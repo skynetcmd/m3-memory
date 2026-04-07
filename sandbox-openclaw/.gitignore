@@ -1,0 +1,5 @@
+.env
+.openclaw/identity/
+.openclaw/devices/
+.openclaw/agents/*/sessions/*.jsonl
+.openclaw/workspace/

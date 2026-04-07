@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# Get the code changes that are about to be committed
+STAGED_CODE=$(git diff --cached)
+
+if [ -z "$STAGED_CODE" ]; then
+  exit 0
+fi
+
+# Dynamically select the largest loaded model for auditing
+AUDIT_MODEL=$(python3 - <<PYEOF
+import urllib.request, json, os
+
+token = os.environ.get("LM_API_TOKEN", "")
+try:
+    req = urllib.request.Request(
+        "http://localhost:1234/v1/models",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    with urllib.request.urlopen(req, timeout=5) as r:
+        data = json.loads(r.read())
+
+    # Filter out embedding models, find largest LLM
+    models = [m["id"] for m in data.get("data", [])]
+    llms = [m for m in models if not any(k in m.lower() for k in ("embed", "nomic", "jina", "e5", "gte", "bge"))]
+
+    if not llms:
+        llms = models  # Fallback to any model
+
+    # Parse size and select largest
+    def get_size(model_id):
+        import re
+        match = re.search(r'(\d+(?:\.\d+)?)[bB]', model_id)
+        return float(match.group(1)) if match else 0.0
+
+    largest = max(llms, key=get_size) if llms else models[0]
+    print(largest)
+except Exception as e:
+    print("qwen3.5-vl-35b-a3b-mlx-crack")  # Fallback
+PYEOF
+)
+
+echo "🔍 Local M3 Max is auditing your code via $AUDIT_MODEL..."
+
+# Send the code to LM Studio's Local Server for a review
+RESPONSE=$(python3 - <<PYEOF
+import urllib.request, json, os, re, sys
+
+token = os.environ.get("LM_API_TOKEN", "")
+staged = """$STAGED_CODE"""
+model = "$AUDIT_MODEL"
+
+payload = {
+    "model": model,
+    "messages": [
+        {"role": "system", "content": "You are a senior security auditor. Review the following code diff for bugs, logic errors, or exposed secrets. Think briefly, then respond. If it looks good, respond with exactly: PASSED. Otherwise, provide a one-line warning."},
+        {"role": "user", "content": staged}
+    ],
+    "max_tokens": 2048,
+    "temperature": 0,
+    "stream": False
+}
+req = urllib.request.Request(
+    "http://localhost:1234/v1/chat/completions",
+    data=json.dumps(payload).encode(),
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+)
+try:
+    with urllib.request.urlopen(req, timeout=300) as r:
+        data = json.loads(r.read())
+    raw = data["choices"][0]["message"]["content"]
+    answer = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    print(answer)
+except Exception as e:
+    print(f"AUDIT_ERROR: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+)
+
+# Check if the audit passed
+if [[ "$RESPONSE" == *"PASSED"* ]]; then
+  echo "✅ Audit Passed. Committing..."
+  exit 0
+else
+  echo "⚠️  LOCAL AUDIT WARNING:"
+  echo "$RESPONSE"
+
+  # Only block interactively — non-interactive shells (scripts, CI) warn and proceed
+  if [ -t 0 ]; then
+    read -p "Do you want to commit anyway? (y/n) " CONFIRM
+    if [ "$CONFIRM" != "y" ]; then
+      echo "Commit aborted."
+      exit 1
+    fi
+  else
+    echo "ℹ️  Non-interactive shell — proceeding despite warning."
+  fi
+fi

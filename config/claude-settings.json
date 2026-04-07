@@ -1,0 +1,40 @@
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "python [M3_MEMORY_ROOT]/bin/statusline-command.sh"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "mcpServers": {
+    "custom_pc_tool": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/custom_tool_bridge.py"
+      ]
+    },
+    "grok_intel": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/grok_bridge.py"
+      ]
+    },
+    "web_research": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/web_research_bridge.py"
+      ]
+    },
+    "memory": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/memory_bridge.py"
+      ]
+    },
+    "debug_agent": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/debug_agent_bridge.py"
+      ]
+    }
+  }
+}

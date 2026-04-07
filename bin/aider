@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Aider launcher — injects statusline via aider_patch.py
+# Uses aider's own embedded Python so all aider deps are available.
+# Add ~/m3-memory/bin to PATH before /opt/homebrew/bin to activate.
+set -euo pipefail
+
+AIDER_REAL=/opt/homebrew/bin/aider
+
+if [ ! -f "$AIDER_REAL" ]; then
+    echo "aider: cannot find $AIDER_REAL — install with: brew install aider" >&2
+    exit 1
+fi
+
+# Read the shebang line to get aider's embedded Python interpreter.
+# This auto-updates when aider is upgraded via brew.
+AIDER_PYTHON=$(head -1 "$AIDER_REAL" | cut -c3-)
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+
+exec "$AIDER_PYTHON" "$SCRIPT_DIR/aider_patch.py" "$@"

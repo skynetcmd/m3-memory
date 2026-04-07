@@ -1,0 +1,17 @@
+default_model: local-mlx
+models:
+  local-mlx:
+    backend: lmstudio
+  claude-4-6-opus:
+    backend: anthropic
+  claude-3-5-sonnet:
+    backend: anthropic
+  gemini-2-0-flash:
+    backend: gemini
+  gemini-2-0-pro:
+    backend: gemini
+  grok-3-latest:
+    backend: grok
+  pplx-70b-sonar:
+    backend: perplexity
+
