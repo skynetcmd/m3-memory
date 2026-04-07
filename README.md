@@ -4,7 +4,7 @@
   <img src="docs/logo.svg" alt="M3 Memory Logo" width="600">
 </p>
 
-**M3 Memory** is an industrial-strength, local-first memory layer. 🚀 25 MCP tools, 🧪 161 automated tests, 🔍 hybrid search with MMR, 🛡️ GDPR compliance, and 🔄 cross-device sync.
+**M3 Memory** is an industrial-strength, local-first memory layer. 🚀 25 MCP tools, 🧪 161 automated tests, 🔍 hybrid search with MMR, 🛡️ GDPR compliance, and 🔄 cross-device sync. Whether you have a single machine running all the light-weight components or multiple machines each with a dedicated function, the M3 memory system is fast, reliable and fault-tolerant (on- or off-line). Whether you're running macos, Windows or Linux, M3 is platform-agnostic--it just works.
 
 > **[Read the full feature overview →](./CORE_FEATURES.md)** — search, security, compliance, intelligence, testing, and all 25 tools explained.
 
