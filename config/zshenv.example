@@ -1,0 +1,112 @@
+# M3 Max Agentic OS: Secure Environment Loader (.zshenv)
+# This file should be copied to ~/.zshenv and configured by the user.
+# It is sourced by Zsh on all shell startups (interactive and non-interactive).
+
+# --- 1. CORE CONFIGURATION (USER MUST SET THIS) ---
+# Set this to the absolute path of your m3-memory repository
+export M3_MEMORY_ROOT="$HOME/m3-memory"
+
+# --- 2. OS-AWARE SECRET MANAGEMENT ---
+# Universal function to get secrets from the native OS secret store.
+# Usage: export MY_VAR=$(get_secret "service_name_in_keychain")
+
+# Detect Operating System
+case "$(uname -s)" in
+    Darwin)
+        # --- macOS ---
+        # Uses Keychain via `security` command.
+        # SET a secret: _keychain_set "service_name" "the_secret_value"
+        # GET a secret: security find-generic-password -s "service_name" -w
+        
+        _keychain_set() {
+            # Deletes existing to prevent duplicates, then adds.
+            security delete-generic-password -s "$1" -a "agent_os" &>/dev/null
+            security add-generic-password -s "$1" -a "agent_os" -w "$2"
+            echo "Keychain: '$1' has been set."
+        }
+
+        get_secret() {
+            security find-generic-password -s "$1" -w 2>/dev/null
+        }
+        ;;
+
+    Linux)
+        # --- Linux ---
+        # Uses Secret Service API via `secret-tool`. Install with:
+        # sudo apt-get install libsecret-tools (Debian/Ubuntu)
+        # sudo dnf install libsecret (Fedora)
+        # SET a secret: _keychain_set "service_name" "the_secret_value"
+        # GET a secret: secret-tool lookup service "service_name"
+
+        if ! command -v secret-tool &> /dev/null; then
+            echo "Warning: 'secret-tool' not found. Secrets will not be loaded." >&2
+            get_secret() { echo ""; }
+        else
+            _keychain_set() {
+                echo -n "$2" | secret-tool store --label="$1" service "agent_os"
+                echo "Secret-Tool: '$1' has been set."
+            }
+            get_secret() {
+                secret-tool lookup service "agent_os" name "$1" 2>/dev/null
+            }
+        fi
+        ;;
+
+    CYGWIN*|MINGW32*|MSYS*|MINGW*)
+        # --- Windows (via Git Bash, etc.) ---
+        # Uses Windows Credential Manager via PowerShell.
+        # SET a secret: _keychain_set "service_name" "the_secret_value"
+        # GET a secret: powershell.exe -Command "(Get-Credential -TargetName 'service_name').Password"
+        
+        _keychain_set() {
+            powershell.exe -Command "New-Credential -TargetName '$1' -UserName 'agent_os' -Password '$2' -Persist LocalMachine"
+            echo "Credential Manager: '$1' has been set."
+        }
+
+        get_secret() {
+            powershell.exe -Command "(Get-Credential -TargetName '$1').Password" 2>/dev/null
+        }
+        ;;
+    *)
+        echo "Unsupported OS for automatic secret loading. Please set environment variables manually." >&2
+        get_secret() { echo ""; }
+        ;;
+esac
+
+# --- 3. EXPORT ENVIRONMENT VARIABLES ---
+# This section uses the `get_secret` function to securely load all necessary
+# variables into the environment for all shell sessions.
+
+# --- FIRST TIME SETUP ---
+# Uncomment and run these lines ONCE in your terminal to store secrets,
+# then re-comment them for security.
+
+# _keychain_set "agentos_sync_target_ip" "your-server-ip"
+# _keychain_set "agentos_pg_url" "postgresql://agent_os:YOUR_SECURE_PASSWORD@$SYNC_TARGET_IP:5432/agent_memory"
+# _keychain_set "AGENT_OS_MASTER_KEY" "your-super-secret-master-key"
+# _keychain_set "LM_STUDIO_API_KEY" "your-lm-studio-token"
+# _keychain_set "PERPLEXITY_API_KEY" "your-pplx-key"
+# _keychain_set "XAI_API_KEY" "your-grok-key"
+# _keychain_set "ANTHROPIC_API_KEY" "your-claude-key"
+# _keychain_set "GEMINI_API_KEY" "your-gemini-key"
+# _keychain_set "OPENCLAW_GATEWAY_TOKEN" "your-openclaw-token"
+
+
+# --- AUTOMATIC LOADING ---
+export SYNC_TARGET_IP=$(get_secret "agentos_sync_target_ip")
+export CHROMA_BASE_URL="http://$SYNC_TARGET_IP:8000"
+export POSTGRES_SERVER=$SYNC_TARGET_IP
+
+export PG_URL=$(get_secret "agentos_pg_url")
+export AGENT_OS_MASTER_KEY=$(get_secret "AGENT_OS_MASTER_KEY")
+export LM_API_TOKEN=$(get_secret "LM_STUDIO_API_KEY")
+export LM_STUDIO_API_KEY=$LM_API_TOKEN
+export PERPLEXITY_API_KEY=$(get_secret "PERPLEXITY_API_KEY")
+export XAI_API_KEY=$(get_secret "XAI_API_KEY")
+export GROK_API_KEY=$XAI_API_KEY
+export ANTHROPIC_API_KEY=$(get_secret "ANTHROPIC_API_KEY")
+export GEMINI_API_KEY=$(get_secret "GEMINI_API_KEY")
+export OPENCLAW_GATEWAY_TOKEN=$(get_secret "OPENCLAW_GATEWAY_TOKEN")
+
+# Add project's bin directory to the path for all shells
+export PATH="$M3_MEMORY_ROOT/bin:$PATH"

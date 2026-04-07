@@ -1,0 +1,67 @@
+{
+  "name": "macbook-production-agent",
+  "description": "Self-contained dual-mode AI agent on macOS using LM Studio and Python router.",
+  "llm": {
+    "endpoint": "http://localhost:8000/v1/chat/completions",
+    "default_model": "local-mlx"
+  },
+  "tools": [
+    {
+      "name": "filesystem_read",
+      "endpoint": "http://localhost:8000/tools/fs/read",
+      "schema": {
+        "type": "object",
+        "properties": { "path": { "type": "string" } },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "filesystem_write",
+      "endpoint": "http://localhost:8000/tools/fs/write",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "content": { "type": "string" }
+        },
+        "required": ["path", "content"]
+      }
+    },
+    {
+      "name": "llm_chat",
+      "endpoint": "http://localhost:8000/tools/llm/chat",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "model": { "type": "string" },
+          "messages": { "type": "array" }
+        },
+        "required": ["model", "messages"]
+      }
+    },
+    {
+      "name": "memory_write",
+      "endpoint": "http://localhost:8000/memory/write",
+      "schema": {
+        "type": "object",
+        "properties": { "text": { "type": "string" } },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "memory_query",
+      "endpoint": "http://localhost:8000/memory/query",
+      "schema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "home_discover",
+      "endpoint": "http://localhost:8000/home/discover",
+      "schema": { "type": "object", "properties": {}, "required": [] }
+    }
+  ]
+}
+

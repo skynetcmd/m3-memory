@@ -1,0 +1,15 @@
+# M3 Max Agentic OS: Scheduled Tasks Template
+# Replace [M3_MEMORY_ROOT] with your absolute project path (e.g., /path/to/your/m3-memory)
+
+# Weekly auditor (Fridays 4pm)
+0 16 * * 5 [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/weekly_auditor.py >> [M3_MEMORY_ROOT]/logs/auditor.log 2>&1
+
+# Hourly sync: SQLite <-> PostgreSQL + ChromaDB (pve-database-host)
+# pg_sync.sh delegates to sync_all.py — covers both pg + chroma
+0 * * * * [M3_MEMORY_ROOT]/bin/pg_sync.sh >> [M3_MEMORY_ROOT]/logs/sync_all.log 2>&1
+
+# Daily Memory Maintenance (3:00 AM) - Decay scores, prune orphans
+0 3 * * * [M3_MEMORY_ROOT]/.venv/bin/python3 -c "import sys; sys.path.insert(0, '[M3_MEMORY_ROOT]/bin'); import memory_maintenance; memory_maintenance.memory_maintenance_impl()" >> [M3_MEMORY_ROOT]/logs/maintenance.log 2>&1
+
+# Monthly Automated Secret Rotation (1st of every month at 2:00 AM)
+0 2 1 * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/secret_rotator.py >> [M3_MEMORY_ROOT]/logs/secret_rotator.log 2>&1

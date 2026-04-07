@@ -1,0 +1,25 @@
+# .aider.conf.yml for M3 Max Agentic OS
+
+# Model defaults
+model: claude-sonnet-4-6
+architect: true
+
+# Visuals
+dark-mode: true
+pretty: true
+stream: true
+
+# Source Control
+auto-commits: true
+dirty-commits: false
+gitignore: false
+
+# Context & Map
+map-tokens: 2048
+cache-prompts: true
+subtree-only: true
+
+# Read-only Protocols
+read:
+  - "[M3_MEMORY_ROOT]/ARCHITECTURE.md"
+  - "[M3_MEMORY_ROOT]/.aider/protocols.md"

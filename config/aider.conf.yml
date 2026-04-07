@@ -1,0 +1,8 @@
+# Aider global config — ~/.aider.conf.yml
+read:
+  - [M3_MEMORY_ROOT]/.aider/protocols.md
+
+# Prevent Aider from traversing up to home or creating repos outside projects.
+subtree-only: true
+git: true
+gitignore: false

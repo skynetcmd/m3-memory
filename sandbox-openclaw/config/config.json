@@ -1,0 +1,9 @@
+{
+  "gateway": {
+    "mode": "local",
+    "controlUi": {
+      "dangerouslyAllowHostHeaderOriginFallback": true,
+      "allowedOrigins": ["*", "http://localhost:8000"]
+    }
+  }
+}

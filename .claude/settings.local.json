@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\('bin/memory_core.py'\\).read\\(\\)\\); print\\('memory_core.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('bin/llm_failover.py'\\).read\\(\\)\\); print\\('llm_failover.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('bin/m3_sdk.py'\\).read\\(\\)\\); print\\('m3_sdk.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('bin/memory_bridge.py'\\).read\\(\\)\\); print\\('memory_bridge.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('bin/memory_sync.py'\\).read\\(\\)\\); print\\('memory_sync.py OK'\\)\")",
+      "Bash(python -c 'import ast; ast.parse\\(open\\('\\\\''__TRACKED_VAR__'\\\\''\\).read\\(\\)\\); print\\('\\\\''__TRACKED_VAR__ OK'\\\\''\\)')",
+      "Bash(.venv/Scripts/python.exe -c ':*)",
+      "Bash(.venv/Scripts/python.exe bin/pg_sync.py)",
+      "Bash(LLM_ENDPOINTS_CSV=\"http://test:1234/v1,http://test2:5678/v1\" .venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0,'bin'\\); from llm_failover import LLM_ENDPOINTS; print\\(LLM_ENDPOINTS\\)\")"
+    ]
+  }
+}

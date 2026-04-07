@@ -1,0 +1,82 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# MLX / model weights
+*.safetensors
+*.gguf
+*.bin
+*.pt
+*.pth
+*.mlx
+
+# LM Studio / memory
+memory/
+!memory/
+!memory/migrations/
+!memory/migrations/*
+!memory/migrations/*.sql
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# Scratch / temp files
+.scratch/
+x.xx*
+x.xxx*
+*.tmp
+*.log
+*.jsonl
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Secrets / env (NEVER commit these)
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.cert
+id_rsa*
+.keyring
+keyring.db
+
+# Aider
+.aider/
+.aider.chat.history.md
+.aider.input.history
+.aider.model.metadata.json
+.aider.tags.cache.v4/
+!.aider/protocols.md
+!.aider.conf.yml
+
+# OpenClaw runtime config (contains tokens & session data)
+sandbox-openclaw/.openclaw/
+sandbox-openclaw/config/.openclaw/
+sandbox-openclaw/.env
+!sandbox-openclaw/.env.example
+
+# Backups and archives (contain historical secrets and credentials)
+backups/
+AI_Folder_Backup/
+
+# Generated MCP config (machine-specific paths; run bin/generate_configs.py to create)
+.mcp.json
+
+# Node
+node_modules/

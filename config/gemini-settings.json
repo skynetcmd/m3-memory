@@ -1,0 +1,46 @@
+{
+  "mcpServers": {
+    "custom_pc_tool": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/custom_tool_bridge.py"
+      ]
+    },
+    "memory": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/memory_bridge.py"
+      ]
+    },
+    "grok_intel": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/grok_bridge.py"
+      ]
+    },
+    "web_research": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/web_research_bridge.py"
+      ]
+    },
+    "debug_agent": {
+      "command": "python",
+      "args": [
+        "[M3_MEMORY_ROOT]/bin/debug_agent_bridge.py"
+      ]
+    }
+  },
+  "general": {
+    "sessionRetention": {
+      "enabled": true,
+      "maxAge": "30d",
+      "warningAcknowledged": true
+    }
+  },
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  }
+}
