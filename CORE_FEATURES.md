@@ -27,7 +27,7 @@ graph LR
 ```
 
 Most agent memory systems solve one problem well — vector search, or persistence, or multi-tenancy.
- M3 Memory solves all of them in a single, tested, local-first package that runs on your hardware without sending a byte to the cloud.
+ M3 Memory solves all of them in a single, tested, local-first package that runs on your hardware without sending a byte to the cloud. Whether you have a single machine running all the light-weight components or multiple machines each with a dedicated function, the M3 memory system is fast, reliable and just works.
 
 **Here's how it actually gets used.** 💡 You're working on your MacBook at a coffee shop, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required. Your laptop has its own LLM running embeddings and answering questions against your full memory store. Later, you're at your Windows desktop at home with a different agent — Gemini this time — and it picks up exactly where you left off. Same memories, same context, same knowledge graph. You didn't copy files, didn't export anything, didn't push to someone else's cloud. Your home server synced everything in the background the moment your laptop hit the local network. The PC, the Mac, the server — they all share one unified memory, and any of them can operate independently when the others are offline.
 
