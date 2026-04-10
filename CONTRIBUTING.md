@@ -63,11 +63,9 @@ bin/                    Core MCP bridges and utility scripts
   embedding_utils.py    Vector embedding helpers
 memory/                 SQLite schema and migration scripts
 config/                 Agent configuration templates (CLAUDE.md, GEMINI.md)
-docs/                   Architecture diagrams and API reference
+docs/                   Architecture diagrams, API reference, and OS install guides
+scripts/                Maintenance utilities (fix_bugs.py, fix_db.py, fix_lint.py)
 tests/                  End-to-end test suite
-fix_bugs.py             Automated bug-fix runner
-fix_db.py               Database repair utilities
-fix_lint.py             Lint auto-fix script
 ```
 
 ---
