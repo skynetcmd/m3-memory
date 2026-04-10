@@ -310,3 +310,5 @@ tests/        End-to-end test suite
 ---
 
 *M3 Memory: the industrial-strength foundation for agents that remember.*
+
+<!-- mcp-name: io.github.skynetcmd/m3-memory -->
