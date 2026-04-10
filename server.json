@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.skynetcmd/m3-memory",
+  "title": "M3 Memory",
+  "description": "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search (FTS5 + vector + MMR), contradiction detection, cross-device sync, GDPR-ready. 100% local, no cloud APIs.",
+  "version": "2026.4.6",
+  "repository": {
+    "url": "https://github.com/skynetcmd/m3-memory",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/skynetcmd/m3-memory",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "m3-memory",
+      "version": "2026.4.6",
+      "runtimeHint": "python",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "bin/memory_bridge.py",
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}
