@@ -73,10 +73,10 @@ keyring.db
 !.aider.conf.yml
 
 # OpenClaw runtime config (contains tokens & session data)
-sandbox-openclaw/.openclaw/
-sandbox-openclaw/config/.openclaw/
-sandbox-openclaw/.env
-!sandbox-openclaw/.env.example
+examples/sandbox-openclaw/.openclaw/
+examples/sandbox-openclaw/config/.openclaw/
+examples/sandbox-openclaw/.env
+!examples/sandbox-openclaw/.env.example
 
 # Backups and archives (contain historical secrets and credentials)
 backups/
