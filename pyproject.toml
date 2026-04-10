@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.4.6"
+version = "2026.4.7"
 description = "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search, GDPR, no cloud"
 readme = "README.md"
 license = "MIT"
