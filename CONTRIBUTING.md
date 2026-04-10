@@ -87,7 +87,7 @@ Please keep PRs focused — one feature or fix per PR makes review faster.
 
 Join our Discord server for questions, design discussions, and contributor chat:
 
-[![Discord](https://img.shields.io/badge/Join%20Discord-M3--Memory%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/m3-memory)
+[![Discord](https://img.shields.io/badge/Join%20Discord-M3--Memory%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/ZcJ3EGC99B)
 
 - **#ask-anything** — setup help and how-to questions
 - **#bug-reports** — report issues (include steps to reproduce + logs)
