@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "python",
+      "args": ["bin/memory_bridge.py"],
+      "cwd": "/path/to/m3-memory"
+    },
+    "grok_intel": {
+      "command": "python",
+      "args": ["bin/grok_bridge.py"],
+      "cwd": "/path/to/m3-memory"
+    },
+    "web_research": {
+      "command": "python",
+      "args": ["bin/web_research_bridge.py"],
+      "cwd": "/path/to/m3-memory"
+    },
+    "debug_agent": {
+      "command": "python",
+      "args": ["bin/debug_agent_bridge.py"],
+      "cwd": "/path/to/m3-memory"
+    }
+  }
+}
