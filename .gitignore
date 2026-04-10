@@ -42,6 +42,9 @@ x.xxx*
 .DS_Store
 .AppleDouble
 
+# Local machine-specific rules (contains IPs, endpoints, credentials — never commit)
+LOCAL_RULES.md
+
 # Secrets / env (NEVER commit these)
 .env
 .env.local
