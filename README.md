@@ -126,7 +126,7 @@ python run_tests.py                # Run the end-to-end test suite
 
 ### Connect Your Agent
 
-Copy the MCP server config into your agent's config file:
+Copy [`mcp.json.example`](./mcp.json.example) to your agent's MCP config location and update the `cwd` path:
 
 ```json
 {
@@ -139,6 +139,12 @@ Copy the MCP server config into your agent's config file:
   }
 }
 ```
+
+| Agent | Config location |
+|-------|----------------|
+| Claude Code | `~/.claude/claude_desktop_config.json` or `.mcp.json` in project root |
+| Gemini CLI | `~/.gemini/settings.json` |
+| Aider | `.aider.conf.yml` (via `--mcp-server` flag) |
 
 For OS-specific setup: [macOS](./install_macos.md) | [Linux](./install_linux.md) | [Windows](./install_windows-powershell.md)
 
@@ -230,6 +236,7 @@ Zero API costs. Zero data exfiltration.
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Agent instruction manual: all 25 MCP tools, protocols, usage rules |
 | [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) | Deep-dive: storage internals, search pipeline, schema, sync, security |
 | [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) | Security configuration and credential setup |
+| [CHANGELOG.md](./CHANGELOG.md) | Release history and what changed |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute, run tests, and fix issues |
 
 ---
@@ -253,6 +260,12 @@ tests/        End-to-end test suite
 
 ---
 
-**Status:** Production Release — v2026.04 · [MIT License](LICENSE)
+**Status:** Production Release — v2026.04 · [MIT License](LICENSE) · [Changelog](CHANGELOG.md)
+
+---
+
+[![Star History Chart](https://api.star-history.com/svg?repos=skynetcmd/m3-memory&type=Date)](https://star-history.com/#skynetcmd/m3-memory&Date)
+
+---
 
 *M3 Memory: the industrial-strength foundation for agents that remember.*
