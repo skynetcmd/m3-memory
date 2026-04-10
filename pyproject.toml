@@ -1,16 +1,16 @@
 [build-system]
 requires = ["setuptools>=70", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
 version = "2026.4.6"
 description = "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search, GDPR, no cloud"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
 requires-python = ">=3.11"
 authors = [
-    { name = "skynetcmd", url = "https://github.com/skynetcmd" }
+    { name = "skynetcmd" }
 ]
 keywords = [
     "mcp",
@@ -29,7 +29,6 @@ keywords = [
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -43,6 +42,36 @@ Homepage = "https://github.com/skynetcmd/m3-memory"
 Repository = "https://github.com/skynetcmd/m3-memory"
 "Bug Tracker" = "https://github.com/skynetcmd/m3-memory/issues"
 Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+packages = []
+include-package-data = false
+
+[tool.setuptools.data-files]
+"m3_memory/bin" = [
+    "bin/memory_bridge.py",
+    "bin/llm_failover.py",
+    "bin/auth_utils.py",
+    "bin/embedding_utils.py",
+    "bin/grok_bridge.py",
+    "bin/web_research_bridge.py",
+    "bin/debug_agent_bridge.py",
+    "bin/custom_tool_bridge.py",
+    "bin/mcp_proxy.py",
+]
+"m3_memory/memory/migrations" = [
+    "memory/migrations/001_initial_schema.sql",
+    "memory/migrations/002_enforce_relationships.sql",
+    "memory/migrations/003_encrypted_secrets.sql",
+    "memory/migrations/004_archive_db.sql",
+    "memory/migrations/005_perf_and_wal.sql",
+]
+"m3_memory" = [
+    "mcp.json.example",
+    "mcp-server.json",
+    "ARCHITECTURE.md",
+    "requirements.txt",
+]
 
 [tool.ruff]
 target-version = "py311"
