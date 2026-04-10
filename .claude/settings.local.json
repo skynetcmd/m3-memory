@@ -9,7 +9,9 @@
       "Bash(python -c 'import ast; ast.parse\\(open\\('\\\\''__TRACKED_VAR__'\\\\''\\).read\\(\\)\\); print\\('\\\\''__TRACKED_VAR__ OK'\\\\''\\)')",
       "Bash(.venv/Scripts/python.exe -c ':*)",
       "Bash(.venv/Scripts/python.exe bin/pg_sync.py)",
-      "Bash(LLM_ENDPOINTS_CSV=\"http://test:1234/v1,http://test2:5678/v1\" .venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0,'bin'\\); from llm_failover import LLM_ENDPOINTS; print\\(LLM_ENDPOINTS\\)\")"
+      "Bash(LLM_ENDPOINTS_CSV=\"http://test:1234/v1,http://test2:5678/v1\" .venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0,'bin'\\); from llm_failover import LLM_ENDPOINTS; print\\(LLM_ENDPOINTS\\)\")",
+      "Bash(mkdir -p ~/.claude/channels/discord)",
+      "Read(//c/Users/bhaba/.claude/channels/**)"
     ]
   }
 }
