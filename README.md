@@ -10,12 +10,16 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/m3-memory.svg"></a>
+  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI downloads" src="https://img.shields.io/pypi/dm/m3-memory.svg"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-blue.svg"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP 25 tools" src="https://img.shields.io/badge/MCP-25_tools-orange.svg"></a>
   <a href=".github/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/badge/CI-lint%20%7C%20typecheck%20%7C%20test-brightgreen.svg"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg">
 </p>
+
+> Give your MCP agents persistent, private memory that actually works. No cloud. No forgetting.
 
 **Industrial-strength memory layer that just works.** M3 Memory gives AI agents persistent, private, intelligent memory — running 100% on your hardware, with no cloud APIs and no subscriptions.
 
@@ -27,6 +31,8 @@
 - 🔒 **Fully local** — your embeddings, your hardware, your data
 
 Works with **Claude Code, Gemini CLI, Aider, OpenClaw**, or any MCP-compatible agent.
+
+⭐ **Star if you want local agents that remember** — feedback & issues very welcome!
 
 ---
 
@@ -111,6 +117,12 @@ sequenceDiagram
 
 ### Install
 
+**Option A — pip (quickest):**
+```bash
+pip install m3-memory
+```
+
+**Option B — clone (for development or full feature set):**
 ```bash
 git clone https://github.com/skynetcmd/m3-memory.git
 cd m3-memory
@@ -152,6 +164,8 @@ Copy [`mcp.json.example`](./mcp.json.example) to your agent's MCP config locatio
 | Aider | `.aider.conf.yml` (via `--mcp-server` flag) |
 
 For OS-specific setup: [macOS](./install_macos.md) | [Linux](./install_linux.md) | [Windows](./install_windows-powershell.md)
+
+> M3 Memory can also be discovered automatically in Claude Code and other MCP clients via the [MCP Registry](https://github.com/modelcontextprotocol/registry). See [`mcp-server.json`](./mcp-server.json) for the registry manifest.
 
 ---
 
