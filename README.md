@@ -164,7 +164,7 @@ Copy [`mcp.json.example`](./mcp.json.example) to your agent's MCP config locatio
 | Gemini CLI | `~/.gemini/settings.json` |
 | Aider | `.aider.conf.yml` (via `--mcp-server` flag) |
 
-For OS-specific setup: [macOS](./install_macos.md) | [Linux](./install_linux.md) | [Windows](./install_windows-powershell.md)
+For OS-specific setup: [macOS](./docs/install_macos.md) | [Linux](./docs/install_linux.md) | [Windows](./docs/install_windows-powershell.md)
 
 > M3 Memory can also be discovered automatically in Claude Code and other MCP clients via the [MCP Registry](https://github.com/modelcontextprotocol/registry). See [`mcp-server.json`](./mcp-server.json) for the registry manifest.
 
@@ -293,7 +293,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to get started, run the test su
 bin/          Core MCP bridges, SDK, and automation scripts
 memory/       SQLite database and migration logic
 config/       Configuration templates for agents and shell
-docs/         Architecture diagrams and API reference
+docs/         Architecture diagrams, API reference, and OS install guides
+scripts/      Maintenance and utility scripts (fix_bugs, fix_db, fix_lint, etc.)
 logs/         Centralized audit and debug logs
 tests/        End-to-end test suite
 ```

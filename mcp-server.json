@@ -1,42 +1,15 @@
 {
   "name": "m3-memory",
-  "displayName": "M3 Memory",
-  "description": "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search (FTS5 + vector + MMR), contradiction detection, GDPR compliance, cross-device sync. Runs 100% locally via SQLite + your own embeddings. No cloud, no subscriptions.",
-  "version": "2026.4.6",
-  "license": "MIT",
+  "version": "2026.04",
+  "description": "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search, contradiction detection, cross-device sync, GDPR-ready. 100% local, no cloud APIs.",
   "homepage": "https://github.com/skynetcmd/m3-memory",
   "repository": "https://github.com/skynetcmd/m3-memory",
-  "author": "skynetcmd",
-  "categories": ["memory", "storage", "knowledge-graph", "rag", "gdpr"],
-  "keywords": [
-    "mcp",
-    "memory",
-    "agentic-memory",
-    "local-llm",
-    "hybrid-search",
-    "vector-search",
-    "sqlite",
-    "gdpr",
-    "claude-code",
-    "gemini-cli",
-    "aider",
-    "ollama",
-    "rag",
-    "knowledge-graph",
-    "privacy-first"
-  ],
-  "runtime": "python",
-  "runtimeVersion": ">=3.11",
-  "installation": {
-    "pip": "pip install m3-memory",
-    "source": "git clone https://github.com/skynetcmd/m3-memory.git"
-  },
-  "mcpServers": {
-    "memory": {
-      "command": "python",
-      "args": ["bin/memory_bridge.py"],
-      "cwd": "${workspaceRoot}"
-    }
+  "license": "MIT",
+  "tags": ["memory", "agents", "mcp", "local", "sqlite", "vector-search", "knowledge-graph"],
+  "server": {
+    "command": "python",
+    "args": ["bin/memory_bridge.py"],
+    "env": {}
   },
   "tools": [
     "memory_write", "memory_search", "memory_suggest", "memory_get",
@@ -46,24 +19,5 @@
     "memory_maintenance", "memory_dedup", "memory_consolidate", "memory_set_retention", "memory_feedback",
     "gdpr_export", "gdpr_forget", "memory_export", "memory_import",
     "memory_cost_report", "chroma_sync"
-  ],
-  "features": [
-    "Hybrid FTS5 + vector + MMR search",
-    "Contradiction detection with automatic supersession",
-    "Knowledge graph with 7 relationship types",
-    "Bitemporal history (point-in-time queries)",
-    "GDPR Article 17 (forget) and Article 20 (export)",
-    "AES-256 encrypted credential vault",
-    "Cross-device sync: SQLite ↔ PostgreSQL ↔ ChromaDB",
-    "Self-maintaining: importance decay, auto-archival, deduplication",
-    "LLM-powered auto-classification and consolidation",
-    "Works with any OpenAI-compatible local LLM server"
-  ],
-  "compatibleAgents": [
-    "Claude Code",
-    "Gemini CLI",
-    "Aider",
-    "OpenClaw",
-    "Any MCP-compatible agent"
   ]
 }
