@@ -3,6 +3,8 @@
 
 > **`M3_MEMORY_ROOT`** — the root of the `m3-memory` repository checkout.
 
+> **Local overrides:** If `LOCAL_RULES.md` exists at `$M3_MEMORY_ROOT/LOCAL_RULES.md`, read it before proceeding. It contains machine-specific failover rules (embedding endpoints, LLM endpoints, internal IPs). It is git-ignored and never committed.
+
 > All paths are relative to `$M3_MEMORY_ROOT` unless otherwise noted.
 >
 > This file is symlinked to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`.
