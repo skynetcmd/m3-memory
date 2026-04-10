@@ -45,6 +45,10 @@ x.xxx*
 # Local machine-specific rules (contains IPs, endpoints, credentials — never commit)
 LOCAL_RULES.md
 
+# Discord bot — deployment is outside the repo (runs on N5 Pro LXC 503)
+bin/discord_bot.py
+bin/status_api.py
+
 # Secrets / env (NEVER commit these)
 .env
 .env.local
