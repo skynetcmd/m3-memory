@@ -83,6 +83,21 @@ Please keep PRs focused — one feature or fix per PR makes review faster.
 
 ---
 
+## Community & Discussion
+
+Join our Discord server for questions, design discussions, and contributor chat:
+
+[![Discord](https://img.shields.io/badge/Join%20Discord-M3--Memory%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/m3-memory)
+
+- **#ask-anything** — setup help and how-to questions
+- **#bug-reports** — report issues (include steps to reproduce + logs)
+- **#memory-design** — architecture debates and new algorithm ideas
+- **#search-quality** — search tuning, benchmarks, and retrieval improvements
+
+**M3_Bot** is active in the server and can answer questions from the docs directly (`!ask <question>`).
+
+---
+
 ## Reporting Issues
 
 Open an issue on GitHub with:

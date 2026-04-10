@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/skynetcmd/m3-memory?style=social"></a>
   <a href="https://github.com/skynetcmd/m3-memory/network/members"><img alt="GitHub Forks" src="https://img.shields.io/github/forks/skynetcmd/m3-memory?style=social"></a>
+  <a href="https://discord.gg/m3-memory"><img alt="Discord" src="https://img.shields.io/badge/Discord-M3--Memory%20Community-5865F2?logo=discord&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -257,6 +258,26 @@ Zero API costs. Zero data exfiltration.
 | [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) | Security configuration and credential setup |
 | [CHANGELOG.md](./CHANGELOG.md) | Release history and what changed |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute, run tests, and fix issues |
+
+---
+
+## Community
+
+Join the M3-Memory Discord server to get help, share your setup, discuss ideas, and follow development.
+
+[![Discord](https://img.shields.io/badge/Join%20Discord-M3--Memory%20Community-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/m3-memory)
+
+| Channel | Purpose |
+|---------|---------|
+| `#start-here` | New? Start here — overview & quick links |
+| `#ask-anything` | Setup help, config questions, how-tos |
+| `#bug-reports` | Report issues with steps to reproduce |
+| `#showcase` | Share your M3-Memory setups and demos |
+| `#search-quality` | Hybrid search tuning & benchmarks |
+| `#sync-federation` | Multi-device sync & ChromaDB federation |
+| `#memory-design` | Architecture discussions & research |
+
+**M3_Bot** is live in the server — mention `@M3_Bot` or use `!ask <question>` in any channel to get answers straight from the documentation.
 
 ---
 
