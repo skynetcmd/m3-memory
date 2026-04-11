@@ -28,7 +28,7 @@ graph LR
 
 M3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
 
-Memories written on one machine sync to others via optional PostgreSQL delta sync. Each machine runs its own SQLite instance and local embedding server, so everything works fully offline. When machines reconnect, changes merge automatically.
+**How this plays out in practice:** You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required. Later, you're at your Windows desktop at home with Gemini CLI, and it picks up exactly where you left off. Same memories, same context, same knowledge graph. You didn't copy files, didn't export anything, didn't push to someone else's cloud. Your PostgreSQL sync handled everything in the background the moment your laptop hit the local network.
 
 ---
 
