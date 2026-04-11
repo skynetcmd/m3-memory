@@ -101,28 +101,28 @@ Most agent memory tools make you choose: local speed **or** cloud persistence **
 
 ### M3-Memory vs Mem0 vs Letta vs LangChain Memory
 
-| Feature | **M3-Memory** | **Mem0** | **Letta (MemGPT)** | **LangChain Memory** |
-|---------|:-------------:|:--------:|:-----------------:|:--------------------:|
-| **Type** | Lightweight local memory layer + MCP server | Universal memory layer / SDK | Full stateful agent runtime + platform | Framework-integrated memory |
-| **Best for** | MCP desktop agents (Claude Code, Aider, Gemini CLI) | LangChain/CrewAI apps, personalization | Long-lived self-managing agents | LangGraph-based agents |
-| **Local-first** | ✅ 100% local, zero external APIs | ⚠️ Self-hostable (cloud promoted) | ✅ Excellent (git-backed) | ⚠️ Good (depends on store) |
-| **MCP native** | ✅ 25 built-in tools | ⚠️ Community wrappers | ⚠️ Indirect | ❌ No |
-| **Memory model** | Hybrid FTS5 + Vector + MMR + **Bitemporal** | Vector + Graph (Pro) | Hierarchical + git | Short-term + LangMem |
-| **Contradiction handling** | ✅ **Automatic** (bitemporal) | ⚠️ LLM-based | ⚠️ Agent self-editing | ⚠️ Manual / LLM-driven |
-| **GDPR Art. 17/20** | ✅ **Built-in dedicated tools** | ⚠️ Supported | ⚠️ Via tools | ❌ Custom needed |
-| **Cross-device sync** | ✅ SQLite ↔ Postgres ↔ Chroma | ⚠️ Limited in OSS | ⚠️ Git-based | ⚠️ Limited |
-| **Overhead** | Very light | Light | Higher (full runtime) | Medium (tied to LangGraph) |
-| **Cost** | ✅ Free, MIT | ⚠️ Free + $249/mo Pro | ⚠️ OSS + Letta Cloud | ✅ OSS |
+| Feature | **M3-Memory** | **Mem0** | **Letta** | **LangChain Memory** |
+|---------|--------------|----------|-----------|----------------------|
+| **Type** | Lightweight MCP memory layer | Universal memory SDK | Full agent runtime | Framework memory |
+| **Best for** | **MCP desktop agents** (Claude Code, Aider, Gemini) | LangChain/CrewAI | Self-managing agents | LangGraph users |
+| **Local-first** | **✅ 100% local, zero APIs** | ⚠️ Self-hostable | ✅ Excellent (git) | ⚠️ Good |
+| **MCP native** | **✅ 25 built-in tools** | ⚠️ Wrappers only | ⚠️ Indirect | ❌ No |
+| **Contradiction** | **✅ Automatic bitemporal** | ⚠️ LLM-based | ⚠️ Agent self-editing | ⚠️ Manual/LLM |
+| **GDPR tools** | **✅ Built-in** (`gdpr_forget` + `gdpr_export`) | ⚠️ Supported | ⚠️ Via tools | ❌ Custom |
+| **Hybrid search** | **✅ FTS5 + Vector + MMR** | ⚠️ Vector + Graph | ⚠️ Hierarchical | ⚠️ Basic |
+| **Cross-device sync** | **✅ Built-in bidirectional** | ⚠️ Limited | ⚠️ Git-based | ⚠️ Limited |
+| **Overhead** | **Very light** | Light | Higher | Medium |
+| **Cost** | **✅ Free, MIT** | ⚠️ Free + $249/mo Pro | ⚠️ OSS + SaaS | ✅ OSS |
 
-**Choose M3-Memory** if you want a simple, privacy-first, MCP-native drop-in memory backend with automatic factual consistency and compliance tools — independent of any full framework.
+**Choose M3-Memory** if you want the simplest, most private, MCP-native memory backend with automatic consistency and compliance — no framework lock-in.
 
-**Choose Mem0** for LangChain / LangGraph / CrewAI pipelines and managed cloud memory at scale.
+**Choose Mem0** for LangChain / LangGraph / CrewAI and managed cloud memory at scale.
 
-**Choose Letta** for long-lived autonomous agents that self-edit their own memory and need a full stateful runtime.
+**Choose Letta** for long-lived autonomous agents that self-edit memory within a full stateful runtime.
 
-**Choose LangChain Memory** if you're already deep in the LangGraph ecosystem and want framework-native memory.
+**Choose LangChain Memory** if you're already in the LangGraph ecosystem and want framework-native memory.
 
-→ Full feature-by-feature breakdown with explanations: [COMPARISON.md](./COMPARISON.md)
+→ Full feature-by-feature breakdown: [COMPARISON.md](./COMPARISON.md)
 
 ---
 
@@ -240,13 +240,7 @@ For OS-specific setup: [macOS](./docs/install_macos.md) · [Linux](./docs/instal
 
 ### 🔍 Hybrid Search That Actually Works
 
-Three-stage pipeline consistently outperforms pure vector search:
-
-1. **FTS5 keyword** — BM25-ranked full-text with injection-safe sanitization
-2. **Semantic vector** — cosine similarity on 1024-dim embeddings via numpy
-3. **MMR re-ranking** — Maximal Marginal Relevance ensures diverse results, no more five near-identical memories
-
-Every result returns a full score breakdown (vector + BM25 + MMR penalty) via `memory_suggest`.
+Three-stage pipeline — **FTS5 keyword → semantic vector → MMR re-ranking** — consistently outperforms pure vector search on technical queries. No more five near-identical results. Every result returns a full score breakdown (vector + BM25 + MMR penalty) via `memory_suggest`.
 
 ### 🚫 Automatic Contradiction Detection
 
@@ -254,50 +248,35 @@ Write a fact that conflicts with an existing one — M3 detects it automatically
 
 ### ⏳ Bitemporal History
 
-Track not just *when a fact was stored*, but *when it was actually true*. Query with `as_of="2026-01-15"` to see the world as your agent knew it on that date — essential for compliance audits and debugging.
+Track not just *when a fact was stored*, but *when it was actually true*. Query `as_of="2026-01-15"` to see what your agent believed on any past date — essential for compliance audits and debugging.
 
 ### 🕸️ Knowledge Graph
 
-Memories form a web. M3 auto-links related memories on write (cosine > 0.7) and supports 7 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`. Traverse up to 3 hops with a single `memory_graph` call.
+Memories auto-link on write (cosine > 0.7). Seven relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`. Traverse up to 3 hops with a single `memory_graph` call.
 
 ### 🧹 Self-Maintaining
 
-- **Importance decay** — memories fade 0.5%/day after 7 days unless reinforced
-- **Auto-archival** — low-importance items (< 0.05) older than 30 days move to cold storage
-- **Per-agent retention** — set max memory count and TTL per agent
-- **Consolidation** — local LLM merges old memory groups into summaries
-- **Deduplication** — configurable cosine threshold catches near-duplicates
+**Importance decay** (0.5%/day after 7 days) · **auto-archival** (< 0.05 importance after 30 days) · **per-agent retention** (TTL + max count) · **LLM consolidation** (merges old groups into summaries) · **deduplication** (configurable cosine threshold)
 
-### 🤖 LLM-Powered Intelligence (Local Only)
+### 🤖 Local LLM Intelligence
 
-Any OpenAI-compatible server works (LM Studio, Ollama, vLLM, LocalAI):
-
-- **Auto-classification** — `type="auto"` lets the LLM categorize into 18 memory types
-- **Conversation summarization** — compress long threads into 3-5 key points
-- **Multi-layered consolidation** — merge related memory groups into summaries
-
-Zero API costs. Zero data exfiltration.
+Works with any OpenAI-compatible server (LM Studio, Ollama, vLLM, LocalAI): **auto-classification** into 18 types · **conversation summarization** · **multi-layered consolidation**. Zero API costs. Zero data exfiltration.
 
 ### 🛡️ Security & Compliance
 
 | Layer | Protection |
 |-------|------------|
-| **Credentials** | AES-256 encrypted vault (PBKDF2, 600K iterations) · OS keyring integration · zero plaintext storage |
-| **Content** | SHA-256 signing on every write · `memory_verify` detects post-write tampering |
-| **Input** | Rejects XSS, SQL injection, Python injection, and prompt injection at the write boundary |
+| **Credentials** | AES-256 vault (PBKDF2, 600K iterations) · OS keyring · zero plaintext |
+| **Content** | SHA-256 signing on every write · tamper detection via `memory_verify` |
+| **Input** | Rejects XSS, SQL injection, Python injection, prompt injection at write boundary |
 | **Search** | FTS5 operator sanitization prevents query injection |
 | **Network** | Circuit breaker (3-failure threshold) · strict timeouts · tokens never logged |
 
-**GDPR built-in:**
-- `gdpr_forget` — hard-deletes all data for a user (Article 17 right to erasure)
-- `gdpr_export` — returns all memories as portable JSON (Article 20 data portability)
+**GDPR built-in:** `gdpr_forget` (Article 17 — hard delete) · `gdpr_export` (Article 20 — portable JSON)
 
 ### 🔄 Cross-Device Sync
 
-- Bi-directional delta sync: SQLite ↔ PostgreSQL via UUID-based UPSERT
-- Crash-resistant — watermark-based tracking, at-least-once delivery
-- ChromaDB federation for distributed vector search across LAN
-- Hourly automated sync; manual trigger via `chroma_sync` tool
+Bi-directional delta sync: **SQLite ↔ PostgreSQL** (UUID-based UPSERT, watermark-tracked, crash-resistant) + **ChromaDB federation** for distributed vector search across LAN. Hourly automated; manual via `chroma_sync` tool.
 
 ---
 
