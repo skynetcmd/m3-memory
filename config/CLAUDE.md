@@ -1,7 +1,7 @@
 # M3 Memory: Core Specs
 
-## 🧠 Primary Engine: DeepSeek-R1 Distill 70B (MLX)
-- **Quantization:** 5-bit | **Context:** 64k-128k
+## Local LLM Engine
+- **Auto-selected:** `llm_failover.py` picks the largest available model across LM Studio and Ollama endpoints
 - **MCP Bridges:** local_logic, web_research, grok_intel, custom_pc_tool
 
 ## 📜 Operational Protocols (AUTO-LOGGING)
