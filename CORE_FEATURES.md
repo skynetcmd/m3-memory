@@ -26,12 +26,7 @@ graph LR
     MB2 <-->|Bi-directional Sync| PG
 ```
 
-Most agent memory systems solve one problem well — vector search, or persistence, or multi-tenancy.
- M3 Memory solves all of them in a single, tested, local-first package that runs on your hardware without sending a byte to the cloud. Whether you have a single machine running all the light-weight components or multiple machines each with a dedicated function, the M3 memory system is fast, reliable and just works.
-
-**Here's how it actually gets used.** 💡 You're working on your MacBook at a coffee shop, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required. Your laptop has its own LLM running embeddings and answering questions against your full memory store. Later, you're at your Windows desktop at home with a different agent — Gemini this time — and it picks up exactly where you left off. Same memories, same context, same knowledge graph. You didn't copy files, didn't export anything, didn't push to someone else's cloud. Your home server synced everything in the background the moment your laptop hit the local network. The PC, the Mac, the server — they all share one unified memory, and any of them can operate independently when the others are offline.
-
-That's the core idea: ⭐ **your AI's memory belongs to you, lives on your hardware, and follows you across every device and every agent you use.** No vendor lock-in, no subscription, no data exfiltration. Just persistent, searchable, cross-device knowledge that's always there when you need it.
+M3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
 
 ---
 
@@ -174,16 +169,10 @@ Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local L
 ## Quick Start
 
 ```bash
-git clone https://github.com/skynetcmd/m3-memory.git
-cd m3-memory
-python -m venv .venv
-source .venv/bin/activate          # macOS/Linux
-# .\.venv\Scripts\Activate.ps1    # Windows
-pip install -r requirements.txt
-python bin/test_memory_bridge.py   # Verify everything works
+pip install m3-memory
 ```
 
-For detailed OS-specific setup: [macOS](./install_macos.md) | [Linux](./install_linux.md) | [Windows](./install_windows-powershell.md)
+For full setup instructions, see [QUICKSTART.md](./QUICKSTART.md).
 
 ---
 
@@ -195,4 +184,4 @@ For detailed OS-specific setup: [macOS](./install_macos.md) | [Linux](./install_
 
 ---
 
-*M3 Memory: the industrial-strength foundation for agents that remember.*
+*For deep technical details, see [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md).*
