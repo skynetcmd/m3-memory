@@ -132,7 +132,7 @@ Related facts link on write (cosine > 0.7). Seven relationship types. Traverse u
 
 ### 🔄 Cross-Device Sync
 **TL;DR: Same memory everywhere.**
-Write on laptop → continue on desktop. Bi-directional delta sync: SQLite ↔ PostgreSQL ↔ ChromaDB.
+Write on your MacBook → continue on your Windows desktop. Bi-directional delta sync: SQLite ↔ PostgreSQL ↔ ChromaDB.
 
 ### 🛡️ GDPR Built-In
 **TL;DR: Compliance out of the box.**
