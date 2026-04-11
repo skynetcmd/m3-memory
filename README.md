@@ -32,10 +32,10 @@ M3 Memory gives Claude Code, Gemini CLI, and Aider persistent, private memory th
 
 ## ⚡ Quick Start (1 minute)
 
-**Prerequisites:** Python 3.11+, and a local embedding server — [Ollama](https://ollama.com) is the easiest:
+**Prerequisites:** Python 3.11+, and a local embedding server — [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), or any OpenAI-compatible endpoint. Ollama is the easiest way to start:
 
 ```bash
-ollama serve   # start local embeddings (e.g. nomic-embed-text)
+ollama pull nomic-embed-text && ollama serve
 ```
 
 **Install:**
@@ -153,7 +153,7 @@ Query `as_of="2026-01-15"` to see exactly what your agent believed on any past d
 
 ### 🕸️ Knowledge Graph
 **TL;DR: Memories connect to each other automatically.**
-Related facts are linked on write when cosine similarity exceeds 0.7. Seven relationship types (`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`). Traverse up to 3 hops with `memory_graph` to explore connected knowledge.
+Related facts are linked on write when cosine similarity exceeds 0.7. Eight relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `message`. Traverse up to 3 hops with `memory_graph` to explore connected knowledge.
 
 ### 🔄 Cross-Device Sync
 **TL;DR: Same memory on every machine.**
@@ -315,10 +315,12 @@ memory_search: "database connection config"
 | [CORE_FEATURES.md](./CORE_FEATURES.md) | Feature overview |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system internals + all 25 MCP tools |
 | [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) | Deep dive: search pipeline, schema, sync, security |
-| [COMPARISON.md](./COMPARISON.md) | M3 vs Mem0 vs Letta vs LangChain Memory |
+| [COMPARISON.md](./COMPARISON.md) | M3 vs Mem0 vs Letta vs LangChain Memory vs Zep |
 | [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) | Config and credential setup |
 | [ROADMAP.md](./ROADMAP.md) | Upcoming milestones |
 | [CHANGELOG.md](./CHANGELOG.md) | Release history |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute |
+| [GOOD_FIRST_ISSUES.md](./GOOD_FIRST_ISSUES.md) | Good first issues for new contributors |
 
 ---
 
@@ -346,10 +348,11 @@ Vote on features → [ROADMAP.md](./ROADMAP.md)
 ## 🧩 Project Structure
 
 ```
-bin/          MCP bridge, SDK, and automation scripts
+bin/          MCP bridge, core engine, sync, and maintenance scripts
+m3_memory/    Python package — CLI entry point (mcp-memory)
 memory/       SQLite database and migrations
 docs/         Architecture diagrams and install guides
-examples/     Demo notebooks and mcp.json snippets
+examples/     Demo notebooks and ready-to-paste mcp.json configs
 tests/        End-to-end test suite (41 tests)
 ```
 

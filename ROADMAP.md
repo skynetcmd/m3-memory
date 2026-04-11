@@ -1,6 +1,6 @@
 # M3 Memory — Roadmap
 
-> Status: **Production (v2026.4.7)** — active development. Priorities shift based on community feedback; open an issue to vote on a feature.
+> Status: **Production (v2026.4.8)** — active development. Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
 
@@ -8,7 +8,7 @@
 
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
-- [ ] **`pip install m3-memory` works out-of-the-box** — `mcp-memory` CLI entry point auto-starts the server
+- [x] **`pip install m3-memory` works out-of-the-box** — `mcp-memory` CLI entry point auto-starts the server *(shipped in v2026.4.8)*
 - [ ] **`setup.sh` / `install_os.py` polish** — OS-aware one-liner that validates deps and prints a ready-to-paste `mcp.json` snippet
 - [ ] **TestPyPI dry-run CI gate** — catch packaging regressions before every release
 
