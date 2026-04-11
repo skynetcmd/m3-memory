@@ -10,7 +10,7 @@ The agentic memory space is crowded. This document explains exactly where M3-Mem
 
 ## M3-Memory vs Mem0
 
-Mem0 is the most mature and widely-used agentic memory library. It's excellent for cloud-hosted, multi-session personalization in LangChain/LangGraph/CrewAI apps. M3-Memory targets a different audience: developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
+Mem0 is a popular agentic memory library with broad ecosystem adoption. It's excellent for cloud-hosted, multi-session personalization in LangChain/LangGraph/CrewAI apps. M3-Memory targets a different audience: developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
 
 | Feature | M3-Memory | Mem0 |
 |---------|-----------|------|
@@ -43,7 +43,7 @@ Mem0 is the most mature and widely-used agentic memory library. It's excellent f
 
 - You're building LangChain / LangGraph / CrewAI applications
 - You need managed multi-tenant cloud memory with a hosted dashboard
-- You want the most battle-tested, widely-adopted solution in the ecosystem
+- You want a well-established solution with broad ecosystem adoption
 - Multi-session personalization at scale is your primary use case
 
 ---
@@ -93,7 +93,7 @@ Yes. Letta agents can call external MCP tools. You could run M3-Memory as the pe
 
 ## M3-Memory vs Zep
 
-Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It's the strongest option for production-scale temporal reasoning, but requires significant infrastructure.
+Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It has strong temporal reasoning capabilities, but requires more infrastructure than M3.
 
 | Feature | M3-Memory | Zep |
 |---------|-----------|-----|

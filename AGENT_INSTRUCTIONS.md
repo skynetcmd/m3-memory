@@ -3,14 +3,7 @@
 > **For AI agents only.** This file tells your agent how to use M3 Memory effectively.
 > For human-readable docs, see [README.md](./README.md), [QUICKSTART.md](./QUICKSTART.md), or [CORE_FEATURES.md](./CORE_FEATURES.md).
 
-> **`M3_MEMORY_ROOT`** — the root of the `m3-memory` repository checkout.
-
-> **Local overrides:** If `LOCAL_RULES.md` exists at `$M3_MEMORY_ROOT/LOCAL_RULES.md`, read it before proceeding. It contains machine-specific failover rules (embedding endpoints, LLM endpoints, internal IPs). It is git-ignored and never committed.
-
-> All paths are relative to `$M3_MEMORY_ROOT` unless otherwise noted.
->
-> This file is symlinked to `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md`.
-> Follow these instructions exactly. For technical implementation details, see [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md).
+> For technical implementation details, see [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md).
 
 ---
 
@@ -193,72 +186,9 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 
 ---
 
-## MCP Bridge Infrastructure
-
-| Server | Script | Tools |
-|--------|--------|-------|
-| `custom_pc_tool` | `bin/custom_tool_bridge.py` | `log_activity`, `update_focus`, `query_decisions`, `retire_focus`, `check_thermal_load`, `query_local_model`, `web_search`, `grok_ask` |
-| `memory` | `bin/memory_bridge.py` | 25 memory tools (see above) |
-| `grok_intel` | `bin/grok_bridge.py` | `grok_ask` — real-time X/Twitter data via Grok 3 |
-| `web_research` | `bin/web_research_bridge.py` | `web_search` — Perplexity sonar-pro (auto-fallback to Grok on failure) |
-| `mcp_proxy` | `bin/mcp_proxy.py` | SSE streaming proxy for non-MCP-native clients |
-| `debug_agent` | `bin/debug_agent_bridge.py` | `debug_analyze`, `debug_bisect`, `debug_trace`, `debug_correlate`, `debug_history`, `debug_report` |
-
-**Local model calls:** Use `custom_pc_tool → query_local_model(prompt=...)` to invoke the local LLM directly.
-
-**LLM Engine:** `bin/llm_failover.py` auto-selects the largest available model. Default: `localhost:1234`. For multi-machine setups, set `LLM_ENDPOINTS_CSV` env var with comma-separated endpoints.
-
----
-
-## Operational Protocols
-
-Every protocol specifies the **exact MCP server and tool** to call. Do not batch; fire immediately.
-
-### Protocol #1 — The Reasoning Rule
-**Trigger:** `query_local_model` returns `reasoning_content` (>200 chars).
-**Action:** Automatically archived to `activity_logs` by `query_local_model`. For manual complex reasoning, call `custom_pc_tool → log_activity(category="thought", ...)`.
-
-### Protocol #2 — The Hardware Rule
-**Trigger:** Suspected pressure or after heavy inference.
-**Action:** 1. `custom_pc_tool → check_thermal_load()`. 2. If status ≠ Nominal, `log_activity(category="hardware", ...)`.
-
-### Protocol #3 — The Decision Rule
-**Trigger:** User agrees to ANY change (code, file move, diagnosis).
-**Action:** Call `custom_pc_tool → log_activity(category="decision", ...)` immediately.
-
-### Protocol #4 — The Search Rule
-**Trigger:** Before starting any new task.
-**Action:** Call `custom_pc_tool → query_decisions(...)` **AND** `memory → memory_search(...)`. Check what's already known before proceeding.
-
-### Protocol #5 — The Focus Protocol
-**Trigger:** Every 3 turns of a technical conversation.
-**Action:** `custom_pc_tool → update_focus(summary="...")`. Call `retire_focus()` on task completion.
-
----
-
-## Auth Model
-
-All bridges resolve API keys using `$M3_MEMORY_ROOT/bin/auth_utils.py`:
-1. Environment variables
-2. `keyring` (Keychain / Credential Manager)
-3. **Synchronized Encrypted Vault** (AES-256 via Fernet/PBKDF2-HMAC-SHA256, 600K iterations, synced to PG Warehouse)
-
-**Security:** `AGENT_OS_MASTER_KEY` must be in native OS keyring. API keys are NEVER stored in plaintext. Legacy 100K-iteration encrypted secrets are auto-migrated to 600K on first decryption.
-
----
-
-## Sandbox Environment
-
-**OpenClaw** — containerized agent sandbox (node:22-slim) on `localhost:8000`.
-- Tools: `claw-grok`, `claw-claude`, `claw-gemini`, `claw-perplexity`, `claw-local`
-- Full LAN access via OrbStack (can reach ChromaDB/Postgres)
-
----
-
 ## Health Check
 
 ```bash
-bin/mcp_check.sh                    # MCP bridge connectivity
 python bin/test_memory_bridge.py    # 41 end-to-end tests
 python bin/benchmark_memory.py      # Retrieval quality benchmarks
 ```

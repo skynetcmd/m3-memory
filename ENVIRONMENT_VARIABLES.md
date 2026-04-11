@@ -66,4 +66,3 @@ Your `.zshenv` should define and export the following variables by calling the `
 | `XAI_API_KEY`| API key for xAI/Grok (web search fallback). | `_keychain_set XAI_API_KEY "your-grok-key"` |
 | `ANTHROPIC_API_KEY`| API key for Anthropic/Claude models. | `_keychain_set ANTHROPIC_API_KEY "your-claude-key"` |
 | `GEMINI_API_KEY`| API key for Google/Gemini models. | `_keychain_set GEMINI_API_KEY "your-gemini-key"` |
-| `OPENCLAW_GATEWAY_TOKEN`| Token for the OpenClaw sandbox gateway. | `_keychain_set OPENCLAW_GATEWAY_TOKEN "your-openclaw-token"` |

@@ -3,33 +3,57 @@
 > High-level overview. For schema details, search internals, sync protocol, and security, see [TECHNICAL_DETAILS.md](../TECHNICAL_DETAILS.md).
 
 ## Overview
-M3 Memory is a local-first persistent memory system for MCP agents. It provides a semantic memory layer with hybrid search, encrypted secret management, and cross-device sync — all running on your hardware.
+
+M3 Memory is a local-first persistent memory system for MCP agents. It provides a semantic memory layer with hybrid search, encrypted credential management, and optional cross-device sync — all running on your hardware.
 
 ## Core Components
 
-### 1. MCP Bridges (`bin/*_bridge.py`)
-- **Memory Bridge**: Manages the semantic memory store (SQLite + ChromaDB). Modularized into `core`, `sync`, and `maintenance`.
-- **Custom Tool Bridge**: Environmental sensing (thermals), system focus, and direct local inference routing.
-- **Debug Agent Bridge**: Autonomous root-cause analysis and system debugging.
+### 1. MCP Memory Bridge (`bin/memory_bridge.py`)
 
-### 2. Memory System
-- **Local Store**: SQLite (`agent_memory.db`) for low-latency retrieval and relationship mapping.
-- **Federated Layer**: ChromaDB for distributed vector search across the LAN.
-- **Warehouse**: PostgreSQL for long-term archival and multi-device synchronization.
+The memory bridge exposes 25 MCP tools for writing, searching, linking, maintaining, and governing agent memory. It is the only bridge required to use M3 Memory.
 
-### 3. Security & Auth (`bin/auth_utils.py`)
-- **Encrypted Vault**: AES-128-CBC (Fernet) protected secrets.
-- **Hardened Key Derivation**: PBKDF2HMAC with per-device persistent salts to prevent pre-computation attacks.
-- **Zero-Knowledge Sync**: Secrets are synchronized across the warehouse in their encrypted state.
+### 2. Storage
 
-### 4. MCP Proxy (`bin/mcp_proxy.py`)
-- Provides an OpenAI-compatible endpoint on `localhost:9000`.
-- Injects 15+ Operational Protocol tools into every request.
-- Enables MCP capabilities for non-native clients like Aider and OpenClaw.
+- **SQLite** (`memory/agent_memory.db`) — primary low-latency store. All reads and writes hit local SQLite first. WAL mode enabled for concurrent access.
+- **ChromaDB** *(optional)* — distributed vector search across LAN machines. Falls back to a local `chroma_mirror` table during outages.
+- **PostgreSQL** *(optional)* — bi-directional delta sync for cross-device memory sharing. No hardcoded credentials; uses environment variables or OS keyring.
+
+### 3. Search Pipeline
+
+Three-stage hybrid retrieval:
+
+1. **FTS5 keyword matching** — BM25-ranked full-text search with query sanitization
+2. **Vector similarity** — cosine similarity against locally-generated embeddings
+3. **MMR diversity re-ranking** — prevents near-duplicate results in top-k
+
+Score formula: `0.7 × vector + 0.3 × BM25`. Falls back to pure semantic search when FTS returns no results.
+
+### 4. Intelligence
+
+- **Contradiction detection** — automatic on write. Conflicting facts are superseded with full history preserved.
+- **Auto-linking** — related memories connected via knowledge graph (cosine > 0.7).
+- **LLM features** — auto-classification, conversation summarization, and memory consolidation via any local OpenAI-compatible server.
+
+### 5. Security (`bin/auth_utils.py`)
+
+- **Credential resolution**: environment variables → OS keyring → encrypted vault (AES-256, PBKDF2, 600K iterations)
+- **Content integrity**: SHA-256 hash on every write, verified on demand
+- **Input safety**: rejects XSS, SQL injection, code injection, and prompt injection at the write boundary
 
 ## Data Flow
-1. **Request**: Client sends a message to the MCP Proxy.
-2. **Injection**: Proxy injects memory search and logging tools.
-3. **Inference**: Request is routed to the best available model (auto-selected via `llm_failover.py`).
-4. **Tool Loop**: If the model requests a tool, the Proxy executes it locally and feeds back results.
-5. **Persistence**: Decisions and thoughts are automatically archived to the memory bridge.
+
+```
+Agent (Claude Code / Gemini CLI / Aider)
+    ↕ MCP protocol
+Memory Bridge (25 tools)
+    ↕
+SQLite (local, primary)
+    ↕ optional delta sync
+PostgreSQL (cross-device)    ChromaDB (federated vector search)
+```
+
+1. Agent calls an MCP tool (e.g., `memory_write`, `memory_search`)
+2. Memory bridge processes the request against local SQLite
+3. On write: safety check → embedding → contradiction detection → auto-link → store
+4. On search: FTS5 + vector + MMR pipeline → ranked results
+5. Optional: delta sync pushes/pulls changes to PostgreSQL and ChromaDB
