@@ -187,8 +187,9 @@ Then search for: "M3 install"
 [QUICKSTART.md](./QUICKSTART.md) — install, configure, verify, first-run troubleshooting
 
 **Go deeper:**
-[CORE_FEATURES.md](./CORE_FEATURES.md) — feature overview |
-[TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — search internals, schema, sync, security |
+[CORE_FEATURES.md](./CORE_FEATURES.md) — capability overview |
+[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — system design, storage layers, search pipeline |
+[TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — implementation specifics: schema, sync protocol, security |
 [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — agent behavioral rules + all 25 MCP tools |
 [COMPARISON.md](./COMPARISON.md) — M3 vs Mem0 vs Letta vs LangChain vs Zep
 
