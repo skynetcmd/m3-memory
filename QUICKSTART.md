@@ -210,7 +210,7 @@ Memory is what makes intelligence **compound over time**.
 ## 📦 Full documentation
 
 - [README.md](./README.md) — full technical + marketing overview
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — internals, MCP tools, protocols
+- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — agent instructions, MCP tools, protocols
 - [COMPARISON.md](./COMPARISON.md) — M3 vs Mem0 vs Letta vs LangChain Memory
 - [ROADMAP.md](./ROADMAP.md) — what's coming next
 

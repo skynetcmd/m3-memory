@@ -148,4 +148,4 @@ If you previously had the repo set up:
 
 - [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) — Complete environment variable reference
 - [README.md](README.md) — System overview and architecture
-- [ARCHITECTURE.md](ARCHITECTURE.md) — Detailed technical specification
+- [AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md) — Agent instructions and MCP tool reference
