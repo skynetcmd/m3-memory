@@ -6,7 +6,7 @@
   <circle fill="#ff5f57" cx="20" cy="19" r="7"/>
   <circle fill="#febc2e" cx="42" cy="19" r="7"/>
   <circle fill="#28c840" cx="64" cy="19" r="7"/>
-  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="13" x="425" y="24" text-anchor="middle">M3 Memory — Cross-Device Sync</text>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="13" x="425" y="24" text-anchor="middle">M3 Memory — Cross-Device, Cross-Platform Sync</text>
 
   <!-- MacBook section -->
   <text fill="#bc8cff" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" font-weight="bold" x="20" y="72">&#9654; MacBook Pro  (Claude Code)</text>
