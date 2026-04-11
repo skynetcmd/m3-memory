@@ -297,6 +297,7 @@ Bi-directional delta sync: **SQLite ↔ PostgreSQL** (UUID-based UPSERT, waterma
 
 | File | Purpose |
 |------|---------|
+| [QUICKSTART.md](./QUICKSTART.md) | New here? Plain-English guide — what it is, 5 tools to start with, recipes |
 | [CORE_FEATURES.md](./CORE_FEATURES.md) | Feature overview — start here |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Agent instruction manual: all 25 MCP tools, protocols, usage rules |
 | [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) | Deep-dive: storage internals, search pipeline, schema, sync, security |
