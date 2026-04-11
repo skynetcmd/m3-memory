@@ -1,4 +1,4 @@
-# 🧠 M3 Memory — Local-First Agentic Memory for MCP Agents
+# 🧠 M3 Memory — Give Your AI Agents Real Memory (in 60 seconds)
 
 <p align="center">
   <img src="docs/logo.svg" alt="M3 Memory Logo" width="600">
@@ -20,113 +20,151 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg">
 </p>
 
-<p align="center"><strong>The privacy-first, MCP-native memory layer for desktop coding agents — automatic contradiction detection, hybrid search, and built-in GDPR compliance. 100% local. Zero cloud.</strong></p>
+**M3 Memory lets Claude Code, Gemini CLI, and Aider remember users, context, and past work — fully local, no cloud, no APIs.**
+
+- 🔒 **100% private** — runs entirely on your machine
+- ⚡ **Works in one config line** — no setup beyond `pip install`
+- 🧠 **Persistent memory** across sessions and devices
 
 ---
 
-## Try it in 60 seconds
+## ⚡ Quick Start (1 minute)
 
 ```bash
 pip install m3-memory
 ```
 
-Add one line to your agent's MCP config:
+Add to your MCP config:
 
 ```json
-{ "mcpServers": { "memory": { "command": "mcp-memory" } } }
+{
+  "mcpServers": {
+    "memory": { "command": "mcp-memory" }
+  }
+}
 ```
 
-**That's it.** Claude Code, Gemini CLI, and Aider now have persistent, private memory.
+Restart your agent → it now has memory. ✅ Claude Code &nbsp;✅ Gemini CLI &nbsp;✅ Aider
+
+**Done.**
 
 ---
 
-## Table of Contents
+## 🧠 What This Feels Like
 
-- [Why M3 Memory?](#why-m3-memory)
-- [How It Compares](#how-it-compares) · [Full comparison →](./COMPARISON.md)
-- [Architecture](#architecture)
-- [Quick Start](#quick-start)
-- [Features](#features)
-- [25 MCP Tools](#25-mcp-tools)
-- [Documentation](#documentation)
-- [Community](#community)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
+You tell your agent:
+
+> "My server runs on port 8080"
+
+Later:
+
+> "Actually it's 9000"
+
+M3 Memory automatically:
+- Detects the contradiction
+- Updates the fact
+- Keeps the full history
+
+Next session:
+
+> "What port is my server on?"
+> → **"9000 (updated from 8080)"**
+
+No prompts. No manual logic. Just works.
 
 ---
 
-## Why M3 Memory?
+## 🎯 Who This Is For
 
-Most agent memory tools make you choose: local speed **or** cloud persistence **or** MCP compatibility. M3 Memory gives you all three — running entirely on your hardware with no external API calls.
+**Use M3 Memory if you:**
+- Build with MCP agents (Claude Code, Gemini CLI, Aider)
+- Want persistent memory across sessions and devices
+- Care about privacy — no cloud, no API keys, works offline
+- Don't want to build memory infrastructure yourself
 
-**You're debugging a deployment issue at a coffee shop.** Claude Code recalls the architecture decisions from last week, the server configs from yesterday, and the troubleshooting steps that worked before — all from local SQLite, no internet required. Later, at your desktop at home, Gemini CLI picks up exactly where you left off. Same memories. Same knowledge graph. Synced the moment you hit the local network.
+**Not for you if:**
+- You only need short-term chat context
+- You're building LangChain/CrewAI pipelines (consider [Mem0](https://mem0.ai))
+- You want a full stateful agent runtime (consider [Letta](https://letta.ai))
 
-> **Your AI's memory belongs to you, lives on your hardware, and follows you across every device and every agent.**
+---
 
-### Why choose M3-Memory specifically?
+## 🎯 Use Cases
 
 | | |
 |---|---|
-| 🔒 **100% local by default** | Zero external APIs, zero token costs, works fully offline |
-| 🛠️ **Native MCP — 25 tools** | Auto-discovers in Claude Code & Gemini CLI with one config line |
-| 🚫 **Automatic contradiction detection** | Bitemporal superseding — stale facts resolved without agent-side logic |
-| ⏳ **Bitemporal history** | Query what your agent believed on any past date |
-| 🛡️ **GDPR built-in** | `gdpr_forget` (Art. 17) + `gdpr_export` (Art. 20) as first-class MCP tools |
-| 🔄 **Cross-device sync** | SQLite ↔ PostgreSQL ↔ ChromaDB, bi-directional delta sync |
-| 🪶 **Ultra-lightweight** | Drop-in backend — no runtime migration, no framework lock-in |
+| 🤖 **Coding agents** | Remember architecture decisions, configs, debugging steps across sessions |
+| 🧠 **Personal assistants** | Persist user preferences, goals, and history long-term |
+| 🧑‍💻 **Dev workflows** | Track environment changes, server configs, and fixes over time |
+| 🧪 **Research agents** | Build evolving knowledge that compounds across sessions |
 
 ---
 
-## See It in Action
+## ✨ Core Features
 
-> **Demo 1 — Automatic contradiction resolution**
-> ![Demo: agent writes a fact, then a conflicting update — old memory auto-superseded with full history preserved](docs/demo_contradiction.gif)
-> *Agent writes "server is on port 8080", then later "server is on port 9000" — M3 detects the conflict, supersedes the old memory, preserves full bitemporal history. No manual cleanup.*
+### 🔍 Hybrid Search
+**TL;DR: Better results than vector search alone.**
+FTS5 keyword + semantic vector + MMR diversity re-ranking in one pipeline. Full score breakdown via `memory_suggest`.
 
-> **Demo 2 — Hybrid search across 1,000 memories**
-> ![Demo: memory_search returns FTS5 + vector + MMR ranked results with score breakdown](docs/demo_search.gif)
-> *FTS5 keyword match + vector similarity + MMR diversity re-ranking in a single pipeline. `memory_suggest` returns full score breakdown per result.*
+### 🚫 Automatic Contradiction Detection
+**TL;DR: Old facts fix themselves.**
+Write conflicting info → M3 detects it, supersedes the old memory, records a `supersedes` relationship, preserves full history. No stale data. No manual cleanup.
 
-> **Demo 3 — Cross-device sync**
-> ![Demo: memory written on one machine appears on another via SQLite→PostgreSQL bidirectional sync](docs/demo_sync.gif)
-> *Write on your laptop. Pick it up on your desktop. Bi-directional delta sync via PostgreSQL — crash-resistant, watermark-tracked.*
+### ⏳ Bitemporal History
+**TL;DR: Time-travel debugging.**
+Query `as_of="2026-01-15"` to see exactly what your agent believed on any past date. Essential for compliance and debugging.
 
-*GIFs coming soon — [contribute a recording](./CONTRIBUTING.md) or [watch the Discord](https://discord.gg/ZcJ3EGC99B) for updates.*
+### 🕸️ Knowledge Graph
+**TL;DR: Memories connect automatically.**
+Related facts link on write (cosine > 0.7). Seven relationship types. Traverse up to 3 hops with `memory_graph`.
 
-⭐ **Star if you want local agents that remember** — feedback & issues very welcome!
+### 🔄 Cross-Device Sync
+**TL;DR: Same memory everywhere.**
+Write on laptop → continue on desktop. Bi-directional delta sync: SQLite ↔ PostgreSQL ↔ ChromaDB.
+
+### 🛡️ GDPR Built-In
+**TL;DR: Compliance out of the box.**
+`gdpr_forget` (Article 17 hard delete) + `gdpr_export` (Article 20 portable JSON) as first-class MCP tools.
+
+### 🔒 Fully Local + Private
+**TL;DR: Your data never leaves your machine.**
+Local embeddings via Ollama, LM Studio, or any OpenAI-compatible server. Zero API costs. Works offline.
 
 ---
 
-## How It Compares
+## 🧰 Core Tools (start here)
 
-### M3-Memory vs Mem0 vs Letta vs LangChain Memory
+You don't need all 25. Start with these:
+
+- `memory_write` — store a memory
+- `memory_search` — retrieve relevant memories
+- `memory_suggest` — ranked results with score breakdown
+- `memory_get` — fetch by ID
+- `memory_update` — refine existing knowledge
+
+→ [Full list of 25 tools](./ARCHITECTURE.md)
+
+---
+
+## 🆚 How It Compares
 
 | Feature | **M3-Memory** | **Mem0** | **Letta** | **LangChain Memory** |
-|---------|--------------|----------|-----------|----------------------|
-| **Type** | Lightweight MCP memory layer | Universal memory SDK | Full agent runtime | Framework memory |
-| **Best for** | **MCP desktop agents** (Claude Code, Aider, Gemini) | LangChain/CrewAI | Self-managing agents | LangGraph users |
-| **Local-first** | **✅ 100% local, zero APIs** | ⚠️ Self-hostable | ✅ Excellent (git) | ⚠️ Good |
-| **MCP native** | **✅ 25 built-in tools** | ⚠️ Wrappers only | ⚠️ Indirect | ❌ No |
-| **Contradiction** | **✅ Automatic bitemporal** | ⚠️ LLM-based | ⚠️ Agent self-editing | ⚠️ Manual/LLM |
-| **GDPR tools** | **✅ Built-in** (`gdpr_forget` + `gdpr_export`) | ⚠️ Supported | ⚠️ Via tools | ❌ Custom |
-| **Hybrid search** | **✅ FTS5 + Vector + MMR** | ⚠️ Vector + Graph | ⚠️ Hierarchical | ⚠️ Basic |
-| **Cross-device sync** | **✅ Built-in bidirectional** | ⚠️ Limited | ⚠️ Git-based | ⚠️ Limited |
-| **Overhead** | **Very light** | Light | Higher | Medium |
-| **Cost** | **✅ Free, MIT** | ⚠️ Free + $249/mo Pro | ⚠️ OSS + SaaS | ✅ OSS |
+|---------|:------------:|:--------:|:---------:|:--------------------:|
+| **Local-first** | ✅ 100% | ⚠️ partial | ✅ good | ⚠️ partial |
+| **MCP native** | ✅ 25 tools | ⚠️ wrappers | ⚠️ indirect | ❌ no |
+| **Contradiction handling** | ✅ automatic | ⚠️ LLM-based | ⚠️ agent-driven | ⚠️ manual |
+| **GDPR tools** | ✅ built-in | ⚠️ supported | ⚠️ via tools | ❌ custom |
+| **Cross-device sync** | ✅ built-in | ⚠️ limited | ⚠️ git-based | ⚠️ limited |
+| **Setup** | ✅ 1 line | ⚠️ SDK needed | ❌ full runtime | ❌ framework only |
+| **Cost** | ✅ free, MIT | ⚠️ $249/mo Pro | ⚠️ OSS + SaaS | ✅ free |
 
-**Choose M3-Memory** if you want the simplest, most private, MCP-native memory backend with automatic consistency and compliance — no framework lock-in.
+**Choose M3 Memory** if you want simple, private, MCP-native memory that just works — no framework lock-in.
 
-**Choose Mem0** for LangChain / LangGraph / CrewAI and managed cloud memory at scale.
-
-**Choose Letta** for long-lived autonomous agents that self-edit memory within a full stateful runtime.
-
-**Choose LangChain Memory** if you're already in the LangGraph ecosystem and want framework-native memory.
-
-→ Full feature-by-feature breakdown: [COMPARISON.md](./COMPARISON.md)
+→ Full breakdown: [COMPARISON.md](./COMPARISON.md)
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
@@ -175,197 +213,79 @@ sequenceDiagram
 
 ---
 
-## Quick Start
+## 🎬 See It in Action
 
-### Prerequisites
+> **Demo 1 — Automatic contradiction resolution**
+> ![Demo: agent writes conflicting facts — old memory auto-superseded, full history preserved](docs/demo_contradiction.gif)
 
-- Python 3.11+
-- Any OpenAI-compatible local LLM server: [LM Studio](https://lmstudio.ai), [Ollama](https://ollama.com), vLLM, LocalAI, llama.cpp
-- *(Optional)* PostgreSQL + ChromaDB for full cross-device federation
+> **Demo 2 — Hybrid search across 1,000 memories**
+> ![Demo: memory_search returns FTS5 + vector + MMR ranked results with score breakdown](docs/demo_search.gif)
 
-### Install
+> **Demo 3 — Cross-device sync**
+> ![Demo: memory written on laptop appears on desktop via SQLite→PostgreSQL bidirectional sync](docs/demo_sync.gif)
 
-**Option A — pip (recommended):**
-
-```bash
-pip install m3-memory
-mcp-memory --version   # confirm the CLI is installed
-```
-
-Add to your agent's MCP config — no path needed:
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "mcp-memory"
-    }
-  }
-}
-```
-
-**Option B — clone (for development):**
-
-```bash
-git clone https://github.com/skynetcmd/m3-memory.git
-cd m3-memory
-python -m venv .venv
-source .venv/bin/activate        # macOS/Linux
-# .\.venv\Scripts\Activate.ps1  # Windows PowerShell
-pip install -r requirements.txt
-```
-
-### Validate
-
-```bash
-python validate_env.py    # check all dependencies and LLM connectivity
-python run_tests.py       # run the end-to-end test suite
-```
-
-### Agent Config Locations
-
-| Agent | Config file |
-|-------|-------------|
-| Claude Code | `~/.claude/claude_desktop_config.json` or `.mcp.json` in project root |
-| Gemini CLI | `~/.gemini/settings.json` |
-| Aider | `.aider.conf.yml` (via `--mcp-server` flag) |
-
-For OS-specific setup: [macOS](./docs/install_macos.md) · [Linux](./docs/install_linux.md) · [Windows](./docs/install_windows-powershell.md)
-
-> M3 Memory auto-discovers in Claude Code and other MCP clients via the [MCP Registry](https://github.com/modelcontextprotocol/registry). See [`mcp-server.json`](./mcp-server.json) for the manifest.
+*GIFs coming soon — [contribute a recording](./CONTRIBUTING.md) or watch [#showcase](https://discord.gg/ZcJ3EGC99B).*
 
 ---
 
-## Features
-
-### 🔍 Hybrid Search That Actually Works
-
-Three-stage pipeline — **FTS5 keyword → semantic vector → MMR re-ranking** — consistently outperforms pure vector search on technical queries. No more five near-identical results. Every result returns a full score breakdown (vector + BM25 + MMR penalty) via `memory_suggest`.
-
-### 🚫 Automatic Contradiction Detection
-
-Write a fact that conflicts with an existing one — M3 detects it automatically. The old memory is soft-deleted, a `supersedes` relationship is recorded, and the full history is preserved. **No stale data. No manual cleanup. No agent-side logic required.**
-
-### ⏳ Bitemporal History
-
-Track not just *when a fact was stored*, but *when it was actually true*. Query `as_of="2026-01-15"` to see what your agent believed on any past date — essential for compliance audits and debugging.
-
-### 🕸️ Knowledge Graph
-
-Memories auto-link on write (cosine > 0.7). Seven relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`. Traverse up to 3 hops with a single `memory_graph` call.
-
-### 🧹 Self-Maintaining
-
-**Importance decay** (0.5%/day after 7 days) · **auto-archival** (< 0.05 importance after 30 days) · **per-agent retention** (TTL + max count) · **LLM consolidation** (merges old groups into summaries) · **deduplication** (configurable cosine threshold)
-
-### 🤖 Local LLM Intelligence
-
-Works with any OpenAI-compatible server (LM Studio, Ollama, vLLM, LocalAI): **auto-classification** into 18 types · **conversation summarization** · **multi-layered consolidation**. Zero API costs. Zero data exfiltration.
-
-### 🛡️ Security & Compliance
-
-| Layer | Protection |
-|-------|------------|
-| **Credentials** | AES-256 vault (PBKDF2, 600K iterations) · OS keyring · zero plaintext |
-| **Content** | SHA-256 signing on every write · tamper detection via `memory_verify` |
-| **Input** | Rejects XSS, SQL injection, Python injection, prompt injection at write boundary |
-| **Search** | FTS5 operator sanitization prevents query injection |
-| **Network** | Circuit breaker (3-failure threshold) · strict timeouts · tokens never logged |
-
-**GDPR built-in:** `gdpr_forget` (Article 17 — hard delete) · `gdpr_export` (Article 20 — portable JSON)
-
-### 🔄 Cross-Device Sync
-
-Bi-directional delta sync: **SQLite ↔ PostgreSQL** (UUID-based UPSERT, watermark-tracked, crash-resistant) + **ChromaDB federation** for distributed vector search across LAN. Hourly automated; manual via `chroma_sync` tool.
-
----
-
-## 25 MCP Tools
-
-| Category | Tools |
-|----------|-------|
-| **Memory Ops** | `memory_write`, `memory_search`, `memory_suggest`, `memory_get`, `memory_update`, `memory_delete`, `memory_verify` |
-| **Knowledge Graph** | `memory_link`, `memory_graph`, `memory_history` |
-| **Conversations** | `conversation_start`, `conversation_append`, `conversation_search`, `conversation_summarize` |
-| **Lifecycle** | `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention`, `memory_feedback` |
-| **Data Governance** | `gdpr_export`, `gdpr_forget`, `memory_export`, `memory_import` |
-| **Operations** | `memory_cost_report`, `chroma_sync` |
-
----
-
-## Documentation
+## 📚 Documentation
 
 | File | Purpose |
 |------|---------|
-| [QUICKSTART.md](./QUICKSTART.md) | New here? Plain-English guide — what it is, 5 tools to start with, recipes |
-| [CORE_FEATURES.md](./CORE_FEATURES.md) | Feature overview — start here |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Agent instruction manual: all 25 MCP tools, protocols, usage rules |
-| [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) | Deep-dive: storage internals, search pipeline, schema, sync, security |
-| [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) | Security configuration and credential setup |
-| [COMPARISON.md](./COMPARISON.md) | Full feature-by-feature comparison vs Mem0, Letta, LangChain Memory, Zep |
-| [ROADMAP.md](./ROADMAP.md) | Upcoming milestones and community voting |
+| [QUICKSTART.md](./QUICKSTART.md) | Plain-English guide — new here? Start here |
+| [CORE_FEATURES.md](./CORE_FEATURES.md) | Feature overview |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system internals + all 25 MCP tools |
+| [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) | Deep dive: search pipeline, schema, sync, security |
+| [COMPARISON.md](./COMPARISON.md) | M3 vs Mem0 vs Letta vs LangChain Memory |
+| [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) | Config and credential setup |
+| [ROADMAP.md](./ROADMAP.md) | Upcoming milestones |
 | [CHANGELOG.md](./CHANGELOG.md) | Release history |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute, run tests, submit changes |
 
 ---
 
-## Community
+## 🤝 Community
 
 [![Discord](https://img.shields.io/badge/Join%20Discord-M3--Memory%20Community-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/ZcJ3EGC99B)
 
-| Channel | Purpose |
-|---------|---------|
-| `#start-here` | New? Start here — overview & quick links |
-| `#ask-anything` | Setup help, config questions, how-tos |
-| `#bug-reports` | Report issues with steps to reproduce |
-| `#showcase` | Share your M3-Memory setups and demos |
-| `#search-quality` | Hybrid search tuning & benchmarks |
-| `#sync-federation` | Multi-device sync & ChromaDB federation |
-| `#memory-design` | Architecture discussions & research |
-
-**M3_Bot** is live — mention `@M3_Bot` or use `!ask <question>` in any channel to query the documentation directly.
+Get help, share your setup, and follow development. **M3_Bot** is live — use `!ask <question>` in any channel.
 
 ---
 
-## Roadmap
+## 🛣️ Roadmap
 
 | Milestone | Highlights |
 |-----------|------------|
-| **v0.2** | Docker image · auto MCP Registry · `mcp-memory` CLI polish |
+| **v0.2** | Docker image · auto MCP Registry · CLI polish |
 | **v0.3** | Local web dashboard · Prometheus metrics · search explain mode |
 | **v0.4** | Multi-agent shared namespaces · P2P encrypted sync |
 | **v1.0** | Public benchmark suite · stable Python SDK · full docs site |
 
-Vote on features and propose new ones → [ROADMAP.md](./ROADMAP.md)
+Vote on features → [ROADMAP.md](./ROADMAP.md)
 
 ---
 
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to get started, run the test suite, and submit changes. Good first issues: [GOOD_FIRST_ISSUES.md](./GOOD_FIRST_ISSUES.md).
-
----
-
-## Project Structure
+## 🧩 Project Structure
 
 ```
-bin/          Core MCP bridges, SDK, and automation scripts
-memory/       SQLite database and migration logic
-config/       Configuration templates for agents and shell
-docs/         Architecture diagrams, API reference, and OS install guides
-examples/     Demo notebooks, mcp.json snippets, benchmark scripts
-scripts/      Maintenance and utility scripts
+bin/          MCP bridge, SDK, and automation scripts
+memory/       SQLite database and migrations
+docs/         Architecture diagrams and install guides
+examples/     Demo notebooks and mcp.json snippets
 tests/        End-to-end test suite (41 tests)
 ```
 
 ---
 
-**Production Release — v2026.4.8 · [MIT License](LICENSE) · [Changelog](CHANGELOG.md)**
+## 🤝 Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) · Good first issues: [GOOD_FIRST_ISSUES.md](./GOOD_FIRST_ISSUES.md)
 
 ---
 
 [![Star History Chart](https://api.star-history.com/svg?repos=skynetcmd/m3-memory&type=Date)](https://star-history.com/#skynetcmd/m3-memory&Date)
 
-*M3 Memory: the industrial-strength foundation for agents that remember.*
+**Your AI should remember. Your data should stay yours.**
+
+*M3 Memory: the foundation for agents that don't forget.*
 
 <!-- mcp-name: io.github.skynetcmd/m3-memory -->
