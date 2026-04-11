@@ -80,17 +80,17 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ## What it does
 
-**Persistent memory** — facts, decisions, preferences, and observations survive across sessions and restarts. Stored in local SQLite.
+**Persistent memory** — facts, decisions, preferences survive across sessions. Stored in local SQLite.
 
-**Hybrid retrieval** — three-stage search pipeline: FTS5 keyword matching, semantic vector similarity, MMR diversity re-ranking. Scored and explainable via `memory_suggest`.
+**Hybrid retrieval** — FTS5 keyword matching + semantic vector similarity + MMR diversity re-ranking. Scored and explainable.
 
-**Contradiction handling** — write a conflicting fact and the old one is automatically superseded. Bitemporal versioning preserves the full history. Query any past point in time with `as_of`.
+**Contradiction handling** — conflicting facts are automatically superseded. Bitemporal versioning preserves the full history.
 
-**Knowledge graph** — related memories are linked automatically on write (cosine > 0.7). Eight relationship types. Traverse up to 3 hops with `memory_graph`.
+**Knowledge graph** — related memories linked automatically on write. Eight relationship types, 3-hop traversal.
 
-**Local and private** — embeddings generated locally via Ollama, LM Studio, or any OpenAI-compatible endpoint. No cloud calls. No API costs. Works offline.
+**Local and private** — embeddings generated locally. No cloud calls. No API costs. Works offline.
 
-**Cross-device, cross-platform sync** — optional bi-directional delta sync across SQLite, PostgreSQL, and ChromaDB. Write on your Mac, pick it up on Windows or Linux. Same memory on every machine, no cloud intermediary.
+**Cross-device sync** — optional bi-directional delta sync across SQLite, PostgreSQL, and ChromaDB. Same memory on every machine.
 
 ---
 
@@ -181,108 +181,16 @@ Then search for: "M3 install"
 
 ---
 
-## Documentation
+## Learn more
 
-**Start here:**
-[QUICKSTART.md](./QUICKSTART.md) — install, configure, verify, first-run troubleshooting
-
-**Go deeper:**
-[CORE_FEATURES.md](./CORE_FEATURES.md) — capability overview |
-[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — system design, storage layers, search pipeline |
-[TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — implementation specifics: schema, sync protocol, security |
-[AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — agent behavioral rules + all 25 MCP tools |
-[COMPARISON.md](./COMPARISON.md) — M3 vs Mem0 vs Letta vs LangChain vs Zep
-
-**Configure:**
-[ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) — credentials and runtime config
-
-**Contribute:**
-[CONTRIBUTING.md](./CONTRIBUTING.md) |
-[GOOD_FIRST_ISSUES.md](./GOOD_FIRST_ISSUES.md) |
-[ROADMAP.md](./ROADMAP.md)
-
----
-
-## How it compares
-
-M3 Memory is built for a specific use case: giving MCP agents persistent, local memory. Other tools solve adjacent but different problems.
-
-| | **M3 Memory** | **Mem0** | **Letta** | **LangChain Memory** |
-|---|:---:|:---:|:---:|:---:|
-| Local-first | Yes | Partial | Yes | Partial |
-| MCP native | 25 tools | Via wrappers | Indirect | No |
-| Contradiction handling | Automatic | LLM-based | Agent-driven | Manual |
-| GDPR tools | Built-in | Supported | Via tools | Custom |
-| Cross-device / cross-platform sync | Built-in | Limited | Git-based | Limited |
-| Setup complexity | `pip install` + 1 config line | SDK integration | Full runtime | Framework integration |
-| Cost | Free, MIT | Free tier; $249/mo Pro | OSS + SaaS | Free |
-
-Mem0 is a better fit if you're building LangChain/CrewAI pipelines. Letta is better if you want a full stateful agent runtime. M3 is better if you want drop-in memory for MCP agents that stays on your machine.
-
----
-
-## Architecture
-
-```mermaid
-graph TD
-    subgraph "AI Agents"
-        C[Claude Code]
-        G[Gemini CLI]
-        A[Aider / Other MCP Agents]
-    end
-
-    subgraph "MCP Bridge"
-        MB[memory_bridge.py — 25 tools]
-    end
-
-    subgraph "Storage"
-        SQ[(SQLite — local)]
-        PG[(PostgreSQL — sync)]
-        CH[(ChromaDB — federated)]
-    end
-
-    C & G & A <--> MB
-    MB <--> SQ
-    SQ <-->|delta sync| PG
-    SQ <-->|push/pull| CH
-```
-
-<details>
-<summary>Write pipeline detail</summary>
-
-```mermaid
-sequenceDiagram
-    participant A as Agent
-    participant M as M3 Memory
-    participant L as Local LLM
-    participant S as SQLite
-
-    A->>M: memory_write(content)
-    M->>M: Safety check
-    M->>L: Generate embedding
-    L-->>M: Vector
-    M->>M: Contradiction detection
-    M->>M: Auto-link related memories
-    M->>M: SHA-256 hash
-    M->>S: Store
-    S-->>M: OK
-    M-->>A: Created: uuid
-```
-
-</details>
-
----
-
-## Roadmap
-
-| Milestone | Highlights |
-|-----------|------------|
-| **v0.2** | Docker image, MCP Registry, CLI polish |
-| **v0.3** | Web dashboard, Prometheus metrics, search explain mode |
-| **v0.4** | Multi-agent namespaces, P2P encrypted sync |
-| **v1.0** | Benchmark suite, stable Python SDK, docs site |
-
-Details and voting in [ROADMAP.md](./ROADMAP.md).
+- **Get running** → [QUICKSTART.md](./QUICKSTART.md)
+- **Understand features** → [CORE_FEATURES.md](./CORE_FEATURES.md)
+- **System design** → [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- **Implementation details** → [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md)
+- **Agent rules + all 25 tools** → [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
+- **M3 vs alternatives** → [COMPARISON.md](./COMPARISON.md)
+- **Configuration** → [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)
+- **Roadmap** → [ROADMAP.md](./ROADMAP.md)
 
 ---
 
@@ -291,12 +199,8 @@ Details and voting in [ROADMAP.md](./ROADMAP.md).
 [![Discord](https://img.shields.io/badge/Discord-M3_Memory-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZcJ3EGC99B)
 &nbsp;
 [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-181717?logo=github&style=flat-square)](https://github.com/skynetcmd/m3-memory/issues)
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md). Good first issues: [GOOD_FIRST_ISSUES.md](./GOOD_FIRST_ISSUES.md).
+&nbsp;
+[Contributing](./CONTRIBUTING.md) · [Good first issues](./GOOD_FIRST_ISSUES.md)
 
 ---
 
