@@ -67,8 +67,8 @@ The repo has 10+ markdown files at root level plus 5 in `docs/`. Some overlap, s
 
 ### Content deduplication
 - [x] `QUICKSTART.md` rewritten as pure onboarding: install, configure, verify, troubleshoot. All philosophy/pitch/comparison removed.
-- [ ] `CORE_FEATURES.md` repeats feature descriptions from README — make it the authoritative feature reference (README version is already ultra-short)
-- [ ] `TECHNICAL_DETAILS.md` and `docs/ARCHITECTURE.md` may overlap on search pipeline and storage internals — audit and deduplicate
+- [x] `CORE_FEATURES.md` rewritten as authoritative feature reference — removed verbose pitch language, updated Quick Start from `git clone` to `pip install`, removed tagline
+- [x] `TECHNICAL_DETAILS.md` and `docs/ARCHITECTURE.md` audited — ARCHITECTURE.md kept as high-level overview with cross-reference to TECHNICAL_DETAILS.md for deep details. Fixed stale "local DeepSeek" reference. No content duplication remains.
 
 ### Files to review for deprecation
 - [x] `SETUP_INSTRUCTIONS.md` — kept as historical migration guide (IP hardcoding removal, env var renames). Not onboarding.
@@ -102,7 +102,7 @@ The repo has 10+ markdown files at root level plus 5 in `docs/`. Some overlap, s
 - [x] All cross-references verified — no broken links, all referenced files exist
 
 ### Old branding in non-tracked files
-- [ ] Check if deployed PyPI package description still says "M3 Max Agentic OS" (may need a version bump)
+- [x] PyPI package description verified clean — `pyproject.toml` description says "Local-first agentic memory layer for MCP agents", no old branding
 
 ---
 
