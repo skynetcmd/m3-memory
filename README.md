@@ -20,18 +20,48 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg">
 </p>
 
-> Give your MCP agents persistent, private memory that actually works. No cloud. No forgetting.
+> **The privacy-first, MCP-native memory layer built for desktop coding agents that stay consistent and compliant.**
+> Your agents remember everything. Your data never leaves your machine.
 
-**Industrial-strength memory layer that just works.** M3 Memory gives AI agents persistent, private, intelligent memory — running 100% on your hardware, with no cloud APIs and no subscriptions.
+```bash
+pip install m3-memory
+```
+
+```json
+{ "mcpServers": { "memory": { "command": "mcp-memory" } } }
+```
+
+That's it. Claude Code, Gemini CLI, and Aider now have persistent memory.
+
+---
+
+### What you get
 
 - 🛠️ **25 MCP tools** — write, search, link, graph, verify, sync, export, and more
 - 🔍 **Hybrid search** — FTS5 keywords + vector similarity + MMR diversity re-ranking
-- 🚫 **Contradiction detection** — stale facts are superseded automatically
+- 🚫 **Contradiction detection** — stale facts are superseded automatically, with full history preserved
 - 🔄 **Cross-device sync** — SQLite ↔ PostgreSQL ↔ ChromaDB, bi-directional
-- 🛡️ **GDPR-ready** — Article 17 (forget) and Article 20 (export) built in
-- 🔒 **Fully local** — your embeddings, your hardware, your data
+- 🛡️ **GDPR-ready** — Article 17 (forget) and Article 20 (export) built in as MCP tools
+- 🔒 **Fully local** — your embeddings, your hardware, your data — zero external API calls
 
 Works with **Claude Code, Gemini CLI, Aider, OpenClaw**, or any MCP-compatible agent.
+
+---
+
+### See it in action
+
+<!-- DEMO GIF 1: Replace with real recording -->
+> **Demo 1 — Write + contradiction auto-resolved**
+> ![Demo: agent writes a fact, then writes a conflicting update — old memory is superseded automatically](docs/demo_contradiction.gif)
+> *Record with [ScreenToGif](https://www.screentogif.com/) (Windows) or [asciinema](https://asciinema.org/) (macOS/Linux)*
+
+<!-- DEMO GIF 2: Replace with real recording -->
+> **Demo 2 — Hybrid search across 1,000 memories**
+> ![Demo: memory_search returns ranked results with FTS5 + vector + MMR scores](docs/demo_search.gif)
+
+<!-- DEMO GIF 3: Replace with real recording -->
+> **Demo 3 — Cross-device sync**
+> ![Demo: memory written on MacBook appears on Windows desktop via SQLite→PostgreSQL sync](docs/demo_sync.gif)
 
 ⭐ **Star if you want local agents that remember** — feedback & issues very welcome!
 
@@ -40,12 +70,13 @@ Works with **Claude Code, Gemini CLI, Aider, OpenClaw**, or any MCP-compatible a
 ## Table of Contents
 
 - [Why M3 Memory](#why-m3-memory)
-- [How It Compares](#how-it-compares)
+- [How It Compares](#how-it-compares) · [Full comparison →](./COMPARISON.md)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [25 MCP Tools](#25-mcp-tools)
 - [Documentation](#documentation)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 
 ---
@@ -62,23 +93,31 @@ Most agent memory solutions require you to pick one: local speed, or cloud persi
 
 ## How It Compares
 
-M3 Memory occupies a distinct niche from other agentic memory systems — it's not trying to replace Letta, Mem0, or Zep, but fills a gap none of them cover: **local-first, MCP-native, zero cloud dependency, zero subscription cost**.
+M3-Memory fills a gap that Mem0, Letta, LangChain Memory, and Zep don't cover: **local-first, MCP-native, automatic contradiction detection, built-in GDPR compliance**.
 
-| | M3 Memory | Letta (MemGPT) | Mem0 / Zep |
-|---|---|---|---|
-| **Philosophy** | Local-first, MCP-native | OS-inspired context management | SaaS / managed cloud |
-| **Deployment** | 100% local, no API keys | Self-hosted or cloud | Cloud-first |
-| **Integration** | MCP Registry (auto-discover) | Custom SDKs / API | Framework SDKs |
-| **Search** | FTS5 + vectors + MMR | Tiered recall (core/archival) | Vector + knowledge graph |
-| **Privacy** | Data never leaves your machine | Varies by deployment | Often cloud-dependent |
-| **Cost** | Free, open source | Open source / SaaS pricing | Free tier + $249/mo Pro |
-| **Production-ready** | ✅ Today | 🔄 In progress | ✅ Mem0 yes / Zep partial |
+| Feature | **M3-Memory** | **Mem0** | **Letta** | **LangChain Memory** |
+|---------|--------------|----------|-----------|----------------------|
+| **Type** | Lightweight local memory layer + MCP server | Universal memory layer / SDK | Full stateful agent runtime + platform | Framework-integrated memory (LangGraph/LangMem) |
+| **Best for** | MCP desktop agents (Claude Code, Aider, Gemini CLI) | LangChain/CrewAI apps, personalization | Long-lived self-managing agents | LangGraph-based agents |
+| **Local-first** | ✅ 100% local, zero external APIs | ⚠️ Self-hostable (cloud promoted) | ✅ Excellent (git-backed in Letta Code) | ⚠️ Self-hostable with stores |
+| **MCP native** | ✅ 25 built-in MCP tools | ⚠️ Community wrappers only | ⚠️ Indirect via tools | ❌ LangChain ecosystem only |
+| **Memory architecture** | Hybrid FTS5 + Vector + MMR + Bitemporal | Vector + Graph (Pro) | Hierarchical core/recall/archival + git | Thread + JSON store + LangMem episodic/semantic |
+| **Contradiction handling** | ✅ Automatic — bitemporal superseding | ⚠️ LLM-based consolidation | ⚠️ Agent-driven self-editing | ⚠️ Manual / LLM-driven |
+| **GDPR Art. 17/20** | ✅ Built-in `gdpr_forget` + `gdpr_export` | ⚠️ Supported | ⚠️ Via tools | ❌ Custom implementation required |
+| **Cross-device sync** | ✅ SQLite ↔ PostgreSQL ↔ ChromaDB | ⚠️ Limited in OSS | ⚠️ Git-based | ⚠️ Depends on backend |
+| **Install** | `pip install m3-memory` + 1-line MCP config | `pip install mem0ai` | Docker / desktop app | Part of LangChain install |
+| **Overhead** | Very light | Light | Higher (full runtime) | Medium (tied to LangGraph) |
+| **Cost** | ✅ Free, MIT | ⚠️ Free + $249/mo Pro | ⚠️ OSS + Letta Cloud | ✅ OSS |
 
-**Choose M3 Memory if you want:** zero-config local privacy, MCP-native auto-discovery in Claude Code / Gemini CLI, hybrid search precision in technical codebases, and no recurring costs.
+**Choose M3-Memory** if you want a simple, privacy-first, MCP-native drop-in memory backend with automatic factual consistency, hybrid search, and compliance tools — independent of any full framework.
 
-**Choose Letta if you want:** agent context window management with an OS-inspired memory swap model.
+**Choose Mem0** for LangChain / LangGraph / CrewAI pipelines and managed cloud memory at scale.
 
-**Choose Mem0/Zep if you want:** managed cloud infrastructure, multi-tenant shared memory, or temporal knowledge graphs at scale.
+**Choose Letta** for long-lived autonomous agents that self-edit their own memory and need a full stateful runtime.
+
+**Choose LangChain Memory / LangMem** if you're already deep in the LangGraph ecosystem and want framework-native memory.
+
+→ Full feature-by-feature breakdown: [COMPARISON.md](./COMPARISON.md)
 
 ---
 
@@ -144,6 +183,18 @@ sequenceDiagram
 **Option A — pip (quickest):**
 ```bash
 pip install m3-memory
+mcp-memory --version   # verify the CLI entry point installed correctly
+```
+
+After install, use `mcp-memory` directly as the server command (no path required):
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "mcp-memory"
+    }
+  }
+}
 ```
 
 **Option B — clone (for development or full feature set):**
@@ -301,6 +352,19 @@ Join the M3-Memory Discord server to get help, share your setup, discuss ideas, 
 | `#memory-design` | Architecture discussions & research |
 
 **M3_Bot** is live in the server — mention `@M3_Bot` or use `!ask <question>` in any channel to get answers straight from the documentation.
+
+---
+
+## Roadmap
+
+| Milestone | Highlights |
+|-----------|------------|
+| **v0.2** | Docker image · auto MCP Registry · `mcp-memory` CLI polish |
+| **v0.3** | Local web dashboard · Prometheus metrics · search explain mode |
+| **v0.4** | Multi-agent shared namespaces · P2P encrypted sync |
+| **v1.0** | Public benchmark suite · stable Python SDK · full docs site |
+
+Full details and voting → [ROADMAP.md](./ROADMAP.md)
 
 ---
 

@@ -4,6 +4,19 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [2026.4.8] — April 10, 2026 — PyPI Launch
+
+### Added
+- `m3_memory` Python package with `mcp-memory` CLI entry point — `pip install m3-memory` now works end-to-end
+- `mcp-memory` command auto-starts the MCP server; no path configuration required for pip installs
+- `ROADMAP.md` — v0.2 through v1.0 milestones with community voting link
+- `publish.yml` GitHub Actions workflow — automated PyPI publish on GitHub Release via OIDC trusted publishing
+
+### Changed
+- `pyproject.toml` — proper package discovery, pinned `dependencies`, `[project.optional-dependencies]`, fixed license metadata
+
+---
+
 ## [2026.04.06] — April 6, 2026 — Production Release
 
 ### Added
