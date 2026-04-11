@@ -1,4 +1,4 @@
-# 🧠 M3 Memory — Give Your AI Agents Real Memory (in 60 seconds)
+# 🧠 M3 Memory
 
 <p align="center">
   <img src="docs/logo.svg" alt="M3 Memory Logo" width="600">
@@ -20,7 +20,9 @@
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg">
 </p>
 
-**M3 Memory lets Claude Code, Gemini CLI, and Aider remember users, context, and past work — fully local, no cloud, no APIs.**
+**Your AI agents finally remember things between sessions.**
+
+M3 Memory gives Claude Code, Gemini CLI, and Aider persistent, private memory — fully local, no cloud, no APIs.
 
 - 🔒 **100% private** — runs entirely on your machine
 - ⚡ **Works in one config line** — no setup beyond `pip install`
