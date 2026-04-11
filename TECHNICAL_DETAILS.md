@@ -1,9 +1,9 @@
 # <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> Memory — Technical Reference
 
 
-> Human-readable technical specification for the M3 Memory system.
- Covers architecture, storage, search internals, security, configuration, testing, and developer tooling.
+> Implementation specifics: schema, search internals, sync protocol, security, configuration, testing, and developer tooling.
 >
+> For the conceptual system design, see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 > For the AI/LLM agent instruction set, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 > For the feature overview, see [CORE_FEATURES.md](./CORE_FEATURES.md).
 
@@ -25,61 +25,28 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 ---
 
-## System Architecture
+## Storage Implementation
 
-### Storage Hierarchy
+> For the conceptual storage hierarchy (SQLite → PostgreSQL → ChromaDB), see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
-```mermaid
-graph TD
-    subgraph "L1: Fast Local Store"
-        SQ[(SQLite)]
-    end
-    subgraph "L2: Global Sync Warehouse"
-        PG[(PostgreSQL)]
-    end
-    subgraph "L3: Federated Vector Layer"
-        CH[(ChromaDB)]
-    end
+### SQLite Configuration
 
-    SQ <-->|Bi-directional Delta Sync| PG
-    SQ -->|Push Queue| CH
-    CH -->|Mirror Pull| SQ
-```
-
-### Storage Layer
-
-```
-┌─────────────────────┐     hourly delta sync     ┌──────────────────────┐
-│  SQLite (local)      │ ◄──────────────────────► │  PostgreSQL 15       │
-│  agent_memory.db     │    UUID UPSERT, crash-    │  (data warehouse)    │
-│  WAL mode, pool=5    │    resistant watermarks    │  cross-device sync   │
-└────────┬────────────┘                            └──────────────────────┘
-         │ push/pull
-         ▼
-┌─────────────────────┐
-│  ChromaDB (v2 API)   │
-│  Federation layer    │
-│  chroma_mirror for   │
-│  offline reads       │
-└─────────────────────┘
-```
-
-**SQLite** is the primary store. All reads and writes hit local SQLite first.
 - WAL mode enabled for concurrent read/write
 - Connection pool (configurable, default size 5) via `m3_sdk.py`
 - Semaphore-bounded embedding concurrency (max 4 concurrent) to prevent local LLM server overload
 - Thread-safe HTTP client with double-check locking
 
-**PostgreSQL 15** is the central data warehouse for cross-device sync.
-- Hosted on a dedicated database server (configurable via `PG_URL` env var or encrypted vault)
-- No hardcoded credentials — uses `_get_pg_url()` with keychain resolution
+### PostgreSQL Sync Details
+
+- Configurable via `PG_URL` env var or encrypted vault — no hardcoded credentials
 - Bi-directional delta sync via `bin/pg_sync.py` using watermark-based UPSERT
 - Syncs: memory items (including `user_id`, `scope`, `valid_from`, `valid_to`, `content_hash`), relationships, embeddings, encrypted secrets
 - Auto-creates `agent_retention_policies` and `gdpr_requests` tables if missing
 - Hourly automated sync via `bin/pg_sync.sh` cron job
 - Sync lock prevents concurrent runs (stale after 1 hour)
 
-**ChromaDB** provides federation for distributed vector search.
+### ChromaDB Federation Details
+
 - v2 API (configurable via `CHROMA_BASE_URL`), collection `agent_memory`
 - `chroma_mirror` table serves reads during outages
 - Stalled sync items auto-retry with configurable attempt limits
@@ -125,24 +92,9 @@ Schema migrations are managed by `bin/migrate_memory.py` — an idempotent runne
 
 ## Search Engine
 
-### Hybrid Search Pipeline
+> For the conceptual search pipeline overview, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
-```mermaid
-graph TD
-    Q[Input Query] --> EMB[Local LLM Embedding]
-    Q --> FTS[SQLite FTS5 Match]
-    FTS --> BM25[BM25 Scoring]
-    EMB --> VEC[Vector Cosine Similarity]
-    BM25 --> COMB[Hybrid Formula: 0.7*V + 0.3*B]
-    VEC --> COMB
-    COMB --> MMR[MMR Diversity Re-ranking]
-    MMR --> FED{Top Results < 3?}
-    FED -->|Yes| CHROMA[Query ChromaDB L3]
-    FED -->|No| FINAL[Final Ranked Results]
-    CHROMA --> FINAL
-```
-
-### Three-Stage Hybrid Pipeline
+### Implementation Details
 
 **Stage 1 — FTS5 Keyword Matching**
 - SQLite FTS5 with BM25 ranking
