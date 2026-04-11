@@ -1,4 +1,4 @@
-# M3 Max Agentic OS: Troubleshooting
+# M3 Memory: Troubleshooting
 
 ## 🗄️ Database Issues
 

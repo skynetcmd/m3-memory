@@ -1,4 +1,4 @@
-# M3 Max Agentic OS: Interactive Shell Configuration (.zshrc)
+# M3 Memory: Interactive Shell Configuration (.zshrc)
 # This file should be copied to ~/.zshrc.
 # It depends on variables loaded from ~/.zshenv, especially $M3_MEMORY_ROOT.
 

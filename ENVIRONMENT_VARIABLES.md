@@ -1,7 +1,7 @@
 # <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> Environment Variables & Secure Credentials
 
 
-This document specifies the environment variables required by the M3 Max Agentic OS.
+This document specifies the environment variables required by M3 Memory.
  It is essential for security and portability that **no hardcoded values (IPs, API keys, etc.)** are present in any repository files.
 
 ## 🏛️ The "Zero-Leak" Architecture Principle

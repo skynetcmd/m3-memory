@@ -1,4 +1,4 @@
-# M3 Max Agentic OS — Unified Dependencies
+# M3 Memory — Unified Dependencies
 # Install: pip install -r requirements.txt
 # Versions pinned to major.minor.* for supply-chain safety (2026-04-05)
 
