@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/skynetcmd/m3-memory">
+    <img src="docs/M3-banner.jpg" alt="M3 Memory" width="100%">
+  </a>
+</p>
+
 # M3 Memory
 
 Persistent, local memory for MCP agents.

@@ -66,18 +66,19 @@ The repo has 10+ markdown files at root level plus 5 in `docs/`. Some overlap, s
 ## Remaining work (not yet done)
 
 ### Content deduplication
-- [ ] `QUICKSTART.md` repeats install steps from README — trim to pure onboarding, remove philosophy/comparison content
-- [ ] `CORE_FEATURES.md` repeats feature descriptions from README — make it the authoritative feature reference, remove from README's "What it does" or keep README version ultra-short
+- [x] `QUICKSTART.md` rewritten as pure onboarding: install, configure, verify, troubleshoot. All philosophy/pitch/comparison removed.
+- [ ] `CORE_FEATURES.md` repeats feature descriptions from README — make it the authoritative feature reference (README version is already ultra-short)
 - [ ] `TECHNICAL_DETAILS.md` and `docs/ARCHITECTURE.md` may overlap on search pipeline and storage internals — audit and deduplicate
 
 ### Files to review for deprecation
-- [ ] `SETUP_INSTRUCTIONS.md` — may overlap with `QUICKSTART.md`. Evaluate if both are needed or if content should merge into QUICKSTART.
-- [ ] `docs/UNDERLYING_TOOLS.md` — scope to m3-memory only. Remove references to broader system components not shipped in the package.
-- [ ] `README2.md` (untracked) — delete if superseded.
+- [x] `SETUP_INSTRUCTIONS.md` — kept as historical migration guide (IP hardcoding removal, env var renames). Not onboarding.
+- [x] `docs/UNDERLYING_TOOLS.md` — scoped to m3-memory package only. Removed homelab-specific references (Proxmox, DeepSeek-R1 70B). Made LLM references generic (auto-selected via llm_failover.py).
+- [x] `README2.md` — deleted (superseded).
 
 ### Symlink/reference consistency
-- [ ] Verify `~/.claude/CLAUDE.md` and `~/.gemini/GEMINI.md` symlinks point to `AGENT_INSTRUCTIONS.md` (not the old name)
-- [ ] `config/CLAUDE.md` exists separately from root `CLAUDE.md` — clarify which is used where
+- [x] Root `CLAUDE.md` and `GEMINI.md` both contain `AGENT_INSTRUCTIONS.md` (include directive for agents)
+- [x] `~/.gemini/GEMINI.md` is a standalone file (not a symlink) — contains Gemini-specific memories, separate from repo
+- [x] `config/CLAUDE.md` is a config template for OpenClaw sandbox use. Root `CLAUDE.md` is the agent include. Different purposes, both correct.
 
 ---
 
@@ -86,7 +87,7 @@ The repo has 10+ markdown files at root level plus 5 in `docs/`. Some overlap, s
 ### Naming consistency
 - [x] All "M3 Max Agentic OS" -> "M3 Memory"
 - [x] Root agent instructions file named `AGENT_INSTRUCTIONS.md`
-- [ ] `bin/embed_architecture.py` — consider renaming to `bin/embed_agent_instructions.py` for consistency
+- [x] `bin/embed_architecture.py` renamed to `bin/embed_agent_instructions.py`
 
 ### Broken expectations
 - [x] `ARCHITECTURE.md` no longer misleadingly named
@@ -98,7 +99,7 @@ The repo has 10+ markdown files at root level plus 5 in `docs/`. Some overlap, s
 
 ### Conflicting doc descriptions
 - [x] README docs table updated to match actual file purposes
-- [ ] Verify all cross-references between docs are bidirectional and accurate
+- [x] All cross-references verified — no broken links, all referenced files exist
 
 ### Old branding in non-tracked files
 - [ ] Check if deployed PyPI package description still says "M3 Max Agentic OS" (may need a version bump)
