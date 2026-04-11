@@ -53,20 +53,9 @@ Restart your agent. Done.
 
 ## What happens next
 
-**Session 1** — you mention a fact:
-> "Our API runs on port 8080."
+You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required.
 
-**Session 2** — you correct it:
-> "We moved the API to port 9000."
-
-**Session 3** — you ask about it:
-> "What port is the API on?"
-
-Without M3, the agent doesn't know. With M3:
-
-> "Port 9000. Updated from 8080 — change recorded March 12th."
-
-The contradiction was detected and resolved automatically. The full history is preserved. You did nothing.
+Later, you're at your Windows desktop at home with Gemini CLI, and it picks up exactly where you left off. Same memories, same context, same knowledge graph. You didn't copy files, didn't export anything, didn't push to someone else's cloud. Your PostgreSQL sync handled everything in the background the moment your laptop hit the local network.
 
 ---
 
