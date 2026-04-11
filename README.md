@@ -22,11 +22,11 @@
 
 **Your AI agents finally remember things between sessions.**
 
-M3 Memory gives Claude Code, Gemini CLI, and Aider persistent, private memory — fully local, no cloud, no APIs.
+M3 Memory gives Claude Code, Gemini CLI, and Aider persistent, private memory that runs entirely on your hardware. No cloud. No API keys. No subscriptions.
 
-- 🔒 **100% private** — runs entirely on your machine
-- ⚡ **Works in one config line** — no setup beyond `pip install`
-- 🧠 **Persistent memory** across sessions and devices
+- 🔒 **100% private** — everything stays on your machine, works fully offline
+- ⚡ **One config line** — `pip install` and a single JSON block, that's it
+- 🧠 **Persistent across sessions and devices** — your agent picks up right where it left off
 
 ---
 
@@ -46,60 +46,73 @@ Add to your MCP config:
 }
 ```
 
-Restart your agent → it now has memory. ✅ Claude Code &nbsp;✅ Gemini CLI &nbsp;✅ Aider
+Restart your agent. It now has memory.
+
+✅ Claude Code &nbsp; ✅ Gemini CLI &nbsp; ✅ Aider
 
 **Done.**
 
 ---
 
-## 🧠 What This Feels Like
+## 😩 The Problem
 
-### <ins>Example 1 — Automatic Contradiction Detection</ins>
+Every time you start a new session, your AI agent has amnesia. It forgets your project structure, your preferences, the decisions you made together yesterday.
 
-You tell your agent:
+You paste the same context. You re-explain the same architecture. You correct the same mistakes.
 
-> "My server runs on port 8080"
+Worse, when facts change — a port number, a dependency version, a deployment target — there's no mechanism to update what the agent "knows." Old and new information coexist. The agent picks whichever it sees first. Contradictions accumulate silently, and you don't notice until something breaks.
 
-Later:
+This is the default experience with every major coding agent today.
 
-> "Actually it's 9000"
+## ✅ With M3 Memory
 
-M3 Memory automatically:
-- Detects the contradiction
-- Updates the fact
-- Keeps the full history
+Your agent remembers everything from previous sessions automatically. Architecture decisions, server configs, debugging history, your preferences — all searchable, all persistent.
 
-Next session:
+When facts change, M3 detects the contradiction, updates the record, and preserves the full history. No stale data. No manual cleanup. No "actually, I told you yesterday..."
 
-> "What port is my server on?"
-> → **"9000 (updated from 8080)"**
-
-No prompts. No manual logic. Just works.
+You don't change how you work. You don't manage memory. You just talk to your agent, and it knows what it should know.
 
 ---
 
-### <ins>Example 2 — Cross-Device Memory</ins>
+## 💡 The Moment It Clicks
 
-You're debugging a deployment issue at a coffee shop. Claude Code recalls the architecture decisions from last week, the server configs from yesterday, and the troubleshooting steps that worked before — all from local SQLite, no internet required.
+**Session 1:**
+> You: "Our API server runs on port 8080."
 
-Later, at your desktop at home, Gemini CLI picks up exactly where you left off. Same memories. Same knowledge graph. Synced the moment you hit the local network.
+**Session 2** (three days later):
+> You: "We moved the API to port 9000."
 
-> **Your AI's memory belongs to you, lives on your hardware, and follows you across every device and every agent.**
+**Session 3** (a week later):
+> You: "What port is the API on?"
+
+---
+
+**Without M3:**
+> Agent: "I don't have that information. Could you tell me what port your API runs on?"
+
+**With M3:**
+> Agent: "Port 9000. (Updated from 8080 — the change was recorded on March 12th.)"
+
+---
+
+No prompts. No manual logic. The contradiction was detected and resolved automatically. The full history is preserved.
 
 ---
 
 ## 🎯 Who This Is For
 
 **Use M3 Memory if you:**
-- Build with MCP agents (Claude Code, Gemini CLI, Aider)
-- Want persistent memory across sessions and devices
-- Care about privacy — no cloud, no API keys, works offline
-- Don't want to build memory infrastructure yourself
+- Use Claude Code, Gemini CLI, Aider, or any MCP-compatible agent
+- Want persistent memory that survives across sessions and devices
+- Prefer local-first — no cloud dependency, no API costs, works offline
+- Don't want to build and maintain memory infrastructure yourself
+- Care about privacy and data ownership
+- Work across multiple machines and want your agent's knowledge to follow you
 
 **Not for you if:**
-- You only need short-term chat context
-- You're building LangChain/CrewAI pipelines (consider [Mem0](https://mem0.ai))
-- You want a full stateful agent runtime (consider [Letta](https://letta.ai))
+- You're building LangChain or CrewAI pipelines — consider [Mem0](https://mem0.ai), which integrates natively with those frameworks
+- You want a full stateful agent runtime with its own orchestration — consider [Letta](https://letta.ai)
+- You only need short-term chat context within a single session
 
 ---
 
@@ -107,38 +120,38 @@ Later, at your desktop at home, Gemini CLI picks up exactly where you left off. 
 
 | | |
 |---|---|
-| 🤖 **Coding agents** | Remember architecture decisions, configs, debugging steps across sessions |
-| 🧠 **Personal assistants** | Persist user preferences, goals, and history long-term |
-| 🧑‍💻 **Dev workflows** | Track environment changes, server configs, and fixes over time |
-| 🧪 **Research agents** | Build evolving knowledge that compounds across sessions |
+| 🤖 **Coding agents** | Remember architecture decisions, configs, and debugging steps across sessions — stop re-explaining your project every time |
+| 🧠 **Personal assistants** | Persist user preferences, goals, and history long-term — your agent learns who you are |
+| 🧑‍💻 **Dev workflows** | Track environment changes, server configs, and fixes over time — build institutional knowledge automatically |
+| 🌐 **Multi-device setups** | You're debugging a deployment issue at a coffee shop. Claude Code recalls the architecture decisions from last week, the server configs from yesterday, and the troubleshooting steps that worked before — all from local SQLite, no internet required. Later, at your Windows desktop at home, Gemini CLI picks up exactly where you left off. Same memories. Same knowledge graph. Synced the moment you hit the local network. |
 
 ---
 
-## ✨ Core Features
+## ✨ Features
 
 ### 🔍 Hybrid Search
-**TL;DR: Better results than vector search alone.**
-FTS5 keyword + semantic vector + MMR diversity re-ranking in one pipeline. Full score breakdown via `memory_suggest`.
+**TL;DR: You get the right memory, not just a similar one.**
+Three-stage pipeline: FTS5 keyword matching, semantic vector similarity, and MMR diversity re-ranking. Results scored with full breakdown via `memory_suggest`. Better recall than vector-only search, especially for technical content with exact names and versions.
 
 ### 🚫 Automatic Contradiction Detection
 **TL;DR: Old facts fix themselves.**
-Write conflicting info → M3 detects it, supersedes the old memory, records a `supersedes` relationship, preserves full history. No stale data. No manual cleanup.
+Write conflicting information and M3 detects the contradiction automatically. The outdated memory is superseded via bitemporal versioning, a `supersedes` relationship is recorded, and the full history is preserved. No stale data. No manual cleanup.
 
 ### ⏳ Bitemporal History
-**TL;DR: Time-travel debugging.**
-Query `as_of="2026-01-15"` to see exactly what your agent believed on any past date. Essential for compliance and debugging.
+**TL;DR: Time-travel debugging for your agent's knowledge.**
+Query `as_of="2026-01-15"` to see exactly what your agent believed on any past date. Every change is tracked with both the time the fact was true and the time it was recorded. Essential for compliance audits and understanding how your agent's knowledge evolved.
 
 ### 🕸️ Knowledge Graph
-**TL;DR: Memories connect automatically.**
-Related facts link on write (cosine > 0.7). Seven relationship types. Traverse up to 3 hops with `memory_graph`.
+**TL;DR: Memories connect to each other automatically.**
+Related facts are linked on write when cosine similarity exceeds 0.7. Seven relationship types (`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`). Traverse up to 3 hops with `memory_graph` to explore connected knowledge.
 
 ### 🔄 Cross-Device Sync
-**TL;DR: Same memory everywhere.**
-Write on your MacBook → continue on your Windows desktop. Bi-directional delta sync: SQLite ↔ PostgreSQL ↔ ChromaDB.
+**TL;DR: Same memory on every machine.**
+Write on your MacBook, continue on your Windows desktop. Bi-directional delta sync across SQLite, PostgreSQL, and ChromaDB. Your agent's knowledge follows you — no cloud intermediary required.
 
 ### 🛡️ GDPR Built-In
-**TL;DR: Compliance out of the box.**
-Two dedicated MCP tools handle the legal requirements your agents must respect:
+**TL;DR: Compliance as MCP tools, not afterthoughts.**
+Two dedicated tools handle the legal requirements your agents must respect:
 - `gdpr_forget` — **Article 17 (Right to Erasure):** permanently hard-deletes all memories for a user, no trace left behind
 - `gdpr_export` — **Article 20 (Data Portability):** exports everything stored for a user as portable JSON, ready to hand over on request
 
@@ -146,21 +159,33 @@ No custom implementation needed. Call the tool, it's done.
 
 ### 🔒 Fully Local + Private
 **TL;DR: Your data never leaves your machine.**
-Local embeddings via Ollama, LM Studio, or any OpenAI-compatible server. Zero API costs. Works offline.
+Local embeddings via Ollama, LM Studio, or any OpenAI-compatible endpoint. Zero cloud calls. Zero API costs. Works completely offline.
+
+### 🧹 Self-Maintaining
+**TL;DR: Memory stays clean without you thinking about it.**
+Automatic decay, expiry purging, orphan pruning, deduplication, and retention enforcement. Run `memory_maintenance` periodically, or let it handle itself. Old memories consolidate into LLM-generated summaries when a category gets too large.
 
 ---
 
-## 🧰 Core Tools (start here)
+## 🧰 Start Simple
 
-You don't need all 25. Start with these:
+M3 Memory ships 25 tools, but you don't need most of them to get started. Your agent will discover and use them automatically.
 
-- `memory_write` — store a memory
-- `memory_search` — retrieve relevant memories
-- `memory_suggest` — ranked results with score breakdown
-- `memory_get` — fetch by ID
-- `memory_update` — refine existing knowledge
+Begin with three: `memory_write`, `memory_search`, and `memory_update`. That covers 90% of daily use. The rest — knowledge graph traversal, deduplication, GDPR compliance, cross-device sync — is there when you need it.
 
-→ [Full list of 25 tools](./ARCHITECTURE.md)
+---
+
+## 🧰 Core Tools
+
+| Tool | What it does |
+|------|-------------|
+| `memory_write` | Store a memory — facts, decisions, preferences, configs, observations |
+| `memory_search` | Retrieve relevant memories using hybrid search |
+| `memory_suggest` | Same as search, but with full score breakdown (vector, BM25, MMR) |
+| `memory_get` | Fetch a specific memory by ID |
+| `memory_update` | Refine existing knowledge — content, title, metadata, importance |
+
+→ [Full list of all 25 tools](./ARCHITECTURE.md)
 
 ---
 
@@ -175,10 +200,6 @@ You don't need all 25. Start with these:
 | **Cross-device sync** | ✅ built-in | ⚠️ limited | ⚠️ git-based | ⚠️ limited |
 | **Setup** | ✅ 1 line | ⚠️ SDK needed | ❌ full runtime | ❌ framework only |
 | **Cost** | ✅ free, MIT | ⚠️ $249/mo Pro | ⚠️ OSS + SaaS | ✅ free |
-
-**Choose M3 Memory** if you want simple, private, MCP-native memory that just works — no framework lock-in.
-
-→ Full breakdown: [COMPARISON.md](./COMPARISON.md)
 
 ---
 
