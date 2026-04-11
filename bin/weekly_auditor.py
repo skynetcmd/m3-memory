@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Weekly Audit Report -- M3 Max Agentic OS
+"""Weekly Audit Report -- M3 Memory
 
 Generates a PDF covering:
   1. Memory System Health (memory_items + embeddings)

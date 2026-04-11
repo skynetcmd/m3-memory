@@ -1,7 +1,7 @@
-# M3 Max Agentic OS: Architecture
+# M3 Memory: Architecture
 
 ## Overview
-The M3 Max Agentic OS is a local-first, distributed intelligence platform designed to orchestrate multiple LLMs through a unified MCP (Model Context Protocol) bridge system. It provides a persistent, semantic memory layer, encrypted secret management, and cross-platform automation.
+M3 Memory is a local-first, distributed intelligence platform designed to orchestrate multiple LLMs through a unified MCP (Model Context Protocol) bridge system. It provides a persistent, semantic memory layer, encrypted secret management, and cross-platform automation.
 
 ## Core Components
 

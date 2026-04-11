@@ -1,4 +1,4 @@
-# M3 Max Agentic OS: API Reference
+# M3 Memory: API Reference
 
 ## 🧠 Memory Bridge
 Central tools for semantic persistence and retrieval.

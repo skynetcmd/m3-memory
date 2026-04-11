@@ -130,7 +130,7 @@ _SWIFT_THERMAL = (
 
 @app.get("/api/os/health")
 async def get_os_health():
-    """Reports health telemetry for the M3 Max Agentic OS."""
+    """Reports health telemetry for M3 Memory."""
     if not M3Context:
         return {"status": "error", "error": "M3 SDK not found. Ensure backend is running within project root."}
     

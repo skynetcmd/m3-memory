@@ -1,4 +1,4 @@
-# M3 Max Agentic OS: Secure Environment Loader (.zshenv)
+# M3 Memory: Secure Environment Loader (.zshenv)
 # This file should be copied to ~/.zshenv and configured by the user.
 # It is sourced by Zsh on all shell startups (interactive and non-interactive).
 

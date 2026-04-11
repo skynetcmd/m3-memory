@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-# Housekeeping script for M3 Max Agentic OS
+# Housekeeping script for M3 Memory
 # Rotates logs and clears temporary files
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
