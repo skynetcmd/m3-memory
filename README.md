@@ -40,6 +40,7 @@ Works with **Claude Code, Gemini CLI, Aider, OpenClaw**, or any MCP-compatible a
 ## Table of Contents
 
 - [Why M3 Memory](#why-m3-memory)
+- [How It Compares](#how-it-compares)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Features](#features)
@@ -56,6 +57,28 @@ Most agent memory solutions require you to pick one: local speed, or cloud persi
 **Example:** You're debugging a deployment issue on your MacBook at a coffee shop. Claude Code recalls the architecture decisions from last week, the server configs from yesterday, and the troubleshooting steps that worked before — all from local SQLite, no internet required. Later, at your Windows desktop at home, Gemini CLI picks up exactly where you left off. Same memories, same context, same knowledge graph — synced in the background the moment your laptop hit the local network.
 
 > ⭐ **Your AI's memory belongs to you, lives on your hardware, and follows you across every device and every agent.**
+
+---
+
+## How It Compares
+
+M3 Memory occupies a distinct niche from other agentic memory systems — it's not trying to replace Letta, Mem0, or Zep, but fills a gap none of them cover: **local-first, MCP-native, zero cloud dependency, zero subscription cost**.
+
+| | M3 Memory | Letta (MemGPT) | Mem0 / Zep |
+|---|---|---|---|
+| **Philosophy** | Local-first, MCP-native | OS-inspired context management | SaaS / managed cloud |
+| **Deployment** | 100% local, no API keys | Self-hosted or cloud | Cloud-first |
+| **Integration** | MCP Registry (auto-discover) | Custom SDKs / API | Framework SDKs |
+| **Search** | FTS5 + vectors + MMR | Tiered recall (core/archival) | Vector + knowledge graph |
+| **Privacy** | Data never leaves your machine | Varies by deployment | Often cloud-dependent |
+| **Cost** | Free, open source | Open source / SaaS pricing | Free tier + $249/mo Pro |
+| **Production-ready** | ✅ Today | 🔄 In progress | ✅ Mem0 yes / Zep partial |
+
+**Choose M3 Memory if you want:** zero-config local privacy, MCP-native auto-discovery in Claude Code / Gemini CLI, hybrid search precision in technical codebases, and no recurring costs.
+
+**Choose Letta if you want:** agent context window management with an OS-inspired memory swap model.
+
+**Choose Mem0/Zep if you want:** managed cloud infrastructure, multi-tenant shared memory, or temporal knowledge graphs at scale.
 
 ---
 
