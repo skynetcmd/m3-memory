@@ -52,6 +52,8 @@ Restart your agent → it now has memory. ✅ Claude Code &nbsp;✅ Gemini CLI &
 
 ## 🧠 What This Feels Like
 
+### Example 1 — Automatic Contradiction Detection
+
 You tell your agent:
 
 > "My server runs on port 8080"
@@ -74,7 +76,11 @@ No prompts. No manual logic. Just works.
 
 ---
 
-Or picture this: You're debugging a deployment issue at a coffee shop. Claude Code recalls the architecture decisions from last week, the server configs from yesterday, and the troubleshooting steps that worked before — all from local SQLite, no internet required. Later, at your desktop at home, Gemini CLI picks up exactly where you left off. Same memories. Same knowledge graph. Synced the moment you hit the local network.
+### Example 2 — Cross-Device Memory
+
+You're debugging a deployment issue at a coffee shop. Claude Code recalls the architecture decisions from last week, the server configs from yesterday, and the troubleshooting steps that worked before — all from local SQLite, no internet required.
+
+Later, at your desktop at home, Gemini CLI picks up exactly where you left off. Same memories. Same knowledge graph. Synced the moment you hit the local network.
 
 > **Your AI's memory belongs to you, lives on your hardware, and follows you across every device and every agent.**
 
