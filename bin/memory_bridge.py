@@ -181,7 +181,7 @@ def memory_history(memory_id, limit=20):
 
 @mcp.tool()
 def memory_link(from_id, to_id, relationship_type="related"):
-    """Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references."""
+    """Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message."""
     return memory_core.memory_link_impl(from_id, to_id, relationship_type)
 
 @mcp.tool()
