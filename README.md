@@ -16,7 +16,9 @@ Your agent forgets everything between sessions. M3 Memory fixes that. Install it
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-25_tools-orange?style=flat-square"></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
 
 Works with Claude Code, Gemini CLI, Aider, and any MCP-compatible agent.
@@ -88,7 +90,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this a
 
 **Local and private** — embeddings generated locally via Ollama, LM Studio, or any OpenAI-compatible endpoint. No cloud calls. No API costs. Works offline.
 
-**Cross-device sync** — optional bi-directional delta sync across SQLite, PostgreSQL, and ChromaDB. Same memory on every machine, no cloud intermediary.
+**Cross-device, cross-platform sync** — optional bi-directional delta sync across SQLite, PostgreSQL, and ChromaDB. Write on your Mac, pick it up on Windows or Linux. Same memory on every machine, no cloud intermediary.
 
 ---
 
@@ -172,9 +174,9 @@ Then search for: "M3 install"
   <img src="docs/demo_search.svg" alt="Demo: hybrid search with score breakdown" width="100%">
 </p>
 
-### Cross-device sync
+### Cross-device, cross-platform sync
 <p align="center">
-  <img src="docs/demo_sync.svg" alt="Demo: cross-device memory sync" width="100%">
+  <img src="docs/demo_sync.svg" alt="Demo: cross-device, cross-platform memory sync" width="100%">
 </p>
 
 ---
@@ -210,7 +212,7 @@ M3 Memory is built for a specific use case: giving MCP agents persistent, local 
 | MCP native | 25 tools | Via wrappers | Indirect | No |
 | Contradiction handling | Automatic | LLM-based | Agent-driven | Manual |
 | GDPR tools | Built-in | Supported | Via tools | Custom |
-| Cross-device sync | Built-in | Limited | Git-based | Limited |
+| Cross-device / cross-platform sync | Built-in | Limited | Git-based | Limited |
 | Setup complexity | `pip install` + 1 config line | SDK integration | Full runtime | Framework integration |
 | Cost | Free, MIT | Free tier; $249/mo Pro | OSS + SaaS | Free |
 
