@@ -48,7 +48,7 @@ Add to your MCP config:
 
 Restart your agent. It now has memory.
 
-✅ Claude Code &nbsp; ✅ Gemini CLI &nbsp; ✅ Aider
+✅ Claude Code &nbsp; ✅ Gemini CLI &nbsp; ✅ Aider &nbsp; ✅ OpenClaw
 
 **Done.**
 
@@ -61,6 +61,8 @@ Every time you start a new session, your AI agent has amnesia. It forgets your p
 You paste the same context. You re-explain the same architecture. You correct the same mistakes.
 
 Worse, when facts change — a port number, a dependency version, a deployment target — there's no mechanism to update what the agent "knows." Old and new information coexist. The agent picks whichever it sees first. Contradictions accumulate silently, and you don't notice until something breaks.
+
+Agents that rely on file-based memory (like OpenClaw) face an additional problem: performance degrades as the number of memory files grows. More files means slower reads, slower context loading, and eventually a system that bogs down under its own history.
 
 This is the default experience with every major coding agent today.
 
