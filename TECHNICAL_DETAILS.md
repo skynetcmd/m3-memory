@@ -4,7 +4,7 @@
 > Human-readable technical specification for the M3 Memory system.
  Covers architecture, storage, search internals, security, configuration, testing, and developer tooling.
 >
-> For the AI/LLM agent instruction set, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+> For the AI/LLM agent instruction set, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 > For the feature overview, see [CORE_FEATURES.md](./CORE_FEATURES.md).
 
 ---
