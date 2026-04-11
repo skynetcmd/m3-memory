@@ -136,7 +136,11 @@ Write on your MacBook → continue on your Windows desktop. Bi-directional delta
 
 ### 🛡️ GDPR Built-In
 **TL;DR: Compliance out of the box.**
-`gdpr_forget` (Article 17 hard delete) + `gdpr_export` (Article 20 portable JSON) as first-class MCP tools.
+Two dedicated MCP tools handle the legal requirements your agents must respect:
+- `gdpr_forget` — **Article 17 (Right to Erasure):** permanently hard-deletes all memories for a user, no trace left behind
+- `gdpr_export` — **Article 20 (Data Portability):** exports everything stored for a user as portable JSON, ready to hand over on request
+
+No custom implementation needed. Call the tool, it's done.
 
 ### 🔒 Fully Local + Private
 **TL;DR: Your data never leaves your machine.**
