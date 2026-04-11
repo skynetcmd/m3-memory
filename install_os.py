@@ -187,7 +187,7 @@ def main():
     print("\n" + "="*50)
     print("🎉 INSTALLATION COMPLETE!")
     print("="*50)
-    print(f"Your Agentic OS is now fully initialized for {platform.system()}.")
+    print(f"M3 Memory is now fully initialized for {platform.system()}.")
     print("\nMCP bridges are configured in .mcp.json — Claude Code will load them automatically.")
     print("\nNext Steps for scheduling automated background syncs:")
 

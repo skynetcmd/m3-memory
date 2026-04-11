@@ -1,4 +1,4 @@
-# M3 Max Agentic OS: Scheduled Tasks Template
+# M3 Memory: Scheduled Tasks Template
 # Replace [M3_MEMORY_ROOT] with your absolute project path (e.g., /path/to/your/m3-memory)
 
 # Weekly auditor (Fridays 4pm)

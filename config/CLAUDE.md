@@ -1,4 +1,4 @@
-# M3 MAX AGENTIC OS: CORE SPECS
+# M3 Memory: Core Specs
 
 ## 🧠 Primary Engine: DeepSeek-R1 Distill 70B (MLX)
 - **Quantization:** 5-bit | **Context:** 64k-128k

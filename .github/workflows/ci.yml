@@ -1,4 +1,4 @@
-name: M3 Max Agentic OS CI
+name: M3 Memory CI
 
 on:
   push:

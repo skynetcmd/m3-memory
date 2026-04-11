@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-M3 Max Agentic OS: Cross-Platform Schedule Installer.
+M3 Memory: Cross-Platform Schedule Installer.
 Automatically configures crontab (macOS/Linux) or schtasks (Windows).
 Uses project virtual environment paths and ensures log directories exist.
 """
@@ -136,7 +136,7 @@ def main():
     
     os_name = platform.system()
 
-    print(f"M3 Max Agentic OS: Detecting platform... {os_name}")
+    print(f"M3 Memory: Detecting platform... {os_name}")
     print(f"Project root: {m3_memory_root}")
     
     if os_name == "Windows":

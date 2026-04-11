@@ -1,4 +1,4 @@
-# 🚀 Setup Instructions — <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> Max Agentic OS
+# Setup Instructions — M3 Memory
 
 
 This document summarizes the required setup steps and configuration changes needed after recent repository updates.

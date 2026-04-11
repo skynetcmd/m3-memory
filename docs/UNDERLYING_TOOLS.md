@@ -1,6 +1,6 @@
-# M3 Max Agentic OS: Underlying Tools
+# M3 Memory: Underlying Tools
 
-This document details the core services, frameworks, and engines that power the M3 Max Agentic OS memory and orchestration layers.
+This document details the core services, frameworks, and engines that power the M3 Memory system.
 
 ## 💾 Storage & Databases
 
