@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 510">
+  <!-- Terminal window -->
+  <rect fill="#0d1117" width="850" height="510" rx="10"/>
+  <rect fill="#161b22" width="850" height="38" rx="10"/>
+  <rect fill="#161b22" y="28" width="850" height="10"/>
+  <circle fill="#ff5f57" cx="20" cy="19" r="7"/>
+  <circle fill="#febc2e" cx="42" cy="19" r="7"/>
+  <circle fill="#28c840" cx="64" cy="19" r="7"/>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="13" x="425" y="24" text-anchor="middle">M3 Memory — Hybrid Search with Score Breakdown</text>
+
+  <!-- Command -->
+  <text fill="#7ee787" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="20" y="72">$</text>
+  <text fill="#e6edf3" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="36" y="72">memory_suggest "database connection config"</text>
+
+  <!-- Header -->
+  <text fill="#58a6ff" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="20" y="108">Top 3 results  (hybrid: FTS5 + vector + MMR)</text>
+  <line x1="20" y1="120" x2="720" y2="120" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Result 1 -->
+  <text fill="#3fb950" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" font-weight="bold" x="20" y="150">#1  score=0.9420</text>
+  <text fill="#bc8cff" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="200" y="150">[fact]</text>
+  <text fill="#e6edf3" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="260" y="150">PostgreSQL connection string</text>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="174">"postgres://app:****@10.21.40.51:5432/m3_prod"</text>
+  <text fill="#484f58" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="198">vector=0.88  bm25=0.96  mmr=0.99  tags: db, postgres, prod</text>
+
+  <!-- Result 2 -->
+  <text fill="#d29922" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" font-weight="bold" x="20" y="242">#2  score=0.8105</text>
+  <text fill="#bc8cff" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="200" y="242">[decision]</text>
+  <text fill="#e6edf3" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="290" y="242">SQLite WAL mode for local DB</text>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="266">"agent_memory.db uses WAL mode, 50ms busy_timeout"</text>
+  <text fill="#484f58" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="290">vector=0.82  bm25=0.71  mmr=0.91  tags: sqlite, config</text>
+
+  <!-- Result 3 -->
+  <text fill="#f78166" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" font-weight="bold" x="20" y="334">#3  score=0.7230</text>
+  <text fill="#bc8cff" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="200" y="334">[knowledge]</text>
+  <text fill="#e6edf3" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="300" y="334">ChromaDB endpoint</text>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="358">"ChromaDB at http://10.21.40.51:8000 for vector store"</text>
+  <text fill="#484f58" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="382">vector=0.79  bm25=0.55  mmr=0.83  tags: chroma, vector</text>
+
+  <!-- Footer -->
+  <line x1="20" y1="410" x2="720" y2="410" stroke="#30363d" stroke-width="1"/>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="20" y="436">Searched 847 memories in 23ms</text>
+  <text fill="#3fb950" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="20" y="464">Pipeline: FTS5 keyword &#8594; semantic vector &#8594; MMR diversity re-rank</text>
+  <text fill="#484f58" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="20" y="492">Embedding model: nomic-embed-text (Ollama, local)</text>
+</svg>
