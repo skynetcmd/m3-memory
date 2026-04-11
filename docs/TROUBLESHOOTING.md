@@ -1,29 +1,51 @@
 # M3 Memory: Troubleshooting
 
-## 🗄️ Database Issues
+## Database Issues
 
 ### "database is locked" (SQLite)
-- **Cause**: Multiple agents (Claude + Gemini + OpenClaw) writing simultaneously.
-- **Solution**: The system uses WAL mode and busy_timeouts, but if it persists, check for orphaned python processes:
+- **Cause**: Multiple agents writing simultaneously.
+- **Solution**: M3 uses WAL mode and busy timeouts. If the error persists, check for orphaned Python processes:
   - `ps aux | grep python` (Linux/Mac)
   - `tasklist | findstr python` (Windows)
 
-### PG Sync Failures
-- **Check**: `PG_URL` in `.env` or encrypted vault.
-- **Check**: Network connectivity to `10.x.x.x`.
+### PostgreSQL sync failures
+- **Check**: Verify `PG_URL` is set correctly (environment variable or OS keyring).
+- **Check**: Confirm the PostgreSQL server is reachable from this machine.
+- **Note**: Sync is optional. M3 Memory works fully without PostgreSQL.
 
-## 🌐 MCP Proxy Issues
+## Embedding Issues
 
-### "401 Unauthorized"
-- **Cause**: `MCP_PROXY_KEY` missing or mismatched.
-- **Solution**: Ensure `Authorization: Bearer <key>` header is sent by Aider/OpenClaw.
-
-### "503 Backend Unreachable"
-- **Cause**: LM Studio or cloud API endpoint is down.
-- **Check**: `lms server status` or Perplexity/Anthropic status pages.
-
-## 🧠 Memory Issues
+### "Embedding failed" or "Connection refused"
+- **Cause**: Your local embedding server isn't running.
+- **Solution**: Start Ollama (`ollama serve`) or verify LM Studio is running on its configured port.
 
 ### Semantic search returning poor results
 - **Solution**: Run `memory_maintenance` to decay importance of stale items.
-- **Solution**: Check if the correct embedding model is loaded in LM Studio (`text-embedding-nomic-embed-text-v1.5`).
+- **Solution**: Verify the correct embedding model is loaded (e.g., `nomic-embed-text` for Ollama, or check your LM Studio model list).
+- **Solution**: Ensure all devices use the same embedding model and dimension (`EMBED_DIM`, default 1024). Mismatched dimensions break cosine similarity.
+
+## Installation Issues
+
+### "mcp-memory: command not found"
+- **Cause**: The package isn't installed or isn't on your PATH.
+- **Solution**:
+  ```bash
+  pip install m3-memory
+  which mcp-memory  # should return a path
+  ```
+
+### Memory server doesn't appear in agent
+- Verify the JSON in your agent's config file is valid.
+- Make sure the key is `"mcpServers"` (case-sensitive).
+- Restart the agent completely (not just a new session).
+
+### Agent can't find previous memories
+- Memories are stored in `memory/agent_memory.db` relative to where `mcp-memory` runs.
+- Check that you're running from the same directory, or set `M3_MEMORY_ROOT`.
+
+## ChromaDB Issues
+
+### "ChromaDB unreachable"
+- Verify `CHROMA_BASE_URL` is set to the correct endpoint.
+- Check that the ChromaDB server is running on the target host.
+- M3 falls back to a local `chroma_mirror` table when ChromaDB is unreachable. Memories are queued and synced when the connection is restored.

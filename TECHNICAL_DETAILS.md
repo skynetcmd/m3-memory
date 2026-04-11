@@ -80,7 +80,7 @@ graph TD
 - Sync lock prevents concurrent runs (stale after 1 hour)
 
 **ChromaDB** provides federation for distributed vector search.
-- v2 API at `http://10.x.x.x:8000`, collection `agent_memory`
+- v2 API (configurable via `CHROMA_BASE_URL`), collection `agent_memory`
 - `chroma_mirror` table serves reads during outages
 - Stalled sync items auto-retry with configurable attempt limits
 
@@ -116,10 +116,6 @@ graph TD
 | `agent_retention_policies` | Per-agent: `max_memories`, `ttl_days`, `auto_archive` |
 | `gdpr_requests` | GDPR request audit: `subject_id`, `request_type`, `status`, `items_affected` |
 | `synchronized_secrets` | Encrypted credential vault: `service_name`, `encrypted_value`, `version`, `origin_device` |
-
-#### Legacy Tables
-
-`activity_logs`, `project_decisions`, `hardware_specs`, `system_focus`, `session_handoff`, `conversation_log`
 
 ### Migrations
 
@@ -376,29 +372,9 @@ Seeds 20 diverse test memories, runs 10 labeled queries, cleans up after. Gracef
 | `bin/benchmark_memory.py` | Retrieval quality benchmarks |
 | `bin/test_memory_bridge.py` | 41 end-to-end tests |
 
-### MCP Bridge Infrastructure
-
-| Server | Script | Purpose |
-|--------|--------|---------|
-| `custom_pc_tool` | `bin/custom_tool_bridge.py` | Activity logging, focus management, hardware monitoring, local model queries, web search, Grok integration |
-| `memory` | `bin/memory_bridge.py` | Full memory system — 25 MCP tools |
-| `grok_intel` | `bin/grok_bridge.py` | Grok 3 — real-time X/Twitter data and fast reasoning |
-| `web_research` | `bin/web_research_bridge.py` | Perplexity sonar-pro with automatic Grok fallback |
-| `mcp_proxy` | `bin/mcp_proxy.py` | SSE streaming proxy for non-MCP-native clients (Aider, custom agents) |
-| `debug_agent` | `bin/debug_agent_bridge.py` | Autonomous debugging: analyze, bisect, trace, correlate, history, report |
-
 ### LLM Engine (`bin/llm_failover.py`)
 
 - `get_best_llm(client, token)` — probes endpoints in failover order, filters embedding models, returns `(base_url, model)` for the largest available model by parameter count
 - `get_best_embed(client, token)` — same pattern, but selects embedding models
-- **Failover chain:** `localhost:1234` → `laptop.local:1234` → `desktop.local:1234` → `gpu-vm.local:11434` (configurable via `LLM_ENDPOINTS_CSV`)
+- **Failover chain:** `localhost:1234` → additional endpoints (configurable via `LLM_ENDPOINTS_CSV`)
 - **Served by:** Any OpenAI-compatible server (e.g., LM Studio, Ollama, vLLM, LocalAI). Supports MLX, GGUF, GPTQ, and other model formats depending on server.
-
----
-
-## Sandbox Environment
-
-**OpenClaw** — containerized agent sandbox (`node:22-slim`) on `localhost:8000`.
-- Tools: `claw-grok`, `claw-claude`, `claw-gemini`, `claw-perplexity`, `claw-local`
-- Full LAN access via OrbStack (reaches ChromaDB, Postgres, local LLM server)
-- Supports `install_schedules.py` for in-container scheduling

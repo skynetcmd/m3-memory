@@ -129,11 +129,7 @@ The following bridges are registered:
 
 | Server name | Script |
 |---|---|
-| `custom_pc_tool` | `bin/custom_tool_bridge.py` |
 | `memory` | `bin/memory_bridge.py` |
-| `grok_intel` | `bin/grok_bridge.py` |
-| `web_research` | `bin/web_research_bridge.py` |
-| `debug_agent` | `bin/debug_agent_bridge.py` |
 
 > **Note:** `.mcp.json` is gitignored because it contains machine-specific absolute paths. Re-run `generate_configs.py` after cloning on a new machine.
 

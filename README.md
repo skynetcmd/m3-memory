@@ -72,9 +72,9 @@ The contradiction was detected and resolved automatically. The full history is p
 
 ## Why this exists
 
-AI agents are stateless. Every session starts from zero. You re-paste context, re-explain architecture, re-correct mistakes. When facts change, the agent has no mechanism to update what it "knows." Old and new information coexist until something breaks.
+Most AI agents don't persist state between sessions. You re-paste context, re-explain architecture, re-correct mistakes. When facts change, the agent has no mechanism to update what it "knows."
 
-M3 Memory gives agents a structured, persistent memory layer that handles this automatically.
+M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
@@ -227,7 +227,7 @@ graph TD
     subgraph "AI Agents"
         C[Claude Code]
         G[Gemini CLI]
-        A[Aider / OpenClaw]
+        A[Aider / Other MCP Agents]
     end
 
     subgraph "MCP Bridge"
