@@ -1,7 +1,9 @@
 # M3 Memory: Architecture
 
+> High-level overview. For schema details, search internals, sync protocol, and security, see [TECHNICAL_DETAILS.md](../TECHNICAL_DETAILS.md).
+
 ## Overview
-M3 Memory is a local-first, distributed intelligence platform designed to orchestrate multiple LLMs through a unified MCP (Model Context Protocol) bridge system. It provides a persistent, semantic memory layer, encrypted secret management, and cross-platform automation.
+M3 Memory is a local-first persistent memory system for MCP agents. It provides a semantic memory layer with hybrid search, encrypted secret management, and cross-device sync — all running on your hardware.
 
 ## Core Components
 
@@ -28,6 +30,6 @@ M3 Memory is a local-first, distributed intelligence platform designed to orches
 ## Data Flow
 1. **Request**: Client sends a message to the MCP Proxy.
 2. **Injection**: Proxy injects memory search and logging tools.
-3. **Inference**: Request is routed to the best available model (local DeepSeek or cloud Claude/Gemini).
+3. **Inference**: Request is routed to the best available model (auto-selected via `llm_failover.py`).
 4. **Tool Loop**: If the model requests a tool, the Proxy executes it locally and feeds back results.
 5. **Persistence**: Decisions and thoughts are automatically archived to the memory bridge.
