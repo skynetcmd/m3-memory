@@ -247,10 +247,10 @@ Master key (`AGENT_OS_MASTER_KEY`) must be in native OS keyring. Never stored in
 | `__import__\|exec\s*(\|eval\s*(` | Python code injection |
 | `(ignore\|disregard)\s+(all\s+)?(previous\|prior)\s+instructions` | Prompt injection |
 
-### Bridge Hardening
+### Runtime Hardening
 
 - All logging to `stderr` only — token values never logged
-- `httpx` with strict timeouts: connect 3s, read 10-30s (configurable per bridge)
+- `httpx` with strict timeouts: connect 3s, read 10–30s
 - Circuit breaker: 3-failure threshold, 60s cooldown
 - Thread-safe HTTP client creation via double-check locking
 - FTS5 query sanitization at search boundary
