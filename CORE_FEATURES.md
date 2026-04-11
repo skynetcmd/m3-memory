@@ -1,8 +1,8 @@
 # <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> Memory — Core Features
 
-> **Production-grade persistent memory for AI agents.** 25 MCP tools. 41 automated tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Zero cloud dependency.
+> 25 MCP tools. 41 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Zero cloud dependency.
 
-For agent instructions and the full tool reference, see **[AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)**.
+For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
 ---
 
@@ -34,9 +34,9 @@ M3 Memory combines persistent storage, hybrid search, contradiction detection, k
 
 ## Feature Highlights
 
-### 🔍 Intelligent Search That Actually Works
+### Intelligent Search
 
-Memory is only useful if you can find what you need. M3 uses a **three-stage hybrid pipeline** that consistently outperforms pure vector search:
+Memory is only useful if you can find what you need. M3 uses a **three-stage hybrid pipeline**:
 
 - **Stage 1 — Keyword (FTS5):** BM25-ranked full-text search with injection-safe query sanitization
 - **Stage 2 — Semantic (Vector):** Cosine similarity against 1024-dim embeddings via numpy batch operations
@@ -44,19 +44,19 @@ Memory is only useful if you can find what you need. M3 uses a **three-stage hyb
 
 **Explainable results.** Every search can return a full score breakdown (vector component, BM25 weight, MMR penalty) so you or your agent can understand *why* a memory was retrieved.
 
-### ⏳ Memories That Know When They Were True
+### Bitemporal History
 
 M3's **bitemporal model** tracks not just *when a fact was stored*, but *when it was actually true*. Query with `as_of="2026-01-15"` to see the world as your agent knew it on that date — essential for debugging, compliance, and historical reasoning.
 
-### 🚫 Contradiction Detection
+### Contradiction Detection
 
 Write a fact that conflicts with an existing one? M3 detects it automatically. The old memory is soft-deleted, a `supersedes` relationship is recorded, and the full history is preserved in the audit trail. No manual cleanup. No stale data.
 
-### 🕸️ Knowledge Graph
+### Knowledge Graph
 
 Memories aren't isolated — they form a web. M3 automatically links related memories on write (cosine >0.7) and supports 7 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`. Traverse the graph up to 3 hops with a single tool call.
 
-### 🧹 Self-Maintaining
+### Self-Maintaining
 
 Left alone, memory systems accumulate noise. M3 fights entropy:
 
@@ -66,7 +66,7 @@ Left alone, memory systems accumulate noise. M3 fights entropy:
 - **Multi-layered consolidation** — when memory groups grow too large, the local LLM merges old items into summaries, preserving knowledge while reducing clutter
 - **Deduplication** — configurable cosine threshold catches near-duplicates across the last 1000 items
 
-### 🤖 LLM-Powered Intelligence
+### LLM-Powered Intelligence
 
 M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI):
 
@@ -78,19 +78,19 @@ All LLM features use the local model — zero API costs, zero data exfiltration.
 
 ---
 
-## 🛡️ Security & Compliance
+## Security & Compliance
 
 ### Defense in Depth
 
 | Layer | Protection |
 |-------|-----------|
-| **🔑 Credentials** | AES-256 encrypted vault (PBKDF2, 600K iterations). OS keyring integration. Zero plaintext storage. |
-| **📝 Content** | SHA-256 signing on every write. `memory_verify` detects post-write tampering. |
-| **📥 Input** | Poisoning prevention rejects XSS, SQL injection, Python code injection, and prompt injection at the write boundary. |
-| **🔍 Search** | FTS5 operator sanitization prevents query injection. |
-| **🌐 Network** | Circuit breaker (3-failure threshold). Strict timeouts. Token values never logged. |
+| **Credentials** | AES-256 encrypted vault (PBKDF2, 600K iterations). OS keyring integration. Zero plaintext storage. |
+| **Content** | SHA-256 signing on every write. `memory_verify` detects post-write tampering. |
+| **Input** | Poisoning prevention rejects XSS, SQL injection, Python code injection, and prompt injection at the write boundary. |
+| **Search** | FTS5 operator sanitization prevents query injection. |
+| **Network** | Circuit breaker (3-failure threshold). Strict timeouts. Token values never logged. |
 
-### ⚖️ GDPR-Ready
+### GDPR-Ready
 
 - **Article 17 (Right to Be Forgotten):** `gdpr_forget` hard-deletes all data for a user — memories, embeddings, relationships, history, sync queue. One tool call.
 - **Article 20 (Data Portability):** `gdpr_export` returns all memories for a user as portable JSON.
@@ -98,7 +98,7 @@ All LLM features use the local model — zero API costs, zero data exfiltration.
 
 ---
 
-## 🔄 Cross-Device Sync
+## Cross-Device Sync
 
 Your memory follows you across machines:
 
@@ -111,7 +111,7 @@ Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
 
 ---
 
-## 📦 Portable & Interoperable
+## Portable & Interoperable
 
 - **MCP-native** — works with Claude Code, Gemini CLI, Aider, or any MCP client out of the box
 - **Export/Import** — full memory dump as JSON (with base64 embeddings) for backup, migration, or sharing between M3 instances
@@ -120,7 +120,7 @@ Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
 
 ---
 
-## 🧪 Tested and Measured
+## Tested and Measured
 
 ### 41 End-to-End Tests
 
@@ -140,7 +140,7 @@ Every feature is tested — not just the happy path:
 - LLM auto-classification
 - Configurable threshold validation
 
-### 📊 Retrieval Quality Benchmarks
+### Retrieval Quality Benchmarks
 
 Automated `benchmark_memory.py` measures what matters:
 
@@ -155,16 +155,16 @@ Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local L
 
 ---
 
-## 🛠️ 25 MCP Tools at a Glance
+## 25 MCP Tools at a Glance
 
 | Category | Tools |
 |----------|-------|
-| **💾 Memory Ops** | `memory_write`, `memory_search`, `memory_suggest`, `memory_get`, `memory_update`, `memory_delete`, `memory_verify` |
-| **🕸️ Knowledge Graph** | `memory_link`, `memory_graph`, `memory_history` |
-| **💬 Conversations** | `conversation_start`, `conversation_append`, `conversation_search`, `conversation_summarize` |
-| **♻️ Lifecycle** | `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention`, `memory_feedback` |
-| **⚖️ Data Governance** | `gdpr_export`, `gdpr_forget`, `memory_export`, `memory_import` |
-| **⚙️ Operations** | `memory_cost_report`, `chroma_sync` |
+| **Memory Ops** | `memory_write`, `memory_search`, `memory_suggest`, `memory_get`, `memory_update`, `memory_delete`, `memory_verify` |
+| **Knowledge Graph** | `memory_link`, `memory_graph`, `memory_history` |
+| **Conversations** | `conversation_start`, `conversation_append`, `conversation_search`, `conversation_summarize` |
+| **Lifecycle** | `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention`, `memory_feedback` |
+| **Data Governance** | `gdpr_export`, `gdpr_forget`, `memory_export`, `memory_import` |
+| **Operations** | `memory_cost_report`, `chroma_sync` |
 
 ---
 
@@ -181,7 +181,7 @@ For full setup instructions, see [QUICKSTART.md](./QUICKSTART.md).
 ## Documentation
 
 - **[TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md)** — Deep-dive technical reference: storage internals, search pipeline, schema, sync protocol, security implementation
-- **[AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)** — Agent instruction manual: MCP tools, usage protocols, behavioral rules (symlinked to CLAUDE.md / GEMINI.md)
+- **[AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)** — Agent behavioral rules and all 25 MCP tools
 - **[ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)** — Security configuration and credential setup
 
 ---
