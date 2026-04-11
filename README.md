@@ -210,7 +210,7 @@ Start with three — `memory_write`, `memory_search`, and `memory_update` — th
 | `memory_get` | Fetch a specific memory by ID |
 | `memory_update` | Refine existing knowledge — content, title, metadata, importance |
 
-> [Full list of all 25 tools](./ARCHITECTURE.md)
+> [Full list of all 25 tools](./AGENT_INSTRUCTIONS.md)
 
 ---
 
@@ -313,7 +313,7 @@ Write a memory on your MacBook, search it on your Windows desktop — no cloud:
 |------|---------|
 | [QUICKSTART.md](./QUICKSTART.md) | New here? Start here |
 | [CORE_FEATURES.md](./CORE_FEATURES.md) | Feature overview |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Full system internals + all 25 MCP tools |
+| [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) | Agent instruction manual — all 25 MCP tools + behavioral rules |
 | [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) | Search pipeline, schema, sync, security |
 | [COMPARISON.md](./COMPARISON.md) | M3 vs Mem0 vs Letta vs LangChain vs Zep |
 | [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) | Config and credential setup |

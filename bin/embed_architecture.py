@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-One-shot script: embed ARCHITECTURE.md sections as searchable memory items.
+One-shot script: embed AGENT_INSTRUCTIONS.md sections as searchable memory items.
 
 Splits the file into 9 semantic sections, writes each as type=document
 with embed=True. Idempotent: soft-deletes any prior architecture items
@@ -192,7 +192,7 @@ Memory limit: 4 GB | Port: localhost:8000 -> container 18789
 
 Volumes:
   /shared (rw) -> sandbox-openclaw/shared/ — drop zone for user and all agents
-  /shared/ARCHITECTURE.md (ro) -> bind mount of ARCHITECTURE.md
+  /shared/AGENT_INSTRUCTIONS.md (ro) -> bind mount of AGENT_INSTRUCTIONS.md
   /home/clawuser/.openclaw (rw) -> sandbox-openclaw/.openclaw/
 
 Runtime tools: curl, wget, ping, jq, ffmpeg, git-lfs, zip, unzip, sqlite3, dig/nslookup, pip3, file, tree, imagemagick
@@ -210,13 +210,13 @@ and all homelab VLANs. Container localhost is isolated from host localhost.""",
 
 METADATA_BASE = json.dumps({
     "tags": ["architecture", "protocol", "system"],
-    "source_file": "ARCHITECTURE.md",
+    "source_file": "AGENT_INSTRUCTIONS.md",
 })
 
 
 async def main() -> None:
     print("=" * 60)
-    print("  ARCHITECTURE.md — Embed as memory items")
+    print("  AGENT_INSTRUCTIONS.md — Embed as memory items")
     print("=" * 60)
 
     # ── Step 1: soft-delete any prior architecture items ──────────────────────
@@ -273,7 +273,7 @@ async def main() -> None:
     print(f"\n{'='*60}")
     print(f"  {ok}/{len(SECTIONS)} sections embedded successfully.")
     if ok == len(SECTIONS):
-        print("  ARCHITECTURE.md is now fully searchable via memory_search.")
+        print("  AGENT_INSTRUCTIONS.md is now fully searchable via memory_search.")
     print(f"{'='*60}")
 
 

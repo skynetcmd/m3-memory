@@ -1,5 +1,7 @@
-# 🛠️ <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> Memory — Agent Instructions
+# <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> M3 Memory — Agent Instructions
 
+> **For AI agents only.** This file tells your agent how to use M3 Memory effectively.
+> For human-readable docs, see [README.md](./README.md), [QUICKSTART.md](./QUICKSTART.md), or [CORE_FEATURES.md](./CORE_FEATURES.md).
 
 > **`M3_MEMORY_ROOT`** — the root of the `m3-memory` repository checkout.
 
@@ -12,9 +14,49 @@
 
 ---
 
-## 🛠️ Memory Tools — When and How to Use
+## Core Behavioral Rules
 
-### ✍️ Writing Memories
+You have full access to **M3 Memory** — a persistent, local-first agentic memory layer via MCP tools. This gives you long-term continuity across sessions, projects, and conversations.
+
+### 1. Search First
+Before answering any question involving project details, past decisions, user preferences, code patterns, APIs, requirements, or facts you might have seen before:
+→ Always call `memory_search` (or `memory_suggest` for detailed scoring) first.
+
+### 2. Write Aggressively
+After learning anything important (user instructions, decisions, code insights, preferences, context, bugs fixed, etc.):
+→ Immediately use `memory_write` or `memory_update` to store it.
+Be concise yet self-contained. Include good tags and categories when possible.
+
+### 3. Update Instead of Duplicating
+If information changes or conflicts with existing memory:
+→ Use `memory_update` (or `memory_write` with clear context).
+M3 automatically detects contradictions, creates superseding relationships, and preserves history via bitemporal versioning.
+
+### 4. Leverage the Knowledge Graph
+When you retrieve memories, explore connections using `memory_graph` (1–3 hop traversal with the 8 supported relationship types).
+
+### 5. Treat M3 Memory as Your Long-Term Brain
+- Use it relentlessly for continuity.
+- Let M3 handle automatic deduplication, decay, summarization, and self-maintenance.
+- Everything stays 100% local and private.
+
+### Quick Reference Flow
+| Situation | Action |
+|-----------|--------|
+| Non-trivial or context-dependent question | `memory_search` first |
+| New important information | `memory_write` |
+| Information has changed | `memory_update` |
+| Need deeper understanding of connections | `memory_graph` |
+| User asks to forget something | `gdpr_forget` |
+| Need full context on a specific memory | `memory_get` or `memory_suggest` |
+
+> **Key principle:** Whenever you think "Should this be remembered?" → the answer is almost always **yes**. Whenever you think "Do I already know this?" → **search first**.
+
+---
+
+## Memory Tools — When and How to Use
+
+### Writing Memories
 
 **Tool:** `memory → memory_write`
 
@@ -64,11 +106,11 @@ graph TD
 - SHA-256 content hash is computed and stored for tamper detection
 - Session-scoped memories auto-expire after 24 hours
 
-### 🔍 Searching Memories
+### Searching Memories
 
 **Tool:** `memory → memory_search`
 
-Always search before writing to avoid duplicates. Search before starting any new task (Protocol #4).
+Always search before writing to avoid duplicates. Search before starting any new task.
 
 ```mermaid
 graph LR
@@ -97,7 +139,7 @@ graph LR
 
 Use `memory_suggest` instead of `memory_search` when you need to explain WHY results were retrieved. Returns score breakdowns (vector, BM25, MMR penalty) per result.
 
-### 📝 Retrieving and Modifying
+### Retrieving and Modifying
 
 | Tool | When to Use |
 |------|-------------|
@@ -106,7 +148,7 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 | `memory_delete(id)` | Soft-delete (default, recoverable) or `hard=True` (cascade deletes embeddings, relationships, history) |
 | `memory_verify(id)` | Check content integrity — re-computes SHA-256 and compares to stored hash |
 
-### 🕸️ Knowledge Graph
+### Knowledge Graph
 
 | Tool | When to Use |
 |------|-------------|
@@ -114,7 +156,7 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 | `memory_graph(id, depth)` | Explore connected memories up to 3 hops. Use when context around a memory matters. |
 | `memory_history(id)` | View the full audit trail for a memory — every create, update, delete, supersede event |
 
-### 💬 Conversations
+### Conversations
 
 | Tool | When to Use |
 |------|-------------|
@@ -123,7 +165,7 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 | `conversation_search(query)` | Search across all conversation messages |
 | `conversation_summarize(conversation_id, threshold)` | Generate an LLM summary when a conversation has many messages |
 
-### ♻️ Lifecycle and Maintenance
+### Lifecycle and Maintenance
 
 | Tool | When to Use |
 |------|-------------|
@@ -133,7 +175,7 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 | `memory_set_retention(agent_id, max_memories, ttl_days)` | Set per-agent retention limits. Enforced automatically by `memory_maintenance`. |
 | `memory_feedback(memory_id, feedback)` | Mark a memory as `useful` (boosts importance +0.1) or `wrong` (soft-deletes). |
 
-### ⚖️ Data Governance
+### Data Governance
 
 | Tool | When to Use |
 |------|-------------|
@@ -142,7 +184,7 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 | `memory_export(agent_filter, type_filter, since)` | Export memories as portable JSON for backup or migration |
 | `memory_import(data)` | Import from a previous export. UPSERT semantics — safe to re-run. |
 
-### ⚙️ Operations
+### Operations
 
 | Tool | When to Use |
 |------|-------------|
@@ -168,27 +210,27 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 
 ---
 
-## 📑 Operational Protocols — MANDATORY, NO EXCEPTIONS
+## Operational Protocols
 
 Every protocol specifies the **exact MCP server and tool** to call. Do not batch; fire immediately.
 
-### 🧠 Protocol #1 — The Reasoning Rule
+### Protocol #1 — The Reasoning Rule
 **Trigger:** `query_local_model` returns `reasoning_content` (>200 chars).
 **Action:** Automatically archived to `activity_logs` by `query_local_model`. For manual complex reasoning, call `custom_pc_tool → log_activity(category="thought", ...)`.
 
-### 🌡️ Protocol #2 — The Hardware Rule
+### Protocol #2 — The Hardware Rule
 **Trigger:** Suspected pressure or after heavy inference.
 **Action:** 1. `custom_pc_tool → check_thermal_load()`. 2. If status ≠ Nominal, `log_activity(category="hardware", ...)`.
 
-### ⚖️ Protocol #3 — The Decision Rule
+### Protocol #3 — The Decision Rule
 **Trigger:** User agrees to ANY change (code, file move, diagnosis).
 **Action:** Call `custom_pc_tool → log_activity(category="decision", ...)` immediately.
 
-### 🔍 Protocol #4 — The Search Rule
+### Protocol #4 — The Search Rule
 **Trigger:** Before starting any new task.
 **Action:** Call `custom_pc_tool → query_decisions(...)` **AND** `memory → memory_search(...)`. Check what's already known before proceeding.
 
-### 🎯 Protocol #5 — The Focus Protocol
+### Protocol #5 — The Focus Protocol
 **Trigger:** Every 3 turns of a technical conversation.
 **Action:** `custom_pc_tool → update_focus(summary="...")`. Call `retire_focus()` on task completion.
 

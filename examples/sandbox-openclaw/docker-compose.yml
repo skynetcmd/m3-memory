@@ -7,7 +7,7 @@ services:
     volumes:
       - ./shared:/shared
       - ./.openclaw:/home/clawuser/.openclaw
-      - ../ARCHITECTURE.md:/shared/ARCHITECTURE.md:ro
+      - ../AGENT_INSTRUCTIONS.md:/shared/AGENT_INSTRUCTIONS.md:ro
     env_file: .env
     environment:
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}

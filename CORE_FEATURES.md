@@ -2,7 +2,7 @@
 
 > **Production-grade persistent memory for AI agents.** 25 MCP tools. 41 automated tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Zero cloud dependency.
 
-For the full technical specification, see **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
+For agent instructions and the full tool reference, see **[AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)**.
 
 ---
 
@@ -190,7 +190,7 @@ For detailed OS-specific setup: [macOS](./install_macos.md) | [Linux](./install_
 ## Documentation
 
 - **[TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md)** — Deep-dive technical reference: storage internals, search pipeline, schema, sync protocol, security implementation
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — Agent instruction manual: MCP tools, usage protocols, behavioral rules (symlinked to CLAUDE.md / GEMINI.md)
+- **[AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)** — Agent instruction manual: MCP tools, usage protocols, behavioral rules (symlinked to CLAUDE.md / GEMINI.md)
 - **[ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)** — Security configuration and credential setup
 
 ---
