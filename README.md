@@ -134,6 +134,20 @@ All 25 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
 ---
 
+## For AI agents
+
+M3 Memory exposes 25 MCP tools for storing, searching, updating, and linking knowledge. Any MCP-compatible agent can use them automatically.
+
+To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
+
+```
+examples/AGENT_RULES.md
+```
+
+Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
+
+---
+
 ## Let your agent install it
 
 Already inside Claude Code or Gemini CLI? Paste one of these prompts:
