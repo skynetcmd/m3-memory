@@ -68,7 +68,7 @@ This is the default experience with every major coding agent today.
 
 ## ✅ With M3 Memory
 
-Your agent remembers everything from previous sessions automatically. Architecture decisions, server configs, debugging history, your preferences — all searchable, all persistent.
+Your agents don't forget anymore — and you don't have to repeat yourself to your AI. Architecture decisions, server configs, debugging history, your preferences — all remembered, all searchable, all persistent across sessions and devices.
 
 When facts change, M3 detects the contradiction, updates the record, and preserves the full history. No stale data. No manual cleanup. No "actually, I told you yesterday..."
 
