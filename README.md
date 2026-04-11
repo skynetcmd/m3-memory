@@ -52,15 +52,15 @@ Restart your agent → it now has memory. ✅ Claude Code &nbsp;✅ Gemini CLI &
 
 ## 🧠 What This Feels Like
 
-### Example 1 — Automatic Contradiction Detection
+### <ins>Example 1 — Automatic Contradiction Detection</ins>
 
 You tell your agent:
 
-> <ins>**"My server runs on port 8080"**</ins>
+> "My server runs on port 8080"
 
 Later:
 
-> <ins>**"Actually it's 9000"**</ins>
+> "Actually it's 9000"
 
 M3 Memory automatically:
 - Detects the contradiction
@@ -70,17 +70,17 @@ M3 Memory automatically:
 Next session:
 
 > "What port is my server on?"
-> → <ins>**"9000 (updated from 8080)"**</ins>
+> → **"9000 (updated from 8080)"**
 
 No prompts. No manual logic. Just works.
 
 ---
 
-### Example 2 — Cross-Device Memory
+### <ins>Example 2 — Cross-Device Memory</ins>
 
 You're debugging a deployment issue at a coffee shop. Claude Code recalls the architecture decisions from last week, the server configs from yesterday, and the troubleshooting steps that worked before — all from local SQLite, no internet required.
 
-Later, at your desktop at home, Gemini CLI picks up exactly where you left off. <ins>**Same memories. Same knowledge graph. Synced the moment you hit the local network.**</ins>
+Later, at your desktop at home, Gemini CLI picks up exactly where you left off. Same memories. Same knowledge graph. Synced the moment you hit the local network.
 
 > **Your AI's memory belongs to you, lives on your hardware, and follows you across every device and every agent.**
 
