@@ -6,19 +6,19 @@ For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.
 
 ---
 
-## What Makes M3 Memory Different
+## Overview
 
 ```mermaid
 graph LR
-    subgraph "🏠 Home (Windows PC)"
+    subgraph "Machine A"
         G[Gemini CLI] <--> MB1[M3 Memory]
     end
 
-    subgraph "☕ Coffee Shop (MacBook)"
+    subgraph "Machine B"
         C[Claude Code] <--> MB2[M3 Memory]
     end
 
-    subgraph "☁️ Cloud Warehouse"
+    subgraph "Sync Layer"
         PG[(PostgreSQL)]
     end
 
@@ -28,7 +28,7 @@ graph LR
 
 M3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
 
-**How this plays out in practice:** You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required. Later, you're at your Windows desktop at home with Gemini CLI, and it picks up exactly where you left off. Same memories, same context, same knowledge graph. You didn't copy files, didn't export anything, didn't push to someone else's cloud. Your home server synced everything in the background the moment your laptop hit the local network.
+Memories written on one machine sync to others via optional PostgreSQL delta sync. Each machine runs its own SQLite instance and local embedding server, so everything works fully offline. When machines reconnect, changes merge automatically.
 
 ---
 
@@ -168,22 +168,6 @@ Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local L
 
 ---
 
-## Quick Start
-
-```bash
-pip install m3-memory
-```
-
-For full setup instructions, see [QUICKSTART.md](./QUICKSTART.md).
-
 ---
 
-## Documentation
-
-- **[TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md)** — Deep-dive technical reference: storage internals, search pipeline, schema, sync protocol, security implementation
-- **[AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)** — Agent behavioral rules and all 25 MCP tools
-- **[ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)** — Security configuration and credential setup
-
----
-
-*For deep technical details, see [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md).*
+For setup instructions, see [QUICKSTART.md](./QUICKSTART.md). For deep technical details, see [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md).
