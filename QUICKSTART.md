@@ -1,33 +1,48 @@
 # M3 Memory — Quick Start
 
-Get persistent memory running with your MCP agent in under a minute.
+Get persistent memory running with your MCP agent in under five minutes.
 
 ---
 
-## Prerequisites
-
-- Python 3.11+
-- A local embedding model. [Ollama](https://ollama.com) is the easiest:
-
-```bash
-ollama pull nomic-embed-text && ollama serve
-```
-
-Any OpenAI-compatible embedding endpoint works ([LM Studio](https://lmstudio.ai), vLLM, etc.).
-
----
-
-## Install
+## 1. Install M3 Memory
 
 ```bash
 pip install m3-memory
 ```
 
+Verify the command is available:
+
+```bash
+mcp-memory --help
+```
+
+If you get `command not found`, check that your Python scripts directory is on your PATH.
+
 ---
 
-## Configure your agent
+## 2. Start a local embedding server
 
-Add the M3 Memory MCP server to your agent's config file:
+M3 Memory needs a local model to generate embeddings for semantic search. [Ollama](https://ollama.com) is the easiest option:
+
+```bash
+# Download an embedding model
+ollama pull nomic-embed-text
+
+# Start the server (runs on localhost:11434)
+ollama serve
+```
+
+Any OpenAI-compatible embedding endpoint works. [LM Studio](https://lmstudio.ai), vLLM, and LocalAI are also supported. If your server runs on a non-default port, set:
+
+```bash
+export LLM_ENDPOINTS_CSV="http://localhost:11434/v1"
+```
+
+---
+
+## 3. Configure your agent
+
+Add the M3 Memory MCP server to your agent's config file.
 
 **Claude Code** (`~/.claude/settings.json`):
 ```json
@@ -56,63 +71,53 @@ Add the M3 Memory MCP server to your agent's config file:
 }
 ```
 
-Restart your agent after adding the config.
+Restart your agent after saving the config.
 
 ---
 
-## Verify it works
+## 4. Verify it works
 
-In your agent session, try:
+In your agent session, write a test memory:
 
 ```
 Write a memory: "M3 Memory installed successfully"
 ```
 
-Then in a new session:
+Your agent should call `memory_write` and return a UUID. That confirms the MCP bridge is connected, SQLite is working, and embeddings are being generated.
+
+Now open a **new session** and search for it:
 
 ```
 Search for: "M3 install"
 ```
 
-If it returns the memory you wrote, everything is working.
+If the memory you wrote comes back, everything is working: persistence, embedding, and hybrid search.
+
+### What success looks like
+
+- `memory_write` returns a UUID (e.g., `Created: a1b2c3d4-...`)
+- `memory_search` returns the memory you wrote, with a relevance score
+- No errors about embedding failures or connection refused
+
+### What failure looks like
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| "Embedding failed" or "Connection refused" | Embedding server not running | Run `ollama serve` or start LM Studio |
+| "mcp-memory: command not found" | Package not on PATH | `pip install m3-memory` and check `which mcp-memory` |
+| Memory tools don't appear in agent | Config not loaded | Check JSON syntax, ensure `"mcpServers"` key, restart agent fully |
+| Search returns nothing in new session | Different working directory | Run from same directory, or set `M3_MEMORY_ROOT` env var |
 
 ---
 
-## Optional: cross-device sync
+## 5. Optional: cross-device sync
 
-M3 Memory works standalone with local SQLite. For multi-device sync, you can optionally add:
+M3 Memory works standalone with local SQLite — no additional infrastructure needed. For multi-device sync, you can optionally connect:
 
 - **PostgreSQL** — bi-directional delta sync across machines
-- **ChromaDB** — federated vector search
+- **ChromaDB** — federated vector search across your LAN
 
 See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL` and `CHROMA_BASE_URL` configuration.
-
----
-
-## Troubleshooting
-
-### "Embedding failed" or "Connection refused"
-Your embedding server isn't running. Start Ollama:
-```bash
-ollama serve
-```
-Or check that LM Studio is running on `localhost:1234`.
-
-### "mcp-memory: command not found"
-The package isn't installed or isn't on your PATH:
-```bash
-pip install m3-memory
-which mcp-memory  # should return a path
-```
-
-### Memory server doesn't appear in agent
-- Verify the JSON in your config file is valid
-- Make sure the key is `"mcpServers"` (case-sensitive)
-- Restart the agent completely (not just a new session)
-
-### Agent can't find previous memories
-- Memories are stored in `memory/agent_memory.db` relative to where `mcp-memory` runs
-- Check that you're running from the same directory, or set `M3_MEMORY_ROOT`
 
 ---
 

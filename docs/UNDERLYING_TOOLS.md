@@ -42,7 +42,7 @@ This document details the core services, frameworks, and engines that power the 
 
 ### HTTP Stack
 - **Library**: `httpx` (v0.28+) for asynchronous calls with connection pooling.
-- **Server**: `FastAPI` + `Uvicorn` for the MCP Proxy.
+- **Server**: `FastAPI` + `Uvicorn` for the MCP bridge server.
 
 ### Encryption
 - **Library**: `cryptography` (v46.0+).

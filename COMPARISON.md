@@ -1,10 +1,8 @@
-# M3-Memory vs The Field — Detailed Comparison
+# M3 Memory — Comparison Guide
 
 > Last updated: April 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
-## Why This Document Exists
-
-The agentic memory space is crowded. This document explains exactly where M3-Memory fits, what it does better, and what it doesn't try to do — so you can make an informed choice.
+Several tools address agentic memory. This document explains where M3 Memory fits relative to each, and when a different tool is the better choice.
 
 ---
 
@@ -159,16 +157,14 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 
 ---
 
-## A Note on Positioning
+## Where M3 Memory fits
 
-M3-Memory is not trying to win every category. It exists because no other tool serves the intersection of:
+M3 Memory targets a specific intersection that other tools don't fully cover:
 
-1. **MCP-native** — works out of the box with the new generation of desktop coding agents, zero integration work
-2. **Local-first** — your data never leaves your machine, ever; fully offline-capable
-3. **Automatic consistency** — contradiction detection ensures agents don't accumulate conflicting beliefs without agent-side logic
-4. **Compliant by default** — GDPR forget and export are first-class MCP tools, not afterthoughts
-5. **Lightweight drop-in** — add memory to any existing agent in one line; no runtime migration required
+- **MCP-native** — works with Claude Code, Gemini CLI, Aider, and any MCP agent without integration code
+- **Local-first** — all data stays on your machine; fully offline-capable
+- **Automatic consistency** — contradiction detection handles conflicting facts without agent-side logic
+- **Compliant** — GDPR forget and export are built-in MCP tools
+- **Drop-in** — one config line to add memory to an existing agent; no runtime migration
 
-**The positioning in one sentence:** The privacy-first, ultra-lightweight, MCP-native memory layer with automatic factual consistency and compliance tools — a perfect drop-in backend for Claude Code, Aider, Gemini CLI, Letta, or any MCP agent.
-
-If that intersection is your need, M3-Memory is built for you.
+If you need LangChain pipeline memory, a full agent runtime, or enterprise-scale temporal graphs, the tools above are better suited. If you need persistent, private memory for MCP agents, M3 is built for that.
