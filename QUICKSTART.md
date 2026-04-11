@@ -1,223 +1,124 @@
-# 🧠 M3 Memory
+# M3 Memory — Quick Start
 
-**Persistent, local memory for AI agents — no APIs, no cloud, no lock-in.**
-
-Give your agent the ability to **remember across sessions**, **connect ideas**, and **retrieve context intelligently** — all running locally.
+Get persistent memory running with your MCP agent in under a minute.
 
 ---
 
-## ⚡ 30-second quickstart
+## Prerequisites
+
+- Python 3.11+
+- A local embedding model. [Ollama](https://ollama.com) is the easiest:
+
+```bash
+ollama pull nomic-embed-text && ollama serve
+```
+
+Any OpenAI-compatible embedding endpoint works ([LM Studio](https://lmstudio.ai), vLLM, etc.).
+
+---
+
+## Install
 
 ```bash
 pip install m3-memory
 ```
 
+---
+
+## Configure your agent
+
+Add the M3 Memory MCP server to your agent's config file:
+
+**Claude Code** (`~/.claude/settings.json`):
 ```json
 {
   "mcpServers": {
-    "memory": {
-      "command": "mcp-memory"
-    }
+    "memory": { "command": "mcp-memory" }
   }
 }
 ```
 
-Restart your agent runtime (Claude Code, Gemini CLI, Aider), and your agent now has **persistent memory**.
-
----
-
-## ❓ Why this exists
-
-Most AI agents are **stateless**.
-
-That means:
-
-- They forget everything between sessions
-- They lose important user context
-- They repeat work and hallucinate inconsistently
-
-**M3 Memory fixes that** by giving agents a structured, persistent memory layer.
-
----
-
-## ✨ What it feels like
-
-**Without memory:**
-
-> User: "What did I say about my startup idea last week?"
-> Agent: "I don't have that context."
-
-**With M3 Memory:**
-
-> Agent retrieves prior conversations →
-> "You were exploring a B2B SaaS idea focused on developer tooling…"
-
----
-
-## 🧩 Mental model
-
-```
-User ↔ Agent ↔ M3 Memory
-                 ├── semantic search
-                 ├── keyword search
-                 ├── memory linking (graph)
-                 └── local persistent storage
+**Gemini CLI** (`~/.gemini/settings.json`):
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "mcp-memory" }
+  }
+}
 ```
 
-> **SQLite + vector search + knowledge graph — for agents**
-
----
-
-## 🧠 Core capabilities
-
-**Memory**
-- Store structured information over time
-- Update and refine knowledge
-- Link related memories together
-
-**Retrieval**
-- Hybrid search (semantic + keyword + re-ranking)
-- Context-aware recall
-- Fast local queries
-
-**Privacy**
-- 100% local-first
-- No API keys
-- No external services
-
----
-
-## 🔑 Start with these 5 tools
-
-You don't need all 25. Use these first:
-
-| Tool | What it does |
-|------|-------------|
-| `memory_write` | Store important info |
-| `memory_search` | Retrieve context |
-| `memory_link` | Connect related ideas |
-| `memory_update` | Refine existing knowledge |
-| `memory_delete` | Clean up |
-
-Everything else is advanced.
-
----
-
-## 🤖 How agents should use this
-
-A simple pattern:
-
-```
-If user provides durable info  → memory_write
-If question may depend on past → memory_search
-If new info updates old        → memory_update
+**Aider** (`.aider.conf.yml` or MCP config):
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "mcp-memory" }
+  }
+}
 ```
 
-This turns your agent from **reactive** → **context-aware**.
+Restart your agent after adding the config.
 
 ---
 
-## 🧪 Recipes
+## Verify it works
 
-**🧑 Personal assistant**
-- Remember preferences, goals, history
-- Build long-term user context
+In your agent session, try:
 
-**💻 Coding agent**
-- Track decisions across sessions
-- Recall architecture and constraints
-
-**📚 Research agent**
-- Store findings over time
-- Connect related concepts
-
-**🧾 Lightweight CRM**
-- Track users, interactions, notes
-
----
-
-## ⚖️ When NOT to use this
-
-M3 Memory may not be the right fit if:
-
-- You need fully managed cloud infrastructure
-- You're building LangChain/CrewAI pipelines (consider [Mem0](https://mem0.ai))
-- You want a full stateful agent runtime (consider [Letta](https://letta.ai))
-
----
-
-## 🏗️ How it works
-
-- Memories stored locally in SQLite
-- Embeddings via your local LLM (Ollama, LM Studio, vLLM)
-- FTS5 keyword index improves precision
-- MMR re-ranking improves diversity
-- Knowledge graph links connect related entries
-- Bitemporal history tracks what was true when
-
----
-
-## ⚡ Performance
-
-- Local queries — sub-millisecond on SQLite
-- No network calls
-- Scales with your hardware
-
----
-
-## 🆚 Comparison
-
-| Feature | M3 Memory | Vector DB only | Basic RAG |
-|---------|:---------:|:--------------:|:---------:|
-| Persistent across sessions | ✅ | ❌ | ❌ |
-| Automatic contradiction detection | ✅ | ❌ | ❌ |
-| Structured linking (graph) | ✅ | ❌ | ❌ |
-| Local-first | ✅ | ⚠️ | ⚠️ |
-| Native MCP tools | ✅ | ❌ | ❌ |
-| GDPR forget + export | ✅ | ❌ | ❌ |
-
----
-
-## 🧠 For AI agents (machine-readable summary)
-
-```yaml
-name: m3-memory
-purpose: persistent memory for AI agents
-capabilities:
-  - write
-  - search
-  - update
-  - link
-  - contradiction-detection
-  - gdpr-forget
-  - gdpr-export
-storage: local SQLite + optional PostgreSQL + ChromaDB
-retrieval: hybrid (FTS5 + semantic + MMR rerank)
-mcp_tools: 25
-local_only: true
+```
+Write a memory: "M3 Memory installed successfully"
 ```
 
----
+Then in a new session:
 
-## 🚀 Philosophy
+```
+Search for: "M3 install"
+```
 
-AI agents shouldn't start from zero every time.
-
-Memory is what makes intelligence **compound over time**.
-
----
-
-## 📦 Full documentation
-
-- [README.md](./README.md) — full technical + marketing overview
-- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — agent instructions, MCP tools, protocols
-- [COMPARISON.md](./COMPARISON.md) — M3 vs Mem0 vs Letta vs LangChain Memory
-- [ROADMAP.md](./ROADMAP.md) — what's coming next
+If it returns the memory you wrote, everything is working.
 
 ---
 
-## 💡 Final thought
+## Optional: cross-device sync
 
-The difference between a *demo agent* and a *useful agent* is simple:
+M3 Memory works standalone with local SQLite. For multi-device sync, you can optionally add:
 
-> **memory**
+- **PostgreSQL** — bi-directional delta sync across machines
+- **ChromaDB** — federated vector search
+
+See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL` and `CHROMA_BASE_URL` configuration.
+
+---
+
+## Troubleshooting
+
+### "Embedding failed" or "Connection refused"
+Your embedding server isn't running. Start Ollama:
+```bash
+ollama serve
+```
+Or check that LM Studio is running on `localhost:1234`.
+
+### "mcp-memory: command not found"
+The package isn't installed or isn't on your PATH:
+```bash
+pip install m3-memory
+which mcp-memory  # should return a path
+```
+
+### Memory server doesn't appear in agent
+- Verify the JSON in your config file is valid
+- Make sure the key is `"mcpServers"` (case-sensitive)
+- Restart the agent completely (not just a new session)
+
+### Agent can't find previous memories
+- Memories are stored in `memory/agent_memory.db` relative to where `mcp-memory` runs
+- Check that you're running from the same directory, or set `M3_MEMORY_ROOT`
+
+---
+
+## Next steps
+
+- [CORE_FEATURES.md](./CORE_FEATURES.md) — what M3 Memory can do
+- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 25 MCP tools and agent behavioral rules
+- [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — search internals, schema, sync, security
+- [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) — credentials and runtime config
