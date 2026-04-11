@@ -32,11 +32,19 @@ M3 Memory gives Claude Code, Gemini CLI, and Aider persistent, private memory th
 
 ## ⚡ Quick Start (1 minute)
 
+**Prerequisites:** Python 3.11+, and a local embedding server — [Ollama](https://ollama.com) is the easiest:
+
+```bash
+ollama serve   # start local embeddings (e.g. nomic-embed-text)
+```
+
+**Install:**
+
 ```bash
 pip install m3-memory
 ```
 
-Add to your MCP config:
+**Add to your MCP config:**
 
 ```json
 {
@@ -256,14 +264,44 @@ sequenceDiagram
 
 ## 🎬 See It in Action
 
-> **Demo 1 — Automatic contradiction resolution**
+**Demo 1 — Contradiction resolution**
+
+Your agent writes two conflicting facts. The old one is automatically superseded — no manual cleanup:
+
+```
+memory_write: "API server runs on port 8080"
+memory_write: "API server moved to port 9000"
+
+→ Port 8080 memory superseded. History preserved. Agent now knows port 9000.
+```
+
 > ![Demo: agent writes conflicting facts — old memory auto-superseded, full history preserved](docs/demo_contradiction.gif)
 
-> **Demo 2 — Hybrid search across 1,000 memories**
+---
+
+**Demo 2 — Hybrid search across 1,000 memories**
+
+```
+memory_search: "database connection config"
+
+→ Returns FTS5 keyword matches + semantic neighbors + MMR-diversified results
+   with full score breakdown (vector, BM25, MMR)
+```
+
 > ![Demo: memory_search returns FTS5 + vector + MMR ranked results with score breakdown](docs/demo_search.gif)
 
-> **Demo 3 — Cross-device sync**
-> ![Demo: memory written on laptop appears on desktop via SQLite→PostgreSQL bidirectional sync](docs/demo_sync.gif)
+---
+
+**Demo 3 — Cross-device sync**
+
+```
+[MacBook] memory_write: "Deploy target changed to us-east-2"
+[Windows desktop] memory_search: "deploy target"
+
+→ Same memory. Instantly available. No cloud intermediary.
+```
+
+> ![Demo: memory written on MacBook appears on Windows desktop via SQLite→PostgreSQL sync](docs/demo_sync.gif)
 
 *GIFs coming soon — [contribute a recording](./CONTRIBUTING.md) or watch [#showcase](https://discord.gg/ZcJ3EGC99B).*
 
@@ -314,6 +352,16 @@ docs/         Architecture diagrams and install guides
 examples/     Demo notebooks and mcp.json snippets
 tests/        End-to-end test suite (41 tests)
 ```
+
+---
+
+## 🚀 Next Steps
+
+1. ⭐ **[Star the repo](https://github.com/skynetcmd/m3-memory)** — helps others find it
+2. 🧪 **Try a real session** — install, write a memory, close your agent, reopen it, and search
+3. 💬 **[Share feedback](https://discord.gg/ZcJ3EGC99B)** — what worked, what didn't
+4. 🐛 **[Open an issue](https://github.com/skynetcmd/m3-memory/issues)** — bugs, questions, feature requests
+5. 🤝 **[Contribute](./CONTRIBUTING.md)** — good first issues listed
 
 ---
 
