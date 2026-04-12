@@ -62,13 +62,6 @@ Add the M3 Memory MCP server to your agent's config file.
 }
 ```
 
-**Aider** — Aider does not natively speak MCP. Use the bundled [`mcp_proxy`](./bin/mcp_proxy.py) to expose m3-memory (plus the rest of the catalog — 55 tools total) to Aider over an OpenAI-compatible endpoint on `localhost:9000`, then point Aider at the proxy:
-```bash
-python bin/mcp_proxy.py               # or: bash bin/start_mcp_proxy.sh
-aider --openai-api-base http://localhost:9000/v1
-```
-The proxy routes by model name — `--model openai/claude-sonnet-4-6` hits Anthropic, `gemini-*` hits Google AI, `grok-*` hits xAI, and anything else falls through to LM Studio on `localhost:1234`. Set `MCP_PROXY_ALLOW_DESTRUCTIVE=1` if you want `memory_delete`, `gdpr_*`, `*_export`, etc. exposed (off by default).
-
 **OpenCode** (`opencode.json` or `opencode.jsonc` in project root or `~/.config/opencode/`):
 ```json
 {
@@ -84,6 +77,102 @@ The proxy routes by model name — `--model openai/claude-sonnet-4-6` hits Anthr
 ```
 
 Restart your agent after saving the config.
+
+---
+
+### Agents without native MCP support
+
+Some agents can't speak MCP directly — Aider and Openclaw are the two we support today. For them, route chat completions through the bundled [`mcp_proxy`](./bin/mcp_proxy.py), an OpenAI-compatible server on `localhost:9000` that injects m3-memory tools (and the rest of the catalog — 55 tools total) into every request and executes `tool_calls` by calling bridge functions directly.
+
+**High-level flow:** agent → `localhost:9000/v1` (OpenAI-compatible) → proxy injects tools → real model provider (Anthropic / Google / xAI / LM Studio) → model may emit `tool_calls` → proxy executes them against m3-memory → results fed back → final answer returned to agent.
+
+The proxy routes by model name: `claude-*` → Anthropic, `gemini-*` → Google AI, `grok-*` → xAI, `sonar-*` → Perplexity, anything else → LM Studio on `localhost:1234`. Set `MCP_PROXY_ALLOW_DESTRUCTIVE=1` if you want `memory_delete`, `gdpr_*`, `*_export`, etc. exposed (off by default).
+
+#### Starting the proxy
+
+**Foreground (development):**
+```bash
+python bin/mcp_proxy.py               # POSIX / Windows (use .venv\Scripts\python.exe on Windows)
+# or:
+bash bin/start_mcp_proxy.sh           # POSIX only — prints URL and tails stdout
+```
+
+**Background (daily use):**
+```bash
+bash bin/start_mcp_proxy.sh --background
+# writes PID to   ${TMPDIR:-~/.cache}/mcp_proxy.pid
+# writes logs to  ${TMPDIR:-~/.cache}/mcp_proxy.log
+# stop:           kill $(cat ~/.cache/mcp_proxy.pid)
+```
+
+**Windows native (no WSL):** the `.sh` launcher is bash-only. Run the Python directly and redirect:
+```powershell
+Start-Process -WindowStyle Hidden `
+  -FilePath "C:\Users\<you>\m3-memory\.venv\Scripts\python.exe" `
+  -ArgumentList "bin\mcp_proxy.py" `
+  -WorkingDirectory "C:\Users\<you>\m3-memory" `
+  -RedirectStandardOutput "$env:TEMP\mcp_proxy.log" `
+  -RedirectStandardError  "$env:TEMP\mcp_proxy.err"
+```
+
+**Boot-time autostart** — pick one depending on the platform:
+- Linux: systemd user unit running `python bin/mcp_proxy.py` under `[Service] Restart=on-failure`
+- macOS: launchd `~/Library/LaunchAgents/ai.m3-memory.mcp-proxy.plist` with `KeepAlive` + `RunAtLoad`
+- Windows: Task Scheduler task `At log on` → `python.exe bin\mcp_proxy.py`, or NSSM if you want it as a real service
+
+**Health check:**
+```bash
+curl -sf http://localhost:9000/v1/models && echo "proxy OK"
+```
+
+> **Important:** any agent configured to use the proxy (Aider / Openclaw) will **fail to reach a model** if the proxy is not running, because their `OPENAI_BASE_URL` points at `localhost:9000` instead of the real upstream. Start the proxy before launching those agents, or use one of the autostart options above.
+
+#### Aider
+
+Aider has no MCP client and no persistent memory of its own — only `CONVENTIONS.md`. To make it an m3-memory participant:
+
+1. Start the proxy (see above).
+2. Point Aider at the proxy via `~/.aider.conf.yml`:
+   ```yaml
+   openai-api-base: http://localhost:9000/v1
+   # Optional — cheaper routing for local dev:
+   # model: openai/claude-sonnet-4-6   # proxy will route to Anthropic
+   ```
+   Or per-invocation: `aider --openai-api-base http://localhost:9000/v1`
+3. Export whatever API key belongs to the upstream provider you're routing to (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `GEMINI_API_KEY`). The proxy forwards the key to whichever provider matches the model prefix.
+4. Keep `CONVENTIONS.md` at the repo root as a shim pointing at `AGENT_INSTRUCTIONS.md` so Aider gets the "always use memory_search first" rules in its system prompt.
+
+Caveat: Aider will only invoke m3-memory tools if the model decides to call them. Your `CONVENTIONS.md` → `AGENT_INSTRUCTIONS.md` chain is what prompts it to do so. Without that prompt, the tools are available but unused.
+
+#### Openclaw
+
+Openclaw is self-hosted, doesn't speak MCP, and has its own internal `session-memory` hook backed by a SQLite retrieval index at `~/.openclaw/memory/main.sqlite`. To make it use m3-memory *instead of / alongside* that internal store:
+
+1. Start the proxy (see above).
+2. Edit `~/.openclaw/openclaw.json` and add `OPENAI_BASE_URL` to the `env` block (leave other keys — `OPENAI_API_KEY`, Telegram tokens, gateway tokens — untouched):
+   ```json
+   "env": {
+     "OPENAI_API_KEY": "sk-...existing...",
+     "OPENAI_BASE_URL": "http://localhost:9000/v1"
+   }
+   ```
+   Back up the file first: `cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak`
+3. Seed the system prompt. Openclaw's `hooks.internal.entries.boot-md` is enabled by default — drop a markdown file that tells the model: *"Before answering, call `memory_search` to check m3-memory. After learning anything important, call `memory_write`."* Without that instruction the injected tools are available but the model won't know to use them.
+4. (Optional) Keep Openclaw's own `session-memory` hook enabled — it runs in parallel and doesn't conflict. Or disable it in `hooks.internal.entries.session-memory.enabled = false` if you want m3-memory to be the sole store.
+5. Restart Openclaw. It will now route through the proxy, get all 44 catalog tools injected into every request, and execute them via the bridge layer directly against m3-memory's SQLite.
+
+Caveat: when the proxy is down, Openclaw's chat completions **will fail** because `OPENAI_BASE_URL` points at a dead local port. Either autostart the proxy (see above) or revert the `env` change when you want to run Openclaw standalone.
+
+#### Migrating existing flat-file memory
+
+If you already have memories in any of these stores — Claude Code flat files, `GEMINI.md` added-memories section, or Openclaw's SQLite — use [`bin/migrate_flat_memory.py`](./bin/migrate_flat_memory.py) to import them. It's idempotent (safe to re-run), verifies every write via SHA-256 round-trip, and prints a manual cleanup list after verification but never deletes source files itself.
+
+```bash
+python bin/migrate_flat_memory.py --dry-run                    # preview
+python bin/migrate_flat_memory.py                              # migrate + verify
+python bin/migrate_flat_memory.py --sources claude,gemini      # subset
+python bin/migrate_flat_memory.py --include-rules              # also import CLAUDE.md etc.
+```
 
 ### Disable your host agent's built-in memory
 
