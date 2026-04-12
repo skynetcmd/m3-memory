@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest an enhancement or new capability
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape m3-memory. For open-ended ideas or "is this a good fit?" questions,
+        prefer the [Discussions](https://github.com/skynetcmd/m3-memory/discussions) tab.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the user-facing pain point, not the solution.
+      placeholder: When I switch devices, my agent can't find context from a previous coffee-shop session because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to see? Be concrete — tool signatures, config keys, UX are all welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds exist today? Why aren't they enough?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Hybrid search (FTS / vector / MMR)
+        - MCP tools / protocol
+        - GDPR / retention
+        - Orchestration / multi-agent
+        - Migration / import-export
+        - Docs / onboarding
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to open a PR for this
+          required: false

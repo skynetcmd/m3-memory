@@ -1,0 +1,102 @@
+name: Bug report
+description: Something isn't working as expected
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill out the fields below so we can reproduce it fast.
+        Before filing, search existing issues and check the [Discussions](https://github.com/skynetcmd/m3-memory/discussions) tab.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. What did you expect, and what actually occurred?
+      placeholder: When I call memory_search with X, it returns Y instead of Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior. Include the exact MCP tool calls or commands.
+      placeholder: |
+        1. Start the MCP server with `python -m m3_memory.server`
+        2. Call `memory_write` with ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: m3-memory version
+      description: "`pip show m3-memory` or the commit SHA if installed from source"
+      placeholder: "2026.4.8"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Install source
+      options:
+        - PyPI (pip install m3-memory)
+        - Git clone / source
+        - GitHub release asset
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent / MCP client
+      multiple: true
+      options:
+        - Claude Code
+        - Claude Desktop
+        - Gemini CLI
+        - Cursor
+        - Aider
+        - OpenClaw
+        - Custom / direct MCP
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Windows 11 / macOS 14.4 / Ubuntu 22.04"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the relevant output from the `logs/` directory or the console. Redact secrets.
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and Discussions
+          required: true
+        - label: I can reproduce this on the latest release
+          required: false

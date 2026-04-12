@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and usage help
+    url: https://github.com/skynetcmd/m3-memory/discussions
+    about: Ask questions, share setups, and discuss ideas in Discussions.
+  - name: Discord community
+    url: https://discord.gg/m3-memory
+    about: Chat with other users and maintainers.
