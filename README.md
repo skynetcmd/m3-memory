@@ -21,7 +21,7 @@ Your agent forgets everything between sessions. M3 Memory fixes that. Install it
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
 
-Works with Claude Code, Gemini CLI, Aider, and any MCP-compatible agent.
+Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agent.
 
 ---
 
