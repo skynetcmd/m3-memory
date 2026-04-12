@@ -91,6 +91,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 |---|---|
 | You use Claude Code, Gemini CLI, Aider, or any MCP agent | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
 | You're coordinating multiple agents on a shared local store | You need a hosted agent runtime with managed scaling — see [Letta](https://letta.ai) |
+| You need GDPR primitives, bitemporal state, or pure SQLite | You want state-of-the-art retrieval benchmarks today — see [Hindsight](https://github.com/vectorize-io/hindsight) |
 | You want memory that persists across sessions and devices | You only need in-session chat context |
 
 ---
