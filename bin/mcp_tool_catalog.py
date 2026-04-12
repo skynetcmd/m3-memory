@@ -170,6 +170,9 @@ TOOLS: list[ToolSpec] = [
                 "valid_from":    {"type": "string", "description": "ISO-8601 validity start.", "default": ""},
                 "valid_to":      {"type": "string", "description": "ISO-8601 validity end.", "default": ""},
                 "auto_classify": {"type": "boolean", "description": "Let the LLM pick the type (forced true if type='auto').", "default": False},
+                "conversation_id": {"type": "string", "description": "Groups this memory with a conversation / team session. Same ID space as conversation_start.", "default": ""},
+                "refresh_on":    {"type": "string", "description": "ISO-8601 timestamp when this memory should be flagged for review (lifecycle / planned obsolescence).", "default": ""},
+                "refresh_reason": {"type": "string", "description": "Why this memory needs refreshing (e.g., 'quarterly policy review').", "default": ""},
             },
             "required": ["type", "content"],
         },
@@ -194,6 +197,7 @@ TOOLS: list[ToolSpec] = [
                 "user_id":            {"type": "string", "description": "Filter by data subject.", "default": ""},
                 "scope":              {"type": "string", "description": "Filter by isolation scope.", "default": ""},
                 "as_of":              {"type": "string", "description": "ISO-8601 time-travel cutoff.", "default": ""},
+                "conversation_id":    {"type": "string", "description": "Restrict to a conversation / team session.", "default": ""},
             },
             "required": ["query"],
         },
@@ -248,6 +252,9 @@ TOOLS: list[ToolSpec] = [
                 "metadata":  {"type": "string", "description": "JSON-encoded metadata (empty = no change).", "default": ""},
                 "importance": {"type": "number", "description": "New importance score (-1.0 = no change).", "default": -1.0},
                 "reembed":   {"type": "boolean", "description": "Re-embed for semantic search.", "default": False},
+                "refresh_on": {"type": "string", "description": "New refresh timestamp. 'clear' removes the reminder; empty = no change.", "default": ""},
+                "refresh_reason": {"type": "string", "description": "New refresh reason. 'clear' removes; empty = no change.", "default": ""},
+                "conversation_id": {"type": "string", "description": "New conversation id. 'clear' removes; empty = no change.", "default": ""},
             },
             "required": ["id"],
         },
@@ -661,6 +668,29 @@ TOOLS: list[ToolSpec] = [
         validators=(),
         default_allowed=True,
         inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_refresh_queue",
+        description=(
+            "List memories whose refresh_on timestamp has arrived and need review. "
+            "Read-only — to actually refresh a memory, call memory_update with new "
+            "content/refresh_on. Pass include_future=True to see all memories with "
+            "refresh_on set, not just overdue ones."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id":       {"type": "string", "description": "Restrict to memories owned by this agent.", "default": ""},
+                "limit":          {"type": "integer", "description": "Max rows to return (1-500).", "default": 50},
+                "include_future": {"type": "boolean", "description": "Include memories whose refresh_on is still in the future.", "default": False},
+            },
+            "required": [],
+        },
+        impl=memory_core.memory_refresh_queue_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=True,
     ),
     ToolSpec(
         name="agent_register",
