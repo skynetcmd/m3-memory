@@ -15,7 +15,7 @@ Your agent forgets everything between sessions. M3 Memory fixes that. Install it
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
   <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-25_tools-orange?style=flat-square"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-44_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
@@ -121,13 +121,13 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 25 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
+All 44 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
 ---
 
 ## For AI agents
 
-M3 Memory exposes 25 MCP tools for storing, searching, updating, and linking knowledge. Any MCP-compatible agent can use them automatically.
+M3 Memory exposes 44 MCP tools for storing, searching, updating, and linking knowledge — including agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
 
 To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
 
@@ -192,7 +192,8 @@ Then search for: "M3 install"
 - **Understand features** → [CORE_FEATURES.md](./CORE_FEATURES.md)
 - **System design** → [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 - **Implementation details** → [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md)
-- **Agent rules + all 25 tools** → [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
+- **Agent rules + all 44 tools** → [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
+- **Multi-agent orchestration** → [examples/multi-agent-team/README.md](./examples/multi-agent-team/README.md)
 - **M3 vs alternatives** → [COMPARISON.md](./COMPARISON.md)
 - **Configuration** → [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)
 - **Roadmap** → [ROADMAP.md](./ROADMAP.md)

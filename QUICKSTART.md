@@ -124,6 +124,6 @@ See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL` and `CHR
 ## Next steps
 
 - [CORE_FEATURES.md](./CORE_FEATURES.md) — what M3 Memory can do
-- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 25 MCP tools and agent behavioral rules
+- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 44 MCP tools and agent behavioral rules
 - [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — search internals, schema, sync, security
 - [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) — credentials and runtime config

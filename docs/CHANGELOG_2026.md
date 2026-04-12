@@ -1,5 +1,67 @@
 # M3 Memory System Changelog - 2026
 
+## April 12, 2026
+
+### ✨ Multi-Agent Orchestration
+
+#### Orchestration Primitives
+- **Agent registry** — `agent_register`, `agent_heartbeat`, `agent_list`, `agent_get`, `agent_offline` for tracking online agents and their capabilities.
+- **Handoffs** — `memory_handoff` transfers ownership of a memory item between agents with audit trail.
+- **Notifications** — `notify`, `notifications_poll`, `notifications_ack`, `notifications_ack_all` for inter-agent messaging.
+- **Tasks** — `task_create`, `task_assign`, `task_update`, `task_get`, `task_list`, `task_set_result`, `task_tree` for distributed work tracking.
+
+#### `m3-team` CLI
+- New entry point `m3-team init|check|run` (registered in `pyproject.toml`).
+- Implementation: `m3_memory/team_cli.py` (237 lines).
+- Spins up multi-agent teams from a single YAML file (`team.yaml` or `team.minimal.yaml`).
+
+#### Dispatch Loop
+- `examples/multi-agent-team/dispatch.py` (366 lines) — provider-agnostic multi-turn MCP dispatch loop.
+- `DispatchLimits`: `max_turns=8`, `max_tool_calls=24`, `max_seconds=120`, `max_tokens_per_call=4096`, `provider_retries=3`.
+- `DispatchResult` terminal taxonomy with bounded retries and loop detection.
+- Provider translation for OpenAI, Anthropic, and Gemini tool-calling formats.
+
+### 🔧 MCP Proxy v2 (`bin/mcp_proxy.py`)
+
+#### Catalog-Driven Dispatch
+- Replaced 250-line hardcoded `MCP_TOOLS` list with three sources:
+  - `PROTOCOL_TOOLS` (5 inline): `log_activity`, `query_decisions`, `update_focus`, `retire_focus`, `check_thermal_load`.
+  - `DEBUG_TOOLS` (6 inline): `debug_analyze`, `debug_bisect`, `debug_trace`, `debug_correlate`, `debug_history`, `debug_report`.
+  - `_build_catalog_tools()` lazy loader pulling from `bin/mcp_tool_catalog.py` (35 default / 44 with destructive enabled).
+- New `_LazyToolList` class for backwards-compat `MCP_TOOLS` attribute.
+- New `_LEGACY_DISPATCH` dict for protocol/debug tool routing.
+
+#### Agent Identity Enforcement
+- `/v1/chat/completions` now reads `X-Agent-Id` HTTP header.
+- `_execute_tool(name, args, agent_id="mcp-proxy-client")` propagates identity to catalog dispatch.
+- Catalog tools with `inject_agent_id=True` (`memory_write`, `agent_heartbeat`, `agent_offline`, `memory_inbox`, `notifications_poll`, `notifications_ack_all`) are non-bypassable: client-claimed `agent_id` is overridden from the header.
+
+#### Destructive Tool Gating
+- `MCP_PROXY_ALLOW_DESTRUCTIVE=1` opt-in env flag.
+- 9 destructive tools hidden by default: `memory_delete`, `chroma_sync`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`.
+- `/health` endpoint reports per-source counts and `allow_destructive` flag.
+
+### 🐛 Bug Fixes
+- **mcp_proxy ImportError**: `from m3_sdk import M3Context, LM_STUDIO_BASE, LM_READ_TIMEOUT` failed because `m3_sdk.py` only exports `M3Context`. Inlined the constants as proxy-local env reads (`LMSTUDIO_BASE`, `READ_TIMEOUT`).
+- **15-tool gap**: Proxy clients (Aider, OpenClaw) previously had access to only 15 of 44 catalog tools. Now full parity at 44/55.
+- **Agent identity bypass**: Proxy did not enforce `inject_agent_id`, letting clients spoof `agent_id` on `memory_write`. Now overridden from `X-Agent-Id` header.
+- **Stale `memory_write` schema**: Proxy advertised an outdated parameter set; now sourced from catalog `ToolSpec`.
+
+### 📚 Documentation & Architecture
+- License changed from MIT to **Apache 2.0** for clearer patent grant in multi-agent contexts.
+- `bin/mcp_tool_catalog.py` (NEW) — single source of truth for all MCP tool definitions via `ToolSpec` dataclass.
+- `VALID_MEMORY_TYPES` expanded to 20 types; `bin/memory_core.py` auto-classifier kept in sync (added `knowledge` type).
+- Knowledge entry `da5d487d` ("Available Knowledgebase Item Types") rewritten with full 20-type taxonomy.
+- Knowledge entry `a18d6a67` ("OpenClaw & MCP Proxy Integration Architecture") updated for v2.
+
+### ✅ Verification
+- **Test Suite**: 193/193 end-to-end tests passing.
+- **MCP Proxy Unit Tests**: 12/12 passing in `bin/test_mcp_proxy_unit.py`.
+- **Default tool count**: 5 protocol + 6 debug + 35 catalog = 46.
+- **With `MCP_PROXY_ALLOW_DESTRUCTIVE=1`**: 5 + 6 + 44 = 55.
+
+---
+
 ## April 6, 2026
 
 ### ✨ New Features

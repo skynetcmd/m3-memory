@@ -37,4 +37,4 @@ Write a memory: "M3 Memory is active in this project"
 Then search for: "M3 Memory"
 ```
 
-For the full tool reference (all 25 tools, parameters, and behaviors), see [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md).
+For the full tool reference (all 44 tools, parameters, and behaviors), see [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md).
