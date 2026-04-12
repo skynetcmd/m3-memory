@@ -62,16 +62,35 @@ Add the M3 Memory MCP server to your agent's config file.
 }
 ```
 
-**Aider** (`.aider.conf.yml` or MCP config):
+**Aider** — Aider does not natively speak MCP. Use the bundled [`mcp_proxy`](./bin/mcp_proxy.py) to expose m3-memory (plus the rest of the catalog — 55 tools total) to Aider over an OpenAI-compatible endpoint on `localhost:9000`, then point Aider at the proxy:
+```bash
+python bin/mcp_proxy.py               # or: bash bin/start_mcp_proxy.sh
+aider --openai-api-base http://localhost:9000/v1
+```
+The proxy routes by model name — `--model openai/claude-sonnet-4-6` hits Anthropic, `gemini-*` hits Google AI, `grok-*` hits xAI, and anything else falls through to LM Studio on `localhost:1234`. Set `MCP_PROXY_ALLOW_DESTRUCTIVE=1` if you want `memory_delete`, `gdpr_*`, `*_export`, etc. exposed (off by default).
+
+**OpenCode** (`opencode.json` or `opencode.jsonc` in project root or `~/.config/opencode/`):
 ```json
 {
-  "mcpServers": {
-    "memory": { "command": "mcp-memory" }
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "memory": {
+      "type": "local",
+      "command": ["mcp-memory"],
+      "enabled": true
+    }
   }
 }
 ```
 
 Restart your agent after saving the config.
+
+### Disable your host agent's built-in memory
+
+Some agents ship with their own local memory system that will compete with m3-memory if left on. **m3-memory is the single source of truth for this project** — turn the built-in one off:
+
+- **Claude Code** — has a built-in "auto memory" system that writes flat markdown files under `~/.claude/projects/<project>/memory/` with a `MEMORY.md` index. This project's [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) already instructs Claude to ignore it, but if you previously had flat-file memories in that directory, migrate them into m3-memory via `memory_write` and then delete the flat files. Claude will load `CLAUDE.md` → `AGENT_INSTRUCTIONS.md` automatically from the project root, which applies the override.
+- **Gemini CLI, Aider, OpenCode** — no built-in memory system to disable. They pick up `GEMINI.md` / `CONVENTIONS.md` / `AGENTS.md` respectively (all shims pointing at `AGENT_INSTRUCTIONS.md`).
 
 ---
 
