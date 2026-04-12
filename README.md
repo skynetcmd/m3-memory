@@ -14,7 +14,7 @@ Your agent forgets everything between sessions. M3 Memory fixes that. Install it
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square"></a>
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
-  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-green?style=flat-square"></a>
+  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-25_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
@@ -90,8 +90,8 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | Good fit | Not the right tool |
 |---|---|
 | You use Claude Code, Gemini CLI, Aider, or any MCP agent | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
-| You want memory that persists across sessions and devices | You want a full agent runtime with orchestration — see [Letta](https://letta.ai) |
-| You want everything local, offline, and private | You only need in-session chat context |
+| You're coordinating multiple agents on a shared local store | You need a hosted agent runtime with managed scaling — see [Letta](https://letta.ai) |
+| You want memory that persists across sessions and devices | You only need in-session chat context |
 
 ---
 
@@ -99,13 +99,13 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| **25 MCP tools** | Write, search, update, link, export, forget — all as native MCP operations |
-| **41 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, and maintenance paths |
+| **44 MCP tools** | Memory, search, GDPR — plus agent registry, handoffs, notifications, and tasks for multi-agent orchestration |
+| **193 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, and orchestration paths |
 | **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
 | **GDPR compliance** | `gdpr_forget` (Article 17) and `gdpr_export` (Article 20) as built-in tools |
 | **Self-maintaining** | Automatic decay, dedup, orphan pruning, retention enforcement |
-| **MIT licensed** | Free. No SaaS tier, no usage limits, no lock-in |
+| **Apache 2.0 licensed** | Free. No SaaS tier, no usage limits, no lock-in |
 
 ---
 
