@@ -1,6 +1,6 @@
 # M3 Memory: API Reference
 
-All 25 MCP tools exposed by the memory bridge (`bin/memory_bridge.py`). For behavioral rules and usage guidance, see [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md).
+All 44 MCP tools exposed by the memory bridge (`bin/memory_bridge.py`), sourced from `bin/mcp_tool_catalog.py`. For behavioral rules and usage guidance, see [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md).
 
 ---
 
