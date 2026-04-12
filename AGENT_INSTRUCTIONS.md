@@ -33,6 +33,27 @@ When you retrieve memories, explore connections using `memory_graph` (1–3 hop 
 - Let M3 handle automatic deduplication, decay, summarization, and self-maintenance.
 - Everything stays 100% local and private.
 
+### 6. Review the Refresh Queue Periodically
+Some memories are flagged with a `refresh_on` timestamp — these are facts, decisions,
+or configs with planned obsolescence (e.g., "review quarterly", "re-verify after next
+release"). When their date arrives they should be reviewed, not silently forgotten.
+
+**When to check:**
+- **At session start** — call `memory_refresh_queue` once. If it's non-empty, surface
+  the backlog to the user before starting substantive work.
+- **On long-running sessions** — re-check at natural breakpoints (between major tasks,
+  after a topic shift, before wrap-up). Don't interrupt a transaction mid-flight.
+- **When `agent_register` or `agent_offline` returns a refresh hint** — the response
+  string ends with `| N memories of yours due for refresh`. Treat this as a reminder
+  to call `memory_refresh_queue` at the next natural breakpoint.
+- **When polling notifications** — `notifications_poll` may return a `refresh_due`
+  event with `{count, sample_ids}`. Ack it after addressing (or after deciding to
+  defer) so maintenance can re-notify you if the backlog changes.
+
+**How to refresh a memory:** call `memory_update` with new content and either a new
+`refresh_on` date or `refresh_on="clear"` to remove the flag. The old value is
+preserved in `memory_history`; you are not creating a duplicate row.
+
 ### Quick Reference Flow
 | Situation | Action |
 |-----------|--------|
@@ -40,6 +61,7 @@ When you retrieve memories, explore connections using `memory_graph` (1–3 hop 
 | New important information | `memory_write` |
 | Information has changed | `memory_update` |
 | Need deeper understanding of connections | `memory_graph` |
+| Session start / agent register returns refresh hint | `memory_refresh_queue` |
 | User asks to forget something | `gdpr_forget` |
 | Need full context on a specific memory | `memory_get` or `memory_suggest` |
 
@@ -68,6 +90,9 @@ Call `memory_write` to persist any fact, decision, preference, observation, or k
 | `valid_to` | No | When this fact stopped being true (ISO 8601). Empty = still valid. |
 | `embed` | No | Generate embedding for semantic search (default true) |
 | `metadata` | No | JSON string with tags, categories, or custom fields |
+| `conversation_id` | No | Group this memory with a conversation / team session. Same ID space as `conversation_start`. Nullable; leave empty for standalone memories. |
+| `refresh_on` | No | ISO 8601 timestamp when this memory should be flagged for review. Use for facts with planned obsolescence. Surfaces via `memory_refresh_queue` once due. |
+| `refresh_reason` | No | Short human-readable reason (e.g., "quarterly policy review") shown in the refresh queue. |
 
 **Type selection guide:**
 - `fact` — objective truths about the world or system ("PostgreSQL 15 is the warehouse version")
@@ -125,6 +150,7 @@ graph LR
 | `scope` | No | Filter by scope |
 | `as_of` | No | Point-in-time query: "what was true as of this date?" (ISO 8601) |
 | `search_mode` | No | `hybrid` (default) or `semantic` |
+| `conversation_id` | No | Restrict results to a specific conversation / team session. Backed by a partial index — cheap even on large stores. |
 
 **How search works:** FTS5 keyword matching → vector similarity → MMR diversity re-ranking. Results are scored as `0.7 × vector + 0.3 × BM25`. If FTS returns nothing, falls back to pure semantic search automatically.
 
@@ -137,9 +163,10 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 | Tool | When to Use |
 |------|-------------|
 | `memory_get(id)` | Retrieve full memory by UUID |
-| `memory_update(id, ...)` | Update content, title, metadata, or importance. Records audit trail. |
+| `memory_update(id, ...)` | Update content, title, metadata, importance, `refresh_on`, `refresh_reason`, or `conversation_id`. Each change is recorded to `memory_history`. Pass the literal string `"clear"` for `refresh_on` / `refresh_reason` / `conversation_id` to NULL the column; empty string = no change. |
 | `memory_delete(id)` | Soft-delete (default, recoverable) or `hard=True` (cascade deletes embeddings, relationships, history) |
 | `memory_verify(id)` | Check content integrity — re-computes SHA-256 and compares to stored hash |
+| `memory_refresh_queue(agent_id, limit, include_future)` | List memories whose `refresh_on` has arrived. Read-only. Pass `include_future=True` to see all memories with a refresh date set, not just overdue ones. Call this at session start and at logical breakpoints. |
 
 ### Knowledge Graph
 
@@ -183,6 +210,106 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 |------|-------------|
 | `memory_cost_report()` | Check session operation counts (embed calls, tokens, searches, writes) |
 | `chroma_sync(direction)` | Manual sync with ChromaDB. Use `push`, `pull`, or `both`. |
+
+---
+
+## Multi-Agent / Mixed-Fleet Collaboration
+
+M3 is provider-agnostic. A single session can include Claude agents, Gemini
+agents, Aider or other local-LLM agents, and anything else that speaks MCP —
+they all share one memory store and coordinate through the same orchestration
+primitives. Nothing in the API is tied to a specific model family.
+
+### Identity: one `agent_id` per agent, not per model
+
+Every agent must register itself with a **unique `agent_id`** before doing
+orchestration work. The `model_id` field records *which* model is behind that
+agent and is free-form (e.g. `claude-opus-4-6`, `gemini-2.5-pro`,
+`deepseek-coder-v2-local`). Two agents running the same model still need
+distinct `agent_id`s.
+
+```
+agent_register(agent_id="claude-planner",  model_id="claude-opus-4-6",  role="planner")
+agent_register(agent_id="claude-reviewer", model_id="claude-opus-4-6",  role="reviewer")
+agent_register(agent_id="gemini-researcher", model_id="gemini-2.5-pro", role="researcher")
+agent_register(agent_id="aider-local",     model_id="deepseek-coder-v2", role="implementer")
+```
+
+Call `agent_heartbeat` periodically (or let the team runner do it) so
+`agent_list` reflects who is actually online. Call `agent_offline` at shutdown
+— it's also one of the two points where a refresh backlog hint is surfaced.
+
+### Sharing a conversation across the fleet
+
+Use `conversation_id` to scope a working session across every participating
+agent. It lives in the same ID space as `conversation_start` /
+`conversation_append`, so you can use a conversation thread as the ID:
+
+```
+conv = conversation_start(title="Ship v2.3 release")  # returns a conversation_id
+# every agent writes memories tagged with this id:
+memory_write(type="decision", content="...", agent_id="claude-planner",  conversation_id=conv)
+memory_write(type="note",     content="...", agent_id="gemini-researcher", conversation_id=conv)
+memory_write(type="code",     content="...", agent_id="aider-local",     conversation_id=conv)
+```
+
+Later, any agent can retrieve the session's shared context with:
+
+```
+memory_search(query="release blockers", conversation_id=conv)
+```
+
+The `conversation_id` filter is backed by a composite partial index
+`(conversation_id, created_at) WHERE is_deleted = 0`, so scoping is cheap even
+on large stores — use it liberally.
+
+### Handoffs, inbox, notifications, tasks
+
+These work identically regardless of which model is on either side:
+
+| Tool | Use |
+|------|-----|
+| `memory_handoff(from_agent, to_agent, memory_ids, note)` | Hand a bundle of memories from one agent to another. Creates an inbox item for the recipient. |
+| `memory_inbox(agent_id)` | Check pending handoffs addressed to you. Call at session start and at breakpoints. |
+| `memory_inbox_ack(inbox_id)` | Acknowledge after processing. |
+| `notify(to_agent, kind, payload)` | Push a structured event to another agent. |
+| `notifications_poll(agent_id)` | Pull unacked notifications (including `refresh_due` from maintenance). |
+| `notifications_ack(id)` / `notifications_ack_all(agent_id)` | Dismiss after addressing. |
+| `task_create` / `task_assign` / `task_update` / `task_set_result` / `task_tree` | Shared task graph across the fleet — any agent can read or update. |
+
+### Filter scoping is strict — no leaks across conversations
+
+When you pass `conversation_id`, `agent_filter`, `user_id`, or `scope` to
+`memory_search`, the filter is enforced strictly: if nothing in the scoped
+subset matches, you get `"No results found."` The federated ChromaDB fallback
+is deliberately skipped when any scoping filter is active, because Chroma
+does not carry those metadata fields and could not honor them.
+
+Practical consequence: **don't use `conversation_id` as a loose hint.** If you
+want a global view that merely prefers in-conversation memories, run two
+searches (scoped first, then unscoped) and merge — don't expect one call to
+do both.
+
+### Embedding visibility
+
+`memory_write(..., embed=False)` skips embedding generation. Such memories
+are only reachable via FTS5 keyword matching — they are invisible to the
+semantic branch of hybrid search because the SQL INNER JOIN on
+`memory_embeddings` drops them. For anything that should participate in
+vector/semantic retrieval across the fleet, leave `embed` at its default
+(`True`).
+
+### Quick mixed-fleet checklist
+
+1. `agent_register` with a unique `agent_id` (distinct from model_id).
+2. Agree on a `conversation_id` (often via `conversation_start`).
+3. Tag every shared write with that `conversation_id`.
+4. Search scoped (`conversation_id=conv`) for session context; search unscoped
+   for long-term memory.
+5. Use `memory_handoff` for "here is my work, please continue" transfers.
+6. Check `memory_inbox` and `notifications_poll` at session start and
+   breakpoints.
+7. `agent_heartbeat` while active; `agent_offline` when done.
 
 ---
 

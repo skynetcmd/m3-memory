@@ -66,6 +66,26 @@ Left alone, memory systems accumulate noise. M3 fights entropy:
 - **Multi-layered consolidation** — when memory groups grow too large, the local LLM merges old items into summaries, preserving knowledge while reducing clutter
 - **Deduplication** — configurable cosine threshold catches near-duplicates across the last 1000 items
 
+### Refresh Lifecycle
+
+Not all knowledge ages the same way. Some facts have **planned obsolescence** — a quarterly policy review, a config valid until the next release, a customer preference you want to re-verify in 90 days. M3 lets you flag these on write:
+
+- Set `refresh_on` (ISO-8601) + `refresh_reason` when calling `memory_write`
+- Query `memory_refresh_queue` any time to see memories whose date has arrived (read-only; no mutation)
+- When you refresh a memory, call `memory_update` with new content and either a new `refresh_on` or the literal `"clear"` — the old value is preserved in `memory_history`, not duplicated
+
+**Agents learn about the backlog through three off-path channels**, never during transactional work:
+
+1. **Pull** — call `memory_refresh_queue` whenever you want
+2. **Lifecycle hint** — `agent_register` and `agent_offline` return strings that include `| N memories of yours due for refresh` when the backlog is non-empty. Startup and shutdown get a quiet nudge; every other call is untouched.
+3. **Push** — `memory_maintenance` emits one `refresh_due` notification per distinct owning agent, deduped against existing unacked notifications so repeated maintenance runs never flood the channel. Agents see it on their next `notifications_poll`.
+
+Queries are backed by a partial index on `refresh_on WHERE refresh_on IS NOT NULL`, so the backlog count is O(flagged-rows), not O(all-rows) — cheap enough to check on every register/offline.
+
+### Conversation Grouping
+
+Memories written inside a multi-turn or multi-agent session can be tagged with a `conversation_id` that shares the same ID space as `conversation_start` / `conversation_append`. Filter `memory_search` by `conversation_id` to scope retrieval to a single session, or leave it null for a global view. Backed by a composite partial index on `(conversation_id, created_at) WHERE is_deleted = 0`, so in-order retrieval of a conversation's memories is an index-only scan — no sort step.
+
 ### LLM-Powered Intelligence
 
 M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI):
@@ -122,7 +142,7 @@ Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
 
 ## Tested and Measured
 
-### 41 End-to-End Tests
+### 193 End-to-End Tests
 
 Every feature is tested — not just the happy path:
 
@@ -155,14 +175,15 @@ Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local L
 
 ---
 
-## 25 MCP Tools at a Glance
+## 45 MCP Tools at a Glance
 
 | Category | Tools |
 |----------|-------|
 | **Memory Ops** | `memory_write`, `memory_search`, `memory_suggest`, `memory_get`, `memory_update`, `memory_delete`, `memory_verify` |
 | **Knowledge Graph** | `memory_link`, `memory_graph`, `memory_history` |
 | **Conversations** | `conversation_start`, `conversation_append`, `conversation_search`, `conversation_summarize` |
-| **Lifecycle** | `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention`, `memory_feedback` |
+| **Lifecycle** | `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention`, `memory_feedback`, `memory_refresh_queue` |
+| **Orchestration** | `memory_handoff`, `memory_inbox`, `memory_inbox_ack`, `agent_register`, `agent_heartbeat`, `agent_list`, `agent_get`, `agent_offline`, `notify`, `notifications_poll`, `notifications_ack`, `notifications_ack_all`, `task_create`, `task_get`, `task_assign`, `task_update`, `task_set_result`, `task_list`, `task_tree` |
 | **Data Governance** | `gdpr_export`, `gdpr_forget`, `memory_export`, `memory_import` |
 | **Operations** | `memory_cost_report`, `chroma_sync` |
 
