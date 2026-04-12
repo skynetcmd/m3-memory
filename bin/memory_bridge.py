@@ -236,15 +236,17 @@ def memory_cost_report():
 
 @mcp.tool()
 def memory_handoff(from_agent: str, to_agent: str, task: str,
-                   context_ids: list = None, note: str = "") -> str:
+                   context_ids: list = None, note: str = "",
+                   task_id: str = "") -> str:
     """Hand off a task from one agent to another. Writes a new handoff-type
     memory owned to_agent and links it to the given context memories with
     'handoff' edges. Returns a confirmation string with the new memory id.
+    Optionally pass task_id to link to a tracked task.
 
     Note: this is the in-process memory handoff (memory_items + memory_relationships).
     Unrelated to the standalone session_handoff.py MCP server."""
     return memory_core.memory_handoff_impl(from_agent, to_agent, task,
-                                           context_ids or [], note)
+                                           context_ids or [], note, task_id)
 
 @mcp.tool()
 def memory_inbox(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
@@ -256,6 +258,89 @@ def memory_inbox(agent_id: str, unread_only: bool = True, limit: int = 20) -> st
 def memory_inbox_ack(memory_id: str) -> str:
     """Mark a handoff memory as read (sets read_at = now)."""
     return memory_core.memory_inbox_ack_impl(memory_id)
+
+@mcp.tool()
+def agent_register(agent_id: str, role: str = "", capabilities: list = None, metadata: dict = None) -> str:
+    """Register an agent (UPSERT). Sets status=active, last_seen=now."""
+    return memory_core.agent_register_impl(agent_id, role, capabilities or [], metadata or {})
+
+@mcp.tool()
+def agent_heartbeat(agent_id: str) -> str:
+    """Update last_seen and set status=active. Errors if not registered."""
+    return memory_core.agent_heartbeat_impl(agent_id)
+
+@mcp.tool()
+def agent_list(status: str = "", role: str = "") -> str:
+    """List registered agents, optionally filtered by status and/or role."""
+    return memory_core.agent_list_impl(status, role)
+
+@mcp.tool()
+def agent_get(agent_id: str) -> str:
+    """Get full record for one registered agent."""
+    return memory_core.agent_get_impl(agent_id)
+
+@mcp.tool()
+def agent_offline(agent_id: str) -> str:
+    """Mark an agent as offline."""
+    return memory_core.agent_offline_impl(agent_id)
+
+@mcp.tool()
+def notify(agent_id: str, kind: str, payload: dict = None) -> str:
+    """Send a notification to an agent. Lightweight wake signal — agents poll notifications_poll."""
+    return memory_core.notify_impl(agent_id, kind, payload or {})
+
+@mcp.tool()
+def notifications_poll(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
+    """List notifications addressed to agent_id, newest first."""
+    return memory_core.notifications_poll_impl(agent_id, bool(unread_only), int(limit))
+
+@mcp.tool()
+def notifications_ack(notification_id: int) -> str:
+    """Mark one notification as read."""
+    return memory_core.notifications_ack_impl(int(notification_id))
+
+@mcp.tool()
+def notifications_ack_all(agent_id: str) -> str:
+    """Bulk-ack all unread notifications for an agent. Returns count acked."""
+    return memory_core.notifications_ack_all_impl(agent_id)
+
+@mcp.tool()
+def task_create(title: str, created_by: str, description: str = "", owner_agent: str = "",
+                parent_task_id: str = "", metadata: dict = None) -> str:
+    """Create a new task in 'pending' state. Returns task id."""
+    return memory_core.task_create_impl(title, created_by, description, owner_agent,
+                                         parent_task_id, metadata or {})
+
+@mcp.tool()
+def task_assign(task_id: str, owner_agent: str) -> str:
+    """Assign a task to an owner. Sets state=in_progress and notifies the new owner."""
+    return memory_core.task_assign_impl(task_id, owner_agent)
+
+@mcp.tool()
+def task_update(task_id: str, state: str = "", description: str = "",
+                metadata: dict = None, actor: str = "") -> str:
+    """Partial update for a task. Validates state transitions. On terminal state, sets completed_at."""
+    return memory_core.task_update_impl(task_id, state, description, metadata or {}, actor)
+
+@mcp.tool()
+def task_set_result(task_id: str, result_memory_id: str) -> str:
+    """Set the result memory pointer for a task. Does NOT change state."""
+    return memory_core.task_set_result_impl(task_id, result_memory_id)
+
+@mcp.tool()
+def task_get(task_id: str) -> str:
+    """Get full record for one task."""
+    return memory_core.task_get_impl(task_id)
+
+@mcp.tool()
+def task_list(owner_agent: str = "", state: str = "", parent_task_id: str = "", limit: int = 50) -> str:
+    """List tasks with optional filters. Newest updated first."""
+    return memory_core.task_list_impl(owner_agent, state, parent_task_id, int(limit))
+
+@mcp.tool()
+def task_tree(root_task_id: str, max_depth: int = 3) -> str:
+    """Render a recursive subtree of tasks rooted at root_task_id."""
+    return memory_core.task_tree_impl(root_task_id, int(max_depth))
 
 if __name__ == "__main__":
     logger.info("Memory Bridge (Modular) starting...")

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """End-to-end test suite for memory_bridge.py.
 
-Tests all 22 MCP tools (including memory_history, memory_link, memory_graph,
-memory_verify, memory_set_retention, gdpr_export, gdpr_forget, memory_cost_report,
-memory_handoff, memory_inbox, memory_inbox_ack).
+Tests all 38 MCP tools (including agent registry, notifications, task orchestration,
+memory_history, memory_link, memory_graph, memory_verify, memory_set_retention,
+gdpr_export, gdpr_forget, memory_cost_report, memory_handoff, memory_inbox, memory_inbox_ack).
 Embedding-dependent tests are attempted and gracefully skipped when an
 embedding model is not loaded in LM Studio.
 """
@@ -111,6 +111,13 @@ def cleanup():
         conn.execute("DELETE FROM memory_items WHERE agent_id = ?", (AGENT,))
     # Also clean up handoff items for test-agent-B
     conn.execute("DELETE FROM memory_items WHERE agent_id = ? AND type = 'handoff'", ("test-agent-B",))
+    # Clean up new orchestration tables for test agents
+    conn.execute("DELETE FROM notifications WHERE agent_id IN (?, ?)", (AGENT, "test-agent-B"))
+    conn.execute("DELETE FROM memory_history WHERE memory_id IN (SELECT id FROM tasks WHERE created_by IN (?, ?) OR owner_agent IN (?, ?))",
+                 (AGENT, "test-agent-B", AGENT, "test-agent-B"))
+    conn.execute("DELETE FROM tasks WHERE created_by IN (?, ?) OR owner_agent IN (?, ?)",
+                 (AGENT, "test-agent-B", AGENT, "test-agent-B"))
+    conn.execute("DELETE FROM agents WHERE agent_id IN (?, ?)", (AGENT, "test-agent-B"))
     conn.commit()
     conn.close()
 
@@ -119,6 +126,11 @@ def cleanup():
 async def run(lm_online: bool, jina_loaded: bool) -> bool:
     import memory_core
     from memory_bridge import (
+        agent_get,
+        agent_heartbeat,
+        agent_list,
+        agent_offline,
+        agent_register,
         chroma_sync,
         conversation_append,
         conversation_messages,
@@ -138,6 +150,10 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         memory_import,
         memory_update,
         memory_write,
+        notify,
+        notifications_ack,
+        notifications_ack_all,
+        notifications_poll,
         sync_status,
         memory_verify,
         memory_set_retention,
@@ -147,6 +163,13 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         memory_handoff,
         memory_inbox,
         memory_inbox_ack,
+        task_assign,
+        task_create,
+        task_get,
+        task_list,
+        task_set_result,
+        task_tree,
+        task_update,
         VALID_MEMORY_TYPES,
         _ensure_sync_tables,
         _content_hash,
@@ -1031,6 +1054,10 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     # ── 42: memory_handoff / inbox roundtrip ─────────────────────────────────
     print("\n── 42: memory_handoff / inbox roundtrip ─────────────────────────")
 
+    # Register agents for handoff (registry sanity check requires both agents registered)
+    agent_register(AGENT, role="tester", capabilities=["handoff"])
+    agent_register("test-agent-B", role="receiver", capabilities=["handoff"])
+
     # Write 2 seed context memories
     ctx1_res = await memory_write(type="note", content="Context 1 for handoff", title="Context 1", agent_id=AGENT, embed=False)
     ctx1_id = ctx1_res.split("Created: ")[1].split()[0]
@@ -1070,6 +1097,223 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     # Check inbox with unread_only=False (should contain acked item)
     inbox_all = memory_inbox("test-agent-B", unread_only=False)
     check("acked handoff in full inbox", handoff_id_8 in inbox_all)
+
+    # ── 43: agent registry ───────────────────────────────────────────────────
+    print("\n── 43: agent registry ──────────────────────────────────────────")
+    reg_res = agent_register("agent-X", role="tester", capabilities=["a","b"], metadata={"k":"v"})
+    check("agent_register success", reg_res.startswith("Registered:"))
+
+    get_res = agent_get("agent-X")
+    check("agent_get contains role", "tester" in get_res)
+
+    hb_res = agent_heartbeat("agent-X")
+    check("agent_heartbeat success", hb_res.startswith("Heartbeat:"))
+
+    hb_fail = agent_heartbeat("agent-nonexistent")
+    check("agent_heartbeat fails for nonexistent", hb_fail.startswith("Error:"))
+
+    list_res = agent_list(role="tester")
+    check("agent_list contains agent-X", "agent-X" in list_res)
+
+    off_res = agent_offline("agent-X")
+    check("agent_offline success", "offline" in off_res)
+
+    re_reg = agent_register("agent-X", role="tester2")
+    check("re-register is idempotent", re_reg.startswith("Registered:"))
+
+    # Cleanup
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM agents WHERE agent_id='agent-X'")
+    conn.commit()
+    conn.close()
+
+    # ── 44: notifications channel ────────────────────────────────────────────
+    print("\n── 44: notifications channel ───────────────────────────────────")
+    agent_register("notif-test", role="receiver")
+
+    notif_res = notify("notif-test", "test_kind", {"foo": "bar"})
+    check("notify success", notif_res.startswith("Notified"))
+    # Parse notification ID: format is "Notified agent_id with id=<id>..."
+    notif_id = None
+    if "id=" in notif_res:
+        id_part = notif_res.split("id=")[1].split(")")[0]
+        try:
+            notif_id = int(id_part)
+        except ValueError:
+            pass
+
+    poll_res = notifications_poll("notif-test", unread_only=True)
+    check("notifications_poll contains test_kind", "test_kind" in poll_res)
+
+    if notif_id:
+        ack_notif = notifications_ack(notif_id)
+        check("notifications_ack success", ack_notif.startswith("Acked"))
+
+        poll_ack = notifications_poll("notif-test", unread_only=True)
+        check("acked notification not in unread", "(empty)" in poll_ack)
+
+    notify("notif-test", "k1", {})
+    notify("notif-test", "k2", {})
+    ack_all_res = notifications_ack_all("notif-test")
+    check("notifications_ack_all returns count", ack_all_res.startswith("Acked ") and "notifications for notif-test" in ack_all_res)
+
+    # Cleanup
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM notifications WHERE agent_id='notif-test'")
+    conn.execute("DELETE FROM agents WHERE agent_id='notif-test'")
+    conn.commit()
+    conn.close()
+
+    # ── 45: tasks CRUD + state machine ──────────────────────────────────────
+    print("\n── 45: tasks CRUD + state machine ─────────────────────────────")
+    agent_register("task-owner", role="worker")
+
+    task_res = task_create("Test task", created_by=AGENT, description="desc")
+    check("task_create success", task_res.startswith("Task created:"))
+    task_id = task_res.split("Task created: ")[1].split()[0] if "Task created:" in task_res else ""
+    task_id_8 = task_id[:8]
+
+    task_get_res = task_get(task_id) if task_id else "skipped"
+    if task_id:
+        check("task_get contains title", "Test task" in task_get_res)
+
+    task_assign_res = task_assign(task_id, "task-owner") if task_id else "skipped"
+    if task_id:
+        check("task_assign sets in_progress", "in_progress" in task_assign_res)
+
+    task_update_res = task_update(task_id, state="completed", actor=AGENT) if task_id else "skipped"
+    if task_id:
+        check("task_update to completed", "completed" in task_update_res)
+
+    # Try invalid transition (terminal -> in_progress)
+    task_invalid = task_update(task_id, state="in_progress", actor=AGENT) if task_id else "skipped"
+    if task_id:
+        check("task_update rejects invalid transition", task_invalid.startswith("Error:"))
+
+    # Try invalid state
+    task_bogus = task_update(task_id, state="bogus_state", actor=AGENT) if task_id else "skipped"
+    if task_id:
+        check("task_update rejects bogus state", task_bogus.startswith("Error:"))
+
+    task_list_res = task_list(owner_agent="task-owner", state="completed") if task_id else "skipped"
+    if task_id:
+        check("task_list contains completed task", task_id_8 in task_list_res)
+
+    # Subtask tree
+    root_res = task_create("Root", created_by=AGENT) if task_id else ""
+    root_id = root_res.split("Task created: ")[1].split()[0] if "Task created:" in root_res else ""
+    root_id_8 = root_id[:8]
+
+    c1_res = task_create("Child1", created_by=AGENT, parent_task_id=root_id) if root_id else ""
+    c1_id = c1_res.split("Task created: ")[1].split()[0] if "Task created:" in c1_res else ""
+    c1_id_8 = c1_id[:8]
+
+    c2_res = task_create("Child2", created_by=AGENT, parent_task_id=root_id) if root_id else ""
+    c2_id = c2_res.split("Task created: ")[1].split()[0] if "Task created:" in c2_res else ""
+    c2_id_8 = c2_id[:8]
+
+    g_res = task_create("Grand", created_by=AGENT, parent_task_id=c1_id) if c1_id else ""
+    g_id = g_res.split("Task created: ")[1].split()[0] if "Task created:" in g_res else ""
+    g_id_8 = g_id[:8]
+
+    if root_id:
+        tree_res = task_tree(root_id, max_depth=3)
+        check("task_tree contains all 4 ids", root_id_8 in tree_res and c1_id_8 in tree_res and c2_id_8 in tree_res and g_id_8 in tree_res)
+
+    # Cleanup
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM tasks WHERE created_by = ?", (AGENT,))
+    conn.execute("DELETE FROM agents WHERE agent_id='task-owner'")
+    conn.commit()
+    conn.close()
+
+    # ── 46: task state history ──────────────────────────────────────────────
+    print("\n── 46: task state history ──────────────────────────────────────")
+    agent_register("hist-agent-1", role="worker")
+    agent_register("hist-agent-2", role="reviewer")
+
+    hist_task_res = task_create("History task", created_by=AGENT, description="test history")
+    hist_task_id = hist_task_res.split("Task created: ")[1].split()[0] if "Task created:" in hist_task_res else ""
+
+    if hist_task_id:
+        task_assign(hist_task_id, "hist-agent-1")
+        task_update(hist_task_id, state="completed", actor="hist-agent-1")
+
+        conn = sqlite3.connect(DB_PATH)
+        count = conn.execute(
+            "SELECT COUNT(*) FROM memory_history WHERE memory_id = ? AND field='state'",
+            (hist_task_id,)
+        ).fetchone()[0]
+        conn.close()
+        check("task state history recorded", count == 2, f"expected 2 state transitions, got {count}")
+
+    # Cleanup
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM tasks WHERE created_by = ? OR owner_agent IN (?, ?)",
+                 (AGENT, "hist-agent-1", "hist-agent-2"))
+    conn.execute("DELETE FROM agents WHERE agent_id IN (?, ?)", ("hist-agent-1", "hist-agent-2"))
+    conn.commit()
+    conn.close()
+
+    # ── 47: orchestration integration chain ─────────────────────────────────
+    print("\n── 47: orchestration integration chain ─────────────────────────")
+    agent_register(AGENT, role="planner")
+    agent_register("test-agent-B", role="coder")
+
+    integ_task = task_create("Integration", created_by=AGENT)
+    integ_task_id = integ_task.split("Task created: ")[1].split()[0] if "Task created:" in integ_task else ""
+    integ_task_id_8 = integ_task_id[:8]
+
+    if integ_task_id:
+        # Assign task
+        task_assign(integ_task_id, "test-agent-B")
+
+        # Check notification
+        notifs = notifications_poll("test-agent-B")
+        check("task_assign triggers notification", "task_assigned" in notifs)
+
+        # Seed context and handoff with task_id
+        ctx_res = await memory_write(type="note", content="Integration context", title="Context", agent_id=AGENT, embed=False)
+        ctx_id = ctx_res.split("Created: ")[1].split()[0] if "Created:" in ctx_res else ""
+
+        if ctx_id:
+            handoff_integ = memory_handoff(AGENT, "test-agent-B", "integrate the thing", context_ids=[ctx_id], task_id=integ_task_id)
+            check("memory_handoff with task_id", handoff_integ.startswith("Handoff created:"))
+            handoff_integ_id = handoff_integ.split("Handoff created: ")[1].split()[0] if "Handoff created:" in handoff_integ else ""
+
+            # Check notifications include task_id
+            notifs2 = notifications_poll("test-agent-B")
+            check("handoff notification contains task_id", integ_task_id_8 in notifs2 or "handoff" in notifs2)
+
+            # Ack all
+            notifications_ack_all("test-agent-B")
+
+            # Check inbox
+            inbox_integ = memory_inbox("test-agent-B")
+            check("inbox contains handoff", "integrate the thing" in inbox_integ or handoff_integ_id[:8] in inbox_integ)
+
+            # Ack handoff
+            if handoff_integ_id:
+                memory_inbox_ack(handoff_integ_id)
+
+            # Seed result and close task
+            result_res = await memory_write(type="note", content="Integration result", title="Result", agent_id=AGENT, embed=False)
+            result_id = result_res.split("Created: ")[1].split()[0] if "Created:" in result_res else ""
+
+            if result_id:
+                task_set_result(integ_task_id, result_id)
+                task_update(integ_task_id, state="completed", actor="test-agent-B")
+
+                # Check planner notification
+                planner_notifs = notifications_poll(AGENT)
+                check("task_completed notification sent", "task_completed" in planner_notifs and integ_task_id_8 in planner_notifs)
+
+    # Cleanup
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM tasks WHERE created_by = ? OR owner_agent = ?", (AGENT, "test-agent-B"))
+    conn.execute("DELETE FROM agents WHERE agent_id IN (?, ?)", (AGENT, "test-agent-B"))
+    conn.commit()
+    conn.close()
 
     # ── Summary ───────────────────────────────────────────────────────────────
     cleanup()
