@@ -1,0 +1,104 @@
+# Multi-agent team roster.
+#
+# Each entry under `agents` becomes a registered agent in m3-memory and a
+# dispatch target in the orchestrator. Add, remove, or rename freely — the
+# orchestrator reads this file at startup and will pick up the changes.
+#
+# `provider` must match a key in `providers` below. Adding a brand-new
+# provider only requires adding a new entry there (and, if it's not already
+# OpenAI-compatible, an adapter in orchestrator.py — see README).
+
+agents:
+  - name: claude-planner
+    provider: anthropic
+    model: claude-opus-4-6
+    role: planner
+    capabilities: [plan, decompose, review, architect]
+    system_prompt: |
+      You are the planning lead for a multi-agent team. Your job is to break
+      incoming work into concrete subtasks and assign each to the right
+      teammate based on their capabilities. You have access to m3-memory's
+      task_create, task_assign, agent_list, and memory_handoff tools.
+      Prefer small, well-specified subtasks over large vague ones.
+
+  - name: gpt-builder
+    provider: openai
+    model: gpt-4.1
+    role: implementer
+    capabilities: [code, write, execute, refactor]
+    system_prompt: |
+      You are the build lead. You execute well-specified implementation
+      tasks. Read the task description carefully, look up any context
+      memories the planner attached, do the work, and write the result
+      back to memory before marking the task complete.
+
+  - name: gemini-analyst
+    provider: gemini
+    model: gemini-2.0-pro
+    role: researcher
+    capabilities: [longcontext, read, summarize, analyze]
+    system_prompt: |
+      You are the research lead. You handle tasks that require reading
+      large amounts of context — codebases, documents, transcripts.
+      Summarize findings concisely and write them to memory so the rest
+      of the team can build on them.
+
+  - name: grok-reviewer
+    provider: grok
+    model: grok-3-latest
+    role: reviewer
+    capabilities: [verify, web, contrarian, factcheck]
+    system_prompt: |
+      You are the review lead. You take completed work from other agents
+      and stress-test it: look for bugs, missed edge cases, and factual
+      errors. You have web access — use it to verify claims. Be specific
+      about what's wrong and why.
+
+# Provider definitions. Each provider declares how to reach its API. The
+# `format` field tells the orchestrator which translation path to use:
+#   - openai_compat: direct passthrough (OpenAI, Grok, Perplexity, LM Studio, vLLM)
+#   - anthropic:     translate via AgentProtocol.openai_to_anthropic
+#   - gemini:        translate via AgentProtocol.openai_to_gemini
+#
+# To add a new provider that speaks a different protocol, add a new format
+# value here and a matching branch in orchestrator.dispatch().
+
+providers:
+  openai:
+    format: openai_compat
+    base_url: https://api.openai.com/v1/chat/completions
+    api_key_env: OPENAI_API_KEY
+
+  anthropic:
+    format: anthropic
+    base_url: https://api.anthropic.com/v1/messages
+    api_key_env: ANTHROPIC_API_KEY
+
+  gemini:
+    format: gemini
+    base_url: https://generativelanguage.googleapis.com/v1beta/models
+    api_key_env: GEMINI_API_KEY
+
+  grok:
+    format: openai_compat
+    base_url: https://api.x.ai/v1/chat/completions
+    api_key_env: GROK_API_KEY
+
+  # Examples of providers you could add without touching code:
+  # perplexity:
+  #   format: openai_compat
+  #   base_url: https://api.perplexity.ai/chat/completions
+  #   api_key_env: PPLX_API_KEY
+  #
+  # local-lmstudio:
+  #   format: openai_compat
+  #   base_url: http://localhost:1234/v1/chat/completions
+  #   api_key_env: LM_API_TOKEN
+
+# Orchestrator behavior knobs.
+orchestrator:
+  poll_interval_seconds: 5
+  max_iterations: 0      # 0 = run forever, otherwise stop after N ticks
+  notification_kinds:    # which notification kinds wake an agent
+    - task_assigned
+    - handoff
