@@ -153,11 +153,13 @@ async def _auto_classify(content: str, title: str) -> str:
     if c_hash in _CLASSIFY_CACHE:
         return _CLASSIFY_CACHE[c_hash]
 
-    # Use a localized set to avoid circular import with memory_bridge
+    # Localized copy of mcp_tool_catalog.VALID_MEMORY_TYPES minus "auto"
+    # (auto is the sentinel that requests classification, not a classifier output).
+    # Kept local to avoid circular import: mcp_tool_catalog imports memory_core.
     valid_types = {
         "note", "fact", "decision", "preference", "conversation", "message",
         "task", "code", "config", "observation", "plan", "summary", "snippet",
-        "reference", "log", "home", "user_fact", "scratchpad",
+        "reference", "log", "home", "user_fact", "scratchpad", "knowledge",
     }
     
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"

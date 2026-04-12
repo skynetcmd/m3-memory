@@ -1,12 +1,25 @@
-# Multi-agent team roster.
+# Multi-agent team roster (v2 — real MCP host).
 #
 # Each entry under `agents` becomes a registered agent in m3-memory and a
 # dispatch target in the orchestrator. Add, remove, or rename freely — the
 # orchestrator reads this file at startup and will pick up the changes.
 #
 # `provider` must match a key in `providers` below. Adding a brand-new
-# provider only requires adding a new entry there (and, if it's not already
-# OpenAI-compatible, an adapter in orchestrator.py — see README).
+# provider only requires adding a new entry there (and, if it's not
+# already OpenAI-compatible, a branch in dispatch.py — see README).
+#
+# `model` is whatever model id the provider exposes. Don't pin a stale
+# default — pick the model you actually want at the time you write this
+# file. The orchestrator passes the string through verbatim.
+#
+# Optional `tools:` block per agent restricts what m3-memory tools that
+# agent can call:
+#   tools:
+#     allow: [memory_write, memory_search, ...]   # explicit allowlist
+#     deny:  [memory_delete]                       # subtractive
+# If `allow` is omitted, the agent gets the catalog default allowlist
+# (everything except destructive ops like memory_delete, gdpr_*, etc.).
+# `deny` is applied after `allow` and is always honored.
 
 agents:
   - name: claude-planner
@@ -14,54 +27,109 @@ agents:
     model: claude-opus-4-6
     role: planner
     capabilities: [plan, decompose, review, architect]
+    tools:
+      allow:
+        - memory_search
+        - memory_get
+        - memory_write
+        - memory_link
+        - memory_handoff
+        - agent_list
+        - task_create
+        - task_assign
+        - task_get
+        - task_list
+        - task_update
+        - notifications_poll
+        - notifications_ack
     system_prompt: |
-      You are the planning lead for a multi-agent team. Your job is to break
-      incoming work into concrete subtasks and assign each to the right
-      teammate based on their capabilities. You have access to m3-memory's
-      task_create, task_assign, agent_list, and memory_handoff tools.
-      Prefer small, well-specified subtasks over large vague ones.
+      You are the planning lead for a multi-agent team. Your job is to
+      break incoming work into concrete subtasks and assign each to the
+      right teammate based on their capabilities.
+
+      Use agent_list to see who is available. Use task_create + task_assign
+      to hand work off. Use memory_handoff (or memory_write + memory_link)
+      to attach context. Prefer small, well-specified subtasks over large
+      vague ones. When you have decomposed and assigned the work, call
+      task_update on the original task with state="completed" and return
+      a short final message.
 
   - name: gpt-builder
     provider: openai
     model: gpt-4.1
     role: implementer
     capabilities: [code, write, execute, refactor]
+    tools:
+      allow:
+        - memory_search
+        - memory_get
+        - memory_write
+        - memory_link
+        - memory_inbox
+        - task_get
+        - task_update
+        - notifications_poll
+        - notifications_ack
     system_prompt: |
       You are the build lead. You execute well-specified implementation
       tasks. Read the task description carefully, look up any context
-      memories the planner attached, do the work, and write the result
-      back to memory before marking the task complete.
+      memories the planner attached (memory_search, memory_get,
+      memory_inbox), do the work, and write the result to memory
+      (memory_write) before marking the task complete with
+      task_update(task_id, state="completed").
 
   - name: gemini-analyst
     provider: gemini
-    model: gemini-2.0-pro
+    model: gemini-2.5-pro
     role: researcher
     capabilities: [longcontext, read, summarize, analyze]
+    tools:
+      allow:
+        - memory_search
+        - memory_get
+        - memory_write
+        - memory_link
+        - task_get
+        - task_update
+        - notifications_poll
+        - notifications_ack
     system_prompt: |
       You are the research lead. You handle tasks that require reading
       large amounts of context — codebases, documents, transcripts.
       Summarize findings concisely and write them to memory so the rest
-      of the team can build on them.
+      of the team can build on them. Mark the task complete via
+      task_update when done.
 
   - name: grok-reviewer
     provider: grok
     model: grok-3-latest
     role: reviewer
     capabilities: [verify, web, contrarian, factcheck]
+    tools:
+      allow:
+        - memory_search
+        - memory_get
+        - memory_write
+        - memory_link
+        - task_get
+        - task_update
+        - notifications_poll
+        - notifications_ack
     system_prompt: |
       You are the review lead. You take completed work from other agents
       and stress-test it: look for bugs, missed edge cases, and factual
-      errors. You have web access — use it to verify claims. Be specific
-      about what's wrong and why.
+      errors. Be specific about what's wrong and why. Write your review
+      to memory and mark the task complete with task_update.
 
 # Provider definitions. Each provider declares how to reach its API. The
-# `format` field tells the orchestrator which translation path to use:
-#   - openai_compat: direct passthrough (OpenAI, Grok, Perplexity, LM Studio, vLLM)
-#   - anthropic:     translate via AgentProtocol.openai_to_anthropic
-#   - gemini:        translate via AgentProtocol.openai_to_gemini
+# `format` field tells dispatch.py which translation path to use:
+#   - openai_compat: direct passthrough (OpenAI, Grok, Groq, Perplexity,
+#                    OpenRouter, Together, LM Studio, vLLM, LocalAI, ...)
+#   - anthropic:     translate via AgentProtocol.openai_to_anthropic_with_tools
+#   - gemini:        translate via AgentProtocol.openai_to_gemini_with_tools
 #
-# To add a new provider that speaks a different protocol, add a new format
-# value here and a matching branch in orchestrator.dispatch().
+# To add a new provider that speaks a different protocol, add a new
+# format value here and a matching branch in dispatch._call_provider_with_retry.
 
 providers:
   openai:
@@ -84,21 +152,55 @@ providers:
     base_url: https://api.x.ai/v1/chat/completions
     api_key_env: GROK_API_KEY
 
-  # Examples of providers you could add without touching code:
+  # Examples of providers you could add without touching code. Pick the
+  # ones you actually use, set the matching API key env var, and point an
+  # agent at it via `provider: <name>`.
+  #
+  # groq:
+  #   format: openai_compat
+  #   base_url: https://api.groq.com/openai/v1/chat/completions
+  #   api_key_env: GROQ_API_KEY
+  #
+  # openrouter:
+  #   format: openai_compat
+  #   base_url: https://openrouter.ai/api/v1/chat/completions
+  #   api_key_env: OPENROUTER_API_KEY
+  #
+  # together:
+  #   format: openai_compat
+  #   base_url: https://api.together.xyz/v1/chat/completions
+  #   api_key_env: TOGETHER_API_KEY
+  #
   # perplexity:
   #   format: openai_compat
   #   base_url: https://api.perplexity.ai/chat/completions
   #   api_key_env: PPLX_API_KEY
   #
-  # local-lmstudio:
+  # lm-studio:
   #   format: openai_compat
   #   base_url: http://localhost:1234/v1/chat/completions
-  #   api_key_env: LM_API_TOKEN
+  #   api_key_env: LM_STUDIO_API_KEY     # any non-empty string is fine
+  #
+  # ollama:
+  #   format: openai_compat
+  #   base_url: http://localhost:11434/v1/chat/completions
+  #   api_key_env: OLLAMA_API_KEY        # ignored by ollama, leave unset
 
 # Orchestrator behavior knobs.
 orchestrator:
   poll_interval_seconds: 5
-  max_iterations: 0      # 0 = run forever, otherwise stop after N ticks
-  notification_kinds:    # which notification kinds wake an agent
+  max_iterations: 0              # 0 = run forever, otherwise stop after N idle ticks
+  max_concurrent_dispatches: 4   # how many notifications dispatch in parallel per tick
+  notification_kinds:            # which notification kinds wake an agent
     - task_assigned
     - handoff
+
+  # Per-dispatch bounds. Every notification gets its own budget. These are
+  # the safety net against runaway tool loops, slow providers, and prompt
+  # bugs. Tune up if your tasks legitimately need more headroom.
+  dispatch_limits:
+    max_turns: 8                 # provider round-trips per dispatch
+    max_tool_calls: 24           # total tool calls per dispatch
+    max_seconds: 120             # wall clock per dispatch
+    max_tokens_per_call: 4096    # provider max_tokens per request
+    provider_retries: 3          # retries on 429 / 5xx (exponential backoff)
