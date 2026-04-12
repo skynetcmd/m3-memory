@@ -4,6 +4,38 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [2026.4.12b] — April 12, 2026 — Conversation Grouping, Refresh Lifecycle, Reversible Migrations
+
+### Added
+- **Reversible migration system** — `bin/migrate_memory.py` rewritten as a subcommand CLI: `status`, `up`, `down --to N`, `backup`, `restore`. Paired `NNN_name.up.sql` / `NNN_name.down.sql` files. File-level DB backups (including `-wal` / `-shm`) written automatically before every `up`/`down` to a user-chosen directory (default `~/.m3-memory/backups/`, persisted in `memory/.migrate_config.json`). Interactive confirmation with `-y` escape hatch for CI. Legacy v001–v012 treated as up-only — `down` refuses to cross them with a clear error naming the lowest reversible target.
+- **`memory_items.conversation_id`** (migration v013) — groups memories by conversation / team session. Same ID space as `conversation_start` / `conversation_append`. Accepted as a parameter on `memory_write`, `memory_update`, and `memory_search`.
+- **`memory_items.refresh_on` + `refresh_reason`** (migration v014) — planned-obsolescence timestamps. Partial index on `refresh_on WHERE refresh_on IS NOT NULL` keeps lookups O(flagged-rows).
+- **`memory_refresh_queue` MCP tool** (45 total) — read-only query for memories due for review. Params: `agent_id`, `limit`, `include_future`.
+- **Refresh backlog surfaces via three off-path channels:**
+  - Pull: `memory_refresh_queue` tool
+  - Lifecycle hint: `agent_register` and `agent_offline` response strings append `| N memories of yours due for refresh` when backlog is non-empty
+  - Push: `memory_maintenance` emits one `refresh_due` notification per distinct owning agent, deduped against existing unacked notifications
+- **Composite partial index** `idx_mi_conversation_id ON memory_items(conversation_id, created_at) WHERE is_deleted = 0` (migration v015) — replaces the plain v013 index so `conversation_id` scoped retrieval gets an index scan with ordered results. Verified with `EXPLAIN QUERY PLAN` on a synthetic 1000-row fixture.
+
+### Changed
+- **`memory_write`** — accepts `conversation_id`, `refresh_on`, `refresh_reason` parameters. All nullable; existing callers unaffected.
+- **`memory_search`** — accepts `conversation_id` filter. Propagated through all recursive fallback paths (FTS → semantic, no-match → semantic, operational-error → semantic).
+- **`memory_update`** — accepts `refresh_on`, `refresh_reason`, `conversation_id`. Sentinel `"clear"` sets a field to NULL; empty string means no change. Field-level audit rows written to `memory_history`.
+- **`memory_maintenance`** — appends `Refresh queue: N memories due for review` to its report when the backlog is non-empty, then fans out notifications by owning agent.
+
+### Docs
+- **AGENT_INSTRUCTIONS.md** — new behavioral rule §6 "Review the Refresh Queue Periodically" with startup / long-session / breakpoint guidance; new parameters documented in `memory_write` / `memory_search` / `memory_update` tables; `memory_refresh_queue` added to retrieval table.
+- **CORE_FEATURES.md** — new "Refresh Lifecycle" and "Conversation Grouping" feature sections; 25→45 MCP tool summary table (now grouped by category including Orchestration).
+- **TECHNICAL_DETAILS.md** — new "Indexes on `memory_items`" table, expanded "Migrations" section covering subcommands / file naming / version tracking / backups / reversibility rules, new top-level "Refresh Lifecycle" section with data flow diagram and design rationale for reusing `memory_history` instead of a parallel soft-delete lifecycle.
+- **README.md** — minimal updates (44→45 tool count in badge and summary text).
+
+### Test Coverage
+- 193/193 end-to-end tests passing (unchanged from previous entry — all new paths are additive)
+- 12/12 mcp_proxy unit tests passing — `test_full_catalog_count` bumped 44→45; `test_legacy_dispatch_table_complete` confirms `memory_refresh_queue` is reachable through the proxy's legacy dispatch path; `test_inject_agent_id_on_memory_write` confirms agent_id enforcement still holds with the new `conversation_id` / `refresh_on` / `refresh_reason` parameters
+- New end-to-end verification covers: conversation_id write/read roundtrip, refresh_on past/future/clear lifecycle, maintenance notification fan-out and dedup, post-ack re-notification, planner confirmation for v015 composite index
+
+---
+
 ## [2026.4.12] — April 12, 2026 — Multi-Agent Orchestration + MCP Proxy v2
 
 ### Added

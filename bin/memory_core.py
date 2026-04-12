@@ -443,7 +443,7 @@ async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
         logger.debug(f"ChromaDB federated query failed: {e}")
         return []
 
-async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, _depth=0):
+async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", _depth=0):
     try:
         k = int(k)
     except (TypeError, ValueError):
@@ -483,6 +483,9 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
     if scope:
         where_clauses.append("mi.scope = ?")
         params.append(scope)
+    if conversation_id:
+        where_clauses.append("mi.conversation_id = ?")
+        params.append(conversation_id)
 
     if as_of:
         where_clauses.append("(mi.valid_from = '' OR mi.valid_from <= ?)")
@@ -528,16 +531,16 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
                 else:
                     clean_query = _sanitize_fts(clean_query)
                     if not clean_query:
-                        return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, _depth=_depth + 1)
+                        return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, conversation_id=conversation_id, _depth=_depth + 1)
                     fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
                 
                 rows = db.execute(sql, (*params, fts_query)).fetchall()
                 if not rows:
                     # Fallback to partial semantic if no FTS matches
-                    return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, _depth=_depth + 1)
+                    return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, conversation_id=conversation_id, _depth=_depth + 1)
     except sqlite3.OperationalError:
         # FTS query might fail on complex syntax, fallback to semantic
-        return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, _depth=_depth + 1)
+        return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, conversation_id=conversation_id, _depth=_depth + 1)
 
     # 3. Calculate Vector similarity and combine scores
     scored = []
@@ -607,7 +610,13 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
         ranked = pre_ranked
     
     # 4. Federated Fallback (Properly using ChromaDB as L3)
-    if len(ranked) < 3 and not type_filter:
+    # Skip when a strict scoping filter is active — federated Chroma has no
+    # conversation_id / agent_id / user_id / scope metadata to honor, so results
+    # would leak past the filter.
+    _skip_federated = bool(
+        type_filter or conversation_id or agent_filter or user_id or scope
+    )
+    if len(ranked) < 3 and not _skip_federated:
         fed_results = await _query_chroma(q_vec, k=3)
         for fr in fed_results:
             # Avoid duplicating items that might already be in local SQLite
@@ -687,7 +696,7 @@ def memory_cost_report_impl() -> str:
         lines.append(f"  {key}: {val}")
     return "\n".join(lines)
 
-async def memory_update_impl(id, content="", title="", metadata="", importance=-1.0, reembed=False):
+async def memory_update_impl(id, content="", title="", metadata="", importance=-1.0, reembed=False, refresh_on="", refresh_reason="", conversation_id=""):
     if isinstance(metadata, dict):
         metadata = json.dumps(metadata)
     elif not isinstance(metadata, str):
@@ -699,7 +708,10 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
         importance = -1.0
     with _db() as db:
         # Read old values for audit trail
-        old = db.execute("SELECT content, title FROM memory_items WHERE id = ?", (id,)).fetchone()
+        old = db.execute(
+            "SELECT content, title, refresh_on, refresh_reason, conversation_id FROM memory_items WHERE id = ?",
+            (id,)
+        ).fetchone()
         if content:
             _record_history(id, "update", old["content"] if old else None, content, "content")
             db.execute("UPDATE memory_items SET content = ? WHERE id = ?", (content, id))
@@ -708,6 +720,21 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
             db.execute("UPDATE memory_items SET title = ? WHERE id = ?", (title, id))
         if importance >= 0: db.execute("UPDATE memory_items SET importance = ? WHERE id = ?", (importance, id))
         if metadata: db.execute("UPDATE memory_items SET metadata_json = ? WHERE id = ?", (metadata, id))
+        # Refresh lifecycle: empty string leaves unchanged, "clear" clears, anything
+        # else is treated as a new ISO timestamp. Using the explicit sentinel "clear"
+        # lets callers distinguish "no change" from "mark as refreshed, remove reminder".
+        if refresh_on:
+            new_val = None if refresh_on == "clear" else refresh_on
+            _record_history(id, "update", old["refresh_on"] if old else None, new_val, "refresh_on")
+            db.execute("UPDATE memory_items SET refresh_on = ? WHERE id = ?", (new_val, id))
+        if refresh_reason:
+            new_val = None if refresh_reason == "clear" else refresh_reason
+            _record_history(id, "update", old["refresh_reason"] if old else None, new_val, "refresh_reason")
+            db.execute("UPDATE memory_items SET refresh_reason = ? WHERE id = ?", (new_val, id))
+        if conversation_id:
+            new_val = None if conversation_id == "clear" else conversation_id
+            _record_history(id, "update", old["conversation_id"] if old else None, new_val, "conversation_id")
+            db.execute("UPDATE memory_items SET conversation_id = ? WHERE id = ?", (new_val, id))
         db.execute("UPDATE memory_items SET updated_at = ? WHERE id = ?", (now, id))
     if reembed and content:
         vec, m = await _embed(content)
@@ -928,6 +955,88 @@ def memory_inbox_ack_impl(memory_id: str) -> str:
     _record_history(memory_id, "handoff_ack", None, now, "read_at", "")
     return f"Acked: {memory_id}"
 
+def _count_refresh_backlog(agent_id: str = "") -> int:
+    """Cheap count of memories whose refresh_on has arrived. Used by lifecycle
+    hooks (agent_register / agent_offline) and maintenance to surface the
+    backlog without expanding the full list. Backed by the partial index
+    idx_mi_refresh_on, so this is O(index-size-of-flagged-rows).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    where = ["is_deleted = 0", "refresh_on IS NOT NULL", "refresh_on <= ?"]
+    params: list = [now]
+    if agent_id:
+        where.append("agent_id = ?")
+        params.append(agent_id)
+    try:
+        with _db() as db:
+            row = db.execute(
+                f"SELECT COUNT(*) FROM memory_items WHERE {' AND '.join(where)}",
+                params,
+            ).fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        # refresh_on column may not exist on an un-migrated DB — fail quiet.
+        return 0
+
+def _refresh_hint(agent_id: str = "") -> str:
+    """One-line hint suitable for appending to lifecycle response strings.
+    Returns empty string when there is no backlog, so callers can concatenate
+    unconditionally.
+    """
+    n = _count_refresh_backlog(agent_id)
+    if n <= 0:
+        return ""
+    noun = "memory" if n == 1 else "memories"
+    scope = "of yours" if agent_id else "in the store"
+    return f" | {n} {noun} {scope} due for refresh (see memory_refresh_queue)"
+
+def memory_refresh_queue_impl(agent_id: str = "", limit: int = 50, include_future: bool = False) -> str:
+    """Lists memories whose refresh_on timestamp has arrived (or all with refresh_on set
+    if include_future=True). Read-only — actual refresh goes through memory_update.
+
+    Surfaces memories flagged for periodic review via the refresh_on lifecycle.
+    Scope to an agent with agent_id, or leave empty to see everything.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 500))
+
+    where = ["is_deleted = 0", "refresh_on IS NOT NULL"]
+    params: list = []
+    if not include_future:
+        where.append("refresh_on <= ?")
+        params.append(now)
+    if agent_id:
+        where.append("agent_id = ?")
+        params.append(agent_id)
+    where_sql = " AND ".join(where)
+
+    with _db() as db:
+        rows = db.execute(
+            f"SELECT id, type, title, refresh_on, refresh_reason, agent_id, updated_at "
+            f"FROM memory_items WHERE {where_sql} ORDER BY refresh_on ASC LIMIT ?",
+            (*params, limit)
+        ).fetchall()
+
+    if not rows:
+        scope_label = f" for {agent_id}" if agent_id else ""
+        when = "with refresh_on set" if include_future else "due for refresh"
+        return f"Refresh queue{scope_label}: (empty — no memories {when})"
+
+    scope_label = f" for {agent_id}" if agent_id else ""
+    lines = [f"Refresh queue{scope_label} ({len(rows)} item{'s' if len(rows) != 1 else ''}):"]
+    for row in rows:
+        title = (row["title"] or "")[:60]
+        reason = row["refresh_reason"] or "(no reason)"
+        lines.append(
+            f"  [{row['id'][:8]}] {row['type']:<12} due={row['refresh_on']} "
+            f"reason={reason} title={title}"
+        )
+    return "\n".join(lines)
+
 async def conversation_start_impl(title, agent_id="", model_id="", tags=""):
     cid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -966,7 +1075,7 @@ async def conversation_append_impl(conversation_id, role, content, agent_id="", 
 
 VALID_SCOPES = {"user", "session", "agent", "org"}
 
-async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False):
+async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason=""):
     """Internal implementation for memory_write. Contradiction detection is automatic."""
     if isinstance(metadata, dict):
         metadata = json.dumps(metadata)
@@ -1002,10 +1111,13 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
     with _db() as db:
         _vf = valid_from or now
         _vt = valid_to or ""
+        _cid = conversation_id or None
+        _ron = refresh_on or None
+        _rreason = refresh_reason or None
         db.execute(
-            "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt)
+            "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason)
         )
         if embed:
             db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (item_id, "upsert"))
@@ -1163,7 +1275,7 @@ def agent_register_impl(agent_id: str, role: str, capabilities: list, metadata: 
             (agent_id, role, caps_json, meta_json, now, now)
         )
 
-    return f"Registered: {agent_id} (role={role}, status=active)"
+    return f"Registered: {agent_id} (role={role}, status=active)" + _refresh_hint(agent_id)
 
 def agent_heartbeat_impl(agent_id: str) -> str:
     """Updates agent's last_seen timestamp and status to active."""
@@ -1248,7 +1360,7 @@ def agent_offline_impl(agent_id: str) -> str:
     if rowcount == 0:
         return f"Error: agent '{agent_id}' not found"
 
-    return f"Agent {agent_id} marked offline"
+    return f"Agent {agent_id} marked offline" + _refresh_hint(agent_id)
 
 # ── Notifications (4 functions) ───────────────────────────────────────────────────
 

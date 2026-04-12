@@ -129,6 +129,57 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         if retention_purged:
             report.append(f"Retention policies: purged {retention_purged} items")
 
+        # Refresh queue: count memories whose refresh_on has arrived, and emit
+        # one push notification per distinct agent with newly-due memories.
+        # - Maintenance never mutates refresh flags (that's memory_update's job).
+        # - Dedup against existing unacked refresh_due notifications so repeated
+        #   maintenance runs don't flood the channel with duplicates.
+        try:
+            refresh_due = db.execute(
+                "SELECT COUNT(*) FROM memory_items "
+                "WHERE is_deleted = 0 AND refresh_on IS NOT NULL AND refresh_on <= ?",
+                (now,)
+            ).fetchone()[0]
+            if refresh_due:
+                report.append(f"Refresh queue: {refresh_due} memor{'y' if refresh_due == 1 else 'ies'} due for review")
+
+                # Fan-out notifications by agent_id. NULL/empty agent_ids are
+                # grouped under a synthetic '(unassigned)' bucket and skipped —
+                # notifications require a real agent_id.
+                agent_rows = db.execute(
+                    "SELECT agent_id, COUNT(*) as n, GROUP_CONCAT(id) as ids "
+                    "FROM memory_items "
+                    "WHERE is_deleted = 0 AND refresh_on IS NOT NULL AND refresh_on <= ? "
+                    "  AND agent_id IS NOT NULL AND agent_id != '' "
+                    "GROUP BY agent_id",
+                    (now,)
+                ).fetchall()
+
+                notified = 0
+                for ar in agent_rows:
+                    aid = ar["agent_id"]
+                    # Dedup: skip if this agent already has an unacked refresh_due notif
+                    existing = db.execute(
+                        "SELECT 1 FROM notifications "
+                        "WHERE agent_id = ? AND kind = 'refresh_due' AND read_at IS NULL LIMIT 1",
+                        (aid,)
+                    ).fetchone()
+                    if existing:
+                        continue
+                    sample = (ar["ids"] or "").split(",")[:3]
+                    payload = json.dumps({"count": ar["n"], "sample_ids": sample})
+                    db.execute(
+                        "INSERT INTO notifications (agent_id, kind, payload_json, created_at) "
+                        "VALUES (?, 'refresh_due', ?, ?)",
+                        (aid, payload, now)
+                    )
+                    notified += 1
+                if notified:
+                    report.append(f"Refresh queue: notified {notified} agent(s)")
+        except Exception as e:
+            # refresh_on column may not exist on very old DBs that haven't run v014
+            logger.debug(f"refresh queue check skipped: {e}")
+
         db.execute("ANALYZE")
         report.append("Statistics updated (ANALYZE)")
 

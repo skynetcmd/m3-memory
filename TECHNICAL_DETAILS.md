@@ -67,7 +67,7 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 | Table | Key Columns | Purpose |
 |-------|-------------|---------|
-| `memory_items` | `id` (UUID PK), `type`, `title`, `content`, `metadata_json`, `agent_id`, `model_id`, `change_agent`, `importance`, `source`, `origin_device`, `user_id`, `scope`, `is_deleted`, `expires_at`, `valid_from`, `valid_to`, `content_hash`, `created_at`, `updated_at`, `last_accessed_at`, `access_count` | Primary memory storage |
+| `memory_items` | `id` (UUID PK), `type`, `title`, `content`, `metadata_json`, `agent_id`, `model_id`, `change_agent`, `importance`, `source`, `origin_device`, `user_id`, `scope`, `is_deleted`, `expires_at`, `valid_from`, `valid_to`, `content_hash`, `created_at`, `updated_at`, `last_accessed_at`, `access_count`, `conversation_id`, `refresh_on`, `refresh_reason` | Primary memory storage |
 | `memory_embeddings` | `id` (UUID PK), `memory_id` (FK), `embedding` (BLOB), `embed_model`, `dim`, `content_hash`, `created_at` | Vector embeddings stored as packed float32 arrays |
 | `memory_relationships` | `id` (UUID PK), `from_id`, `to_id`, `relationship_type`, `created_at` | Directed knowledge graph edges |
 | `memory_history` | `id` (UUID PK), `memory_id`, `event`, `prev_value`, `new_value`, `field`, `actor_id`, `created_at` | Immutable audit trail |
@@ -84,9 +84,60 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 | `gdpr_requests` | GDPR request audit: `subject_id`, `request_type`, `status`, `items_affected` |
 | `synchronized_secrets` | Encrypted credential vault: `service_name`, `encrypted_value`, `version`, `origin_device` |
 
+### Indexes on `memory_items`
+
+The hot paths drive the index set. Rebuild history is tracked through migrations; the current set is:
+
+| Index | Definition | Hot path |
+|---|---|---|
+| `idx_mi_type` | `(type)` | Type-filtered search |
+| `idx_mi_agent` | `(agent_id)` | Agent-scoped search |
+| `idx_mi_model` | `(model_id)` | Provenance lookups |
+| `idx_mi_change_agent` | `(change_agent)` | Audit |
+| `idx_mi_created` | `(created_at)` | Recency ordering |
+| `idx_mi_updated` | `(updated_at)` | Sync delta windows |
+| `idx_mi_deleted` | `(is_deleted)` | Live-row filter |
+| `idx_mi_deleted_type` | `(is_deleted, type)` | Common composite filter |
+| `idx_mi_handoff_inbox` | `(agent_id, type, read_at, created_at)` | `memory_inbox` hot path |
+| `idx_mi_importance` | `(importance)` | Decay + retention |
+| `idx_mi_scope` | `(scope)` | Multi-tenant filter |
+| `idx_mi_user_id` | `(user_id)` | GDPR lookups |
+| `idx_mi_valid_from` | `(valid_from)` | Bitemporal as-of queries |
+| `idx_mi_conversation_id` | `(conversation_id, created_at) WHERE is_deleted = 0` | Conversation-scoped search, composite partial (v015) |
+| `idx_mi_refresh_on` | `(refresh_on) WHERE refresh_on IS NOT NULL` | Refresh backlog scan, partial (v014) |
+
+Both new indexes are **partial indexes**: they only cover rows that actually need them (`conversation_id` non-null live rows; `refresh_on` non-null rows). This keeps the indexes small and the lookups O(flagged-rows) rather than O(table).
+
+Query-plan verification used `EXPLAIN QUERY PLAN` against a synthetic 1000-row fixture to confirm the planner picks the intended index for each new hot path rather than falling back to a lower-selectivity index like `idx_mi_deleted`.
+
 ### Migrations
 
-Schema migrations are managed by `bin/migrate_memory.py` — an idempotent runner that applies SQL files from `memory/migrations/` in order. Called automatically on first `_db()` access via `_lazy_init()`.
+Schema migrations are managed by `bin/migrate_memory.py` — a subcommand-driven CLI that applies versioned SQL files from `memory/migrations/`:
+
+```
+python bin/migrate_memory.py status           # show current version + pending
+python bin/migrate_memory.py up                # apply pending (interactive, prompts for backup dir + confirmation)
+python bin/migrate_memory.py up -y             # apply pending non-interactively (CI/scripted)
+python bin/migrate_memory.py down --to N       # roll back to version N
+python bin/migrate_memory.py backup [--out DIR]  # standalone backup
+python bin/migrate_memory.py restore <PATH>    # restore from backup
+```
+
+**File naming.** Each migration has a numeric prefix and now uses explicit direction suffixes:
+
+- `NNN_name.up.sql` — forward migration (required)
+- `NNN_name.down.sql` — rollback migration (optional; if absent the migration is irreversible)
+- `NNN_name.sql` — **legacy** format (v001–v012). Treated as up-only. Any attempt to roll back past a legacy migration is refused with a clear error naming the lowest reversible target.
+
+Migrations v013+ ship both `.up.sql` and `.down.sql` files.
+
+**Version tracking.** The `schema_versions` table records `(version, filename, applied_at)` for every applied migration. Current version = `MAX(version)`. The runner applies each SQL script inside a transaction, then inserts the version row in the same transaction — a failure rolls back both. A legacy idempotency fallback is preserved: if an `up` fails with a `duplicate column name` / `already exists` error, the migration is marked applied anyway (so existing DBs that predate the migration runner catch up cleanly).
+
+**File-level backups.** Before every `up` or `down`, the runner copies `memory/agent_memory.db` (plus any `-wal` / `-shm` sidecars) to a timestamped file like `agent_memory.v014.pre-up.20260412T145131Z.db`. The destination directory is chosen once via an interactive prompt on first run (default: `~/.m3-memory/backups/`, recommended out-of-repo even though `*.db` is gitignored) and persisted to `memory/.migrate_config.json`. In-DB transactions provide instant rollback on a failure mid-migration; the filesystem backup is the escape hatch for "I applied the wrong migration and want to undo it after the fact."
+
+**User confirmation.** Interactive runs print the list of pending migrations (noting which have down files), ask for the backup directory, then require a final `y/N` before writing. The `-y` / `--yes` flag skips both prompts for CI and scripted use. `up` with no arguments also requires confirmation — the old zero-argument invocation still works, just interactively.
+
+**Reversibility rules.** `down --to N` walks applied versions in reverse and runs each `.down.sql`. Pre-flight check refuses the whole batch if any version in the revert path lacks a down file. This prevents partially-rolled-back state where some versions rolled back cleanly and others couldn't.
 
 ---
 
@@ -219,7 +270,47 @@ Master key (`AGENT_OS_MASTER_KEY`) must be in native OS keyring. Never stored in
 | `agent` | Per-agent (default) | Standard agent-scoped memory |
 | `org` | Organization-wide | Shared across all users and agents |
 
-Every `memory_search` accepts `user_id` and `scope` filters. Invalid scopes fall back to `"agent"`.
+Every `memory_search` accepts `user_id`, `scope`, and `conversation_id` filters. Invalid scopes fall back to `"agent"`. `conversation_id` shares the same ID space as `conversation_start` — there is one concept of "conversation", not two.
+
+---
+
+## Refresh Lifecycle
+
+Memories can be flagged with `refresh_on` (ISO-8601 timestamp) and `refresh_reason` on write or update. When the timestamp has arrived, the memory enters the **refresh queue** — a read-only view exposed via the `memory_refresh_queue` tool. Maintenance never mutates these flags; actual refresh goes through `memory_update` and is recorded in `memory_history`.
+
+### Data flow
+
+```
+memory_write(refresh_on=T)
+       │
+       ▼
+memory_items.refresh_on = T          [indexed: idx_mi_refresh_on WHERE refresh_on IS NOT NULL]
+       │
+       ▼ (T arrives)
+memory_maintenance runs
+       │
+       ├──► report: "Refresh queue: N memories due for review"
+       │
+       └──► notifications fan-out (one per distinct agent_id with due memories)
+              │                      (deduped against existing unacked refresh_due)
+              ▼
+       notifications.kind = 'refresh_due'
+       payload = {count, sample_ids[:3]}
+```
+
+Agents discover the backlog through three off-path channels:
+
+1. **`memory_refresh_queue` pull** — always available, zero cost when not called. Parameters: `agent_id` (filter), `limit` (default 50, max 500), `include_future` (show not-yet-due memories too).
+2. **Lifecycle hint on `agent_register` / `agent_offline`** — the response string is appended with `| N memories of yours due for refresh (see memory_refresh_queue)` when the backlog is non-empty. Helper: `memory_core._count_refresh_backlog(agent_id)` — one indexed `COUNT(*)` against the partial index.
+3. **`refresh_due` notification** — emitted by `memory_maintenance`, one row per distinct owning agent with due memories. Dedup query checks for an existing unacked `refresh_due` notification for the same agent; if present, no new notification is inserted. This means repeated maintenance runs are idempotent. After the agent calls `notifications_ack`, the next maintenance run can re-notify if the backlog is still non-empty.
+
+### Update semantics
+
+`memory_update` accepts `refresh_on`, `refresh_reason`, and `conversation_id` as first-class fields. The sentinel value `"clear"` sets the column to `NULL`; an empty string means "no change". Each change is recorded in `memory_history` with the field name and both old and new values, so the refresh history is queryable via `memory_history(id)`.
+
+### Why not a separate lifecycle table?
+
+Early design considered soft-deleting old memories on refresh and inserting new ones. That would duplicate what `memory_history` already does (versioning via field-level audit trail) and create two parallel "this memory changed over time" mechanisms. Instead, `refresh_on` is a **signal** — a column that means "review me" — and the update path stays unified.
 
 ---
 
@@ -278,7 +369,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 
 ### End-to-End Test Suite (`bin/test_memory_bridge.py`)
 
-41 tests across 8 categories:
+193 tests across all feature categories (memory CRUD, search, contradictions, GDPR, sync, maintenance, orchestration, refresh lifecycle, multi-agent handoffs, tasks, notifications):
 
 | Category | Tests | What's Verified |
 |----------|-------|----------------|
