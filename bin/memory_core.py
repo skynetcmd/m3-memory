@@ -245,14 +245,22 @@ def _conn():
     with _db() as db:
         yield db
 
-def _record_history(memory_id: str, event: str, prev_value: str = None, new_value: str = None, field: str = "content", actor_id: str = ""):
-    """Records a change event in the memory_history audit trail."""
+def _record_history(memory_id: str, event: str, prev_value: str = None, new_value: str = None, field: str = "content", actor_id: str = "", db=None):
+    """Records a change event in the memory_history audit trail.
+
+    Pass ``db`` when the caller already holds an open connection (e.g. inside
+    a ``with _db() as db:`` block). Opening a second pool connection while
+    the outer one has an uncommitted writer causes SQLite WAL writer
+    contention, which burns the full ``busy_timeout`` per call.
+    """
+    row = (str(uuid.uuid4()), memory_id, event, prev_value, new_value, field, actor_id)
+    sql = "INSERT INTO memory_history (id, memory_id, event, prev_value, new_value, field, actor_id) VALUES (?,?,?,?,?,?,?)"
     try:
-        with _db() as db:
-            db.execute(
-                "INSERT INTO memory_history (id, memory_id, event, prev_value, new_value, field, actor_id) VALUES (?,?,?,?,?,?,?)",
-                (str(uuid.uuid4()), memory_id, event, prev_value, new_value, field, actor_id)
-            )
+        if db is not None:
+            db.execute(sql, row)
+        else:
+            with _db() as inner:
+                inner.execute(sql, row)
     except Exception as e:
         logger.debug(f"History recording failed: {e}")
 
@@ -713,10 +721,10 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
             (id,)
         ).fetchone()
         if content:
-            _record_history(id, "update", old["content"] if old else None, content, "content")
+            _record_history(id, "update", old["content"] if old else None, content, "content", db=db)
             db.execute("UPDATE memory_items SET content = ? WHERE id = ?", (content, id))
         if title:
-            _record_history(id, "update", old["title"] if old else None, title, "title")
+            _record_history(id, "update", old["title"] if old else None, title, "title", db=db)
             db.execute("UPDATE memory_items SET title = ? WHERE id = ?", (title, id))
         if importance >= 0: db.execute("UPDATE memory_items SET importance = ? WHERE id = ?", (importance, id))
         if metadata: db.execute("UPDATE memory_items SET metadata_json = ? WHERE id = ?", (metadata, id))
@@ -725,15 +733,15 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
         # lets callers distinguish "no change" from "mark as refreshed, remove reminder".
         if refresh_on:
             new_val = None if refresh_on == "clear" else refresh_on
-            _record_history(id, "update", old["refresh_on"] if old else None, new_val, "refresh_on")
+            _record_history(id, "update", old["refresh_on"] if old else None, new_val, "refresh_on", db=db)
             db.execute("UPDATE memory_items SET refresh_on = ? WHERE id = ?", (new_val, id))
         if refresh_reason:
             new_val = None if refresh_reason == "clear" else refresh_reason
-            _record_history(id, "update", old["refresh_reason"] if old else None, new_val, "refresh_reason")
+            _record_history(id, "update", old["refresh_reason"] if old else None, new_val, "refresh_reason", db=db)
             db.execute("UPDATE memory_items SET refresh_reason = ? WHERE id = ?", (new_val, id))
         if conversation_id:
             new_val = None if conversation_id == "clear" else conversation_id
-            _record_history(id, "update", old["conversation_id"] if old else None, new_val, "conversation_id")
+            _record_history(id, "update", old["conversation_id"] if old else None, new_val, "conversation_id", db=db)
             db.execute("UPDATE memory_items SET conversation_id = ? WHERE id = ?", (new_val, id))
         db.execute("UPDATE memory_items SET updated_at = ? WHERE id = ?", (now, id))
     if reembed and content:
@@ -754,7 +762,7 @@ def memory_delete_impl(id, hard=False):
         row = db.execute("SELECT id, content FROM memory_items WHERE id = ?", (id,)).fetchone()
         if not row:
             return f"Error: item {id} not found"
-        _record_history(id, "delete", row["content"], None, "content")
+        _record_history(id, "delete", row["content"], None, "content", db=db)
         if hard:
             db.execute("DELETE FROM memory_embeddings WHERE memory_id = ?", (id,))
             db.execute("DELETE FROM memory_relationships WHERE from_id = ? OR to_id = ?", (id, id))
