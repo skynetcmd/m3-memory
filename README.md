@@ -47,6 +47,8 @@ Requires a local embedding model. [Ollama](https://ollama.com) is the easiest:
 ollama pull nomic-embed-text && ollama serve
 ```
 
+Prefer a GUI? [LM Studio](https://lmstudio.ai) works too — load any embedding model (e.g. `nomic-embed-text-v1.5`) and start its server (defaults to port 1234).
+
 Restart your agent. Done.
 
 ---

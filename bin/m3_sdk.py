@@ -68,12 +68,18 @@ class M3Context:
                         conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=pool_timeout)
                         conn.row_factory = sqlite3.Row
                         conn.execute("PRAGMA journal_mode = WAL")
+                        conn.execute("PRAGMA synchronous = NORMAL")
                         conn.execute("PRAGMA foreign_keys = ON")
                         conn.execute("PRAGMA busy_timeout = 10000")
                         _SQLITE_POOL.put(conn)
                     except sqlite3.Error as e:
                         logger.error(f"Failed to create SQLite connection: {e}")
                         raise
+                # One-time sanity log — confirm WAL + synchronous settings took effect.
+                _probe = _SQLITE_POOL.queue[0]
+                _jm = _probe.execute("PRAGMA journal_mode").fetchone()[0]
+                _sy = _probe.execute("PRAGMA synchronous").fetchone()[0]
+                logger.info(f"SQLite pool ready: journal_mode={_jm} synchronous={_sy} pool_size={pool_size}")
                 logger.debug(f"Initialized SQLite connection pool (size={pool_size}, timeout={pool_timeout}s).")
 
     def _check_circuit(self, service: str) -> bool:
