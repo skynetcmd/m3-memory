@@ -57,7 +57,7 @@ The test suite covers memory CRUD, hybrid search, contradiction detection, GDPR 
 
 ```
 bin/                    Core MCP bridges and utility scripts
-  memory_bridge.py      Main MCP server — all 25 memory tools
+  memory_bridge.py      Main MCP server — all 44 memory tools (sourced from mcp_tool_catalog.py)
   llm_failover.py       LLM endpoint auto-selection
   auth_utils.py         AES-256 vault and OS keyring integration
   embedding_utils.py    Vector embedding helpers

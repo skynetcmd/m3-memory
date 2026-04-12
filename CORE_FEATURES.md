@@ -1,6 +1,6 @@
 # <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> Memory — Core Features
 
-> 25 MCP tools. 41 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Zero cloud dependency.
+> 44 MCP tools. 193 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -70,7 +70,7 @@ Left alone, memory systems accumulate noise. M3 fights entropy:
 
 M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI):
 
-- **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 18 types
+- **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 20 types
 - **Conversation summarization** — compress long conversation threads into 3-5 key points
 - **Multi-layered consolidation** — merge groups of related memories into comprehensive summaries
 
