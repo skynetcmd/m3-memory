@@ -90,5 +90,8 @@ AI_Folder_Backup/
 # Generated MCP config (machine-specific paths; run bin/generate_configs.py to create)
 .mcp.json
 
+# Local migration state (machine-specific)
+memory/.migrate_config.json
+
 # Node
 node_modules/
