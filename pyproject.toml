@@ -7,7 +7,7 @@ name = "m3-memory"
 version = "2026.4.8"
 description = "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search, GDPR, no cloud"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [
     { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" }
