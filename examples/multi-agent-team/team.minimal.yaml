@@ -1,0 +1,46 @@
+# Minimal one-agent team for the zero-API-key quickstart.
+#
+# Prereq: LM Studio (or any local OpenAI-compat server) running at
+# http://localhost:1234. Load any chat model with tool-calling support.
+#
+# Then:
+#     python orchestrator.py team.minimal.yaml
+#
+# Or via the installed CLI:
+#     m3-team run team.minimal.yaml
+#
+# Queue work from another terminal (Claude Code, Gemini CLI, or any MCP
+# client connected to m3-memory):
+#     task_create("Summarize the README", created_by="you")
+#     task_assign(<task_id>, "local-agent")
+
+agents:
+  - name: local-agent
+    provider: lm-studio
+    model: local-model            # whatever your LM Studio loaded
+    role: generalist
+    capabilities: [code, write, summarize, plan]
+    system_prompt: |
+      You are a helpful local agent with access to m3-memory tools.
+      Read the task, do the work, write the result to memory with
+      memory_write, and mark the task complete with task_update.
+
+providers:
+  lm-studio:
+    format: openai_compat
+    base_url: http://localhost:1234/v1/chat/completions
+    api_key_env: LM_STUDIO_API_KEY    # any non-empty value works
+
+orchestrator:
+  poll_interval_seconds: 5
+  max_iterations: 0
+  max_concurrent_dispatches: 2
+  notification_kinds:
+    - task_assigned
+    - handoff
+  dispatch_limits:
+    max_turns: 8
+    max_tool_calls: 24
+    max_seconds: 120
+    max_tokens_per_call: 4096
+    provider_retries: 3

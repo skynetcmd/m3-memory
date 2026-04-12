@@ -71,6 +71,7 @@ dev = [
 
 [project.scripts]
 mcp-memory = "m3_memory.cli:main"
+m3-team = "m3_memory.team_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/skynetcmd/m3-memory"

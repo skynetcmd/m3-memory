@@ -1,4 +1,5 @@
 from mcp.server.fastmcp import FastMCP
+import inspect
 import logging
 import sys
 import os
@@ -18,16 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import memory_core
 import memory_sync
 import memory_maintenance as _memory_maintenance_mod
-
-# ── Validation Constants ─────────────────────────────────────────────────────
-MAX_CONTENT_SIZE = 50_000       # characters
-MAX_QUERY_LENGTH = 2_000        # characters
-MAX_K = 100
-VALID_MEMORY_TYPES = frozenset({
-    "note", "fact", "decision", "preference", "conversation", "message",
-    "task", "code", "config", "observation", "plan", "summary", "snippet",
-    "reference", "log", "home", "user_fact", "scratchpad", "auto",
-})
+import mcp_tool_catalog
 
 # Re-export internal helpers for legacy compatibility (C7, H11)
 _conn = memory_core._conn
@@ -37,79 +29,14 @@ _ensure_sync_tables = memory_core._ensure_sync_tables
 _content_hash       = memory_core._content_hash
 _pack               = memory_core._pack
 
-# ── MCP Tools (Proxied to implementations) ────────────────────────────────────
+# Re-export catalog validation constants — tests and external callers import
+# VALID_MEMORY_TYPES from memory_bridge directly.
+VALID_MEMORY_TYPES = mcp_tool_catalog.VALID_MEMORY_TYPES
+MAX_CONTENT_SIZE   = mcp_tool_catalog.MAX_CONTENT_SIZE
+MAX_QUERY_LENGTH   = mcp_tool_catalog.MAX_QUERY_LENGTH
+MAX_K              = mcp_tool_catalog.MAX_K
 
-@mcp.tool()
-async def memory_write(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False):
-    """Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing memory of the same type/title, the old one is superseded. Use type='auto' to let the LLM decide the best category."""
-    import json as _json
-    # Input validation
-    if type not in VALID_MEMORY_TYPES:
-        return f"Error: invalid memory type '{type}'. Valid types: {', '.join(sorted(VALID_MEMORY_TYPES))}"
-    if content and len(content) > MAX_CONTENT_SIZE:
-        return f"Error: content too large ({len(content)} chars). Maximum is {MAX_CONTENT_SIZE}."
-    if isinstance(metadata, dict):
-        metadata = _json.dumps(metadata)
-    elif isinstance(metadata, str) and metadata and metadata != "{}":
-        try:
-            _json.loads(metadata)
-        except (ValueError, _json.JSONDecodeError):
-            return "Error: metadata is not valid JSON."
-    
-    # If type is "auto", force auto_classify to True
-    if type == "auto":
-        auto_classify = True
-
-    return await memory_core.memory_write_impl(type, content, title, metadata, agent_id, model_id, change_agent, importance, source, embed, user_id, scope, valid_from, valid_to, auto_classify)
-
-@mcp.tool()
-async def memory_search(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of=""):
-    """Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation."""
-    if not query or not str(query).strip():
-        return "Error: query cannot be empty."
-    query = str(query)
-    if len(query) > MAX_QUERY_LENGTH:
-        query = query[:MAX_QUERY_LENGTH]
-    try:
-        k = int(k)
-    except (TypeError, ValueError):
-        k = 8
-    k = max(1, min(k, MAX_K))
-    return await memory_core.memory_search_impl(query, k, type_filter, agent_filter, search_mode, include_scratchpad, user_id, scope, as_of)
-
-@mcp.tool()
-async def memory_suggest(query, k=5):
-    """Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected."""
-    return await memory_core.memory_suggest_impl(query, int(k))
-
-@mcp.tool()
-def memory_get(id):
-    """Retrieves a full MemoryItem by UUID."""
-    return memory_core.memory_get_impl(id)
-
-@mcp.tool()
-async def memory_update(id, content="", title="", metadata="", importance=-1.0, reembed=False):
-    """Updates a MemoryItem by ID."""
-    import json as _json
-    if isinstance(metadata, dict):
-        metadata = _json.dumps(metadata)
-    return await memory_core.memory_update_impl(id, content, title, metadata, importance, reembed)
-
-@mcp.tool()
-def memory_delete(id, hard=False):
-    """Deletes a MemoryItem (soft or hard)."""
-    return memory_core.memory_delete_impl(id, hard)
-
-@mcp.tool()
-async def conversation_start(title, agent_id="", model_id="", tags=""):
-    """Starts a new conversation thread."""
-    return await memory_core.conversation_start_impl(title, agent_id, model_id, tags)
-
-@mcp.tool()
-async def conversation_append(conversation_id, role, content, agent_id="", model_id="", embed=True):
-    """Appends a message to a conversation."""
-    return await memory_core.conversation_append_impl(conversation_id, role, content, agent_id, model_id, embed)
-
+# ── Helper functions still used directly by tests / other modules ────────────
 def conversation_messages(conversation_id):
     """Returns all messages in a conversation as a formatted string (role: content)."""
     with memory_core._db() as db:
@@ -125,16 +52,6 @@ def conversation_messages(conversation_id):
         return f"Error: no messages found for conversation {conversation_id}"
     return "\n".join(f"{row['role']}: {row['content']}" for row in rows)
 
-@mcp.tool()
-async def conversation_search(query, k=8):
-    """Search messages across conversations using hybrid semantic/keyword search."""
-    return await memory_core.memory_search_impl(query, k=k, type_filter="message")
-
-@mcp.tool()
-async def conversation_summarize(conversation_id, threshold=20):
-    """Summarize a conversation into key points using the local LLM."""
-    return await memory_core.conversation_summarize_impl(conversation_id, int(threshold))
-
 def sync_status():
     """Returns a summary string of the Chroma sync queue, mirror, and conflict counts."""
     try:
@@ -149,199 +66,129 @@ def sync_status():
     except Exception as e:
         return f"Sync status unavailable: {e}"
 
-@mcp.tool()
-async def chroma_sync(max_items=50, direction="both", reset_stalled=True):
-    """Bi-directional sync between local SQLite and ChromaDB."""
-    return await memory_sync.chroma_sync_impl(max_items, direction, reset_stalled)
+# ── Typed function builder for FastMCP schema introspection ──────────────────
+def _build_typed_function(spec):
+    """Build a typed function from spec.parameters so FastMCP can introspect it.
 
-@mcp.tool()
-def memory_maintenance(decay=True, purge_expired=True, prune_orphan_embeddings=True):
-    """Runs maintenance tasks on the memory store."""
-    return _memory_maintenance_mod.memory_maintenance_impl(decay, purge_expired, prune_orphan_embeddings)
+    Returns a function with explicit typed parameters that FastMCP can use to
+    generate proper JSONSchema. Both async and sync are supported.
+    """
+    props = spec.parameters.get("properties", {})
+    required = set(spec.parameters.get("required", []))
 
-@mcp.tool()
-async def memory_consolidate(type_filter="", agent_filter="", threshold=20):
-    """Consolidate old memories of the same type into summaries using the local LLM. Reduces clutter while preserving knowledge."""
-    return await _memory_maintenance_mod.memory_consolidate_impl(type_filter, agent_filter, int(threshold))
-
-@mcp.tool()
-def memory_dedup(threshold=0.92, dry_run=True):
-    """Find and merge near-duplicate memory items."""
-    return _memory_maintenance_mod.memory_dedup_impl(threshold, dry_run)
-
-@mcp.tool()
-def memory_feedback(memory_id, feedback="useful"):
-    """Provide feedback on a memory item to improve quality."""
-    return _memory_maintenance_mod.memory_feedback_impl(memory_id, feedback)
-
-@mcp.tool()
-def memory_history(memory_id, limit=20):
-    """Returns the change history (audit trail) for a memory item. Tracks create, update, delete, and supersede events."""
-    return memory_core.memory_history_impl(memory_id, limit)
-
-@mcp.tool()
-def memory_link(from_id, to_id, relationship_type="related"):
-    """Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message, handoff."""
-    return memory_core.memory_link_impl(from_id, to_id, relationship_type)
-
-@mcp.tool()
-def memory_graph(memory_id, depth=1):
-    """Returns the local graph neighborhood of a memory item (connected memories up to N hops, max 3)."""
-    return memory_core.memory_graph_impl(memory_id, depth)
-
-@mcp.tool()
-def memory_verify(id):
-    """Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with."""
-    return memory_core.memory_verify_impl(id)
-
-@mcp.tool()
-def memory_set_retention(agent_id, max_memories=1000, ttl_days=0, auto_archive=1):
-    """Set or update per-agent memory retention policy. Controls max memory count, TTL expiry, and auto-archival."""
+    # Preserve the impl's natural parameter order so positional calls keep working.
+    # Tests and other callers do `task_create("title", created_by=...)` — alphabetical
+    # sorting would put `created_by` at position 0 and break that contract. Use
+    # inspect.signature on the impl to recover the canonical order, then drop any
+    # parameter that isn't in the catalog's properties.
     try:
-        max_memories = int(max_memories)
-        ttl_days = int(ttl_days)
-        auto_archive = int(auto_archive)
+        impl_param_order = [
+            p.name for p in inspect.signature(spec.impl).parameters.values()
+            if p.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        ]
     except (TypeError, ValueError):
-        return "Error: max_memories, ttl_days, and auto_archive must be integers."
-    return _memory_maintenance_mod.memory_set_retention_impl(agent_id, max_memories, ttl_days, auto_archive)
+        impl_param_order = list(props.keys())
 
-@mcp.tool()
-def memory_export(agent_filter="", type_filter="", since=""):
-    """Export memories as portable JSON. Filter by agent, type, or date."""
-    return _memory_maintenance_mod.memory_export_impl(agent_filter, type_filter, since)
+    ordered = [n for n in impl_param_order if n in props]
+    # Append any catalog property the impl signature didn't surface (rare — mostly
+    # the inline _conversation_search_impl path). Order is stable.
+    for n in props.keys():
+        if n not in ordered:
+            ordered.append(n)
 
-@mcp.tool()
-def memory_import(data):
-    """Import memories from a JSON export. UPSERT semantics — safe to re-run."""
-    return _memory_maintenance_mod.memory_import_impl(data)
+    parts = []
+    for pname in ordered:
+        pdef = props[pname]
+        ptype = {
+            "string": "str", "integer": "int", "number": "float",
+            "boolean": "bool", "array": "list", "object": "dict",
+        }.get(pdef.get("type", "string"), "str")
 
-@mcp.tool()
-def gdpr_export(user_id):
-    """Export all memories for a data subject (GDPR data portability). Returns JSON with all memory items for the given user_id."""
-    if not user_id or not str(user_id).strip():
-        return "Error: user_id is required."
-    return _memory_maintenance_mod.gdpr_export_impl(str(user_id).strip())
+        if pname in required:
+            parts.append(f"{pname}: {ptype}")
+        else:
+            default = pdef.get("default", None)
+            if isinstance(default, bool):           # before int — bool is an int subclass
+                default_repr = str(default)
+            elif isinstance(default, str):
+                default_repr = repr(default)        # repr handles quoting + escapes
+            elif isinstance(default, (int, float)):
+                default_repr = str(default)
+            elif default is None:
+                default_repr = "None"
+            else:
+                default_repr = repr(default)
+            parts.append(f"{pname}: {ptype} = {default_repr}")
 
-@mcp.tool()
-def gdpr_forget(user_id):
-    """Right to be forgotten — hard-deletes ALL data for a user_id including memories, embeddings, relationships, and history."""
-    if not user_id or not str(user_id).strip():
-        return "Error: user_id is required."
-    return _memory_maintenance_mod.gdpr_forget_impl(str(user_id).strip())
+    sig = ", ".join(parts)
 
-@mcp.tool()
-def memory_cost_report():
-    """Returns current session operation counts and estimated token usage for memory operations."""
-    return memory_core.memory_cost_report_impl()
+    # Build the function source. The _wrapper closure will call the validator and impl.
+    if spec.is_async:
+        src = f"async def _impl({sig}):\n    return await _wrapper(locals())"
+    else:
+        src = f"def _impl({sig}):\n    return _wrapper(locals())"
 
-@mcp.tool()
-def memory_handoff(from_agent: str, to_agent: str, task: str,
-                   context_ids: list = None, note: str = "",
-                   task_id: str = "") -> str:
-    """Hand off a task from one agent to another. Writes a new handoff-type
-    memory owned to_agent and links it to the given context memories with
-    'handoff' edges. Returns a confirmation string with the new memory id.
-    Optionally pass task_id to link to a tracked task.
+    # The _wrapper closes over spec; locals() gives us the bound args.
+    if spec.is_async:
+        async def _wrapper(args):
+            args.pop("__class__", None)  # locals() may include this in some Python versions
+            args, err = mcp_tool_catalog.validate_args(spec, args)
+            if err:
+                return err
+            try:
+                result = await spec.impl(**args)
+                return result if isinstance(result, str) else str(result)
+            except Exception as e:
+                return f"Error: {type(e).__name__}: {e}"
+    else:
+        def _wrapper(args):
+            args.pop("__class__", None)
+            args, err = mcp_tool_catalog.validate_args(spec, args)
+            if err:
+                return err
+            try:
+                result = spec.impl(**args)
+                return result if isinstance(result, str) else str(result)
+            except Exception as e:
+                return f"Error: {type(e).__name__}: {e}"
 
-    Note: this is the in-process memory handoff (memory_items + memory_relationships).
-    Unrelated to the standalone session_handoff.py MCP server."""
-    return memory_core.memory_handoff_impl(from_agent, to_agent, task,
-                                           context_ids or [], note, task_id)
+    ns = {"_wrapper": _wrapper}
+    exec(src, ns)
+    fn = ns["_impl"]
+    fn.__name__ = spec.name
+    fn.__doc__ = spec.description
+    return fn
 
-@mcp.tool()
-def memory_inbox(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
-    """List handoff messages addressed to agent_id, newest first.
-    Pass unread_only=False to include already-acked items."""
-    return memory_core.memory_inbox_impl(agent_id, bool(unread_only), int(limit))
+# ── Catalog-driven MCP tool registration ──────────────────────────────────────
+def _register_catalog_tools():
+    """Register every ToolSpec in mcp_tool_catalog.TOOLS as a FastMCP tool.
 
-@mcp.tool()
-def memory_inbox_ack(memory_id: str) -> str:
-    """Mark a handoff memory as read (sets read_at = now)."""
-    return memory_core.memory_inbox_ack_impl(memory_id)
+    The catalog is the single source of truth for tool name, schema, validators,
+    and impl callable. This loop preserves the existing MCP-facing surface
+    (44 tools) while making the bridge a thin shim.
+    """
+    for spec in mcp_tool_catalog.TOOLS:
+        _register_one(spec)
 
-@mcp.tool()
-def agent_register(agent_id: str, role: str = "", capabilities: list = None, metadata: dict = None) -> str:
-    """Register an agent (UPSERT). Sets status=active, last_seen=now."""
-    return memory_core.agent_register_impl(agent_id, role, capabilities or [], metadata or {})
+def _register_one(spec):
+    """Register a single ToolSpec with FastMCP. Builds a typed function per spec
+    so FastMCP can introspect the schema and each registered function has the
+    right name and docstring."""
+    fn = _build_typed_function(spec)
+    mcp.tool(name=spec.name, description=spec.description)(fn)
 
-@mcp.tool()
-def agent_heartbeat(agent_id: str) -> str:
-    """Update last_seen and set status=active. Errors if not registered."""
-    return memory_core.agent_heartbeat_impl(agent_id)
+_register_catalog_tools()
 
-@mcp.tool()
-def agent_list(status: str = "", role: str = "") -> str:
-    """List registered agents, optionally filtered by status and/or role."""
-    return memory_core.agent_list_impl(status, role)
-
-@mcp.tool()
-def agent_get(agent_id: str) -> str:
-    """Get full record for one registered agent."""
-    return memory_core.agent_get_impl(agent_id)
-
-@mcp.tool()
-def agent_offline(agent_id: str) -> str:
-    """Mark an agent as offline."""
-    return memory_core.agent_offline_impl(agent_id)
-
-@mcp.tool()
-def notify(agent_id: str, kind: str, payload: dict = None) -> str:
-    """Send a notification to an agent. Lightweight wake signal — agents poll notifications_poll."""
-    return memory_core.notify_impl(agent_id, kind, payload or {})
-
-@mcp.tool()
-def notifications_poll(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
-    """List notifications addressed to agent_id, newest first."""
-    return memory_core.notifications_poll_impl(agent_id, bool(unread_only), int(limit))
-
-@mcp.tool()
-def notifications_ack(notification_id: int) -> str:
-    """Mark one notification as read."""
-    return memory_core.notifications_ack_impl(int(notification_id))
-
-@mcp.tool()
-def notifications_ack_all(agent_id: str) -> str:
-    """Bulk-ack all unread notifications for an agent. Returns count acked."""
-    return memory_core.notifications_ack_all_impl(agent_id)
-
-@mcp.tool()
-def task_create(title: str, created_by: str, description: str = "", owner_agent: str = "",
-                parent_task_id: str = "", metadata: dict = None) -> str:
-    """Create a new task in 'pending' state. Returns task id."""
-    return memory_core.task_create_impl(title, created_by, description, owner_agent,
-                                         parent_task_id, metadata or {})
-
-@mcp.tool()
-def task_assign(task_id: str, owner_agent: str) -> str:
-    """Assign a task to an owner. Sets state=in_progress and notifies the new owner."""
-    return memory_core.task_assign_impl(task_id, owner_agent)
-
-@mcp.tool()
-def task_update(task_id: str, state: str = "", description: str = "",
-                metadata: dict = None, actor: str = "") -> str:
-    """Partial update for a task. Validates state transitions. On terminal state, sets completed_at."""
-    return memory_core.task_update_impl(task_id, state, description, metadata or {}, actor)
-
-@mcp.tool()
-def task_set_result(task_id: str, result_memory_id: str) -> str:
-    """Set the result memory pointer for a task. Does NOT change state."""
-    return memory_core.task_set_result_impl(task_id, result_memory_id)
-
-@mcp.tool()
-def task_get(task_id: str) -> str:
-    """Get full record for one task."""
-    return memory_core.task_get_impl(task_id)
-
-@mcp.tool()
-def task_list(owner_agent: str = "", state: str = "", parent_task_id: str = "", limit: int = 50) -> str:
-    """List tasks with optional filters. Newest updated first."""
-    return memory_core.task_list_impl(owner_agent, state, parent_task_id, int(limit))
-
-@mcp.tool()
-def task_tree(root_task_id: str, max_depth: int = 3) -> str:
-    """Render a recursive subtree of tasks rooted at root_task_id."""
-    return memory_core.task_tree_impl(root_task_id, int(max_depth))
+# ── Module-level function exposure for test/direct imports ───────────────────
+# Each tool is also exposed as a module-level callable so tests and other modules
+# can call them directly (e.g. `from memory_bridge import memory_write`).
+for _spec in mcp_tool_catalog.TOOLS:
+    globals()[_spec.name] = _build_typed_function(_spec)
 
 if __name__ == "__main__":
-    logger.info("Memory Bridge (Modular) starting...")
+    logger.info("Memory Bridge (catalog-driven) starting...")
+    logger.info(f"Registered {len(mcp_tool_catalog.TOOLS)} MCP tools from mcp_tool_catalog.")
     mcp.run()

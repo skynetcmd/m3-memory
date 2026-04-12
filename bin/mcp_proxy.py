@@ -1,15 +1,31 @@
 #!/usr/bin/env python3
 """
-MCP Tool Execution Proxy  v1.0
+MCP Tool Execution Proxy  v2.0
 ==============================
 OpenAI-compatible server on localhost:9000.
 
 Purpose
 -------
 Aider and OpenClaw have no native MCP support. This proxy sits between them
-and the actual model, injecting the 15 Operational Protocol tools into every
-request and executing tool_calls by calling bridge functions directly —
-no MCP transport overhead.
+and the actual model, injecting MCP tools into every request and executing
+tool_calls by calling bridge functions directly — no MCP transport overhead.
+
+Tool sources (v2)
+-----------------
+1. Operational Protocol tools from custom_tool_bridge (5):
+   log_activity, query_decisions, update_focus, retire_focus, check_thermal_load
+2. Debug Agent tools from debug_agent_bridge (6):
+   debug_analyze, debug_bisect, debug_trace, debug_correlate, debug_history, debug_report
+3. m3-memory catalog tools from mcp_tool_catalog.TOOLS (44):
+   memory_*, agent_*, task_*, conversation_*, notifications_*, etc.
+
+Default allowlist excludes destructive catalog tools (memory_delete, chroma_sync,
+gdpr_*, *_export, *_import, memory_maintenance, memory_set_retention, agent_offline).
+Set MCP_PROXY_ALLOW_DESTRUCTIVE=1 to expose them.
+
+Agent identity is taken from the X-Agent-Id request header (default
+"mcp-proxy-client"). Catalog tools marked inject_agent_id receive this value
+non-bypassably; the LLM cannot spoof another agent.
 
 Routing
 -------
@@ -62,7 +78,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("mcp_proxy")
 
-from m3_sdk import M3Context, LM_STUDIO_BASE, LM_READ_TIMEOUT
+from m3_sdk import M3Context
 
 ctx = M3Context()
 
@@ -74,18 +90,15 @@ ANTHROPIC_VERSION = "2023-06-01"
 GOOGLE_AI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
 GROK_BASE = "https://api.x.ai/v1"
 PERPLEXITY_BASE = "https://api.perplexity.ai"
-LMSTUDIO_BASE = LM_STUDIO_BASE
+LMSTUDIO_BASE = os.environ.get("LM_STUDIO_BASE", "http://localhost:1234/v1")
 MAX_TOOL_ROUNDS = 10
 CONNECT_TIMEOUT = 5.0
-READ_TIMEOUT = LM_READ_TIMEOUT
+READ_TIMEOUT = float(os.environ.get("LM_READ_TIMEOUT", "300"))
+ALLOW_DESTRUCTIVE = os.environ.get("MCP_PROXY_ALLOW_DESTRUCTIVE", "").lower() in ("1", "true", "yes")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKSPACE = BASE_DIR
 sys.path.insert(0, os.path.join(WORKSPACE, "bin"))
-
-from m3_sdk import M3Context
-
-ctx = M3Context()
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -186,29 +199,34 @@ def _debug():
             raise
     return _debug_mod
 
-# ── MCP tool definitions (OpenAI function-calling schema) ─────────────────────
+# ── MCP tool definitions ──────────────────────────────────────────────────────
+#
+# Tools come from three sources:
+#   1. PROTOCOL_TOOLS — 5 Operational Protocol tools from custom_tool_bridge
+#   2. DEBUG_TOOLS — 6 debug agent tools from debug_agent_bridge
+#   3. mcp_tool_catalog.TOOLS — 44 m3-memory tools (the v2 single source of truth)
+#
+# Sources 1 and 2 are kept inline because their bridges aren't catalog-registered.
+# Source 3 is built dynamically each request from mcp_tool_catalog and respects
+# default_allowed (destructive tools opt-in via MCP_PROXY_ALLOW_DESTRUCTIVE) and
+# inject_agent_id (the orchestrator stamps agent_id; the LLM cannot spoof).
 
-MCP_TOOLS: list[dict] = [
+PROTOCOL_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
             "name": "log_activity",
             "description": (
-                "Archive activity to the agent log (Protocols #1–#3). "
-                "Protocol #1: category=thought for complex reasoning. "
-                "Protocol #2: category=hardware after thermal check. "
-                "Protocol #3: category=decision IMMEDIATELY when user agrees to any "
-                "code change, file move, or project direction. Do NOT batch at end."
+                "Archive activity to the agent log (Protocols #1-#3). "
+                "category=thought for complex reasoning, hardware after thermal check, "
+                "decision when user agrees to any code change, file move, or direction."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "category": {
-                        "type": "string",
-                        "enum": ["thought", "hardware", "decision"],
-                    },
-                    "detail_a": {"type": "string", "description": "Primary detail (≤500 chars)"},
-                    "detail_b": {"type": "string", "description": "Secondary detail (≤2000 chars)"},
+                    "category": {"type": "string", "enum": ["thought", "hardware", "decision"]},
+                    "detail_a": {"type": "string", "description": "Primary detail (<=500 chars)"},
+                    "detail_b": {"type": "string", "description": "Secondary detail (<=2000 chars)"},
                     "detail_c": {"type": "string", "description": "Tertiary detail / root cause"},
                 },
                 "required": ["category", "detail_a"],
@@ -220,7 +238,7 @@ MCP_TOOLS: list[dict] = [
         "function": {
             "name": "query_decisions",
             "description": (
-                "Protocol #4 — MUST call before starting any new task. "
+                "Protocol #4 - MUST call before starting any new task. "
                 "Full-text search across project_decisions table for prior decisions."
             ),
             "parameters": {
@@ -237,11 +255,11 @@ MCP_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "update_focus",
-            "description": "Protocol #5 — Call every 3 turns with a ≤10-word trajectory summary.",
+            "description": "Protocol #5 - Call every 3 turns with a <=10-word trajectory summary.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "summary": {"type": "string", "description": "≤10-word current trajectory"},
+                    "summary": {"type": "string", "description": "<=10-word current trajectory"},
                 },
                 "required": ["summary"],
             },
@@ -251,7 +269,7 @@ MCP_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "retire_focus",
-            "description": "Protocol #5 — Clear dashboard focus when a task completes.",
+            "description": "Protocol #5 - Clear dashboard focus when a task completes.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -259,96 +277,18 @@ MCP_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "check_thermal_load",
-            "description": "Protocol #2 — Check M3 Max thermal/RAM pressure. Returns Nominal|Fair|Serious|Critical.",
+            "description": "Protocol #2 - Check M3 Max thermal/RAM pressure. Returns Nominal|Fair|Serious|Critical.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_search",
-            "description": "Semantic vector search across agent memory. Use to recall prior context, decisions, or architecture details.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Natural language search query"},
-                    "k": {"type": "integer", "default": 5, "description": "Max results"},
-                    "type_filter": {
-                        "type": "string",
-                        "description": "Filter by type: document, note, fact, conversation",
-                    },
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_write",
-            "description": "Write a new item to the memory system with optional vector embedding.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "enum": ["document", "note", "fact", "conversation"],
-                    },
-                    "content": {"type": "string", "description": "Memory content"},
-                    "title": {"type": "string", "description": "Short descriptive title"},
-                    "importance": {
-                        "type": "number",
-                        "default": 0.7,
-                        "description": "Importance 0.0–1.0",
-                    },
-                    "embed": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Generate vector embedding for semantic search",
-                    },
-                },
-                "required": ["type", "content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_get",
-            "description": "Retrieve a specific memory item by its UUID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string", "description": "Memory item UUID"},
-                },
-                "required": ["id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "memory_update",
-            "description": "Update an existing memory item's content, title, or importance.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string", "description": "Memory item UUID"},
-                    "content": {"type": "string", "description": "New content"},
-                    "title": {"type": "string", "description": "New title"},
-                    "importance": {"type": "number", "description": "New importance 0.0–1.0"},
-                    "reembed": {"type": "boolean", "default": True},
-                },
-                "required": ["id"],
-            },
-        },
-    },
-    # ── Debug Agent tools ────────────────────────────────────────────────────
+]
+
+DEBUG_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
             "name": "debug_analyze",
-            "description": "Root cause analysis with memory-augmented reasoning. Searches past issues, reads source, and uses local LLM to diagnose.",
+            "description": "Root cause analysis with memory-augmented reasoning. Searches past issues, reads source, uses local LLM to diagnose.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -380,13 +320,13 @@ MCP_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "debug_trace",
-            "description": "Execution flow analysis — reads source, finds callers, identifies failure points.",
+            "description": "Execution flow analysis - reads source, finds callers, identifies failure points.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "Path to the source file"},
                     "function_name": {"type": "string", "description": "Function to focus on"},
-                    "error_type": {"type": "string", "description": "Error type to look for (e.g. TypeError)"},
+                    "error_type": {"type": "string", "description": "Error type to look for"},
                 },
                 "required": ["file_path"],
             },
@@ -439,46 +379,128 @@ MCP_TOOLS: list[dict] = [
     },
 ]
 
+# Catalog import — done lazily to avoid pulling memory_core at module load
+_catalog_mod = None
+_catalog_specs_by_name: dict = {}
+_catalog_tool_schemas: list[dict] = []
+_catalog_built = False
+
+
+def _build_catalog_tools() -> tuple[list[dict], dict]:
+    """Lazy-load mcp_tool_catalog and build (openai_schemas, name->spec)."""
+    global _catalog_mod, _catalog_specs_by_name, _catalog_tool_schemas, _catalog_built
+    if _catalog_built:
+        return _catalog_tool_schemas, _catalog_specs_by_name
+    try:
+        import mcp_tool_catalog as cat
+        _catalog_mod = cat
+        for spec in cat.TOOLS:
+            if not ALLOW_DESTRUCTIVE and not spec.default_allowed:
+                continue
+            _catalog_specs_by_name[spec.name] = spec
+            _catalog_tool_schemas.append({
+                "type": "function",
+                "function": {
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.parameters,
+                },
+            })
+        log.info(
+            f"Catalog loaded: {len(_catalog_tool_schemas)} tools "
+            f"(ALLOW_DESTRUCTIVE={ALLOW_DESTRUCTIVE})"
+        )
+    except Exception as exc:
+        log.error(f"Failed to load mcp_tool_catalog: {type(exc).__name__}: {exc}")
+    _catalog_built = True
+    return _catalog_tool_schemas, _catalog_specs_by_name
+
+
+def get_mcp_tools() -> list[dict]:
+    """Return the merged tool list: protocol + debug + catalog (filtered)."""
+    catalog_schemas, _ = _build_catalog_tools()
+    return PROTOCOL_TOOLS + DEBUG_TOOLS + catalog_schemas
+
+
+# Backwards compat — some external callers (start scripts, health checks)
+# may still reference MCP_TOOLS as a module attribute. Keep it as a property-
+# like cached list. Note: this is built once at first access.
+class _LazyToolList(list):
+    def __init__(self):
+        super().__init__()
+        self._loaded = False
+
+    def _load(self):
+        if not self._loaded:
+            self.extend(get_mcp_tools())
+            self._loaded = True
+
+    def __len__(self):
+        self._load()
+        return super().__len__()
+
+    def __iter__(self):
+        self._load()
+        return super().__iter__()
+
+    def __getitem__(self, idx):
+        self._load()
+        return super().__getitem__(idx)
+
+
+MCP_TOOLS = _LazyToolList()
+
+
 # ── Tool executor ─────────────────────────────────────────────────────────────
 
-async def _execute_tool(name: str, args: dict) -> str:
-    """Dispatch a tool_call name → bridge async function. Returns string result."""
+# Map of protocol/debug tool name -> (bridge_loader, attr_name, is_async)
+_LEGACY_DISPATCH = {
+    "log_activity":       (lambda: _custom(), "log_activity",       True),
+    "query_decisions":    (lambda: _custom(), "query_decisions",    True),
+    "update_focus":       (lambda: _custom(), "update_focus",       True),
+    "retire_focus":       (lambda: _custom(), "retire_focus",       True),
+    "check_thermal_load": (lambda: _custom(), "check_thermal_load", True),
+    "debug_analyze":      (lambda: _debug(),  "debug_analyze",      True),
+    "debug_bisect":       (lambda: _debug(),  "debug_bisect",       True),
+    "debug_trace":        (lambda: _debug(),  "debug_trace",        True),
+    "debug_correlate":    (lambda: _debug(),  "debug_correlate",    True),
+    "debug_history":      (lambda: _debug(),  "debug_history",      False),
+    "debug_report":       (lambda: _debug(),  "debug_report",       False),
+}
+
+
+async def _execute_tool(name: str, args: dict, agent_id: str = "mcp-proxy-client") -> str:
+    """Dispatch a tool_call to the right bridge.
+
+    Order:
+      1. Legacy protocol/debug tools -> direct bridge call
+      2. Catalog tools -> mcp_tool_catalog.execute_tool (handles validation,
+         agent_id injection, async/sync, error capture)
+    """
     try:
-        if name == "log_activity":
-            return await _custom().log_activity(**args)
-        if name == "query_decisions":
-            return await _custom().query_decisions(**args)
-        if name == "update_focus":
-            return await _custom().update_focus(**args)
-        if name == "retire_focus":
-            return await _custom().retire_focus()
-        if name == "check_thermal_load":
-            return await _custom().check_thermal_load()
-        if name == "memory_search":
-            return await _memory().memory_search(**args)
-        if name == "memory_write":
-            return await _memory().memory_write(**args)
-        if name == "memory_get":
-            return await _memory().memory_get(**args)
-        if name == "memory_update":
-            return await _memory().memory_update(**args)
-        # Debug Agent tools
-        if name == "debug_analyze":
-            return await _debug().debug_analyze(**args)
-        if name == "debug_bisect":
-            return await _debug().debug_bisect(**args)
-        if name == "debug_trace":
-            return await _debug().debug_trace(**args)
-        if name == "debug_correlate":
-            return await _debug().debug_correlate(**args)
-        if name == "debug_history":
-            return await _debug().debug_history(**args)
-        if name == "debug_report":
-            return await _debug().debug_report(**args)
-        return f"Unknown MCP tool: {name}"
+        if name in _LEGACY_DISPATCH:
+            loader, attr, is_async = _LEGACY_DISPATCH[name]
+            bridge = loader()
+            fn = getattr(bridge, attr)
+            result = await fn(**args) if is_async else fn(**args)
+            return result if isinstance(result, str) else str(result)
+
+        _, specs_by_name = _build_catalog_tools()
+        spec = specs_by_name.get(name)
+        if spec is None:
+            if _catalog_mod is not None:
+                full = _catalog_mod.get_tool(name)
+                if full is not None and not ALLOW_DESTRUCTIVE and not full.default_allowed:
+                    return (
+                        f"Tool '{name}' is destructive and disabled by default. "
+                        f"Set MCP_PROXY_ALLOW_DESTRUCTIVE=1 to enable."
+                    )
+            return f"Unknown MCP tool: {name}"
+
+        return await _catalog_mod.execute_tool(spec, args, agent_id)
     except Exception as exc:
-        log.warning(f"Tool {name} raised {type(exc).__name__}")
-        return f"Tool error: {type(exc).__name__}"
+        log.warning(f"Tool {name} raised {type(exc).__name__}: {exc}")
+        return f"Tool error: {type(exc).__name__}: {exc}"
 
 # ── Routing ───────────────────────────────────────────────────────────────────
 
@@ -708,6 +730,7 @@ async def _run_with_tools(
     model: str,
     client_tools: list,
     max_tokens: int,
+    agent_id: str = "mcp-proxy-client",
 ) -> dict:
     """
     Main loop:
@@ -716,7 +739,7 @@ async def _run_with_tools(
       3. Execute tool_calls in parallel, append results, repeat.
       4. Return the first response with finish_reason != tool_calls.
     """
-    all_tools = MCP_TOOLS + client_tools
+    all_tools = get_mcp_tools() + client_tools
     working = list(messages)
     btype, burl, bkey = _route(model)
 
@@ -732,10 +755,10 @@ async def _run_with_tools(
         tool_calls: list = message.get("tool_calls") or []
 
         if not tool_calls or finish != "tool_calls":
-            log.info(f"Done in {round_num + 1} round(s) — finish_reason={finish}")
+            log.info(f"Done in {round_num + 1} round(s) - finish_reason={finish}")
             return response
 
-        log.info(f"Round {round_num + 1}: executing {len(tool_calls)} tool call(s)")
+        log.info(f"Round {round_num + 1}: executing {len(tool_calls)} tool call(s) for agent={agent_id}")
 
         # Add assistant message (with tool_calls) to history
         working.append(message)
@@ -752,9 +775,11 @@ async def _run_with_tools(
                     args = json.loads(raw) if isinstance(raw, str) else raw
                 except json.JSONDecodeError:
                     args = {}
-                log.info(f"  → {name}({list(args.keys())})")
+                log.info(f"  -> {name}({list(args.keys())})")
                 try:
-                    result = await asyncio.wait_for(_execute_tool(name, args), timeout=300.0)
+                    result = await asyncio.wait_for(
+                        _execute_tool(name, args, agent_id), timeout=300.0
+                    )
                 except asyncio.TimeoutError:
                     log.warning(f"Tool {name} timed out after 300s")
                     result = f"Tool error: {name} timed out after 300s"
@@ -767,8 +792,8 @@ async def _run_with_tools(
         tool_results = await asyncio.gather(*[_exec_one(tc) for tc in tool_calls])
         working.extend(tool_results)
 
-    log.warning(f"Reached MAX_TOOL_ROUNDS ({MAX_TOOL_ROUNDS}) — returning last response")
-    return response  # type: ignore[return-value]  # set in last iteration
+    log.warning(f"Reached MAX_TOOL_ROUNDS ({MAX_TOOL_ROUNDS}) - returning last response")
+    return response  # type: ignore[return-value]
 
 # ── SSE streaming adapter ─────────────────────────────────────────────────────
 
@@ -815,8 +840,8 @@ async def _sse_from_completion(completion: dict) -> AsyncIterator[str]:
 
 app = FastAPI(
     title="MCP Tool Execution Proxy",
-    description="Injects MCP Operational Protocol tools into Aider/OpenClaw requests.",
-    version="1.0.0",
+    description="Injects m3-memory v2 catalog + protocol/debug tools into Aider/OpenClaw requests.",
+    version="2.0.0",
 )
 
 
@@ -830,11 +855,20 @@ async def _on_shutdown():
 
 @app.get("/health")
 async def health() -> dict:
+    catalog_schemas, _ = _build_catalog_tools()
     return {
         "status": "ok",
         "proxy": "mcp-tool-proxy",
-        "version": "1.0.0",
-        "mcp_tools": len(MCP_TOOLS),
+        "version": "2.0.0",
+        "tool_counts": {
+            "protocol": len(PROTOCOL_TOOLS),
+            "debug": len(DEBUG_TOOLS),
+            "catalog": len(catalog_schemas),
+            "total": len(PROTOCOL_TOOLS) + len(DEBUG_TOOLS) + len(catalog_schemas),
+        },
+        "allow_destructive": ALLOW_DESTRUCTIVE,
+        # Backwards-compat field — old health checks looked for "mcp_tools"
+        "mcp_tools": len(PROTOCOL_TOOLS) + len(DEBUG_TOOLS) + len(catalog_schemas),
         "backends": {
             "anthropic": ANTHROPIC_BASE,
             "google": GOOGLE_AI_BASE,
@@ -911,7 +945,8 @@ async def chat_completions(request: Request) -> JSONResponse:
     messages = [m.model_dump(exclude_none=True) for m in body.messages]
     client_tools = body.tools or []
     wants_stream = body.stream
-    
+    agent_id = request.headers.get("X-Agent-Id", "mcp-proxy-client")
+
     # Fix M8: Correctly handle max_tokens=0 or missing
     if body.max_tokens is not None and body.max_tokens > 0:
         max_tokens = body.max_tokens
@@ -921,11 +956,11 @@ async def chat_completions(request: Request) -> JSONResponse:
     btype, burl, _ = _route(model)
     log.info(
         f"Request: model={model} backend={btype} url={burl.split('/')[2]} "
-        f"messages={len(messages)} client_tools={len(client_tools)} stream={wants_stream}"
+        f"agent={agent_id} messages={len(messages)} client_tools={len(client_tools)} stream={wants_stream}"
     )
 
     try:
-        result = await _run_with_tools(messages, model, client_tools, max_tokens)
+        result = await _run_with_tools(messages, model, client_tools, max_tokens, agent_id)
 
         if wants_stream:
             return StreamingResponse(
@@ -973,12 +1008,17 @@ async def chat_completions(request: Request) -> JSONResponse:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    catalog_schemas, _ = _build_catalog_tools()
+    total_tools = len(PROTOCOL_TOOLS) + len(DEBUG_TOOLS) + len(catalog_schemas)
     log.info("=" * 60)
-    log.info("  MCP Tool Execution Proxy  v1.0")
-    log.info(f"  Listening:  http://{PROXY_HOST}:{PROXY_PORT}")
-    log.info(f"  LM Studio:  {LMSTUDIO_BASE}")
-    log.info(f"  Anthropic:  {ANTHROPIC_BASE}")
-    log.info(f"  MCP tools:  {len(MCP_TOOLS)} injected into every request")
+    log.info("  MCP Tool Execution Proxy  v2.0")
+    log.info(f"  Listening:          http://{PROXY_HOST}:{PROXY_PORT}")
+    log.info(f"  LM Studio:          {LMSTUDIO_BASE}")
+    log.info(f"  Anthropic:          {ANTHROPIC_BASE}")
+    log.info(f"  Protocol tools:     {len(PROTOCOL_TOOLS)}")
+    log.info(f"  Debug tools:        {len(DEBUG_TOOLS)}")
+    log.info(f"  Catalog tools:      {len(catalog_schemas)} (ALLOW_DESTRUCTIVE={ALLOW_DESTRUCTIVE})")
+    log.info(f"  Total injected:     {total_tools}")
     log.info("=" * 60)
     uvicorn.run(app, host=PROXY_HOST, port=PROXY_PORT, log_level="warning")
 
