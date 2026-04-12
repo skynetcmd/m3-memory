@@ -736,7 +736,7 @@ def memory_delete_impl(id, hard=False):
                        (datetime.now(timezone.utc).isoformat(), id))
     return f"{'Hard' if hard else 'Soft'}-deleted: {id}"
 
-VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates"}
+VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff"}
 
 def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related") -> str:
     """Creates a directional link between two memory items."""
@@ -813,6 +813,97 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
             lines.append(f"  {e['from_id'][:8]} --[{e['relationship_type']}]--> {e['to_id'][:8]}")
 
     return "\n".join(lines)
+
+def memory_handoff_impl(from_agent: str, to_agent: str, task: str,
+                        context_ids: list, note: str = "") -> str:
+    """Creates a handoff memory for inter-agent task transfer."""
+    # 1. Generate new UUID
+    new_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 2. Insert handoff memory directly via raw SQL
+    with _db() as db:
+        metadata_json = json.dumps({"from_agent": from_agent, "note": note})
+        db.execute(
+            "INSERT INTO memory_items (id, type, title, content, agent_id, scope, metadata_json, created_at, updated_at, is_deleted) "
+            "VALUES (?, 'handoff', ?, ?, ?, 'agent', ?, ?, ?, 0)",
+            (new_id, f"Handoff from {from_agent}", task, to_agent, metadata_json, now, now)
+        )
+
+    # 3. Link context items (each opens its own _db() context)
+    for ctx_id in context_ids:
+        try:
+            memory_link_impl(new_id, ctx_id, "handoff")
+        except Exception as e:
+            logger.debug(f"Failed to link context {ctx_id}: {e}")
+
+    # 4. Record history
+    _record_history(new_id, "handoff_create", None, task, "content", from_agent)
+
+    # 5. Return status
+    return f"Handoff created: {new_id} ({from_agent} -> {to_agent}, {len(context_ids)} context links)"
+
+def memory_inbox_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
+    """Retrieves handoff messages for an agent, optionally filtered to unread."""
+    # Build WHERE clause dynamically
+    where_clause = "WHERE agent_id = ? AND type = 'handoff' AND is_deleted = 0"
+    if unread_only:
+        where_clause += " AND read_at IS NULL"
+
+    # Query the inbox
+    with _db() as db:
+        rows = db.execute(
+            f"SELECT id, title, content, metadata_json, created_at, read_at FROM memory_items "
+            f"{where_clause} ORDER BY created_at DESC LIMIT ?",
+            (agent_id, limit)
+        ).fetchall()
+
+    # Format result
+    if not rows:
+        return f"Inbox for {agent_id}: (empty)"
+
+    lines = [f"Inbox for {agent_id} ({len(rows)} {'unread' if unread_only else 'total'}):"]
+    for row in rows:
+        # Parse from_agent from metadata_json
+        from_agent = "?"
+        try:
+            meta = json.loads(row["metadata_json"] or "{}")
+            from_agent = meta.get("from_agent", "?")
+        except Exception:
+            pass
+
+        # Truncate task (content) to 60 chars
+        task_truncated = (row["content"] or "")[:60]
+        lines.append(f"  [{row['id'][:8]}] from={from_agent} task={task_truncated} created={row['created_at']}")
+
+    return "\n".join(lines)
+
+def memory_inbox_ack_impl(memory_id: str) -> str:
+    """Marks a handoff memory as read."""
+    # 1. Compute current timestamp
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 2. Update read_at and updated_at
+    with _db() as db:
+        db.execute(
+            "UPDATE memory_items SET read_at = ?, updated_at = ? WHERE id = ? AND type = 'handoff' AND is_deleted = 0",
+            (now, now, memory_id)
+        )
+        rows_affected = db.total_changes  # This may not be reliable; use a verify query instead
+
+        # Verify update actually happened
+        verify = db.execute(
+            "SELECT id FROM memory_items WHERE id = ? AND type = 'handoff' AND is_deleted = 0 AND read_at IS NOT NULL",
+            (memory_id,)
+        ).fetchone()
+
+    # 3. Check result
+    if not verify:
+        return f"Error: memory {memory_id} not found or not a handoff"
+
+    # 4. Record history and return
+    _record_history(memory_id, "handoff_ack", None, now, "read_at", "")
+    return f"Acked: {memory_id}"
 
 async def conversation_start_impl(title, agent_id="", model_id="", tags=""):
     cid = str(uuid.uuid4())

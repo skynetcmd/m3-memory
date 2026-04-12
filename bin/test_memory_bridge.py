@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """End-to-end test suite for memory_bridge.py.
 
-Tests all 19 MCP tools (including memory_history, memory_link, memory_graph,
-memory_verify, memory_set_retention, gdpr_export, gdpr_forget, memory_cost_report).
+Tests all 22 MCP tools (including memory_history, memory_link, memory_graph,
+memory_verify, memory_set_retention, gdpr_export, gdpr_forget, memory_cost_report,
+memory_handoff, memory_inbox, memory_inbox_ack).
 Embedding-dependent tests are attempted and gracefully skipped when an
 embedding model is not loaded in LM Studio.
 """
@@ -108,6 +109,8 @@ def cleanup():
         conn.execute(f"DELETE FROM chroma_sync_queue WHERE memory_id IN ({placeholders})", ids)
         conn.execute(f"DELETE FROM memory_history WHERE memory_id IN ({placeholders})", ids)
         conn.execute("DELETE FROM memory_items WHERE agent_id = ?", (AGENT,))
+    # Also clean up handoff items for test-agent-B
+    conn.execute("DELETE FROM memory_items WHERE agent_id = ? AND type = 'handoff'", ("test-agent-B",))
     conn.commit()
     conn.close()
 
@@ -141,6 +144,9 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         gdpr_export,
         gdpr_forget,
         memory_cost_report,
+        memory_handoff,
+        memory_inbox,
+        memory_inbox_ack,
         VALID_MEMORY_TYPES,
         _ensure_sync_tables,
         _content_hash,
@@ -1015,12 +1021,55 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     if lm_online:
         auto_res = await memory_write(type="auto", content="There is a bug in the login screen where the password field doesn't mask characters.", title="Login bug", agent_id=AGENT)
         auto_id = auto_res.split("Created: ")[1].split()[0]
-        
+
         item_data = json.loads(memory_get(auto_id))
         check("auto-classify assigned a type", item_data["type"] != "auto" and item_data["type"] in VALID_MEMORY_TYPES)
         print(f"   Classified as: {item_data['type']}")
     else:
         skip("LLM Auto-Classification", "local LLM offline")
+
+    # ── 42: memory_handoff / inbox roundtrip ─────────────────────────────────
+    print("\n── 42: memory_handoff / inbox roundtrip ─────────────────────────")
+
+    # Write 2 seed context memories
+    ctx1_res = await memory_write(type="note", content="Context 1 for handoff", title="Context 1", agent_id=AGENT, embed=False)
+    ctx1_id = ctx1_res.split("Created: ")[1].split()[0]
+
+    ctx2_res = await memory_write(type="note", content="Context 2 for handoff", title="Context 2", agent_id=AGENT, embed=False)
+    ctx2_id = ctx2_res.split("Created: ")[1].split()[0]
+
+    # Call memory_handoff
+    handoff_res = memory_handoff(AGENT, "test-agent-B", "Finish the TPS report", context_ids=[ctx1_id, ctx2_id], note="due Friday")
+    check("handoff creation", handoff_res.startswith("Handoff created:"))
+
+    # Parse new memory id from response
+    handoff_id = handoff_res.split("Handoff created: ")[1].split()[0] if "Handoff created:" in handoff_res else ""
+    handoff_id_8 = handoff_id[:8]
+
+    # Check memory_inbox for new agent with unread_only=True
+    inbox_res = memory_inbox("test-agent-B", unread_only=True)
+    check("inbox contains new handoff (unread)", handoff_id_8 in inbox_res and "Finish the TPS report" in inbox_res)
+
+    # Verify edges via raw SQL
+    conn = sqlite3.connect(DB_PATH)
+    edge_count = conn.execute(
+        "SELECT COUNT(*) FROM memory_relationships WHERE from_id = ? AND relationship_type = 'handoff'",
+        (handoff_id,)
+    ).fetchone()[0]
+    conn.close()
+    check("handoff edges created", edge_count == 2, f"expected 2 edges, got {edge_count}")
+
+    # Ack the handoff
+    ack_res = memory_inbox_ack(handoff_id)
+    check("inbox_ack success", ack_res.startswith("Acked:"))
+
+    # Check inbox again with unread_only=True (should be empty of this item)
+    inbox_unread = memory_inbox("test-agent-B", unread_only=True)
+    check("acked handoff not in unread inbox", handoff_id_8 not in inbox_unread)
+
+    # Check inbox with unread_only=False (should contain acked item)
+    inbox_all = memory_inbox("test-agent-B", unread_only=False)
+    check("acked handoff in full inbox", handoff_id_8 in inbox_all)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     cleanup()

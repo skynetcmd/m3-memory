@@ -181,7 +181,7 @@ def memory_history(memory_id, limit=20):
 
 @mcp.tool()
 def memory_link(from_id, to_id, relationship_type="related"):
-    """Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message."""
+    """Creates a directional link between two memory items. Valid types: related, supports, contradicts, extends, supersedes, references, consolidates, message, handoff."""
     return memory_core.memory_link_impl(from_id, to_id, relationship_type)
 
 @mcp.tool()
@@ -233,6 +233,29 @@ def gdpr_forget(user_id):
 def memory_cost_report():
     """Returns current session operation counts and estimated token usage for memory operations."""
     return memory_core.memory_cost_report_impl()
+
+@mcp.tool()
+def memory_handoff(from_agent: str, to_agent: str, task: str,
+                   context_ids: list = None, note: str = "") -> str:
+    """Hand off a task from one agent to another. Writes a new handoff-type
+    memory owned to_agent and links it to the given context memories with
+    'handoff' edges. Returns a confirmation string with the new memory id.
+
+    Note: this is the in-process memory handoff (memory_items + memory_relationships).
+    Unrelated to the standalone session_handoff.py MCP server."""
+    return memory_core.memory_handoff_impl(from_agent, to_agent, task,
+                                           context_ids or [], note)
+
+@mcp.tool()
+def memory_inbox(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
+    """List handoff messages addressed to agent_id, newest first.
+    Pass unread_only=False to include already-acked items."""
+    return memory_core.memory_inbox_impl(agent_id, bool(unread_only), int(limit))
+
+@mcp.tool()
+def memory_inbox_ack(memory_id: str) -> str:
+    """Mark a handoff memory as read (sets read_at = now)."""
+    return memory_core.memory_inbox_ack_impl(memory_id)
 
 if __name__ == "__main__":
     logger.info("Memory Bridge (Modular) starting...")
