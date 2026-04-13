@@ -345,6 +345,243 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
     finally:
         _EMBED_SEM.release()
 
+
+# Tuned against llama-server --parallel 4 + --ubatch-size 4096:
+# 4 in-flight chunks × 1024 texts/chunk ≈ 161 embeds/sec on RTX 5080.
+EMBED_BULK_CHUNK = int(os.environ.get("EMBED_BULK_CHUNK", "1024"))
+EMBED_BULK_CONCURRENCY = int(os.environ.get("EMBED_BULK_CONCURRENCY", "4"))
+_EMBED_BULK_SEM = asyncio.Semaphore(EMBED_BULK_CONCURRENCY)
+
+
+async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
+    """Batched embed path that bypasses the per-call semaphore and posts many
+    inputs in a single /embeddings request. Honors the content-hash cache so
+    repeated texts cost nothing. Returns a list aligned with `texts`."""
+    if not texts:
+        return []
+
+    out: list[tuple[list[float] | None, str] | None] = [None] * len(texts)
+
+    # Cache lookup: dedupe by content_hash, fetch any cached rows in one pass.
+    hashes = [_content_hash(t) for t in texts]
+    uniq_hashes = list(set(hashes))
+    cached_vecs: dict[str, tuple[list[float], str]] = {}
+    try:
+        with _db() as db:
+            placeholders = ",".join("?" * len(uniq_hashes))
+            rows = db.execute(
+                f"SELECT content_hash, embedding, embed_model FROM memory_embeddings "
+                f"WHERE embed_model = ? AND content_hash IN ({placeholders})",
+                (EMBED_MODEL, *uniq_hashes),
+            ).fetchall()
+            for r in rows:
+                cached_vecs[r["content_hash"]] = (_unpack(r["embedding"]), r["embed_model"])
+    except Exception as e:
+        logger.debug(f"Bulk embed cache lookup failed: {e}")
+
+    # Fill cached slots; collect misses to embed.
+    miss_indices: list[int] = []
+    miss_texts: list[str] = []
+    for i, (t, h) in enumerate(zip(texts, hashes)):
+        hit = cached_vecs.get(h)
+        if hit is not None:
+            out[i] = hit
+        else:
+            miss_indices.append(i)
+            miss_texts.append(t)
+
+    if not miss_texts:
+        return out  # type: ignore[return-value]
+
+    _track_cost("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
+    token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
+    client = _get_embed_client()
+    result = await get_best_embed(client, token)
+    if not result:
+        for i in miss_indices:
+            out[i] = (None, EMBED_MODEL)
+        return out  # type: ignore[return-value]
+    base_url, model = result
+
+    async def _post_once(chunk_texts: list[str]) -> list[list[float] | None] | None:
+        """One POST. Returns vectors on success, None on failure (caller decides bisect)."""
+        try:
+            resp = await client.post(
+                f"{base_url}/embeddings",
+                json={"model": model, "input": chunk_texts},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=_httpx.Timeout(CHROMA_CONNECT_T, read=EMBED_TIMEOUT_READ * 4),
+            )
+            resp.raise_for_status()
+            data = resp.json()["data"]
+            ordered = sorted(data, key=lambda d: d.get("index", 0))
+            return [d["embedding"] for d in ordered]
+        except Exception:
+            return None
+
+    async def _post_chunk(chunk_texts: list[str]) -> list[list[float] | None]:
+        """Post a chunk with retry + bisection on failure.
+
+        If a batch fails 3 attempts, split it in half and recurse on both halves.
+        Single-text failures (len==1) are surfaced as [None] so a single bad
+        input never takes down its neighbors.
+        """
+        async with _EMBED_BULK_SEM:
+            # Try up to 3 times at this chunk size.
+            for attempt in range(3):
+                result = await _post_once(chunk_texts)
+                if result is not None:
+                    return result
+                if attempt < 2:
+                    await asyncio.sleep(2 * (2 ** attempt))
+
+        # All retries failed. Bisect if we can.
+        if len(chunk_texts) == 1:
+            logger.warning(
+                f"Bulk embed: dropping single input of len={len(chunk_texts[0])} after 3 attempts"
+            )
+            return [None]
+        mid = len(chunk_texts) // 2
+        logger.info(
+            f"Bulk embed: bisecting failed chunk of {len(chunk_texts)} into "
+            f"{mid} + {len(chunk_texts) - mid}"
+        )
+        left, right = await asyncio.gather(
+            _post_chunk(chunk_texts[:mid]),
+            _post_chunk(chunk_texts[mid:]),
+        )
+        return [*left, *right]
+
+    # Split misses into chunks and fan out under _EMBED_BULK_SEM.
+    chunks = [
+        miss_texts[i : i + EMBED_BULK_CHUNK]
+        for i in range(0, len(miss_texts), EMBED_BULK_CHUNK)
+    ]
+    chunk_results = await asyncio.gather(*(_post_chunk(c) for c in chunks))
+
+    global _EMBED_DIM_VALIDATED
+    flat: list[list[float] | None] = []
+    for cr in chunk_results:
+        flat.extend(cr)
+    for local_i, vec in enumerate(flat):
+        if vec is not None and not _EMBED_DIM_VALIDATED:
+            if len(vec) != EMBED_DIM:
+                logger.error(
+                    f"Embedding dimension mismatch: got {len(vec)}, expected {EMBED_DIM}"
+                )
+            _EMBED_DIM_VALIDATED = True
+        out[miss_indices[local_i]] = (vec, model)
+
+    return out  # type: ignore[return-value]
+
+
+async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
+    """Bulk write that routes embeddings through `_embed_many`. Intended for
+    benchmark / import paths where per-item contradiction detection would
+    dominate wall-clock. Returns a list of item_ids (or empty string on failure)."""
+    if not items:
+        return []
+
+    now = datetime.now(timezone.utc).isoformat()
+    prepared: list[dict] = []
+    for it in items:
+        mid = str(uuid.uuid4())
+        meta = it.get("metadata", "{}")
+        if isinstance(meta, dict):
+            meta = json.dumps(meta)
+        scope = it.get("scope", "agent")
+        if scope not in VALID_SCOPES:
+            scope = "agent"
+        content = it.get("content") or ""
+        title = it.get("title") or ""
+        agent = (
+            (it.get("change_agent") or "").strip().lower()
+            or _infer_change_agent_util(
+                it.get("agent_id", ""), it.get("model_id", ""), default=DEFAULT_CHANGE_AGENT
+            )
+        )
+        try:
+            importance = float(it.get("importance", 0.5))
+        except (TypeError, ValueError):
+            importance = 0.5
+        expires_at = None
+        if scope == "session":
+            from datetime import timedelta
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(hours=24)
+            ).isoformat()
+        prepared.append(
+            {
+                "id": mid,
+                "type": it.get("type", "note"),
+                "title": title,
+                "content": content,
+                "metadata": meta,
+                "agent_id": it.get("agent_id", ""),
+                "model_id": it.get("model_id", ""),
+                "change_agent": agent,
+                "importance": importance,
+                "source": it.get("source", "agent"),
+                "user_id": it.get("user_id", ""),
+                "scope": scope,
+                "expires_at": expires_at,
+                "valid_from": it.get("valid_from") or now,
+                "valid_to": it.get("valid_to") or "",
+                "conversation_id": it.get("conversation_id") or None,
+                "refresh_on": it.get("refresh_on") or None,
+                "refresh_reason": it.get("refresh_reason") or None,
+                "embed": it.get("embed", True),
+                "embed_text": content or title,
+            }
+        )
+
+    # Phase 1: INSERT memory_items + chroma queue + history in one transaction.
+    with _db() as db:
+        for p in prepared:
+            db.execute(
+                "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, "
+                "change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, "
+                "valid_from, valid_to, conversation_id, refresh_on, refresh_reason, content_hash) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    p["id"], p["type"], p["title"], p["content"], p["metadata"],
+                    p["agent_id"], p["model_id"], p["change_agent"], p["importance"],
+                    p["source"], ORIGIN_DEVICE, p["user_id"], p["scope"], p["expires_at"],
+                    now, p["valid_from"], p["valid_to"], p["conversation_id"],
+                    p["refresh_on"], p["refresh_reason"],
+                    hashlib.sha256((p["content"] or "").encode("utf-8")).hexdigest(),
+                ),
+            )
+            if p["embed"]:
+                db.execute(
+                    "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
+                    (p["id"], "upsert"),
+                )
+            _record_history(
+                p["id"], "create", None, p["content"], "content",
+                p["agent_id"] or p["change_agent"], db=db,
+            )
+
+    # Phase 2: batched embeddings for items that requested them.
+    to_embed = [p for p in prepared if p["embed"] and p["embed_text"]]
+    if to_embed:
+        vecs = await _embed_many([p["embed_text"] for p in to_embed])
+        with _db() as db:
+            for p, (vec, m) in zip(to_embed, vecs):
+                if not vec:
+                    continue
+                db.execute(
+                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (
+                        str(uuid.uuid4()), p["id"], _pack(vec), m, len(vec), now,
+                        _content_hash(p["embed_text"]),
+                    ),
+                )
+
+    return [p["id"] for p in prepared]
+
+
 def _queue_chroma(memory_id: str, operation: str) -> None:
     try:
         with _db() as db:
