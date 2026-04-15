@@ -206,7 +206,11 @@ def _ensure_sync_tables() -> None:
     import subprocess
     try:
         migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
-        subprocess.run([sys.executable, migration_script], check=True, timeout=30)
+        subprocess.run(
+            [sys.executable, migration_script, "up", "--yes"],
+            check=True,
+            timeout=30,
+        )
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
 
