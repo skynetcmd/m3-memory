@@ -32,6 +32,17 @@ DB_PATH = ctx.db_path
 
 BATCH_SIZE = 100  # commit every N rows
 
+# Exclude benchmark / test agent data from warehouse pushes.
+# These prefixes match agent_ids created by test_memory_bridge.py,
+# benchmark_memory.py, and test_debug_agent.py.
+_TEST_AGENT_FILTER = """
+    AND agent_id NOT LIKE 'bench_%'
+    AND agent_id NOT LIKE 'test_%'
+    AND agent_id NOT LIKE 'cons_%'
+    AND agent_id NOT LIKE 'import_test_%'
+    AND agent_id NOT IN ('notif-test', 'agent-X', 'test-agent-B')
+"""
+
 
 def _get_pg_url() -> str:
     """Resolve PostgreSQL connection URL from environment or encrypted vault."""
@@ -141,26 +152,22 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
 
     # 1. PUSH: Local to Remote (delta — only changed rows since last push)
     watermark = _get_watermark(sl_cur, "pg_push")
-    if watermark:
-        sl_cur.execute("""
+    _SELECT_COLS = """
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
                    change_agent, importance, source, origin_device, is_deleted,
                    expires_at, decay_rate, created_at, updated_at,
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
                    COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
-            WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)
+            WHERE 1=1 """ + _TEST_AGENT_FILTER
+
+    if watermark:
+        sl_cur.execute(_SELECT_COLS + """
+            AND (updated_at > ? OR (updated_at IS NULL AND created_at > ?))
         """, (watermark, watermark))
         logger.info(f"Delta push: rows changed since {watermark}")
     else:
-        sl_cur.execute("""
-            SELECT id, type, title, content, metadata_json, agent_id, model_id,
-                   change_agent, importance, source, origin_device, is_deleted,
-                   expires_at, decay_rate, created_at, updated_at,
-                   COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
-                   COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
-            FROM memory_items
-        """)
+        sl_cur.execute(_SELECT_COLS)
         logger.info("Full push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
@@ -432,16 +439,18 @@ def sync_tasks(sl_cur, pg_cur, sl_conn):
         "result_memory_id, metadata_json, created_at, updated_at, completed_at, deleted_at"
     )
 
-    # 1. PUSH: local → remote (delta on updated_at)
+    # 1. PUSH: local → remote (delta on updated_at, excluding test data)
+    _task_filter = _TEST_AGENT_FILTER.replace("agent_id", "created_by")
+    _task_base = f"SELECT {task_cols} FROM tasks WHERE 1=1 " + _task_filter
     watermark = _get_watermark(sl_cur, "tasks_push")
     if watermark:
         sl_cur.execute(
-            f"SELECT {task_cols} FROM tasks WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)",
+            _task_base + " AND (updated_at > ? OR (updated_at IS NULL AND created_at > ?))",
             (watermark, watermark),
         )
         logger.info(f"Delta task push: rows changed since {watermark}")
     else:
-        sl_cur.execute(f"SELECT {task_cols} FROM tasks")
+        sl_cur.execute(_task_base)
         logger.info("Full task push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
@@ -553,17 +562,19 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
 
     # 1. PUSH: Local to Remote (delta)
     watermark = _get_watermark(sl_cur, "emb_push")
-    if watermark:
-        # memory_embeddings has no updated_at, so join on memory_items.updated_at
-        sl_cur.execute("""
+    _EMB_BASE = """
             SELECT me.id, me.memory_id, me.embedding, me.embed_model, me.dim
             FROM memory_embeddings me
             JOIN memory_items mi ON me.memory_id = mi.id
-            WHERE mi.updated_at > ? OR (mi.updated_at IS NULL AND mi.created_at > ?)
+            WHERE 1=1 """ + _TEST_AGENT_FILTER.replace("agent_id", "mi.agent_id")
+
+    if watermark:
+        sl_cur.execute(_EMB_BASE + """
+            AND (mi.updated_at > ? OR (mi.updated_at IS NULL AND mi.created_at > ?))
         """, (watermark, watermark))
         logger.info(f"Delta embedding push: rows changed since {watermark}")
     else:
-        sl_cur.execute("SELECT id, memory_id, embedding, embed_model, dim FROM memory_embeddings")
+        sl_cur.execute(_EMB_BASE)
         logger.info("Full embedding push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
