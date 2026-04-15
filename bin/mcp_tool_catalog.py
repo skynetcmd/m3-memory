@@ -903,6 +903,24 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="task_delete",
+        description="Delete a task. Soft-delete (default) sets a tombstone that propagates via pg_sync to the warehouse and peers. Hard-delete removes the row locally and requires a prior soft-delete.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task UUID."},
+                "hard":    {"type": "boolean", "description": "If true, permanently remove an already-tombstoned row from local SQLite.", "default": False},
+                "actor":   {"type": "string", "description": "Actor performing the delete (audit log).", "default": ""},
+            },
+            "required": ["task_id"],
+        },
+        impl=memory_core.task_delete_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="task_set_result",
         description="Set the result memory pointer for a task. Does NOT change state.",
         parameters={

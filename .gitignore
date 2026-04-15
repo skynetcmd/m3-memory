@@ -95,3 +95,10 @@ memory/.migrate_config.json
 
 # Node
 node_modules/
+
+# LongMemEval benchmark raw data (265 MB JSON, too large for git; fetched out-of-band)
+data/longmemeval/
+data/memory.db
+
+# Claude Code runtime locks
+.claude/scheduled_tasks.lock
