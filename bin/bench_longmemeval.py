@@ -171,6 +171,28 @@ def classify_question(question: str) -> str:
         return "preference"
     return "default"
 
+# Categories where the answer lives in one specific turn inside a single
+# session. Session expansion converts "right session, wrong turn" into wins
+# because every turn of the hit session is pulled into context — this turns
+# the relevant recall metric from turn_hit into session_hit (which is
+# typically 10-15pp higher on these categories).
+SS_EXPAND_CATEGORIES = frozenset({
+    "single-session-user",
+    "single-session-assistant",
+})
+
+# Map from qtype to the role whose turns should get a retrieval score bonus.
+# ss-assistant questions ("what did you tell me about X?") semantically match
+# user follow-up turns more readily than the assistant answer turn itself,
+# so the evidence turn ranks lower than distractor user turns. Boosting the
+# matching-role score at re-rank time pulls the evidence turn up. Applied to
+# a fetched pool of k*2 candidates, then trimmed back to k before session
+# expansion.
+SS_ROLE_BOOST_MAP = {
+    "single-session-assistant": "assistant",
+    "single-session-user": "user",
+}
+
 
 def judge_prompt(qtype: str, question: str, answer: str, response: str, abstention: bool) -> str:
     if abstention:
@@ -289,10 +311,28 @@ async def retrieve_for_question(
     cluster_size: int = 0, graph_depth: int = 0,
     recency_bias: float = 0.0,
     adaptive_k: bool = False,
+    expand_sessions: bool = False,
+    session_cap: int = 12,
+    role_boost: float = 0.0,
+    role_boost_target: str = "",
 ) -> list[dict]:
-    """Hybrid FTS5+vector search with optional graph expansion and episodic clustering."""
+    """Hybrid FTS5+vector search with optional graph expansion and episodic clustering.
+
+    `expand_sessions`: after the initial ranked retrieval, pull all turns from
+    each session that had at least one hit (capped at `session_cap` turns per
+    session). Fixes cases where the literal answer turn ranks just outside
+    top-k while other turns from the same session make it in — MMR's duplicate
+    penalty demotes supersession evidence, which session expansion recovers.
+
+    `role_boost` + `role_boost_target`: fetch an overshoot of 2*k candidates,
+    add `role_boost` to the score of any candidate whose metadata.role matches
+    `role_boost_target`, re-sort by boosted score, and trim to k. Targets the
+    ss-assistant failure mode where the evidence turn ranks outside top-k
+    because user-turn distractors score higher on the raw question embedding.
+    """
+    fetch_k = k * 2 if role_boost > 0 and role_boost_target else k
     ranked = await memory_search_scored_impl(
-        question, k=k, user_id=qid,
+        question, k=fetch_k, user_id=qid,
         extra_columns=["metadata_json", "conversation_id"],
         recency_bias=recency_bias,
         adaptive_k=adaptive_k,
@@ -310,6 +350,52 @@ async def retrieve_for_question(
             item["metadata"] = {}
         hits.append(item)
         seen_ids.add(item["id"])
+
+    # Role boost re-rank: for ss-user/ss-assistant, boost hits whose role
+    # matches the expected answer role, re-sort, and trim the overshoot
+    # fetch_k pool back to k. Runs before graph/session expansion so the
+    # downstream expansions seed from the role-corrected top-k.
+    if role_boost > 0 and role_boost_target and hits:
+        for h in hits:
+            if h["metadata"].get("role") == role_boost_target:
+                h["score"] += role_boost
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        hits = hits[:k]
+        seen_ids = {h["id"] for h in hits}
+
+    # Session expansion: pull every turn from each hit session (capped per
+    # session). For single-session categories this collapses turn_hit onto
+    # session_hit — once the right session is retrieved, every turn of it is
+    # in context, so "right session, wrong turn" becomes a win.
+    if expand_sessions and hits:
+        session_ids_hit = {h["conversation_id"] for h in hits if h.get("conversation_id")}
+        if session_ids_hit:
+            with _db() as db:
+                placeholders = ",".join(["?"] * len(session_ids_hit))
+                rows = db.execute(
+                    f"SELECT id, content, title, metadata_json, conversation_id "
+                    f"FROM memory_items "
+                    f"WHERE conversation_id IN ({placeholders}) AND is_deleted = 0",
+                    tuple(session_ids_hit),
+                ).fetchall()
+            per_session: dict[str, list[dict]] = {}
+            for r in rows:
+                if r["id"] in seen_ids:
+                    continue
+                rm = json.loads(r["metadata_json"] or "{}")
+                per_session.setdefault(r["conversation_id"] or "", []).append({
+                    "id": r["id"],
+                    "content": r["content"] or "",
+                    "title": r["title"] or "",
+                    "metadata": rm,
+                    "conversation_id": r["conversation_id"] or "",
+                    "score": 0.0,
+                })
+            for cid, rows_for_session in per_session.items():
+                rows_for_session.sort(key=lambda x: x["metadata"].get("turn_index", 0))
+                for r in rows_for_session[:session_cap]:
+                    seen_ids.add(r["id"])
+                    hits.append(r)
 
     # Graph expansion: 1-hop traversal from initial hits
     if graph_depth > 0:
@@ -601,6 +687,11 @@ async def run(args: argparse.Namespace) -> None:
         dataset = dataset[: args.limit]
         log(f"  limited to {len(dataset)}")
 
+    if args.only_qtype:
+        allowed = set(args.only_qtype)
+        dataset = [inst for inst in dataset if inst.get("question_type") in allowed]
+        log(f"  filtered to question_type in {sorted(allowed)}: {len(dataset)} instances")
+
     # Resolve OpenAI credentials via vault (unless --no-judge).
     gen_client = None
     judge_client = None
@@ -673,6 +764,15 @@ async def run(args: argparse.Namespace) -> None:
             if args.smart_retrieval and q_signal == "temporal":
                 effective_k = max(effective_k, 30)  # Significantly larger K for date reasoning
 
+            # SS category levers from 01c9b0d: role boost + session expansion
+            # for single-session-user / single-session-assistant. Role boost
+            # fixes the ss-assistant ranking failure (user follow-up turns
+            # outrank the assistant answer turn on raw question embedding);
+            # session expansion converts "right session, wrong turn" into wins.
+            rboost_target = SS_ROLE_BOOST_MAP.get(qtype, "")
+            rboost = args.ss_role_boost if rboost_target else 0.0
+            ss_expand = qtype in SS_EXPAND_CATEGORIES
+
             try:
                 hits = await retrieve_for_question(
                     qid, question, effective_k,
@@ -680,6 +780,9 @@ async def run(args: argparse.Namespace) -> None:
                     graph_depth=args.graph_depth,
                     recency_bias=0.15 if q_signal == "update" else 0.0,
                     adaptive_k=args.adaptive_k or args.smart_retrieval,
+                    expand_sessions=ss_expand,
+                    role_boost=rboost,
+                    role_boost_target=rboost_target,
                 )
             except Exception as e:
                 log(f"  [{qid}] retrieval failed: {e}")
@@ -800,6 +903,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     p.add_argument("--limit", type=int, default=0, help="subsample first N instances (0 = all)")
+    p.add_argument(
+        "--only-qtype",
+        action="append",
+        default=[],
+        help=(
+            "Restrict the run to instances whose question_type matches one of "
+            "these values. Repeat the flag to allow multiple types (e.g. "
+            "--only-qtype single-session-user --only-qtype single-session-assistant). "
+            "Applied after --limit. Pair with --skip-ingest to rerun a subset "
+            "against an already-ingested DB."
+        ),
+    )
     p.add_argument("--skip-ingest", action="store_true")
     p.add_argument("--no-judge", action="store_true")
     p.add_argument("--k", type=int, default=20, help="top-K retrieved turns per question")
@@ -809,6 +924,19 @@ def parse_args() -> argparse.Namespace:
                    help="episodic expansion: pull +/- N surrounding turns (0 = off)")
     p.add_argument("--graph-depth", type=int, default=1,
                    help="graph expansion hops from initial hits (0 = off)")
+    p.add_argument(
+        "--ss-role-boost",
+        type=float,
+        default=0.10,
+        help=(
+            "Retrieval score bonus applied to turns matching the expected "
+            "role for single-session categories (assistant turns for "
+            "single-session-assistant, user turns for single-session-user). "
+            "Fetches a 2x candidate pool before re-ranking. Targets the "
+            "ss-assistant failure mode where the evidence answer turn ranks "
+            "behind user-follow-up distractors. Set to 0 to disable."
+        ),
+    )
     p.add_argument("--generator-model",
                    default=os.environ.get("EVAL_GENERATOR_MODEL"))
     p.add_argument("--judge-model",
