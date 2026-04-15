@@ -314,6 +314,28 @@ RECENCY_BIAS_CATEGORIES = frozenset({
     "temporal-reasoning",
 })
 
+# Categories where the answer lives in one specific turn inside a single
+# session. Session expansion converts "right session, wrong turn" into wins
+# because every turn of the hit session is pulled into context — this turns
+# the relevant recall metric from turn_hit into session_hit (which is
+# typically 10-15pp higher on these categories).
+SS_EXPAND_CATEGORIES = frozenset({
+    "single-session-user",
+    "single-session-assistant",
+})
+
+# Map from qtype to the role whose turns should get a retrieval score bonus.
+# ss-assistant questions ("what did you tell me about X?") semantically match
+# user follow-up turns more readily than the assistant answer turn itself,
+# so the evidence turn ranks lower than distractor user turns. Boosting the
+# matching-role score at re-rank time pulls the evidence turn up. Applied to
+# a fetched pool of k*2 candidates, then trimmed back to k before session
+# expansion.
+SS_ROLE_BOOST_MAP = {
+    "single-session-assistant": "assistant",
+    "single-session-user": "user",
+}
+
 
 def judge_prompt(qtype: str, question: str, answer: str, response: str, abstention: bool) -> str:
     if abstention:
@@ -590,6 +612,8 @@ async def retrieve_for_question(
     expand_sessions: bool = False,
     session_cap: int = 12,
     recency_bias: float = 0.0,
+    role_boost: float = 0.0,
+    role_boost_target: str = "",
 ) -> list[dict]:
     """Hybrid FTS5 + vector + MMR retrieval scoped to this question's haystack.
 
@@ -602,11 +626,18 @@ async def retrieve_for_question(
     session). Fixes cases where the literal answer turn ranks just outside
     top-k while other turns from the same session make it in — MMR's duplicate
     penalty demotes supersession evidence, which session expansion recovers.
+
+    `role_boost` + `role_boost_target`: fetch an overshoot of 2*k candidates,
+    add `role_boost` to the score of any candidate whose metadata.role matches
+    `role_boost_target`, re-sort by boosted score, and trim to k. Targets the
+    ss-assistant failure mode where the evidence turn ranks outside top-k
+    because user-turn distractors score higher on the raw question embedding.
     """
     as_of = _session_date_to_iso(qdate) if qdate else ""
+    fetch_k = k * 2 if role_boost > 0 and role_boost_target else k
     ranked = await memory_search_scored_impl(
         question,
-        k=k,
+        k=fetch_k,
         user_id=qid,
         as_of=as_of,
         extra_columns=["metadata_json", "conversation_id", "valid_from", "valid_to"],
@@ -633,6 +664,14 @@ async def retrieve_for_question(
             }
         )
         seen_ids.add(item["id"])
+
+    if role_boost > 0 and role_boost_target and hits:
+        for h in hits:
+            if h["metadata"].get("role") == role_boost_target:
+                h["score"] += role_boost
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        hits = hits[:k]
+        seen_ids = {h["id"] for h in hits}
 
     if not expand_sessions or not hits:
         return hits
@@ -1074,6 +1113,11 @@ async def run(args: argparse.Namespace) -> None:
         dataset = dataset[: args.limit]
         log(f"  limited to {len(dataset)}")
 
+    if args.only_qtype:
+        allowed = set(args.only_qtype)
+        dataset = [inst for inst in dataset if inst.get("question_type") in allowed]
+        log(f"  filtered to question_type in {sorted(allowed)}: {len(dataset)} instances")
+
     # LLM dispatcher — routes per-model to OpenAI or Anthropic SDK. Credentials
     # are resolved lazily on first use, so a run that only needs one provider
     # won't error on the other's missing key.
@@ -1137,13 +1181,17 @@ async def run(args: argparse.Namespace) -> None:
             qtype_correct.setdefault(qtype, [])
 
             k_for_q = args.k_reasoning if qtype in REFLECTION_CATEGORIES else args.k
-            expand = qtype in REFLECTION_CATEGORIES
+            expand = qtype in REFLECTION_CATEGORIES or qtype in SS_EXPAND_CATEGORIES
             rbias = args.recency_bias if qtype in RECENCY_BIAS_CATEGORIES else 0.0
+            rboost_target = SS_ROLE_BOOST_MAP.get(qtype, "")
+            rboost = args.ss_role_boost if rboost_target else 0.0
             try:
                 hits = await retrieve_for_question(
                     qid, question, k_for_q, qdate=qdate,
                     expand_sessions=expand,
                     recency_bias=rbias,
+                    role_boost=rboost,
+                    role_boost_target=rboost_target,
                 )
             except Exception as e:
                 log(f"  [{qid}] retrieval failed: {e}")
@@ -1338,6 +1386,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     p.add_argument("--limit", type=int, default=0, help="subsample first N instances (0 = all)")
+    p.add_argument(
+        "--only-qtype",
+        action="append",
+        default=[],
+        help=(
+            "Restrict the run to instances whose question_type matches one of "
+            "these values. Repeat the flag to allow multiple types (e.g. "
+            "--only-qtype single-session-user --only-qtype single-session-assistant). "
+            "Applied after --limit. Pair with --skip-ingest to rerun a subset "
+            "against an already-ingested DB."
+        ),
+    )
     p.add_argument("--skip-ingest", action="store_true")
     p.add_argument("--no-judge", action="store_true")
     p.add_argument("--k", type=int, default=10, help="top-K retrieved turns per question")
@@ -1350,6 +1410,19 @@ def parse_args() -> argparse.Namespace:
             "knowledge-update, single-session-preference). These need more "
             "context to stitch facts across sessions; k=10 starves them. Set "
             "equal to --k to disable the per-category bump."
+        ),
+    )
+    p.add_argument(
+        "--ss-role-boost",
+        type=float,
+        default=0.10,
+        help=(
+            "Retrieval score bonus applied to turns matching the expected "
+            "role for single-session categories (assistant turns for "
+            "single-session-assistant, user turns for single-session-user). "
+            "Fetches a 2x candidate pool before re-ranking. Targets the "
+            "ss-assistant failure mode where the evidence answer turn ranks "
+            "behind user-follow-up distractors. Set to 0 to disable."
         ),
     )
     p.add_argument(
