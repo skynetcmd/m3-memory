@@ -439,9 +439,15 @@ def sync_tasks(sl_cur, pg_cur, sl_conn):
         "result_memory_id, metadata_json, created_at, updated_at, completed_at, deleted_at"
     )
 
-    # 1. PUSH: local → remote (delta on updated_at, excluding test data)
+    # 1. PUSH: local → remote (delta on updated_at, excluding test data).
+    # Tombstones always ride through so deletes propagate even for test-agent rows
+    # that were pushed before the test-agent filter existed.
     _task_filter = _TEST_AGENT_FILTER.replace("agent_id", "created_by")
-    _task_base = f"SELECT {task_cols} FROM tasks WHERE 1=1 " + _task_filter
+    _task_base = (
+        f"SELECT {task_cols} FROM tasks WHERE (deleted_at IS NOT NULL OR (1=1 "
+        + _task_filter
+        + "))"
+    )
     watermark = _get_watermark(sl_cur, "tasks_push")
     if watermark:
         sl_cur.execute(
