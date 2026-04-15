@@ -386,7 +386,13 @@ MAX_TURN_CHARS = 6000  # ~2000 tokens; fits in a 4096-per-slot ctx with headroom
 # logs a warning so we can count how often it happens.
 MAX_SESSION_CHARS = 20000
 
-_SESSION_TRUNC_COUNT = 0
+# Per-session truncation diagnostics. build_session_items appends one dict per
+# session that required truncation so we can audit evidence-preservation after
+# the run without re-reading the raw dataset. Each entry: {qid, session_id,
+# orig_len, strategy, evidence_preserved}. strategy is "evidence-window" when
+# the session had a has_answer turn and we centered the window on it, or
+# "tail-cut" for evidence-free sessions that fall back to the legacy cut.
+_SESSION_TRUNC_EVENTS: list[dict] = []
 
 
 def build_turn_items(instance: dict) -> list[dict]:
@@ -473,26 +479,74 @@ def build_session_items(instance: dict) -> list[dict]:
 
     for s_idx, (sess_id, sess_date, session) in enumerate(zip(session_ids, session_dates, sessions)):
         valid_from = _session_date_to_iso(sess_date)
-        lines: list[str] = []
-        if sess_date:
-            lines.append(f"[Conversation date: {sess_date}]")
-        any_has_answer = False
-        for turn in session:
+        header = f"[Conversation date: {sess_date}]" if sess_date else ""
+        turn_lines: list[str] = []
+        evidence_indices: list[int] = []
+        for t_idx, turn in enumerate(session):
             role = turn.get("role", "user").capitalize()
             content = turn.get("content", "") or ""
-            lines.append(f"{role}: {content}")
+            turn_lines.append(f"{role}: {content}")
             if turn.get("has_answer"):
-                any_has_answer = True
-        text = "\n".join(lines)
-        if len(text) > MAX_SESSION_CHARS:
-            global _SESSION_TRUNC_COUNT
-            _SESSION_TRUNC_COUNT += 1
+                evidence_indices.append(t_idx)
+        any_has_answer = bool(evidence_indices)
+
+        full_text = "\n".join([header, *turn_lines]) if header else "\n".join(turn_lines)
+        orig_len = len(full_text)
+
+        if orig_len <= MAX_SESSION_CHARS:
+            text = full_text
+        else:
+            budget = MAX_SESSION_CHARS - (len(header) + 1 if header else 0)
+            if evidence_indices:
+                # Evidence-aware window: grow symmetrically around the first
+                # has_answer turn until we hit the char budget, so the evidence
+                # turn is always retained. Keep later evidence turns inside
+                # the window when they fit (prefer contiguous coverage).
+                anchor = evidence_indices[0]
+                lo = hi = anchor
+                running = len(turn_lines[anchor]) + 1  # +1 for the join newline
+                # Expand forward first so later evidence turns (if any) stay in.
+                while hi + 1 < len(turn_lines):
+                    nxt = len(turn_lines[hi + 1]) + 1
+                    if running + nxt > budget:
+                        break
+                    hi += 1
+                    running += nxt
+                while lo - 1 >= 0:
+                    prv = len(turn_lines[lo - 1]) + 1
+                    if running + prv > budget:
+                        break
+                    lo -= 1
+                    running += prv
+                window_lines = turn_lines[lo : hi + 1]
+                evidence_preserved = all(lo <= idx <= hi for idx in evidence_indices)
+                strategy = "evidence-window"
+                body = "\n".join(window_lines)
+                text = f"{header}\n{body}" if header else body
+            else:
+                text = full_text[:MAX_SESSION_CHARS]
+                evidence_preserved = True  # no evidence to lose
+                strategy = "tail-cut"
+
+            _SESSION_TRUNC_EVENTS.append(
+                {
+                    "qid": qid,
+                    "session_id": sess_id,
+                    "session_index": s_idx,
+                    "orig_len": orig_len,
+                    "kept_len": len(text),
+                    "strategy": strategy,
+                    "evidence_preserved": evidence_preserved,
+                    "n_turns_total": len(turn_lines),
+                    "n_evidence_turns": len(evidence_indices),
+                }
+            )
             print(
                 f"  [warn] session truncated: qid={qid} sess={sess_id} "
-                f"len={len(text)} -> {MAX_SESSION_CHARS}",
+                f"len={orig_len} -> {len(text)} strategy={strategy} "
+                f"evidence_preserved={evidence_preserved}",
                 flush=True,
             )
-            text = text[:MAX_SESSION_CHARS]
         items.append(
             {
                 "type": "message",
@@ -1235,7 +1289,11 @@ async def run(args: argparse.Namespace) -> None:
         "dataset": str(args.dataset),
         "n_instances": len(dataset),
         "ingest_mode": args.ingest_mode,
-        "session_truncations": _SESSION_TRUNC_COUNT,
+        "session_truncations": len(_SESSION_TRUNC_EVENTS),
+        "session_truncation_events": _SESSION_TRUNC_EVENTS,
+        "session_truncation_evidence_losses": sum(
+            1 for ev in _SESSION_TRUNC_EVENTS if not ev["evidence_preserved"]
+        ),
         "k": args.k,
         "answer_model": args.answer_model,
         "judge_model": args.judge_model,
