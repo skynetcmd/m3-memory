@@ -403,8 +403,16 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         return out  # type: ignore[return-value]
     base_url, model = result
 
+    # Captured by _post_once's except handlers so the drop log can surface
+    # the real reason. Shared across all concurrent chunks in this call.
+    _last_embed_err: dict[str, str] = {"msg": ""}
+
     async def _post_once(chunk_texts: list[str]) -> list[list[float] | None] | None:
-        """One POST. Returns vectors on success, None on failure (caller decides bisect)."""
+        """One POST. Returns vectors on success, None on failure (caller decides bisect).
+
+        On failure, stashes the last error so the final drop log can surface
+        why (e.g. HTTP 400 with "exceeds context size" — invisible before).
+        """
         try:
             resp = await client.post(
                 f"{base_url}/embeddings",
@@ -416,7 +424,11 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             data = resp.json()["data"]
             ordered = sorted(data, key=lambda d: d.get("index", 0))
             return [d["embedding"] for d in ordered]
-        except Exception:
+        except _httpx.HTTPStatusError as e:
+            _last_embed_err["msg"] = f"HTTP {e.response.status_code}: {e.response.text[:300]}"
+            return None
+        except Exception as e:
+            _last_embed_err["msg"] = f"{type(e).__name__}: {e}"
             return None
 
     async def _post_chunk(chunk_texts: list[str]) -> list[list[float] | None]:
@@ -437,8 +449,10 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
 
         # All retries failed. Bisect if we can.
         if len(chunk_texts) == 1:
+            reason = _last_embed_err.get("msg") or "unknown"
             logger.warning(
-                f"Bulk embed: dropping single input of len={len(chunk_texts[0])} after 3 attempts"
+                f"Bulk embed: dropping single input of len={len(chunk_texts[0])} "
+                f"after 3 attempts — last error: {reason}"
             )
             return [None]
         mid = len(chunk_texts) // 2
@@ -688,22 +702,88 @@ async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
         logger.debug(f"ChromaDB federated query failed: {e}")
         return []
 
-async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", _depth=0):
+def _apply_recency_bonus(scored, recency_bias, explain=False):
+    """Add a rank-based recency bonus to each (score, item) pair.
+
+    Items are ranked lexicographically by `valid_from` (ISO-8601 sorts
+    correctly as strings). The oldest dated item receives bonus 0, the
+    newest receives `recency_bias`, with linear interpolation between.
+    Items with empty `valid_from` receive bonus 0. If fewer than two dated
+    items exist, the input is returned unchanged.
+
+    Used to break ties in favor of supersession evidence for "what is my
+    current X" queries without parsing timestamps.
+    """
+    if not scored or recency_bias <= 0:
+        return scored
+    with_vf = [(i, (it.get("valid_from") or "")) for i, (_, it) in enumerate(scored)]
+    dated = [(i, v) for i, v in with_vf if v]
+    if len(dated) < 2:
+        return scored
+    dated.sort(key=lambda x: x[1])
+    n = len(dated) - 1
+    rank_of = {idx: rank for rank, (idx, _) in enumerate(dated)}
+    rescored = []
+    for i, (s, it) in enumerate(scored):
+        bonus = recency_bias * (rank_of[i] / n) if i in rank_of else 0.0
+        if explain and "_explanation" in it:
+            it["_explanation"]["recency_bonus"] = bonus
+        rescored.append((s + bonus, it))
+    return rescored
+
+
+async def memory_search_scored_impl(
+    query,
+    k=8,
+    type_filter="",
+    agent_filter="",
+    search_mode="hybrid",
+    user_id="",
+    scope="",
+    as_of="",
+    conversation_id="",
+    explain=False,
+    extra_columns=None,
+    recency_bias=0.0,
+    _depth=0,
+):
+    """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
+
+    Structured sibling of `memory_search_impl`. Used by benchmarks and other
+    callers that need raw result rows (with metadata_json, conversation_id,
+    valid_from, etc.) rather than the formatted text output.
+
+    `extra_columns` is an optional list of extra `mi.<column>` names to include
+    in each item dict (e.g. ["metadata_json", "conversation_id", "valid_from",
+    "valid_to", "user_id"]). Federated Chroma fallback results will NOT have
+    these extra fields.
+    """
     try:
         k = int(k)
     except (TypeError, ValueError):
         k = 8
     _track_cost("search_calls")
     if _depth > 1:
-        return "Search failed: FTS and semantic both unavailable."
-    
+        return []
+
     q_vec, _ = await _embed(query)
-    if not q_vec: return "Embedding failed"
-    
-    # 1. Base filtering (H12)
+    if not q_vec:
+        return []
+
+    extra_columns = list(extra_columns or [])
+    _BASE_COLS = ["id", "content", "title", "type", "importance"]
+    _allowed_extra = {
+        "metadata_json", "conversation_id", "valid_from", "valid_to",
+        "user_id", "scope", "agent_id", "created_at", "source",
+    }
+    if recency_bias and "valid_from" not in extra_columns:
+        extra_columns = extra_columns + ["valid_from"]
+    safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
+    extra_sql = (", " + ", ".join(f"mi.{c}" for c in safe_extra)) if safe_extra else ""
+
     where_clauses = ["mi.is_deleted = 0"]
     params = []
-    
+
     if type_filter:
         is_exact = (type_filter.startswith('"') and type_filter.endswith('"')) or (type_filter.startswith("'") and type_filter.endswith("'"))
         actual_type = type_filter[1:-1] if is_exact else type_filter
@@ -712,7 +792,7 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
         else:
             where_clauses.append("mi.type LIKE ?")
         params.append(actual_type)
-        
+
     if agent_filter:
         is_exact = (agent_filter.startswith('"') and agent_filter.endswith('"')) or (agent_filter.startswith("'") and agent_filter.endswith("'"))
         actual_agent = agent_filter[1:-1] if is_exact else agent_filter
@@ -738,89 +818,91 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
         params.extend([as_of, as_of])
 
     where_sql = " AND ".join(where_clauses)
-    
-    # 2. Hybrid search with FTS5 ranking (Efficiency Suggestion #2)
-    # We join with the FTS table to get BM25 scores for keyword relevance
-    sql = f"""
-        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
-               bm25(memory_items_fts) as bm25_score
-        FROM memory_items mi 
-        JOIN memory_embeddings me ON mi.id = me.memory_id
-        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
-        WHERE {where_sql} AND memory_items_fts MATCH ?
-        ORDER BY bm25_score ASC
-        LIMIT 1000
-    """
-    
-    # Fallback to standard if no keywords match or search_mode is semantic-only
+
+    def _recurse_semantic():
+        return memory_search_scored_impl(
+            query, k, type_filter, agent_filter, "semantic",
+            user_id, scope, as_of, conversation_id, explain,
+            extra_columns, recency_bias, _depth + 1,
+        )
+
     try:
         with _db() as db:
             if search_mode == "semantic":
-                # Just use base query without FTS join for pure vector search
                 sql = f"""
-                    SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score
-                    FROM memory_items mi 
+                    SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score{extra_sql}
+                    FROM memory_items mi
                     JOIN memory_embeddings me ON mi.id = me.memory_id
                     WHERE {where_sql}
                     LIMIT 1000
                 """
                 rows = db.execute(sql, params).fetchall()
             else:
-                # Optimized FTS5 Hybrid Search
-                # Handle exact quoted search or FTS prefix matching for better keyword tolerance
+                sql = f"""
+                    SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
+                           bm25(memory_items_fts) as bm25_score{extra_sql}
+                    FROM memory_items mi
+                    JOIN memory_embeddings me ON mi.id = me.memory_id
+                    JOIN memory_items_fts fts ON mi.rowid = fts.rowid
+                    WHERE {where_sql} AND memory_items_fts MATCH ?
+                    ORDER BY bm25_score ASC
+                    LIMIT 1000
+                """
                 is_exact_query = (query.startswith('"') and query.endswith('"')) or (query.startswith("'") and query.endswith("'"))
                 clean_query = query[1:-1] if is_exact_query else query
-                
                 if is_exact_query:
                     fts_query = f'"{clean_query}"'
                 else:
                     clean_query = _sanitize_fts(clean_query)
                     if not clean_query:
-                        return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, conversation_id=conversation_id, _depth=_depth + 1)
+                        return await _recurse_semantic()
                     fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
-                
+
                 rows = db.execute(sql, (*params, fts_query)).fetchall()
                 if not rows:
-                    # Fallback to partial semantic if no FTS matches
-                    return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, conversation_id=conversation_id, _depth=_depth + 1)
+                    return await _recurse_semantic()
     except sqlite3.OperationalError:
-        # FTS query might fail on complex syntax, fallback to semantic
-        return await memory_search_impl(query, k, type_filter, agent_filter, "semantic", include_scratchpad, user_id, scope, as_of=as_of, explain=explain, conversation_id=conversation_id, _depth=_depth + 1)
+        return await _recurse_semantic()
 
-    # 3. Calculate Vector similarity and combine scores
     scored = []
-    # Cap to SEARCH_ROW_CAP rows for cosine computation to bound memory usage
     if len(rows) > SEARCH_ROW_CAP:
         rows = rows[:SEARCH_ROW_CAP]
     page_matrix = [_unpack(r["embedding"]) for r in rows]
     page_scores = _batch_cosine(q_vec, page_matrix)
-    
+
     for i, row in enumerate(rows):
         item = dict(row)
         del item["embedding"]
-        # Normalize BM25 (lower is better in SQLite) and combine with cosine
-        # Final Score = VectorScore + (Importance * Weight)
         vector_score = page_scores[i]
         bm25_norm = (1.0 / (1.0 + abs(row["bm25_score"])))
         final_score = vector_score * 0.7 + bm25_norm * 0.3
-        
-        # Store breakdown for explain mode
         if explain:
             item["_explanation"] = {
                 "vector": vector_score,
                 "bm25": bm25_norm,
                 "importance": row["importance"],
-                "raw_hybrid": final_score
+                "raw_hybrid": final_score,
             }
         scored.append((final_score, item))
 
-    # MMR re-ranking for search result diversity
+    if recency_bias > 0 and scored:
+        scored = _apply_recency_bonus(scored, recency_bias, explain=explain)
+
     _MMR_LAMBDA = 0.7
-    pre_ranked = sorted(scored, key=lambda x: x[0], reverse=True)[:k * 3]
+    pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
+    seen_content: set[str] = set()
+    pre_ranked: list = []
+    for entry in pre_ranked_all:
+        c = (entry[1].get("content") or "").strip()
+        if c and c in seen_content:
+            continue
+        if c:
+            seen_content.add(c)
+        pre_ranked.append(entry)
+        if len(pre_ranked) >= k * 3:
+            break
     if len(pre_ranked) > k and len(page_matrix) > 0:
-        _emb_lookup = {}
-        for i in range(len(rows)):
-            _emb_lookup[rows[i]["id"]] = page_matrix[i]
+        _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
         selected = [pre_ranked[0]]
         candidates = list(pre_ranked[1:])
         while candidates and len(selected) < k:
@@ -830,58 +912,56 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
                 if c_vec is None:
                     best_idx = ci
                     break
-                
-                # MMR Penalty calculation
                 similarities = [_batch_cosine(c_vec, [_emb_lookup[s[1]["id"]]])[0]
                                 for s in selected if s[1]["id"] in _emb_lookup]
                 max_sim = max(similarities, default=0.0)
-                
                 mmr = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
-                
                 if mmr > best_mmr:
                     best_mmr = mmr
                     best_idx = ci
-                    
-                if explain and "mmr_penalty" not in c_item.get("_explanation", {}):
-                    # We only record the penalty for the final selected rank in a real implementation, 
-                    # but for this logic we'll just store the last max_sim we saw for each candidate.
-                    if "_explanation" not in c_item: c_item["_explanation"] = {}
+                if explain:
+                    if "_explanation" not in c_item:
+                        c_item["_explanation"] = {}
                     c_item["_explanation"]["max_sim_to_selected"] = max_sim
                     c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
-
             selected.append(candidates.pop(best_idx))
         ranked = selected
     else:
         ranked = pre_ranked
-    
-    # 4. Federated Fallback (Properly using ChromaDB as L3)
-    # Skip when a strict scoping filter is active — federated Chroma has no
-    # conversation_id / agent_id / user_id / scope metadata to honor, so results
-    # would leak past the filter.
-    _skip_federated = bool(
-        type_filter or conversation_id or agent_filter or user_id or scope
-    )
+
+    _skip_federated = bool(type_filter or conversation_id or agent_filter or user_id or scope)
     if len(ranked) < 3 and not _skip_federated:
         fed_results = await _query_chroma(q_vec, k=3)
         for fr in fed_results:
-            # Avoid duplicating items that might already be in local SQLite
             if not any(r[1]["id"] == fr["id"] for r in ranked):
                 if explain:
                     fr["_explanation"] = {"source": "federated_chroma"}
                 ranked.append((fr["score"], fr))
 
-    # 5. Bulk access tracking update
     if ranked:
-        # Filter for items that actually came from SQLite (have bm25_score)
         ids = [item[1]["id"] for item in ranked if "bm25_score" in item[1]]
         if ids:
             try:
                 with _db() as db:
                     placeholders = ",".join(["?"] * len(ids))
-                    db.execute(f"UPDATE memory_items SET last_accessed_at = ?, access_count = access_count + 1 WHERE id IN ({placeholders})",
-                              (datetime.now(timezone.utc).isoformat(), *ids))
+                    db.execute(
+                        f"UPDATE memory_items SET last_accessed_at = ?, access_count = access_count + 1 WHERE id IN ({placeholders})",
+                        (datetime.now(timezone.utc).isoformat(), *ids),
+                    )
             except Exception as e:
                 logger.debug(f"Search result timestamp update failed: {e}")
+
+    return ranked
+
+
+async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", _depth=0):
+    ranked = await memory_search_scored_impl(
+        query, k=k, type_filter=type_filter, agent_filter=agent_filter,
+        search_mode=search_mode, user_id=user_id, scope=scope, as_of=as_of,
+        conversation_id=conversation_id, explain=explain,
+    )
+    if ranked is None:
+        return "Search failed: FTS and semantic both unavailable."
 
     if not ranked:
         return "No results found."
@@ -1704,7 +1784,7 @@ def task_assign_impl(task_id: str, owner_agent: str) -> str:
     """Assigns a task to an agent and transitions state to in_progress."""
     with _db() as db:
         row = db.execute(
-            "SELECT state, created_by FROM tasks WHERE id = ?",
+            "SELECT state, created_by FROM tasks WHERE id = ? AND deleted_at IS NULL",
             (task_id,)
         ).fetchone()
 
@@ -1738,7 +1818,7 @@ def task_update_impl(task_id: str, state: str = "", description: str = "", metad
     """Updates a task's state, description, and/or metadata."""
     with _db() as db:
         row = db.execute(
-            "SELECT state, description, metadata_json, created_by FROM tasks WHERE id = ?",
+            "SELECT state, description, metadata_json, created_by FROM tasks WHERE id = ? AND deleted_at IS NULL",
             (task_id,)
         ).fetchone()
 
@@ -1801,7 +1881,7 @@ def task_set_result_impl(task_id: str, result_memory_id: str) -> str:
 
     with _db() as db:
         cur = db.execute(
-            "UPDATE tasks SET result_memory_id = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET result_memory_id = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
             (result_memory_id, now, task_id)
         )
         rowcount = cur.rowcount
@@ -1811,13 +1891,13 @@ def task_set_result_impl(task_id: str, result_memory_id: str) -> str:
 
     return f"Task {task_id} result={result_memory_id}"
 
-def task_get_impl(task_id: str) -> str:
+def task_get_impl(task_id: str, include_deleted: bool = False) -> str:
     """Retrieves detailed information about a task."""
+    sql = "SELECT * FROM tasks WHERE id = ?"
+    if not include_deleted:
+        sql += " AND deleted_at IS NULL"
     with _db() as db:
-        row = db.execute(
-            "SELECT * FROM tasks WHERE id = ?",
-            (task_id,)
-        ).fetchone()
+        row = db.execute(sql, (task_id,)).fetchone()
 
     if not row:
         return f"Error: task '{task_id}' not found"
@@ -1834,15 +1914,61 @@ def task_get_impl(task_id: str) -> str:
         f"  Created At: {row['created_at']}",
         f"  Updated At: {row['updated_at']}",
         f"  Completed At: {row['completed_at'] or '(not completed)'}",
+        f"  Deleted At: {row['deleted_at'] or '(not deleted)'}",
     ]
 
     return "\n".join(lines)
 
-def task_list_impl(owner_agent: str = "", state: str = "", parent_task_id: str = "", limit: int = 20) -> str:
+def task_delete_impl(task_id: str, hard: bool = False, actor: str = "") -> str:
+    """Delete a task.
+
+    Soft-delete (default): sets `deleted_at` so pg_sync propagates the
+    tombstone to the warehouse and peers on the next run. The row stays
+    in local SQLite and is filtered out of reads.
+
+    Hard-delete: only allowed once the row is already tombstoned. Removes
+    the row from local SQLite. Note that sync is UPSERT-only, so a hard
+    delete on one peer does NOT remove the row on other peers — they
+    converge via the soft-delete tombstone.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as db:
+        row = db.execute(
+            "SELECT state, deleted_at FROM tasks WHERE id = ?",
+            (task_id,)
+        ).fetchone()
+
+        if not row:
+            return f"Error: task '{task_id}' not found"
+
+        if hard:
+            if row["deleted_at"] is None:
+                return (
+                    f"Error: task '{task_id}' must be soft-deleted before hard-delete. "
+                    "Call task_delete with hard=False first."
+                )
+            db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+            _record_history(task_id, "task_deleted", row["state"], "hard_deleted", "deleted_at", actor or "system")
+            return f"Task {task_id} hard-deleted"
+
+        if row["deleted_at"] is not None:
+            return f"Task {task_id} already soft-deleted at {row['deleted_at']}"
+
+        db.execute(
+            "UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            (now, now, task_id)
+        )
+
+    _record_history(task_id, "task_deleted", row["state"], "soft_deleted", "deleted_at", actor or "system")
+    return f"Task {task_id} soft-deleted (tombstone will sync on next pg_sync run)"
+
+def task_list_impl(owner_agent: str = "", state: str = "", parent_task_id: str = "", limit: int = 20, include_deleted: bool = False) -> str:
     """Lists tasks, optionally filtered by owner, state, and/or parent."""
     where_clauses = []
     params = []
 
+    if not include_deleted:
+        where_clauses.append("deleted_at IS NULL")
     if owner_agent:
         where_clauses.append("owner_agent = ?")
         params.append(owner_agent)
@@ -1871,12 +1997,12 @@ def task_list_impl(owner_agent: str = "", state: str = "", parent_task_id: str =
     return "\n".join(lines)
 
 def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
-    """Displays a task and its subtasks in a tree structure."""
+    """Displays a task and its subtasks in a tree structure. Tombstoned tasks are hidden."""
     max_depth = max(1, min(max_depth, 20))
 
     with _db() as db:
         row = db.execute(
-            "SELECT id, title, state, owner_agent FROM tasks WHERE id = ?",
+            "SELECT id, title, state, owner_agent FROM tasks WHERE id = ? AND deleted_at IS NULL",
             (root_task_id,)
         ).fetchone()
 
@@ -1886,11 +2012,11 @@ def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
         rows = db.execute(
             """WITH RECURSIVE subtree(id, title, state, owner_agent, parent_task_id, depth) AS (
                 SELECT id, title, state, owner_agent, parent_task_id, 0
-                  FROM tasks WHERE id = ?
+                  FROM tasks WHERE id = ? AND deleted_at IS NULL
                 UNION ALL
                 SELECT t.id, t.title, t.state, t.owner_agent, t.parent_task_id, s.depth + 1
                   FROM tasks t JOIN subtree s ON t.parent_task_id = s.id
-                 WHERE s.depth + 1 <= ?
+                 WHERE s.depth + 1 <= ? AND t.deleted_at IS NULL
             )
             SELECT * FROM subtree ORDER BY depth, id""",
             (root_task_id, max_depth)

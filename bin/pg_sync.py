@@ -386,6 +386,139 @@ def sync_secrets(sl_cur, pg_cur):
     logger.info(f"Pulled {pull_count} remote secrets from the warehouse.")
 
 
+def _ensure_pg_tasks_schema(pg_cur):
+    """Create the `tasks` table in PG if missing, with tombstone column."""
+    pg_cur.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id                TEXT PRIMARY KEY,
+            title             TEXT NOT NULL,
+            description       TEXT DEFAULT '',
+            state             TEXT NOT NULL DEFAULT 'pending',
+            owner_agent       TEXT,
+            created_by        TEXT NOT NULL,
+            parent_task_id    TEXT,
+            result_memory_id  TEXT,
+            metadata_json     TEXT DEFAULT '{}',
+            created_at        TEXT,
+            updated_at        TEXT,
+            completed_at      TEXT,
+            deleted_at        TEXT
+        )
+    """)
+    pg_cur.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TEXT")
+    pg_cur.execute("CREATE INDEX IF NOT EXISTS idx_tasks_owner_state ON tasks(owner_agent, state)")
+    pg_cur.execute("CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks(parent_task_id)")
+    pg_cur.execute("CREATE INDEX IF NOT EXISTS idx_tasks_state       ON tasks(state)")
+    pg_cur.execute("CREATE INDEX IF NOT EXISTS idx_tasks_deleted_at  ON tasks(deleted_at)")
+    logger.info("PG schema: ensured tasks table exists (with deleted_at tombstone column)")
+
+
+def sync_tasks(sl_cur, pg_cur, sl_conn):
+    """Bi-directional delta sync for the tasks table, including soft-delete tombstones.
+
+    Tombstones ride through as ordinary UPSERTs: deleted_at is just a column,
+    and any change to it bumps updated_at, so delta watermarks pick it up for
+    free. Sync is UPSERT-only (no DELETE propagation) — cross-peer hard-delete
+    is out of scope; peers converge via tombstones.
+    """
+    logger.info("Synchronizing tasks...")
+    from psycopg2.extras import execute_values
+    now = datetime.now(timezone.utc).isoformat()
+
+    _ensure_pg_tasks_schema(pg_cur)
+
+    task_cols = (
+        "id, title, description, state, owner_agent, created_by, parent_task_id, "
+        "result_memory_id, metadata_json, created_at, updated_at, completed_at, deleted_at"
+    )
+
+    # 1. PUSH: local → remote (delta on updated_at)
+    watermark = _get_watermark(sl_cur, "tasks_push")
+    if watermark:
+        sl_cur.execute(
+            f"SELECT {task_cols} FROM tasks WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)",
+            (watermark, watermark),
+        )
+        logger.info(f"Delta task push: rows changed since {watermark}")
+    else:
+        sl_cur.execute(f"SELECT {task_cols} FROM tasks")
+        logger.info("Full task push: no watermark found (first sync)")
+
+    local_rows = sl_cur.fetchall()
+    push_count = 0
+    if local_rows:
+        try:
+            upsert = f"""
+                INSERT INTO tasks ({task_cols}) VALUES %s
+                ON CONFLICT (id) DO UPDATE SET
+                    title            = EXCLUDED.title,
+                    description      = EXCLUDED.description,
+                    state            = EXCLUDED.state,
+                    owner_agent      = EXCLUDED.owner_agent,
+                    parent_task_id   = EXCLUDED.parent_task_id,
+                    result_memory_id = EXCLUDED.result_memory_id,
+                    metadata_json    = EXCLUDED.metadata_json,
+                    updated_at       = EXCLUDED.updated_at,
+                    completed_at     = EXCLUDED.completed_at,
+                    deleted_at       = EXCLUDED.deleted_at
+                WHERE tasks.updated_at IS NULL OR EXCLUDED.updated_at > tasks.updated_at
+            """
+            for i in range(0, len(local_rows), BATCH_SIZE):
+                batch = [tuple(r) for r in local_rows[i:i+BATCH_SIZE]]
+                execute_values(pg_cur, upsert, batch)
+                push_count += len(batch)
+        except Exception as exc:
+            logger.error(f"Batch task push failed: {type(exc).__name__}: {exc}")
+
+    _set_watermark(sl_cur, "tasks_push", now)
+    sl_conn.commit()
+    logger.info(f"Pushed {push_count} tasks to warehouse.")
+
+    # 2. PULL: remote → local (delta on updated_at)
+    watermark = _get_watermark(sl_cur, "tasks_pull")
+    if watermark:
+        pg_cur.execute(
+            f"SELECT {task_cols} FROM tasks WHERE updated_at > %s OR (updated_at IS NULL AND created_at > %s)",
+            (watermark, watermark),
+        )
+        logger.info(f"Delta task pull: rows changed since {watermark}")
+    else:
+        pg_cur.execute(f"SELECT {task_cols} FROM tasks")
+        logger.info("Full task pull: no watermark found (first sync)")
+
+    remote_rows = pg_cur.fetchall()
+    pull_count = 0
+    if remote_rows:
+        try:
+            upsert = f"""
+                INSERT INTO tasks ({task_cols})
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                    title            = excluded.title,
+                    description      = excluded.description,
+                    state            = excluded.state,
+                    owner_agent      = excluded.owner_agent,
+                    parent_task_id   = excluded.parent_task_id,
+                    result_memory_id = excluded.result_memory_id,
+                    metadata_json    = excluded.metadata_json,
+                    updated_at       = excluded.updated_at,
+                    completed_at     = excluded.completed_at,
+                    deleted_at       = excluded.deleted_at
+                WHERE tasks.updated_at IS NULL OR excluded.updated_at > tasks.updated_at
+            """
+            for i in range(0, len(remote_rows), BATCH_SIZE):
+                batch = [tuple(r) for r in remote_rows[i:i+BATCH_SIZE]]
+                sl_cur.executemany(upsert, batch)
+                pull_count += len(batch)
+                sl_conn.commit()
+        except Exception as exc:
+            logger.error(f"Batch task pull failed: {type(exc).__name__}: {exc}")
+
+    _set_watermark(sl_cur, "tasks_pull", now)
+    sl_conn.commit()
+    logger.info(f"Pulled {pull_count} tasks from warehouse.")
+
+
 def _ensure_pg_embeddings_schema(pg_cur):
     """Auto-create memory_embeddings table in PG if missing."""
     pg_cur.execute("""
@@ -560,6 +693,7 @@ def main():
                         _ensure_pg_tier_tables(pg_cur)
                         sync_memory_relationships(sl_cur, pg_cur, sl_conn)
                         sync_memory_embeddings(sl_cur, pg_cur, sl_conn)
+                        sync_tasks(sl_cur, pg_cur, sl_conn)
                         sync_secrets(sl_cur, pg_cur)
 
                     pg_conn.commit()
