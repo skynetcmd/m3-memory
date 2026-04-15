@@ -100,7 +100,7 @@ async def get_best_llm(client: httpx.AsyncClient, token: str) -> Optional[tuple[
             logger.warning(f"[llm_failover] {endpoint}: {type(e).__name__}")
             continue
         except httpx.HTTPStatusError as e:
-            logger.warning(f"[llm_failover] {endpoint}: HTTPStatusError {e.status_code}")
+            logger.warning(f"[llm_failover] {endpoint}: HTTPStatusError {e.response.status_code}")
             continue
         except Exception as e:
             logger.warning(f"[llm_failover] {endpoint}: {type(e).__name__}: {e}")
@@ -173,7 +173,7 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
             logger.warning(f"[llm_failover] {endpoint}: {type(e).__name__}")
             continue
         except httpx.HTTPStatusError as e:
-            logger.warning(f"[llm_failover] {endpoint}: HTTPStatusError {e.status_code}")
+            logger.warning(f"[llm_failover] {endpoint}: HTTPStatusError {e.response.status_code}")
             continue
         except Exception as e:
             logger.warning(f"[llm_failover] {endpoint}: {type(e).__name__}: {e}")
