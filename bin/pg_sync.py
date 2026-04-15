@@ -572,13 +572,32 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
 
     if local_rows:
         try:
+            # Pre-filter: only push embeddings whose memory_id exists in PG memory_items.
+            # This avoids FK violations when local items haven't been pushed yet.
+            local_memory_ids = list({row[1] for row in local_rows})
+            pg_existing_ids = set()
+            for i in range(0, len(local_memory_ids), BATCH_SIZE):
+                batch_ids = local_memory_ids[i:i+BATCH_SIZE]
+                pg_cur.execute(
+                    "SELECT id FROM memory_items WHERE id IN %s",
+                    (tuple(batch_ids),),
+                )
+                pg_existing_ids.update(r[0] for r in pg_cur.fetchall())
+
             # Convert sqlite3.Row to tuples with Binary-wrapped embedding blobs
             values = []
+            skipped = 0
             for row in local_rows:
+                if row[1] not in pg_existing_ids:
+                    skipped += 1
+                    continue
                 row_list = list(row)
                 # row[2] is the embedding blob — wrap for PG BYTEA
                 row_list[2] = Binary(row_list[2])
                 values.append(tuple(row_list))
+
+            if skipped:
+                logger.info(f"Skipped {skipped} embeddings (memory_id not in PG memory_items)")
 
             for i in range(0, len(values), BATCH_SIZE):
                 batch = values[i:i+BATCH_SIZE]
