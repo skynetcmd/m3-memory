@@ -33,9 +33,11 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 import traceback
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -66,22 +68,107 @@ DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.jso
 
 # ── Answer generation + judge prompts (from upstream LongMemEval) ────────────
 
-SYSTEM_PROMPT = (
+# ── System prompts (selected by question signal) ──
+
+SYSTEM_PROMPT_TEMPORAL = (
     "You are an assistant with long-term memory. You are participating in a benchmark. "
     "IMPORTANT: You must use the 'CURRENT DATE' provided below as the absolute reference for 'today'. "
     "Ignore your internal clock. All relative time references (yesterday, last week, etc.) "
     "must be calculated relative to the session date they appear in, using the Timeline and "
-    "Temporal Anchors provided. Reason step-by-step before giving the final answer."
+    "Temporal Anchors provided. Reason step-by-step about the dates before giving the final answer."
 )
 
-ANSWER_TEMPLATE = (
+SYSTEM_PROMPT_UPDATE = (
+    "You are an assistant with long-term memory. You are participating in a benchmark. "
+    "The user's preferences and facts may have changed over time across conversations. "
+    "When the chat history contains multiple different answers for the same thing, "
+    "always prefer the MOST RECENT information. Earlier mentions may be outdated."
+)
+
+SYSTEM_PROMPT_PREFERENCE = (
+    "You are an assistant with long-term memory. You are participating in a benchmark. "
+    "Focus on what the USER said about their own preferences, habits, and personal details. "
+    "Ignore generic advice or suggestions from the assistant in the chat history — "
+    "only the user's own statements about themselves matter for answering this question."
+)
+
+SYSTEM_PROMPT_DEFAULT = (
+    "You are an assistant with long-term memory. You are participating in a benchmark. "
+    "Answer the question based on the relevant chat history provided. Be concise and accurate."
+)
+
+# ── Answer templates ──
+
+ANSWER_TEMPLATE_TEMPORAL = (
     "Session Timeline:\n{timeline}\n\n"
     "Temporal Anchors (Resolved Dates Found in Context):\n{anchors}\n\n"
     "History Chats:\n\n{history}\n\n"
     "CURRENT DATE: {date}\n"
     "Question: {question}\n\n"
-    "Final Answer:"
+    "Reason step-by-step about dates, then provide the final answer.\n"
+    "Answer directly and concisely. Do not calculate, infer, or add information "
+    "beyond what is stated in the chat history.\nFinal Answer:"
 )
+
+ANSWER_TEMPLATE_DEFAULT = (
+    "History Chats:\n\n{history}\n\n"
+    "Current Date: {date}\n"
+    "Question: {question}\n\n"
+    "Answer directly and concisely. Do not calculate, infer, or add information "
+    "beyond what is stated in the chat history.\nFinal Answer:"
+)
+
+# ── Question classification (no oracle metadata) ──
+
+_TEMPORAL_QUERY_RE = re.compile(
+    r"\b(when|how long|how many (?:days|weeks|months|years)|"
+    r"what date|what time|before|after|since|until|"
+    r"first time|last time|most recent|recently|latest|earliest|"
+    r"ago|duration|timeline|how old|started|ended|"
+    r"how (?:much|many) time|"
+    r"which .{0,60} first|"
+    r"what (?:is|was) the order|order .* from first|"
+    r"who .{0,30} first|"
+    r"the (?:most|least) (?:in|during) \w+|"
+    r"last (?:saturday|sunday|monday|tuesday|wednesday|thursday|friday|week|weekend|month)|"
+    r"past (?:weekend|week|month)|"
+    r"(?:valentine|christmas|new year|birthday|holiday)(?:'?s)? day)\b",
+    re.IGNORECASE,
+)
+
+_UPDATE_QUERY_RE = re.compile(
+    r"\b(current(?:ly)?|now(?:adays)?|these days|at the moment|presently|"
+    r"still (?:using|have|do|live|work|go)|"
+    r"what (?:is|are) my|what (?:do|does|did) I (?:currently|now)|"
+    r"updated|changed to|switched to|moved to|"
+    r"most recent (?:address|job|name|number|email|score|time|record))\b",
+    re.IGNORECASE,
+)
+
+_PREFERENCE_QUERY_RE = re.compile(
+    r"\b(recommend|suggest|preference|personali[sz]e|"
+    r"what (?:kind|type|style|genre|brand) (?:of|do)|"
+    r"what (?:do I|would I) (?:like|prefer|enjoy|want)|"
+    r"tailor|suited (?:to|for) me|based on (?:my|what I)|"
+    r"complement (?:my|the) (?:current|existing)|"
+    r"interest(?:ing|ed)|hobby|favorite|favourite)\b",
+    re.IGNORECASE,
+)
+
+
+def classify_question(question: str) -> str:
+    """Classify question intent to select prompt/retrieval strategy.
+
+    Returns one of: 'temporal', 'update', 'preference', 'default'.
+    Temporal takes priority (a temporal update question needs date reasoning).
+    """
+    if _TEMPORAL_QUERY_RE.search(question):
+        return "temporal"
+    if _UPDATE_QUERY_RE.search(question):
+        return "update"
+    if _PREFERENCE_QUERY_RE.search(question):
+        return "preference"
+    return "default"
 
 
 def judge_prompt(qtype: str, question: str, answer: str, response: str, abstention: bool) -> str:
@@ -199,11 +286,15 @@ async def ingest_instance(instance: dict) -> tuple[int, float]:
 async def retrieve_for_question(
     qid: str, question: str, k: int,
     cluster_size: int = 0, graph_depth: int = 0,
+    recency_bias: float = 0.0,
+    adaptive_k: bool = False,
 ) -> list[dict]:
     """Hybrid FTS5+vector search with optional graph expansion and episodic clustering."""
     ranked = await memory_search_scored_impl(
         question, k=k, user_id=qid,
         extra_columns=["metadata_json", "conversation_id"],
+        recency_bias=recency_bias,
+        adaptive_k=adaptive_k,
     )
     if not ranked:
         return []
@@ -246,8 +337,14 @@ async def retrieve_for_question(
         hits.extend(graph_hits)
 
     # Episodic cluster expansion: pull surrounding turns from same session
+    MIN_EXPANSION_SCORE = 0.3  # don't expand low-quality hits
+    MAX_HITS_PER_SESSION = 8   # cap per-session at retrieval level
     if cluster_size > 0:
         expanded = list(hits)
+        session_hit_counts: dict[str, int] = {}
+        for h in hits:
+            cid = h.get("conversation_id", "")
+            session_hit_counts[cid] = session_hit_counts.get(cid, 0) + 1
         for h in hits:
             m = h.get("metadata", {})
             cid = h.get("conversation_id")
@@ -263,23 +360,41 @@ async def retrieve_for_question(
                     for r in rows:
                         if r["id"] not in seen_ids:
                             rm = json.loads(r["metadata_json"] or "{}")
-                            if "turn_index" in rm and abs(rm["turn_index"] - t_idx) <= cluster_size:
+                            expansion_score = h["score"] * 0.9
+                            if (
+                                "turn_index" in rm
+                                and abs(rm["turn_index"] - t_idx) <= cluster_size
+                                and expansion_score >= MIN_EXPANSION_SCORE
+                                and session_hit_counts.get(cid, 0) < MAX_HITS_PER_SESSION
+                            ):
                                 seen_ids.add(r["id"])
+                                session_hit_counts[cid] = session_hit_counts.get(cid, 0) + 1
                                 expanded.append({
                                     "id": r["id"],
                                     "content": r["content"],
                                     "title": r["title"],
                                     "metadata": rm,
                                     "conversation_id": r["conversation_id"],
-                                    "score": h["score"] * 0.9,
+                                    "score": expansion_score,
                                 })
         return expanded
 
     return hits
 
 
-def format_retrieved(hits: list[dict]) -> tuple[str, str]:
-    """Return (history_text, temporal_anchors_text)."""
+MAX_TURNS_PER_SESSION = 6  # cap per-session turns to reduce noise
+
+
+def format_retrieved(
+    hits: list[dict],
+    q_signal: str = "default",
+) -> tuple[str, str]:
+    """Return (history_text, temporal_anchors_text).
+
+    q_signal controls noise reduction:
+      - 'preference': deprioritize assistant turns (user statements matter most)
+      - any: cap turns per session to MAX_TURNS_PER_SESSION by score
+    """
     lines: list[str] = []
     by_session: dict[str, list[dict]] = {}
     high_value: list[dict] = []
@@ -294,6 +409,45 @@ def format_retrieved(hits: list[dict]) -> tuple[str, str]:
             by_session.setdefault(h.get("conversation_id") or "unknown", []).append(h)
         else:
             high_value.append(h)
+
+    # For preference questions, deprioritize assistant turns
+    if q_signal == "preference":
+        for cid in by_session:
+            for t in by_session[cid]:
+                if t.get("metadata", {}).get("role") == "assistant":
+                    t["score"] = t.get("score", 0) * 0.5
+
+    # Ensure user-assistant turn pairs: if a user turn is present, pull adjacent
+    # assistant turn from DB (helps single-session-assistant questions where the
+    # answer is in the assistant reply but retrieval favored the user question).
+    for cid in list(by_session.keys()):
+        existing_indices = {t["metadata"].get("turn_index") for t in by_session[cid]}
+        turns_to_add: list[dict] = []
+        for t in list(by_session[cid]):
+            m = t.get("metadata", {})
+            if m.get("role") == "user" and "turn_index" in m:
+                next_idx = m["turn_index"] + 1
+                if next_idx not in existing_indices:
+                    with _db() as db:
+                        row = db.execute(
+                            "SELECT id, content, title, metadata_json, conversation_id "
+                            "FROM memory_items "
+                            "WHERE conversation_id = ? AND is_deleted = 0 "
+                            "  AND json_extract(metadata_json, '$.turn_index') = ?",
+                            (cid, next_idx),
+                        ).fetchone()
+                        if row:
+                            rm = json.loads(row["metadata_json"] or "{}")
+                            existing_indices.add(next_idx)
+                            turns_to_add.append({
+                                "id": row["id"],
+                                "content": row["content"],
+                                "title": row["title"],
+                                "metadata": rm,
+                                "conversation_id": row["conversation_id"],
+                                "score": t.get("score", 0) * 0.85,
+                            })
+        by_session[cid].extend(turns_to_add)
 
     # Surface observations/summaries first (hierarchical context)
     if high_value:
@@ -313,11 +467,20 @@ def format_retrieved(hits: list[dict]) -> tuple[str, str]:
             default=0,
         ),
     )
-    for cid in sorted_sessions:
+    n_sessions = len(sorted_sessions)
+    for s_num, cid in enumerate(sorted_sessions, 1):
         turns = by_session[cid]
+        # Cap turns per session: keep top-scored, then sort by turn_index for output
+        # Ensure minimum diversity: keep at least 2 turns from each session
+        cap = MAX_TURNS_PER_SESSION
+        if n_sessions > 3 and len(turns) > 2:
+            cap = max(cap, 2)  # guarantee at least 2 even if cap < 2
+        if len(turns) > cap:
+            turns.sort(key=lambda t: t.get("score", 0), reverse=True)
+            turns = turns[:cap]
         turns.sort(key=lambda t: t["metadata"].get("turn_index", 0))
         date = turns[0]["metadata"].get("session_date", "")
-        lines.append(f"[Session on {date}]")
+        lines.append(f"[Session on {date} — Session #{s_num} of {n_sessions}]")
         for t in turns:
             role = t["metadata"].get("role", "?")
             lines.append(f"{role}: {t['content']}")
@@ -343,19 +506,32 @@ def _openai_client(api_key: str, base_url: str | None = None):
 
 def answer_with_llm(
     client, model: str, history: str, date: str, question: str,
-    timeline: str = "", anchors: str = "",
+    timeline: str = "", anchors: str = "", q_signal: str = "default",
 ) -> tuple[str, int]:
-    prompt = ANSWER_TEMPLATE.format(
-        timeline=timeline or "(not available)",
-        anchors=anchors or "None found.",
-        history=history,
-        date=date,
-        question=question,
-    )
+    if q_signal == "temporal":
+        prompt = ANSWER_TEMPLATE_TEMPORAL.format(
+            timeline=timeline or "(not available)",
+            anchors=anchors or "None found.",
+            history=history,
+            date=date,
+            question=question,
+        )
+        sys_prompt = SYSTEM_PROMPT_TEMPORAL
+    else:
+        prompt = ANSWER_TEMPLATE_DEFAULT.format(
+            history=history,
+            date=date,
+            question=question,
+        )
+        sys_prompt = {
+            "update": SYSTEM_PROMPT_UPDATE,
+            "preference": SYSTEM_PROMPT_PREFERENCE,
+        }.get(q_signal, SYSTEM_PROMPT_DEFAULT)
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": sys_prompt},
         {"role": "user", "content": prompt},
     ]
+    max_tok = 1200 if q_signal == "temporal" else 800
     t0 = time.perf_counter()
     for attempt in range(3):
         try:
@@ -363,9 +539,14 @@ def answer_with_llm(
                 model=model,
                 messages=messages,
                 temperature=0,
-                max_tokens=800,
+                max_tokens=max_tok,
             )
             hyp = (resp.choices[0].message.content or "").strip()
+            # Strip common prefixes that confuse the judge
+            for prefix in ("Final Answer:", "Final answer:", "Answer:"):
+                if hyp.startswith(prefix):
+                    hyp = hyp[len(prefix):].strip()
+                    break
             return hyp, int((time.perf_counter() - t0) * 1000)
         except Exception as e:
             if attempt == 2:
@@ -460,6 +641,7 @@ async def run(args: argparse.Namespace) -> None:
     qtypes_seen: set[str] = set()
     qtype_correct: dict[str, list[int]] = {}
     retrieval_hit_stats: list[float] = []
+    signal_dist: Counter = Counter()
 
     with open(hyp_path, "w", encoding="utf-8") as hyp_f:
         for i, inst in enumerate(dataset):
@@ -474,11 +656,21 @@ async def run(args: argparse.Namespace) -> None:
             qtypes_seen.add(qtype)
             qtype_correct.setdefault(qtype, [])
 
+            q_signal = classify_question(question)
+            signal_dist[q_signal] += 1
+
+            # Smart retrieval logic: boost K for temporal reasoning
+            effective_k = args.k
+            if args.smart_retrieval and q_signal == "temporal":
+                effective_k = max(effective_k, 30)  # Significantly larger K for date reasoning
+
             try:
                 hits = await retrieve_for_question(
-                    qid, question, args.k,
+                    qid, question, effective_k,
                     cluster_size=args.cluster_size,
                     graph_depth=args.graph_depth,
+                    recency_bias=0.15 if q_signal == "update" else 0.0,
+                    adaptive_k=args.adaptive_k or args.smart_retrieval,
                 )
             except Exception as e:
                 log(f"  [{qid}] retrieval failed: {e}")
@@ -503,10 +695,10 @@ async def run(args: argparse.Namespace) -> None:
             hypothesis = ""
             correct: bool | None = None
             if not args.no_judge:
-                history, anchors = format_retrieved(hits)
+                history, anchors = format_retrieved(hits, q_signal=q_signal)
                 hypothesis, ans_ms = answer_with_llm(
                     answer_client, args.answer_model, history, qdate, question,
-                    timeline=timeline, anchors=anchors,
+                    timeline=timeline, anchors=anchors, q_signal=q_signal,
                 )
                 correct = judge_with_llm(
                     judge_client, args.judge_model, qtype, question, answer, hypothesis, abstention
@@ -565,11 +757,14 @@ async def run(args: argparse.Namespace) -> None:
         "cluster_size": args.cluster_size,
         "graph_depth": args.graph_depth,
         "search_mode": "hybrid",
+        "smart_retrieval": args.smart_retrieval,
+        "adaptive_k": args.adaptive_k,
         "answer_model": args.answer_model,
         "judge_model": args.judge_model,
         "judged": not args.no_judge,
         "overall_accuracy": overall,
         "per_type": per_type,
+        "signal_distribution": dict(signal_dist),
         "retrieval_session_hit_rate": (
             sum(retrieval_hit_stats) / len(retrieval_hit_stats) if retrieval_hit_stats else None
         ),
@@ -587,6 +782,7 @@ async def run(args: argparse.Namespace) -> None:
         log("(judging skipped — run with --judge-only to score later)")
     if retrieval_hit_stats:
         log(f"session hit-rate @k={args.k}: {summary['retrieval_session_hit_rate']:.4f}")
+    log(f"signal distribution: {dict(signal_dist)}")
     log(f"hypotheses -> {hyp_path}")
     log(f"results    -> {results_path}")
 
@@ -598,6 +794,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-ingest", action="store_true")
     p.add_argument("--no-judge", action="store_true")
     p.add_argument("--k", type=int, default=20, help="top-K retrieved turns per question")
+    p.add_argument("--adaptive-k", action="store_true", help="Enable elbow trim for adaptive K")
+    p.add_argument("--smart-retrieval", action="store_true", help="Enable temporal-aware smart retrieval")
     p.add_argument("--cluster-size", type=int, default=5,
                    help="episodic expansion: pull +/- N surrounding turns (0 = off)")
     p.add_argument("--graph-depth", type=int, default=1,
