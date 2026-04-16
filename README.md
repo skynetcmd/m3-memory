@@ -25,7 +25,7 @@ Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agen
 
 ---
 
-## :package: Install
+## 📦 Install
 
 ```bash
 pip install m3-memory
@@ -55,7 +55,7 @@ Restart your agent. Done.
 
 ---
 
-## :crystal_ball: What happens next
+## 🔮 What happens next
 
 You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required.
 
@@ -63,7 +63,7 @@ Later, you're at your Windows desktop at home with Gemini CLI, and it picks up e
 
 ---
 
-## :bulb: Why this exists
+## 💡 Why this exists
 
 Most AI agents don't persist state between sessions. You re-paste context, re-explain architecture, re-correct mistakes. When facts change, the agent has no mechanism to update what it "knows."
 
@@ -71,7 +71,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## :zap: What it does
+## ⚡ What it does
 
 **Persistent memory** — facts, decisions, preferences survive across sessions. Stored in local SQLite.
 
@@ -87,19 +87,19 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## :books: Learn more
+## 📚 Learn more
 
 | | |
 |---|---|
-| :rocket: **[Get running](./QUICKSTART.md)** | :busts_in_silhouette: **[Multi-agent orchestration](./MULTI_AGENT.md)** |
-| :sparkles: **[Core features](./CORE_FEATURES.md)** | :jigsaw: **[Multi-agent example](./examples/multi-agent-team/README.md)** |
-| :building_construction: **[System design](./docs/ARCHITECTURE.md)** | :balance_scale: **[M3 vs alternatives](./COMPARISON.md)** |
-| :wrench: **[Implementation details](./TECHNICAL_DETAILS.md)** | :gear: **[Configuration](./ENVIRONMENT_VARIABLES.md)** |
-| :robot: **[Agent rules + all 46 tools](./AGENT_INSTRUCTIONS.md)** | :world_map: **[Roadmap](./ROADMAP.md)** |
+| 🚀 **[Get running](./QUICKSTART.md)** | 👥 **[Multi-agent orchestration](./MULTI_AGENT.md)** |
+| ✨ **[Core features](./CORE_FEATURES.md)** | 🧩 **[Multi-agent example](./examples/multi-agent-team/README.md)** |
+| 🏗️ **[System design](./docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](./COMPARISON.md)** |
+| 🔧 **[Implementation details](./TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](./ENVIRONMENT_VARIABLES.md)** |
+| 🤖 **[Agent rules + all 46 tools](./AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](./ROADMAP.md)** |
 
 ---
 
-## :dart: Who this is for
+## 🎯 Who this is for
 
 | Good fit | Not the right tool |
 |---|---|
@@ -110,7 +110,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## :shield: Why trust this
+## 🛡️ Why trust this
 
 | | |
 |---|---|
@@ -124,7 +124,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## :bar_chart: Benchmarks
+## 📊 Benchmarks
 
 **89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500 correct) — a 500-question evaluation of long-horizon conversational memory. Without oracle metadata: **74.8%** (smart retrieval) to **68.0%** (fixed-k baseline).
 
@@ -142,7 +142,7 @@ Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README
 
 ---
 
-## :toolbox: Core tools
+## 🧰 Core tools
 
 Most sessions use three tools. The rest is there when you need it.
 
@@ -158,7 +158,7 @@ All 45 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
 ---
 
-## :robot: For AI agents
+## 🤖 For AI agents
 
 M3 Memory exposes 46 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
 
@@ -172,7 +172,7 @@ Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](.
 
 ---
 
-## :magic_wand: Let your agent install it
+## 🪄 Let your agent install it
 
 Already inside Claude Code or Gemini CLI? Paste one of these prompts:
 
@@ -200,7 +200,7 @@ Then search for: "M3 install"
 
 ---
 
-## :movie_camera: See it in action
+## 🎬 See it in action
 
 ### Contradiction detection
 <p align="center">
@@ -219,7 +219,7 @@ Then search for: "M3 install"
 
 ---
 
-## :speech_balloon: Community
+## 💬 Community
 
 [![Discord](https://img.shields.io/badge/Discord-M3_Memory-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZcJ3EGC99B)
 &nbsp;

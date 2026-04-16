@@ -4,7 +4,7 @@ Get persistent memory running with your MCP agent in under five minutes.
 
 ---
 
-## :one: Install M3 Memory
+## 1️⃣ Install M3 Memory
 
 ```bash
 pip install m3-memory
@@ -20,7 +20,7 @@ If you get `command not found`, check that your Python scripts directory is on y
 
 ---
 
-## :two: Start a local embedding server
+## 2️⃣ Start a local embedding server
 
 M3 Memory needs a local model to generate embeddings for semantic search. [Ollama](https://ollama.com) is the easiest option:
 
@@ -40,7 +40,7 @@ export LLM_ENDPOINTS_CSV="http://localhost:11434/v1"
 
 ---
 
-## :three: Configure your agent
+## 3️⃣ Configure your agent
 
 Add the M3 Memory MCP server to your agent's config file.
 
@@ -183,7 +183,7 @@ Some agents ship with their own local memory system that will compete with m3-me
 
 ---
 
-## :four: Verify it works
+## 4️⃣ Verify it works
 
 In your agent session, write a test memory:
 
@@ -218,7 +218,7 @@ If the memory you wrote comes back, everything is working: persistence, embeddin
 
 ---
 
-## :five: Optional: cross-device sync
+## 5️⃣ Optional: cross-device sync
 
 M3 Memory works standalone with local SQLite — no additional infrastructure needed. For multi-device sync, you can optionally connect:
 
@@ -229,7 +229,7 @@ See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL` and `CHR
 
 ---
 
-## :arrow_forward: Next steps
+## ▶️ Next steps
 
 - [CORE_FEATURES.md](./CORE_FEATURES.md) — what M3 Memory can do
 - [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 44 MCP tools and agent behavioral rules
