@@ -91,11 +91,11 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| **[Get running](./QUICKSTART.md)** | **[Multi-agent orchestration](./MULTI_AGENT.md)** |
-| **[Core features](./CORE_FEATURES.md)** | **[Multi-agent example](./examples/multi-agent-team/README.md)** |
-| **[System design](./docs/ARCHITECTURE.md)** | **[M3 vs alternatives](./COMPARISON.md)** |
-| **[Implementation details](./TECHNICAL_DETAILS.md)** | **[Configuration](./ENVIRONMENT_VARIABLES.md)** |
-| **[Agent rules + all 46 tools](./AGENT_INSTRUCTIONS.md)** | **[Roadmap](./ROADMAP.md)** |
+| :rocket: **[Get running](./QUICKSTART.md)** | :busts_in_silhouette: **[Multi-agent orchestration](./MULTI_AGENT.md)** |
+| :sparkles: **[Core features](./CORE_FEATURES.md)** | :jigsaw: **[Multi-agent example](./examples/multi-agent-team/README.md)** |
+| :building_construction: **[System design](./docs/ARCHITECTURE.md)** | :balance_scale: **[M3 vs alternatives](./COMPARISON.md)** |
+| :wrench: **[Implementation details](./TECHNICAL_DETAILS.md)** | :gear: **[Configuration](./ENVIRONMENT_VARIABLES.md)** |
+| :robot: **[Agent rules + all 46 tools](./AGENT_INSTRUCTIONS.md)** | :world_map: **[Roadmap](./ROADMAP.md)** |
 
 ---
 
