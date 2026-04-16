@@ -6,7 +6,7 @@ For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.
 
 ---
 
-## Overview
+## :eye: Overview
 
 <p align="center">
   <img src="docs/overview_diagram.svg" alt="M3 Memory architecture overview" width="100%">
@@ -18,9 +18,9 @@ M3 Memory combines persistent storage, hybrid search, contradiction detection, k
 
 ---
 
-## Feature Highlights
+## :sparkles: Feature Highlights
 
-### Intelligent Search
+### :mag: Intelligent Search
 
 Memory is only useful if you can find what you need. M3 uses a **three-stage hybrid pipeline**:
 
@@ -30,19 +30,19 @@ Memory is only useful if you can find what you need. M3 uses a **three-stage hyb
 
 **Explainable results.** Every search can return a full score breakdown (vector component, BM25 weight, MMR penalty) so you or your agent can understand *why* a memory was retrieved.
 
-### Bitemporal History
+### :hourglass_flowing_sand: Bitemporal History
 
 M3's **bitemporal model** tracks not just *when a fact was stored*, but *when it was actually true*. Query with `as_of="2026-01-15"` to see the world as your agent knew it on that date — essential for debugging, compliance, and historical reasoning.
 
-### Contradiction Detection
+### :warning: Contradiction Detection
 
 Write a fact that conflicts with an existing one? M3 detects it automatically. The old memory is soft-deleted, a `supersedes` relationship is recorded, and the full history is preserved in the audit trail. No manual cleanup. No stale data.
 
-### Knowledge Graph
+### :spider_web: Knowledge Graph
 
 Memories aren't isolated — they form a web. M3 automatically links related memories on write (cosine >0.7) and supports 7 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`. Traverse the graph up to 3 hops with a single tool call.
 
-### Self-Maintaining
+### :broom: Self-Maintaining
 
 Left alone, memory systems accumulate noise. M3 fights entropy:
 
@@ -52,7 +52,7 @@ Left alone, memory systems accumulate noise. M3 fights entropy:
 - **Multi-layered consolidation** — when memory groups grow too large, the local LLM merges old items into summaries, preserving knowledge while reducing clutter
 - **Deduplication** — configurable cosine threshold catches near-duplicates across the last 1000 items
 
-### Refresh Lifecycle
+### :arrows_counterclockwise: Refresh Lifecycle
 
 Not all knowledge ages the same way. Some facts have **planned obsolescence** — a quarterly policy review, a config valid until the next release, a customer preference you want to re-verify in 90 days. M3 lets you flag these on write:
 
@@ -68,11 +68,11 @@ Not all knowledge ages the same way. Some facts have **planned obsolescence** �
 
 Queries are backed by a partial index on `refresh_on WHERE refresh_on IS NOT NULL`, so the backlog count is O(flagged-rows), not O(all-rows) — cheap enough to check on every register/offline.
 
-### Conversation Grouping
+### :speech_balloon: Conversation Grouping
 
 Memories written inside a multi-turn or multi-agent session can be tagged with a `conversation_id` that shares the same ID space as `conversation_start` / `conversation_append`. Filter `memory_search` by `conversation_id` to scope retrieval to a single session, or leave it null for a global view. Backed by a composite partial index on `(conversation_id, created_at) WHERE is_deleted = 0`, so in-order retrieval of a conversation's memories is an index-only scan — no sort step.
 
-### LLM-Powered Intelligence
+### :brain: LLM-Powered Intelligence
 
 M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI):
 
@@ -84,9 +84,9 @@ All LLM features use the local model — zero API costs, zero data exfiltration.
 
 ---
 
-## Security & Compliance
+## :lock: Security & Compliance
 
-### Defense in Depth
+### :shield: Defense in Depth
 
 | Layer | Protection |
 |-------|-----------|
@@ -96,7 +96,7 @@ All LLM features use the local model — zero API costs, zero data exfiltration.
 | **Search** | FTS5 operator sanitization prevents query injection. |
 | **Network** | Circuit breaker (3-failure threshold). Strict timeouts. Token values never logged. |
 
-### GDPR-Ready
+### :eu: GDPR-Ready
 
 - **Article 17 (Right to Be Forgotten):** `gdpr_forget` hard-deletes all data for a user — memories, embeddings, relationships, history, sync queue. One tool call.
 - **Article 20 (Data Portability):** `gdpr_export` returns all memories for a user as portable JSON.
@@ -104,7 +104,7 @@ All LLM features use the local model — zero API costs, zero data exfiltration.
 
 ---
 
-## Cross-Device Sync
+## :repeat: Cross-Device Sync
 
 Your memory follows you across machines:
 
@@ -117,7 +117,7 @@ Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
 
 ---
 
-## Portable & Interoperable
+## :electric_plug: Portable & Interoperable
 
 - **MCP-native** — works with Claude Code, Gemini CLI, Aider, or any MCP client out of the box
 - **Export/Import** — full memory dump as JSON (with base64 embeddings) for backup, migration, or sharing between M3 instances
@@ -126,7 +126,7 @@ Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
 
 ---
 
-## Tested and Measured
+## :test_tube: Tested and Measured
 
 ### 193 End-to-End Tests
 
@@ -161,7 +161,7 @@ Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local L
 
 ---
 
-## 45 MCP Tools at a Glance
+## :toolbox: 46 MCP Tools at a Glance
 
 | Category | Tools |
 |----------|-------|
