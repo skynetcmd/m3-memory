@@ -9,7 +9,7 @@
 
 ---
 
-## :satellite: LLM Server Requirements
+## 📡 LLM Server Requirements
 
 M3 Memory is **server-agnostic**. It communicates with local LLMs via the OpenAI-compatible API. Any server that exposes these two endpoints will work:
 
@@ -25,7 +25,7 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 ---
 
-## :floppy_disk: Storage Implementation
+## 💾 Storage Implementation
 
 > For the conceptual storage hierarchy (SQLite → PostgreSQL → ChromaDB), see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
@@ -141,7 +141,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ---
 
-## :mag: Search Engine
+## 🔍 Search Engine
 
 > For the conceptual search pipeline overview, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
@@ -181,7 +181,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ---
 
-## :brain: Intelligence Features
+## 🧠 Intelligence Features
 
 ### Contradiction Detection
 
@@ -223,7 +223,7 @@ When `type="auto"` is passed to `memory_write`:
 
 ---
 
-## :lock: Security
+## 🔒 Security
 
 ### Credential Resolution (`bin/auth_utils.py`)
 
@@ -261,7 +261,7 @@ Master key (`AGENT_OS_MASTER_KEY`) must be in native OS keyring. Never stored in
 
 ---
 
-## :busts_in_silhouette: Scoping & Multi-Tenancy
+## 👥 Scoping & Multi-Tenancy
 
 | Scope | Isolation | Behavior |
 |-------|-----------|----------|
@@ -274,7 +274,7 @@ Every `memory_search` accepts `user_id`, `scope`, and `conversation_id` filters.
 
 ---
 
-## :arrows_counterclockwise: Refresh Lifecycle
+## 🔄 Refresh Lifecycle
 
 Memories can be flagged with `refresh_on` (ISO-8601 timestamp) and `refresh_reason` on write or update. When the timestamp has arrived, the memory enters the **refresh queue** — a read-only view exposed via the `memory_refresh_queue` tool. Maintenance never mutates these flags; actual refresh goes through `memory_update` and is recorded in `memory_history`.
 
@@ -314,7 +314,7 @@ Early design considered soft-deleting old memories on refresh and inserting new 
 
 ---
 
-## :repeat: Sync System (`bin/pg_sync.py`)
+## 🔁 Sync System (`bin/pg_sync.py`)
 
 ### Delta Sync Protocol
 
@@ -335,7 +335,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 
 ---
 
-## :gear: Configuration
+## ⚙️ Configuration
 
 ### Environment Variables
 
@@ -365,7 +365,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 
 ---
 
-## :test_tube: Testing
+## 🧪 Testing
 
 ### End-to-End Test Suite (`bin/test_memory_bridge.py`)
 
@@ -395,7 +395,7 @@ Seeds 20 diverse test memories, runs 10 labeled queries, cleans up after. Gracef
 
 ---
 
-## :hammer_and_wrench: Developer Tooling
+## 🛠️ Developer Tooling
 
 ### M3 SDK (`bin/m3_sdk.py`)
 

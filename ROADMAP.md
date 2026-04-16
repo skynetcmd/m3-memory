@@ -4,7 +4,7 @@
 
 ---
 
-## :white_check_mark: Shipped
+## ✅ Shipped
 
 ### v2026.04.06 — Production Release (April 6, 2026)
 
@@ -40,7 +40,7 @@
 
 ---
 
-## :package: Next — Distribution & Deployment
+## 📦 Next — Distribution & Deployment
 
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
@@ -49,7 +49,7 @@
 
 ---
 
-## :chart_with_upwards_trend: Planned — Observability & Web UI
+## 📈 Planned — Observability & Web UI
 
 - [ ] **Web dashboard** — lightweight local UI (FastAPI + HTMX) to browse memories, inspect knowledge graph, run GDPR operations
 - [ ] **Real-time contradiction log** — surfaced in dashboard and via `memory_verify` tool
@@ -59,7 +59,7 @@
 
 ---
 
-## :busts_in_silhouette: Planned — Multi-Agent & Collaboration
+## 👥 Planned — Multi-Agent & Collaboration
 
 - [ ] **Shared memory namespaces** — optional scoped memory pools across multiple local agents
 - [ ] **Agent identity model** — per-agent memory isolation with explicit cross-agent read grants
@@ -68,7 +68,7 @@
 
 ---
 
-## :trophy: Planned — Benchmark Suite & Stability
+## 🏆 Planned — Benchmark Suite & Stability
 
 - [ ] **Public benchmark suite** — MRR, Hit@5, latency vs. Mem0 / LangMem / raw ChromaDB on standard datasets
 - [ ] **Formal accuracy regression CI** — block merges that degrade retrieval quality
@@ -78,7 +78,7 @@
 
 ---
 
-## :snowflake: Icebox (considering, no timeline)
+## ❄️ Icebox (considering, no timeline)
 
 - Browser extension for passive memory capture
 - iOS / Android companion app for on-device sync
@@ -87,7 +87,7 @@
 
 ---
 
-## :handshake: Contributing
+## 🤝 Contributing
 
 Vote on features by reacting to [GitHub Issues](https://github.com/skynetcmd/m3-memory/issues) with 👍. Open a new issue with the `roadmap` label to propose something not listed here.
 
