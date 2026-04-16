@@ -10,14 +10,16 @@
 
 Persistent, local memory for MCP agents.
 
-Your agent forgets everything between sessions. M3 Memory fixes that. Install it, add one line to your MCP config, and your agent remembers across sessions, detects contradictions, and keeps its own knowledge current — all on your hardware, fully offline.
+> **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
+>
+> 🚀 **[New to M3? Start here with our 5-minute "Human-First" guide.](https://github.com/skynetcmd/m3-memory/blob/main/GETTING_STARTED.md)**
 
 <p align="center">
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square"></a>
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
   <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-45_tools-orange?style=flat-square"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-46_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
@@ -81,7 +83,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 **Contradiction handling** — conflicting facts are automatically superseded. Bitemporal versioning preserves the full history.
 
-**Knowledge graph** — related memories linked automatically on write. Eight relationship types, 3-hop traversal.
+**Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal.
 
 **Zero-config local install** — `pip install m3-memory`, one line in your MCP config, done. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 
@@ -93,7 +95,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| 🚀 **[Get running](https://github.com/skynetcmd/m3-memory/blob/main/QUICKSTART.md)** | 👥 **[Multi-agent orchestration](https://github.com/skynetcmd/m3-memory/blob/main/MULTI_AGENT.md)** |
+| 🚀 **[Getting started](https://github.com/skynetcmd/m3-memory/blob/main/GETTING_STARTED.md)** | 👥 **[Multi-agent orchestration](https://github.com/skynetcmd/m3-memory/blob/main/MULTI_AGENT.md)** |
 | ✨ **[Core features](https://github.com/skynetcmd/m3-memory/blob/main/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](https://github.com/skynetcmd/m3-memory/blob/main/examples/multi-agent-team/README.md)** |
 | 🏗️ **[System design](https://github.com/skynetcmd/m3-memory/blob/main/docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](https://github.com/skynetcmd/m3-memory/blob/main/COMPARISON.md)** |
 | 🔧 **[Implementation details](https://github.com/skynetcmd/m3-memory/blob/main/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](https://github.com/skynetcmd/m3-memory/blob/main/ENVIRONMENT_VARIABLES.md)** |
@@ -156,7 +158,7 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 45 tools are documented in [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md).
+All 46 tools are documented in [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md).
 
 ---
 
