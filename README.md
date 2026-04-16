@@ -44,10 +44,12 @@ Add to your MCP config:
 Requires a local embedding model. [Ollama](https://ollama.com) is the easiest:
 
 ```bash
-ollama pull nomic-embed-text && ollama serve
+ollama pull qwen3-embedding:0.6b && ollama serve
 ```
 
-Prefer a GUI? [LM Studio](https://lmstudio.ai) works too — load any embedding model (e.g. `nomic-embed-text-v1.5`) and start its server (defaults to port 1234).
+Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the default model M3 Memory is tuned for. `nomic-embed-text` (768-dim) also works — set `EMBED_MODEL=nomic-embed-text` in your environment.
+
+Prefer a GUI? [LM Studio](https://lmstudio.ai) works too — load any embedding model and start its server (defaults to port 1234).
 
 Restart your agent. Done.
 
@@ -149,7 +151,7 @@ Already inside Claude Code or Gemini CLI? Paste one of these prompts:
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"mcp-memory"}}} to my
 ~/.claude/settings.json under "mcpServers". Make sure Ollama is running
-with nomic-embed-text. Then use /mcp to verify the memory server loaded.
+with qwen3-embedding:0.6b. Then use /mcp to verify the memory server loaded.
 ```
 
 **Gemini CLI:**
@@ -157,7 +159,7 @@ with nomic-embed-text. Then use /mcp to verify the memory server loaded.
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"mcp-memory"}}} to my
 ~/.gemini/settings.json under "mcpServers". Make sure Ollama is running
-with nomic-embed-text.
+with qwen3-embedding:0.6b.
 ```
 
 After install, test it:
