@@ -75,15 +75,15 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 **Persistent memory** — facts, decisions, preferences survive across sessions. Stored in local SQLite.
 
-**Hybrid retrieval** — FTS5 keyword matching + semantic vector similarity + MMR diversity re-ranking. Scored and explainable.
+**Hybrid retrieval** — FTS5 keyword matching + semantic vector similarity + MMR diversity re-ranking. Automatic, no tuning required.
 
 **Contradiction handling** — conflicting facts are automatically superseded. Bitemporal versioning preserves the full history.
 
 **Knowledge graph** — related memories linked automatically on write. Eight relationship types, 3-hop traversal.
 
-**Local and private** — embeddings generated locally. No cloud calls. No API costs. Works offline.
+**Zero-config local install** — `pip install m3-memory`, one line in your MCP config, done. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 
-**Cross-device sync** — optional bi-directional delta sync across SQLite, PostgreSQL, and ChromaDB. Same memory on every machine.
+**Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB. Set one environment variable and your memories follow you across machines.
 
 ---
 
@@ -103,7 +103,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | Good fit | Not the right tool |
 |---|---|
-| You use Claude Code, Gemini CLI, Aider, or any MCP agent | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
+| You use Claude Code, Gemini CLI, Aider, or any MCP agent — plus non-MCP clients via the built-in HTTP proxy server | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
 | You're coordinating multiple agents on a shared local store | You need a hosted agent runtime with managed scaling — see [Letta](https://letta.ai) |
 | You need GDPR primitives, bitemporal state, or pure SQLite | You want state-of-the-art retrieval benchmarks today — see [Hindsight](https://github.com/vectorize-io/hindsight) |
 | You want memory that persists across sessions and devices | You only need in-session chat context |
