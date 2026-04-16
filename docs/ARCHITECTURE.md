@@ -1,4 +1,4 @@
-# M3 Memory: Architecture
+# <a href="../README.md"><img src="icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory: Architecture
 
 > Human-facing system design overview. For implementation specifics (schema, sync protocol, search internals), see [TECHNICAL_DETAILS.md](../TECHNICAL_DETAILS.md).
 

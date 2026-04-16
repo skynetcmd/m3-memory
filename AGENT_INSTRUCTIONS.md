@@ -1,4 +1,4 @@
-# <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> M3 Memory — Agent Instructions
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Agent Instructions
 
 > **For AI agents only.** This file tells your agent how to use M3 Memory effectively.
 > For human-readable docs, see [README.md](./README.md), [QUICKSTART.md](./QUICKSTART.md), or [CORE_FEATURES.md](./CORE_FEATURES.md).

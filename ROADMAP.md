@@ -1,4 +1,4 @@
-# M3 Memory — Roadmap
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Roadmap
 
 > Status: **Production (v2026.4.8)** — active development. Priorities shift based on community feedback; open an issue to vote on a feature.
 
