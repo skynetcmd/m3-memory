@@ -4,7 +4,7 @@
 
 ---
 
-## v0.2 — Distribution & Deployment (Next)
+## :package: v0.2 — Distribution & Deployment (Next)
 
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
@@ -14,7 +14,7 @@
 
 ---
 
-## v0.3 — Observability & Web UI
+## :chart_with_upwards_trend: v0.3 — Observability & Web UI
 
 - [ ] **Web dashboard** — lightweight local UI (FastAPI + HTMX) to browse memories, inspect knowledge graph, run GDPR operations
 - [ ] **Real-time contradiction log** — surfaced in dashboard and via `memory_verify` tool
@@ -24,7 +24,7 @@
 
 ---
 
-## v0.4 — Multi-Agent & Collaboration
+## :busts_in_silhouette: v0.4 — Multi-Agent & Collaboration
 
 - [ ] **Shared memory namespaces** — optional scoped memory pools across multiple local agents
 - [ ] **Agent identity model** — per-agent memory isolation with explicit cross-agent read grants
@@ -33,7 +33,7 @@
 
 ---
 
-## v1.0 — Benchmark Suite & Stability
+## :trophy: v1.0 — Benchmark Suite & Stability
 
 - [ ] **Public benchmark suite** — MRR, Hit@5, latency vs. Mem0 / LangMem / raw ChromaDB on standard datasets
 - [ ] **Formal accuracy regression CI** — block merges that degrade retrieval quality
@@ -43,7 +43,7 @@
 
 ---
 
-## Icebox (considering, no timeline)
+## :snowflake: Icebox (considering, no timeline)
 
 - Browser extension for passive memory capture
 - iOS / Android companion app for on-device sync
@@ -52,7 +52,7 @@
 
 ---
 
-## Contributing
+## :handshake: Contributing
 
 Vote on features by reacting to [GitHub Issues](https://github.com/skynetcmd/m3-memory/issues) with 👍. Open a new issue with the `roadmap` label to propose something not listed here.
 

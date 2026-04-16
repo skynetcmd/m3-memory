@@ -7,7 +7,7 @@
 
 ---
 
-## Memory Protocol Override
+## :rotating_light: Memory Protocol Override
 
 **This project uses the m3-memory MCP server as its sole memory store.**
 
@@ -21,7 +21,7 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 ---
 
-## Core Behavioral Rules
+## :brain: Core Behavioral Rules
 
 You have full access to **M3 Memory** — a persistent, local-first agentic memory layer via MCP tools. This gives you long-term continuity across sessions, projects, and conversations.
 
@@ -83,7 +83,7 @@ preserved in `memory_history`; you are not creating a duplicate row.
 
 ---
 
-## Memory Tools — When and How to Use
+## :toolbox: Memory Tools — When and How to Use
 
 ### Writing Memories
 
@@ -227,7 +227,7 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 
 ---
 
-## Multi-Agent / Mixed-Fleet Collaboration
+## :busts_in_silhouette: Multi-Agent / Mixed-Fleet Collaboration
 
 M3 is provider-agnostic. A single session can include Claude agents, Gemini
 agents, Aider or other local-LLM agents, and anything else that speaks MCP —
@@ -327,7 +327,7 @@ vector/semantic retrieval across the fleet, leave `embed` at its default
 
 ---
 
-## Health Check
+## :heartbeat: Health Check
 
 ```bash
 python bin/test_memory_bridge.py    # 41 end-to-end tests

@@ -4,9 +4,9 @@ M3 Memory provides the persistent memory and coordination substrate for multi-ag
 
 M3 Memory is not an agent runtime — it does not schedule or execute agents. It is the memory layer underneath your orchestrator, whether that is the bundled `m3-team` CLI, a LangGraph pipeline, or your own polling loop.
 
-## Primitives
+## :jigsaw: Primitives
 
-### Agent registry
+### :bust_in_silhouette: Agent registry
 
 Every agent registers with an ID and description. The registry tracks liveness via heartbeats and provides a directory other agents can query.
 
@@ -18,7 +18,7 @@ Every agent registers with an ID and description. The registry tracks liveness v
 | `agent_get` | Get details for a specific agent |
 | `agent_offline` | Mark an agent offline |
 
-### Scoped memory
+### :file_folder: Scoped memory
 
 Memory is isolated by `scope` so agents can maintain private working notes while sharing project-level knowledge.
 
@@ -28,7 +28,7 @@ Memory is isolated by `scope` so agents can maintain private working notes while
 
 All scopes support the same `memory_search`, `memory_write`, and `memory_update` operations. Scope filtering is applied at query time — an agent searching `scope="org"` sees only org-scoped memories.
 
-### Handoffs and inbox
+### :incoming_envelope: Handoffs and inbox
 
 When one agent finishes and the next needs to pick up, use `memory_handoff` to push context directly into the receiving agent's inbox. The receiver calls `memory_inbox` to read pending items and `memory_inbox_ack` to clear them.
 
@@ -46,7 +46,7 @@ await tool(session, "memory_handoff", {
 await tool(session, "memory_inbox", {"agent_id": "implementer"})
 ```
 
-### Tasks
+### :clipboard: Tasks
 
 Tasks are first-class objects with ownership, status, priority, and results. A planner creates tasks, assigns them to workers, and workers set results when done.
 
@@ -61,7 +61,7 @@ Tasks are first-class objects with ownership, status, priority, and results. A p
 | `task_tree` | Render a recursive subtree rooted at a parent task |
 | `task_delete` | Soft-delete a task |
 
-### Notifications
+### :bell: Notifications
 
 Agents discover work through a poll-based notification queue. The orchestrator polls each agent's queue and dispatches work when notifications arrive.
 
@@ -72,17 +72,17 @@ Agents discover work through a poll-based notification queue. The orchestrator p
 | `notifications_ack` | Acknowledge a single notification |
 | `notifications_ack_all` | Acknowledge all pending notifications |
 
-### Conversation grouping
+### :speech_balloon: Conversation grouping
 
 Tag related memories with a shared `conversation_id` to create a logical session boundary. This works across agents — a planner and implementer can both write to `conversation_id="release-2026-04"` and later search within that scope.
 
-### Bitemporal queries
+### :hourglass_flowing_sand: Bitemporal queries
 
 Every memory records when it was created and when it was valid. The `as_of` parameter on `memory_search` enables time-travel queries — useful for debugging past decisions or reconciling conflicting reports across agents.
 
-## Workflow patterns
+## :arrows_counterclockwise: Workflow patterns
 
-### Turn-based (sequential handoff)
+### :arrow_right: Turn-based (sequential handoff)
 
 One agent finishes, then passes context to the next. Each agent reads the inbox, searches shared memory, does its work, and hands off to the successor.
 
@@ -94,7 +94,7 @@ Planner → (handoff) → Implementer → (handoff) → Reviewer
 2. Implementer reads inbox, searches shared memory, writes private implementation notes to `scope="agent"`, and sets the task result.
 3. Reviewer searches shared memory, verifies against the contract, and records approval.
 
-### Parallel (fan-out / fan-in)
+### :twisted_rightwards_arrows: Parallel (fan-out / fan-in)
 
 Multiple agents work simultaneously on independent tasks, reading from the same shared memory.
 
@@ -106,7 +106,7 @@ Planner → assigns Task A to Agent 1
 
 Agents read `scope="org"` for shared context while keeping private notes in `scope="agent"`. The reviewer searches across both scopes to verify consistency.
 
-### Hierarchical (task trees)
+### :deciduous_tree: Hierarchical (task trees)
 
 A parent task can have subtasks, forming a tree. Use `task_tree` to inspect the full hierarchy.
 
@@ -135,15 +135,15 @@ await tool(session, "task_create", {
 await tool(session, "task_tree", {"root_task_id": parent_id})
 ```
 
-### Blackboard (shared knowledge base)
+### :memo: Blackboard (shared knowledge base)
 
 All agents contribute facts and observations to `scope="org"` asynchronously, without a predefined sequence. Any agent can search the shared pool at any time. This is useful when agents are loosely coupled — each contributes what it knows, and others consume what they need.
 
-### Reactive (notification-driven)
+### :zap: Reactive (notification-driven)
 
 Agents react to events rather than following a fixed sequence. Add `task_completed` to the orchestrator's `notification_kinds` so a planner automatically wakes up when a subtask finishes. Agents can also use `notify` to broadcast custom signals.
 
-## Full example
+## :rocket: Full example
 
 The [`examples/multi-agent-team/`](./examples/multi-agent-team/) directory contains a complete, runnable orchestrator:
 
@@ -169,7 +169,7 @@ The agent picks it up on the next tick, executes tool calls against m3-memory, a
 
 See [`examples/multi-agent-team/README.md`](./examples/multi-agent-team/README.md) for provider setup, resilience knobs, and how to add agents without code changes.
 
-## Design principles
+## :compass: Design principles
 
 **Memory is the coordination layer.** Agents don't talk to each other directly — they read and write shared memory. This decouples agent execution from agent communication.
 
