@@ -87,6 +87,18 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
+## Learn more
+
+| | |
+|---|---|
+| **[Get running](./QUICKSTART.md)** | **[Multi-agent orchestration](./MULTI_AGENT.md)** |
+| **[Core features](./CORE_FEATURES.md)** | **[Multi-agent example](./examples/multi-agent-team/README.md)** |
+| **[System design](./docs/ARCHITECTURE.md)** | **[M3 vs alternatives](./COMPARISON.md)** |
+| **[Implementation details](./TECHNICAL_DETAILS.md)** | **[Configuration](./ENVIRONMENT_VARIABLES.md)** |
+| **[Agent rules + all 46 tools](./AGENT_INSTRUCTIONS.md)** | **[Roadmap](./ROADMAP.md)** |
+
+---
+
 ## Who this is for
 
 | Good fit | Not the right tool |
@@ -186,21 +198,6 @@ Then search for: "M3 install"
 <p align="center">
   <img src="docs/demo_sync.svg" alt="Demo: cross-device, cross-platform memory sync" width="100%">
 </p>
-
----
-
-## Learn more
-
-- **Get running** → [QUICKSTART.md](./QUICKSTART.md)
-- **Understand features** → [CORE_FEATURES.md](./CORE_FEATURES.md)
-- **System design** → [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- **Implementation details** → [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md)
-- **Agent rules + all 44 tools** → [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
-- **Multi-agent orchestration** → [MULTI_AGENT.md](./MULTI_AGENT.md)
-- **Multi-agent example** → [examples/multi-agent-team/README.md](./examples/multi-agent-team/README.md)
-- **M3 vs alternatives** → [COMPARISON.md](./COMPARISON.md)
-- **Configuration** → [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)
-- **Roadmap** → [ROADMAP.md](./ROADMAP.md)
 
 ---
 
