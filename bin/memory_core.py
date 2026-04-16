@@ -733,6 +733,70 @@ def _apply_recency_bonus(scored, recency_bias, explain=False):
     return rescored
 
 
+def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -> list[tuple[float, dict]]:
+    """Trims results where the score drop-off is significantly higher than average."""
+    if len(ranked) < 3:
+        return ranked
+    
+    # Calculate score differences between consecutive results
+    diffs = [ranked[i][0] - ranked[i+1][0] for i in range(len(ranked) - 1)]
+    avg_diff = sum(diffs) / len(diffs)
+    
+    # Find the first 'elbow' where the drop is significantly larger than the average
+    for i, d in enumerate(diffs):
+        if d > avg_diff * sensitivity:
+            # We found an elbow, trim here
+            return ranked[:i+1]
+            
+    return ranked
+
+
+def _apply_temporal_boost(scored, query, explain=False):
+    """Detects dates in query and boosts items with matching or nearby valid_from dates."""
+    # 1. Extract potential dates from query (YYYY-MM-DD)
+    date_patterns = [
+        r"\b(\d{4})-(\d{2})-(\d{2})\b",
+        r"\b(\d+)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b",
+    ]
+    query_dates = []
+    for pattern in date_patterns:
+        for match in re.finditer(pattern, query.lower()):
+            try:
+                if "-" in match.group(0):
+                    query_dates.append(datetime.fromisoformat(match.group(0)).date())
+                else:
+                    d, m, y = match.groups()
+                    months = ["january", "february", "march", "april", "may", "june", 
+                              "july", "august", "september", "october", "november", "december"]
+                    query_dates.append(date(int(y), months.index(m) + 1, int(d)))
+            except Exception:
+                continue
+    
+    if not query_dates:
+        return scored
+
+    rescored = []
+    for s, it in scored:
+        boost = 0.0
+        vf_str = it.get("valid_from", "")
+        if vf_str:
+            try:
+                vf_date = datetime.fromisoformat(vf_str.split("T")[0]).date()
+                for qd in query_dates:
+                    diff = abs((vf_date - qd).days)
+                    if diff == 0: boost = max(boost, 0.25)
+                    elif diff <= 2: boost = max(boost, 0.15)
+                    elif diff <= 7: boost = max(boost, 0.05)
+            except Exception:
+                pass
+        
+        if explain and boost > 0:
+            if "_explanation" not in it: it["_explanation"] = {}
+            it["_explanation"]["temporal_boost"] = boost
+        rescored.append((s + boost, it))
+    return rescored
+
+
 async def memory_search_scored_impl(
     query,
     k=8,
@@ -747,6 +811,7 @@ async def memory_search_scored_impl(
     extra_columns=None,
     recency_bias=0.0,
     vector_weight=0.7,
+    adaptive_k=False,
     _depth=0,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
@@ -888,11 +953,23 @@ async def memory_search_scored_impl(
             }
         scored.append((final_score, item))
 
+    # Apply temporal boost if dates detected in query
+    if scored:
+        scored = _apply_temporal_boost(scored, query, explain=explain)
+
     if recency_bias > 0 and scored:
         scored = _apply_recency_bonus(scored, recency_bias, explain=explain)
 
     _MMR_LAMBDA = 0.7
     pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
+    
+    # Adaptive K: Trim by elbow if requested
+    if adaptive_k:
+        pre_ranked_all = _trim_by_elbow(pre_ranked_all)
+        # Recalculate k to match the trimmed length if it's smaller
+        if len(pre_ranked_all) < k:
+            k = len(pre_ranked_all)
+
     seen_content: set[str] = set()
     pre_ranked: list = []
     for entry in pre_ranked_all:
