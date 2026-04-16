@@ -25,8 +25,8 @@ If you get `command not found`, check that your Python scripts directory is on y
 M3 Memory needs a local model to generate embeddings for semantic search. [Ollama](https://ollama.com) is the easiest option:
 
 ```bash
-# Download an embedding model
-ollama pull nomic-embed-text
+# Download the default embedding model
+ollama pull qwen3-embedding:0.6b
 
 # Start the server (runs on localhost:11434)
 ollama serve
