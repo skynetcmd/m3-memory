@@ -1,0 +1,45 @@
+{
+  "dataset": "data/longmemeval/longmemeval_s_cleaned.json",
+  "n_instances": 500,
+  "ingest_mode": "turn",
+  "session_truncations": 0,
+  "session_truncation_events": [],
+  "session_truncation_evidence_losses": 0,
+  "k": 10,
+  "answer_model": "claude-opus-4-6",
+  "judge_model": "gpt-4o",
+  "judged": true,
+  "overall_accuracy": 0.89,
+  "per_type": {
+    "single-session-user": {
+      "n": 70,
+      "accuracy": 0.9142857142857143
+    },
+    "multi-session": {
+      "n": 133,
+      "accuracy": 0.849624060150376
+    },
+    "single-session-preference": {
+      "n": 30,
+      "accuracy": 0.9333333333333333
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "accuracy": 0.8646616541353384
+    },
+    "knowledge-update": {
+      "n": 78,
+      "accuracy": 0.9230769230769231
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "accuracy": 0.9464285714285714
+    }
+  },
+  "retrieval_session_hit_rate": 0.968,
+  "hypothesis_file": ".scratch/longmemeval_run_20260415_174852/hypotheses.jsonl",
+  "chain_of_note_compare": false,
+  "overall_accuracy_con": null,
+  "per_type_con": {},
+  "hypothesis_file_con": null
+}
