@@ -4,7 +4,7 @@
 
 ---
 
-## :eye: System Overview
+## 👁️ System Overview
 
 M3 Memory is a local-first persistent memory system for MCP agents. An agent calls MCP tools to write, search, link, and manage memories. All data lives in local SQLite. Optional sync layers (PostgreSQL, ChromaDB) enable cross-device and federated search.
 
@@ -20,7 +20,7 @@ PostgreSQL (cross-device sync)    ChromaDB (federated vector search)
 
 ---
 
-## :floppy_disk: Storage Hierarchy
+## 💾 Storage Hierarchy
 
 Three layers, only the first is required.
 
@@ -49,7 +49,7 @@ graph TD
 
 ---
 
-## :mag: Search Pipeline
+## 🔍 Search Pipeline
 
 Three-stage hybrid retrieval. Scored and explainable.
 
@@ -73,7 +73,7 @@ If local results are sparse, ChromaDB is queried as an L3 fallback.
 
 ---
 
-## :pencil2: Write Pipeline
+## ✏️ Write Pipeline
 
 Every `memory_write` call runs through this sequence:
 
@@ -103,7 +103,7 @@ sequenceDiagram
 
 ---
 
-## :brain: Intelligence Features
+## 🧠 Intelligence Features
 
 M3 uses a local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works.
 
@@ -115,7 +115,7 @@ All LLM features run locally. No external API calls.
 
 ---
 
-## :lock: Security Model
+## 🔒 Security Model
 
 ### Credential Resolution
 
@@ -135,7 +135,7 @@ Strict HTTP timeouts, circuit breaker (3-failure threshold), token values never 
 
 ---
 
-## :busts_in_silhouette: Scoping & Multi-Tenancy
+## 👥 Scoping & Multi-Tenancy
 
 | Scope | Behavior |
 |-------|----------|
@@ -148,7 +148,7 @@ Every search accepts `user_id` and `scope` filters.
 
 ---
 
-## :eu: GDPR Compliance
+## 🇪🇺 GDPR Compliance
 
 - **Article 17 (Right to Be Forgotten):** `gdpr_forget` hard-deletes all data for a user — memories, embeddings, relationships, history, sync queue
 - **Article 20 (Data Portability):** `gdpr_export` returns all memories as portable JSON
