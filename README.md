@@ -91,7 +91,6 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 |---|---|
 | You use Claude Code, Gemini CLI, Aider, or any MCP agent | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
 | You're coordinating multiple agents on a shared local store | You need a hosted agent runtime with managed scaling — see [Letta](https://letta.ai) |
-| You need GDPR primitives, bitemporal state, or pure SQLite | You want state-of-the-art retrieval benchmarks today — see [Hindsight](https://github.com/vectorize-io/hindsight) |
 | You want memory that persists across sessions and devices | You only need in-session chat context |
 
 ---
@@ -107,6 +106,24 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | **GDPR compliance** | `gdpr_forget` (Article 17) and `gdpr_export` (Article 20) as built-in tools |
 | **Self-maintaining** | Automatic decay, dedup, orphan pruning, retention enforcement |
 | **Apache 2.0 licensed** | Free. No SaaS tier, no usage limits, no lock-in |
+
+---
+
+## Benchmarks
+
+M3 Memory scores **89.0% on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)** (445/500 correct) — a 500-question evaluation of long-horizon conversational memory across six question types including single-session recall, multi-session reasoning, temporal reasoning, and knowledge updates.
+
+| Question type | n | Accuracy |
+|---|---|---|
+| single-session-user | 70 | 91.4% |
+| single-session-assistant | 56 | 94.6% |
+| single-session-preference | 30 | 93.3% |
+| multi-session | 133 | 85.0% |
+| temporal-reasoning | 133 | 86.5% |
+| knowledge-update | 78 | 92.3% |
+| **Overall** | **500** | **89.0%** |
+
+Full methodology, reproduction command, and honest caveats: [`benchmarks/longmemeval/README.md`](./benchmarks/longmemeval/README.md).
 
 ---
 

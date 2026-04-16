@@ -745,6 +745,7 @@ async def memory_search_scored_impl(
     explain=False,
     extra_columns=None,
     recency_bias=0.0,
+    vector_weight=0.7,
     _depth=0,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
@@ -823,7 +824,7 @@ async def memory_search_scored_impl(
         return memory_search_scored_impl(
             query, k, type_filter, agent_filter, "semantic",
             user_id, scope, as_of, conversation_id, explain,
-            extra_columns, recency_bias, _depth + 1,
+            extra_columns, recency_bias, vector_weight, _depth + 1,
         )
 
     try:
@@ -875,13 +876,14 @@ async def memory_search_scored_impl(
         del item["embedding"]
         vector_score = page_scores[i]
         bm25_norm = (1.0 / (1.0 + abs(row["bm25_score"])))
-        final_score = vector_score * 0.7 + bm25_norm * 0.3
+        final_score = vector_score * vector_weight + bm25_norm * (1.0 - vector_weight)
         if explain:
             item["_explanation"] = {
                 "vector": vector_score,
                 "bm25": bm25_norm,
                 "importance": row["importance"],
                 "raw_hybrid": final_score,
+                "vector_weight": vector_weight,
             }
         scored.append((final_score, item))
 
@@ -974,7 +976,8 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
         if explain and "_explanation" in item:
             exp = item["_explanation"]
             if "raw_hybrid" in exp:
-                lines.append(f"   Breakdown: vector={exp['vector']:.4f} (weight 0.7) + bm25={exp['bm25']:.4f} (weight 0.3) -> raw={exp['raw_hybrid']:.4f}")
+                vw = exp.get("vector_weight", 0.7)
+                lines.append(f"   Breakdown: vector={exp['vector']:.4f} (weight {vw:.2f}) + bm25={exp['bm25']:.4f} (weight {1.0-vw:.2f}) -> raw={exp['raw_hybrid']:.4f}")
                 if "mmr_penalty" in exp:
                     lines.append(f"   MMR penalty: -{exp['mmr_penalty']:.4f} (max_sim_to_selected={exp['max_sim_to_selected']:.4f})")
                 lines.append(f"   Importance: {exp['importance']:.4f}")

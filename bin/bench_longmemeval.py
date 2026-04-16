@@ -28,11 +28,12 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 import traceback
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -217,6 +218,17 @@ ANSWER_SYSTEM_BY_TYPE = {
 
 ANSWER_USER_TEMPLATE = (
     "History Chats:\n\n{history}\n\n"
+    "Current Date: {date}\nQuestion: {question}\nAnswer:"
+)
+
+NO_MEMORY_SYSTEM = (
+    "You are a helpful assistant. Answer the user's question directly and "
+    "concisely. If you do not know the answer, reply exactly: \"I don't know "
+    "based on our past conversations.\" Do not guess, infer, or invent "
+    "details. Be terse — no preamble, no hedging, no restating the question."
+)
+
+NO_MEMORY_USER_TEMPLATE = (
     "Current Date: {date}\nQuestion: {question}\nAnswer:"
 )
 
@@ -425,16 +437,44 @@ def build_turn_items(instance: dict) -> list[dict]:
     session_ids: list[str] = instance["haystack_session_ids"]
     session_dates: list[str] = instance["haystack_dates"]
 
+    prev_session_date_iso = ""
     for s_idx, (sess_id, sess_date, session) in enumerate(zip(session_ids, session_dates, sessions)):
         # LongMemEval session_date is "YYYY/MM/DD HH:MM" — normalize to ISO-8601
         # so bitemporal filters (as_of) and chronological sorting work.
         valid_from = _session_date_to_iso(sess_date)
+
+        # Gap marker: days between this session and the previous one.
+        gap_days = None
+        if prev_session_date_iso and valid_from:
+            try:
+                prev_dt = datetime.fromisoformat(prev_session_date_iso)
+                curr_dt = datetime.fromisoformat(valid_from)
+                gap_days = (curr_dt - prev_dt).days
+            except (ValueError, TypeError):
+                pass
+
         for t_idx, turn in enumerate(session):
             role = turn.get("role", "user")
             content = turn.get("content", "") or ""
             if len(content) > MAX_TURN_CHARS:
                 content = content[:MAX_TURN_CHARS]
             has_answer = bool(turn.get("has_answer", False))
+
+            ref_dates = extract_referenced_dates(content)
+
+            meta: dict[str, Any] = {
+                "role": role,
+                "session_id": sess_id,
+                "session_date": sess_date,
+                "session_index": s_idx,
+                "turn_index": t_idx,
+                "has_answer": has_answer,
+            }
+            if ref_dates:
+                meta["referenced_dates"] = ref_dates
+            if t_idx == 0 and gap_days is not None:
+                meta["gap_from_prev_session_days"] = gap_days
+
             items.append(
                 {
                     "type": "message",
@@ -446,16 +486,10 @@ def build_turn_items(instance: dict) -> list[dict]:
                     "change_agent": BENCH_CHANGE_AGENT,
                     "valid_from": valid_from,
                     "embed": True,
-                    "metadata": {
-                        "role": role,
-                        "session_id": sess_id,
-                        "session_date": sess_date,
-                        "session_index": s_idx,
-                        "turn_index": t_idx,
-                        "has_answer": has_answer,
-                    },
+                    "metadata": meta,
                 }
             )
+        prev_session_date_iso = valid_from
     return items
 
 
@@ -474,6 +508,117 @@ def _session_date_to_iso(sess_date: str) -> str:
         except ValueError:
             continue
     return ""
+
+
+# ── Temporal-cue extraction ─────────────────────────────────────────────────
+
+# Matches dates like: Jan 15, January 15, 2023/01/15, 2023-01-15, 01/15/2023,
+# "last Tuesday", "two weeks ago", "March 5th", etc.
+_MONTH_NAMES = (
+    r"(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December|"
+    r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+)
+_DATE_PATTERNS = [
+    # "January 15", "Jan 15th", "March 5th, 2023"
+    re.compile(
+        rf"({_MONTH_NAMES})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{{4}}))?",
+        re.IGNORECASE,
+    ),
+    # YYYY/MM/DD or YYYY-MM-DD
+    re.compile(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})"),
+    # MM/DD/YYYY
+    re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})"),
+]
+
+_RELATIVE_TIME_RE = re.compile(
+    r"(\d+)\s+(day|week|month|year)s?\s+ago"
+    r"|last\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|week|month|year)"
+    r"|(\d+)\s+(day|week|month)s?\s+(?:later|after|before|from\s+now)"
+    r"|how\s+many\s+(day|week|month|year)s?\s+(?:passed|between|since|ago|have\s+passed)",
+    re.IGNORECASE,
+)
+
+
+def extract_referenced_dates(text: str) -> list[str]:
+    """Extract explicit date strings from text content.
+
+    Returns a list of ISO-8601 date strings (YYYY-MM-DD) found in the text.
+    Used at ingest time to annotate turns with dates they reference, enabling
+    time-aware retrieval without oracle metadata.
+    """
+    import calendar
+
+    dates: list[str] = []
+    seen: set[str] = set()
+
+    month_map = {}
+    for i, name in enumerate(calendar.month_name):
+        if name:
+            month_map[name.lower()] = i
+    for i, name in enumerate(calendar.month_abbr):
+        if name:
+            month_map[name.lower()] = i
+
+    # Named month patterns: "January 15", "Jan 15th, 2023"
+    for m in _DATE_PATTERNS[0].finditer(text):
+        month_str, day_str = m.group(1), m.group(2)
+        year_str = m.group(3)
+        month = month_map.get(month_str.lower(), 0)
+        if not month:
+            continue
+        day = int(day_str)
+        year = int(year_str) if year_str else 2023  # LongMemEval default year
+        try:
+            d = f"{year:04d}-{month:02d}-{day:02d}"
+            datetime.strptime(d, "%Y-%m-%d")
+            if d not in seen:
+                dates.append(d)
+                seen.add(d)
+        except ValueError:
+            pass
+
+    # YYYY/MM/DD or YYYY-MM-DD
+    for m in _DATE_PATTERNS[1].finditer(text):
+        y, mo, dy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            d = f"{y:04d}-{mo:02d}-{dy:02d}"
+            datetime.strptime(d, "%Y-%m-%d")
+            if d not in seen:
+                dates.append(d)
+                seen.add(d)
+        except ValueError:
+            pass
+
+    # MM/DD/YYYY
+    for m in _DATE_PATTERNS[2].finditer(text):
+        mo, dy, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            d = f"{y:04d}-{mo:02d}-{dy:02d}"
+            datetime.strptime(d, "%Y-%m-%d")
+            if d not in seen:
+                dates.append(d)
+                seen.add(d)
+        except ValueError:
+            pass
+
+    return dates
+
+
+def has_temporal_cues(text: str) -> bool:
+    """Check if a query contains temporal reasoning signals."""
+    if _RELATIVE_TIME_RE.search(text):
+        return True
+    if any(p.search(text) for p in _DATE_PATTERNS):
+        return True
+    temporal_keywords = [
+        "how many days", "how many weeks", "how many months", "how many years",
+        "how long", "when did", "what date", "which came first", "in what order",
+        "before or after", "earlier", "later", "first to last", "last to first",
+        "chronological", "timeline", "sequence",
+    ]
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in temporal_keywords)
 
 
 def build_session_items(instance: dict) -> list[dict]:
@@ -604,6 +749,67 @@ async def ingest_instance(instance: dict, ingest_mode: str = "turn") -> tuple[in
     return len(items), time.perf_counter() - t0
 
 
+# F4: cross-encoder reranker. Lazy-loaded module-level singleton so the
+# 300MB+ import cost is only paid when --rerank is on. Default model is
+# the ms-marco distilled MiniLM — the standard cheap cross-encoder, fast
+# enough for per-query reranking at bench scale.
+_RERANKER = None
+_RERANKER_NAME = ""
+
+
+def _get_reranker(model_name: str):
+    global _RERANKER, _RERANKER_NAME
+    if _RERANKER is not None and _RERANKER_NAME == model_name:
+        return _RERANKER
+    from sentence_transformers import CrossEncoder
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _RERANKER = CrossEncoder(model_name, device=device)
+    _RERANKER_NAME = model_name
+    return _RERANKER
+
+
+_HYDE_SYSTEM = (
+    "You rewrite a short question as a first-person passage that might "
+    "appear in the user's past chat history as the answer. Write 2-3 "
+    "sentences in the user's voice, as if they mentioned the fact in "
+    "passing during an unrelated conversation. Include plausible "
+    "surrounding detail so the passage sounds conversational, not like a "
+    "direct answer. Do not invent specific entities you don't know — use "
+    "placeholder phrasing when the fact is genuinely unknown."
+)
+
+_HYDE_USER_TEMPLATE = "Question: {question}\n\nPassage:"
+
+
+def _hyde_expand(
+    client: "LLMClient",
+    model: str,
+    question: str,
+    max_tokens: int = 150,
+) -> str:
+    """Generate a hypothetical-answer passage for HyDE-style retrieval.
+
+    Targets the query/evidence phrasing asymmetry: ss-user questions like
+    "What degree did I graduate with?" fail to retrieve the evidence turn
+    "I graduated with a degree in Business Administration, which has
+    helped..." because the evidence embeds the answer inside a longer
+    sentence about something else. A hypothetical passage in the user's
+    voice matches the evidence embedding much more closely than the terse
+    query does.
+    """
+    try:
+        passage = client.complete(
+            model=model,
+            system=_HYDE_SYSTEM,
+            user=_HYDE_USER_TEMPLATE.format(question=question),
+            max_tokens=max_tokens,
+        )
+    except Exception:
+        return ""
+    return (passage or "").strip()
+
+
 async def retrieve_for_question(
     qid: str,
     question: str,
@@ -614,6 +820,17 @@ async def retrieve_for_question(
     recency_bias: float = 0.0,
     role_boost: float = 0.0,
     role_boost_target: str = "",
+    vector_weight: float = 0.7,
+    hyde_client: "LLMClient | None" = None,
+    hyde_model: str = "",
+    rerank_model: str = "",
+    rerank_pool_k: int = 100,
+    adaptive_k: bool = False,
+    adaptive_k_max: int = 30,
+    adaptive_k_min: int = 5,
+    smart_retrieval: bool = False,
+    smart_neighbor_sessions: int = 3,
+    smart_time_boost: float = 0.15,
 ) -> list[dict]:
     """Hybrid FTS5 + vector + MMR retrieval scoped to this question's haystack.
 
@@ -634,14 +851,33 @@ async def retrieve_for_question(
     because user-turn distractors score higher on the raw question embedding.
     """
     as_of = _session_date_to_iso(qdate) if qdate else ""
-    fetch_k = k * 2 if role_boost > 0 and role_boost_target else k
+    # F4 rerank fetches a large candidate pool; otherwise fall back to 2x for
+    # role boost, else plain k. Adaptive-k always pulls adaptive_k_max so the
+    # elbow trim downstream has a full distribution to cut against.
+    if rerank_model:
+        fetch_k = rerank_pool_k
+    elif adaptive_k or smart_retrieval:
+        fetch_k = adaptive_k_max
+    elif role_boost > 0 and role_boost_target:
+        fetch_k = k * 2
+    else:
+        fetch_k = k
+    # H2c: append HyDE passage to original question. BM25 still matches on the
+    # original query words, vector embedding sees enriched signal including
+    # plausible answer phrasing. One LLM call per question.
+    query_text = question
+    if hyde_client is not None and hyde_model:
+        passage = _hyde_expand(hyde_client, hyde_model, question)
+        if passage:
+            query_text = f"{question}\n\n{passage}"
     ranked = await memory_search_scored_impl(
-        question,
+        query_text,
         k=fetch_k,
         user_id=qid,
         as_of=as_of,
         extra_columns=["metadata_json", "conversation_id", "valid_from", "valid_to"],
         recency_bias=recency_bias,
+        vector_weight=vector_weight,
     )
     hits: list[dict] = []
     seen_ids: set[str] = set()
@@ -665,12 +901,155 @@ async def retrieve_for_question(
         )
         seen_ids.add(item["id"])
 
-    if role_boost > 0 and role_boost_target and hits:
+    # F4: cross-encoder rerank over the candidate pool. Cross-encoders score
+    # query+candidate jointly, detecting "answer embedded in off-topic turn"
+    # cases where bi-encoder similarity fails. Mutually exclusive with the
+    # role_boost path — once rerank is active, role heuristics are obsolete.
+    if rerank_model and hits:
+        ce = _get_reranker(rerank_model)
+        pairs = [(question, h["content"]) for h in hits]
+        ce_scores = ce.predict(pairs)
+        for h, s in zip(hits, ce_scores):
+            h["score"] = float(s)
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        hits = hits[:k]
+        seen_ids = {h["id"] for h in hits}
+    elif role_boost > 0 and role_boost_target and hits:
         for h in hits:
             if h["metadata"].get("role") == role_boost_target:
                 h["score"] += role_boost
         hits.sort(key=lambda h: h["score"], reverse=True)
         hits = hits[:k]
+        seen_ids = {h["id"] for h in hits}
+
+    if smart_retrieval and hits:
+        # ── Time-aware boost ──
+        # Parse dates from the query. If found, boost candidates whose
+        # valid_from or referenced_dates fall within ±30 days of any
+        # query date. This is the lightweight version of Mastra's three-
+        # date model, using only data already stored at ingest time.
+        query_dates = extract_referenced_dates(question)
+        query_has_temporal = has_temporal_cues(question)
+
+        if query_dates:
+            query_dt_set: list[datetime] = []
+            for ds in query_dates:
+                try:
+                    query_dt_set.append(datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=timezone.utc))
+                except ValueError:
+                    pass
+
+            if query_dt_set:
+                for h in hits:
+                    # Check valid_from
+                    vf = h.get("valid_from", "")
+                    if vf:
+                        try:
+                            h_dt = datetime.fromisoformat(vf)
+                            for qdt in query_dt_set:
+                                if abs((h_dt - qdt).days) <= 30:
+                                    h["score"] += smart_time_boost
+                                    break
+                        except (ValueError, TypeError):
+                            pass
+                    # Check referenced_dates in metadata
+                    ref_dates = h.get("metadata", {}).get("referenced_dates", [])
+                    for rd in ref_dates:
+                        try:
+                            rd_dt = datetime.strptime(rd, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            for qdt in query_dt_set:
+                                if abs((rd_dt - qdt).days) <= 14:
+                                    h["score"] += smart_time_boost
+                                    break
+                        except (ValueError, TypeError):
+                            pass
+                hits.sort(key=lambda h: h["score"], reverse=True)
+
+        # ── Neighbor-session expansion ──
+        # Triggered when: (a) temporal cues in query, OR (b) hits span
+        # multiple sessions (heuristic for multi-session synthesis).
+        # Pulls turns from sessions adjacent (±N) to each hit session,
+        # giving the answer model enough context for cross-session
+        # reasoning without needing oracle category labels.
+        hit_session_indices = set()
+        for h in hits:
+            si = h.get("metadata", {}).get("session_index")
+            if si is not None:
+                hit_session_indices.add(int(si))
+
+        multi_session_signal = len(hit_session_indices) >= 2
+        if (query_has_temporal or multi_session_signal) and hit_session_indices:
+            neighbor_indices: set[int] = set()
+            for si in hit_session_indices:
+                for offset in range(-smart_neighbor_sessions, smart_neighbor_sessions + 1):
+                    neighbor_indices.add(si + offset)
+            neighbor_indices -= hit_session_indices
+
+            if neighbor_indices:
+                neighbor_convs = {f"{qid}::{si}" for si in neighbor_indices if si >= 0}
+                if neighbor_convs:
+                    with _db() as db:
+                        placeholders = ",".join(["?"] * len(neighbor_convs))
+                        rows = db.execute(
+                            f"""
+                            SELECT id, content, title, metadata_json,
+                                   conversation_id, valid_from, valid_to
+                            FROM memory_items
+                            WHERE conversation_id IN ({placeholders})
+                              AND user_id = ?
+                            ORDER BY valid_from, CAST(
+                                json_extract(metadata_json, '$.turn_index') AS INTEGER
+                            )
+                            """,
+                            [*neighbor_convs, qid],
+                        ).fetchall()
+                        for row in rows:
+                            rid = row[0]
+                            if rid in seen_ids:
+                                continue
+                            meta_raw = row[3] or "{}"
+                            try:
+                                meta = json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+                            except json.JSONDecodeError:
+                                meta = {}
+                            # Neighbor turns get a reduced score — they're
+                            # context, not direct hits. Use the lowest
+                            # score from the initial hits minus a small
+                            # penalty so they sort after real hits.
+                            neighbor_score = (hits[-1]["score"] * 0.8) if hits else 0.0
+                            hits.append(
+                                {
+                                    "id": rid,
+                                    "content": row[1] or "",
+                                    "title": row[2] or "",
+                                    "metadata": meta,
+                                    "conversation_id": row[4] or "",
+                                    "valid_from": row[5] or "",
+                                    "valid_to": row[6] or "",
+                                    "score": neighbor_score,
+                                }
+                            )
+                            seen_ids.add(rid)
+                    hits.sort(key=lambda h: h["score"], reverse=True)
+
+    if (adaptive_k or smart_retrieval) and hits:
+        # Elbow trim on the final candidate set (which may now include
+        # time-boosted and neighbor-session-expanded turns).
+        scores = [h["score"] for h in hits[:adaptive_k_max]]
+        n = len(scores)
+        if n <= adaptive_k_min:
+            cut = n
+        else:
+            best_i = adaptive_k_min - 1
+            best_gap = scores[best_i] - scores[best_i + 1] if best_i + 1 < n else 0.0
+            for i in range(adaptive_k_min - 1, n - 1):
+                gap = scores[i] - scores[i + 1]
+                if gap > best_gap:
+                    best_gap = gap
+                    best_i = i
+            cut = best_i + 1
+            cut = max(adaptive_k_min, min(adaptive_k_max, cut))
+        hits = hits[:cut]
         seen_ids = {h["id"] for h in hits}
 
     if not expand_sessions or not hits:
@@ -1016,6 +1395,9 @@ def answer_with_llm(
     abstention: bool = False,
     notes: str = "",
     history_json: str = "",
+    no_memory: bool = False,
+    rag_aware_empty: bool = False,
+    no_category_knobs: bool = False,
 ) -> tuple[str, int]:
     """Generate an answer for one LongMemEval question.
 
@@ -1025,11 +1407,39 @@ def answer_with_llm(
     call conditions on (history + reflection + question). On reflection
     failure, falls back silently to the single-shot path.
     """
-    if abstention:
+    if no_memory:
+        # Baseline: answer model gets the question alone, with a neutral
+        # prompt that makes no reference to memories or retrieval. Measures
+        # what the answer model can do on its own, without M3's retrieval
+        # layer contributing anything.
+        system = NO_MEMORY_SYSTEM
+    elif rag_aware_empty:
+        # Baseline variant: the answer model sees the real RAG system prompt
+        # (it thinks it HAS memory + retrieval) and the real user template,
+        # but the history block is empty. Simulates a correctly-wired RAG
+        # pipeline whose retriever returned zero results. This is the fair
+        # "null retriever" control that Gemini's critique demanded — it
+        # isolates retrieval contribution without the prompt-confound of
+        # switching to a non-RAG system prompt. Abstention branch and
+        # per-category scaffold still apply, same as the stock path.
+        if abstention:
+            system = ANSWER_SYSTEM_ABSTENTION
+        else:
+            system = ANSWER_SYSTEM_BASE
+            scaffold = ANSWER_SYSTEM_BY_TYPE.get(qtype)
+            if scaffold:
+                system = f"{ANSWER_SYSTEM_BASE}\n\n{scaffold}"
+    elif abstention:
         # _abs questions are scored against an abstention-rewarding judge —
         # use the dedicated prompt and skip the per-category scaffolds (which
         # all assume the question IS answerable).
         system = ANSWER_SYSTEM_ABSTENTION
+    elif no_category_knobs:
+        # Ablation: force category-agnostic answering. Drop the per-type
+        # scaffold from ANSWER_SYSTEM_BY_TYPE so every qtype sees the same
+        # base RAG prompt. Abstention branching above is still honored —
+        # that's a dataset-level signal (_abs in qid), not a tuning knob.
+        system = ANSWER_SYSTEM_BASE
     else:
         system = ANSWER_SYSTEM_BASE
         scaffold = ANSWER_SYSTEM_BY_TYPE.get(qtype)
@@ -1037,6 +1447,34 @@ def answer_with_llm(
             system = f"{ANSWER_SYSTEM_BASE}\n\n{scaffold}"
 
     t0 = time.perf_counter()
+
+    if no_memory:
+        user = NO_MEMORY_USER_TEMPLATE.format(date=date, question=question)
+        for attempt in range(3):
+            try:
+                hyp = client.complete(model, system, user, max_tokens, thinking_budget=thinking_budget)
+                return hyp, int((time.perf_counter() - t0) * 1000)
+            except Exception as e:
+                if attempt == 2:
+                    return f"[ANSWER_ERROR:{type(e).__name__}: {e}]", int((time.perf_counter() - t0) * 1000)
+                time.sleep(2 * (2 ** attempt))
+        return "[ANSWER_ERROR:unreachable]", 0
+
+    if rag_aware_empty:
+        # Real user template, empty history block — the model sees a
+        # correctly-wired RAG pipeline whose retriever returned no turns.
+        # Skip reflection / chain-of-note since they operate on retrieved
+        # content and would just process an empty string.
+        user = ANSWER_USER_TEMPLATE.format(history="", date=date, question=question)
+        for attempt in range(3):
+            try:
+                hyp = client.complete(model, system, user, max_tokens, thinking_budget=thinking_budget)
+                return hyp, int((time.perf_counter() - t0) * 1000)
+            except Exception as e:
+                if attempt == 2:
+                    return f"[ANSWER_ERROR:{type(e).__name__}: {e}]", int((time.perf_counter() - t0) * 1000)
+                time.sleep(2 * (2 ** attempt))
+        return "[ANSWER_ERROR:unreachable]", 0
 
     reflection_text = ""
     if reflection and qtype in REFLECTION_CATEGORIES:
@@ -1161,6 +1599,7 @@ async def run(args: argparse.Namespace) -> None:
     qtype_correct: dict[str, list[int]] = {}
     qtype_correct_con: dict[str, list[int]] = {}
     retrieval_hit_stats: list[float] = []
+    effective_k_by_qtype: dict[str, list[int]] = {}
 
     compare_con = bool(getattr(args, "chain_of_note_compare", False))
     if compare_con:
@@ -1180,29 +1619,52 @@ async def run(args: argparse.Namespace) -> None:
             qtypes_seen.add(qtype)
             qtype_correct.setdefault(qtype, [])
 
-            k_for_q = args.k_reasoning if qtype in REFLECTION_CATEGORIES else args.k
-            expand = qtype in REFLECTION_CATEGORIES or qtype in SS_EXPAND_CATEGORIES
-            rbias = args.recency_bias if qtype in RECENCY_BIAS_CATEGORIES else 0.0
-            rboost_target = SS_ROLE_BOOST_MAP.get(qtype, "")
-            rboost = args.ss_role_boost if rboost_target else 0.0
-            try:
-                hits = await retrieve_for_question(
-                    qid, question, k_for_q, qdate=qdate,
-                    expand_sessions=expand,
-                    recency_bias=rbias,
-                    role_boost=rboost,
-                    role_boost_target=rboost_target,
-                )
-            except Exception as e:
-                log(f"  [{qid}] retrieval failed: {e}")
+            if args.no_memory or args.rag_aware_empty:
                 hits = []
+                retrieval_hit = None
+            else:
+                if args.smart_retrieval or args.adaptive_k or args.no_category_knobs:
+                    k_for_q = args.k
+                    expand = False
+                    rbias = 0.0
+                    rboost_target = ""
+                    rboost = 0.0
+                else:
+                    k_for_q = args.k_reasoning if qtype in REFLECTION_CATEGORIES else args.k
+                    expand = qtype in REFLECTION_CATEGORIES or qtype in SS_EXPAND_CATEGORIES
+                    rbias = args.recency_bias if qtype in RECENCY_BIAS_CATEGORIES else 0.0
+                    rboost_target = SS_ROLE_BOOST_MAP.get(qtype, "")
+                    rboost = args.ss_role_boost if rboost_target else 0.0
+                try:
+                    hits = await retrieve_for_question(
+                        qid, question, k_for_q, qdate=qdate,
+                        expand_sessions=expand,
+                        recency_bias=rbias,
+                        role_boost=rboost,
+                        role_boost_target=rboost_target,
+                        vector_weight=args.vector_weight,
+                        hyde_client=answer_client if args.hyde else None,
+                        hyde_model=args.hyde_model or args.answer_model,
+                        rerank_model=args.rerank_model if args.rerank else "",
+                        rerank_pool_k=args.rerank_pool_k,
+                        adaptive_k=args.adaptive_k or args.smart_retrieval,
+                        adaptive_k_max=args.adaptive_k_max,
+                        adaptive_k_min=args.adaptive_k_min,
+                        smart_retrieval=args.smart_retrieval,
+                        smart_neighbor_sessions=args.smart_neighbor_sessions,
+                        smart_time_boost=args.smart_time_boost,
+                    )
+                except Exception as e:
+                    log(f"  [{qid}] retrieval failed: {e}")
+                    hits = []
 
-            retrieved_session_ids = {
-                h["metadata"].get("session_id", "") for h in hits if h.get("metadata")
-            }
-            retrieval_hit = bool(evidence_sessions & retrieved_session_ids) if evidence_sessions else None
-            if retrieval_hit is not None:
-                retrieval_hit_stats.append(1.0 if retrieval_hit else 0.0)
+                retrieved_session_ids = {
+                    h["metadata"].get("session_id", "") for h in hits if h.get("metadata")
+                }
+                retrieval_hit = bool(evidence_sessions & retrieved_session_ids) if evidence_sessions else None
+                if retrieval_hit is not None:
+                    retrieval_hit_stats.append(1.0 if retrieval_hit else 0.0)
+                effective_k_by_qtype.setdefault(qtype, []).append(len(hits))
 
             hypothesis = ""
             hypothesis_con = ""
@@ -1220,14 +1682,18 @@ async def run(args: argparse.Namespace) -> None:
                     )
                     if notes:
                         history_json = _format_history_json(hits)
+                knobs_off = args.no_category_knobs or args.adaptive_k or args.smart_retrieval
                 hypothesis, ans_ms = answer_with_llm(
                     answer_client, args.answer_model, history, qdate, question,
                     qtype=qtype, abstention=abstention,
                     notes=notes, history_json=history_json,
                     max_tokens=args.answer_max_tokens,
                     thinking_budget=args.thinking_budget,
-                    reflection=args.reflection,
+                    reflection=args.reflection and not knobs_off,
                     reflection_model=args.reflection_model or None,
+                    no_memory=args.no_memory,
+                    rag_aware_empty=args.rag_aware_empty,
+                    no_category_knobs=knobs_off,
                 )
                 correct = judge_with_llm(
                     judge_client, args.judge_model, qtype, question, answer, hypothesis, abstention
@@ -1378,6 +1844,19 @@ async def run(args: argparse.Namespace) -> None:
             log(f"  {qt}: plain={plain:.4f}  con={con:.4f}  ({sign}{delta:+.4f})")
     if retrieval_hit_stats:
         log(f"session hit-rate @k={args.k}: {summary['retrieval_session_hit_rate']:.4f}")
+    if (args.adaptive_k or args.smart_retrieval) and effective_k_by_qtype:
+        log("adaptive-k effective retrieval depth by qtype:")
+        for qt in sorted(effective_k_by_qtype):
+            vals = effective_k_by_qtype[qt]
+            if not vals:
+                continue
+            mn = min(vals)
+            mx = max(vals)
+            mean = sum(vals) / len(vals)
+            log(f"  {qt}: n={len(vals)}  mean={mean:.1f}  min={mn}  max={mx}")
+        all_vals = [k for vs in effective_k_by_qtype.values() for k in vs]
+        if all_vals:
+            log(f"  overall: mean={sum(all_vals)/len(all_vals):.1f}  min={min(all_vals)}  max={max(all_vals)}")
     log(f"hypotheses -> {hyp_path}")
     log(f"results    -> {results_path}")
 
@@ -1400,6 +1879,96 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--skip-ingest", action="store_true")
     p.add_argument("--no-judge", action="store_true")
+    p.add_argument(
+        "--no-memory",
+        action="store_true",
+        help=(
+            "Baseline mode: skip retrieval entirely and ask the answer model "
+            "the question with no history, using a neutral system prompt that "
+            "makes no reference to memory. Measures what the answer model can "
+            "do on its own. Implies --skip-ingest since no DB is read."
+        ),
+    )
+    p.add_argument(
+        "--rag-aware-empty",
+        action="store_true",
+        help=(
+            "Baseline variant: the answer model sees the real RAG system "
+            "prompt (it thinks it HAS memory) and the real user template, "
+            "but the History Chats block is empty. Simulates a correctly-"
+            "wired RAG pipeline whose retriever returned zero results. "
+            "Closes the prompt-confound gap in the plain --no-memory "
+            "baseline — isolates retrieval contribution without also "
+            "switching the system prompt. Implies --skip-ingest. Mutually "
+            "exclusive with --no-memory."
+        ),
+    )
+    p.add_argument(
+        "--no-category-knobs",
+        action="store_true",
+        help=(
+            "Ablation: disable all category-gated retrieval knobs and per-"
+            "category answer scaffolds. Forces a fixed global k (no "
+            "k_reasoning boost for reflection categories), expand_sessions=False, "
+            "recency_bias=0.0, role_boost=0.0, and skips ANSWER_SYSTEM_BY_TYPE "
+            "scaffolds. Abstention branching on _abs questions is preserved "
+            "(forced by the benchmark's judge design, not a tuning decision). "
+            "Measures how much of the stock score depends on ground-truth "
+            "category metadata from the dataset vs. category-agnostic "
+            "retrieval. Can be combined with --skip-ingest to reuse an "
+            "existing ingested DB."
+        ),
+    )
+    p.add_argument(
+        "--adaptive-k",
+        action="store_true",
+        help=(
+            "Adaptive k selection driven by the retrieval score distribution. "
+            "Fetches adaptive_k_max candidates, finds the largest adjacent "
+            "score gap in the top scores, and trims to the elbow clamped to "
+            "[adaptive_k_min, adaptive_k_max]. Uses only the retriever's own "
+            "similarity signal — no oracle category metadata, no LLM "
+            "classifier. Implies --no-category-knobs (adaptive-k owns k "
+            "selection; other category knobs stay off)."
+        ),
+    )
+    p.add_argument(
+        "--adaptive-k-max",
+        type=int,
+        default=30,
+        help="Upper bound on adaptive-k. Candidate pool size + hard cap.",
+    )
+    p.add_argument(
+        "--adaptive-k-min",
+        type=int,
+        default=5,
+        help="Lower bound on adaptive-k. Never trim below this many turns.",
+    )
+    p.add_argument(
+        "--smart-retrieval",
+        action="store_true",
+        help=(
+            "Time-aware expansion + adaptive-k + neighbor-session expansion. "
+            "Parses temporal cues from the query (regex, no LLM), boosts "
+            "candidates near extracted dates, expands to neighboring sessions "
+            "when temporal cues or multi-session signals are detected, then "
+            "applies adaptive-k elbow trim. Uses only data stored at ingest "
+            "time (timestamps, referenced_dates, session_index) — no oracle "
+            "category metadata. Implies --no-category-knobs."
+        ),
+    )
+    p.add_argument(
+        "--smart-neighbor-sessions",
+        type=int,
+        default=3,
+        help="±N sessions to expand into when smart-retrieval triggers neighbor expansion.",
+    )
+    p.add_argument(
+        "--smart-time-boost",
+        type=float,
+        default=0.15,
+        help="Score boost for candidates whose timestamps match query-extracted dates.",
+    )
     p.add_argument("--k", type=int, default=10, help="top-K retrieved turns per question")
     p.add_argument(
         "--k-reasoning",
@@ -1410,6 +1979,74 @@ def parse_args() -> argparse.Namespace:
             "knowledge-update, single-session-preference). These need more "
             "context to stitch facts across sessions; k=10 starves them. Set "
             "equal to --k to disable the per-category bump."
+        ),
+    )
+    p.add_argument(
+        "--rerank",
+        action="store_true",
+        help=(
+            "F4: cross-encoder reranker. Fetches a candidate pool of "
+            "--rerank-pool-k, rescores each (query, candidate) pair with a "
+            "cross-encoder, sorts, trims to --k. Targets the 'needle "
+            "disguised as hay' failure where the evidence turn mentions "
+            "the answer as a side clause in a conversation about something "
+            "else — cases bi-encoder similarity cannot rank correctly. "
+            "Mutually exclusive with --ss-role-boost at the ranking stage "
+            "(rerank already handles ordering)."
+        ),
+    )
+    p.add_argument(
+        "--rerank-model",
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        help=(
+            "Cross-encoder model name for reranking. Default is the "
+            "ms-marco distilled MiniLM — fast, CPU-friendly, standard for "
+            "passage reranking."
+        ),
+    )
+    p.add_argument(
+        "--rerank-pool-k",
+        type=int,
+        default=100,
+        help=(
+            "Candidate pool size fetched from memory_search_scored_impl "
+            "before reranking. Larger pool catches evidence turns that "
+            "ranked low on bi-encoder score but the cross-encoder will "
+            "promote. 100 is a safe default; 200 for very deep haystacks."
+        ),
+    )
+    p.add_argument(
+        "--hyde",
+        action="store_true",
+        help=(
+            "HyDE-style query expansion: before retrieval, call an LLM to "
+            "rewrite the question as a hypothetical first-person passage, "
+            "then append it to the question before embedding. Targets the "
+            "query/evidence phrasing asymmetry where terse biographical "
+            "queries fail to match evidence turns that mention the answer "
+            "in passing. One extra LLM call per question."
+        ),
+    )
+    p.add_argument(
+        "--hyde-model",
+        default="gpt-4o-mini",
+        help=(
+            "Model for HyDE passage generation. Defaults to gpt-4o-mini — "
+            "cheap and strong at this rewrite task. Use --hyde-model '' to "
+            "fall back to --answer-model."
+        ),
+    )
+    p.add_argument(
+        "--vector-weight",
+        type=float,
+        default=0.7,
+        help=(
+            "Hybrid score blend: final = vector * w + bm25 * (1 - w). "
+            "Default 0.7 matches production m3-memory. Lower values favor "
+            "lexical matching — useful when query terms appear literally "
+            "in the evidence turn but semantic similarity is weak (e.g. "
+            "terse biographical questions where the answer is embedded "
+            "in a longer conversational turn about a different topic)."
         ),
     )
     p.add_argument(
@@ -1555,6 +2192,11 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     args = p.parse_args()
+    if args.no_memory and args.rag_aware_empty:
+        p.error("--no-memory and --rag-aware-empty are mutually exclusive "
+                "(they are two different baseline framings; pick one)")
+    if args.no_memory or args.rag_aware_empty:
+        args.skip_ingest = True
     if args.reflection and args.thinking_budget > 0:
         p.error("--reflection and --thinking-budget are mutually exclusive "
                 "(both serve the same purpose: extra reasoning compute)")
