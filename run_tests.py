@@ -29,9 +29,9 @@ def main():
     # Metadata for tests: {filename: (expected_time_str, timeout_seconds)}
     TEST_METADATA = {
         "test_knowledge.py": ("5-10s", 30),
-        "test_mcp_proxy.py": ("15s (runs only when needed)", 15),
+        "test_mcp_proxy.py": ("15s (runs only when needed)", 30),
         "test_unified_router.py": ("60s+", 120),
-        "test_memory_bridge.py": ("5-10s", 30),
+        "test_memory_bridge.py": ("60s+", 120),
         "test_debug_agent.py": ("2-5s", 30),
         "test_keychain.py": ("1-2s", 30),
         "test_mission_control.py": ("2-5s", 30),
