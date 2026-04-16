@@ -6,16 +6,21 @@ haystack), then for each question retrieves the top-K most relevant turns and
 asks an LLM to answer. An OpenAI judge (default gpt-4o-mini) scores the answer
 using the official LongMemEval per-task prompts.
 
-Routes embeddings through the new `memory_write_bulk_impl` / `_embed_many` path
-and expects llama-server on http://localhost:8081/v1 (override with
-LLM_ENDPOINTS_CSV).
+Retrieval pipeline (ported from LOCOMO benchmark work):
+  1. Hybrid search (FTS5 BM25 + vector cosine, fused with MMR re-ranking)
+  2. Graph expansion (1-hop traversal of knowledge graph from initial hits)
+  3. Episodic cluster expansion (+/- N surrounding turns from same session)
+  4. Timeline-aware answer prompt for temporal reasoning
+
+Routes embeddings through `memory_write_bulk_impl` / `_embed_many` and expects
+llama-server on http://localhost:8081/v1 (override with LLM_ENDPOINTS_CSV).
 
 Usage:
     python bin/bench_longmemeval.py                         # full 500 instances
     python bin/bench_longmemeval.py --limit 20              # subsample
     python bin/bench_longmemeval.py --skip-ingest           # reuse already-loaded DB
     python bin/bench_longmemeval.py --no-judge              # write hypotheses only
-    python bin/bench_longmemeval.py --judge-only FILE       # judge an existing hyp file
+    python bin/bench_longmemeval.py --cluster-size 0 --graph-depth 0  # ablation: hybrid only
 
 Artifacts go to .scratch/longmemeval_run_<timestamp>/:
     hypotheses.jsonl   one line per question
@@ -46,23 +51,36 @@ os.environ.setdefault("EMBED_BULK_CONCURRENCY", "4")
 import memory_core  # noqa: E402
 from memory_core import (  # noqa: E402
     memory_write_bulk_impl,
+    memory_link_impl,
+    memory_search_scored_impl,
     _embed,
     _batch_cosine,
     _unpack,
     _db,
 )
 from auth_utils import get_api_key  # noqa: E402
+import temporal_utils  # noqa: E402
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
 
 
 # ── Answer generation + judge prompts (from upstream LongMemEval) ────────────
 
+SYSTEM_PROMPT = (
+    "You are an assistant with long-term memory. You are participating in a benchmark. "
+    "IMPORTANT: You must use the 'CURRENT DATE' provided below as the absolute reference for 'today'. "
+    "Ignore your internal clock. All relative time references (yesterday, last week, etc.) "
+    "must be calculated relative to the session date they appear in, using the Timeline and "
+    "Temporal Anchors provided. Reason step-by-step before giving the final answer."
+)
+
 ANSWER_TEMPLATE = (
-    "I will give you several history chats between you and a user. "
-    "Please answer the question based on the relevant chat history.\n\n\n"
+    "Session Timeline:\n{timeline}\n\n"
+    "Temporal Anchors (Resolved Dates Found in Context):\n{anchors}\n\n"
     "History Chats:\n\n{history}\n\n"
-    "Current Date: {date}\nQuestion: {question}\nAnswer:"
+    "CURRENT DATE: {date}\n"
+    "Question: {question}\n\n"
+    "Final Answer:"
 )
 
 
@@ -140,12 +158,14 @@ def build_turn_items(instance: dict) -> list[dict]:
     session_dates: list[str] = instance["haystack_dates"]
 
     for s_idx, (sess_id, sess_date, session) in enumerate(zip(session_ids, session_dates, sessions)):
+        anchor_dt = temporal_utils.parse_longmemeval_date(sess_date)
         for t_idx, turn in enumerate(session):
             role = turn.get("role", "user")
             content = turn.get("content", "") or ""
             if len(content) > MAX_TURN_CHARS:
                 content = content[:MAX_TURN_CHARS]
             has_answer = bool(turn.get("has_answer", False))
+            anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
             items.append(
                 {
                     "type": "message",
@@ -162,6 +182,7 @@ def build_turn_items(instance: dict) -> list[dict]:
                         "session_index": s_idx,
                         "turn_index": t_idx,
                         "has_answer": has_answer,
+                        "temporal_anchors": anchors,
                     },
                 }
             )
@@ -175,44 +196,125 @@ async def ingest_instance(instance: dict) -> tuple[int, float]:
     return len(items), time.perf_counter() - t0
 
 
-async def retrieve_for_question(qid: str, question: str, k: int) -> list[dict]:
-    """Cosine search scoped to this question's haystack only."""
-    q_vec, _ = await _embed(question)
-    if not q_vec:
+async def retrieve_for_question(
+    qid: str, question: str, k: int,
+    cluster_size: int = 0, graph_depth: int = 0,
+) -> list[dict]:
+    """Hybrid FTS5+vector search with optional graph expansion and episodic clustering."""
+    ranked = await memory_search_scored_impl(
+        question, k=k, user_id=qid,
+        extra_columns=["metadata_json", "conversation_id"],
+    )
+    if not ranked:
         return []
-    with _db() as db:
-        rows = db.execute(
-            "SELECT mi.id, mi.content, mi.title, mi.metadata_json, mi.conversation_id, "
-            "me.embedding "
-            "FROM memory_items mi JOIN memory_embeddings me ON mi.id = me.memory_id "
-            "WHERE mi.is_deleted = 0 AND mi.user_id = ?",
-            (qid,),
-        ).fetchall()
-    if not rows:
-        return []
-    vecs = [_unpack(r["embedding"]) for r in rows]
-    scores = _batch_cosine(q_vec, vecs)
-    scored = [
-        {
-            "id": r["id"],
-            "content": r["content"],
-            "title": r["title"],
-            "metadata": json.loads(r["metadata_json"] or "{}"),
-            "conversation_id": r["conversation_id"],
-            "score": float(s),
-        }
-        for r, s in zip(rows, scores)
-    ]
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    return scored[:k]
+
+    hits = []
+    seen_ids: set[str] = set()
+    for score, item in ranked:
+        item["score"] = score
+        if "metadata_json" in item:
+            item["metadata"] = json.loads(item["metadata_json"] or "{}")
+        if "metadata" not in item:
+            item["metadata"] = {}
+        hits.append(item)
+        seen_ids.add(item["id"])
+
+    # Graph expansion: 1-hop traversal from initial hits
+    if graph_depth > 0:
+        graph_hits = []
+        for h in hits:
+            with _db() as db:
+                rows = db.execute(
+                    "SELECT mi.id, mi.content, mi.title, mi.metadata_json, mi.conversation_id "
+                    "FROM memory_items mi JOIN memory_relationships mr "
+                    "  ON (mi.id = mr.from_id OR mi.id = mr.to_id) "
+                    "WHERE (mr.from_id = ? OR mr.to_id = ?) AND mi.id != ? "
+                    "  AND mi.is_deleted = 0",
+                    (h["id"], h["id"], h["id"]),
+                ).fetchall()
+                for r in rows:
+                    if r["id"] not in seen_ids:
+                        seen_ids.add(r["id"])
+                        graph_hits.append({
+                            "id": r["id"],
+                            "content": r["content"],
+                            "title": r["title"],
+                            "metadata": json.loads(r["metadata_json"] or "{}"),
+                            "conversation_id": r["conversation_id"],
+                            "score": h["score"] * 0.8,
+                        })
+        hits.extend(graph_hits)
+
+    # Episodic cluster expansion: pull surrounding turns from same session
+    if cluster_size > 0:
+        expanded = list(hits)
+        for h in hits:
+            m = h.get("metadata", {})
+            cid = h.get("conversation_id")
+            if "turn_index" in m and cid:
+                t_idx = m["turn_index"]
+                with _db() as db:
+                    rows = db.execute(
+                        "SELECT id, content, title, metadata_json, conversation_id "
+                        "FROM memory_items "
+                        "WHERE conversation_id = ? AND is_deleted = 0",
+                        (cid,),
+                    ).fetchall()
+                    for r in rows:
+                        if r["id"] not in seen_ids:
+                            rm = json.loads(r["metadata_json"] or "{}")
+                            if "turn_index" in rm and abs(rm["turn_index"] - t_idx) <= cluster_size:
+                                seen_ids.add(r["id"])
+                                expanded.append({
+                                    "id": r["id"],
+                                    "content": r["content"],
+                                    "title": r["title"],
+                                    "metadata": rm,
+                                    "conversation_id": r["conversation_id"],
+                                    "score": h["score"] * 0.9,
+                                })
+        return expanded
+
+    return hits
 
 
-def format_retrieved(hits: list[dict]) -> str:
-    lines = []
+def format_retrieved(hits: list[dict]) -> tuple[str, str]:
+    """Return (history_text, temporal_anchors_text)."""
+    lines: list[str] = []
     by_session: dict[str, list[dict]] = {}
+    high_value: list[dict] = []
+    anchor_lines: list[str] = []
+
     for h in hits:
-        by_session.setdefault(h["conversation_id"] or "unknown", []).append(h)
-    for cid, turns in by_session.items():
+        m = h.get("metadata", {})
+        # Collect temporal anchors
+        for a in m.get("temporal_anchors", []):
+            anchor_lines.append(f"- {a['absolute']}: '{a['ref']}' in {h.get('title', '?')}")
+        if m.get("turn_index") is not None:
+            by_session.setdefault(h.get("conversation_id") or "unknown", []).append(h)
+        else:
+            high_value.append(h)
+
+    # Surface observations/summaries first (hierarchical context)
+    if high_value:
+        lines.append("[Key Facts and Summaries]")
+        high_value.sort(key=lambda x: x.get("metadata", {}).get("session_index", 0))
+        for item in high_value:
+            date = item.get("metadata", {}).get("session_date", "")
+            prefix = f"({date}) " if date else ""
+            lines.append(f"{prefix}{item.get('title', '')}: {item['content']}")
+        lines.append("")
+
+    # Sort sessions chronologically by session_index
+    sorted_sessions = sorted(
+        by_session.keys(),
+        key=lambda cid: min(
+            (t["metadata"].get("session_index", 0) for t in by_session[cid]),
+            default=0,
+        ),
+    )
+    for cid in sorted_sessions:
+        turns = by_session[cid]
         turns.sort(key=lambda t: t["metadata"].get("turn_index", 0))
         date = turns[0]["metadata"].get("session_date", "")
         lines.append(f"[Session on {date}]")
@@ -220,7 +322,10 @@ def format_retrieved(hits: list[dict]) -> str:
             role = t["metadata"].get("role", "?")
             lines.append(f"{role}: {t['content']}")
         lines.append("")
-    return "\n".join(lines).strip()
+
+    history = "\n".join(lines).strip()
+    anchors = "\n".join(sorted(set(anchor_lines))).strip() or "None found."
+    return history, anchors
 
 
 # ── LLM calls (answer + judge) ───────────────────────────────────────────────
@@ -236,16 +341,29 @@ def _openai_client(api_key: str, base_url: str | None = None):
     return OpenAI(**kwargs)
 
 
-def answer_with_llm(client, model: str, history: str, date: str, question: str) -> tuple[str, int]:
-    prompt = ANSWER_TEMPLATE.format(history=history, date=date, question=question)
+def answer_with_llm(
+    client, model: str, history: str, date: str, question: str,
+    timeline: str = "", anchors: str = "",
+) -> tuple[str, int]:
+    prompt = ANSWER_TEMPLATE.format(
+        timeline=timeline or "(not available)",
+        anchors=anchors or "None found.",
+        history=history,
+        date=date,
+        question=question,
+    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
     t0 = time.perf_counter()
     for attempt in range(3):
         try:
             resp = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=0,
-                max_tokens=400,
+                max_tokens=800,
             )
             hyp = (resp.choices[0].message.content or "").strip()
             return hyp, int((time.perf_counter() - t0) * 1000)
@@ -357,7 +475,11 @@ async def run(args: argparse.Namespace) -> None:
             qtype_correct.setdefault(qtype, [])
 
             try:
-                hits = await retrieve_for_question(qid, question, args.k)
+                hits = await retrieve_for_question(
+                    qid, question, args.k,
+                    cluster_size=args.cluster_size,
+                    graph_depth=args.graph_depth,
+                )
             except Exception as e:
                 log(f"  [{qid}] retrieval failed: {e}")
                 hits = []
@@ -369,11 +491,23 @@ async def run(args: argparse.Namespace) -> None:
             if retrieval_hit is not None:
                 retrieval_hit_stats.append(1.0 if retrieval_hit else 0.0)
 
+            # Build session timeline for temporal reasoning
+            session_dates = inst.get("haystack_dates", [])
+            session_ids = inst.get("haystack_session_ids", [])
+            timeline_lines = [
+                f"Session {idx + 1} ({sid}): {sdate}"
+                for idx, (sid, sdate) in enumerate(zip(session_ids, session_dates))
+            ]
+            timeline = "\n".join(timeline_lines)
+
             hypothesis = ""
             correct: bool | None = None
             if not args.no_judge:
-                history = format_retrieved(hits)
-                hypothesis, ans_ms = answer_with_llm(answer_client, args.answer_model, history, qdate, question)
+                history, anchors = format_retrieved(hits)
+                hypothesis, ans_ms = answer_with_llm(
+                    answer_client, args.answer_model, history, qdate, question,
+                    timeline=timeline, anchors=anchors,
+                )
                 correct = judge_with_llm(
                     judge_client, args.judge_model, qtype, question, answer, hypothesis, abstention
                 )
@@ -428,6 +562,9 @@ async def run(args: argparse.Namespace) -> None:
         "dataset": str(args.dataset),
         "n_instances": len(dataset),
         "k": args.k,
+        "cluster_size": args.cluster_size,
+        "graph_depth": args.graph_depth,
+        "search_mode": "hybrid",
         "answer_model": args.answer_model,
         "judge_model": args.judge_model,
         "judged": not args.no_judge,
@@ -460,7 +597,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--limit", type=int, default=0, help="subsample first N instances (0 = all)")
     p.add_argument("--skip-ingest", action="store_true")
     p.add_argument("--no-judge", action="store_true")
-    p.add_argument("--k", type=int, default=10, help="top-K retrieved turns per question")
+    p.add_argument("--k", type=int, default=20, help="top-K retrieved turns per question")
+    p.add_argument("--cluster-size", type=int, default=5,
+                   help="episodic expansion: pull +/- N surrounding turns (0 = off)")
+    p.add_argument("--graph-depth", type=int, default=1,
+                   help="graph expansion hops from initial hits (0 = off)")
     p.add_argument("--answer-model", default="gpt-4o-mini")
     p.add_argument("--judge-model", default="gpt-4o-mini")
     p.add_argument("--ingest-concurrency", type=int, default=4,
