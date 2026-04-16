@@ -500,7 +500,7 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
     now = datetime.now(timezone.utc).isoformat()
     prepared: list[dict] = []
     for it in items:
-        mid = str(uuid.uuid4())
+        mid = it.get("id") or str(uuid.uuid4())
         meta = it.get("metadata", "{}")
         if isinstance(meta, dict):
             meta = json.dumps(meta)
