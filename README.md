@@ -124,6 +124,24 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
+## :bar_chart: Benchmarks
+
+**89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500 correct) — a 500-question evaluation of long-horizon conversational memory. Without oracle metadata: **74.8%** (smart retrieval) to **68.0%** (fixed-k baseline).
+
+| Question type | n | Accuracy |
+|---|---|---|
+| single-session-user | 70 | 91.4% |
+| single-session-assistant | 56 | 94.6% |
+| single-session-preference | 30 | 93.3% |
+| multi-session | 133 | 85.0% |
+| temporal-reasoning | 133 | 86.5% |
+| knowledge-update | 78 | 92.3% |
+| **Overall** | **500** | **89.0%** |
+
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](./benchmarks/longmemeval/README.md).
+
+---
+
 ## :toolbox: Core tools
 
 Most sessions use three tools. The rest is there when you need it.
