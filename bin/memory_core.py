@@ -207,7 +207,8 @@ def _ensure_sync_tables() -> None:
     import subprocess
     try:
         migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
-        subprocess.run([sys.executable, migration_script], check=True, timeout=30)
+        # Increase timeout to 300s to handle backups of multi-GB databases (#46)
+        subprocess.run([sys.executable, migration_script], check=True, timeout=300)
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
 
@@ -1034,11 +1035,13 @@ async def memory_search_scored_impl(
     return ranked
 
 
-async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", _depth=0):
+async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, _depth=0):
     ranked = await memory_search_scored_impl(
         query, k=k, type_filter=type_filter, agent_filter=agent_filter,
         search_mode=search_mode, user_id=user_id, scope=scope, as_of=as_of,
         conversation_id=conversation_id, explain=explain,
+        recency_bias=float(recency_bias) if recency_bias else 0.0,
+        adaptive_k=bool(adaptive_k),
     )
     if ranked is None:
         return "Search failed: FTS and semantic both unavailable."
