@@ -1174,7 +1174,7 @@ def memory_delete_impl(id, hard=False):
                        (datetime.now(timezone.utc).isoformat(), id))
     return f"{'Hard' if hard else 'Soft'}-deleted: {id}"
 
-VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff"}
+VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff", "precedes", "follows"}
 
 def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> str:
     # Verify both items exist
