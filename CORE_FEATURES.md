@@ -8,23 +8,9 @@ For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.
 
 ## Overview
 
-```mermaid
-graph LR
-    subgraph "Machine A"
-        G[Gemini CLI] <--> MB1[M3 Memory]
-    end
-
-    subgraph "Machine B"
-        C[Claude Code] <--> MB2[M3 Memory]
-    end
-
-    subgraph "Sync Layer"
-        PG[(PostgreSQL)]
-    end
-
-    MB1 <-->|Bi-directional Sync| PG
-    MB2 <-->|Bi-directional Sync| PG
-```
+<p align="center">
+  <img src="docs/overview_diagram.svg" alt="M3 Memory architecture overview" width="100%">
+</p>
 
 M3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
 
