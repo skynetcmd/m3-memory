@@ -57,12 +57,12 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
                 "temperature": 0.3
             },
             headers={"Authorization": f"Bearer {token}"},
-            timeout=120.0
+            timeout=LLM_TIMEOUT
         )
         resp.raise_for_status()
         summary_text = resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        return f"Error during LLM summarization: {e}"
+        return f"Error during LLM summarization: {type(e).__name__}: {e}"
 
     # 5. Store the summary as a new memory item
     summary_id = str(uuid.uuid4())
@@ -101,6 +101,7 @@ DEDUP_LIMIT            = int(os.environ.get("DEDUP_LIMIT", "1000"))
 DEDUP_THRESHOLD        = float(os.environ.get("DEDUP_THRESHOLD", "0.92"))
 CONTRADICTION_THRESHOLD = float(os.environ.get("CONTRADICTION_THRESHOLD", "0.85"))
 SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "500"))
+LLM_TIMEOUT            = float(os.environ.get("LLM_TIMEOUT", "120.0"))
 
 VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "grok", "manual", "system", "unknown", "legacy"}
 
@@ -1095,28 +1096,36 @@ def memory_delete_impl(id, hard=False):
 
 VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff"}
 
-def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related") -> str:
+def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> str:
+    # Verify both items exist
+    for mid in (from_id, to_id):
+        if not db.execute("SELECT id FROM memory_items WHERE id = ?", (mid,)).fetchone():
+            return f"Error: memory {mid} not found"
+    # Check for duplicate link
+    existing = db.execute(
+        "SELECT id FROM memory_relationships WHERE from_id = ? AND to_id = ? AND relationship_type = ?",
+        (from_id, to_id, relationship_type)
+    ).fetchone()
+    if existing:
+        return f"Link already exists: {existing['id']}"
+    rid = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+        (rid, from_id, to_id, relationship_type, datetime.now(timezone.utc).isoformat())
+    )
+    return f"Linked: {from_id} --[{relationship_type}]--> {to_id} (id: {rid})"
+
+
+def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related", db=None) -> str:
     """Creates a directional link between two memory items."""
     if relationship_type not in VALID_RELATIONSHIP_TYPES:
         return f"Error: invalid relationship type '{relationship_type}'. Valid: {', '.join(sorted(VALID_RELATIONSHIP_TYPES))}"
+    
+    if db is not None:
+        return _memory_link_inner(from_id, to_id, relationship_type, db)
+    
     with _db() as db:
-        # Verify both items exist
-        for mid in (from_id, to_id):
-            if not db.execute("SELECT id FROM memory_items WHERE id = ?", (mid,)).fetchone():
-                return f"Error: memory {mid} not found"
-        # Check for duplicate link
-        existing = db.execute(
-            "SELECT id FROM memory_relationships WHERE from_id = ? AND to_id = ? AND relationship_type = ?",
-            (from_id, to_id, relationship_type)
-        ).fetchone()
-        if existing:
-            return f"Link already exists: {existing['id']}"
-        rid = str(uuid.uuid4())
-        db.execute(
-            "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
-            (rid, from_id, to_id, relationship_type, datetime.now(timezone.utc).isoformat())
-        )
-    return f"Linked: {from_id} --[{relationship_type}]--> {to_id} (id: {rid})"
+        return _memory_link_inner(from_id, to_id, relationship_type, db)
 
 def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
     """Returns the local graph neighborhood of a memory item up to N hops."""
