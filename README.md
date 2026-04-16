@@ -1,5 +1,4 @@
-![M3 Memory](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/M3-banner.jpg)
-
+![M3 Memory]
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory">
     <img src="docs/M3-banner.jpg" alt="M3 Memory" width="100%">
