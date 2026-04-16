@@ -1,4 +1,4 @@
-# M3 Memory — Comparison Guide
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Comparison Guide
 
 > Last updated: April 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 

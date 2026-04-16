@@ -1,4 +1,4 @@
-# M3 Memory — Quick Start
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Quick Start
 
 Get persistent memory running with your MCP agent in under five minutes.
 
