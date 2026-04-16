@@ -134,7 +134,71 @@ async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:
 
 # ── Inline impl wrapper for conversation_search ──────────────────────────────
 async def _conversation_search_impl(query, k=8):
-    return await memory_core.memory_search_impl(query, k=k, type_filter="message")
+    """Search messages with automatic adjacent-turn pairing.
+
+    When a user turn is found, the next assistant turn from the same
+    conversation is included so callers always see the full Q&A pair.
+    """
+    ranked = await memory_core.memory_search_scored_impl(
+        query, k=int(k), type_filter="message",
+        extra_columns=["metadata_json", "conversation_id"],
+    )
+    if ranked is None:
+        return "Search failed: FTS and semantic both unavailable."
+    if not ranked:
+        return "No results found."
+
+    # Build initial result set
+    items = []
+    seen_ids: set = set()
+    for score, item in ranked:
+        item["score"] = score
+        if "metadata_json" in item:
+            item["_meta"] = json.loads(item.get("metadata_json") or "{}")
+        else:
+            item["_meta"] = {}
+        items.append(item)
+        seen_ids.add(item["id"])
+
+    # Adjacent-turn pairing: pull the next turn for user messages
+    extras = []
+    for item in items:
+        m = item.get("_meta", {})
+        cid = item.get("conversation_id")
+        if m.get("role") == "user" and "turn_index" in m and cid:
+            next_idx = m["turn_index"] + 1
+            with memory_core._db() as db:
+                row = db.execute(
+                    "SELECT id, content, title, metadata_json, conversation_id "
+                    "FROM memory_items "
+                    "WHERE conversation_id = ? AND is_deleted = 0 "
+                    "  AND json_extract(metadata_json, '$.turn_index') = ?",
+                    (cid, next_idx),
+                ).fetchone()
+                if row and row["id"] not in seen_ids:
+                    seen_ids.add(row["id"])
+                    rm = json.loads(row["metadata_json"] or "{}")
+                    extras.append({
+                        "id": row["id"],
+                        "content": row["content"],
+                        "title": row["title"],
+                        "type": "message",
+                        "conversation_id": row["conversation_id"],
+                        "score": item["score"] * 0.85,
+                        "_meta": rm,
+                    })
+    items.extend(extras)
+    items.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # Format output
+    lines = [f"Top {len(items)} results:"]
+    for rank, item in enumerate(items, 1):
+        content = item.get("content") or ""
+        lines.append("-" * 40)
+        lines.append(f"{rank}. [{item['id']}] score={item['score']:.4f}  type: {item.get('type', 'unknown')}  title: {item.get('title','')}")
+        lines.append(f"Content:\n{content}\n")
+    lines.append("-" * 40)
+    return "\n".join(lines)
 
 # ── Inline impl wrapper for memory_verify ────────────────────────────────────
 # The LLM-facing parameter is `id` (preserves the existing bridge contract);
@@ -198,6 +262,8 @@ TOOLS: list[ToolSpec] = [
                 "scope":              {"type": "string", "description": "Filter by isolation scope.", "default": ""},
                 "as_of":              {"type": "string", "description": "ISO-8601 time-travel cutoff.", "default": ""},
                 "conversation_id":    {"type": "string", "description": "Restrict to a conversation / team session.", "default": ""},
+                "recency_bias":       {"type": "number", "description": "Boost newer items (0.0=off, 0.1-0.2=moderate, higher=aggressive). Useful for 'current' or 'latest' queries.", "default": 0.0},
+                "adaptive_k":         {"type": "boolean", "description": "Auto-trim results at the score drop-off point, returning only high-relevance items.", "default": False},
             },
             "required": ["query"],
         },
