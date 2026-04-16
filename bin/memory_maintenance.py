@@ -186,10 +186,15 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
 
     # VACUUM must run outside any transaction
     try:
-        vconn = sqlite3.connect(DB_PATH)
-        vconn.execute("VACUUM")
-        vconn.close()
-        report.append("Space reclaimed (VACUUM)")
+        # Skip VACUUM on databases > 500MB to prevent multi-minute hangs (#46)
+        db_size = os.path.getsize(DB_PATH)
+        if db_size > 500 * 1024 * 1024:
+            report.append(f"VACUUM skipped: database too large ({db_size / 1e9:.2f} GB)")
+        else:
+            vconn = sqlite3.connect(DB_PATH)
+            vconn.execute("VACUUM")
+            vconn.close()
+            report.append("Space reclaimed (VACUUM)")
     except Exception as e:
         report.append(f"VACUUM skipped: {e}")
 
