@@ -114,7 +114,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| **45 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, and tasks for multi-agent orchestration |
+| **46 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, and tasks for multi-agent orchestration |
 | **193 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, and orchestration paths |
 | **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
@@ -142,7 +142,7 @@ All 45 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
 ## For AI agents
 
-M3 Memory exposes 45 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
+M3 Memory exposes 46 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
 
 To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
 
