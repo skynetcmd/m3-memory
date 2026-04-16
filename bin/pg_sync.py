@@ -32,17 +32,6 @@ DB_PATH = ctx.db_path
 
 BATCH_SIZE = 100  # commit every N rows
 
-# Exclude benchmark / test agent data from warehouse pushes.
-# These prefixes match agent_ids created by test_memory_bridge.py,
-# benchmark_memory.py, and test_debug_agent.py.
-_TEST_AGENT_FILTER = """
-    AND agent_id NOT LIKE 'bench_%'
-    AND agent_id NOT LIKE 'test_%'
-    AND agent_id NOT LIKE 'cons_%'
-    AND agent_id NOT LIKE 'import_test_%'
-    AND agent_id NOT IN ('notif-test', 'agent-X', 'test-agent-B')
-"""
-
 
 def _get_pg_url() -> str:
     """Resolve PostgreSQL connection URL from environment or encrypted vault."""
@@ -152,22 +141,26 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
 
     # 1. PUSH: Local to Remote (delta — only changed rows since last push)
     watermark = _get_watermark(sl_cur, "pg_push")
-    _SELECT_COLS = """
+    if watermark:
+        sl_cur.execute("""
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
                    change_agent, importance, source, origin_device, is_deleted,
                    expires_at, decay_rate, created_at, updated_at,
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
                    COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
-            WHERE 1=1 """ + _TEST_AGENT_FILTER
-
-    if watermark:
-        sl_cur.execute(_SELECT_COLS + """
-            AND (updated_at > ? OR (updated_at IS NULL AND created_at > ?))
+            WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)
         """, (watermark, watermark))
         logger.info(f"Delta push: rows changed since {watermark}")
     else:
-        sl_cur.execute(_SELECT_COLS)
+        sl_cur.execute("""
+            SELECT id, type, title, content, metadata_json, agent_id, model_id,
+                   change_agent, importance, source, origin_device, is_deleted,
+                   expires_at, decay_rate, created_at, updated_at,
+                   COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
+                   COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
+            FROM memory_items
+        """)
         logger.info("Full push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
@@ -439,24 +432,16 @@ def sync_tasks(sl_cur, pg_cur, sl_conn):
         "result_memory_id, metadata_json, created_at, updated_at, completed_at, deleted_at"
     )
 
-    # 1. PUSH: local → remote (delta on updated_at, excluding test data).
-    # Tombstones always ride through so deletes propagate even for test-agent rows
-    # that were pushed before the test-agent filter existed.
-    _task_filter = _TEST_AGENT_FILTER.replace("agent_id", "created_by")
-    _task_base = (
-        f"SELECT {task_cols} FROM tasks WHERE (deleted_at IS NOT NULL OR (1=1 "
-        + _task_filter
-        + "))"
-    )
+    # 1. PUSH: local → remote (delta on updated_at)
     watermark = _get_watermark(sl_cur, "tasks_push")
     if watermark:
         sl_cur.execute(
-            _task_base + " AND (updated_at > ? OR (updated_at IS NULL AND created_at > ?))",
+            f"SELECT {task_cols} FROM tasks WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)",
             (watermark, watermark),
         )
         logger.info(f"Delta task push: rows changed since {watermark}")
     else:
-        sl_cur.execute(_task_base)
+        sl_cur.execute(f"SELECT {task_cols} FROM tasks")
         logger.info("Full task push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
@@ -568,19 +553,17 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
 
     # 1. PUSH: Local to Remote (delta)
     watermark = _get_watermark(sl_cur, "emb_push")
-    _EMB_BASE = """
+    if watermark:
+        # memory_embeddings has no updated_at, so join on memory_items.updated_at
+        sl_cur.execute("""
             SELECT me.id, me.memory_id, me.embedding, me.embed_model, me.dim
             FROM memory_embeddings me
             JOIN memory_items mi ON me.memory_id = mi.id
-            WHERE 1=1 """ + _TEST_AGENT_FILTER.replace("agent_id", "mi.agent_id")
-
-    if watermark:
-        sl_cur.execute(_EMB_BASE + """
-            AND (mi.updated_at > ? OR (mi.updated_at IS NULL AND mi.created_at > ?))
+            WHERE mi.updated_at > ? OR (mi.updated_at IS NULL AND mi.created_at > ?)
         """, (watermark, watermark))
         logger.info(f"Delta embedding push: rows changed since {watermark}")
     else:
-        sl_cur.execute(_EMB_BASE)
+        sl_cur.execute("SELECT id, memory_id, embedding, embed_model, dim FROM memory_embeddings")
         logger.info("Full embedding push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
@@ -589,32 +572,13 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
 
     if local_rows:
         try:
-            # Pre-filter: only push embeddings whose memory_id exists in PG memory_items.
-            # This avoids FK violations when local items haven't been pushed yet.
-            local_memory_ids = list({row[1] for row in local_rows})
-            pg_existing_ids = set()
-            for i in range(0, len(local_memory_ids), BATCH_SIZE):
-                batch_ids = local_memory_ids[i:i+BATCH_SIZE]
-                pg_cur.execute(
-                    "SELECT id FROM memory_items WHERE id IN %s",
-                    (tuple(batch_ids),),
-                )
-                pg_existing_ids.update(r[0] for r in pg_cur.fetchall())
-
             # Convert sqlite3.Row to tuples with Binary-wrapped embedding blobs
             values = []
-            skipped = 0
             for row in local_rows:
-                if row[1] not in pg_existing_ids:
-                    skipped += 1
-                    continue
                 row_list = list(row)
                 # row[2] is the embedding blob — wrap for PG BYTEA
                 row_list[2] = Binary(row_list[2])
                 values.append(tuple(row_list))
-
-            if skipped:
-                logger.info(f"Skipped {skipped} embeddings (memory_id not in PG memory_items)")
 
             for i in range(0, len(values), BATCH_SIZE):
                 batch = values[i:i+BATCH_SIZE]
