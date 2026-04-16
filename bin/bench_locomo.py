@@ -52,12 +52,36 @@ CATEGORIES = {
     5: "adversarial"
 }
 
-SYSTEM_PROMPT = (
-    "You are an assistant with long-term memory. You are participating in a benchmark. "
-    "Use the provided History and Timeline to answer questions. "
-    "IMPORTANT: If a 'Temporal Anchor' matches an event mentioned in history, that anchor date is the GROUND TRUTH for when that event happened. "
-    "Always use the anchor date over the session date if they differ."
-)
+# --- Adaptive Prompts by Category ---
+
+SYSTEM_PROMPTS = {
+    "default": (
+        "You are an assistant with long-term memory. You are participating in a benchmark. "
+        "Use the provided History and Timeline to answer questions. "
+        "IMPORTANT: If a 'Temporal Anchor' matches an event mentioned in history, that anchor date is the GROUND TRUTH for when that event happened. "
+        "Always use the anchor date over the session date if they differ. "
+        "Answer directly based on the evidence; do not infer or calculate beyond what is stated."
+    ),
+    "temporal": (
+        "You are a temporal reasoning expert. Use the provided History, Timeline, and Anchors to answer the question. "
+        "1. Identify the reference date (Today's Date).\n"
+        "2. Locate events in the history.\n"
+        "3. Use the 'Temporal Anchors' to resolve relative terms like 'yesterday' or 'last week' into absolute dates.\n"
+        "4. Calculate durations or find the latest event state.\n"
+        "Reason step-by-step, then provide a CONCISE final answer."
+    ),
+    "multi-hop": (
+        "You are a multi-session reasoning assistant. You must connect facts across different conversation sessions. "
+        "Pay close attention to how a topic mentioned in one session evolves or is referenced in another. "
+        "Answer the question based on the cumulative history provided."
+    ),
+    "adversarial": (
+        "You are participating in an adversarial memory benchmark. "
+        "Some questions may be unanswerable based on the provided history. "
+        "If the information is not present, say 'unanswerable' and explain what is missing. "
+        "Do not hallucinate or make up details."
+    )
+}
 
 ANSWER_TEMPLATE = (
     "Timeline of All Sessions:\n{timeline}\n\n"
@@ -67,6 +91,21 @@ ANSWER_TEMPLATE = (
     "Question: {question}\n\n"
     "Reason step-by-step using the anchors and timeline, then provide a CONCISE final answer."
 )
+
+def classify_question(query: str) -> str:
+    """Regex-based question classifier to route to optimal prompting/retrieval strategy."""
+    q = query.lower()
+    # Temporal: When, how long, how many days, ago, date, year, month
+    if any(x in q for x in ["when", "how long", "how many days", " ago", "date", "year", "month", "last week", "yesterday"]):
+        return "temporal"
+    # Adversarial: typically contains "not", "never", or is a "what if"
+    if any(x in q for x in ["never", "not mentioned", "unanswerable"]):
+        return "adversarial"
+    # Multi-hop: usually "how did X change", "what is the sequence", "over time"
+    if any(x in q for x in ["change", "sequence", "evolution", "progress", "history of"]):
+        return "multi-hop"
+    return "default"
+
 
 def judge_prompt(qtype: str, question: str, answer: str, response: str) -> str:
     if qtype == "adversarial":
@@ -214,11 +253,21 @@ async def ingest_sample_with_graph(sample: dict) -> tuple[int, float]:
     print(f"Created {count} relationships")
     return len(items), time.perf_counter() - t0
 
-async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: int = 0, graph_depth: int = 0) -> list[dict]:
+async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: int = 0, graph_depth: int = 0, q_signal: str = "default") -> list[dict]:
     from memory_core import memory_search_scored_impl
+    
+    # Per-category K gating
+    actual_k = k
+    if q_signal == "temporal": actual_k = max(k, 20)
+    elif q_signal == "adversarial": actual_k = min(k, 10)
+    
+    # Recency bias for temporal and multi-hop
+    rb = 0.15 if q_signal in ["temporal", "multi-hop"] else 0.0
+    
     ranked = await memory_search_scored_impl(
-        question, k=k, user_id=sid, 
-        extra_columns=["metadata_json", "conversation_id"]
+        question, k=actual_k, user_id=sid, 
+        extra_columns=["metadata_json", "conversation_id"],
+        recency_bias=rb
     )
     if not ranked: return []
     hits = []
@@ -279,36 +328,44 @@ async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: i
         return expanded
     return hits
 
-def format_retrieved(hits: list[dict]) -> tuple[str, str]:
+def format_retrieved(hits: list[dict], q_signal: str = "default") -> tuple[str, str]:
     lines, by_session, obs_and_sums, anchors = [], {}, [], []
+    
+    # Per-session turn capping: 8 turns max to reduce noise
+    MAX_TURNS = 8
+    
     for h in hits:
         m = h.get("metadata", {})
         if m.get("temporal_anchors"):
             for a in m["temporal_anchors"]:
                 anchors.append(f"- {a['absolute']}: '{a['ref']}' in {h['title']}")
         if m.get("turn_index") is not None:
-            by_session.setdefault(h.get("conversation_id") or "unknown", []).append(h)
+            session_id = h.get("conversation_id") or "unknown"
+            session_list = by_session.setdefault(session_id, [])
+            if len(session_list) < MAX_TURNS:
+                session_list.append(h)
         else:
             obs_and_sums.append(h)
-            # If it's a summary or observation, pull more dialogue from that session
+            # If it's a summary or observation, pull limited dialogue from that session
             if h.get("conversation_id"):
                 cid = h["conversation_id"]
                 with _db() as db:
-                    # Pull first 10 turns of the session for context
-                    rows = db.execute("SELECT content, title, metadata_json FROM memory_items WHERE conversation_id=? AND type='message' ORDER BY created_at ASC LIMIT 10", (cid,)).fetchall()
+                    # Pull first 5 turns (was 10) to reduce noise
+                    rows = db.execute("SELECT content, title, metadata_json FROM memory_items WHERE conversation_id=? AND type='message' ORDER BY created_at ASC LIMIT 5", (cid,)).fetchall()
                     for r in rows:
                         rm = json.loads(r["metadata_json"] or "{}")
-                        # Add if not already present in by_session[cid]
-                        existing_contents = [t["content"] for t in by_session.get(cid, [])]
-                        if r["content"] not in existing_contents:
-                            by_session.setdefault(cid, []).append({
+                        session_list = by_session.setdefault(cid, [])
+                        existing_contents = [t["content"] for t in session_list]
+                        if r["content"] not in existing_contents and len(session_list) < MAX_TURNS:
+                            session_list.append({
                                 "content": r["content"], "title": r["title"], "metadata": rm
                             })
 
     if obs_and_sums:
         lines.append("[Observations and Summaries]")
-        obs_and_sums.sort(key=lambda x: (x.get("metadata", {}).get("session_index", 0), x.get("type", "")))
-        for item in obs_and_sums:
+        # Cap observations to top 5 most relevant
+        obs_and_sums.sort(key=lambda x: x.get("score", 0), reverse=True)
+        for item in obs_and_sums[:5]:
             date = item.get("metadata", {}).get("session_date", "")
             lines.append(f"({date}) {item['title']}: {item['content']}")
         lines.append("")
@@ -361,27 +418,28 @@ async def run(args: argparse.Namespace) -> None:
                 if args.limit_questions and total_q >= args.limit_questions: break
                 total_q += 1
                 q, a = qa["question"], qa["answer"]
-                qtype = CATEGORIES.get(qa.get("category", 0), "unknown")
-                qtype_correct.setdefault(qtype, [])
-                hits = await retrieve_for_question(sid, q, args.k, args.cluster_size, args.graph_depth)
+                qtype_label = CATEGORIES.get(qa.get("category", 0), "unknown")
+                qtype_correct.setdefault(qtype_label, [])
+                
+                # Adaptive routing
+                q_signal = classify_question(q)
+                sys_prompt = SYSTEM_PROMPTS.get(q_signal, SYSTEM_PROMPTS["default"])
+                
+                hits = await retrieve_for_question(sid, q, args.k, args.cluster_size, args.graph_depth, q_signal=q_signal)
                 last_d = "Unknown"
                 for i in range(35, 0, -1):
                     dk = f"session_{i}_date_time"
                     if dk in sample["conversation"]:
                         last_d = sample["conversation"][dk]; break
-                history, anchors = format_retrieved(hits)
+                history, anchors = format_retrieved(hits, q_signal=q_signal)
                 tl_lines = [f"Session {i}: {sample['conversation'][f'session_{i}_date_time']}" for i in range(1, 36) if f'session_{i}_date_time' in sample['conversation']]
                 timeline = "\n".join(tl_lines)
                 
                 messages = [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": ANSWER_TEMPLATE.format(timeline=timeline, anchors=anchors, history=history, date=last_d, question=q)}
                 ]
                 
-                if "Sweden" in str(a) or "Sweden" in q:
-                    with open(BASE_DIR / ".scratch" / "sweden_prompt.txt", "w", encoding="utf-8") as sf:
-                        sf.write(json.dumps(messages, indent=2))
-
                 hyp = ""
                 for attempt in range(3):
                     try:
@@ -391,11 +449,11 @@ async def run(args: argparse.Namespace) -> None:
                 correct = False
                 for attempt in range(3):
                     try:
-                        resp = client.chat.completions.create(model=args.judge_model, messages=[{"role": "user", "content": judge_prompt(qtype, q, str(a), hyp)}], temperature=0, max_tokens=10)
+                        resp = client.chat.completions.create(model=args.judge_model, messages=[{"role": "user", "content": judge_prompt(qtype_label, q, str(a), hyp)}], temperature=0, max_tokens=10)
                         correct = "yes" in (resp.choices[0].message.content or "").lower(); break
                     except Exception: time.sleep(2**attempt)
-                qtype_correct[qtype].append(1 if correct else 0)
-                hyp_f.write(json.dumps({"sample_id": sid, "question": q, "reference": a, "hypothesis": hyp, "correct": correct, "qtype": qtype}, ensure_ascii=False) + "\n")
+                qtype_correct[qtype_label].append(1 if correct else 0)
+                hyp_f.write(json.dumps({"sample_id": sid, "question": q, "reference": a, "hypothesis": hyp, "correct": correct, "qtype": qtype_label, "signal": q_signal}, ensure_ascii=False) + "\n")
                 hyp_f.flush()
             if args.limit_questions and total_q >= args.limit_questions: break
             log(f"  sample done. running_acc={sum(sum(v) for v in qtype_correct.values())/total_q:.3f}")
