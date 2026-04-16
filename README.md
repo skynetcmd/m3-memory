@@ -1,3 +1,5 @@
+![M3 Memory](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/M3-banner.jpg)
+
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory">
     <img src="docs/M3-banner.jpg" alt="M3 Memory" width="100%">
@@ -14,7 +16,7 @@ Your agent forgets everything between sessions. M3 Memory fixes that. Install it
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square"></a>
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
-  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
+  <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-45_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
@@ -91,11 +93,11 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| 🚀 **[Get running](./QUICKSTART.md)** | 👥 **[Multi-agent orchestration](./MULTI_AGENT.md)** |
-| ✨ **[Core features](./CORE_FEATURES.md)** | 🧩 **[Multi-agent example](./examples/multi-agent-team/README.md)** |
-| 🏗️ **[System design](./docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](./COMPARISON.md)** |
-| 🔧 **[Implementation details](./TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](./ENVIRONMENT_VARIABLES.md)** |
-| 🤖 **[Agent rules + all 46 tools](./AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](./ROADMAP.md)** |
+| 🚀 **[Get running](https://github.com/skynetcmd/m3-memory/blob/main/QUICKSTART.md)** | 👥 **[Multi-agent orchestration](https://github.com/skynetcmd/m3-memory/blob/main/MULTI_AGENT.md)** |
+| ✨ **[Core features](https://github.com/skynetcmd/m3-memory/blob/main/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](https://github.com/skynetcmd/m3-memory/blob/main/examples/multi-agent-team/README.md)** |
+| 🏗️ **[System design](https://github.com/skynetcmd/m3-memory/blob/main/docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](https://github.com/skynetcmd/m3-memory/blob/main/COMPARISON.md)** |
+| 🔧 **[Implementation details](https://github.com/skynetcmd/m3-memory/blob/main/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](https://github.com/skynetcmd/m3-memory/blob/main/ENVIRONMENT_VARIABLES.md)** |
+| 🤖 **[Agent rules + all 46 tools](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](https://github.com/skynetcmd/m3-memory/blob/main/ROADMAP.md)** |
 
 ---
 
@@ -138,7 +140,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | knowledge-update | 78 | 92.3% |
 | **Overall** | **500** | **89.0%** |
 
-Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](./benchmarks/longmemeval/README.md).
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](https://github.com/skynetcmd/m3-memory/blob/main/benchmarks/longmemeval/README.md).
 
 ---
 
@@ -154,7 +156,7 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 45 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
+All 45 tools are documented in [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md).
 
 ---
 
@@ -168,7 +170,7 @@ To teach your agent best practices (search before answering, write aggressively,
 examples/AGENT_RULES.md
 ```
 
-Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
+Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)
 
 ---
 
@@ -204,17 +206,17 @@ Then search for: "M3 install"
 
 ### Contradiction detection
 <p align="center">
-  <img src="docs/demo_contradiction.svg" alt="Demo: contradiction detection and automatic resolution" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_contradiction.svg" alt="Demo: contradiction detection and automatic resolution" width="100%">
 </p>
 
 ### Hybrid search with scores
 <p align="center">
-  <img src="docs/demo_search.svg" alt="Demo: hybrid search with score breakdown" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_search.svg" alt="Demo: hybrid search with score breakdown" width="100%">
 </p>
 
 ### Cross-device, cross-platform sync
 <p align="center">
-  <img src="docs/demo_sync.svg" alt="Demo: cross-device, cross-platform memory sync" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_sync.svg" alt="Demo: cross-device, cross-platform memory sync" width="100%">
 </p>
 
 ---
@@ -225,7 +227,7 @@ Then search for: "M3 install"
 &nbsp;
 [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-181717?logo=github&style=flat-square)](https://github.com/skynetcmd/m3-memory/issues)
 &nbsp;
-[Contributing](./CONTRIBUTING.md) · [Good first issues](./GOOD_FIRST_ISSUES.md)
+[Contributing](https://github.com/skynetcmd/m3-memory/blob/main/CONTRIBUTING.md) · [Good first issues](https://github.com/skynetcmd/m3-memory/blob/main/GOOD_FIRST_ISSUES.md)
 
 ---
 
