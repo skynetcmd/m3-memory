@@ -25,7 +25,7 @@ Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agen
 
 ---
 
-## Install
+## :package: Install
 
 ```bash
 pip install m3-memory
@@ -55,7 +55,7 @@ Restart your agent. Done.
 
 ---
 
-## What happens next
+## :crystal_ball: What happens next
 
 You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required.
 
@@ -63,7 +63,7 @@ Later, you're at your Windows desktop at home with Gemini CLI, and it picks up e
 
 ---
 
-## Why this exists
+## :bulb: Why this exists
 
 Most AI agents don't persist state between sessions. You re-paste context, re-explain architecture, re-correct mistakes. When facts change, the agent has no mechanism to update what it "knows."
 
@@ -71,7 +71,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## What it does
+## :zap: What it does
 
 **Persistent memory** — facts, decisions, preferences survive across sessions. Stored in local SQLite.
 
@@ -87,7 +87,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## Learn more
+## :books: Learn more
 
 | | |
 |---|---|
@@ -99,7 +99,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## Who this is for
+## :dart: Who this is for
 
 | Good fit | Not the right tool |
 |---|---|
@@ -110,7 +110,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## Why trust this
+## :shield: Why trust this
 
 | | |
 |---|---|
@@ -124,7 +124,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## Core tools
+## :toolbox: Core tools
 
 Most sessions use three tools. The rest is there when you need it.
 
@@ -140,7 +140,7 @@ All 45 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
 ---
 
-## For AI agents
+## :robot: For AI agents
 
 M3 Memory exposes 46 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
 
@@ -154,7 +154,7 @@ Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](.
 
 ---
 
-## Let your agent install it
+## :magic_wand: Let your agent install it
 
 Already inside Claude Code or Gemini CLI? Paste one of these prompts:
 
@@ -182,7 +182,7 @@ Then search for: "M3 install"
 
 ---
 
-## See it in action
+## :movie_camera: See it in action
 
 ### Contradiction detection
 <p align="center">
@@ -201,7 +201,7 @@ Then search for: "M3 install"
 
 ---
 
-## Community
+## :speech_balloon: Community
 
 [![Discord](https://img.shields.io/badge/Discord-M3_Memory-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZcJ3EGC99B)
 &nbsp;
