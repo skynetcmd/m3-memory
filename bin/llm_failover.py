@@ -144,6 +144,79 @@ async def get_best_llm(client: httpx.AsyncClient, token: str) -> Optional[tuple[
     return None
 
 
+async def get_smallest_llm(
+    client: httpx.AsyncClient,
+    token: str,
+    min_size_b: float = 0.5,
+) -> Optional[tuple[str, str]]:
+    """
+    Find the smallest available LLM model across endpoints, subject to a size floor.
+
+    Mirrors `get_best_llm` but selects the smallest model by `parse_model_size`,
+    ignoring models whose parsed size is below ``min_size_b`` (default 0.5B).
+    The floor avoids picking tiny/broken models (e.g. unparseable 0.0) and keeps
+    enrichment quality usable. Models with unparseable size (0.0) are skipped.
+
+    Intended for cheap ingest-time enrichment: auto-titling, entity tagging,
+    session gists. Callers should be prepared for None if no endpoint is reachable.
+
+    Args:
+        client: httpx.AsyncClient for making requests
+        token: Bearer token for API authentication
+        min_size_b: Minimum parsed model size in billions (default 0.5)
+
+    Returns:
+        Tuple of (base_url, model_id) or None if no usable models found
+    """
+    for endpoint in LLM_ENDPOINTS:
+        try:
+            response = await client.get(
+                f"{endpoint}/models",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=httpx.Timeout(CONNECT_TIMEOUT, read=READ_TIMEOUT),
+            )
+            response.raise_for_status()
+
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.warning(f"[llm_failover] {endpoint}: {type(e).__name__}")
+            continue
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"[llm_failover] {endpoint}: HTTPStatusError {e.response.status_code}")
+            continue
+        except Exception as e:
+            logger.warning(f"[llm_failover] {endpoint}: {type(e).__name__}: {e}")
+            continue
+
+        try:
+            data = response.json()
+        except Exception as e:
+            logger.warning(f"[llm_failover] {endpoint}: Failed to parse JSON: {e}")
+            continue
+
+        models = data.get("data", data.get("models", []))
+        if not models:
+            continue
+
+        sized_models: list[tuple[float, str]] = []
+        for model in models:
+            model_id = model.get("id") or model.get("model", "")
+            if any(excl in model_id.lower() for excl in EMBED_EXCLUSIONS):
+                continue
+            if LLM_EXCLUSIONS and any(excl in model_id.lower() for excl in LLM_EXCLUSIONS):
+                continue
+            size = parse_model_size(model_id)
+            if size >= min_size_b:
+                sized_models.append((size, model_id))
+
+        if not sized_models:
+            continue
+
+        smallest = min(sized_models, key=lambda t: t[0])[1]
+        return (endpoint, smallest)
+
+    return None
+
+
 async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tuple[str, str]]:
     """
     Find an embedding model across endpoints, with fallback to any available model.

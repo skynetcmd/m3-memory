@@ -16,7 +16,7 @@ import asyncio
 
 import re
 from m3_sdk import M3Context
-from llm_failover import get_best_embed, get_best_llm
+from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
     """Summarizes a conversation into key points using the local LLM."""
@@ -248,8 +248,137 @@ async def _auto_classify(content: str, title: str) -> str:
             return m_type
     except Exception as e:
         logger.debug(f"Auto-classification failed: {e}")
-    
+
     return "note"
+
+
+# ── Ingest-time LLM enrichment (opt-in) ──────────────────────────────────────
+# Gated by env vars so behavior matches today's default (no extra LLM calls at
+# write time) unless explicitly enabled. Intended for production callers that
+# pass blank titles / want entity-tagged metadata without running heuristics
+# themselves. All helpers fail-open: on any error, they return the untouched
+# input so ingest never fails because LLM enrichment did.
+
+def _ingest_llm_enabled(flag: str) -> bool:
+    return os.environ.get(flag, "0").strip().lower() in ("1", "true", "yes", "on")
+
+_AUTO_TITLE_CACHE: dict[str, str] = {}
+_AUTO_ENTITIES_CACHE: dict[str, list[str]] = {}
+
+async def _maybe_auto_title(content: str, title: str) -> str:
+    """If M3_INGEST_AUTO_TITLE=1 and title is empty/trivial, ask a small LLM
+    for a 4-8 word descriptive title derived from content. Returns the
+    original title on any error or when the gate is off.
+
+    A title is considered "trivial" if it is empty, a bare role prefix like
+    "user:" or "assistant:", or shorter than 4 chars.
+    """
+    if not _ingest_llm_enabled("M3_INGEST_AUTO_TITLE"):
+        return title
+    if not content:
+        return title
+    t = (title or "").strip()
+    trivial = (not t) or len(t) < 4 or t.rstrip(":").lower() in {
+        "user", "assistant", "system", "tool", "msg", "note"
+    }
+    if not trivial:
+        return title
+
+    c_hash = _content_hash(content[:800])
+    if c_hash in _AUTO_TITLE_CACHE:
+        return _AUTO_TITLE_CACHE[c_hash]
+
+    try:
+        token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
+        client = _get_embed_client()
+        result = await get_smallest_llm(client, token)
+        if not result:
+            return title
+        base_url, model = result
+        prompt = (
+            "Summarize the following text as a concise title of 4 to 8 words. "
+            "Do not use quotes. Do not add a trailing period. No prefix.\n\n"
+            f"{content[:600]}"
+        )
+        resp = await client.post(
+            f"{base_url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+                "max_tokens": 32,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+        out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        # Strip wrapping quotes and trailing punctuation
+        out = out.strip("\"'").rstrip(".!?,;:").strip()
+        if not out or len(out) > 120:
+            return title
+        _AUTO_TITLE_CACHE[c_hash] = out
+        return out
+    except Exception as e:
+        logger.debug(f"auto-title failed: {e}")
+        return title
+
+
+async def _maybe_auto_entities(content: str) -> list[str]:
+    """If M3_INGEST_AUTO_ENTITIES=1, ask a small LLM for up to 8 salient
+    entities / named concepts in `content`. Returns [] on any error or when
+    the gate is off. Callers typically store the result under
+    metadata["entities"] and include it in embed_text for retrieval boost.
+    """
+    if not _ingest_llm_enabled("M3_INGEST_AUTO_ENTITIES"):
+        return []
+    if not content:
+        return []
+    c_hash = _content_hash(content[:800])
+    if c_hash in _AUTO_ENTITIES_CACHE:
+        return list(_AUTO_ENTITIES_CACHE[c_hash])
+
+    try:
+        token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
+        client = _get_embed_client()
+        result = await get_smallest_llm(client, token)
+        if not result:
+            return []
+        base_url, model = result
+        prompt = (
+            "List up to 8 salient entities or named concepts from the text. "
+            "Reply with a JSON array of strings, nothing else.\n\n"
+            f"{content[:600]}"
+        )
+        resp = await client.post(
+            f"{base_url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 128,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+        raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        # Be lenient: strip code fences and pull the first JSON array.
+        raw = raw.strip("`").strip()
+        start, end = raw.find("["), raw.rfind("]")
+        if start < 0 or end < 0 or end <= start:
+            return []
+        parsed = json.loads(raw[start:end + 1])
+        if not isinstance(parsed, list):
+            return []
+        ents = [str(x).strip() for x in parsed if isinstance(x, (str, int, float)) and str(x).strip()]
+        ents = ents[:8]
+        _AUTO_ENTITIES_CACHE[c_hash] = ents
+        return list(ents)
+    except Exception as e:
+        logger.debug(f"auto-entities failed: {e}")
+        return []
+
 
 def _track_cost(operation: str, tokens_est: int = 0):
     _COST_COUNTERS[operation] = _COST_COUNTERS.get(operation, 0) + 1
@@ -600,7 +729,8 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
                 "refresh_on": it.get("refresh_on") or None,
                 "refresh_reason": it.get("refresh_reason") or None,
                 "embed": it.get("embed", True),
-                "embed_text": content or title,
+                "embed_text": (it.get("embed_text") or content or title),
+                "variant": it.get("variant") or None,
             }
         )
 
@@ -610,8 +740,8 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
             db.execute(
                 "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, "
                 "change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, "
-                "valid_from, valid_to, conversation_id, refresh_on, refresh_reason, content_hash) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "valid_from, valid_to, conversation_id, refresh_on, refresh_reason, content_hash, variant) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     p["id"], p["type"], p["title"], p["content"], p["metadata"],
                     p["agent_id"], p["model_id"], p["change_agent"], p["importance"],
@@ -619,6 +749,7 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
                     now, p["valid_from"], p["valid_to"], p["conversation_id"],
                     p["refresh_on"], p["refresh_reason"],
                     hashlib.sha256((p["content"] or "").encode("utf-8")).hexdigest(),
+                    p["variant"],
                 ),
             )
             if p["embed"]:
@@ -632,11 +763,25 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
             )
 
     # Phase 2: batched embeddings for items that requested them.
+    # Dedup by content_hash(embed_text) so variants that share identical
+    # embed_text don't trigger duplicate embedder calls. Cache hits inside
+    # _embed_many already handle DB-cached vectors, but this additionally
+    # deduplicates within the current batch.
     to_embed = [p for p in prepared if p["embed"] and p["embed_text"]]
     if to_embed:
-        vecs = await _embed_many([p["embed_text"] for p in to_embed])
+        hash_to_first: dict[str, int] = {}
+        unique_texts: list[str] = []
+        assign: list[int] = []  # idx into unique_texts for each item in to_embed
+        for p in to_embed:
+            h = _content_hash(p["embed_text"])
+            if h not in hash_to_first:
+                hash_to_first[h] = len(unique_texts)
+                unique_texts.append(p["embed_text"])
+            assign.append(hash_to_first[h])
+        unique_vecs = await _embed_many(unique_texts)
         with _db() as db:
-            for p, (vec, m) in zip(to_embed, vecs):
+            for p, idx in zip(to_embed, assign):
+                vec, m = unique_vecs[idx]
                 if not vec:
                     continue
                 db.execute(
@@ -866,6 +1011,7 @@ async def memory_search_scored_impl(
     recency_bias=0.0,
     vector_weight=0.7,
     adaptive_k=False,
+    variant="",
     _depth=0,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
@@ -932,6 +1078,14 @@ async def memory_search_scored_impl(
     if conversation_id:
         where_clauses.append("mi.conversation_id = ?")
         params.append(conversation_id)
+    if variant:
+        # Accept "<name>" for exact-variant, "" for unfiltered (default),
+        # or the sentinel "__none__" to filter for untagged legacy rows.
+        if variant == "__none__":
+            where_clauses.append("mi.variant IS NULL")
+        else:
+            where_clauses.append("mi.variant = ?")
+            params.append(variant)
 
     if as_of:
         where_clauses.append("(mi.valid_from = '' OR mi.valid_from <= ?)")
@@ -944,7 +1098,8 @@ async def memory_search_scored_impl(
         return memory_search_scored_impl(
             query, k, type_filter, agent_filter, "semantic",
             user_id, scope, as_of, conversation_id, explain,
-            extra_columns, recency_bias, vector_weight, _depth + 1,
+            extra_columns, recency_bias, vector_weight, adaptive_k,
+            variant, _depth + 1,
         )
 
     try:
@@ -1111,13 +1266,14 @@ async def memory_search_scored_impl(
     return ranked
 
 
-async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, _depth=0):
+async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, variant="", _depth=0):
     ranked = await memory_search_scored_impl(
         query, k=k, type_filter=type_filter, agent_filter=agent_filter,
         search_mode=search_mode, user_id=user_id, scope=scope, as_of=as_of,
         conversation_id=conversation_id, explain=explain,
         recency_bias=float(recency_bias) if recency_bias else 0.0,
         adaptive_k=bool(adaptive_k),
+        variant=variant,
     )
     if ranked is None:
         return "Search failed: FTS and semantic both unavailable."
@@ -1568,8 +1724,17 @@ async def conversation_append_impl(conversation_id, role, content, agent_id="", 
 
 VALID_SCOPES = {"user", "session", "agent", "org"}
 
-async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason=""):
-    """Internal implementation for memory_write. Contradiction detection is automatic."""
+async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None):
+    """Internal implementation for memory_write. Contradiction detection is automatic.
+
+    `variant` tags the item with a free-form ingestion-pipeline identifier so
+    multiple variants (e.g. "baseline", "heuristic_c1c4", "llm_v1") can coexist
+    and be compared. Default None = untagged.
+
+    `embed_text` overrides the default text fed to the embedder (which is
+    `content or title`). Useful when callers want to enrich the embedding with
+    titles/entities without polluting the displayed content.
+    """
     if isinstance(metadata, dict):
         metadata = json.dumps(metadata)
     elif not isinstance(metadata, str):
@@ -1601,7 +1766,20 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         from datetime import timedelta
         expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
+    # Opt-in ingest-time enrichment (env-gated, fail-open).
+    title = await _maybe_auto_title(content or "", title)
     title = _augment_title_with_role(title, metadata)
+    if _ingest_llm_enabled("M3_INGEST_AUTO_ENTITIES"):
+        ents = await _maybe_auto_entities(content or "")
+        if ents:
+            try:
+                meta_dict = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
+            except json.JSONDecodeError:
+                meta_dict = {}
+            if isinstance(meta_dict, dict) and "entities" not in meta_dict:
+                meta_dict["entities"] = ents
+                metadata = json.dumps(meta_dict)
+
     with _db() as db:
         _vf = valid_from or now
         _vt = valid_to or ""
@@ -1609,9 +1787,9 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         _ron = refresh_on or None
         _rreason = refresh_reason or None
         db.execute(
-            "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason)
+            "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, variant) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason, variant)
         )
         if embed:
             db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (item_id, "upsert"))
@@ -1620,13 +1798,13 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
 
     vec = None
     if embed:
-        vec, m = await _embed(content or title)
+        vec, m = await _embed(embed_text or content or title)
         if vec:
             with _db() as db:
                 db.execute(
                     "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(content or title))
+                    (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(embed_text or content or title))
                 )
 
     _record_history(item_id, "create", None, content, "content", agent_id or agent)
