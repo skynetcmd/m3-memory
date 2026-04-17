@@ -354,6 +354,10 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `PG_URL` | (vault/env) | PostgreSQL connection string |
 | `LLM_ENDPOINTS_CSV` | `http://localhost:1234/v1` | Comma-separated OpenAI-compatible LLM server endpoints |
 | `MMR_LAMBDA` | 0.7 | MMR relevance vs. diversity balance |
+| `M3_SPEAKER_IN_TITLE` | `1` | When a memory's `metadata.role` is a proper name, prepend `[Role]` to the title at write time so FTS5 can match speaker-scoped queries. Set to `0` to disable. |
+| `M3_SHORT_TURN_THRESHOLD` | 20 | Character-length threshold below which the ranker applies a length penalty (floor 0.3×) to suppress filler turns like "ok cool". |
+| `M3_TITLE_MATCH_BOOST` | 0.05 | Per-query-token-overlap boost applied when the title echoes query tokens. Set to 0 to disable. |
+| `M3_IMPORTANCE_WEIGHT` | 0.05 | Weight of the caller-supplied `importance` field in final ranking. Set to 0 to ignore importance during ranking. |
 
 ### Valid Memory Types (18)
 

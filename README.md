@@ -54,6 +54,8 @@ Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the default model M3 M
 
 Prefer a GUI? [LM Studio](https://lmstudio.ai) works too — load any embedding model and start its server (defaults to port 1234).
 
+Want auto-classification, summarization, and consolidation? Load a small chat model alongside the embedder (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B instruct GGUF in LM Studio / llama.cpp). M3 auto-selects it; embedding-only features work without it. See [QUICKSTART → Optional: load a small chat model](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
+
 Restart your agent. Done.
 
 ---
