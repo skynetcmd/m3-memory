@@ -1,9 +1,10 @@
-"""LOCOMO benchmark runner for m3-memory.
+"""Dialog-QA benchmark runner for m3-memory.
 
-Loads the LOCOMO10 dataset, bulk-ingests every conversation turn
-into m3-memory scoped by sample_id, then for each question retrieves 
-the top-K most relevant turns and asks an LLM to answer. 
-An OpenAI judge (default gpt-4o-mini) scores the answer.
+Loads the configured dialog-QA dataset, bulk-ingests every conversation turn
+into m3-memory scoped by sample_id, then for each question retrieves
+the top-K most relevant turns and asks a generator LLM to answer.
+A separate judge LLM scores the answer (model configured by --judge-model
+or the EVAL_JUDGE_MODEL env var).
 
 Includes:
 - Episodic Cluster Expansion (+/- N turns)
@@ -20,10 +21,12 @@ import os
 import sys
 import time
 import uuid
-import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "bin"))
@@ -35,8 +38,6 @@ import memory_core  # noqa: E402
 from memory_core import (  # noqa: E402
     memory_write_bulk_impl,
     memory_link_impl,
-    memory_graph_impl,
-    _embed,
     _db,
 )
 from auth_utils import get_api_key  # noqa: E402
@@ -63,11 +64,12 @@ SYSTEM_PROMPTS = {
         "Answer directly based on the evidence; do not infer or calculate beyond what is stated."
     ),
     "temporal": (
-        "You are a temporal reasoning expert. Use the provided History, Timeline, and Anchors to answer the question. "
-        "1. Identify the reference date (Today's Date).\n"
-        "2. Locate events in the history.\n"
-        "3. Use the 'Temporal Anchors' to resolve relative terms like 'yesterday' or 'last week' into absolute dates.\n"
-        "4. Calculate durations or find the latest event state.\n"
+        "You are a temporal reasoning expert. Use the provided History, Timeline, and Anchors to answer the question.\n"
+        "IMPORTANT: When a person says 'yesterday', 'last week', or 'last year', they are referring to the date of THAT SPECIFIC CONVERSATION SESSION, not 'Today\\'s Date'.\n"
+        "1. Identify the session where the event is mentioned.\n"
+        "2. Note the date of that session.\n"
+        "3. Apply the relative time offset (e.g. 'last year') to that session's date.\n"
+        "4. Use 'Temporal Anchors' if they provide an absolute date for the same event.\n"
         "Reason step-by-step, then provide a CONCISE final answer."
     ),
     "multi-hop": (
@@ -111,19 +113,25 @@ def judge_prompt(qtype: str, question: str, answer: str, response: str) -> str:
     if qtype == "adversarial":
         return (
             "I will give you an unanswerable question, an explanation, and a response "
-            "from a model. Please answer yes if the model correctly identifies the question "
-            "as unanswerable.\n\n"
+            "from a model. Please answer 'yes' if the model correctly identifies the question "
+            "as unanswerable, even if it provides a brief explanation.\n\n"
             f"Question: {question}\n\nExplanation: {answer}\n\nModel Response: {response}\n\n"
-            "Does the model correctly identify the question as unanswerable? Answer yes or no only."
+            "Does the model correctly identify the question as unanswerable? Answer 'yes' or 'no' only."
         )
     return (
-        "I will give you a question, a correct answer, and a response from a model. "
-        "Please answer yes if the response contains the correct answer. Otherwise, answer no. "
-        f"Question: {question}\n\nCorrect Answer: {answer}\n\nModel Response: {response}\n\n"
-        "Is the model response correct? Answer yes or no only."
+        "I will give you a question, a correct ground-truth answer, and a response from a model. "
+        "The model response might contain step-by-step reasoning before its final answer. "
+        "Please answer 'yes' if the response contains the correct answer. Otherwise, answer 'no'. "
+        "Focus on the semantic correctness of the final answer, ignoring reasoning steps.\n\n"
+        f"Question: {question}\n\nCorrect Ground-truth Answer: {answer}\n\nModel Response: {response}\n\n"
+        "Is the model response correct? Answer 'yes' or 'no' only."
     )
 
-MAX_TURN_CHARS = 6000
+def _safe_loads(blob: str | None) -> dict:
+    """Defensive JSON parse — returns {} on invalid/empty input."""
+    if not blob: return {}
+    try: return json.loads(blob)
+    except (json.JSONDecodeError, TypeError): return {}
 
 async def ingest_sample_with_graph(sample: dict) -> tuple[int, float]:
     sid = sample["sample_id"]
@@ -229,7 +237,7 @@ async def ingest_sample_with_graph(sample: dict) -> tuple[int, float]:
         })
 
     t0 = time.perf_counter()
-    await memory_write_bulk_impl(items)
+    item_ids = await memory_write_bulk_impl(items)
     await asyncio.sleep(0.1)
     
     count = 0
@@ -239,6 +247,35 @@ async def ingest_sample_with_graph(sample: dict) -> tuple[int, float]:
                 res = memory_link_impl(from_id, to_id, "references", db=db)
                 if "Linked:" in res: count += 1
         
+        # 4. Link Consecutive Messages in Session (Optimal Strategy)
+        for i in range(1, 36):
+            cid = f"{sid}::S{i}"
+            rows = db.execute(
+                "SELECT id FROM memory_items WHERE conversation_id=? AND type='message' ORDER BY created_at ASC", 
+                (cid,)
+            ).fetchall()
+            prev_mid = None
+            for row in rows:
+                curr_mid = row[0]
+                if prev_mid:
+                    memory_link_impl(prev_mid, curr_mid, "precedes", db=db)
+                    count += 1
+                prev_mid = curr_mid
+
+        # 5. Link Session Summaries to Messages
+        for i in range(1, 36):
+            sum_title = f"Sum:S{i}"
+            cid = f"{sid}::S{i}"
+            s_row = db.execute("SELECT id FROM memory_items WHERE title=? AND user_id=? AND is_deleted=0", (sum_title, sid)).fetchone()
+            if s_row:
+                s_id = s_row[0]
+                # Link summary to the first 3 messages of the session as entry points
+                m_rows = db.execute("SELECT id FROM memory_items WHERE conversation_id=? AND type='message' ORDER BY created_at ASC LIMIT 3", (cid,)).fetchall()
+                for m_row in m_rows:
+                    memory_link_impl(s_id, m_row[0], "references", db=db)
+                    count += 1
+
+        # 6. Link Consecutive Summaries
         prev_sum_id = None
         for i in range(1, 36):
             title = f"Sum:S{i}"
@@ -275,15 +312,15 @@ async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: i
     for score, item in ranked:
         item["score"] = score
         if "metadata_json" in item:
-            item["metadata"] = json.loads(item["metadata_json"] or "{}")
+            item["metadata"] = _safe_loads(item["metadata_json"])
         if "metadata" not in item: item["metadata"] = {}
         hits.append(item)
         seen_ids.add(item["id"])
     
-    if graph_depth > 0:
+    if graph_depth > 0 and hits:
         graph_hits = []
-        for h in hits:
-            with _db() as db:
+        with _db() as db:
+            for h in hits:
                 rows = db.execute(
                     "SELECT mi.id, mi.content, mi.title, mi.metadata_json, mi.conversation_id "
                     "FROM memory_items mi JOIN memory_relationships mr ON (mi.id = mr.from_id OR mi.id = mr.to_id) "
@@ -293,7 +330,7 @@ async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: i
                 for r in rows:
                     if r["id"] not in seen_ids:
                         seen_ids.add(r["id"])
-                        rm = json.loads(r["metadata_json"] or "{}")
+                        rm = _safe_loads(r["metadata_json"])
                         graph_hits.append({
                             "id": r["id"], "content": r["content"], "title": r["title"],
                             "metadata": rm, "conversation_id": r["conversation_id"],
@@ -303,20 +340,24 @@ async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: i
 
     if cluster_size > 0:
         expanded = []
-        for h in hits:
-            expanded.append(h)
-            m = h.get("metadata", {})
-            cid = h.get("conversation_id")
-            if "turn_index" in m and cid:
-                t_idx = m["turn_index"]
-                with _db() as db:
-                    rows = db.execute(
-                        "SELECT id, content, title, metadata_json, conversation_id "
-                        "FROM memory_items WHERE conversation_id = ? AND is_deleted = 0",
-                        (cid,)
-                    ).fetchall()
-                    for r in rows:
-                        rm = json.loads(r["metadata_json"] or "{}")
+        # Cache per-conversation turn rows so we don't re-query for each hit in same session.
+        session_cache: dict[str, list] = {}
+        with _db() as db:
+            db.execute("PRAGMA busy_timeout = 30000")
+            for h in hits:
+                expanded.append(h)
+                m = h.get("metadata", {})
+                cid = h.get("conversation_id")
+                if "turn_index" in m and cid:
+                    t_idx = m["turn_index"]
+                    if cid not in session_cache:
+                        session_cache[cid] = db.execute(
+                            "SELECT id, content, title, metadata_json, conversation_id "
+                            "FROM memory_items WHERE conversation_id = ? AND is_deleted = 0",
+                            (cid,)
+                        ).fetchall()
+                    for r in session_cache[cid]:
+                        rm = _safe_loads(r["metadata_json"])
                         if "turn_index" in rm and abs(rm["turn_index"] - t_idx) <= cluster_size:
                             if r["id"] not in seen_ids:
                                 seen_ids.add(r["id"])
@@ -330,10 +371,12 @@ async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: i
 
 def format_retrieved(hits: list[dict], q_signal: str = "default") -> tuple[str, str]:
     lines, by_session, obs_and_sums, anchors = [], {}, [], []
-    
+
     # Per-session turn capping: 8 turns max to reduce noise
     MAX_TURNS = 8
-    
+
+    # First pass: classify hits and collect conversation_ids needing backfill.
+    backfill_cids: set[str] = set()
     for h in hits:
         m = h.get("metadata", {})
         if m.get("temporal_anchors"):
@@ -346,20 +389,29 @@ def format_retrieved(hits: list[dict], q_signal: str = "default") -> tuple[str, 
                 session_list.append(h)
         else:
             obs_and_sums.append(h)
-            # If it's a summary or observation, pull limited dialogue from that session
             if h.get("conversation_id"):
-                cid = h["conversation_id"]
-                with _db() as db:
-                    # Pull first 5 turns (was 10) to reduce noise
-                    rows = db.execute("SELECT content, title, metadata_json FROM memory_items WHERE conversation_id=? AND type='message' ORDER BY created_at ASC LIMIT 5", (cid,)).fetchall()
-                    for r in rows:
-                        rm = json.loads(r["metadata_json"] or "{}")
-                        session_list = by_session.setdefault(cid, [])
-                        existing_contents = [t["content"] for t in session_list]
-                        if r["content"] not in existing_contents and len(session_list) < MAX_TURNS:
-                            session_list.append({
-                                "content": r["content"], "title": r["title"], "metadata": rm
-                            })
+                backfill_cids.add(h["conversation_id"])
+
+    # Second pass: single DB session for all session-backfill fetches.
+    if backfill_cids:
+        with _db() as db:
+            for cid in backfill_cids:
+                rows = db.execute(
+                    "SELECT content, title, metadata_json FROM memory_items "
+                    "WHERE conversation_id=? AND type='message' AND is_deleted=0 "
+                    "ORDER BY created_at ASC LIMIT 5",
+                    (cid,),
+                ).fetchall()
+                session_list = by_session.setdefault(cid, [])
+                existing_contents = {t["content"] for t in session_list}
+                for r in rows:
+                    if r["content"] not in existing_contents and len(session_list) < MAX_TURNS:
+                        session_list.append({
+                            "content": r["content"],
+                            "title": r["title"],
+                            "metadata": _safe_loads(r["metadata_json"]),
+                        })
+                        existing_contents.add(r["content"])
 
     if obs_and_sums:
         lines.append("[Observations and Summaries]")
@@ -369,7 +421,11 @@ def format_retrieved(hits: list[dict], q_signal: str = "default") -> tuple[str, 
             date = item.get("metadata", {}).get("session_date", "")
             lines.append(f"({date}) {item['title']}: {item['content']}")
         lines.append("")
-    sorted_sessions = sorted(by_session.keys(), key=lambda x: int(x.split("::S")[-1]) if "::S" in x else 0)
+    def _session_sort_key(x: str) -> int:
+        if "::S" not in x: return 0
+        try: return int(x.rsplit("::S", 1)[-1])
+        except ValueError: return 0
+    sorted_sessions = sorted(by_session.keys(), key=_session_sort_key)
     for cid in sorted_sessions:
         turns = by_session[cid]
         turns.sort(key=lambda t: t.get("metadata", {}).get("turn_index", 0))
@@ -381,25 +437,50 @@ def format_retrieved(hits: list[dict], q_signal: str = "default") -> tuple[str, 
         lines.append("")
     return "\n".join(lines).strip(), "\n".join(set(anchors)).strip() or "None found."
 
-def _openai_client(api_key: str):
+def _openai_client(api_key: str, base_url: str | None = None):
     try: from openai import OpenAI
     except ImportError: raise SystemExit("pip install openai")
-    return OpenAI(api_key=api_key)
+    
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+        logger.info(f"Connecting to provider at {base_url}")
+    else:
+        logger.info("Connecting to official OpenAI/Anthropic endpoint")
+    return OpenAI(**kwargs)
 
 async def run(args: argparse.Namespace) -> None:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     out_dir = BASE_DIR / ".scratch" / f"locomo_run_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
     hyp_path, results_path, log_path = out_dir / "hypotheses.jsonl", out_dir / "results.json", out_dir / "run.log"
+    log_f = open(log_path, "a", encoding="utf-8", buffering=1)
     def log(msg: str):
         line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
         print(line, flush=True)
-        with open(log_path, "a", encoding="utf-8") as f: f.write(line + "\n")
+        try: log_f.write(line + "\n")
+        except Exception: pass
     log(f"loading dataset: {args.dataset}")
     with open(args.dataset, "r", encoding="utf-8") as f: dataset = json.load(f)
     if args.limit_samples: dataset = dataset[: args.limit_samples]
-    api_key = get_api_key("OPENAI_API_KEY")
-    client = _openai_client(api_key)
+    
+    # Priority: Env > Vault
+    api_key = os.getenv("OPENAI_API_KEY") or get_api_key("OPENAI_API_KEY")
+
+    if not args.generator_model:
+        raise SystemExit(
+            "generator model is not set — pass --generator-model or set EVAL_GENERATOR_MODEL"
+        )
+    if not args.judge_model:
+        raise SystemExit(
+            "judge model is not set — pass --judge-model or set EVAL_JUDGE_MODEL"
+        )
+
+    # Generator uses the provided base_url (e.g. local proxy / LM Studio)
+    gen_client = _openai_client(api_key, base_url=args.openai_base_url)
+    # Judge uses the default base_url so it can route independently
+    judge_client = _openai_client(api_key, base_url=None)
+    
     if not args.skip_ingest:
         log("phase 1: ingest with graph linking + temporal resolution")
         total_items = 0
@@ -408,6 +489,11 @@ async def run(args: argparse.Namespace) -> None:
             total_items += n
             log(f"  sample {i+1}/{len(dataset)}: {n} items")
         log(f"ingest done: {total_items} items")
+
+    if args.ingest_only:
+        log("Stopping after phase 1 as requested by --ingest-only")
+        return
+
     log("phase 2: retrieve + answer + judge")
     qtype_correct, total_q = {}, 0
     with open(hyp_path, "w", encoding="utf-8") as hyp_f:
@@ -425,6 +511,12 @@ async def run(args: argparse.Namespace) -> None:
                 q_signal = classify_question(q)
                 sys_prompt = SYSTEM_PROMPTS.get(q_signal, SYSTEM_PROMPTS["default"])
                 
+                # If using a model with a thinking/reasoning phase (e.g. Qwen or DeepSeek),
+                # append /no_think to the system prompt to force direct answers for retrieval benchmarking.
+                if any(k in args.generator_model.lower() for k in ["qwen", "deepseek"]):
+                    if not sys_prompt.endswith("/no_think"):
+                        sys_prompt = sys_prompt.strip() + " /no_think"
+                
                 hits = await retrieve_for_question(sid, q, args.k, args.cluster_size, args.graph_depth, q_signal=q_signal)
                 last_d = "Unknown"
                 for i in range(35, 0, -1):
@@ -441,19 +533,75 @@ async def run(args: argparse.Namespace) -> None:
                 ]
                 
                 hyp = ""
+                answer_ok = False
                 for attempt in range(3):
                     try:
-                        resp = client.chat.completions.create(model=args.answer_model, messages=messages, temperature=0, max_tokens=800)
-                        hyp = (resp.choices[0].message.content or "").strip(); break
-                    except Exception: time.sleep(2**attempt)
+                        # Offload blocking HTTP call so the event loop stays responsive.
+                        resp = await asyncio.to_thread(
+                            gen_client.chat.completions.create,
+                            model=args.generator_model, messages=messages,
+                            temperature=0, max_tokens=1024,
+                        )
+                        msg = resp.choices[0].message
+                        if args.verbose:
+                            log(f"  DEBUG: msg object: {msg}")
+
+                        # Capture standard content OR reasoning_content (common in local Qwen/DeepSeek)
+                        hyp = (msg.content or "").strip()
+                        if not hyp:
+                            hyp = getattr(msg, "reasoning_content", "") or getattr(msg, "reasoning", "")
+                            if hyp:
+                                hyp = hyp.strip()
+
+                        if not hyp:
+                            log(f"  WARNING: Empty hypothesis from model {args.generator_model} (finish_reason={resp.choices[0].finish_reason}).")
+                        answer_ok = True
+                        break
+                    except Exception as e:
+                        log(f"  ERROR: completion failed (attempt {attempt+1}): {e}")
+                        if attempt < 2:
+                            await asyncio.sleep(2**attempt)
+                if not answer_ok:
+                    log(f"  FATAL: all {3} answer attempts exhausted for Q{total_q}; recording empty hypothesis.")
+
                 correct = False
-                for attempt in range(3):
-                    try:
-                        resp = client.chat.completions.create(model=args.judge_model, messages=[{"role": "user", "content": judge_prompt(qtype_label, q, str(a), hyp)}], temperature=0, max_tokens=10)
-                        correct = "yes" in (resp.choices[0].message.content or "").lower(); break
-                    except Exception: time.sleep(2**attempt)
+                judge_status = "skipped_empty_hyp"
+                if hyp:
+                    for attempt in range(3):
+                        try:
+                            resp = await asyncio.to_thread(
+                                judge_client.chat.completions.create,
+                                model=args.judge_model,
+                                messages=[{"role": "user", "content": judge_prompt(qtype_label, q, str(a), hyp)}],
+                                temperature=0,
+                                max_tokens=100,
+                            )
+                            raw = (resp.choices[0].message.content or "")
+                            finish = resp.choices[0].finish_reason
+                            if not raw.strip():
+                                log(f"  WARNING: empty judge response (finish_reason={finish}); retrying.")
+                                judge_status = f"empty_response_finish={finish}"
+                                if attempt < 2:
+                                    await asyncio.sleep(2**attempt)
+                                    continue
+                                break
+                            correct = "yes" in raw.lower()
+                            judge_status = "ok"
+                            break
+                        except Exception as e:
+                            log(f"  ERROR: judge failed (attempt {attempt+1}): {e}")
+                            judge_status = f"error:{type(e).__name__}"
+                            if attempt < 2:
+                                await asyncio.sleep(2**attempt)
+                    if judge_status.startswith(("error:", "empty_response")):
+                        log(f"  FATAL: judge unusable for Q{total_q} ({judge_status}); marking correct=False.")
                 qtype_correct[qtype_label].append(1 if correct else 0)
-                hyp_f.write(json.dumps({"sample_id": sid, "question": q, "reference": a, "hypothesis": hyp, "correct": correct, "qtype": qtype_label, "signal": q_signal}, ensure_ascii=False) + "\n")
+                hyp_f.write(json.dumps({
+                    "sample_id": sid, "question": q, "reference": a,
+                    "hypothesis": hyp, "correct": correct,
+                    "qtype": qtype_label, "signal": q_signal,
+                    "judge_status": judge_status,
+                }, ensure_ascii=False) + "\n")
                 hyp_f.flush()
             if args.limit_questions and total_q >= args.limit_questions: break
             log(f"  sample done. running_acc={sum(sum(v) for v in qtype_correct.values())/total_q:.3f}")
@@ -462,6 +610,8 @@ async def run(args: argparse.Namespace) -> None:
     summary = {"n_questions": total_q, "overall_accuracy": overall, "per_type": {qt: {"n": len(v), "acc": sum(v)/len(v)} for qt, v in qtype_correct.items()}}
     with open(results_path, "w", encoding="utf-8") as f: json.dump(summary, f, indent=2)
     log(f"overall accuracy: {overall:.4f}\nresults -> {results_path}")
+    try: log_f.close()
+    except Exception: pass
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -469,11 +619,16 @@ def parse_args():
     p.add_argument("--limit-samples", type=int, default=0)
     p.add_argument("--limit-questions", type=int, default=0)
     p.add_argument("--skip-ingest", action="store_true")
-    p.add_argument("--k", type=int, default=20)
+    p.add_argument("--ingest-only", action="store_true")
+    p.add_argument("--k", type=int, default=40)
     p.add_argument("--cluster-size", type=int, default=5)
     p.add_argument("--graph-depth", type=int, default=1)
-    p.add_argument("--answer-model", default="gpt-4o-mini")
-    p.add_argument("--judge-model", default="gpt-4o-mini")
+    p.add_argument("--generator-model",
+                   default=os.environ.get("EVAL_GENERATOR_MODEL"))
+    p.add_argument("--judge-model",
+                   default=os.environ.get("EVAL_JUDGE_MODEL"))
+    p.add_argument("--openai-base-url", default=None, help="Custom base URL for OpenAI-compatible API (e.g. MCP proxy or LM Studio)")
+    p.add_argument("--verbose", action="store_true", help="Dump full msg objects per question into run.log")
     return p.parse_args()
 
 if __name__ == "__main__": asyncio.run(run(parse_args()))
