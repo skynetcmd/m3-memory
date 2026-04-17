@@ -74,13 +74,15 @@ Memories written inside a multi-turn or multi-agent session can be tagged with a
 
 ### 🧠 LLM-Powered Intelligence
 
-M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI):
+M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI, `llama.cpp --server`):
 
 - **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 20 types
 - **Conversation summarization** — compress long conversation threads into 3-5 key points
 - **Multi-layered consolidation** — merge groups of related memories into comprehensive summaries
 
 All LLM features use the local model — zero API costs, zero data exfiltration.
+
+**Model selection is automatic.** `bin/llm_failover.py:get_best_llm()` discovers loaded chat models across every endpoint in `LLM_ENDPOINTS_CSV`, filters out embedding-only models (anything matching `embed`, `nomic`, `jina`, `bge`, `e5`, `minilm`), and picks the largest available by parameter count. If you want auto-classification and summarization to run cheaply — without loading a heavy generation model you don't otherwise need — load a small instruct model (0.5B–1B, e.g. `qwen2.5:0.5b`, `llama3.2:1b`, or any GGUF equivalent) as your only chat model; these run in hundreds of milliseconds on CPU and are sufficient for classification and short summaries. See [QUICKSTART](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment) for concrete recipes per runtime.
 
 ---
 

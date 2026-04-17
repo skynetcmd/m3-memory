@@ -32,11 +32,28 @@ ollama pull qwen3-embedding:0.6b
 ollama serve
 ```
 
-Any OpenAI-compatible embedding endpoint works. [LM Studio](https://lmstudio.ai), vLLM, and LocalAI are also supported. If your server runs on a non-default port, set:
+Any OpenAI-compatible embedding endpoint works. [LM Studio](https://lmstudio.ai), vLLM, LocalAI, and `llama.cpp --server` are also supported. If your server runs on a non-default port, set:
 
 ```bash
 export LLM_ENDPOINTS_CSV="http://localhost:11434/v1"
 ```
+
+### Optional: load a small chat model for enrichment
+
+Some features — `auto_classify`, conversation/consolidation summaries, and future write-time enrichment — call your local LLM with short prompts. For these you want a **small, fast** model running alongside your embedder. M3 auto-selects via the same OpenAI-compatible endpoint; no extra config needed.
+
+Pick whichever fits your hardware and runtime:
+
+| Runtime | Example small model | Size |
+|---|---|---|
+| **Ollama** | `ollama pull qwen2.5:0.5b` or `ollama pull llama3.2:1b` | ~400 MB / ~1.3 GB |
+| **LM Studio** | Qwen2.5-0.5B-Instruct (GGUF, Q8) | ~500 MB |
+| **llama.cpp** | `llama-server -m qwen2.5-0.5b-instruct-q8_0.gguf` | ~500 MB |
+| **vLLM / LocalAI** | Any HF-compatible 0.5B–1B instruct model | varies |
+
+M3 picks the largest loaded chat model for all features. Embedding-only models (names matching `embed`, `nomic`, `jina`, `bge`, `e5`, `minilm`) are filtered out of chat selection automatically. If you want enrichment to stay fast, keep a small instruct model as your only loaded chat model — that way `get_best_llm` picks it for classification/summarization work. If you also load a large generation model, it will be preferred for every call (the per-feature "use the small model for enrichment, large model for generation" routing is on the roadmap, not yet in this release).
+
+If you only want embeddings, skip this step — M3 runs fine without a chat model; the enrichment features simply become no-ops.
 
 ---
 
