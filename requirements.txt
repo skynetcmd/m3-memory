@@ -1,6 +1,15 @@
 # M3 Memory — Unified Dependencies
 # Install: pip install -r requirements.txt
 # Versions pinned to major.minor.* for supply-chain safety (2026-04-16)
+#
+# RUNTIME DEPENDENCY (not Python): M3 needs an OpenAI-compatible LLM server
+# running locally for embeddings and optional enrichment features.
+#   Required: an embedding model (e.g. qwen3-embedding:0.6b via Ollama).
+#   Optional: a small chat model (0.5B-1B instruct, e.g. qwen2.5:0.5b or
+#     llama3.2:1b) for auto-classification, summarization, and consolidation.
+#     These features are no-ops if no chat model is loaded.
+# See QUICKSTART.md and ENVIRONMENT_VARIABLES.md for runtime recommendations
+# across Ollama, LM Studio, llama.cpp --server, vLLM, and LocalAI.
 
 # --- Core Engine & MCP ---
 fastmcp>=3.2.4,<4
