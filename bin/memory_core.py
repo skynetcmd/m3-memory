@@ -265,24 +265,29 @@ def _ingest_llm_enabled(flag: str) -> bool:
 _AUTO_TITLE_CACHE: dict[str, str] = {}
 _AUTO_ENTITIES_CACHE: dict[str, list[str]] = {}
 
-async def _maybe_auto_title(content: str, title: str) -> str:
+async def _maybe_auto_title(content: str, title: str, force: bool = False) -> str:
     """If M3_INGEST_AUTO_TITLE=1 and title is empty/trivial, ask a small LLM
     for a 4-8 word descriptive title derived from content. Returns the
     original title on any error or when the gate is off.
 
     A title is considered "trivial" if it is empty, a bare role prefix like
     "user:" or "assistant:", or shorter than 4 chars.
+
+    Pass `force=True` to bypass both the env gate and the trivial-title
+    check — callers that want to force LLM enrichment for a specific
+    pipeline variant can opt in regardless of M3_INGEST_AUTO_TITLE.
     """
-    if not _ingest_llm_enabled("M3_INGEST_AUTO_TITLE"):
+    if not force and not _ingest_llm_enabled("M3_INGEST_AUTO_TITLE"):
         return title
     if not content:
         return title
-    t = (title or "").strip()
-    trivial = (not t) or len(t) < 4 or t.rstrip(":").lower() in {
-        "user", "assistant", "system", "tool", "msg", "note"
-    }
-    if not trivial:
-        return title
+    if not force:
+        t = (title or "").strip()
+        trivial = (not t) or len(t) < 4 or t.rstrip(":").lower() in {
+            "user", "assistant", "system", "tool", "msg", "note"
+        }
+        if not trivial:
+            return title
 
     c_hash = _content_hash(content[:800])
     if c_hash in _AUTO_TITLE_CACHE:
@@ -324,13 +329,16 @@ async def _maybe_auto_title(content: str, title: str) -> str:
         return title
 
 
-async def _maybe_auto_entities(content: str) -> list[str]:
+async def _maybe_auto_entities(content: str, force: bool = False) -> list[str]:
     """If M3_INGEST_AUTO_ENTITIES=1, ask a small LLM for up to 8 salient
     entities / named concepts in `content`. Returns [] on any error or when
     the gate is off. Callers typically store the result under
     metadata["entities"] and include it in embed_text for retrieval boost.
+
+    Pass `force=True` to bypass the env gate — callers that want per-variant
+    LLM enrichment can opt in regardless of M3_INGEST_AUTO_ENTITIES.
     """
-    if not _ingest_llm_enabled("M3_INGEST_AUTO_ENTITIES"):
+    if not force and not _ingest_llm_enabled("M3_INGEST_AUTO_ENTITIES"):
         return []
     if not content:
         return []
