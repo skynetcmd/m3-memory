@@ -1,12 +1,13 @@
-"""LongMemEval benchmark runner for m3-memory.
+"""Long-session QA benchmark runner for m3-memory.
 
-Loads the cleaned LongMemEval-S dataset, bulk-ingests every conversation turn
+Loads the configured long-session dataset, bulk-ingests every conversation turn
 into m3-memory scoped by question_id (so each instance has its own isolated
 haystack), then for each question retrieves the top-K most relevant turns and
-asks an LLM to answer. An OpenAI judge (default gpt-4o-mini) scores the answer
-using the official LongMemEval per-task prompts.
+asks a generator LLM to answer. A separate judge LLM scores the answer using
+the per-task judge prompts (model configured by --judge-model or
+EVAL_JUDGE_MODEL).
 
-Retrieval pipeline (ported from LOCOMO benchmark work):
+Retrieval pipeline:
   1. Hybrid search (FTS5 BM25 + vector cosine, fused with MMR re-ranking)
   2. Graph expansion (1-hop traversal of knowledge graph from initial hits)
   3. Episodic cluster expansion (+/- N surrounding turns from same session)
@@ -16,7 +17,7 @@ Routes embeddings through `memory_write_bulk_impl` / `_embed_many` and expects
 llama-server on http://localhost:8081/v1 (override with LLM_ENDPOINTS_CSV).
 
 Usage:
-    python bin/bench_longmemeval.py                         # full 500 instances
+    python bin/bench_longmemeval.py                         # full dataset
     python bin/bench_longmemeval.py --limit 20              # subsample
     python bin/bench_longmemeval.py --skip-ingest           # reuse already-loaded DB
     python bin/bench_longmemeval.py --no-judge              # write hypotheses only
@@ -601,14 +602,22 @@ async def run(args: argparse.Namespace) -> None:
         log(f"  limited to {len(dataset)}")
 
     # Resolve OpenAI credentials via vault (unless --no-judge).
-    answer_client = None
+    gen_client = None
     judge_client = None
+    if not args.generator_model:
+        raise SystemExit(
+            "generator model is not set — pass --generator-model or set EVAL_GENERATOR_MODEL"
+        )
     if not args.no_judge:
+        if not args.judge_model:
+            raise SystemExit(
+                "judge model is not set — pass --judge-model or set EVAL_JUDGE_MODEL"
+            )
         api_key = get_api_key("OPENAI_API_KEY")
         if not api_key:
             raise SystemExit("OPENAI_API_KEY not found (env / keyring / vault). Use `bin/setup_secret.py OPENAI_API_KEY`.")
-        answer_client = _openai_client(api_key)
-        judge_client = answer_client  # same account
+        gen_client = _openai_client(api_key)
+        judge_client = gen_client  # same account
 
     # ── Phase 1: ingest ──
     if args.skip_ingest:
@@ -697,7 +706,7 @@ async def run(args: argparse.Namespace) -> None:
             if not args.no_judge:
                 history, anchors = format_retrieved(hits, q_signal=q_signal)
                 hypothesis, ans_ms = answer_with_llm(
-                    answer_client, args.answer_model, history, qdate, question,
+                    gen_client, args.generator_model, history, qdate, question,
                     timeline=timeline, anchors=anchors, q_signal=q_signal,
                 )
                 correct = judge_with_llm(
@@ -759,7 +768,7 @@ async def run(args: argparse.Namespace) -> None:
         "search_mode": "hybrid",
         "smart_retrieval": args.smart_retrieval,
         "adaptive_k": args.adaptive_k,
-        "answer_model": args.answer_model,
+        "generator_model": args.generator_model,
         "judge_model": args.judge_model,
         "judged": not args.no_judge,
         "overall_accuracy": overall,
@@ -800,8 +809,10 @@ def parse_args() -> argparse.Namespace:
                    help="episodic expansion: pull +/- N surrounding turns (0 = off)")
     p.add_argument("--graph-depth", type=int, default=1,
                    help="graph expansion hops from initial hits (0 = off)")
-    p.add_argument("--answer-model", default="gpt-4o-mini")
-    p.add_argument("--judge-model", default="gpt-4o-mini")
+    p.add_argument("--generator-model",
+                   default=os.environ.get("EVAL_GENERATOR_MODEL"))
+    p.add_argument("--judge-model",
+                   default=os.environ.get("EVAL_JUDGE_MODEL"))
     p.add_argument("--ingest-concurrency", type=int, default=4,
                    help="number of instances to ingest in parallel")
     return p.parse_args()
