@@ -103,6 +103,14 @@ CONTRADICTION_THRESHOLD = float(os.environ.get("CONTRADICTION_THRESHOLD", "0.85"
 SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "500"))
 LLM_TIMEOUT            = float(os.environ.get("LLM_TIMEOUT", "120.0"))
 
+# Ranker/write-path tuning. See _augment_title_with_role and the scoring loop
+# in memory_search_scored_impl. These are safe defaults; override via env var
+# to disable or tune per deployment.
+SPEAKER_IN_TITLE       = os.environ.get("M3_SPEAKER_IN_TITLE", "1").lower() in ("1", "true", "yes")
+SHORT_TURN_THRESHOLD   = int(os.environ.get("M3_SHORT_TURN_THRESHOLD", "20"))
+TITLE_MATCH_BOOST      = float(os.environ.get("M3_TITLE_MATCH_BOOST", "0.05"))
+IMPORTANCE_WEIGHT      = float(os.environ.get("M3_IMPORTANCE_WEIGHT", "0.05"))
+
 VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "grok", "manual", "system", "unknown", "legacy"}
 
 _FTS_OPERATORS = re.compile(r'\b(OR|AND|NOT|NEAR)\b|[*()\[\]{}]')
@@ -111,6 +119,51 @@ def _sanitize_fts(query: str, max_len: int = 500) -> str:
     if len(query) > max_len:
         query = query[:max_len]
     return _FTS_OPERATORS.sub(' ', query).strip()
+
+
+_TOKEN_SPLIT = re.compile(r"[^\w]+", re.UNICODE)
+
+def _augment_title_with_role(title: str, metadata: str | dict | None) -> str:
+    """Prepend '[role] ' to title when metadata carries a person-name role.
+
+    Makes the speaker visible to FTS so queries like 'what did Caroline say
+    about X' can match turns by Caroline. Idempotent: skips when title is
+    already bracket-prefixed. Gated by SPEAKER_IN_TITLE.
+    """
+    if not SPEAKER_IN_TITLE:
+        return title or ""
+    t = (title or "").strip()
+    if t.startswith("["):
+        return t
+    if not metadata:
+        return t
+    try:
+        meta = metadata if isinstance(metadata, dict) else json.loads(metadata)
+    except (json.JSONDecodeError, TypeError):
+        return t
+    role = (meta.get("role") or "").strip()
+    # Only prepend when role looks like a proper name (avoid 'user'/'assistant'
+    # generics which add noise without helping real-world queries).
+    if not role or role.lower() in ("user", "assistant", "system", "tool"):
+        return t
+    return f"[{role}] {t}".strip()
+
+
+def _query_title_overlap(query: str, title: str) -> float:
+    """Fraction of query tokens that also appear in title. 0.0 when no overlap.
+
+    Used as a small ranker boost for titles that literally echo query terms.
+    """
+    if not query or not title:
+        return 0.0
+    q_tokens = {t for t in _TOKEN_SPLIT.split(query.lower()) if len(t) > 2}
+    if not q_tokens:
+        return 0.0
+    t_tokens = {t for t in _TOKEN_SPLIT.split(title.lower()) if len(t) > 2}
+    if not t_tokens:
+        return 0.0
+    overlap = q_tokens & t_tokens
+    return len(overlap) / len(q_tokens)
 
 _POISON_PATTERNS = [
     re.compile(r'<script\b', re.I),
@@ -509,7 +562,7 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
         if scope not in VALID_SCOPES:
             scope = "agent"
         content = it.get("content") or ""
-        title = it.get("title") or ""
+        title = _augment_title_with_role(it.get("title") or "", meta)
         agent = (
             (it.get("change_agent") or "").strip().lower()
             or _infer_change_agent_util(
@@ -944,12 +997,35 @@ async def memory_search_scored_impl(
         vector_score = page_scores[i]
         bm25_norm = (1.0 / (1.0 + abs(row["bm25_score"])))
         final_score = vector_score * vector_weight + bm25_norm * (1.0 - vector_weight)
+
+        # Short-turn length penalty: stubs like "ok cool" rank identically to
+        # substantive content under FTS+vector alone. Scale by length up to the
+        # threshold, full-weight beyond.
+        content_len = len(row["content"] or "")
+        length_penalty = 1.0
+        if content_len < SHORT_TURN_THRESHOLD:
+            length_penalty = max(0.3, content_len / SHORT_TURN_THRESHOLD)
+        final_score *= length_penalty
+
+        # Title-match boost: titles that echo query tokens are high-signal.
+        title_overlap = _query_title_overlap(query, row["title"] or "")
+        title_boost = TITLE_MATCH_BOOST * title_overlap
+        final_score += title_boost
+
+        # Importance blend: caller-supplied importance nudges ranking.
+        importance_boost = IMPORTANCE_WEIGHT * (float(row["importance"] or 0.0))
+        final_score += importance_boost
+
         if explain:
             item["_explanation"] = {
                 "vector": vector_score,
                 "bm25": bm25_norm,
                 "importance": row["importance"],
-                "raw_hybrid": final_score,
+                "raw_hybrid": vector_score * vector_weight + bm25_norm * (1.0 - vector_weight),
+                "length_penalty": length_penalty,
+                "title_overlap": title_overlap,
+                "title_boost": title_boost,
+                "importance_boost": importance_boost,
                 "vector_weight": vector_weight,
             }
         scored.append((final_score, item))
@@ -1525,6 +1601,7 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         from datetime import timedelta
         expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
+    title = _augment_title_with_role(title, metadata)
     with _db() as db:
         _vf = valid_from or now
         _vt = valid_to or ""
