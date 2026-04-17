@@ -28,7 +28,7 @@ from auth_utils import DB_PATH, get_api_key, get_master_key, set_api_key, _get_f
 KNOWN_SERVICES: list[dict] = [
     {
         "name": "OPENAI_API_KEY",
-        "description": "OpenAI API key — used by LongMemEval judge and any GPT-4o calls",
+        "description": "OpenAI API key — used by eval judge and OpenAI LLM calls",
         "url": "https://platform.openai.com/api-keys",
         "validator": lambda v: (
             (True, "project-scoped key") if v.startswith("sk-proj-")
