@@ -252,6 +252,79 @@ def section_git(pdf, summary):
     summary["git"] = output[:500]
 
 
+# -- Section 6: Tool Inventory Refresh ---------------------------------------
+def section_tool_inventory(pdf, summary):
+    """Refresh memory/tool_inventory/ and report which tools drifted.
+
+    Drift = the live file's sha1 has changed since the last inventory write.
+    We snapshot the `sha1:` frontmatter values BEFORE running the generator,
+    then diff after.
+    """
+    pdf.set_font("helvetica", "B", 14)
+    pdf.cell(0, 10, "6. Tool Inventory",
+             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("helvetica", "", 9)
+
+    inv_dir = os.path.join(BASE_DIR, "memory", "tool_inventory")
+    gen_script = os.path.join(BASE_DIR, "bin", "gen_tool_inventory.py")
+
+    def _snapshot_sha1s():
+        out = {}
+        if not os.path.isdir(inv_dir):
+            return out
+        for fn in os.listdir(inv_dir):
+            if not fn.endswith(".md") or fn == "INDEX.md":
+                continue
+            path = os.path.join(inv_dir, fn)
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        if line.startswith("sha1:"):
+                            out[fn] = line.split(":", 1)[1].strip()
+                            break
+            except OSError:
+                continue
+        return out
+
+    before = _snapshot_sha1s()
+    try:
+        subprocess.check_call(
+            [sys.executable, gen_script],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=120,
+        )
+        ran = True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        ran = False
+        err = str(e)
+    after = _snapshot_sha1s()
+
+    drifted = sorted(f for f in after if before.get(f) != after.get(f))
+    new = sorted(f for f in after if f not in before)
+    removed = sorted(f for f in before if f not in after)
+
+    if not ran:
+        line = f"Generator FAILED: {err}"
+    elif not drifted and not new and not removed:
+        line = f"{len(after)} tool entries — no drift since last run."
+    else:
+        parts = [f"{len(after)} tool entries."]
+        if new:
+            parts.append(f"NEW: {', '.join(n.replace('.md','') for n in new[:10])}")
+        if drifted:
+            parts.append(
+                f"DRIFTED (source changed, re-enrichment recommended): "
+                f"{', '.join(d.replace('.md','') for d in drifted[:15])}"
+            )
+        if removed:
+            parts.append(f"REMOVED: {', '.join(r.replace('.md','') for r in removed[:10])}")
+        line = " | ".join(parts)
+
+    pdf.mc(5, sanitize(line, 2000))
+    pdf.ln(4)
+    summary["tool_inventory"] = line
+
+
 # -- Memory write -------------------------------------------------------------
 def write_summary_to_memory(summary_text, week_label):
     """Import memory_bridge functions and write a weekly summary memory item."""
@@ -297,6 +370,7 @@ def main():
     section_activity(pdf, summary)
     section_chroma_sync(pdf, summary)
     section_git(pdf, summary)
+    section_tool_inventory(pdf, summary)
 
     output_path = os.path.join(
         REPORTS_DIR, f"Audit_{datetime.now().strftime('%Y_W%V')}.pdf"
@@ -312,7 +386,8 @@ def main():
             f"DECISIONS:\n{summary.get('decisions', 'N/A')}\n\n"
             f"ACTIVITY:\n{summary.get('activity', 'N/A')}\n\n"
             f"CHROMA SYNC:\n{summary.get('chroma_sync', 'N/A')}\n\n"
-            f"GIT:\n{summary.get('git', 'N/A')}"
+            f"GIT:\n{summary.get('git', 'N/A')}\n\n"
+            f"TOOL INVENTORY:\n{summary.get('tool_inventory', 'N/A')}"
         )
         write_summary_to_memory(summary_text, week_label)
     else:
