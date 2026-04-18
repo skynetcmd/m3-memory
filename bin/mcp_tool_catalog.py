@@ -237,6 +237,8 @@ TOOLS: list[ToolSpec] = [
                 "conversation_id": {"type": "string", "description": "Groups this memory with a conversation / team session. Same ID space as conversation_start.", "default": ""},
                 "refresh_on":    {"type": "string", "description": "ISO-8601 timestamp when this memory should be flagged for review (lifecycle / planned obsolescence).", "default": ""},
                 "refresh_reason": {"type": "string", "description": "Why this memory needs refreshing (e.g., 'quarterly policy review').", "default": ""},
+                "variant":       {"type": "string", "description": "Pipeline identifier for A/B variant tracking.", "default": ""},
+                "embed_text":    {"type": "string", "description": "Override text used for embedding; falls back to content when empty.", "default": ""},
             },
             "required": ["type", "content"],
         },

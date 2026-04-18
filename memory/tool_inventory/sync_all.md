@@ -2,7 +2,7 @@
 tool: bin/sync_all.py
 sha1: eb959b693c79
 mtime_utc: 2026-04-07T04:04:47.489006+00:00
-generated_utc: 2026-04-17T04:17:01.767818+00:00
+generated_utc: 2026-04-18T05:16:53.223560+00:00
 private: false
 ---
 
@@ -27,7 +27,7 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--dry-run` | Check connectivity only | — |  | store_true |  |
+| `--dry-run` | Check connectivity only | — | Runs both pg_sync.py and chroma_sync_cli.py with connectivity checks | store_true | Enables connectivity check mode (when set); however, **NOT forwarded** to subprocess callees (see Known gap below) |
 
 ## Environment variables read
 
@@ -53,6 +53,10 @@ _(none detected)_
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+## Known gaps
+
+**`--dry-run` flag not forwarded to subprocesses:** The `--dry-run` flag is parsed by sync_all.py but is NOT passed to subprocess callees (pg_sync.py and chroma_sync_cli.py). Both tools lack argparse integration, so the flag's intent (connectivity check only) is lost. Root cause: subprocess command construction on lines 61 and 91 does not include `--dry-run` in the argv list. Workaround: run pg_sync.py and chroma_sync_cli.py manually for dry-run behavior, or patch subprocess calls to forward the flag.
 
 ## Re-validation
 
