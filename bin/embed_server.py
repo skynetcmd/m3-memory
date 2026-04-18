@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import time
 from typing import Union
 
@@ -93,7 +94,11 @@ def main():
     parser = argparse.ArgumentParser(description="M3 Embedding Server")
     parser.add_argument("--model", default=DEFAULT_MODEL_ID, help="HuggingFace model ID")
     parser.add_argument("--port", type=int, default=1234, help="Port to serve on")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("EMBED_SERVER_HOST", "127.0.0.1"),
+        help="Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN)",
+    )
     args = parser.parse_args()
 
     model_name = "qwen3-embedding"
