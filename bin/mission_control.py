@@ -266,7 +266,7 @@ def clear_screen(is_apple_terminal: bool) -> None:
     if is_apple_terminal:
         print("\n" * 2)
     elif IS_WIN:
-        os.system("cls")
+        os.system("cls")  # nosec B605 - literal string, no user input reaches this call
     else:
         print("\033[H\033[J", end="", flush=True)
 

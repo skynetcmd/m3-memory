@@ -28,8 +28,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 WORKSPACE = BASE_DIR
 
-PASS = "\033[32mPASS\033[0m"
-FAIL = "\033[31mFAIL\033[0m"
+PASS = "\033[32mPASS\033[0m"  # nosec B105 - ANSI colour code, not a password
+FAIL = "\033[31mFAIL\033[0m"  # nosec B105 - ANSI colour code, not a password
 INFO = "\033[33m    \033[0m"
 
 results: list[tuple[str, bool, str]] = []
