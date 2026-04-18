@@ -2,7 +2,7 @@
 tool: bin/sync_all.py
 sha1: eb959b693c79
 mtime_utc: 2026-04-07T04:04:47.489006+00:00
-generated_utc: 2026-04-18T16:33:21.747168+00:00
+generated_utc: 2026-04-18T21:58:23.170957+00:00
 private: false
 ---
 
@@ -27,7 +27,7 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--dry-run` | Check connectivity only | — | Checks SYNC_TARGET_IP reachability, then calls pg_sync.py and chroma_sync_cli.py (both write to DBs/ChromaDB). | store_true | Checks reachability only; logs planned sync but skips subprocess calls (no actual writes). |
+| `--dry-run` | Check connectivity only | `False` | Checks SYNC_TARGET_IP reachability, then calls pg_sync.py and chroma_sync_cli.py (both write to DBs/ChromaDB). | store_true | Checks reachability only; logs planned sync but skips subprocess calls (no actual writes). |
 
 ## Environment variables read
 

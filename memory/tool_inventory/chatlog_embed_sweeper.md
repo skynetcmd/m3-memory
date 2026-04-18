@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_embed_sweeper.py
-sha1: b30ba03bbdac
-mtime_utc: 2026-04-18T15:41:31.006444+00:00
-generated_utc: 2026-04-18T16:33:21.595895+00:00
+sha1: b023a34608a8
+mtime_utc: 2026-04-18T20:37:50.748787+00:00
+generated_utc: 2026-04-18T21:58:22.995882+00:00
 private: false
 ---
 
@@ -25,10 +25,10 @@ and drains any spill-to-disk files from the async write queue.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--batch` | Batch size (default from config.embed_sweeper.batch_size) | None (uses cfg.embed_sweeper.batch_size) | Uses config batch size | int | Embeds N rows per batch iteration |
-| `--max-per-run` | Max rows per run (default from CHATLOG_EMBED_MAX_PER_RUN env or 10000) | None (uses CHATLOG_EMBED_MAX_PER_RUN env or 10000) | Embeds up to 10000 rows per run | int | Processes up to N rows total per invocation |
-| `--dry-run` | Query and log but don't embed | — | Queries unembed rows, embeds in batches, updates DB | store_true | Queries and logs row counts without embedding |
-| `--drain-spill` | Process spill files before embedding | — | Skips spill drain (unless spill dir exists) | store_true | Always processes spill files before embedding |
+| `--batch` | Batch size (default from config.embed_sweeper.batch_size) | None | Uses config batch size | int | Embeds N rows per batch iteration |
+| `--max-per-run` | Max rows per run (default from CHATLOG_EMBED_MAX_PER_RUN env or 10000) | None | Embeds up to 10000 rows per run | int | Processes up to N rows total per invocation |
+| `--dry-run` | Query and log but don't embed | `False` | Queries unembed rows, embeds in batches, updates DB | store_true | Queries and logs row counts without embedding |
+| `--drain-spill` | Process spill files before embedding | `False` | Skips spill drain (unless spill dir exists) | store_true | Always processes spill files before embedding |
 
 ## Environment variables read
 

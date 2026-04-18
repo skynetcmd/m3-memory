@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: 69ade5c04e4f
-mtime_utc: 2026-04-18T15:51:47.878968+00:00
-generated_utc: 2026-04-18T16:33:21.601606+00:00
+sha1: 02f475266e2a
+mtime_utc: 2026-04-18T20:37:50.748787+00:00
+generated_utc: 2026-04-18T21:58:23.002353+00:00
 private: false
 ---
 
@@ -31,11 +31,11 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--format` | Log format | `auto` | Auto-detects format from first 4KB of data | choice | Parses as specified format (claude-code/gemini-cli/opencode/aider) |
-| `--watch` | Poll directory for new log files | None (process single file) | Reads input_file or stdin once | str | Polls DIR every 500ms for new .jsonl/.md/.json files |
-| `--conversation-id` | Override conversation_id | `` (derive from filename or stdin hash) | Derives from input filename using blake2b hash | str | Uses specified conversation_id for all ingested items |
+| `--format` | Log format | `auto` | Auto-detects format from first 4KB of data | str | Parses as specified format (claude-code/gemini-cli/opencode/aider) |
+| `--watch` | Poll directory for new log files | — | Reads input_file or stdin once | str | Polls DIR every 500ms for new .jsonl/.md/.json files |
+| `--conversation-id` | Override conversation_id | `` | Derives from input filename using blake2b hash | str | Uses specified conversation_id for all ingested items |
 | `--model` | Override model_id (aider) | `` | Uses model_id from parsed data | str | Replaces model_id for items with unknown/missing model |
-| `input_file` | Input file (stdin if omitted) | — (read from stdin) | Reads from stdin | positional | Reads specified file instead of stdin |
+| `input_file` | Input file (stdin if omitted) | — | Reads from stdin | str | Reads specified file instead of stdin |
 
 ## Environment variables read
 

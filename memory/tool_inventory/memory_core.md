@@ -2,7 +2,7 @@
 tool: bin/memory_core.py
 sha1: 07600a556568
 mtime_utc: 2026-04-18T21:42:09.778629+00:00
-generated_utc: 2026-04-18T21:42:09.778629+00:00
+generated_utc: 2026-04-18T21:58:23.124532+00:00
 private: false
 ---
 
@@ -35,6 +35,22 @@ honored. Kwargs:
 Of these, only `variant` is exposed on the MCP `memory_write` schema and via
 `--variant` on bench CLIs. `enrich` / `check_contradictions` /
 `emit_conversation` are kwarg-only perf knobs for bulk ingest drivers.
+
+## Env-var gates read
+
+Ingest: `M3_INGEST_AUTO_TITLE`, `M3_INGEST_AUTO_ENTITIES`,
+`M3_INGEST_EVENT_ROWS`, `M3_INGEST_WINDOW_CHUNKS`, `M3_INGEST_GIST_ROWS`,
+`M3_INGEST_WINDOW_SIZE`, `M3_INGEST_GIST_MIN_TURNS`, `M3_INGEST_GIST_STRIDE`.
+
+Retrieval / ranking: `M3_QUERY_TYPE_ROUTING`, `M3_TITLE_MATCH_BOOST`,
+`M3_SHORT_TURN_THRESHOLD`, `M3_SPEAKER_IN_TITLE`, `M3_IMPORTANCE_WEIGHT`,
+`SEARCH_ROW_CAP`.
+
+Embeddings: `EMBED_MODEL`, `EMBED_DIM`, `EMBED_BULK_CHUNK`,
+`EMBED_BULK_CONCURRENCY`, `CHROMA_BASE_URL`.
+
+Other: `CONTRADICTION_THRESHOLD`, `DEDUP_LIMIT`, `DEDUP_THRESHOLD`,
+`LLM_TIMEOUT`, `ORIGIN_DEVICE`.
 
 ## Entry points
 
@@ -80,7 +96,7 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script]`` (line 674)
+- `subprocess.run()  → `[sys.executable, migration_script]`` (line 716)
 
 
 ## Notable external imports
