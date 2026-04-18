@@ -13,3 +13,6 @@
 
 # Monthly Automated Secret Rotation (1st of every month at 2:00 AM)
 0 2 1 * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/secret_rotator.py >> [M3_MEMORY_ROOT]/logs/secret_rotator.log 2>&1
+
+# Every 30 minutes: Embed un-embedded chat_log rows using the local embedding server
+*/30 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/chatlog_embed_sweeper.py --batch 256 --max-per-run 10000 >> [M3_MEMORY_ROOT]/logs/chatlog_embed_sweep.log 2>&1

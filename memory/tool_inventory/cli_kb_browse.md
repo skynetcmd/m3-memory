@@ -2,7 +2,7 @@
 tool: bin/cli_kb_browse.py
 sha1: 113649874500
 mtime_utc: 2026-04-07T04:04:41.324855+00:00
-generated_utc: 2026-04-17T04:17:01.685581+00:00
+generated_utc: 2026-04-18T05:16:53.097584+00:00
 private: false
 ---
 

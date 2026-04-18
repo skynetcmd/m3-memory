@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server.py
-sha1: d15de239efa1
-mtime_utc: 2026-04-17T00:50:00.647616+00:00
-generated_utc: 2026-04-17T04:17:01.696291+00:00
+sha1: 752edd542fc0
+mtime_utc: 2026-04-18T03:45:31.260359+00:00
+generated_utc: 2026-04-18T05:16:53.113689+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 91)
+- `def main()` (line 92)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -31,12 +31,11 @@ Usage:
 |---|---|---|---|---|---|
 | `--model` | HuggingFace model ID | `DEFAULT_MODEL_ID` |  |  |  |
 | `--port` | Port to serve on | `1234` |  | int |  |
-| `--host` | Host to bind to | `0.0.0.0` |  |  |  |
-| `--device` | Device to use (e.g. cuda:0, cpu) | — |  |  |  |
+| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` |  |  |  |
 
 ## Environment variables read
 
-_(none detected)_
+- `EMBED_SERVER_HOST`
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -51,7 +50,6 @@ _(no subprocess / http / sqlite calls detected)_
 - `fastapi (FastAPI)`
 - `pydantic (BaseModel, Field)`
 - `sentence_transformers (SentenceTransformer)`
-- `torch`
 - `uvicorn`
 
 ## File dependencies (repo paths referenced)
