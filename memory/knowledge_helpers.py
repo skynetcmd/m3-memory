@@ -9,7 +9,12 @@ bin_dir = os.path.join(BASE_DIR, "bin")
 if bin_dir not in sys.path:
     sys.path.insert(0, bin_dir)
 
-from memory_bridge import memory_delete, memory_search, memory_update, memory_write
+from memory_bridge import (  # type: ignore[attr-defined]  # dynamic registration via globals()
+    memory_delete,
+    memory_search,
+    memory_update,
+    memory_write,
+)
 from memory_core import _db
 
 
@@ -89,7 +94,7 @@ def list_knowledge(limit: int = 50, type_filter: str = "") -> list[dict]:
                     ORDER BY created_at DESC
                     LIMIT ?
                 """
-            params = (actual_type, limit)
+            params: tuple = (actual_type, limit)
         else:
             sql = """
                 SELECT id, type, title, content, metadata_json, created_at, importance
