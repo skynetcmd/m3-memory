@@ -689,12 +689,53 @@ def main():
                 with ctx.pg_connection() as pg_conn:
                     pg_conn.autocommit = False
                     with pg_conn.cursor() as pg_cur:
-                        sync_memory_items(sl_cur, pg_cur, sl_conn)
-                        _ensure_pg_tier_tables(pg_cur)
-                        sync_memory_relationships(sl_cur, pg_cur, sl_conn)
-                        sync_memory_embeddings(sl_cur, pg_cur, sl_conn)
-                        sync_tasks(sl_cur, pg_cur, sl_conn)
-                        sync_secrets(sl_cur, pg_cur)
+                        # Step 1: Memory Items
+                        try:
+                            pg_cur.execute("SAVEPOINT items")
+                            sync_memory_items(sl_cur, pg_cur, sl_conn)
+                            pg_cur.execute("RELEASE SAVEPOINT items")
+                        except Exception as e:
+                            pg_cur.execute("ROLLBACK TO SAVEPOINT items")
+                            logger.error(f"Memory items sync failed: {e}")
+
+                        # Step 2: PG Tier Tables
+                        try:
+                            _ensure_pg_tier_tables(pg_cur)
+                        except Exception as e:
+                            logger.warning(f"Ensuring PG tier tables failed: {e}")
+
+                        # Step 3: Relationships (common source of FK violations)
+                        try:
+                            pg_cur.execute("SAVEPOINT rels")
+                            sync_memory_relationships(sl_cur, pg_cur, sl_conn)
+                            pg_cur.execute("RELEASE SAVEPOINT rels")
+                        except Exception as e:
+                            pg_cur.execute("ROLLBACK TO SAVEPOINT rels")
+                            logger.error(f"Relationships sync failed: {e}")
+
+                        # Step 4: Embeddings
+                        try:
+                            pg_cur.execute("SAVEPOINT embs")
+                            sync_memory_embeddings(sl_cur, pg_cur, sl_conn)
+                            pg_cur.execute("RELEASE SAVEPOINT embs")
+                        except Exception as e:
+                            pg_cur.execute("ROLLBACK TO SAVEPOINT embs")
+                            logger.error(f"Embeddings sync failed: {e}")
+
+                        # Step 5: Tasks
+                        try:
+                            pg_cur.execute("SAVEPOINT tasks")
+                            sync_tasks(sl_cur, pg_cur, sl_conn)
+                            pg_cur.execute("RELEASE SAVEPOINT tasks")
+                        except Exception as e:
+                            pg_cur.execute("ROLLBACK TO SAVEPOINT tasks")
+                            logger.error(f"Tasks sync failed: {e}")
+
+                        # Step 6: Secrets
+                        try:
+                            sync_secrets(sl_cur, pg_cur)
+                        except Exception as e:
+                            logger.warning(f"Secrets sync failed: {e}")
 
                     pg_conn.commit()
 

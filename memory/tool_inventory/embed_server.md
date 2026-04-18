@@ -1,0 +1,61 @@
+---
+tool: bin/embed_server.py
+sha1: 752edd542fc0
+mtime_utc: 2026-04-18T03:45:31.260359+00:00
+generated_utc: 2026-04-18T05:16:53.113689+00:00
+private: false
+---
+
+# bin/embed_server.py
+
+## Purpose
+
+Local embedding server — OpenAI-compatible /v1/embeddings endpoint.
+
+Uses sentence-transformers to load Qwen3-Embedding-0.6B and serves on
+port 1234 so memory_core.py and the test suite can use it without
+LM Studio or Ollama.
+
+Usage:
+    python bin/embed_server.py                     # default: port 1234
+    python bin/embed_server.py --port 9900
+
+## Entry points
+
+- `def main()` (line 92)
+- `if __name__ == "__main__"` guard
+
+## CLI flags / arguments
+
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--model` | HuggingFace model ID | `DEFAULT_MODEL_ID` |  |  |  |
+| `--port` | Port to serve on | `1234` |  | int |  |
+| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` |  |  |  |
+
+## Environment variables read
+
+- `EMBED_SERVER_HOST`
+
+## Calls INTO this repo (intra-repo imports)
+
+_(none detected)_
+
+## Calls OUT (external side-channels)
+
+_(no subprocess / http / sqlite calls detected)_
+
+## Notable external imports
+
+- `fastapi (FastAPI)`
+- `pydantic (BaseModel, Field)`
+- `sentence_transformers (SentenceTransformer)`
+- `uvicorn`
+
+## File dependencies (repo paths referenced)
+
+_(none detected)_
+
+## Re-validation
+
+If the `sha1` above differs from the current file's sha1, the inventory is stale — re-read the tool, confirm flags/env vars/entry-points/calls still match, and regenerate via `python bin/gen_tool_inventory.py`.

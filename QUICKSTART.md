@@ -1,10 +1,10 @@
-# M3 Memory — Quick Start
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Quick Start
 
 Get persistent memory running with your MCP agent in under five minutes.
 
 ---
 
-## 1. Install M3 Memory
+## 1️⃣ Install M3 Memory
 
 ```bash
 pip install m3-memory
@@ -20,27 +20,44 @@ If you get `command not found`, check that your Python scripts directory is on y
 
 ---
 
-## 2. Start a local embedding server
+## 2️⃣ Start a local embedding server
 
 M3 Memory needs a local model to generate embeddings for semantic search. [Ollama](https://ollama.com) is the easiest option:
 
 ```bash
-# Download an embedding model
-ollama pull nomic-embed-text
+# Download the default embedding model
+ollama pull qwen3-embedding:0.6b
 
 # Start the server (runs on localhost:11434)
 ollama serve
 ```
 
-Any OpenAI-compatible embedding endpoint works. [LM Studio](https://lmstudio.ai), vLLM, and LocalAI are also supported. If your server runs on a non-default port, set:
+Any OpenAI-compatible embedding endpoint works. [LM Studio](https://lmstudio.ai), vLLM, LocalAI, and `llama.cpp --server` are also supported. If your server runs on a non-default port, set:
 
 ```bash
 export LLM_ENDPOINTS_CSV="http://localhost:11434/v1"
 ```
 
+### Optional: load a small chat model for enrichment
+
+Some features — `auto_classify`, conversation/consolidation summaries, and future write-time enrichment — call your local LLM with short prompts. For these you want a **small, fast** model running alongside your embedder. M3 auto-selects via the same OpenAI-compatible endpoint; no extra config needed.
+
+Pick whichever fits your hardware and runtime:
+
+| Runtime | Example small model | Size |
+|---|---|---|
+| **Ollama** | `ollama pull qwen2.5:0.5b` or `ollama pull llama3.2:1b` | ~400 MB / ~1.3 GB |
+| **LM Studio** | Qwen2.5-0.5B-Instruct (GGUF, Q8) | ~500 MB |
+| **llama.cpp** | `llama-server -m qwen2.5-0.5b-instruct-q8_0.gguf` | ~500 MB |
+| **vLLM / LocalAI** | Any HF-compatible 0.5B–1B instruct model | varies |
+
+M3 picks the largest loaded chat model for all features. Embedding-only models (names matching `embed`, `nomic`, `jina`, `bge`, `e5`, `minilm`) are filtered out of chat selection automatically. If you want enrichment to stay fast, keep a small instruct model as your only loaded chat model — that way `get_best_llm` picks it for classification/summarization work. If you also load a large generation model, it will be preferred for every call (the per-feature "use the small model for enrichment, large model for generation" routing is on the roadmap, not yet in this release).
+
+If you only want embeddings, skip this step — M3 runs fine without a chat model; the enrichment features simply become no-ops.
+
 ---
 
-## 3. Configure your agent
+## 3️⃣ Configure your agent
 
 Add the M3 Memory MCP server to your agent's config file.
 
@@ -183,7 +200,7 @@ Some agents ship with their own local memory system that will compete with m3-me
 
 ---
 
-## 4. Verify it works
+## 4️⃣ Verify it works
 
 In your agent session, write a test memory:
 
@@ -218,7 +235,7 @@ If the memory you wrote comes back, everything is working: persistence, embeddin
 
 ---
 
-## 5. Optional: cross-device sync
+## 5️⃣ Optional: cross-device sync
 
 M3 Memory works standalone with local SQLite — no additional infrastructure needed. For multi-device sync, you can optionally connect:
 
@@ -229,7 +246,7 @@ See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL` and `CHR
 
 ---
 
-## Next steps
+## ▶️ Next steps
 
 - [CORE_FEATURES.md](./CORE_FEATURES.md) — what M3 Memory can do
 - [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 44 MCP tools and agent behavioral rules

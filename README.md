@@ -1,3 +1,4 @@
+![M3 Memory]
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory">
     <img src="docs/M3-banner.jpg" alt="M3 Memory" width="100%">
@@ -8,24 +9,26 @@
 
 Persistent, local memory for MCP agents.
 
-Your agent forgets everything between sessions. M3 Memory fixes that. Install it, add one line to your MCP config, and your agent remembers across sessions, detects contradictions, and keeps its own knowledge current — all on your hardware, fully offline.
+> **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
+>
+> 🚀 **[New to M3? Start here with our 5-minute "Human-First" guide.](https://github.com/skynetcmd/m3-memory/blob/main/GETTING_STARTED.md)**
 
 <p align="center">
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square"></a>
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
-  <a href="LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-45_tools-orange?style=flat-square"></a>
+  <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-46_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
 
-Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agent.
+Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agent. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
 
 ---
 
-## Install
+## 📦 Install
 
 ```bash
 pip install m3-memory
@@ -41,19 +44,25 @@ Add to your MCP config:
 }
 ```
 
-Requires a local embedding model. [Ollama](https://ollama.com) is the easiest:
+Requires a local embedding model. [Ollama](https://ollama.com) maybe the easiest:
 
 ```bash
-ollama pull nomic-embed-text && ollama serve
+ollama pull qwen3-embedding:0.6b && ollama serve
 ```
 
-Prefer a GUI? [LM Studio](https://lmstudio.ai) works too — load any embedding model (e.g. `nomic-embed-text-v1.5`) and start its server (defaults to port 1234).
+I personally use LM Studio for it's support for Apple's MLX. But, it's your preference.
 
-Restart your agent. Done.
+Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the model M3 Memory is tuned for. But you can set and use other embedders as you wish. For example, you could use `nomic-embed-text` (768-dim) which also works (with minimal fidelity loss) — set `EMBED_MODEL=nomic-embed-text` in your environment.
+
+As mentioned, you can use [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai) — load an embedding model and start its server.
+
+Want auto-classification, summarization, and consolidation? Load a small chat model alongside the embedder (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B instruct GGUF in LM Studio / llama.cpp). M3 auto-selects it; embedding-only features work without it. See [QUICKSTART → Optional: load a small chat model](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
+
+Restart your agent. Done!
 
 ---
 
-## What happens next
+## 🔮 What happens next (benefits of use)
 
 You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required.
 
@@ -61,7 +70,7 @@ Later, you're at your Windows desktop at home with Gemini CLI, and it picks up e
 
 ---
 
-## Why this exists
+## 💡 Why this exists
 
 Most AI agents don't persist state between sessions. You re-paste context, re-explain architecture, re-correct mistakes. When facts change, the agent has no mechanism to update what it "knows."
 
@@ -69,37 +78,49 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## What it does
+## ⚡ What it does
 
 **Persistent memory** — facts, decisions, preferences survive across sessions. Stored in local SQLite.
 
-**Hybrid retrieval** — FTS5 keyword matching + semantic vector similarity + MMR diversity re-ranking. Scored and explainable.
+**Hybrid retrieval** — FTS5 keyword matching + semantic vector similarity + MMR diversity re-ranking. Automatic, no tuning required.
 
 **Contradiction handling** — conflicting facts are automatically superseded. Bitemporal versioning preserves the full history.
 
-**Knowledge graph** — related memories linked automatically on write. Eight relationship types, 3-hop traversal.
+**Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal.
 
-**Local and private** — embeddings generated locally. No cloud calls. No API costs. Works offline.
+**Zero-config local install** — `pip install m3-memory`, one line in your MCP config, done. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 
-**Cross-device sync** — optional bi-directional delta sync across SQLite, PostgreSQL, and ChromaDB. Same memory on every machine.
+**Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB. Set one environment variable and your memories follow you across machines.
 
 ---
 
-## Who this is for
+## 📚 Learn more
+
+| | |
+|---|---|
+| 🚀 **[Getting started](https://github.com/skynetcmd/m3-memory/blob/main/GETTING_STARTED.md)** | 👥 **[Multi-agent orchestration](https://github.com/skynetcmd/m3-memory/blob/main/MULTI_AGENT.md)** |
+| ✨ **[Core features](https://github.com/skynetcmd/m3-memory/blob/main/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](https://github.com/skynetcmd/m3-memory/blob/main/examples/multi-agent-team/README.md)** |
+| 🏗️ **[System design](https://github.com/skynetcmd/m3-memory/blob/main/docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](https://github.com/skynetcmd/m3-memory/blob/main/COMPARISON.md)** |
+| 🔧 **[Implementation details](https://github.com/skynetcmd/m3-memory/blob/main/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](https://github.com/skynetcmd/m3-memory/blob/main/ENVIRONMENT_VARIABLES.md)** |
+| 🤖 **[Agent rules + all 46 tools](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](https://github.com/skynetcmd/m3-memory/blob/main/ROADMAP.md)** |
+
+---
+
+## 🎯 Who this is for
 
 | Good fit | Not the right tool |
 |---|---|
-| You use Claude Code, Gemini CLI, Aider, or any MCP agent | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
+| You use Claude Code, Gemini CLI, Aider, or any MCP agent — plus non-MCP clients via the built-in HTTP proxy server | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
 | You're coordinating multiple agents on a shared local store | You need a hosted agent runtime with managed scaling — see [Letta](https://letta.ai) |
 | You want memory that persists across sessions and devices | You only need in-session chat context |
 
 ---
 
-## Why trust this
+## 🛡️ Why trust this
 
 | | |
 |---|---|
-| **45 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, and tasks for multi-agent orchestration |
+| **46 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, and tasks for multi-agent orchestration |
 | **193 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, and orchestration paths |
 | **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
@@ -109,9 +130,9 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ---
 
-## Benchmarks
+## 📊 Benchmarks
 
-M3 Memory scores **89.0% on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)** (445/500 correct) — a 500-question evaluation of long-horizon conversational memory across six question types including single-session recall, multi-session reasoning, temporal reasoning, and knowledge updates.
+**89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500 correct) — a 500-question evaluation of long-horizon conversational memory. Without oracle metadata: **74.8%** (smart retrieval) to **68.0%** (fixed-k baseline).
 
 | Question type | n | Accuracy |
 |---|---|---|
@@ -123,11 +144,11 @@ M3 Memory scores **89.0% on [LongMemEval-S](https://github.com/xiaowu0162/LongMe
 | knowledge-update | 78 | 92.3% |
 | **Overall** | **500** | **89.0%** |
 
-Full methodology, reproduction command, and honest caveats: [`benchmarks/longmemeval/README.md`](./benchmarks/longmemeval/README.md).
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](https://github.com/skynetcmd/m3-memory/blob/main/benchmarks/longmemeval/README.md).
 
 ---
 
-## Core tools
+## 🧰 Core tools
 
 Most sessions use three tools. The rest is there when you need it.
 
@@ -139,13 +160,13 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 45 tools are documented in [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
+All 46 tools are documented in [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md).
 
 ---
 
-## For AI agents
+## 🤖 For AI agents
 
-M3 Memory exposes 45 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
+M3 Memory exposes 46 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
 
 To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
 
@@ -153,11 +174,11 @@ To teach your agent best practices (search before answering, write aggressively,
 examples/AGENT_RULES.md
 ```
 
-Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
+Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)
 
 ---
 
-## Let your agent install it
+## 🪄 Let your agent install it
 
 Already inside Claude Code or Gemini CLI? Paste one of these prompts:
 
@@ -166,7 +187,7 @@ Already inside Claude Code or Gemini CLI? Paste one of these prompts:
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"mcp-memory"}}} to my
 ~/.claude/settings.json under "mcpServers". Make sure Ollama is running
-with nomic-embed-text. Then use /mcp to verify the memory server loaded.
+with qwen3-embedding:0.6b. Then use /mcp to verify the memory server loaded.
 ```
 
 **Gemini CLI:**
@@ -174,7 +195,7 @@ with nomic-embed-text. Then use /mcp to verify the memory server loaded.
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"mcp-memory"}}} to my
 ~/.gemini/settings.json under "mcpServers". Make sure Ollama is running
-with nomic-embed-text.
+with qwen3-embedding:0.6b.
 ```
 
 After install, test it:
@@ -183,48 +204,44 @@ Write a memory: "M3 Memory installed successfully on [today's date]"
 Then search for: "M3 install"
 ```
 
+### Add the chat log subsystem
+
+Want auto-capture of every Claude Code / Gemini CLI / OpenCode / Aider conversation into a searchable, promotable chat log store? Once m3-memory is wired up, just say:
+
+```
+Install the m3-memory chat log subsystem.
+```
+
+The agent runs `bin/chatlog_init.py`, wires the host-agent hook, and installs the embed sweeper schedule. See [docs/CHATLOG.md](https://github.com/skynetcmd/m3-memory/blob/main/docs/CHATLOG.md) for the architecture and ops guide.
+
 ---
 
-## See it in action
+## 🎬 See it in action
 
 ### Contradiction detection
 <p align="center">
-  <img src="docs/demo_contradiction.svg" alt="Demo: contradiction detection and automatic resolution" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_contradiction.svg" alt="Demo: contradiction detection and automatic resolution" width="100%">
 </p>
 
 ### Hybrid search with scores
 <p align="center">
-  <img src="docs/demo_search.svg" alt="Demo: hybrid search with score breakdown" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_search.svg" alt="Demo: hybrid search with score breakdown" width="100%">
 </p>
 
 ### Cross-device, cross-platform sync
 <p align="center">
-  <img src="docs/demo_sync.svg" alt="Demo: cross-device, cross-platform memory sync" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_sync.svg" alt="Demo: cross-device, cross-platform memory sync" width="100%">
 </p>
 
 ---
 
-## Learn more
-
-- **Get running** → [QUICKSTART.md](./QUICKSTART.md)
-- **Understand features** → [CORE_FEATURES.md](./CORE_FEATURES.md)
-- **System design** → [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- **Implementation details** → [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md)
-- **Agent rules + all 44 tools** → [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md)
-- **Multi-agent orchestration** → [examples/multi-agent-team/README.md](./examples/multi-agent-team/README.md)
-- **M3 vs alternatives** → [COMPARISON.md](./COMPARISON.md)
-- **Configuration** → [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)
-- **Roadmap** → [ROADMAP.md](./ROADMAP.md)
-
----
-
-## Community
+## 💬 Community
 
 [![Discord](https://img.shields.io/badge/Discord-M3_Memory-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZcJ3EGC99B)
 &nbsp;
 [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-181717?logo=github&style=flat-square)](https://github.com/skynetcmd/m3-memory/issues)
 &nbsp;
-[Contributing](./CONTRIBUTING.md) · [Good first issues](./GOOD_FIRST_ISSUES.md)
+[Contributing](https://github.com/skynetcmd/m3-memory/blob/main/CONTRIBUTING.md) · [Good first issues](https://github.com/skynetcmd/m3-memory/blob/main/GOOD_FIRST_ISSUES.md)
 
 ---
 

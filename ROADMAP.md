@@ -1,20 +1,55 @@
-# M3 Memory — Roadmap
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Roadmap
 
-> Status: **Production (v2026.4.8)** — active development. Priorities shift based on community feedback; open an issue to vote on a feature.
+> Current version: **v2026.4.12b** — active development. Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
 
-## v0.2 — Distribution & Deployment (Next)
+## ✅ Shipped
+
+### v2026.04.06 — Production Release (April 6, 2026)
+
+- [x] Core memory system — write, search, update, delete, link
+- [x] Hybrid retrieval — FTS5 + vector similarity + MMR re-ranking
+- [x] Contradiction detection and bitemporal versioning
+- [x] Knowledge graph with 8 relationship types
+- [x] GDPR compliance — `gdpr_forget` (Article 17), `gdpr_export` (Article 20)
+- [x] Cross-device sync — SQLite ↔ PostgreSQL ↔ ChromaDB
+- [x] LLM auto-classification, conversation summarization, memory consolidation
+- [x] 44 MCP tools, 41 end-to-end tests
+
+### v2026.4.8 — PyPI Launch (April 10, 2026)
+
+- [x] `pip install m3-memory` works out-of-the-box
+- [x] `mcp-memory` CLI entry point auto-starts the server
+- [x] `publish.yml` GitHub Actions — automated PyPI publish via OIDC
+- [x] ROADMAP.md with community voting
+
+### v2026.4.12 — Multi-Agent Orchestration (April 12, 2026)
+
+- [x] Agent registry, handoffs, notifications, and task trees
+- [x] `m3-team` CLI for multi-agent teams from YAML
+- [x] MCP proxy v2 — catalog-driven dispatch, 46 tools
+- [x] License → Apache 2.0
+
+### v2026.4.12b — Conversation Grouping & Refresh Lifecycle (April 12, 2026)
+
+- [x] `conversation_id` on memory_write / memory_search / memory_update
+- [x] Refresh lifecycle — `refresh_on`, `refresh_reason`, `memory_refresh_queue`
+- [x] Reversible migration system with backup/restore
+- [x] 193 end-to-end tests
+
+---
+
+## 📦 Next — Distribution & Deployment
 
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
-- [x] **`pip install m3-memory` works out-of-the-box** — `mcp-memory` CLI entry point auto-starts the server *(shipped in v2026.4.8)*
 - [ ] **`setup.sh` / `install_os.py` polish** — OS-aware one-liner that validates deps and prints a ready-to-paste `mcp.json` snippet
 - [ ] **TestPyPI dry-run CI gate** — catch packaging regressions before every release
 
 ---
 
-## v0.3 — Observability & Web UI
+## 📈 Planned — Observability & Web UI
 
 - [ ] **Web dashboard** — lightweight local UI (FastAPI + HTMX) to browse memories, inspect knowledge graph, run GDPR operations
 - [ ] **Real-time contradiction log** — surfaced in dashboard and via `memory_verify` tool
@@ -24,7 +59,7 @@
 
 ---
 
-## v0.4 — Multi-Agent & Collaboration
+## 👥 Planned — Multi-Agent & Collaboration
 
 - [ ] **Shared memory namespaces** — optional scoped memory pools across multiple local agents
 - [ ] **Agent identity model** — per-agent memory isolation with explicit cross-agent read grants
@@ -33,7 +68,7 @@
 
 ---
 
-## v1.0 — Benchmark Suite & Stability
+## 🏆 Planned — Benchmark Suite & Stability
 
 - [ ] **Public benchmark suite** — MRR, Hit@5, latency vs. Mem0 / LangMem / raw ChromaDB on standard datasets
 - [ ] **Formal accuracy regression CI** — block merges that degrade retrieval quality
@@ -43,7 +78,7 @@
 
 ---
 
-## Icebox (considering, no timeline)
+## ❄️ Icebox (considering, no timeline)
 
 - Browser extension for passive memory capture
 - iOS / Android companion app for on-device sync
@@ -52,7 +87,7 @@
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 Vote on features by reacting to [GitHub Issues](https://github.com/skynetcmd/m3-memory/issues) with 👍. Open a new issue with the `roadmap` label to propose something not listed here.
 

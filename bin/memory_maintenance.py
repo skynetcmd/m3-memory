@@ -4,10 +4,11 @@ import base64
 import json
 import uuid
 from datetime import datetime, timezone
+import memory_core
 from memory_core import (
     _db, _conn, ARCHIVE_DB_PATH, DB_PATH, _cosine, _unpack,
     DEDUP_LIMIT, DEDUP_THRESHOLD, get_best_llm, memory_link_impl,
-    _get_embed_client, ctx, _content_hash, _embed, _pack
+    _get_embed_client, ctx, _content_hash, _embed, _pack, LLM_TIMEOUT
 )
 
 logger = logging.getLogger("memory_maintenance")
@@ -185,10 +186,15 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
 
     # VACUUM must run outside any transaction
     try:
-        vconn = sqlite3.connect(DB_PATH)
-        vconn.execute("VACUUM")
-        vconn.close()
-        report.append("Space reclaimed (VACUUM)")
+        # Skip VACUUM on databases > 500MB to prevent multi-minute hangs (#46)
+        db_size = os.path.getsize(DB_PATH)
+        if db_size > 500 * 1024 * 1024:
+            report.append(f"VACUUM skipped: database too large ({db_size / 1e9:.2f} GB)")
+        else:
+            vconn = sqlite3.connect(DB_PATH)
+            vconn.execute("VACUUM")
+            vconn.close()
+            report.append("Space reclaimed (VACUUM)")
     except Exception as e:
         report.append(f"VACUUM skipped: {e}")
 
@@ -424,12 +430,16 @@ async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20)
                     "temperature": 0.3
                 },
                 headers={"Authorization": f"Bearer {token}"},
-                timeout=120.0
+                timeout=memory_core.LLM_TIMEOUT
             )
             resp.raise_for_status()
-            summary_text = resp.json()["choices"][0]["message"]["content"].strip()
+            data = resp.json()
+            if "choices" not in data or not data["choices"]:
+                results.append(f"Error consolidating {g_type}/{g_agent}: LLM returned no choices")
+                continue
+            summary_text = data["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            results.append(f"Error consolidating {g_type}/{g_agent}: {e}")
+            results.append(f"Error consolidating {g_type}/{g_agent}: {type(e).__name__}: {e}")
             continue
             
         # 5. Store summary
@@ -453,7 +463,7 @@ async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20)
             
             # 6. Link to sources and 7. Soft-delete
             for r in rows:
-                memory_link_impl(summary_id, r["id"], "consolidates")
+                memory_link_impl(summary_id, r["id"], "consolidates", db=db)
                 db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (r["id"],))
         
         results.append(f"Consolidated {len(rows)} {g_type} items into summary {summary_id}")

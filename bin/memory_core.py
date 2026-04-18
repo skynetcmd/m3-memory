@@ -16,7 +16,7 @@ import asyncio
 
 import re
 from m3_sdk import M3Context
-from llm_failover import get_best_embed, get_best_llm
+from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
     """Summarizes a conversation into key points using the local LLM."""
@@ -57,12 +57,12 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
                 "temperature": 0.3
             },
             headers={"Authorization": f"Bearer {token}"},
-            timeout=120.0
+            timeout=LLM_TIMEOUT
         )
         resp.raise_for_status()
         summary_text = resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        return f"Error during LLM summarization: {e}"
+        return f"Error during LLM summarization: {type(e).__name__}: {e}"
 
     # 5. Store the summary as a new memory item
     summary_id = str(uuid.uuid4())
@@ -101,6 +101,15 @@ DEDUP_LIMIT            = int(os.environ.get("DEDUP_LIMIT", "1000"))
 DEDUP_THRESHOLD        = float(os.environ.get("DEDUP_THRESHOLD", "0.92"))
 CONTRADICTION_THRESHOLD = float(os.environ.get("CONTRADICTION_THRESHOLD", "0.85"))
 SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "500"))
+LLM_TIMEOUT            = float(os.environ.get("LLM_TIMEOUT", "120.0"))
+
+# Ranker/write-path tuning. See _augment_title_with_role and the scoring loop
+# in memory_search_scored_impl. These are safe defaults; override via env var
+# to disable or tune per deployment.
+SPEAKER_IN_TITLE       = os.environ.get("M3_SPEAKER_IN_TITLE", "1").lower() in ("1", "true", "yes")
+SHORT_TURN_THRESHOLD   = int(os.environ.get("M3_SHORT_TURN_THRESHOLD", "20"))
+TITLE_MATCH_BOOST      = float(os.environ.get("M3_TITLE_MATCH_BOOST", "0.05"))
+IMPORTANCE_WEIGHT      = float(os.environ.get("M3_IMPORTANCE_WEIGHT", "0.05"))
 
 VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "grok", "manual", "system", "unknown", "legacy"}
 
@@ -110,6 +119,51 @@ def _sanitize_fts(query: str, max_len: int = 500) -> str:
     if len(query) > max_len:
         query = query[:max_len]
     return _FTS_OPERATORS.sub(' ', query).strip()
+
+
+_TOKEN_SPLIT = re.compile(r"[^\w]+", re.UNICODE)
+
+def _augment_title_with_role(title: str, metadata: str | dict | None) -> str:
+    """Prepend '[role] ' to title when metadata carries a person-name role.
+
+    Makes the speaker visible to FTS so queries like 'what did Caroline say
+    about X' can match turns by Caroline. Idempotent: skips when title is
+    already bracket-prefixed. Gated by SPEAKER_IN_TITLE.
+    """
+    if not SPEAKER_IN_TITLE:
+        return title or ""
+    t = (title or "").strip()
+    if t.startswith("["):
+        return t
+    if not metadata:
+        return t
+    try:
+        meta = metadata if isinstance(metadata, dict) else json.loads(metadata)
+    except (json.JSONDecodeError, TypeError):
+        return t
+    role = (meta.get("role") or "").strip()
+    # Only prepend when role looks like a proper name (avoid 'user'/'assistant'
+    # generics which add noise without helping real-world queries).
+    if not role or role.lower() in ("user", "assistant", "system", "tool"):
+        return t
+    return f"[{role}] {t}".strip()
+
+
+def _query_title_overlap(query: str, title: str) -> float:
+    """Fraction of query tokens that also appear in title. 0.0 when no overlap.
+
+    Used as a small ranker boost for titles that literally echo query terms.
+    """
+    if not query or not title:
+        return 0.0
+    q_tokens = {t for t in _TOKEN_SPLIT.split(query.lower()) if len(t) > 2}
+    if not q_tokens:
+        return 0.0
+    t_tokens = {t for t in _TOKEN_SPLIT.split(title.lower()) if len(t) > 2}
+    if not t_tokens:
+        return 0.0
+    overlap = q_tokens & t_tokens
+    return len(overlap) / len(q_tokens)
 
 _POISON_PATTERNS = [
     re.compile(r'<script\b', re.I),
@@ -194,8 +248,145 @@ async def _auto_classify(content: str, title: str) -> str:
             return m_type
     except Exception as e:
         logger.debug(f"Auto-classification failed: {e}")
-    
+
     return "note"
+
+
+# ── Ingest-time LLM enrichment (opt-in) ──────────────────────────────────────
+# Gated by env vars so behavior matches today's default (no extra LLM calls at
+# write time) unless explicitly enabled. Intended for production callers that
+# pass blank titles / want entity-tagged metadata without running heuristics
+# themselves. All helpers fail-open: on any error, they return the untouched
+# input so ingest never fails because LLM enrichment did.
+
+def _ingest_llm_enabled(flag: str) -> bool:
+    return os.environ.get(flag, "0").strip().lower() in ("1", "true", "yes", "on")
+
+_AUTO_TITLE_CACHE: dict[str, str] = {}
+_AUTO_ENTITIES_CACHE: dict[str, list[str]] = {}
+
+async def _maybe_auto_title(content: str, title: str, force: bool = False) -> str:
+    """If M3_INGEST_AUTO_TITLE=1 and title is empty/trivial, ask a small LLM
+    for a 4-8 word descriptive title derived from content. Returns the
+    original title on any error or when the gate is off.
+
+    A title is considered "trivial" if it is empty, a bare role prefix like
+    "user:" or "assistant:", or shorter than 4 chars.
+
+    Pass `force=True` to bypass both the env gate and the trivial-title
+    check — callers that want to force LLM enrichment for a specific
+    pipeline variant can opt in regardless of M3_INGEST_AUTO_TITLE.
+    """
+    if not force and not _ingest_llm_enabled("M3_INGEST_AUTO_TITLE"):
+        return title
+    if not content:
+        return title
+    if not force:
+        t = (title or "").strip()
+        trivial = (not t) or len(t) < 4 or t.rstrip(":").lower() in {
+            "user", "assistant", "system", "tool", "msg", "note"
+        }
+        if not trivial:
+            return title
+
+    c_hash = _content_hash(content[:800])
+    if c_hash in _AUTO_TITLE_CACHE:
+        return _AUTO_TITLE_CACHE[c_hash]
+
+    try:
+        token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
+        client = _get_embed_client()
+        result = await get_smallest_llm(client, token)
+        if not result:
+            return title
+        base_url, model = result
+        prompt = (
+            "Summarize the following text as a concise title of 4 to 8 words. "
+            "Do not use quotes. Do not add a trailing period. No prefix.\n\n"
+            f"{content[:600]}"
+        )
+        resp = await client.post(
+            f"{base_url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+                "max_tokens": 32,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+        out = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        # Strip wrapping quotes and trailing punctuation
+        out = out.strip("\"'").rstrip(".!?,;:").strip()
+        if not out or len(out) > 120:
+            return title
+        _AUTO_TITLE_CACHE[c_hash] = out
+        return out
+    except Exception as e:
+        logger.debug(f"auto-title failed: {e}")
+        return title
+
+
+async def _maybe_auto_entities(content: str, force: bool = False) -> list[str]:
+    """If M3_INGEST_AUTO_ENTITIES=1, ask a small LLM for up to 8 salient
+    entities / named concepts in `content`. Returns [] on any error or when
+    the gate is off. Callers typically store the result under
+    metadata["entities"] and include it in embed_text for retrieval boost.
+
+    Pass `force=True` to bypass the env gate — callers that want per-variant
+    LLM enrichment can opt in regardless of M3_INGEST_AUTO_ENTITIES.
+    """
+    if not force and not _ingest_llm_enabled("M3_INGEST_AUTO_ENTITIES"):
+        return []
+    if not content:
+        return []
+    c_hash = _content_hash(content[:800])
+    if c_hash in _AUTO_ENTITIES_CACHE:
+        return list(_AUTO_ENTITIES_CACHE[c_hash])
+
+    try:
+        token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
+        client = _get_embed_client()
+        result = await get_smallest_llm(client, token)
+        if not result:
+            return []
+        base_url, model = result
+        prompt = (
+            "List up to 8 salient entities or named concepts from the text. "
+            "Reply with a JSON array of strings, nothing else.\n\n"
+            f"{content[:600]}"
+        )
+        resp = await client.post(
+            f"{base_url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 128,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20.0,
+        )
+        resp.raise_for_status()
+        raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        # Be lenient: strip code fences and pull the first JSON array.
+        raw = raw.strip("`").strip()
+        start, end = raw.find("["), raw.rfind("]")
+        if start < 0 or end < 0 or end <= start:
+            return []
+        parsed = json.loads(raw[start:end + 1])
+        if not isinstance(parsed, list):
+            return []
+        ents = [str(x).strip() for x in parsed if isinstance(x, (str, int, float)) and str(x).strip()]
+        ents = ents[:8]
+        _AUTO_ENTITIES_CACHE[c_hash] = ents
+        return list(ents)
+    except Exception as e:
+        logger.debug(f"auto-entities failed: {e}")
+        return []
+
 
 def _track_cost(operation: str, tokens_est: int = 0):
     _COST_COUNTERS[operation] = _COST_COUNTERS.get(operation, 0) + 1
@@ -206,7 +397,8 @@ def _ensure_sync_tables() -> None:
     import subprocess
     try:
         migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
-        subprocess.run([sys.executable, migration_script], check=True, timeout=30)
+        # Increase timeout to 300s to handle backups of multi-GB databases (#46)
+        subprocess.run([sys.executable, migration_script], check=True, timeout=300)
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
 
@@ -499,7 +691,7 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
     now = datetime.now(timezone.utc).isoformat()
     prepared: list[dict] = []
     for it in items:
-        mid = str(uuid.uuid4())
+        mid = it.get("id") or str(uuid.uuid4())
         meta = it.get("metadata", "{}")
         if isinstance(meta, dict):
             meta = json.dumps(meta)
@@ -507,7 +699,7 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
         if scope not in VALID_SCOPES:
             scope = "agent"
         content = it.get("content") or ""
-        title = it.get("title") or ""
+        title = _augment_title_with_role(it.get("title") or "", meta)
         agent = (
             (it.get("change_agent") or "").strip().lower()
             or _infer_change_agent_util(
@@ -545,7 +737,8 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
                 "refresh_on": it.get("refresh_on") or None,
                 "refresh_reason": it.get("refresh_reason") or None,
                 "embed": it.get("embed", True),
-                "embed_text": content or title,
+                "embed_text": (it.get("embed_text") or content or title),
+                "variant": it.get("variant") or None,
             }
         )
 
@@ -555,8 +748,8 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
             db.execute(
                 "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, "
                 "change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, "
-                "valid_from, valid_to, conversation_id, refresh_on, refresh_reason, content_hash) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "valid_from, valid_to, conversation_id, refresh_on, refresh_reason, content_hash, variant) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     p["id"], p["type"], p["title"], p["content"], p["metadata"],
                     p["agent_id"], p["model_id"], p["change_agent"], p["importance"],
@@ -564,6 +757,7 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
                     now, p["valid_from"], p["valid_to"], p["conversation_id"],
                     p["refresh_on"], p["refresh_reason"],
                     hashlib.sha256((p["content"] or "").encode("utf-8")).hexdigest(),
+                    p["variant"],
                 ),
             )
             if p["embed"]:
@@ -577,11 +771,25 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
             )
 
     # Phase 2: batched embeddings for items that requested them.
+    # Dedup by content_hash(embed_text) so variants that share identical
+    # embed_text don't trigger duplicate embedder calls. Cache hits inside
+    # _embed_many already handle DB-cached vectors, but this additionally
+    # deduplicates within the current batch.
     to_embed = [p for p in prepared if p["embed"] and p["embed_text"]]
     if to_embed:
-        vecs = await _embed_many([p["embed_text"] for p in to_embed])
+        hash_to_first: dict[str, int] = {}
+        unique_texts: list[str] = []
+        assign: list[int] = []  # idx into unique_texts for each item in to_embed
+        for p in to_embed:
+            h = _content_hash(p["embed_text"])
+            if h not in hash_to_first:
+                hash_to_first[h] = len(unique_texts)
+                unique_texts.append(p["embed_text"])
+            assign.append(hash_to_first[h])
+        unique_vecs = await _embed_many(unique_texts)
         with _db() as db:
-            for p, (vec, m) in zip(to_embed, vecs):
+            for p, idx in zip(to_embed, assign):
+                vec, m = unique_vecs[idx]
                 if not vec:
                     continue
                 db.execute(
@@ -732,6 +940,70 @@ def _apply_recency_bonus(scored, recency_bias, explain=False):
     return rescored
 
 
+def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -> list[tuple[float, dict]]:
+    """Trims results where the score drop-off is significantly higher than average."""
+    if len(ranked) < 3:
+        return ranked
+    
+    # Calculate score differences between consecutive results
+    diffs = [ranked[i][0] - ranked[i+1][0] for i in range(len(ranked) - 1)]
+    avg_diff = sum(diffs) / len(diffs)
+    
+    # Find the first 'elbow' where the drop is significantly larger than the average
+    for i, d in enumerate(diffs):
+        if d > avg_diff * sensitivity:
+            # We found an elbow, trim here
+            return ranked[:i+1]
+            
+    return ranked
+
+
+def _apply_temporal_boost(scored, query, explain=False):
+    """Detects dates in query and boosts items with matching or nearby valid_from dates."""
+    # 1. Extract potential dates from query (YYYY-MM-DD)
+    date_patterns = [
+        r"\b(\d{4})-(\d{2})-(\d{2})\b",
+        r"\b(\d+)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b",
+    ]
+    query_dates = []
+    for pattern in date_patterns:
+        for match in re.finditer(pattern, query.lower()):
+            try:
+                if "-" in match.group(0):
+                    query_dates.append(datetime.fromisoformat(match.group(0)).date())
+                else:
+                    d, m, y = match.groups()
+                    months = ["january", "february", "march", "april", "may", "june", 
+                              "july", "august", "september", "october", "november", "december"]
+                    query_dates.append(date(int(y), months.index(m) + 1, int(d)))
+            except Exception:
+                continue
+    
+    if not query_dates:
+        return scored
+
+    rescored = []
+    for s, it in scored:
+        boost = 0.0
+        vf_str = it.get("valid_from", "")
+        if vf_str:
+            try:
+                vf_date = datetime.fromisoformat(vf_str.split("T")[0]).date()
+                for qd in query_dates:
+                    diff = abs((vf_date - qd).days)
+                    if diff == 0: boost = max(boost, 0.25)
+                    elif diff <= 2: boost = max(boost, 0.15)
+                    elif diff <= 7: boost = max(boost, 0.05)
+            except Exception:
+                pass
+        
+        if explain and boost > 0:
+            if "_explanation" not in it: it["_explanation"] = {}
+            it["_explanation"]["temporal_boost"] = boost
+        rescored.append((s + boost, it))
+    return rescored
+
+
 async def memory_search_scored_impl(
     query,
     k=8,
@@ -746,6 +1018,8 @@ async def memory_search_scored_impl(
     extra_columns=None,
     recency_bias=0.0,
     vector_weight=0.7,
+    adaptive_k=False,
+    variant="",
     _depth=0,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
@@ -812,6 +1086,14 @@ async def memory_search_scored_impl(
     if conversation_id:
         where_clauses.append("mi.conversation_id = ?")
         params.append(conversation_id)
+    if variant:
+        # Accept "<name>" for exact-variant, "" for unfiltered (default),
+        # or the sentinel "__none__" to filter for untagged legacy rows.
+        if variant == "__none__":
+            where_clauses.append("mi.variant IS NULL")
+        else:
+            where_clauses.append("mi.variant = ?")
+            params.append(variant)
 
     if as_of:
         where_clauses.append("(mi.valid_from = '' OR mi.valid_from <= ?)")
@@ -822,9 +1104,12 @@ async def memory_search_scored_impl(
 
     def _recurse_semantic():
         return memory_search_scored_impl(
-            query, k, type_filter, agent_filter, "semantic",
-            user_id, scope, as_of, conversation_id, explain,
-            extra_columns, recency_bias, vector_weight, _depth + 1,
+            query, k=k, type_filter=type_filter, agent_filter=agent_filter,
+            search_mode="semantic", user_id=user_id, scope=scope, as_of=as_of,
+            conversation_id=conversation_id, explain=explain,
+            extra_columns=extra_columns, recency_bias=recency_bias,
+            vector_weight=vector_weight, adaptive_k=adaptive_k,
+            variant=variant, _depth=_depth + 1,
         )
 
     try:
@@ -877,21 +1162,56 @@ async def memory_search_scored_impl(
         vector_score = page_scores[i]
         bm25_norm = (1.0 / (1.0 + abs(row["bm25_score"])))
         final_score = vector_score * vector_weight + bm25_norm * (1.0 - vector_weight)
+
+        # Short-turn length penalty: stubs like "ok cool" rank identically to
+        # substantive content under FTS+vector alone. Scale by length up to the
+        # threshold, full-weight beyond.
+        content_len = len(row["content"] or "")
+        length_penalty = 1.0
+        if content_len < SHORT_TURN_THRESHOLD:
+            length_penalty = max(0.3, content_len / SHORT_TURN_THRESHOLD)
+        final_score *= length_penalty
+
+        # Title-match boost: titles that echo query tokens are high-signal.
+        title_overlap = _query_title_overlap(query, row["title"] or "")
+        title_boost = TITLE_MATCH_BOOST * title_overlap
+        final_score += title_boost
+
+        # Importance blend: caller-supplied importance nudges ranking.
+        importance_boost = IMPORTANCE_WEIGHT * (float(row["importance"] or 0.0))
+        final_score += importance_boost
+
         if explain:
             item["_explanation"] = {
                 "vector": vector_score,
                 "bm25": bm25_norm,
                 "importance": row["importance"],
-                "raw_hybrid": final_score,
+                "raw_hybrid": vector_score * vector_weight + bm25_norm * (1.0 - vector_weight),
+                "length_penalty": length_penalty,
+                "title_overlap": title_overlap,
+                "title_boost": title_boost,
+                "importance_boost": importance_boost,
                 "vector_weight": vector_weight,
             }
         scored.append((final_score, item))
+
+    # Apply temporal boost if dates detected in query
+    if scored:
+        scored = _apply_temporal_boost(scored, query, explain=explain)
 
     if recency_bias > 0 and scored:
         scored = _apply_recency_bonus(scored, recency_bias, explain=explain)
 
     _MMR_LAMBDA = 0.7
     pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
+    
+    # Adaptive K: Trim by elbow if requested
+    if adaptive_k:
+        pre_ranked_all = _trim_by_elbow(pre_ranked_all)
+        # Recalculate k to match the trimmed length if it's smaller
+        if len(pre_ranked_all) < k:
+            k = len(pre_ranked_all)
+
     seen_content: set[str] = set()
     pre_ranked: list = []
     for entry in pre_ranked_all:
@@ -956,11 +1276,14 @@ async def memory_search_scored_impl(
     return ranked
 
 
-async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", _depth=0):
+async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, variant="", _depth=0):
     ranked = await memory_search_scored_impl(
         query, k=k, type_filter=type_filter, agent_filter=agent_filter,
         search_mode=search_mode, user_id=user_id, scope=scope, as_of=as_of,
         conversation_id=conversation_id, explain=explain,
+        recency_bias=float(recency_bias) if recency_bias else 0.0,
+        adaptive_k=bool(adaptive_k),
+        variant=variant,
     )
     if ranked is None:
         return "Search failed: FTS and semantic both unavailable."
@@ -1093,30 +1416,38 @@ def memory_delete_impl(id, hard=False):
                        (datetime.now(timezone.utc).isoformat(), id))
     return f"{'Hard' if hard else 'Soft'}-deleted: {id}"
 
-VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff"}
+VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff", "precedes", "follows"}
 
-def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related") -> str:
+def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> str:
+    # Verify both items exist
+    for mid in (from_id, to_id):
+        if not db.execute("SELECT id FROM memory_items WHERE id = ?", (mid,)).fetchone():
+            return f"Error: memory {mid} not found"
+    # Check for duplicate link
+    existing = db.execute(
+        "SELECT id FROM memory_relationships WHERE from_id = ? AND to_id = ? AND relationship_type = ?",
+        (from_id, to_id, relationship_type)
+    ).fetchone()
+    if existing:
+        return f"Link already exists: {existing['id']}"
+    rid = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+        (rid, from_id, to_id, relationship_type, datetime.now(timezone.utc).isoformat())
+    )
+    return f"Linked: {from_id} --[{relationship_type}]--> {to_id} (id: {rid})"
+
+
+def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related", db=None) -> str:
     """Creates a directional link between two memory items."""
     if relationship_type not in VALID_RELATIONSHIP_TYPES:
         return f"Error: invalid relationship type '{relationship_type}'. Valid: {', '.join(sorted(VALID_RELATIONSHIP_TYPES))}"
+    
+    if db is not None:
+        return _memory_link_inner(from_id, to_id, relationship_type, db)
+    
     with _db() as db:
-        # Verify both items exist
-        for mid in (from_id, to_id):
-            if not db.execute("SELECT id FROM memory_items WHERE id = ?", (mid,)).fetchone():
-                return f"Error: memory {mid} not found"
-        # Check for duplicate link
-        existing = db.execute(
-            "SELECT id FROM memory_relationships WHERE from_id = ? AND to_id = ? AND relationship_type = ?",
-            (from_id, to_id, relationship_type)
-        ).fetchone()
-        if existing:
-            return f"Link already exists: {existing['id']}"
-        rid = str(uuid.uuid4())
-        db.execute(
-            "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
-            (rid, from_id, to_id, relationship_type, datetime.now(timezone.utc).isoformat())
-        )
-    return f"Linked: {from_id} --[{relationship_type}]--> {to_id} (id: {rid})"
+        return _memory_link_inner(from_id, to_id, relationship_type, db)
 
 def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
     """Returns the local graph neighborhood of a memory item up to N hops."""
@@ -1403,8 +1734,17 @@ async def conversation_append_impl(conversation_id, role, content, agent_id="", 
 
 VALID_SCOPES = {"user", "session", "agent", "org"}
 
-async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason=""):
-    """Internal implementation for memory_write. Contradiction detection is automatic."""
+async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None):
+    """Internal implementation for memory_write. Contradiction detection is automatic.
+
+    `variant` tags the item with a free-form ingestion-pipeline identifier so
+    multiple variants (e.g. "baseline", "heuristic_c1c4", "llm_v1") can coexist
+    and be compared. Default None = untagged.
+
+    `embed_text` overrides the default text fed to the embedder (which is
+    `content or title`). Useful when callers want to enrich the embedding with
+    titles/entities without polluting the displayed content.
+    """
     if isinstance(metadata, dict):
         metadata = json.dumps(metadata)
     elif not isinstance(metadata, str):
@@ -1436,6 +1776,20 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         from datetime import timedelta
         expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
+    # Opt-in ingest-time enrichment (env-gated, fail-open).
+    title = await _maybe_auto_title(content or "", title)
+    title = _augment_title_with_role(title, metadata)
+    if _ingest_llm_enabled("M3_INGEST_AUTO_ENTITIES"):
+        ents = await _maybe_auto_entities(content or "")
+        if ents:
+            try:
+                meta_dict = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
+            except json.JSONDecodeError:
+                meta_dict = {}
+            if isinstance(meta_dict, dict) and "entities" not in meta_dict:
+                meta_dict["entities"] = ents
+                metadata = json.dumps(meta_dict)
+
     with _db() as db:
         _vf = valid_from or now
         _vt = valid_to or ""
@@ -1443,9 +1797,9 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         _ron = refresh_on or None
         _rreason = refresh_reason or None
         db.execute(
-            "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason)
+            "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, variant) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason, variant)
         )
         if embed:
             db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (item_id, "upsert"))
@@ -1454,13 +1808,13 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
 
     vec = None
     if embed:
-        vec, m = await _embed(content or title)
+        vec, m = await _embed(embed_text or content or title)
         if vec:
             with _db() as db:
                 db.execute(
                     "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(content or title))
+                    (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(embed_text or content or title))
                 )
 
     _record_history(item_id, "create", None, content, "content", agent_id or agent)
