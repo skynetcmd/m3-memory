@@ -1,13 +1,14 @@
-import sys
+import logging
 import os
 import sqlite3
-import logging
+import sys
 
 # Dynamically resolve project root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
 from m3_sdk import M3Context
+
 ctx = M3Context()
 DB_PATH = ctx.db_path
 
@@ -22,6 +23,7 @@ except ImportError:
 mcp = FastMCP("Session Manager")
 
 from datetime import datetime, timezone
+
 
 # Ensure table exists at module load (M13)
 def _ensure_table():

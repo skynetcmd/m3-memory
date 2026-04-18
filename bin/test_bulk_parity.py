@@ -9,12 +9,11 @@ variant handling, contradiction detection, and conversation emitters.
 import asyncio
 import json
 import os
-import sys
 import sqlite3
+import sys
 import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))

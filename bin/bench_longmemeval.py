@@ -51,19 +51,14 @@ os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:8081/v1")
 os.environ.setdefault("EMBED_BULK_CHUNK", "1024")
 os.environ.setdefault("EMBED_BULK_CONCURRENCY", "4")
 
-import memory_core  # noqa: E402
+import temporal_utils  # noqa: E402
+from auth_utils import get_api_key  # noqa: E402
 from memory_core import (  # noqa: E402
+    _db,
+    memory_search_scored_impl,
     memory_write_bulk_impl,
     memory_write_impl,
-    memory_link_impl,
-    memory_search_scored_impl,
-    _embed,
-    _batch_cosine,
-    _unpack,
-    _db,
 )
-from auth_utils import get_api_key  # noqa: E402
-import temporal_utils  # noqa: E402
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
 

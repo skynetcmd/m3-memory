@@ -2,6 +2,7 @@ import json
 import re
 import uuid
 
+
 class AgentProtocol:
     """
     Unified translation layer for OpenAI-style payloads across M3 Max MCP bridges.
@@ -13,11 +14,11 @@ class AgentProtocol:
         """Translates OpenAI messages to Anthropic's format."""
         system = ""
         anthropic_messages = []
-        
+
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content")
-            
+
             if role == "system":
                 system = content
             else:
@@ -25,7 +26,7 @@ class AgentProtocol:
                     "role": role if role != "assistant" else "assistant",
                     "content": content
                 })
-        
+
         return {
             "model": model,
             "system": system,
@@ -42,7 +43,7 @@ class AgentProtocol:
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content")
-            
+
             if role == "system":
                 system_instruction = {"parts": [{"text": content}]}
             else:
@@ -55,7 +56,7 @@ class AgentProtocol:
         payload = {"contents": contents}
         if system_instruction:
             payload["system_instruction"] = system_instruction
-        
+
         return payload
 
     @staticmethod

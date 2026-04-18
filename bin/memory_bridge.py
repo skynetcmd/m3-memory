@@ -1,8 +1,9 @@
-from mcp.server.fastmcp import FastMCP
 import inspect
 import logging
-import sys
 import os
+import sys
+
+from mcp.server.fastmcp import FastMCP
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -16,10 +17,8 @@ mcp = FastMCP("Memory Bridge")
 
 # Modular imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import memory_core
-import memory_sync
-import memory_maintenance as _memory_maintenance_mod
 import mcp_tool_catalog
+import memory_core
 
 # Re-export internal helpers for legacy compatibility (C7, H11)
 _conn = memory_core._conn

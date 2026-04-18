@@ -1,7 +1,7 @@
+import logging
+import os
 import platform
 import subprocess
-import os
-import logging
 
 logger = logging.getLogger("thermal_utils")
 

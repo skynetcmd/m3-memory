@@ -63,12 +63,12 @@ import sys
 import time
 import uuid
 from typing import Any, AsyncIterator, List, Optional, Union
-from pydantic import BaseModel, Field
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -115,11 +115,11 @@ def _check_auth(request: Request):
         # However, a warning should be logged.
         log.warning("MCP_PROXY_KEY is NOT set. Proxy is running without authentication!")
         return True
-    
+
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return False
-    
+
     token = auth_header.replace("Bearer ", "").strip()
     return token == master
 

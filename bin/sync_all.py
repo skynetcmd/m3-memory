@@ -8,14 +8,14 @@ Usage:
     python bin/sync_all.py
     python bin/sync_all.py --dry-run   (connectivity check only)
 """
-import sys
-import os
-import platform
-import subprocess
-import pathlib
-import socket
-import logging
 import argparse
+import logging
+import os
+import pathlib
+import platform
+import socket
+import subprocess
+import sys
 
 IS_WIN = platform.system() == "Windows"
 

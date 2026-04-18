@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+
 from memory_core import (
-    _db, _conn, _pack, _unpack, CHROMA_BASE_URL, CHROMA_COLLECTION, CHROMA_V2_PREFIX, CHROMA_CONTENT_MAX, EMBED_DIM
+    CHROMA_BASE_URL,
+    CHROMA_COLLECTION,
+    CHROMA_CONTENT_MAX,
+    CHROMA_V2_PREFIX,
+    EMBED_DIM,
+    _db,
+    _pack,
+    _unpack,
 )
 
 logger = logging.getLogger("memory_sync")
@@ -86,7 +94,7 @@ async def _push_to_chroma(client, col_id, col_path, max_items):
 async def _pull_from_chroma(client, col_id, col_path, max_items):
     """Pulls new items from ChromaDB and stores them in chroma_mirror."""
     from datetime import datetime, timezone
-    
+
     # 1. Get last pull timestamp
     last_pull = "1970-01-01T00:00:00Z"
     with _db() as db:
@@ -106,7 +114,7 @@ async def _pull_from_chroma(client, col_id, col_path, max_items):
         }, timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
-        
+
         if not data.get("ids"): return 0, 0, ""
 
         # Validate parallel arrays have consistent lengths
@@ -129,13 +137,13 @@ async def _pull_from_chroma(client, col_id, col_path, max_items):
                 if emb_vec and len(emb_vec) != EMBED_DIM:
                     logger.warning(f"ChromaDB pull: dimension mismatch for {mid}: got {len(emb_vec)}, expected {EMBED_DIM} — skipping")
                     continue
-                
+
                 # Skip if it's our own local item (optional, depending on architecture)
                 # if meta.get("origin_device") == platform.node(): continue
 
                 # Insert into mirror
                 db.execute("""
-                    INSERT INTO chroma_mirror 
+                    INSERT INTO chroma_mirror
                     (id, type, title, content, metadata_json, agent_id, model_id, origin_device, importance, remote_created_at, pulled_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
@@ -144,12 +152,12 @@ async def _pull_from_chroma(client, col_id, col_path, max_items):
                         importance = excluded.importance,
                         pulled_at = excluded.pulled_at
                 """, (
-                    mid, meta.get("type", "note"), meta.get("title", ""), content, 
+                    mid, meta.get("type", "note"), meta.get("title", ""), content,
                     json.dumps(meta), meta.get("agent_id", ""), meta.get("model_id", ""),
                     meta.get("origin_device", ""), meta.get("importance", 0.5),
                     meta.get("created_at", last_pull), datetime.now(timezone.utc).isoformat()
                 ))
-                
+
                 # Insert embedding
                 db.execute("""
                     INSERT INTO chroma_mirror_embeddings (id, mirror_id, embedding, dim, pulled_at)
@@ -158,13 +166,13 @@ async def _pull_from_chroma(client, col_id, col_path, max_items):
                         embedding = excluded.embedding,
                         pulled_at = excluded.pulled_at
                 """, (mid, mid, _pack(emb_vec), len(emb_vec), datetime.now(timezone.utc).isoformat()))
-                
+
                 pulled += 1
 
             # Update sync state
             db.execute("INSERT OR REPLACE INTO sync_state (collection_name, last_pull_at) VALUES (?, ?)",
                       (CHROMA_COLLECTION, datetime.now(timezone.utc).isoformat()))
-            
+
     except Exception as e:
         logger.exception(f"ChromaDB pull failed: {e}")
         failed = max_items # approximation
@@ -178,7 +186,7 @@ async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
     if reset_stalled:
         with _db() as db:
             db.execute("UPDATE chroma_sync_queue SET attempts = 0, stalled_since = NULL WHERE attempts >= 3")
-    
+
     if not CHROMA_BASE_URL:
         logger.debug("ChromaDB sync skipped: CHROMA_BASE_URL not set.")
         return "ChromaDB sync skipped: CHROMA_BASE_URL not set."
@@ -198,14 +206,14 @@ async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
         return "ChromaDB unreachable"
 
     col_path = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{col_id}"
-    
+
     pushed, p_failed = 0, 0
     pulled, l_failed = 0, 0
-    
+
     if direction in ("push", "both"):
         pushed, p_failed, _ = await _push_to_chroma(client, col_id, col_path, max_items)
-    
+
     if direction in ("pull", "both"):
         pulled, l_failed, _ = await _pull_from_chroma(client, col_id, col_path, max_items)
-        
+
     return f"Synced: {pushed} pushed, {pulled} pulled, {p_failed + l_failed} failed"

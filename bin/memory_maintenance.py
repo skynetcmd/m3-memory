@@ -1,14 +1,27 @@
-import sqlite3
-import logging
 import base64
 import json
+import logging
+import os
+import sqlite3
 import uuid
 from datetime import datetime, timezone
+
 import memory_core
 from memory_core import (
-    _db, _conn, ARCHIVE_DB_PATH, DB_PATH, _cosine, _unpack,
-    DEDUP_LIMIT, DEDUP_THRESHOLD, get_best_llm, memory_link_impl,
-    _get_embed_client, ctx, _content_hash, _embed, _pack, LLM_TIMEOUT
+    ARCHIVE_DB_PATH,
+    DB_PATH,
+    DEDUP_LIMIT,
+    DEDUP_THRESHOLD,
+    _content_hash,
+    _cosine,
+    _db,
+    _embed,
+    _get_embed_client,
+    _pack,
+    _unpack,
+    ctx,
+    get_best_llm,
+    memory_link_impl,
 )
 
 logger = logging.getLogger("memory_maintenance")
@@ -36,11 +49,11 @@ def _transfer_to_archive(item_id, reason, db):
 def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True):
     with _db() as db:
         rows = db.execute(f"SELECT me.memory_id, me.embedding, mi.title FROM memory_embeddings me JOIN memory_items mi ON me.memory_id = mi.id WHERE mi.is_deleted = 0 ORDER BY mi.created_at DESC LIMIT {DEDUP_LIMIT}").fetchall()
-    
+
     items = [(r["memory_id"], _unpack(r["embedding"]), r["title"]) for r in rows]
     duplicates = []
     seen = set()
-    
+
     for i, (mid_a, vec_a, title_a) in enumerate(items):
         if mid_a in seen: continue
         for j in range(i + 1, len(items)):
@@ -49,12 +62,12 @@ def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True):
             if _cosine(vec_a, vec_b) >= threshold:
                 duplicates.append((mid_a, mid_b, title_a, title_b))
                 seen.add(mid_b)
-    
+
     if not dry_run:
         with _db() as db:
             for _, mid_b, _, _ in duplicates:
                 db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (mid_b,))
-    
+
     return f"Found {len(duplicates)} duplicate groups."
 
 def memory_feedback_impl(memory_id, feedback="useful"):
@@ -259,7 +272,7 @@ def gdpr_forget_impl(user_id: str) -> str:
             # Delete history
             db.execute(f"DELETE FROM memory_history WHERE memory_id IN ({placeholders})", item_ids)
             # Hard-delete the items themselves
-            db.execute(f"DELETE FROM memory_items WHERE user_id = ?", (user_id,))
+            db.execute("DELETE FROM memory_items WHERE user_id = ?", (user_id,))
 
         # Log the forget request
         try:
@@ -303,9 +316,9 @@ def memory_export_impl(agent_filter="", type_filter="", since="", output_format=
     if since:
         where.append("mi.created_at >= ?")
         params.append(since)
-    
+
     where_sql = " AND ".join(where)
-    
+
     with _db() as db:
         rows = db.execute(f"SELECT * FROM memory_items mi WHERE {where_sql}", params).fetchall()
         items = []
@@ -320,12 +333,12 @@ def memory_export_impl(agent_filter="", type_filter="", since="", output_format=
                 if edata["embedding"]:
                     edata["embedding"] = base64.b64encode(edata["embedding"]).decode("utf-8")
                 item["embeddings"].append(edata)
-            
+
             # Fetch relationships
             rels = db.execute("SELECT to_id, relationship_type, created_at FROM memory_relationships WHERE from_id = ?", (mid,)).fetchall()
             item["relationships"] = [dict(r) for r in rels]
             items.append(item)
-            
+
     return json.dumps({
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "item_count": len(items),
@@ -339,7 +352,7 @@ def memory_import_impl(data: str):
         items = payload.get("items", [])
     except Exception as e:
         return f"Error parsing import data: {e}"
-    
+
     i_count, e_count, r_count = 0, 0, 0
     with _db() as db:
         for item in items:
@@ -350,11 +363,11 @@ def memory_import_impl(data: str):
             placeholders = ", ".join(["?"] * len(clean_item))
             columns = ", ".join(clean_item.keys())
             update_stmt = ", ".join([f"{k}=excluded.{k}" for k in clean_item.keys() if k != "id"])
-            
+
             sql = f"INSERT INTO memory_items ({columns}) VALUES ({placeholders}) ON CONFLICT(id) DO UPDATE SET {update_stmt}"
             db.execute(sql, list(clean_item.values()))
             i_count += 1
-            
+
             # 2. Re-insert embeddings
             mid = clean_item["id"]
             for edata in item.get("embeddings", []):
@@ -364,7 +377,7 @@ def memory_import_impl(data: str):
                     (str(uuid.uuid4()), mid, eblob, edata.get("embed_model"), edata.get("dim"), edata.get("created_at"), edata.get("content_hash"))
                 )
                 e_count += 1
-            
+
             # 3. Re-insert relationships
             for rdata in item.get("relationships", []):
                 db.execute(
@@ -372,7 +385,7 @@ def memory_import_impl(data: str):
                     (str(uuid.uuid4()), mid, rdata.get("to_id"), rdata.get("relationship_type"), rdata.get("created_at"))
                 )
                 r_count += 1
-                
+
     return f"Imported {i_count} items, {e_count} embeddings, {r_count} relationships"
 
 async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20):
@@ -388,37 +401,37 @@ async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20)
         params.append(agent_filter)
     sql += " GROUP BY type, agent_id HAVING cnt > ?"
     params.append(threshold)
-    
+
     with _db() as db:
         groups = db.execute(sql, params).fetchall()
-        
+
     if not groups:
         return "No memory groups exceed consolidation threshold."
-    
+
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
     client = _get_embed_client()
     result = await get_best_llm(client, token)
     if not result:
         return "Error: No local LLM available for consolidation."
     base_url, model = result
-    
+
     results = []
     for g in groups:
         g_type, g_agent = g["type"], g["agent_id"]
         n_to_consolidate = g["cnt"] - threshold
-        
+
         # 2. Fetch oldest N items
         with _db() as db:
             rows = db.execute(
                 "SELECT id, title, content FROM memory_items WHERE type = ? AND agent_id = ? AND is_deleted = 0 ORDER BY created_at ASC LIMIT ?",
                 (g_type, g_agent, n_to_consolidate)
             ).fetchall()
-        
+
         if not rows: continue
-        
+
         # 3. Concatenate content
         items_text = "\n".join(f"- {r['title'] or '(untitled)'}: {r['content']}" for r in rows)
-        
+
         # 4. Call LLM
         prompt = f"Consolidate these {len(rows)} memory items into a single comprehensive summary. Preserve all facts, decisions, and key details.\n\n{items_text}"
         try:
@@ -441,31 +454,31 @@ async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20)
         except Exception as e:
             results.append(f"Error consolidating {g_type}/{g_agent}: {type(e).__name__}: {e}")
             continue
-            
+
         # 5. Store summary
         summary_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        
+
         # Embed the summary so it's searchable
         s_vec, s_model = await _embed(summary_text)
-        
+
         with _db() as db:
             db.execute(
                 "INSERT INTO memory_items (id, type, title, content, agent_id, created_at, content_hash) VALUES (?, 'summary', ?, ?, ?, ?, ?)",
                 (summary_id, f"Consolidated {g_type} memories for {g_agent}", summary_text, g_agent, now, _content_hash(summary_text))
             )
-            
+
             if s_vec:
                 db.execute(
                     "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) VALUES (?,?,?,?,?,?,?)",
                     (str(uuid.uuid4()), summary_id, _pack(s_vec), s_model, len(s_vec), now, _content_hash(summary_text))
                 )
-            
+
             # 6. Link to sources and 7. Soft-delete
             for r in rows:
                 memory_link_impl(summary_id, r["id"], "consolidates", db=db)
                 db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (r["id"],))
-        
+
         results.append(f"Consolidated {len(rows)} {g_type} items into summary {summary_id}")
-        
+
     return "\n".join(results)

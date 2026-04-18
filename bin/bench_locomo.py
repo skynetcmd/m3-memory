@@ -17,13 +17,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,14 +34,13 @@ sys.path.insert(0, str(BASE_DIR / "bin"))
 # Route embeddings to llama-server before memory_core imports.
 os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:1234/v1")
 
-import memory_core  # noqa: E402
-from memory_core import (  # noqa: E402
-    memory_write_bulk_impl,
-    memory_link_impl,
-    _db,
-)
-from auth_utils import get_api_key  # noqa: E402
 import temporal_utils  # noqa: E402
+from auth_utils import get_api_key  # noqa: E402
+from memory_core import (  # noqa: E402
+    _db,
+    memory_link_impl,
+    memory_write_bulk_impl,
+)
 
 DEFAULT_DATASET = BASE_DIR / "data" / "locomo" / "locomo10.json"
 
@@ -138,30 +137,30 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
     conv = sample["conversation"]
     obs = sample.get("observation", {})
     sums = sample.get("session_summary", {})
-    
+
     speaker_a = conv.get("speaker_a", "Speaker A")
     speaker_b = conv.get("speaker_b", "Speaker B")
-    
+
     items: list[dict] = []
     dia_map: dict[str, str] = {}
-    
+
     # 1. Build Message Items
     for i in range(1, 36):
         sess_key = f"session_{i}"
         if sess_key not in conv or not conv[sess_key]: continue
-        
+
         sess_date_str = conv.get(f"session_{i}_date_time", "Unknown")
         anchor_dt = temporal_utils.parse_locomo_date(sess_date_str)
-        
+
         for t_idx, turn in enumerate(conv[sess_key]):
             role = speaker_a if turn.get("speaker") == "speaker_a" else speaker_b
             dia_id = turn.get("dia_id")
             mid = str(uuid.uuid4())
             if dia_id: dia_map[dia_id] = mid
-            
+
             content = turn.get("text", "") or ""
             anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
-            
+
             items.append({
                 "id": mid,
                 "type": "message",
@@ -177,18 +176,18 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
                     "temporal_anchors": anchors
                 }
             })
-            
+
     # 2. Build Observation Items + Links
     obs_links: list[tuple[str, str]] = []
     for i in range(1, 36):
         ok = f"session_{i}_observation"
         if ok not in obs or not obs[ok]: continue
-        
+
         sess_date_str = conv.get(f"session_{i}_date_time", "Unknown")
         anchor_dt = temporal_utils.parse_locomo_date(sess_date_str)
         obs_data = obs[ok]
         if not isinstance(obs_data, dict): continue
-        
+
         for speaker, lines in obs_data.items():
             for line in lines:
                 text = line[0]
@@ -205,7 +204,7 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
                     "source": "locomo_obs",
                     "embed": True,
                     "metadata": {
-                        "session_index": i, "session_date": sess_date_str, 
+                        "session_index": i, "session_date": sess_date_str,
                         "speaker": speaker, "temporal_anchors": anchors
                     }
                 })
@@ -237,21 +236,21 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
         })
 
     t0 = time.perf_counter()
-    item_ids = await memory_write_bulk_impl(items, variant=variant)
+    await memory_write_bulk_impl(items, variant=variant)
     await asyncio.sleep(0.1)
-    
+
     count = 0
     with _db() as db:
         if obs_links:
             for from_id, to_id in obs_links:
                 res = memory_link_impl(from_id, to_id, "references", db=db)
                 if "Linked:" in res: count += 1
-        
+
         # 4. Link Consecutive Messages in Session (Optimal Strategy)
         for i in range(1, 36):
             cid = f"{sid}::S{i}"
             rows = db.execute(
-                "SELECT id FROM memory_items WHERE conversation_id=? AND type='message' ORDER BY created_at ASC", 
+                "SELECT id FROM memory_items WHERE conversation_id=? AND type='message' ORDER BY created_at ASC",
                 (cid,)
             ).fetchall()
             prev_mid = None
@@ -286,23 +285,23 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
                     memory_link_impl(prev_sum_id, curr_id, "precedes", db=db)
                     count += 1
                 prev_sum_id = curr_id
-                
+
     print(f"Created {count} relationships")
     return len(items), time.perf_counter() - t0
 
 async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: int = 0, graph_depth: int = 0, q_signal: str = "default") -> list[dict]:
     from memory_core import memory_search_scored_impl
-    
+
     # Per-category K gating
     actual_k = k
     if q_signal == "temporal": actual_k = max(k, 20)
     elif q_signal == "adversarial": actual_k = min(k, 10)
-    
+
     # Recency bias for temporal and multi-hop
     rb = 0.15 if q_signal in ["temporal", "multi-hop"] else 0.0
-    
+
     ranked = await memory_search_scored_impl(
-        question, k=actual_k, user_id=sid, 
+        question, k=actual_k, user_id=sid,
         extra_columns=["metadata_json", "conversation_id"],
         recency_bias=rb
     )
@@ -316,7 +315,7 @@ async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: i
         if "metadata" not in item: item["metadata"] = {}
         hits.append(item)
         seen_ids.add(item["id"])
-    
+
     if graph_depth > 0 and hits:
         graph_hits = []
         with _db() as db:
@@ -438,9 +437,11 @@ def format_retrieved(hits: list[dict], q_signal: str = "default") -> tuple[str, 
     return "\n".join(lines).strip(), "\n".join(set(anchors)).strip() or "None found."
 
 def _openai_client(api_key: str, base_url: str | None = None):
-    try: from openai import OpenAI
-    except ImportError: raise SystemExit("pip install openai")
-    
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise SystemExit("pip install openai") from None
+
     kwargs = {"api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
@@ -463,7 +464,7 @@ async def run(args: argparse.Namespace) -> None:
     log(f"loading dataset: {args.dataset}")
     with open(args.dataset, "r", encoding="utf-8") as f: dataset = json.load(f)
     if args.limit_samples: dataset = dataset[: args.limit_samples]
-    
+
     # Priority: Env > Vault
     api_key = os.getenv("OPENAI_API_KEY") or get_api_key("OPENAI_API_KEY")
 
@@ -480,7 +481,7 @@ async def run(args: argparse.Namespace) -> None:
     gen_client = _openai_client(api_key, base_url=args.openai_base_url)
     # Judge uses the default base_url so it can route independently
     judge_client = _openai_client(api_key, base_url=None)
-    
+
     if not args.skip_ingest:
         log("phase 1: ingest with graph linking + temporal resolution")
         total_items = 0
@@ -506,17 +507,17 @@ async def run(args: argparse.Namespace) -> None:
                 q, a = qa["question"], qa["answer"]
                 qtype_label = CATEGORIES.get(qa.get("category", 0), "unknown")
                 qtype_correct.setdefault(qtype_label, [])
-                
+
                 # Adaptive routing
                 q_signal = classify_question(q)
                 sys_prompt = SYSTEM_PROMPTS.get(q_signal, SYSTEM_PROMPTS["default"])
-                
+
                 # If using a model with a thinking/reasoning phase (e.g. Qwen or DeepSeek),
                 # append /no_think to the system prompt to force direct answers for retrieval benchmarking.
                 if any(k in args.generator_model.lower() for k in ["qwen", "deepseek"]):
                     if not sys_prompt.endswith("/no_think"):
                         sys_prompt = sys_prompt.strip() + " /no_think"
-                
+
                 hits = await retrieve_for_question(sid, q, args.k, args.cluster_size, args.graph_depth, q_signal=q_signal)
                 last_d = "Unknown"
                 for i in range(35, 0, -1):
@@ -526,12 +527,12 @@ async def run(args: argparse.Namespace) -> None:
                 history, anchors = format_retrieved(hits, q_signal=q_signal)
                 tl_lines = [f"Session {i}: {sample['conversation'][f'session_{i}_date_time']}" for i in range(1, 36) if f'session_{i}_date_time' in sample['conversation']]
                 timeline = "\n".join(tl_lines)
-                
+
                 messages = [
                     {"role": "system", "content": sys_prompt},
                     {"role": "user", "content": ANSWER_TEMPLATE.format(timeline=timeline, anchors=anchors, history=history, date=last_d, question=q)}
                 ]
-                
+
                 hyp = ""
                 answer_ok = False
                 for attempt in range(3):

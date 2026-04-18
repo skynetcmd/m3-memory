@@ -79,7 +79,7 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
 
         # Try to load chatlog config
         try:
-            from chatlog_config import chatlog_mode, chatlog_db_path, CHATLOG_MIGRATIONS_DIR
+            from chatlog_config import CHATLOG_MIGRATIONS_DIR, chatlog_db_path, chatlog_mode
             mode = chatlog_mode()
             if mode in ("separate", "hybrid"):
                 chatlog_target = MigrationTarget(

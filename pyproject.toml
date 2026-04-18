@@ -99,8 +99,15 @@ m3_memory = [
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I"]
-ignore = ["E501"]
+# E501: long lines handled by editor wrap, not blocker for this codebase.
+# E402: many bin/ entrypoints do sys.path setup or lazy imports deliberately
+#   before importing project modules — buried imports are intentional.
+# E701/E702: one-liner `if x: return` / `try: foo` is used throughout bench
+#   and ingest scripts as a terseness choice; not a readability problem here.
+ignore = ["E501", "E402", "E701", "E702"]
 
 [tool.mypy]
 python_version = "3.11"

@@ -15,7 +15,6 @@ import logging
 import os
 import sqlite3
 import sys
-import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -108,7 +107,7 @@ def _compute_warnings(
     if spill.get("bytes", 0) > 0:
         oldest_ms = spill.get("oldest_ms_ago", 0)
         if oldest_ms > 3_600_000:
-            warnings.append(f"spill files older than 1h")
+            warnings.append("spill files older than 1h")
 
     queue_state = state.get("queue", {})
     depth = queue_state.get("depth", 0)

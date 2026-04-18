@@ -1,5 +1,5 @@
-import json
 import asyncio
+import json
 import os
 import sys
 
@@ -9,8 +9,9 @@ bin_dir = os.path.join(BASE_DIR, "bin")
 if bin_dir not in sys.path:
     sys.path.insert(0, bin_dir)
 
-from memory_bridge import memory_write, memory_search, memory_delete, memory_update
+from memory_bridge import memory_delete, memory_search, memory_update, memory_write
 from memory_core import _db
+
 
 def add_knowledge(content: str, title: str = "", source: str = "", tags: list[str] = None, item_type: str = "knowledge", metadata: str = "") -> str:
     """Adds a new knowledge item to memory."""
@@ -20,7 +21,7 @@ def add_knowledge(content: str, title: str = "", source: str = "", tags: list[st
         final_metadata = metadata
     else:
         final_metadata = json.dumps({"source": source, "tags": tags})
-    
+
     try:
         # Check if an event loop is already running
         asyncio.get_running_loop()
@@ -98,9 +99,9 @@ def list_knowledge(limit: int = 50, type_filter: str = "") -> list[dict]:
                 LIMIT ?
             """
             params = (limit,)
-            
+
         rows = db.execute(sql, params).fetchall()
-        
+
         results = []
         for row in rows:
             r = dict(row)
@@ -110,7 +111,7 @@ def list_knowledge(limit: int = 50, type_filter: str = "") -> list[dict]:
                     meta = json.loads(r["metadata_json"])
                 except json.JSONDecodeError:
                     pass
-            
+
             results.append({
                 "id": r["id"],
                 "type": r["type"],

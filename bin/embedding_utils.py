@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 # ── String Sanitization ──────────────────────────────────────────────────────
 def sanitize(text: str) -> str:
     """
-    Robust UTF-8 sanitization (M12). 
-    Removes control characters and normalizes Unicode while preserving 
+    Robust UTF-8 sanitization (M12).
+    Removes control characters and normalizes Unicode while preserving
     emojis, CJK, and other multi-byte characters.
     """
     if not text:
@@ -75,7 +75,7 @@ def batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
     q_dim = len(query)
     # Filter out vectors with different dimensions to prevent numpy ValueError
     valid_indices = [i for i, v in enumerate(matrix) if len(v) == q_dim]
-    
+
     if not valid_indices:
         return [0.0] * len(matrix)
 
@@ -84,20 +84,20 @@ def batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
             q = _np.array(query, dtype=_np.float32)
             # Create a full results array initialized to 0.0
             results = [0.0] * len(matrix)
-            
+
             # Perform batch operation on valid subset
             valid_matrix = [matrix[i] for i in valid_indices]
             m = _np.array(valid_matrix, dtype=_np.float32)
-            
+
             q_norm = _np.linalg.norm(q)
             m_norms = _np.linalg.norm(m, axis=1)
-            
+
             norms = m_norms * q_norm
             # Avoid division by zero
             norms = _np.where(norms == 0, 1e-10, norms)
-            
+
             subset_scores = (m @ q / norms).tolist()
-            
+
             # Map subset scores back to original indices
             for i, score in zip(valid_indices, subset_scores):
                 results[i] = score
