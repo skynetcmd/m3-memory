@@ -172,8 +172,8 @@ def t4_aider() -> None:
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         try:
-            result = subprocess.run(
-                ["security", "find-generic-password", "-s", "ANTHROPIC_API_KEY", "-w"],
+            result = subprocess.run(  # nosec B607 - `security` is the macOS keychain CLI
+                ["security", "find-generic-password", "-s", "ANTHROPIC_API_KEY", "-w"],  # nosec B105 - CLI subcommand name, not a password literal
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:

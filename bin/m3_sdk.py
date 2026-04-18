@@ -154,7 +154,7 @@ class M3Context:
                     self._record_failure(service)
                     logger.error(f"HTTP Request failed after {retries} attempts: {exc}")
                     raise
-                wait = (2 ** attempt) + random.uniform(0, 1)
+                wait = (2 ** attempt) + random.uniform(0, 1)  # nosec B311 - backoff jitter, not cryptographic
                 logger.warning(f"Request to {url} failed ({exc}). Retrying in {wait:.1f}s...")
                 await asyncio.sleep(wait)
 

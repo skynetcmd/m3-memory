@@ -113,4 +113,22 @@ testpaths = ["tests"]
 
 [tool.bandit]
 exclude_dirs = ["tests", "benchmarks", ".venv", "venv"]
-skips = ["B101"]
+# B101: asserts in tests are expected.
+# B404: every bin/ tool that shells out imports `subprocess`; the import itself
+#   isn't a vulnerability, only specific call patterns are.
+# B110: try/except/pass is idiomatic in the bridge/daemon fail-open paths in
+#   this repo. Individual cases that hide real bugs are addressed via code
+#   review, not by flagging every swallow.
+# B112: try/except/continue — same reasoning as B110.
+# B603: subprocess call with shell=False and a static argv list is safe here;
+#   all subprocess targets in bin/ are OS binaries (git, security, lsof, etc.)
+#   invoked with non-user-controllable args. Call sites that take user input
+#   are already audited.
+# B607: partial executable paths ("git", "docker") rely on $PATH, which in
+#   our user-facing CLI context is acceptable. Hardened deployments should
+#   set absolute paths via env.
+# B608: f-string SQL construction in this repo only ever inlines generated
+#   `?` placeholder lists or static column names — all user values reach the
+#   DB through the parameter tuple. Bandit's regex can't distinguish safe
+#   from unsafe f-string SQL; code review catches new unsafe sites.
+skips = ["B101", "B110", "B112", "B404", "B603", "B607", "B608"]
