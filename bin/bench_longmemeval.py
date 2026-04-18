@@ -54,6 +54,7 @@ os.environ.setdefault("EMBED_BULK_CONCURRENCY", "4")
 import memory_core  # noqa: E402
 from memory_core import (  # noqa: E402
     memory_write_bulk_impl,
+    memory_write_impl,
     memory_link_impl,
     memory_search_scored_impl,
     _embed,
@@ -237,8 +238,8 @@ def judge_prompt(qtype: str, question: str, answer: str, response: str, abstenti
 MAX_TURN_CHARS = 6000  # ~2000 tokens; fits in a 4096-per-slot ctx with headroom
 
 
-def build_turn_items(instance: dict) -> list[dict]:
-    """Flatten a LongMemEval instance into turn-level memory_write_bulk_impl inputs."""
+def build_turn_items(instance: dict, variant: str = "") -> list[dict]:
+    """Flatten a LongMemEval instance into turn-level memory_write inputs."""
     qid = instance["question_id"]
     items: list[dict] = []
     sessions: list[list[dict]] = instance["haystack_sessions"]
@@ -254,33 +255,51 @@ def build_turn_items(instance: dict) -> list[dict]:
                 content = content[:MAX_TURN_CHARS]
             has_answer = bool(turn.get("has_answer", False))
             anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
-            items.append(
-                {
-                    "type": "message",
-                    "title": f"{role}:{sess_id}:{t_idx}",
-                    "content": content,
-                    "user_id": qid,
-                    "conversation_id": f"{qid}::{s_idx}",
-                    "source": "longmemeval",
-                    "embed": True,
-                    "metadata": {
-                        "role": role,
-                        "session_id": sess_id,
-                        "session_date": sess_date,
-                        "session_index": s_idx,
-                        "turn_index": t_idx,
-                        "has_answer": has_answer,
-                        "temporal_anchors": anchors,
-                    },
-                }
-            )
+            item = {
+                "type": "message",
+                "title": f"{role}:{sess_id}:{t_idx}",
+                "content": content,
+                "user_id": qid,
+                "conversation_id": f"{qid}::{s_idx}",
+                "source": "longmemeval",
+                "embed": True,
+                "metadata": {
+                    "role": role,
+                    "session_id": sess_id,
+                    "session_date": sess_date,
+                    "session_index": s_idx,
+                    "turn_index": t_idx,
+                    "has_answer": has_answer,
+                    "temporal_anchors": anchors,
+                },
+            }
+            if variant:
+                item["variant"] = variant
+            items.append(item)
     return items
 
 
-async def ingest_instance(instance: dict) -> tuple[int, float]:
-    items = build_turn_items(instance)
+async def ingest_instance(instance: dict, variant: str = "", per_item: bool = False) -> tuple[int, float]:
+    items = build_turn_items(instance, variant=variant)
     t0 = time.perf_counter()
-    await memory_write_bulk_impl(items)
+    if per_item:
+        for it in items:
+            meta = it.get("metadata", {})
+            if isinstance(meta, dict):
+                meta = json.dumps(meta)
+            await memory_write_impl(
+                type=it.get("type", "message"),
+                content=it.get("content", ""),
+                title=it.get("title", ""),
+                metadata=meta,
+                source=it.get("source", "longmemeval"),
+                embed=it.get("embed", True),
+                user_id=it.get("user_id", ""),
+                conversation_id=it.get("conversation_id", ""),
+                variant=it.get("variant"),
+            )
+    else:
+        await memory_write_bulk_impl(items)
     return len(items), time.perf_counter() - t0
 
 
@@ -631,7 +650,7 @@ async def run(args: argparse.Namespace) -> None:
 
         async def _one(i: int, inst: dict) -> tuple[int, int]:
             async with sem:
-                n, _dt = await ingest_instance(inst)
+                n, _dt = await ingest_instance(inst, variant=args.variant, per_item=args.per_item)
                 return i, n
 
         tasks = [asyncio.create_task(_one(i, inst)) for i, inst in enumerate(dataset)]
@@ -815,6 +834,11 @@ def parse_args() -> argparse.Namespace:
                    default=os.environ.get("EVAL_JUDGE_MODEL"))
     p.add_argument("--ingest-concurrency", type=int, default=4,
                    help="number of instances to ingest in parallel")
+    p.add_argument("--per-item", action="store_true",
+                   help="use memory_write_impl per-turn (enables Phase 1 enrichers). "
+                        "Much slower than bulk path; default off.")
+    p.add_argument("--variant", type=str, default="",
+                   help="tag every ingested row with this variant label")
     return p.parse_args()
 
 

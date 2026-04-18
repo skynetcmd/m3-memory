@@ -1,0 +1,1 @@
+{"queue_depth": 0, "last_flush_at": "2026-04-18T15:54:04Z", "last_write_at": "2026-04-18T15:54:04Z", "total_written": 10, "queue": {"depth": 1, "max": 20000}, "spill": {"bytes": 560400, "oldest_ms_ago": 1}}

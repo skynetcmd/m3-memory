@@ -163,15 +163,65 @@ class M3Context:
         global _SQLITE_POOL
         if _SQLITE_POOL is None:
             self._init_sqlite_pool()
-        
+
         conn = _SQLITE_POOL.get(timeout=10)
         try:
             yield conn
         finally:
             _SQLITE_POOL.put(conn)
-    
+
+    @contextmanager
+    def get_chatlog_conn(self) -> sqlite3.Connection:
+        """Yield a SQLite connection routed to the chat log DB.
+
+        In integrated mode, returns a connection from the primary pool so chat
+        log writes and reads share the main DB. In separate/hybrid mode,
+        delegates to chatlog_config's dedicated pool (tuned for append-heavy
+        chat log workloads with larger mmap/cache and 30s busy_timeout).
+        """
+        try:
+            import chatlog_config
+        except ImportError:
+            # Chat log subsystem not installed — fall through to main DB.
+            with self.get_sqlite_conn() as conn:
+                yield conn
+            return
+
+        if chatlog_config.is_integrated():
+            with self.get_sqlite_conn() as conn:
+                yield conn
+            return
+
+        with chatlog_config.chatlog_sqlite_conn() as conn:
+            yield conn
+
     def get_secret(self, service: str) -> Optional[str]:
         return get_api_key(service)
+
+    def log_event(self, category: str, detail_a: str,
+                  detail_b: str = "", detail_c: str = "None") -> None:
+        """Route a structured event to the correct legacy table.
+
+        Used by bridges that predate the unified memory_items model.
+        Categories: 'thought'/'activity' → activity_logs; 'decision' → project_decisions.
+        Unknown categories fall through to activity_logs for safety.
+        """
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.get_sqlite_conn() as conn:
+            cur = conn.cursor()
+            if category == "decision":
+                cur.execute(
+                    "INSERT INTO project_decisions (project, decision, rationale, timestamp) "
+                    "VALUES (?, ?, ?, ?)",
+                    (detail_c or "default", detail_a, detail_b, now),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO activity_logs (timestamp, query, response, model_used) "
+                    "VALUES (?, ?, ?, ?)",
+                    (now, detail_a, detail_b, detail_c or category),
+                )
+            conn.commit()
 
     @contextmanager
     def pg_connection(self):
@@ -199,6 +249,22 @@ class M3Context:
                     logger.warning(f"PostgreSQL connect attempt {attempt + 1} failed: {e}. Retrying in 3s...")
                     time.sleep(3)
         raise RuntimeError(f"PostgreSQL connection failed after 2 attempts: {last_exc}")
+
+class StructuredLogger:
+    """Renders structured log lines as `event | k=v | k=v` for grep-friendly output."""
+
+    def format(self, event: str, *args, **kwargs) -> str:
+        parts = [event]
+        for a in args:
+            if a is None or a == "":
+                continue
+            parts.append(str(a))
+        for k, v in kwargs.items():
+            if v is None:
+                continue
+            parts.append(f"{k}={v}")
+        return " | ".join(parts)
+
 
 def _cleanup():
     global _SQLITE_POOL

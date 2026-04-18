@@ -203,6 +203,16 @@ Write a memory: "M3 Memory installed successfully on [today's date]"
 Then search for: "M3 install"
 ```
 
+### Add the chat log subsystem
+
+Want auto-capture of every Claude Code / Gemini CLI / OpenCode / Aider conversation into a searchable, promotable chat log store? Once m3-memory is wired up, just say:
+
+```
+Install the m3-memory chat log subsystem.
+```
+
+The agent runs `bin/chatlog_init.py`, wires the host-agent hook, and installs the embed sweeper schedule. See [docs/CHATLOG.md](https://github.com/skynetcmd/m3-memory/blob/main/docs/CHATLOG.md) for the architecture and ops guide.
+
 ---
 
 ## 🎬 See it in action

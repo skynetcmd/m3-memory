@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: 6f5d18e700e9
-mtime_utc: 2026-04-17T03:42:11.732199+00:00
-generated_utc: 2026-04-17T04:17:01.749666+00:00
+sha1: e66a7a36e8a2
+mtime_utc: 2026-04-18T03:45:31.264360+00:00
+generated_utc: 2026-04-18T05:16:53.204637+00:00
 private: false
 ---
 
@@ -13,12 +13,11 @@ private: false
 Migration runner for the m3-memory SQLite database.
 
 Subcommands:
-    status                    Show current version and pending migrations
-    plan [--to N]             Preview DDL that pending migrations would run (no changes)
-    up [--to N] [--dry-run]   Apply pending migrations (prompts for backup + confirmation)
-    down --to N [--dry-run]   Roll back to version N (requires .down.sql files)
-    backup [--out PATH]       Take a standalone backup
-    restore <PATH>            Restore the database from a backup file
+    status              Show current version and pending migrations
+    up [--to N]         Apply pending migrations (prompts for backup dir + confirmation)
+    down [--to N]       Roll back to version N (requires .down.sql files)
+    backup [--out PATH] Take a standalone backup
+    restore <PATH>      Restore the database from a backup file
 
 Migration file formats (both supported, sorted by numeric prefix):
     NNN_name.sql            legacy, treated as up-only
@@ -32,7 +31,7 @@ transaction already committed.
 
 ## Entry points
 
-- `def main()` (line 544)
+- `def main()` (line 401)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -41,11 +40,8 @@ transaction already committed.
 |---|---|---|---|---|---|
 | `--to` | Apply up to this version (default: latest) | — |  | int |  |
 | `-y`, `--yes` | Skip confirmation prompts | — |  | store_true |  |
-| `--dry-run` | Print the plan + DDL without applying anything | — |  | store_true |  |
 | `--to` | Roll back to this version | — |  | int |  |
 | `-y`, `--yes` | Skip confirmation prompts | — |  | store_true |  |
-| `--dry-run` | Print the plan + DDL without reverting anything | — |  | store_true |  |
-| `--to` | Plan up to this version (default: latest) | — |  | int |  |
 | `--out` | Backup directory (overrides saved default) | — |  | str |  |
 | `-y`, `--yes` | Skip interactive prompts | — |  | store_true |  |
 | `path` | Path to the backup .db file | — |  |  |  |
@@ -63,14 +59,10 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 109)
-- `sqlite3.connect()  → `DB_PATH`` (line 147)
-- `sqlite3.connect()  → `DB_PATH`` (line 321)
-- `sqlite3.connect()  → `DB_PATH`` (line 375)
-- `sqlite3.connect()  → `DB_PATH`` (line 424)
-- `sqlite3.connect()  → `DB_PATH`` (line 475)
-- `sqlite3.connect()  → `DB_PATH`` (line 492)
-- `sqlite3.connect()  → `dst`` (line 111)
+- `sqlite3.connect()  → `DB_PATH`` (line 229)
+- `sqlite3.connect()  → `DB_PATH`` (line 266)
+- `sqlite3.connect()  → `DB_PATH`` (line 310)
+- `sqlite3.connect()  → `DB_PATH`` (line 356)
 
 
 ## Notable external imports

@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_secret.py
-sha1: 67aff86c730a
-mtime_utc: 2026-04-17T04:16:28.315598+00:00
-generated_utc: 2026-04-17T04:17:01.765886+00:00
+sha1: 54a4dc30d9d9
+mtime_utc: 2026-04-18T03:18:29.586755+00:00
+generated_utc: 2026-04-18T05:16:53.221485+00:00
 private: false
 ---
 
@@ -29,8 +29,8 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--list` | list stored services (no values) | — | lists all stored API keys (no values shown) | store_true | runs `_list_vault()` |
-| `--delete` | remove a service from the vault | — | enter interactive add mode | metavar=SERVICE | prompts for confirmation, deletes via `_delete_service()` |
+| `--list` | list stored services (no values) | — |  | store_true |  |
+| `--delete` | remove a service from the vault | — |  |  |  |
 
 ## Environment variables read
 
@@ -44,14 +44,10 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()` → `synchronized_secrets` table in `DB_PATH` (line 95, line 117, line 141, line 230)
-  - Reads: `service_name, version, origin_device, updated_at` for listing
-  - Writes: INSERT/UPDATE via `auth_utils.set_api_key()`, DELETE for removal
-  - Verifies round-trip encryption of stored secrets
-
-**OS keyring** (via `auth_utils`)
-
-- `get_master_key()` reads `AGENT_OS_MASTER_KEY` from system keyring for Fernet decryption
+- `sqlite3.connect()  → `DB_PATH`` (line 117)
+- `sqlite3.connect()  → `DB_PATH`` (line 141)
+- `sqlite3.connect()  → `DB_PATH`` (line 230)
+- `sqlite3.connect()  → `DB_PATH`` (line 95)
 
 
 ## Notable external imports
@@ -60,7 +56,7 @@ _(none detected)_
 
 ## File dependencies (repo paths referenced)
 
-- `bin/auth_utils.py` (imports: DB_PATH, get_api_key, get_master_key, set_api_key, _get_fernet)
+_(none detected)_
 
 ## Re-validation
 
