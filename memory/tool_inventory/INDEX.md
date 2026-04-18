@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-04-18T05:16:53.265214+00:00._
+_Generated 2026-04-18T16:33:21.794296+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -12,6 +12,11 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/bench_locomo.py](bench_locomo.md) | Dialog-QA benchmark runner for m3-memory. |  |
 | [bin/bench_longmemeval.py](bench_longmemeval.md) | Long-session QA benchmark runner for m3-memory. |  |
 | [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. |  |
+| [bin/chatlog_embed_sweeper.py](chatlog_embed_sweeper.md) | chatlog_embed_sweeper.py — lazy embed chat log rows missing embeddings. |  |
+| [bin/chatlog_ingest.py](chatlog_ingest.md) | chatlog_ingest.py — single-entry-point CLI for ingesting host-agent chat logs. |  |
+| [bin/chatlog_init.py](chatlog_init.md) | chatlog_init.py — interactive setup CLI for the chat log subsystem. |  |
+| [bin/chatlog_status.py](chatlog_status.md) | chatlog_status.py — single-call summary of the chat log subsystem state. |  |
+| [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
 | [bin/chroma_sync_cli.py](chroma_sync_cli.md) | CLI wrapper for ChromaDB bi-directional sync. |  |
 | [bin/cli_kb_browse.py](cli_kb_browse.md) | cli_kb_browse.py — Browse knowledge base entries in rank (importance) order. |  |
 | [bin/cli_knowledge.py](cli_knowledge.md) | (no docstring) |  |
@@ -29,13 +34,14 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/memory_core.py](memory_core.md) | (no docstring) |  |
 | [bin/memory_doctor.py](memory_doctor.md) | (no docstring) |  |
 | [bin/migrate_flat_memory.py](migrate_flat_memory.md) | migrate_flat_memory.py — one-way ETL from flat-file / SQLite agent memory |  |
-| [bin/migrate_memory.py](migrate_memory.md) | Migration runner for the m3-memory SQLite database. |  |
+| [bin/migrate_memory.py](migrate_memory.md) | Migration runner for the m3-memory SQLite databases. |  |
 | [bin/pg_setup.py](pg_setup.md) | (no docstring) |  |
 | [bin/pg_sync.py](pg_sync.md) | (no docstring) |  |
 | [bin/secret_rotator.py](secret_rotator.md) | (no docstring) |  |
 | [bin/setup_secret.py](setup_secret.md) | Interactive CLI for adding API keys to the m3-memory encrypted vault. |  |
 | [bin/sync_all.py](sync_all.md) | sync_all.py — Hourly sync runner (SQLite <-> PostgreSQL + ChromaDB). |  |
 | [bin/temporal_utils.py](temporal_utils.md) | Enhanced temporal resolution utility for m3-memory. |  |
+| [bin/test_bulk_parity.py](test_bulk_parity.md) | Real integration tests for memory_write_bulk_impl. |  |
 | [bin/test_debug_agent.py](test_debug_agent.md) | End-to-end test suite for debug_agent_bridge.py. |  |
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |

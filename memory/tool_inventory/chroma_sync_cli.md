@@ -2,7 +2,7 @@
 tool: bin/chroma_sync_cli.py
 sha1: a8094a92f2f1
 mtime_utc: 2026-04-06T00:25:00.978104+00:00
-generated_utc: 2026-04-18T05:16:53.094302+00:00
+generated_utc: 2026-04-18T16:33:21.611252+00:00
 private: false
 ---
 

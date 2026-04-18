@@ -2,7 +2,7 @@
 tool: scripts/inventory_graph.py
 sha1: 9e89d836cfa4
 mtime_utc: 2026-04-18T05:06:31.404255+00:00
-generated_utc: 2026-04-18T05:16:53.263041+00:00
+generated_utc: 2026-04-18T16:33:21.792048+00:00
 private: false
 ---
 

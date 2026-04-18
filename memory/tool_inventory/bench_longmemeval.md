@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_longmemeval.py
-sha1: c4a7e8c28672
-mtime_utc: 2026-04-17T04:16:43.577376+00:00
-generated_utc: 2026-04-17T04:17:01.676572+00:00
+sha1: 4b834c3fcf8b
+mtime_utc: 2026-04-18T05:51:13.858670+00:00
+generated_utc: 2026-04-18T16:33:21.582167+00:00
 private: false
 ---
 
@@ -42,27 +42,28 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 
 ## Entry points
 
-- `async def run()` (line 581)
-- `def main()` (line 821)
+- `async def run()` (line 600)
+- `def main()` (line 845)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--dataset` | path to benchmark dataset | `longmemeval_s_cleaned.json` | Loads default dataset from data/ | Path | Uses custom dataset location |
-| `--limit` | subsample first N instances (0 = all) | `0` | Processes entire dataset | int | Processes only first N items |
-| `--skip-ingest` | reuse DB without re-ingesting | — | Ingest all turns into DB | store_true | Skips ingest phase |
-| `--no-judge` | write hypotheses without judging | — | Runs judge phase | store_true | Outputs only hypotheses |
-| `--k` | top-K retrieved turns per question | `20` | Retrieves top 20 turns | int | Adjusts retrieval set size |
-| `--adaptive-k` | Enable elbow trim for adaptive K | — | Disabled | store_true | Trims K at elbow points |
-| `--smart-retrieval` | Enable temporal-aware smart retrieval | — | Disabled | store_true | Boosts K for temporal questions |
-| `--cluster-size` | episodic expansion: pull +/- N surrounding turns (0 = off) | `5` | Expands +/- 5 turns per hit | int | Sets episodic expansion radius |
-| `--graph-depth` | graph expansion hops from initial hits (0 = off) | `1` | 1-hop graph traversal | int | Sets knowledge graph depth |
-| `--generator-model` | LLM model for answer generation | env: `EVAL_GENERATOR_MODEL` | Must be set or errors | str | Uses specified generator model |
-| `--judge-model` | LLM model for answer judging | env: `EVAL_JUDGE_MODEL` | Must be set if not --no-judge | str | Uses specified judge model |
-| `--ingest-concurrency` | number of instances to ingest in parallel | `4` | 4 parallel ingests | int | Sets parallelism for ingest phase |
-| `--variant` | Pipeline identifier for A/B tracking | `""` (empty) | Items carry no variant tag; bulk rows have variant=NULL | str | Propagated to memory_write_bulk_impl per-item and to enrichers |
+| `--dataset` |  | `DEFAULT_DATASET` | Loads longmemeval_s_cleaned.json from data/longmemeval/ | Path | Uses provided JSON file path |
+| `--limit` | subsample first N instances (0 = all) | `0` | Process all instances | int | Process first N instances only |
+| `--skip-ingest` |  | — | Runs phase 1 (ingest) + phase 2 (retrieve/judge) | store_true | Skips phase 1, reuses DB from previous run |
+| `--no-judge` |  | — | Writes hypotheses.jsonl + runs judge | store_true | Writes hypotheses.jsonl only (skip judge scoring) |
+| `--k` | top-K retrieved turns per question | `20` | Retrieve top 20 turns per question | int | Retrieve top N turns (boost to 30 for temporal if --smart-retrieval) |
+| `--adaptive-k` | Enable elbow trim for adaptive K | — | Uses fixed K value | store_true | Applies elbow trim heuristic to reduce K for low-signal |
+| `--smart-retrieval` | Enable temporal-aware smart retrieval | — | No temporal boost | store_true | Boosts K to 30 for temporal-classified questions |
+| `--cluster-size` | episodic expansion: pull +/- N surrounding turns (0 = off) | `5` | Expands hits ±5 turns in same conversation | int | Expands hits ±N turns (0 disables episodic expansion) |
+| `--graph-depth` | graph expansion hops from initial hits (0 = off) | `1` | Traverses 1-hop relationships from retrieved items | int | Traverses N-hop graph (0 disables graph expansion) |
+| `--generator-model` |  | `os.environ.get('EVAL_GENERATOR_MODEL')` | Reads EVAL_GENERATOR_MODEL env var | str | Model ID for answer generation |
+| `--judge-model` |  | `os.environ.get('EVAL_JUDGE_MODEL')` | Reads EVAL_JUDGE_MODEL env var | str | Model ID for answer scoring |
+| `--ingest-concurrency` | number of instances to ingest in parallel | `4` | Ingests 4 instances in parallel | int | Ingests N instances in parallel with asyncio.Semaphore |
+| `--per-item` | use memory_write_impl per-turn (enables Phase 1 enrichers). Much slower than bulk path; default off. | — | Uses memory_write_bulk_impl (fast) | store_true | Uses memory_write_impl per-turn (enables enrichers, slower) |
+| `--variant` | tag every ingested row with this variant label | `` | No variant label | str | Tags all ingested items with variant ID |
 
 ## Environment variables read
 
@@ -71,13 +72,14 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils (Vault/keyring credential lookup for OPENAI_API_KEY)`
-- `memory_core (Bulk ingestion, hybrid search, graph traversal, embedding)`
-- `temporal_utils (Date parsing, temporal anchor resolution)`
+- `auth_utils (get_api_key)`
+- `memory_core`
+- `memory_core (memory_write_bulk_impl, memory_write_impl, memory_link_impl, memory_search_scored_impl, _embed, _batch_cosine, _unpack, _db)`
+- `temporal_utils`
 
 ## Calls OUT (external side-channels)
 
-- `OpenAI SDK` (`client.chat.completions.create()` for answer generation and judging)
+_(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
@@ -85,10 +87,8 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 
 ## File dependencies (repo paths referenced)
 
-- `data/longmemeval/longmemeval_s_cleaned.json` (Benchmark dataset input)
-- `.scratch/longmemeval_run_<timestamp>/hypotheses.jsonl` (Question-level predictions and retrieval results)
-- `.scratch/longmemeval_run_<timestamp>/results.json` (Aggregate accuracy and per-type breakdown)
-- `.scratch/longmemeval_run_<timestamp>/run.log` (Progress and error logs)
+- `longmemeval_s_cleaned.json`
+- `results.json`
 
 ## Re-validation
 

@@ -1,1 +1,18 @@
-{"queue_depth": 0, "last_flush_at": "2026-04-18T15:54:04Z", "last_write_at": "2026-04-18T15:54:04Z", "total_written": 10, "queue": {"depth": 1, "max": 20000}, "spill": {"bytes": 560400, "oldest_ms_ago": 1}}
+{
+  "queue_depth": 0,
+  "last_flush_at": "2026-04-18T16:23:12Z",
+  "last_write_at": "2026-04-18T16:23:12Z",
+  "total_written": 11,
+  "queue": {
+    "depth": 1,
+    "max": 20000
+  },
+  "spill": {
+    "bytes": 560400,
+    "oldest_ms_ago": 1
+  },
+  "embed_backlog": 0,
+  "last_sweeper_run_at": "2026-04-18T16:46:40.235407+00:00",
+  "last_sweeper_rows_embedded": 813,
+  "last_sweeper_spill_drained": 0
+}

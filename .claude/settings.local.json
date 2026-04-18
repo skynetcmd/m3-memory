@@ -11,7 +11,9 @@
       "Bash(.venv/Scripts/python.exe bin/pg_sync.py)",
       "Bash(LLM_ENDPOINTS_CSV=\"http://test:1234/v1,http://test2:5678/v1\" .venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0,'bin'\\); from llm_failover import LLM_ENDPOINTS; print\\(LLM_ENDPOINTS\\)\")",
       "Bash(mkdir -p ~/.claude/channels/discord)",
-      "Read(//c/Users/bhaba/.claude/channels/**)"
+      "Read(//c/Users/bhaba/.claude/channels/**)",
+      "Bash(cp \"/c/Users/bhaba/.claude/plans/gentle-conjuring-wilkes.md\" \"/c/Users/bhaba/plans-export/chatlog-subsystem-plan.md\")",
+      "Read(//c/Users/bhaba/plans-export/**)"
     ]
   }
 }
