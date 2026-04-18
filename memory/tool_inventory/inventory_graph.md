@@ -1,8 +1,8 @@
 ---
 tool: scripts/inventory_graph.py
-sha1: 9e89d836cfa4
-mtime_utc: 2026-04-18T05:06:31.404255+00:00
-generated_utc: 2026-04-18T16:33:21.792048+00:00
+sha1: dda2b640b17f
+mtime_utc: 2026-04-18T20:37:50.815027+00:00
+generated_utc: 2026-04-18T21:58:23.223315+00:00
 private: false
 ---
 
