@@ -720,8 +720,13 @@ def _ensure_sync_tables() -> None:
     import subprocess
     try:
         migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
-        # Increase timeout to 300s to handle backups of multi-GB databases (#46)
-        subprocess.run([sys.executable, migration_script], check=True, timeout=300)
+        # -y skips the interactive confirmation. Without it, migrate_memory.py
+        # hits input() which returns "" on a non-TTY stdin (CI, daemon, subprocess
+        # without a pipe), silently skipping all migrations — leaving the DB
+        # empty of tasks/chatlog tables. Increase timeout to 300s to handle
+        # backups of multi-GB databases (#46).
+        subprocess.run([sys.executable, migration_script, "up", "-y"],
+                       check=True, timeout=300)
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
 

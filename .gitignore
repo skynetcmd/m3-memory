@@ -32,6 +32,12 @@ memory/
 *.bak
 *.sqlite
 
+# Machine-local chatlog/migration config (contains absolute paths)
+memory/.chatlog_config.json
+memory/.chatlog_state.json
+memory/.chatlog_ingest_cursor.json
+memory/.migrate_config.json
+
 # Scratch / temp files
 .scratch/
 x.xx*
