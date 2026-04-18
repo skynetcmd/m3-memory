@@ -6,6 +6,7 @@ import sqlite3
 import string
 import sys
 from datetime import datetime, timezone
+from typing import Optional
 
 # Add the bin directory to path so we can import SDK modules if called from elsewhere
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -42,7 +43,7 @@ def rotate_secrets(dry_run: bool = False):
                 with ctx.get_sqlite_conn() as conn:
                     conn.execute("CREATE TABLE IF NOT EXISTS secret_backups (service_name TEXT, encrypted_value TEXT, rotated_at TEXT)")
                     # Get the encrypted blob directly from the source table
-                    row = conn.execute("SELECT encrypted_value FROM synchronized_secrets WHERE service_name = ?", (key_name,)).fetchone()
+                    row: Optional[sqlite3.Row] = conn.execute("SELECT encrypted_value FROM synchronized_secrets WHERE service_name = ?", (key_name,)).fetchone()
                     if row:
                         conn.execute("INSERT INTO secret_backups VALUES (?, ?, ?)", (key_name, row[0], datetime.now(timezone.utc).isoformat()))
                         conn.commit()
