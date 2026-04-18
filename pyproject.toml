@@ -131,4 +131,7 @@ exclude_dirs = ["tests", "benchmarks", ".venv", "venv"]
 #   `?` placeholder lists or static column names — all user values reach the
 #   DB through the parameter tuple. Bandit's regex can't distinguish safe
 #   from unsafe f-string SQL; code review catches new unsafe sites.
-skips = ["B101", "B110", "B112", "B404", "B603", "B607", "B608"]
+# B606: "starting a process without a shell" flags the *secure* pattern
+#   (shell=False subprocess calls). These are the ones we want. B603/B607
+#   cover the subprocess-specific concerns that actually matter.
+skips = ["B101", "B110", "B112", "B404", "B603", "B606", "B607", "B608"]

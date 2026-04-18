@@ -141,7 +141,7 @@ async def main() -> None:
     test_qids = load_test_qids(test_path)
     print(f"pool size: {len(pool):,}   test qids: {len(test_qids)}")
 
-    rng = random.Random(SEED)
+    rng = random.Random(SEED)  # nosec B311 - deterministic sampling for reproducibility, not cryptographic
     chosen = sample_exemplars(pool, test_qids, EXEMPLARS_PER_CATEGORY, rng)
     print(f"total exemplars chosen: {len(chosen)}")
 
