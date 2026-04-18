@@ -2,7 +2,7 @@
 tool: bin/embed_server_gpu.py
 sha1: 078970016f69
 mtime_utc: 2026-04-18T03:24:41.215160+00:00
-generated_utc: 2026-04-18T05:16:53.115514+00:00
+generated_utc: 2026-04-18T16:33:21.632648+00:00
 private: true
 ---
 
@@ -23,8 +23,8 @@ Runs on Port 9903 by default.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--port` |  | `9903` |  | int |  |
-| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_GPU_HOST', '127.0.0.1')` |  |  |  |
+| `--port` | Port to serve proxy on | `9903` | Proxy listens on localhost:9903, forwards to llama-server | int | Proxy listens on specified port |
+| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_GPU_HOST', '127.0.0.1')` | Binds only to 127.0.0.1 (localhost only) | str | Binds to specified host (0.0.0.0 for LAN access) |
 
 ## Environment variables read
 

@@ -2,7 +2,7 @@
 tool: bin/debug_agent_bridge.py
 sha1: d56f4de3dbb8
 mtime_utc: 2026-04-18T03:45:31.260359+00:00
-generated_utc: 2026-04-18T05:16:53.109110+00:00
+generated_utc: 2026-04-18T16:33:21.625896+00:00
 private: false
 ---
 
@@ -10,47 +10,50 @@ private: false
 
 ## Purpose
 
-Debug Agent MCP Bridge providing autonomous debugging tools via FastMCP. Offers root cause analysis, execution tracing, log correlation, and structured reporting. Integrates thermal awareness and memory-augmented LLM reasoning.
+Debug Agent MCP Bridge — Autonomous debugging tools.
 
-## Entry points / Public API
+Tools: debug_analyze, debug_bisect, debug_trace, debug_correlate, debug_history, debug_report
 
-- `debug_analyze(error_message, context="", file_path="")` — Root cause analysis with memory-augmented reasoning
-- `debug_trace(file_path, function_name="", error_type="")` — Execution flow analysis; reads source and finds callers
-- `debug_bisect(test_command, good_commit, bad_commit="HEAD")` — Git bisect placeholder (requires interactive shell)
-- `debug_correlate(log_file="", time_range="24h", pattern="")` — Cross-reference logs and decisions
-- `debug_history(keyword="", limit=10)` — Search past debugging sessions with hybrid relevance ranking
-- `debug_report(title, findings, issue_id="")` — Generate and persist structured debug reports
+Registration (settings.json):
+  "debug_agent": {
+      "command": "python3",
+      "args": ["[M3_MEMORY_ROOT]/bin/debug_agent_bridge.py"]
+  }
 
-Entry: `if __name__ == "__main__"` invokes `mcp.run()`
+All internal paths are relative to BASE_DIR (auto-detected or AI_WORKSPACE_DIR env var).
+
+## Entry points
+
+- `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
-_(No CLI surface — invoked as a library/module.)_
+_(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `AI_WORKSPACE_DIR` — Workspace root; auto-detects parent of bin/ if unset
-- `ORIGIN_DEVICE` — Device identifier for logging; defaults to `platform.node()`
-- `LM_API_TOKEN` (via `ctx.get_secret()`) — LM Studio authentication
+- `AI_WORKSPACE_DIR`
+- `ORIGIN_DEVICE`
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `embedding_utils.parse_model_size` — Model parameter estimation
-- `m3_sdk.M3Context` — Database/logging/HTTP context manager
-- `m3_sdk.LM_STUDIO_BASE` — LM Studio base URL constant
-- `thermal_utils.get_thermal_status` — Hardware thermal state
+- `embedding_utils (parse_model_size)`
+- `m3_sdk (M3Context, LM_STUDIO_BASE)`
+- `thermal_utils (get_thermal_status)`
 
 ## Calls OUT (external side-channels)
 
-- **LM Studio HTTP**: `/v1/chat/completions`, `/v1/models`, `/v1/embeddings` (via `ctx.request_with_retry`)
-- **SQLite**: agent_memory.db for debug_reports, chroma_sync_queue, event logging
-- **ChromaDB queue**: `chroma_sync_queue` insert for embedding syncs
+_(no subprocess / http / sqlite calls detected)_
 
-## File dependencies
+## Notable external imports
 
-- `agent_memory.db` — debug_reports, chroma_sync_queue tables
-- Workspace root relative to BASE_DIR (default: codebase root)
+- `mcp.server.fastmcp (FastMCP)`
+- `platform`
+
+## File dependencies (repo paths referenced)
+
+- `agent_memory.db`
 
 ## Re-validation
 
-If sha1 above differs from current file, inventory is stale. Re-read the tool, confirm flags/env vars/entry-points/calls, then regenerate.
+If the `sha1` above differs from the current file's sha1, the inventory is stale — re-read the tool, confirm flags/env vars/entry-points/calls still match, and regenerate via `python bin/gen_tool_inventory.py`.
