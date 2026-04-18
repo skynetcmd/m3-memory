@@ -158,14 +158,10 @@ def test_cost_report_aggregates_by_provider(cost_report_db):
     conn.close()
 
 
-def test_cost_report_null_cost_excluded():
+def test_cost_report_null_cost_excluded(tmp_path):
     """Rows with null cost_usd are excluded from cost sum."""
-    db_path = "/tmp/test_cost_null.db"
+    db_path = str(tmp_path / "test_cost_null.db")
     import sqlite3
-    import os
-
-    if os.path.exists(db_path):
-        os.remove(db_path)
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -219,17 +215,12 @@ def test_cost_report_null_cost_excluded():
     assert total_cost == 1.0
 
     conn.close()
-    os.remove(db_path)
 
 
-def test_cost_report_token_counts_aggregated():
+def test_cost_report_token_counts_aggregated(tmp_path):
     """Token counts are summed correctly."""
-    db_path = "/tmp/test_tokens.db"
+    db_path = str(tmp_path / "test_tokens.db")
     import sqlite3
-    import os
-
-    if os.path.exists(db_path):
-        os.remove(db_path)
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -265,7 +256,6 @@ def test_cost_report_token_counts_aggregated():
     assert total_out == 2500  # 500 * 5
 
     conn.close()
-    os.remove(db_path)
 
 
 def test_cost_report_by_model_id(cost_report_db):
