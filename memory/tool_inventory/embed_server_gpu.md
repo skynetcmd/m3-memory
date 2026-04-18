@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server_gpu.py
-sha1: 991d7cb97921
-mtime_utc: 2026-04-17T01:46:21.084758+00:00
-generated_utc: 2026-04-17T04:17:01.697848+00:00
+sha1: 078970016f69
+mtime_utc: 2026-04-18T03:24:41.215160+00:00
+generated_utc: 2026-04-18T05:16:53.115514+00:00
 private: true
 ---
 
@@ -16,7 +16,7 @@ Runs on Port 9903 by default.
 
 ## Entry points
 
-- `def main()` (line 109)
+- `def main()` (line 114)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -24,10 +24,14 @@ Runs on Port 9903 by default.
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
 | `--port` |  | `9903` |  | int |  |
+| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_GPU_HOST', '127.0.0.1')` |  |  |  |
 
 ## Environment variables read
 
-_(none detected)_
+- `EMBED_SERVER_GPU_HOST`
+- `GGUF_MODEL_PATH`
+- `LLAMA_PORT`
+- `LLAMA_SERVER_EXE`
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -37,12 +41,12 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `cmd`` (line 90)
+- `subprocess.Popen()  → `cmd`` (line 95)
 
 **http**
 
-- `httpx.AsyncClient()` (line 50)
-- `httpx.Client()` (line 97)
+- `httpx.AsyncClient()` (line 55)
+- `httpx.Client()` (line 102)
 
 
 ## Notable external imports

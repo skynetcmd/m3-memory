@@ -486,7 +486,7 @@ async def _auto_classify(content: str, title: str) -> str:
         "note", "fact", "decision", "preference", "conversation", "message",
         "task", "code", "config", "observation", "plan", "summary", "snippet",
         "reference", "log", "home", "user_fact", "scratchpad", "knowledge",
-        "event_extraction",
+        "event_extraction", "chat_log",
     }
     
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
