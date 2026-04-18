@@ -50,7 +50,7 @@ Requires a local embedding model. [Ollama](https://ollama.com) is the easiest:
 ollama pull qwen3-embedding:0.6b && ollama serve
 ```
 
-Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the default model M3 Memory is tuned for. `nomic-embed-text` (768-dim) also works — set `EMBED_MODEL=nomic-embed-text` in your environment.
+Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the default model M3 Memory is tuned for. But can set and use other embedder as you wish. For example, you could use `nomic-embed-text` (768-dim) which also works (with minimal fidelity loss) — set `EMBED_MODEL=nomic-embed-text` in your environment.
 
 Prefer a GUI? [LM Studio](https://lmstudio.ai) works too — load any embedding model and start its server (defaults to port 1234).
 
