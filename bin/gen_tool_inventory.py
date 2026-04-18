@@ -59,7 +59,7 @@ _EXTERNAL_BUCKETS: dict[tuple[str, ...], str] = {
 
 
 def file_sha1(path: Path) -> str:
-    h = hashlib.sha1()
+    h = hashlib.sha1(usedforsecurity=False)
     h.update(path.read_bytes())
     return h.hexdigest()[:12]
 
