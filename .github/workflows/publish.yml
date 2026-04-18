@@ -1,5 +1,9 @@
 name: Publish to PyPI
 
+# checkov:skip=CKV_GHA_7: dry_run is a constrained choice input used to route
+# between TestPyPI and PyPI; no value flows into build/publish commands beyond
+# an equality check.
+
 on:
   release:
     types: [published]
