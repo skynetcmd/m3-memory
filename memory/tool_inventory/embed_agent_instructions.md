@@ -2,7 +2,7 @@
 tool: bin/embed_agent_instructions.py
 sha1: fbfd0024bb9f
 mtime_utc: 2026-04-11T18:26:43.113999+00:00
-generated_utc: 2026-04-18T05:16:53.112240+00:00
+generated_utc: 2026-04-18T16:33:21.629530+00:00
 private: false
 ---
 

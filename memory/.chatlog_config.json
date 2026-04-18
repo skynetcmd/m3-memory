@@ -8,8 +8,8 @@
       "last_seen": ""
     },
     "gemini-cli": {
-      "enabled": false,
-      "hook_path": "",
+      "enabled": true,
+      "hook_path": "C:\\Users\\bhaba\\.gemini\\hooks\\onExit.ps1",
       "last_seen": ""
     },
     "opencode": {

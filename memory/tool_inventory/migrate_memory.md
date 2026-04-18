@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: e66a7a36e8a2
-mtime_utc: 2026-04-18T03:45:31.264360+00:00
-generated_utc: 2026-04-18T05:16:53.204637+00:00
+sha1: 99c409ab5227
+mtime_utc: 2026-04-18T15:41:09.975266+00:00
+generated_utc: 2026-04-18T16:33:21.728641+00:00
 private: false
 ---
 
@@ -10,7 +10,11 @@ private: false
 
 ## Purpose
 
-Migration runner for the m3-memory SQLite database.
+Migration runner for the m3-memory SQLite databases.
+
+Supports multiple migration targets:
+    - main (agent_memory.db) — always present
+    - chatlog — optional, controlled by chatlog_config.chatlog_mode()
 
 Subcommands:
     status              Show current version and pending migrations
@@ -18,6 +22,9 @@ Subcommands:
     down [--to N]       Roll back to version N (requires .down.sql files)
     backup [--out PATH] Take a standalone backup
     restore <PATH>      Restore the database from a backup file
+
+All subcommands accept --target {main,chatlog,all} to select which DB(s) to operate on.
+Default is "all" (operates on all configured targets).
 
 Migration file formats (both supported, sorted by numeric prefix):
     NNN_name.sql            legacy, treated as up-only
@@ -31,21 +38,26 @@ transaction already committed.
 
 ## Entry points
 
-- `def main()` (line 401)
+- `def main()` (line 538)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--to` | Apply up to this version (default: latest) | — |  | int |  |
-| `-y`, `--yes` | Skip confirmation prompts | — |  | store_true |  |
-| `--to` | Roll back to this version | — |  | int |  |
-| `-y`, `--yes` | Skip confirmation prompts | — |  | store_true |  |
-| `--out` | Backup directory (overrides saved default) | — |  | str |  |
-| `-y`, `--yes` | Skip interactive prompts | — |  | store_true |  |
-| `path` | Path to the backup .db file | — |  |  |  |
-| `-y`, `--yes` | Skip confirmation | — |  | store_true |  |
+| `--target` | Which DB target to operate on (default: all configured) | `all` | Displays status for all configured targets (main + chatlog if available). | str | Shows status for only specified target. |
+| `--to` | Apply up to this version (default: latest) | — | Applies all pending migrations up to latest available version. | int | Applies migrations up to specified version; stops before newer ones. |
+| `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; applies migrations to all configured targets. | str | Applies migrations to only specified target. |
+| `-y`, `--yes` | Skip confirmation prompts | — | Prompts user to confirm backup dir and migration execution. | store_true | Auto-selects default backup dir (~/.m3-memory/backups) and confirms migration. |
+| `--to` | Roll back to this version | — | Requires explicit version (no default). | int | Reverts migrations above specified version; checks for down files first. |
+| `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; rolls back all configured targets. | str | Rolls back only specified target. |
+| `-y`, `--yes` | Skip confirmation prompts | — | Prompts user to confirm backup dir and rollback execution. | store_true | Auto-selects default backup dir and confirms rollback. |
+| `--out` | Backup directory (overrides saved default) | — | Uses saved backup dir from .migrate_config.json; prompts if missing. | str | Uses specified directory instead of saved config; still requires confirmation if not -y. |
+| `--target` | Which DB target to operate on (default: all configured) | `all` | Creates backup for all configured targets in backup_dir/<target>/ subdirs. | str | Creates backup for only specified target. |
+| `-y`, `--yes` | Skip interactive prompts | — | Prompts user for confirmation before creating backup. | store_true | Skips confirmation; creates backup immediately. |
+| `path` | Path to the backup .db file | — | Required positional argument; no default. | str | Restores from specified backup file path. |
+| `--target` | Which DB target to restore (default: main; use chatlog for chat log DB) | `main` | Restores main database; warns if --target all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
+| `-y`, `--yes` | Skip confirmation | — | Prompts user to confirm before overwriting current DB. | store_true | Skips confirmation; proceeds directly to restore. |
 
 ## Environment variables read
 
@@ -53,16 +65,16 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `chatlog_config (chatlog_mode, chatlog_db_path, CHATLOG_MIGRATIONS_DIR)`
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 229)
-- `sqlite3.connect()  → `DB_PATH`` (line 266)
-- `sqlite3.connect()  → `DB_PATH`` (line 310)
-- `sqlite3.connect()  → `DB_PATH`` (line 356)
+- `sqlite3.connect()  → `target.db_path`` (line 311)
+- `sqlite3.connect()  → `target.db_path`` (line 362)
+- `sqlite3.connect()  → `target.db_path`` (line 417)
+- `sqlite3.connect()  → `target.db_path`` (line 469)
 
 
 ## Notable external imports
@@ -71,6 +83,7 @@ _(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
+- `.db`
 - `.migrate_config.json`
 - `agent_memory.db`
 

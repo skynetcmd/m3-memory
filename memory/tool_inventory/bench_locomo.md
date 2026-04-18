@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_locomo.py
-sha1: 395aafe2917b
-mtime_utc: 2026-04-17T04:16:50.784481+00:00
-generated_utc: 2026-04-17T04:17:01.667215+00:00
+sha1: dd445cc496a8
+mtime_utc: 2026-04-18T14:52:11.799641+00:00
+generated_utc: 2026-04-18T16:33:21.572043+00:00
 private: false
 ---
 
@@ -33,19 +33,19 @@ Includes:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--dataset` | Benchmark data file path | locomo10.json | Load default dataset | Path | Use custom dataset |
-| `--limit-samples` | Cap dataset to N samples | 0 (unlimited) | Process all samples | int | Truncate dataset early |
-| `--limit-questions` | Stop after N total questions | 0 (unlimited) | Answer all questions | int | Early termination |
-| `--skip-ingest` | Skip phase 1 ingestion | — | Ingest then retrieve | store_true | Skip straight to retrieval |
-| `--ingest-only` | Stop after phase 1 | — | Run full pipeline | store_true | Exit after ingestion |
-| `--k` | Top-K retrieved hits baseline | 40 | Retrieve 40 items | int | Adjust retrieval count |
-| `--cluster-size` | Episodic expansion turns | 5 | Expand ±5 turns per hit | int | Adjust context window |
-| `--graph-depth` | Link traversal hops | 1 | Follow 1-hop edges | int | Deepen graph expansion |
-| `--generator-model` | Generator LLM identifier | EVAL_GENERATOR_MODEL env | No default set | string | Specify answer model |
-| `--judge-model` | Judge LLM identifier | EVAL_JUDGE_MODEL env | No default set | string | Specify scoring model |
-| `--openai-base-url` | Custom API endpoint | — | Use official OpenAI | string | Route to local proxy |
-| `--variant` | Pipeline identifier for A/B tracking | `""` (empty) | Items carry no variant tag; bulk rows have variant=NULL | string | Tags every bulk-inserted row with the variant, propagated to enrichers |
-| `--verbose` | Log full message objects | — | Minimal logging | store_true | Debug mode with details |
+| `--dataset` |  | `DEFAULT_DATASET` | Loads locomo10.json from data/locomo/ | Path | Uses provided JSON file path |
+| `--limit-samples` |  | `0` | Process all samples | int | Process first N samples only |
+| `--limit-questions` |  | `0` | Process all questions | int | Stop after N questions total |
+| `--skip-ingest` |  | — | Ingests & links data in phase 1 | store_true | Skips ingest, starts at phase 2 (retrieve) |
+| `--ingest-only` |  | — | Runs ingest + retrieve + judge | store_true | Stops after phase 1 (ingest) |
+| `--k` |  | `40` | Retrieve top 40 items from search | int | Retrieve top N items (adaptive: +20 for temporal, -10 for adversarial) |
+| `--cluster-size` |  | `5` | No episodic expansion | int | Expand hits ±N turns in same conversation |
+| `--graph-depth` |  | `1` | Single-hop graph expansion | int | Traverse N hops in relationship graph |
+| `--generator-model` |  | `os.environ.get('EVAL_GENERATOR_MODEL')` | Reads EVAL_GENERATOR_MODEL env var | str | Model ID for answer generation |
+| `--judge-model` |  | `os.environ.get('EVAL_JUDGE_MODEL')` | Reads EVAL_JUDGE_MODEL env var | str | Model ID for scoring answers |
+| `--openai-base-url` | Custom base URL for OpenAI-compatible API (e.g. MCP proxy or LM Studio) | None | Uses official OpenAI/Anthropic endpoint | str | Routes generator to custom provider |
+| `--variant` | Pipeline identifier passed to bulk-insert and enrichers for A/B tracking. | `` | No pipeline variant label | str | Tags all ingested items with variant ID |
+| `--verbose` | Dump full msg objects per question into run.log | — | Logs only status/errors | store_true | Logs full OpenAI message objects |
 
 ## Environment variables read
 
@@ -55,27 +55,24 @@ Includes:
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils (get_api_key)` (retrieve API keys from vault fallback)
-- `memory_core` (bulk item ingestion, graph linking, semantic search)
-- `memory_core (memory_write_bulk_impl, memory_link_impl, _db)` (core persistence and relationships)
-- `memory_core (memory_search_scored_impl)` (vector search with recency bias)
-- `temporal_utils` (date parsing and relative expression resolution)
+- `auth_utils (get_api_key)`
+- `memory_core`
+- `memory_core (memory_search_scored_impl)`
+- `memory_core (memory_write_bulk_impl, memory_link_impl, _db)`
+- `temporal_utils`
 
 ## Calls OUT (external side-channels)
 
-- `gen_client.chat.completions.create()` (OpenAI SDK; generator model inference)
-- `judge_client.chat.completions.create()` (OpenAI SDK; answer scoring inference)
+_(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `openai (OpenAI)` (instantiated as gen_client and judge_client for LLM calls)
+- `openai (OpenAI)`
 
 ## File dependencies (repo paths referenced)
 
-- `data/locomo/locomo10.json` (benchmark dataset; conversation turns, Q&A, metadata)
-- `.scratch/locomo_run_{timestamp}/hypotheses.jsonl` (model answers; one per line)
-- `.scratch/locomo_run_{timestamp}/results.json` (summary accuracy by category)
-- `.scratch/locomo_run_{timestamp}/run.log` (detailed per-question logs)
+- `locomo10.json`
+- `results.json`
 
 ## Re-validation
 

@@ -1,21 +1,27 @@
 ---
-tool: bin/temporal_utils.py
-sha1: a5d46393391d
-mtime_utc: 2026-04-18T03:45:31.264360+00:00
-generated_utc: 2026-04-18T16:33:21.749615+00:00
+tool: bin/chatlog_status.py
+sha1: 4aaa2b3ea8bc
+mtime_utc: 2026-04-18T15:51:57.870691+00:00
+generated_utc: 2026-04-18T16:33:21.608681+00:00
 private: false
 ---
 
-# bin/temporal_utils.py
+# bin/chatlog_status.py
 
 ## Purpose
 
-Enhanced temporal resolution utility for m3-memory.
-Resolves relative date expressions (yesterday, last Friday, the Sunday before June 1st) 
-into absolute ISO-8601 dates based on an anchor timestamp.
+chatlog_status.py — single-call summary of the chat log subsystem state.
+
+Exports:
+- chatlog_status_impl() -> str : returns JSON summary
+- CLI: python bin/chatlog_status.py [--json]
+
+Returns row counts from SQLite; everything else from state file + config.
+Cold call <50ms (no full table scans).
 
 ## Entry points
 
+- `def main()` (line 195)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -28,11 +34,15 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `chatlog_config`
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**sqlite**
+
+- `sqlite3.connect()  → `chatlog_db`` (line 70)
+- `sqlite3.connect()  → `main_db`` (line 54)
+
 
 ## Notable external imports
 

@@ -2,7 +2,7 @@
 tool: bin/cli_kb_browse.py
 sha1: 113649874500
 mtime_utc: 2026-04-07T04:04:41.324855+00:00
-generated_utc: 2026-04-18T05:16:53.097584+00:00
+generated_utc: 2026-04-18T16:33:21.614731+00:00
 private: false
 ---
 
@@ -29,11 +29,11 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `-n`, `--limit` | Max entries to show | — |  | int |  |
-| `-t`, `--type` | Filter by type (fact, decision, knowledge, project…) | — |  | str |  |
-| `-s`, `--search` | Search title/content (case-insensitive) | — |  | str |  |
-| `--no-pager` | Print all without paging | — |  | store_true |  |
-| `--db` | Override DB path | — |  | str |  |
+| `-n`, `--limit` | Max entries to show | (None) | Returns all entries (no LIMIT clause in SQL), sorted by importance DESC | int | Limits result set to N rows using SQL LIMIT |
+| `-t`, `--type` | Filter by type (fact, decision, knowledge, project…) | (None) | No type filtering; SQL WHERE clause omitted | str | Filters by type; supports wildcard (e.g., fact*) or exact match (e.g., "fact") |
+| `-s`, `--search` | Search title/content (case-insensitive) | (None) | No search filtering; fetches all entries | str | Filters entries where title or content matches (case-insensitive LIKE); exact match if quoted |
+| `--no-pager` | Print all without paging | (false) | Renders all entries in paged mode (50 lines/page, prompts to continue) | store_true | Prints all rendered entries to stdout without pagination |
+| `--db` | Override DB path | (DB_PATH constant) | Uses hardcoded DB_PATH (REPO_ROOT / "memory" / "agent_memory.db") | str | Connects to specified SQLite DB file instead of default |
 
 ## Environment variables read
 

@@ -2,7 +2,7 @@
 tool: bin/secret_rotator.py
 sha1: bf6e966bbec0
 mtime_utc: 2026-04-06T00:25:00.987104+00:00
-generated_utc: 2026-04-18T05:16:53.217456+00:00
+generated_utc: 2026-04-18T16:33:21.741045+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ _(no module docstring — update the source file.)_
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--dry-run` |  | — |  | store_true |  |
+| `--dry-run` | Show planned rotations without writing | — | Rotates secrets: backs up old value, generates new token, encrypts to vault, logs event. | store_true | Logs planned rotations (new token length) but skips backup, encryption, vault write, and event logging. |
 
 ## Environment variables read
 
