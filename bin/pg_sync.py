@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import sys
 import os
+import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 from m3_sdk import resolve_venv_python
+
 
 def ensure_venv():
     venv_python = resolve_venv_python()
@@ -14,10 +15,11 @@ def ensure_venv():
 
 ensure_venv()
 
-import sqlite3
-import logging
 import json
+import logging
+import sqlite3
 from datetime import datetime, timezone
+
 from m3_sdk import M3Context
 
 # Python 3.12+ sqlite3 datetime adapter deprecation fix
@@ -166,10 +168,10 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
     local_rows = sl_cur.fetchall()
     push_count = 0
     push_errors = 0
-    
+
     # Batch UPSERT using execute_values or manual batching for PostgreSQL
     from psycopg2.extras import execute_values
-    
+
     if local_rows:
         try:
             # PostgreSQL upsert logic for memory_items
@@ -275,7 +277,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
                     if isinstance(row_list[4], dict):
                         row_list[4] = json.dumps(row_list[4])
                     batch.append(row_list)
-                
+
                 sl_cur.executemany(upsert_query, batch)
                 pull_count += len(batch)
                 sl_conn.commit()
@@ -299,7 +301,7 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn):
         sl_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships WHERE created_at > ?", (watermark,))
     else:
         sl_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships")
-    
+
     local_rows = sl_cur.fetchall()
     push_count = 0
     if local_rows:
@@ -319,7 +321,7 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn):
         pg_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships WHERE created_at > %s", (watermark,))
     else:
         pg_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships")
-        
+
     remote_rows = pg_cur.fetchall()
     pull_count = 0
     if remote_rows:
@@ -329,7 +331,7 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn):
             sl_conn.commit()
         except Exception as exc:
             logger.warning(f"Batch Relationship pull failed: {type(exc).__name__}")
-    
+
     _set_watermark(sl_cur, "rel_pull", now)
     sl_conn.commit()
     logger.info(f"Pulled {pull_count} relationships from warehouse.")
@@ -545,8 +547,8 @@ def _ensure_pg_embeddings_schema(pg_cur):
 def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
     """Synchronizes the memory_embeddings table bi-directionally with watermark logic."""
     logger.info("Synchronizing memory_embeddings...")
-    from psycopg2.extras import execute_values
     from psycopg2 import Binary
+    from psycopg2.extras import execute_values
     now = datetime.now(timezone.utc).isoformat()
 
     _ensure_pg_embeddings_schema(pg_cur)
@@ -657,7 +659,7 @@ def _acquire_sync_lock(sl_cur) -> bool:
             last_lock = datetime.fromisoformat(row[0])
             if (datetime.now(timezone.utc) - last_lock).total_seconds() < 3600:
                 return False
-        
+
         sl_cur.execute(
             "INSERT OR REPLACE INTO sync_state (collection_name, last_pull_at) VALUES ('pg_sync_lock', ?)",
             (datetime.now(timezone.utc).isoformat(),)
@@ -751,7 +753,7 @@ def main():
     except Exception as e:
         logger.error(f"Sync failed: {type(e).__name__}: {e}")
         sys.exit(1)
-    
+
 
 if __name__ == "__main__":
     main()

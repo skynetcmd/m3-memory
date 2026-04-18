@@ -7,11 +7,11 @@ Uses project virtual environment paths and ensures log directories exist.
 
 import argparse
 import os
-import sys
+import pathlib
 import platform
 import subprocess
+import sys
 import tempfile
-import pathlib
 
 
 def _safe_print(msg: str) -> None:
@@ -56,7 +56,7 @@ def install_unix_crontab(m3_memory_root):
     # Filter out old agent_os entries to prevent duplicates
     # This filters any line containing the current m3_memory_root
     filtered_cron = "\n".join([line for line in current_cron.splitlines() if m3_memory_root not in line])
-    
+
     # Append the new content
     new_cron = filtered_cron.strip() + "\n\n" + cron_content.strip() + "\n"
 
@@ -80,6 +80,8 @@ def get_schedule_specs(m3_memory_root):
         python_exe = sys.executable
 
     log_dir = os.path.join(m3_memory_root, "logs")
+    bin_posix = m3_memory_root.replace("\\", "/") + "/bin"
+    maintenance_log = os.path.join(log_dir, "maintenance.log")
 
     return [
         {
@@ -100,7 +102,7 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_Maintenance",
-            "cmd": f'"{python_exe}" -c "import sys; sys.path.insert(0, \'{m3_memory_root.replace("\\", "/")}/bin\'); import memory_maintenance; memory_maintenance.memory_maintenance_impl()" >> "{os.path.join(log_dir, "maintenance.log")}" 2>&1',
+            "cmd": f'"{python_exe}" -c "import sys; sys.path.insert(0, \'{bin_posix}\'); import memory_maintenance; memory_maintenance.memory_maintenance_impl()" >> "{maintenance_log}" 2>&1',
             "schedule": "DAILY",
             "modifier": "",
             "time": "03:00",

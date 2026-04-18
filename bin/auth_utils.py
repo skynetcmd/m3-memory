@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import base64
+import logging
 import os
 import platform
 import re
-import subprocess
-import logging
 import sqlite3
-import base64
+import subprocess
 import unicodedata
 from datetime import datetime, timezone
 
@@ -22,7 +22,7 @@ def get_master_key() -> str | None:
     val = os.getenv("AGENT_OS_MASTER_KEY", "").strip()
     if val:
         return val
-    
+
     try:
         import keyring
         val = keyring.get_password("system", "AGENT_OS_MASTER_KEY")
@@ -30,7 +30,7 @@ def get_master_key() -> str | None:
             return val
     except Exception:
         pass
-        
+
     if platform.system() == "Darwin":
         try:
             result = subprocess.run(
@@ -40,7 +40,7 @@ def get_master_key() -> str | None:
             return result.stdout.strip()
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
-            
+
     return None
 
 
@@ -59,7 +59,7 @@ def _get_device_salt() -> bytes:
                     return salt
         except Exception:
             pass
-    
+
     # Generate new salt
     salt = os.urandom(16)
     try:
@@ -226,13 +226,13 @@ def set_api_key(service: str, value: str):
     master_key = get_master_key()
     if not master_key:
         raise ValueError("AGENT_OS_MASTER_KEY not found in OS keyring. Cannot encrypt secret.")
-        
+
     fernet = _get_fernet(master_key)
     encrypted_value = fernet.encrypt(value.encode("utf-8")).decode("utf-8")
     origin_device = os.environ.get("ORIGIN_DEVICE", platform.node())
     # ISO-8601 UTC timestamp
     now = datetime.now(timezone.utc).isoformat()
-    
+
     conn = None
     try:
         conn = sqlite3.connect(DB_PATH)

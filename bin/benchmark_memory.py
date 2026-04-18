@@ -6,17 +6,17 @@ Measures Hit@1, Hit@5, MRR, and Latency across diverse test cases.
 
 import asyncio
 import os
+import statistics
 import sys
 import time
 import uuid
-import statistics
-from datetime import datetime, timezone
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
-from memory_core import memory_write_impl, memory_search_impl, memory_delete_impl, _db
 import httpx
+from memory_core import memory_delete_impl, memory_search_impl, memory_write_impl
+
 
 # ── Probe LM Studio (from test_memory_bridge.py) ─────────────────────────────
 async def probe_lm_studio():
@@ -90,7 +90,7 @@ async def run_benchmark():
 
     print(f"\n--- Running {len(TEST_CASES)} Retrieval Test Cases ---")
     metrics = {"hits@1": 0, "hits@5": 0, "mrr": 0, "latencies": []}
-    
+
     print(f"{'#':<3} | {'Query':<35} | {'Rank':<4} | {'Latency':<8} | {'Status'}")
     print("-" * 70)
 
@@ -109,7 +109,7 @@ async def run_benchmark():
             if line.startswith("1. ["):
                 base_line_idx = idx
                 break
-        
+
         rank = -1
         if base_line_idx != -1:
             for line_idx in range(base_line_idx, len(lines)):
@@ -120,7 +120,7 @@ async def run_benchmark():
                     if ". [" in line:
                         rank = int(line.split(". [")[0].strip())
                     break
-        
+
         status = "❌ FAIL"
         if rank == 1:
             metrics["hits@1"] += 1
@@ -131,7 +131,7 @@ async def run_benchmark():
             metrics["hits@5"] += 1
             metrics["mrr"] += (1.0 / rank)
             status = f"✅ HIT@{rank}"
-        
+
         rank_label = str(rank) if rank > 0 else "N/A"
         print(f"{i:<3} | {case['query'][:35]:<35} | {rank_label:<4} | {latency:>6.1f}ms | {status}")
 

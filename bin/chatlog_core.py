@@ -736,8 +736,8 @@ async def chatlog_promote_impl(
                 cols_sql = ", ".join(col_names)
                 placeholders = ",".join("?" for _ in row_ids)
                 # Override type via the SELECT
-                select_cols = ", ".join(
-                    f"? as type" if c == "type" else c for c in col_names
+                ", ".join(
+                    "? as type" if c == "type" else c for c in col_names
                 )
                 # Simpler: build rows in Python, insert into main with target_type
                 for r in rows:

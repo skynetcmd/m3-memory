@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
-import sys
 import os
+import sys
 
 # Ensure we can import from the memory directory
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,6 +10,7 @@ sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 from m3_sdk import resolve_venv_python
 
+
 def ensure_venv():
     venv_python = resolve_venv_python()
     if os.path.exists(venv_python) and sys.executable != venv_python:
@@ -17,10 +18,18 @@ def ensure_venv():
 
 ensure_venv()
 
-from memory.knowledge_helpers import add_knowledge, search_knowledge, list_knowledge, delete_knowledge, get_all_types, update_knowledge
+from memory.knowledge_helpers import (
+    add_knowledge,
+    delete_knowledge,
+    get_all_types,
+    list_knowledge,
+    search_knowledge,
+    update_knowledge,
+)
+
 
 def main():
-    # Intercept old positional commands to maintain backwards compatibility 
+    # Intercept old positional commands to maintain backwards compatibility
     # while allowing the new flag-based behavior.
     for i, arg in enumerate(sys.argv):
         if arg in ("add", "search", "list", "delete", "update"):
@@ -28,7 +37,7 @@ def main():
             break
 
     parser = argparse.ArgumentParser(description="Knowledge Base CLI")
-    
+
     # Core Actions (Mutually Exclusive)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-a", "--add", type=str, metavar="CONTENT", help="Add a knowledge item with this content")
@@ -36,7 +45,7 @@ def main():
     group.add_argument("-s", "--search", type=str, metavar="QUERY", help="Search knowledge items")
     group.add_argument("-l", "--list", action="store_true", help="List recent knowledge items")
     group.add_argument("-d", "--delete", type=str, metavar="ID", help="Delete a knowledge item by ID")
-    
+
     # Modifiers
     parser.add_argument("-c", "--content", type=str, default="", help="Updated content for the item (with -u)")
     parser.add_argument("-t", "--type", type=str, default="", help="Filter or set item type (use 'all' or '?' to list types in DB)")
@@ -73,11 +82,11 @@ def main():
         print(result)
 
     elif args.update is not None:
-        # Check if they are trying to update the type (not natively supported by memory_update_impl yet, 
+        # Check if they are trying to update the type (not natively supported by memory_update_impl yet,
         # so we notify them or just use the other fields)
         if args.type:
             print("Warning: Updating 'type' is not supported via the CLI update command yet. Use DB queries.")
-            
+
         result = update_knowledge(
             item_id=args.update,
             content=args.content,
@@ -90,12 +99,12 @@ def main():
 
     elif args.search is not None:
         result = search_knowledge(args.search, k=args.limit, type_filter=args.type)
-        
+
         # If search_knowledge returns a string instead of a structured result (like an error), print it directly
         if isinstance(result, str):
             print(result)
         else:
-            # If it were returning dictionaries, we'd handle it here. 
+            # If it were returning dictionaries, we'd handle it here.
             # However, memory_search in memory_bridge returns a formatted string.
             pass
 

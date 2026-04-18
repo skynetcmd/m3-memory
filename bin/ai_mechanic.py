@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
@@ -9,19 +9,19 @@ def repair_database():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        
+
         # Force-align project_decisions
         cursor.execute("DROP TABLE IF EXISTS project_decisions")
         cursor.execute("""CREATE TABLE project_decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project TEXT, decision TEXT, rationale TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-        
+
         # Force-align system_focus
         cursor.execute("DROP TABLE IF EXISTS system_focus")
         cursor.execute("CREATE TABLE system_focus (id INTEGER PRIMARY KEY, summary TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
         cursor.execute("INSERT INTO system_focus (id, summary) VALUES (1, 'System Repaired & Calibrated')")
-        
+
         conn.commit()
         conn.close()
         print("✅ Database Schema Aligned.")

@@ -14,25 +14,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
-import logging
-from pathlib import Path
 
 # Import config module from same directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chatlog_config import (
-    ChatlogConfig,
-    HookSpec,
-    RedactionSpec,
-    CostTrackingSpec,
-    EmbedSweeperSpec,
     CONFIG_PATH,
     DEFAULT_DB_PATH,
     MAIN_DB_PATH,
-    VALID_MODES,
     VALID_HOST_AGENTS,
+    VALID_MODES,
+    ChatlogConfig,
+    CostTrackingSpec,
+    EmbedSweeperSpec,
+    HookSpec,
+    RedactionSpec,
     resolve_config,
     save_config,
 )
@@ -60,7 +59,7 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
 def prompt_choice(question: str, choices: list[str], default: str) -> str:
     """Prompt for one of several choices. Return the chosen value."""
     choices_str = "/".join(choices)
-    default_idx = choices.index(default) if default in choices else 0
+    choices.index(default) if default in choices else 0
     while True:
         response = input(f"{question} ({choices_str}): ").strip().lower()
         if response == "":

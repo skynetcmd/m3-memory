@@ -9,7 +9,6 @@ import asyncio
 import os
 import sqlite3
 import sys
-import subprocess
 
 try:
     import httpx

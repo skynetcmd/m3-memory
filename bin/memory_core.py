@@ -42,23 +42,24 @@ Other: `CONTRADICTION_THRESHOLD`, `DEDUP_LIMIT`, `DEDUP_THRESHOLD`,
 """
 from __future__ import annotations
 
-import sqlite3
-import os
-import logging
-import sys
-import uuid
-import json
-import hashlib
-import threading
-import platform
-from typing import Any
-from datetime import datetime, timezone
-from contextlib import contextmanager
 import asyncio
-
+import hashlib
+import json
+import logging
+import os
+import platform
 import re
-from m3_sdk import M3Context
+import sqlite3
+import sys
+import threading
+import uuid
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
+from typing import Any
+
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
+from m3_sdk import M3Context
+
 
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
     """Summarizes a conversation into key points using the local LLM."""
@@ -114,16 +115,23 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
             "INSERT INTO memory_items (id, type, title, content, created_at, content_hash) VALUES (?, 'summary', ?, ?, ?, ?)",
             (summary_id, f"Summary of {conversation_id[:8]}", summary_text, now, _content_hash(summary_text))
         )
-    
+
     # 6. Link it to the conversation
     memory_link_impl(summary_id, conversation_id, "references")
-    
+
     _record_history(summary_id, "create", None, summary_text, "content", "system")
     return summary_text
 from embedding_utils import (
-    pack as _pack, unpack as _unpack,
     batch_cosine as _batch_cosine,
+)
+from embedding_utils import (
     infer_change_agent as _infer_change_agent_util,
+)
+from embedding_utils import (
+    pack as _pack,
+)
+from embedding_utils import (
+    unpack as _unpack,
 )
 
 logger = logging.getLogger("memory_core")
@@ -530,13 +538,13 @@ async def _auto_classify(content: str, title: str) -> str:
         "reference", "log", "home", "user_fact", "scratchpad", "knowledge",
         "event_extraction", "chat_log",
     }
-    
+
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
     client = _get_embed_client()
     result = await get_best_llm(client, token)
     if not result:
         return "note"
-    
+
     base_url, model = result
     prompt = (
         f"Classify this memory into exactly one type. Valid types: {', '.join(sorted(valid_types))}\n"
@@ -544,7 +552,7 @@ async def _auto_classify(content: str, title: str) -> str:
         f"Content: {content[:500]}\n"
         f"Reply with ONLY the type name, nothing else."
     )
-    
+
     try:
         resp = await client.post(
             f"{base_url}/chat/completions",
@@ -792,6 +800,7 @@ def _content_hash(content: str) -> str:
 
 # Shared Async Client
 import httpx as _httpx
+
 _shared_embed_client: _httpx.AsyncClient | None = None
 
 def _get_embed_client() -> _httpx.AsyncClient:
@@ -1340,7 +1349,7 @@ async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
             "include": ["documents", "metadatas", "distances"]
         }, timeout=CHROMA_READ_T)
         query_resp.raise_for_status()
-        
+
         data = query_resp.json()
         results = []
         if data["ids"] and data["ids"][0]:
@@ -1393,17 +1402,17 @@ def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -
     """Trims results where the score drop-off is significantly higher than average."""
     if len(ranked) < 3:
         return ranked
-    
+
     # Calculate score differences between consecutive results
     diffs = [ranked[i][0] - ranked[i+1][0] for i in range(len(ranked) - 1)]
     avg_diff = sum(diffs) / len(diffs)
-    
+
     # Find the first 'elbow' where the drop is significantly larger than the average
     for i, d in enumerate(diffs):
         if d > avg_diff * sensitivity:
             # We found an elbow, trim here
             return ranked[:i+1]
-            
+
     return ranked
 
 
@@ -1422,12 +1431,12 @@ def _apply_temporal_boost(scored, query, explain=False):
                     query_dates.append(datetime.fromisoformat(match.group(0)).date())
                 else:
                     d, m, y = match.groups()
-                    months = ["january", "february", "march", "april", "may", "june", 
+                    months = ["january", "february", "march", "april", "may", "june",
                               "july", "august", "september", "october", "november", "december"]
                     query_dates.append(date(int(y), months.index(m) + 1, int(d)))
             except Exception:
                 continue
-    
+
     if not query_dates:
         return scored
 
@@ -1445,7 +1454,7 @@ def _apply_temporal_boost(scored, query, explain=False):
                     elif diff <= 7: boost = max(boost, 0.05)
             except Exception:
                 pass
-        
+
         if explain and boost > 0:
             if "_explanation" not in it: it["_explanation"] = {}
             it["_explanation"]["temporal_boost"] = boost
@@ -1653,7 +1662,7 @@ async def memory_search_scored_impl(
 
     _MMR_LAMBDA = 0.7
     pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
-    
+
     # Adaptive K: Trim by elbow if requested
     if adaptive_k:
         pre_ranked_all = _trim_by_elbow(pre_ranked_all)
@@ -1744,7 +1753,7 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
         content = item.get("content") or ""
         lines.append("-" * 40)
         lines.append(f"{rank}. [{item['id']}] score={score:.4f}  type: {item.get('type', 'unknown')}  title: {item.get('title','')}")
-        
+
         if explain and "_explanation" in item:
             exp = item["_explanation"]
             if "raw_hybrid" in exp:
@@ -1891,10 +1900,10 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     """Creates a directional link between two memory items."""
     if relationship_type not in VALID_RELATIONSHIP_TYPES:
         return f"Error: invalid relationship type '{relationship_type}'. Valid: {', '.join(sorted(VALID_RELATIONSHIP_TYPES))}"
-    
+
     if db is not None:
         return _memory_link_inner(from_id, to_id, relationship_type, db)
-    
+
     with _db() as db:
         return _memory_link_inner(from_id, to_id, relationship_type, db)
 
@@ -2047,7 +2056,6 @@ def memory_inbox_ack_impl(memory_id: str) -> str:
             "UPDATE memory_items SET read_at = ?, updated_at = ? WHERE id = ? AND type = 'handoff' AND is_deleted = 0",
             (now, now, memory_id)
         )
-        rows_affected = db.total_changes  # This may not be reliable; use a verify query instead
 
         # Verify update actually happened
         verify = db.execute(
@@ -2314,23 +2322,23 @@ async def memory_write_batch_impl(items: list[dict]):
     results = []
     # 1. First pass: Insert metadata in one transaction
     now = datetime.now(timezone.utc).isoformat()
-    
+
     write_tasks = []
     for item in items:
         mid = str(uuid.uuid4())
         agent = item.get("change_agent", "").strip().lower() or _infer_change_agent_util(item.get("agent_id", ""), item.get("model_id", ""), default=DEFAULT_CHANGE_AGENT)
-        
+
         with _db() as db:
             db.execute(
                 "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, created_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (mid, item["type"], item.get("title", ""), item["content"], item.get("metadata", "{}"), 
-                 item.get("agent_id", ""), item.get("model_id", ""), agent, item.get("importance", 0.5), 
+                (mid, item["type"], item.get("title", ""), item["content"], item.get("metadata", "{}"),
+                 item.get("agent_id", ""), item.get("model_id", ""), agent, item.get("importance", 0.5),
                  item.get("source", "agent"), ORIGIN_DEVICE, now)
             )
             if item.get("embed", True):
                 db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (mid, "upsert"))
-        
+
         if item.get("embed", True):
             # Queue for parallel embedding (gather)
             write_tasks.append((mid, item.get("content") or item.get("title")))
@@ -2367,7 +2375,7 @@ async def memory_write_batch_impl(items: list[dict]):
                         "VALUES (?,?,?,?,?,?,?)",
                         (str(uuid.uuid4()), mid, _pack(vec), m, len(vec), now, _content_hash(text))
                     )
-    
+
     return f"Batch created: {len(results)} items"
 
 # ── Task Orchestration: State Machine + Helper Functions ─────────────────────────

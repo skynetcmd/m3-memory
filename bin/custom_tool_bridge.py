@@ -1,11 +1,13 @@
-from mcp.server.fastmcp import FastMCP
-import sqlite3
+import logging
 import os
 import re
-import logging
+import sqlite3
 import sys
-import httpx
 from datetime import datetime
+
+import httpx
+from mcp.server.fastmcp import FastMCP
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from llm_failover import get_best_llm
 
@@ -40,10 +42,10 @@ EXT_READ_TIMEOUT = 30.0   # seconds for external APIs (Perplexity, Grok)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 
-from thermal_utils import get_thermal_status
-
 # ── Auth (delegated to m3_sdk) ────────────────────────────────────────────────
 from m3_sdk import M3Context, StructuredLogger
+from thermal_utils import get_thermal_status
+
 ctx = M3Context()
 sl = StructuredLogger()
 
@@ -67,7 +69,7 @@ def log_activity(category: str, detail_a: str, detail_b: str, detail_c: str = "N
                         (f"%{detail_a}%", f"%{detail_b}%")
                     )
                     conn.commit()
-                    
+
 
         logger.info(sl.format("Activity Logged", category, detail_a=detail_a[:100]))
         return f"Logged to {category} table successfully."
@@ -111,7 +113,7 @@ def update_focus(summary: str):
     except Exception as exc:
         logger.error(f"Unexpected DB error: {type(exc).__name__}: {exc}")
         return f"Error: Unexpected failure ({type(exc).__name__}). Check stderr logs."
-    
+
 
 
 @mcp.tool()
@@ -137,7 +139,7 @@ def retire_focus():
     except Exception as exc:
         logger.error(f"Unexpected error: {type(exc).__name__}: {exc}")
         return f"Error: Unexpected failure ({type(exc).__name__}). Check stderr logs."
-    
+
 
 
 @mcp.tool()
@@ -206,7 +208,7 @@ def query_decisions(keyword: str = "", limit: int = 10):
     except Exception as exc:
         logger.error(f"Unexpected DB error: {type(exc).__name__}")
         return f"Error: Unexpected failure ({type(exc).__name__}). Check stderr logs."
-    
+
 
 
 # ── Research tools ────────────────────────────────────────────────────────────
@@ -403,7 +405,7 @@ async def query_local_model(prompt: str):
     choice        = choices[0]
     finish_reason = choice.get("finish_reason", "unknown")
     raw_content   = choice.get("message", {}).get("content", "")
-    
+
     # Extract answer by stripping <think> tags
     content = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
 

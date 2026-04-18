@@ -12,8 +12,8 @@ Safe to run from cron — logs to stderr, exits 0 on success or graceful offline
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))

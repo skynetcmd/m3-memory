@@ -1,11 +1,12 @@
 """
 Enhanced temporal resolution utility for m3-memory.
-Resolves relative date expressions (yesterday, last Friday, the Sunday before June 1st) 
+Resolves relative date expressions (yesterday, last Friday, the Sunday before June 1st)
 into absolute ISO-8601 dates based on an anchor timestamp.
 """
 from __future__ import annotations
+
 import re
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from typing import Any
 
 DAYS_OF_WEEK = {
@@ -14,14 +15,14 @@ DAYS_OF_WEEK = {
 }
 
 MONTHS = [
-    "january", "february", "march", "april", "may", "june", 
+    "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december"
 ]
 
 def parse_generic_date(text: str) -> datetime | None:
     """Tries to parse a date from a string like 'May 25, 2023' or '25 May 2023'."""
     text = text.lower().strip()
-    
+
     # 1. 'May 25, 2023' or 'May 25 2023'
     match = re.search(r"([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,)?\s+(\d{4})", text)
     if match:
@@ -48,7 +49,7 @@ def resolve_weekday_relative(weekday_name: str, base_date: datetime, direction: 
     """Finds the nearest [weekday] before or after the base_date."""
     target_weekday = DAYS_OF_WEEK[weekday_name.lower()]
     current_weekday = base_date.weekday()
-    
+
     if direction == "before":
         days_diff = (current_weekday - target_weekday) % 7
         if days_diff == 0:
@@ -153,15 +154,15 @@ def parse_locomo_date(date_str: str) -> datetime | None:
             day = int(match.group(4))
             month_name = match.group(5).lower()
             year = int(match.group(6))
-            
+
             if meridiem == "pm" and hour < 12:
                 hour += 12
             if meridiem == "am" and hour == 12:
                 hour = 0
-                
+
             month = MONTHS.index(month_name) + 1
             return datetime(year, month, day, hour, minute)
-    except:
+    except Exception:
         pass
     return None
 
@@ -182,17 +183,17 @@ if __name__ == "__main__":
     # Test cases
     anchor = parse_locomo_date("1:14 pm on 25 May, 2023")
     print(f"Anchor: {anchor}")
-    
+
     # Test complex pattern
     test_text = "Melanie ran a charity race on the Sunday before 25 May 2023."
     print(f"Test: {test_text}")
     print(f"Resolved: {resolve_temporal_expressions(test_text, anchor)}")
-    
+
     # Test simple relative
     print(f"Yesterday: {resolve_temporal_expressions('I went there yesterday', anchor)}")
-    
+
     # Test last weekday
     print(f"Last Tuesday: {resolve_temporal_expressions('We met last Tuesday', anchor)}")
-    
+
     # Test numeric
     print(f"3 years ago: {resolve_temporal_expressions('That was 3 years ago', anchor)}")
