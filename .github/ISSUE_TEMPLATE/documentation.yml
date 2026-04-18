@@ -1,0 +1,40 @@
+name: Documentation issue
+description: Suggest improvements or report errors in the documentation
+labels: ["documentation", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the M3 Memory documentation!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong with the documentation?
+      description: Is it missing information, outdated, or contains errors?
+      placeholder: The install guide for Windows mentions a command that no longer exists...
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Where is this located?
+      description: URL or file path
+      placeholder: "docs/install_windows-powershell.md"
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested-fix
+    attributes:
+      label: Suggested fix
+      description: How should we improve it?
+
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to open a PR for this
+          required: false
