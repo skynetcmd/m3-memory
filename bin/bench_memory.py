@@ -36,7 +36,7 @@ def _unpack(blob: bytes) -> list[float]:
 
 
 def _random_vec(dim: int = 768) -> list[float]:
-    return [random.gauss(0, 1) for _ in range(dim)]
+    return [random.gauss(0, 1) for _ in range(dim)]  # nosec B311 - benchmark noise, not cryptographic
 
 
 def _cosine(a, b):
@@ -69,7 +69,7 @@ def bench_write(conn, n=500):
                 origin_device, is_deleted, created_at)
                VALUES (?,?,?,?,?,?,?,?,0,?)""",
             (item_id, "bench_test", f"Bench item {i}",
-             f"Benchmark content for item {i} with random data {random.random()}",
+             f"Benchmark content for item {i} with random data {random.random()}",  # nosec B311 - benchmark filler, not cryptographic
              "{}", 0.5, "bench", "bench_host", ts),
         )
         vec = _random_vec()
