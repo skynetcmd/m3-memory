@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 145273f21c6f
-mtime_utc: 2026-04-18T15:35:57.277842+00:00
-generated_utc: 2026-04-18T16:33:21.708862+00:00
+sha1: 07600a556568
+mtime_utc: 2026-04-18T21:42:09.778629+00:00
+generated_utc: 2026-04-18T21:42:09.778629+00:00
 private: false
 ---
 
@@ -10,7 +10,31 @@ private: false
 
 ## Purpose
 
-_(no module docstring — update the source file.)_
+Core memory primitives: single + bulk write, search, enrichment, emitters.
+
+Not a CLI — imported by MCP server, bench drivers, and import scripts.
+
+## Public async API (relevant to ingest)
+
+`memory_write_impl(...)` — single-item insert with full enrichment chain.
+Exposed as the `memory_write` MCP tool; accepts `variant` and `embed_text`.
+
+`memory_write_bulk_impl(items, *, enrich=None, check_contradictions=None,
+emit_conversation=None, variant=None)` — batch insert for benchmarks / imports.
+Routes embeddings through `_embed_many`. Per-item fields (type, content,
+metadata, conversation_id, variant, embed, embed_text, auto_classify) are
+honored. Kwargs:
+
+| Kwarg | Default | Default behavior |
+|---|---|---|
+| `enrich` | `None` | Inherit env gates `M3_INGEST_AUTO_TITLE` and `M3_INGEST_AUTO_ENTITIES`. `True` forces both on, `False` forces both off. |
+| `check_contradictions` | `None` | OFF (bulk default differs from single-insert to protect throughput on large imports). `True` enables bounded contradiction check (Semaphore(8)), `False` explicit off. |
+| `emit_conversation` | `None` | ON when items carry `conversation_id` and `type=='message'`. `False` disables event/window/gist emitters. Sub-emitters are additionally gated by env vars `M3_INGEST_EVENT_ROWS`, `M3_INGEST_WINDOW_CHUNKS`, `M3_INGEST_GIST_ROWS`. |
+| `variant` | `None` | No default variant tag. When set, acts as fallback when an item doesn't carry its own `variant`. Per-item `variant` always wins. |
+
+Of these, only `variant` is exposed on the MCP `memory_write` schema and via
+`--variant` on bench CLIs. `enrich` / `check_contradictions` /
+`emit_conversation` are kwarg-only perf knobs for bulk ingest drivers.
 
 ## Entry points
 
