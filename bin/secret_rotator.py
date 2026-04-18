@@ -2,6 +2,7 @@
 import logging
 import os
 import secrets
+import sqlite3
 import string
 import sys
 from datetime import datetime, timezone
@@ -37,6 +38,7 @@ def rotate_secrets(dry_run: bool = False):
             old_secret = ctx.get_secret(key_name)
             if old_secret and not dry_run:
                 # Store backup in a dedicated table (ensure schema exists)
+                conn: sqlite3.Connection
                 with ctx.get_sqlite_conn() as conn:
                     conn.execute("CREATE TABLE IF NOT EXISTS secret_backups (service_name TEXT, encrypted_value TEXT, rotated_at TEXT)")
                     # Get the encrypted blob directly from the source table

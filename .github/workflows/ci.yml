@@ -27,11 +27,6 @@ jobs:
   typecheck:
     name: Type Check (Mypy)
     runs-on: ubuntu-latest
-    # Mypy is informational only: bin/memory_bridge.py exposes tools via
-    # globals()[name] = fn at import time (dynamic FastMCP registration),
-    # which mypy can't see. ~55 of ~184 errors are this false-positive;
-    # the rest are legacy untyped code. Do not block CI on this.
-    continue-on-error: true
     steps:
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
     - name: Set up Python
