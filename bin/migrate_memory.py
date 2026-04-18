@@ -37,7 +37,7 @@ import sqlite3
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
 logger = logging.getLogger("migrate_memory")
@@ -213,7 +213,7 @@ def discover_migrations(migrations_dir: str):
     Args:
         migrations_dir: Directory to scan for migration files.
     """
-    out = {}
+    out: dict[int, dict[str, Optional[str]]] = {}
     for filepath in glob.glob(os.path.join(migrations_dir, "*.sql")):
         fname = os.path.basename(filepath)
         m = _FNAME_RE.match(fname)
