@@ -156,7 +156,7 @@ def _build_typed_function(spec):
                 return f"Error: {type(e).__name__}: {e}"
 
     ns = {"_wrapper": _wrapper}
-    exec(src, ns)
+    exec(src, ns)  # nosec B102 - src is built from static ToolSpec catalog, not user input
     fn = ns["_impl"]
     fn.__name__ = spec.name
     fn.__doc__ = spec.description
