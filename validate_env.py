@@ -31,7 +31,7 @@ ENV_VARS = [
     {"name": "M3_MEMORY_ROOT", "required": True, "validator": is_absolute_path, "format": "Absolute path"},
     {"name": "SYNC_TARGET_IP", "required": False, "validator": is_valid_ip, "format": "IP address (e.g., 192.168.1.100)"},
     {"name": "CHROMA_BASE_URL", "required": False, "validator": is_valid_url, "format": "URL (e.g., http://localhost:8000)"},
-    {"name": "PG_URL", "required": True, "validator": is_postgres_url, "format": "PostgreSQL connection string (e.g., postgresql://user:pass@host/db)"},
+    {"name": "PG_URL", "required": True, "validator": is_postgres_url, "format": "PostgreSQL connection string (e.g., postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db)"},
     {"name": "AGENT_OS_MASTER_KEY", "required": True, "validator": None, "format": None},
     {"name": "LM_API_TOKEN", "required": True, "validator": None, "format": None},
     {"name": "PERPLEXITY_API_KEY", "required": False, "validator": None, "format": None},
