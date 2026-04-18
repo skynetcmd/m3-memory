@@ -82,7 +82,7 @@ esac
 # then re-comment them for security.
 
 # _keychain_set "agentos_sync_target_ip" "your-server-ip"
-# _keychain_set "agentos_pg_url" "postgresql://agent_os:YOUR_SECURE_PASSWORD@$SYNC_TARGET_IP:5432/agent_memory"
+# _keychain_set "agentos_pg_url" "postgresql://agent_os:REPLACE_WITH_YOUR_PASSWORD@$SYNC_TARGET_IP:5432/agent_memory"
 # _keychain_set "AGENT_OS_MASTER_KEY" "your-super-secret-master-key"
 # _keychain_set "LM_STUDIO_API_KEY" "your-lm-studio-token"
 # _keychain_set "PERPLEXITY_API_KEY" "your-pplx-key"

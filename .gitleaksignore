@@ -1,0 +1,10 @@
+# gitleaks + trivy/semgrep shared: files where placeholder connection strings
+# are documentation, not real credentials. Each path below contains strings
+# like `postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db` that scanners
+# match against generic secret rules. Real deployments read secrets from the
+# OS keychain / encrypted vault (see config/zshenv.example).
+config/zshenv.example
+validate_env.py
+ENVIRONMENT_VARIABLES.md
+bin/pg_setup.py
+examples/sandbox-openclaw/.env.example
