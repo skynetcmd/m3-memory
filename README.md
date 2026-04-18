@@ -24,7 +24,7 @@ Persistent, local memory for MCP agents.
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
 
-Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agent.
+Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agent. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
 
 ---
 
@@ -44,23 +44,25 @@ Add to your MCP config:
 }
 ```
 
-Requires a local embedding model. [Ollama](https://ollama.com) is the easiest:
+Requires a local embedding model. [Ollama](https://ollama.com) maybe the easiest:
 
 ```bash
 ollama pull qwen3-embedding:0.6b && ollama serve
 ```
 
-Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the default model M3 Memory is tuned for. `nomic-embed-text` (768-dim) also works — set `EMBED_MODEL=nomic-embed-text` in your environment.
+I personally use LM Studio for it's support for Apple's MLX. But, it's your preference.
 
-Prefer a GUI? [LM Studio](https://lmstudio.ai) works too — load any embedding model and start its server (defaults to port 1234).
+Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the model M3 Memory is tuned for. But you can set and use other embedders as you wish. For example, you could use `nomic-embed-text` (768-dim) which also works (with minimal fidelity loss) — set `EMBED_MODEL=nomic-embed-text` in your environment.
+
+As mentioned, you can use [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai) — load an embedding model and start its server.
 
 Want auto-classification, summarization, and consolidation? Load a small chat model alongside the embedder (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B instruct GGUF in LM Studio / llama.cpp). M3 auto-selects it; embedding-only features work without it. See [QUICKSTART → Optional: load a small chat model](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
-Restart your agent. Done.
+Restart your agent. Done!
 
 ---
 
-## 🔮 What happens next
+## 🔮 What happens next (benefits of use)
 
 You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required.
 
