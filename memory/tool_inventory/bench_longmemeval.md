@@ -62,6 +62,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 | `--generator-model` | LLM model for answer generation | env: `EVAL_GENERATOR_MODEL` | Must be set or errors | str | Uses specified generator model |
 | `--judge-model` | LLM model for answer judging | env: `EVAL_JUDGE_MODEL` | Must be set if not --no-judge | str | Uses specified judge model |
 | `--ingest-concurrency` | number of instances to ingest in parallel | `4` | 4 parallel ingests | int | Sets parallelism for ingest phase |
+| `--variant` | Pipeline identifier for A/B tracking | `""` (empty) | Items carry no variant tag; bulk rows have variant=NULL | str | Propagated to memory_write_bulk_impl per-item and to enrichers |
 
 ## Environment variables read
 

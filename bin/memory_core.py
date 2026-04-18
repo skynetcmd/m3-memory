@@ -954,10 +954,29 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     return out  # type: ignore[return-value]
 
 
-async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
+async def memory_write_bulk_impl(
+    items: list[dict],
+    *,
+    enrich: bool | None = None,
+    check_contradictions: bool | None = None,
+    emit_conversation: bool | None = None,
+    variant: str | None = None,
+) -> list[str]:
     """Bulk write that routes embeddings through `_embed_many`. Intended for
     benchmark / import paths where per-item contradiction detection would
-    dominate wall-clock. Returns a list of item_ids (or empty string on failure)."""
+    dominate wall-clock. Returns a list of item_ids (or empty string on failure).
+
+    enrich=None means "inherit env gates" (M3_INGEST_AUTO_TITLE, M3_INGEST_AUTO_ENTITIES).
+    True forces on, False forces off.
+
+    check_contradictions=None means "off by default in bulk" (perf), True enables,
+    False disables. Differs from single path because bulk may have thousands of items.
+
+    emit_conversation=None means "on if conversation_id present and type==message"
+    (mirror single path), False disables.
+
+    variant is used as default when items don't set their own variant.
+    """
     if not items:
         return []
 
@@ -972,7 +991,7 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
         if scope not in VALID_SCOPES:
             scope = "agent"
         content = it.get("content") or ""
-        title = _augment_title_with_role(it.get("title") or "", meta)
+        title = it.get("title") or ""
         agent = (
             (it.get("change_agent") or "").strip().lower()
             or _infer_change_agent_util(
@@ -989,10 +1008,16 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
             expires_at = (
                 datetime.now(timezone.utc) + timedelta(hours=24)
             ).isoformat()
+
+        # Resolve auto_classify before adding to prepared
+        item_type = it.get("type", "note")
+        if it.get("auto_classify") and (not item_type or item_type == "auto"):
+            item_type = await _auto_classify(content, title)
+
         prepared.append(
             {
                 "id": mid,
-                "type": it.get("type", "note"),
+                "type": item_type,
                 "title": title,
                 "content": content,
                 "metadata": meta,
@@ -1010,11 +1035,39 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
                 "refresh_on": it.get("refresh_on") or None,
                 "refresh_reason": it.get("refresh_reason") or None,
                 "embed": it.get("embed", True),
-                "embed_text": _augment_embed_text_with_anchors(
-                    it.get("embed_text") or content or title, meta
-                ),
-                "variant": it.get("variant") or None,
+                "embed_text": None,  # Will be set after enrichment
+                "variant": it.get("variant") or variant,
             }
+        )
+
+    # Pre-enrichment phase: auto-title, auto-entities, augment embed_text.
+    # This runs before embedding so enriched text is included in the embed vector.
+    for p in prepared:
+        # Resolve enrich flag: None -> check env gates, True -> force on, False -> force off
+        if enrich is True:
+            p["title"] = await _maybe_auto_title(p["content"], p["title"], force=True)
+        elif enrich is None:
+            p["title"] = await _maybe_auto_title(p["content"], p["title"], force=False)
+        # else: enrich is False, skip auto-title
+
+        # Auto-entities: similar gating pattern
+        if enrich is True or (enrich is None and _ingest_llm_enabled("M3_INGEST_AUTO_ENTITIES")):
+            ents = await _maybe_auto_entities(p["content"], force=(enrich is True))
+            if ents:
+                try:
+                    meta_dict = json.loads(p["metadata"]) if isinstance(p["metadata"], str) else (p["metadata"] or {})
+                except json.JSONDecodeError:
+                    meta_dict = {}
+                if isinstance(meta_dict, dict) and "entities" not in meta_dict:
+                    meta_dict["entities"] = ents
+                    p["metadata"] = json.dumps(meta_dict)
+
+        # Augment title with role (single path does this at L2056)
+        p["title"] = _augment_title_with_role(p["title"], p["metadata"])
+
+        # Set embed_text with anchors after enrichment
+        p["embed_text"] = _augment_embed_text_with_anchors(
+            p["content"] or p["title"], p["metadata"]
         )
 
     # Phase 1: INSERT memory_items + chroma queue + history in one transaction.
@@ -1075,6 +1128,80 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
                         _content_hash(p["embed_text"]),
                     ),
                 )
+
+    # Phase 3: Contradiction detection (if requested, with bounded concurrency).
+    # Default is off in bulk (perf), must explicitly enable with check_contradictions=True.
+    if check_contradictions is True:
+        # Use semaphore to limit concurrency (avoid overwhelming LLM/search)
+        sem = asyncio.Semaphore(8)
+
+        async def check_one(p: dict) -> tuple[str, list[str]]:
+            async with sem:
+                # Only check if we have an embedding and type is not conversation/message
+                vec_row = None
+                with _db() as db:
+                    r = db.execute(
+                        "SELECT embedding FROM memory_embeddings WHERE memory_id = ? LIMIT 1",
+                        (p["id"],)
+                    ).fetchone()
+                    if r:
+                        vec_row = r
+
+                if not vec_row or p["type"] in ("conversation", "message"):
+                    return p["id"], []
+
+                vec = _unpack(vec_row["embedding"])
+                superseded_ids, _ = await _check_contradictions(
+                    p["id"], p["content"], p["title"], vec, p["type"], p["agent_id"]
+                )
+                return p["id"], superseded_ids
+
+        results = await asyncio.gather(*[check_one(p) for p in prepared], return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.debug(f"Contradiction check in bulk failed: {result}")
+
+    # Phase 4: Conversation emitters (event rows, window chunks, gist rows).
+    # Default behavior: emit if conversation_id is present and type==message (mirror single path).
+    # Can be disabled with emit_conversation=False.
+    if emit_conversation is not False:  # None or True
+        # Group items by conversation_id for emitter calls
+        by_conv: dict[str, list[dict]] = {}
+        for p in prepared:
+            cid = p.get("conversation_id")
+            if cid and p["type"] == "message":
+                if cid not in by_conv:
+                    by_conv[cid] = []
+                by_conv[cid].append(p)
+
+        for cid, conv_items in by_conv.items():
+            # Sort items by valid_from to preserve turn order (mirror single path L2119-2126)
+            conv_items.sort(key=lambda x: x.get("valid_from") or now)
+
+            # Process each message in conversation
+            for p in conv_items:
+                user_id = p.get("user_id", "")
+                try:
+                    if INGEST_EVENT_ROWS:
+                        await _maybe_emit_event_rows(
+                            p["content"] or "", p["metadata"], cid, user_id, p["id"]
+                        )
+                except Exception as e:
+                    logger.debug(f"event_extraction emit failed in bulk: {e}")
+
+            # Window and gist emitters (run once per conversation group, not per message)
+            user_id = conv_items[0].get("user_id", "") if conv_items else ""
+            try:
+                if INGEST_WINDOW_CHUNKS:
+                    await _maybe_emit_window_chunk(cid, user_id)
+            except Exception as e:
+                logger.debug(f"window chunk emit failed in bulk: {e}")
+
+            try:
+                if INGEST_GIST_ROWS:
+                    await _maybe_emit_gist_row(cid, user_id)
+            except Exception as e:
+                logger.debug(f"gist row emit failed in bulk: {e}")
 
     return [p["id"] for p in prepared]
 

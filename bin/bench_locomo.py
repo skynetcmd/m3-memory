@@ -133,7 +133,7 @@ def _safe_loads(blob: str | None) -> dict:
     try: return json.loads(blob)
     except (json.JSONDecodeError, TypeError): return {}
 
-async def ingest_sample_with_graph(sample: dict) -> tuple[int, float]:
+async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int, float]:
     sid = sample["sample_id"]
     conv = sample["conversation"]
     obs = sample.get("observation", {})
@@ -237,7 +237,7 @@ async def ingest_sample_with_graph(sample: dict) -> tuple[int, float]:
         })
 
     t0 = time.perf_counter()
-    item_ids = await memory_write_bulk_impl(items)
+    item_ids = await memory_write_bulk_impl(items, variant=variant)
     await asyncio.sleep(0.1)
     
     count = 0
@@ -485,7 +485,7 @@ async def run(args: argparse.Namespace) -> None:
         log("phase 1: ingest with graph linking + temporal resolution")
         total_items = 0
         for i, sample in enumerate(dataset):
-            n, _ = await ingest_sample_with_graph(sample)
+            n, _ = await ingest_sample_with_graph(sample, variant=args.variant)
             total_items += n
             log(f"  sample {i+1}/{len(dataset)}: {n} items")
         log(f"ingest done: {total_items} items")
@@ -628,6 +628,7 @@ def parse_args():
     p.add_argument("--judge-model",
                    default=os.environ.get("EVAL_JUDGE_MODEL"))
     p.add_argument("--openai-base-url", default=None, help="Custom base URL for OpenAI-compatible API (e.g. MCP proxy or LM Studio)")
+    p.add_argument("--variant", default="", help="Pipeline identifier passed to bulk-insert and enrichers for A/B tracking.")
     p.add_argument("--verbose", action="store_true", help="Dump full msg objects per question into run.log")
     return p.parse_args()
 
