@@ -299,6 +299,21 @@ def section_tool_inventory(pdf, summary):
         err = str(e)
     after = _snapshot_sha1s()
 
+    # Refresh the mermaid call graph from the (possibly updated) inventory.
+    graph_script = os.path.join(BASE_DIR, "scripts", "inventory_graph.py")
+    graph_ok = False
+    graph_err = ""
+    if os.path.isfile(graph_script):
+        try:
+            subprocess.check_call(
+                [sys.executable, graph_script],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=30,
+            )
+            graph_ok = True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+            graph_err = str(e)
+
     drifted = sorted(f for f in after if before.get(f) != after.get(f))
     new = sorted(f for f in after if f not in before)
     removed = sorted(f for f in before if f not in after)
@@ -319,6 +334,11 @@ def section_tool_inventory(pdf, summary):
         if removed:
             parts.append(f"REMOVED: {', '.join(r.replace('.md','') for r in removed[:10])}")
         line = " | ".join(parts)
+
+    if graph_ok:
+        line += " | Call graph: refreshed (CALL_GRAPH.md)."
+    elif os.path.isfile(graph_script):
+        line += f" | Call graph FAILED: {graph_err}"
 
     pdf.mc(5, sanitize(line, 2000))
     pdf.ln(4)

@@ -90,6 +90,7 @@ VALID_M3_TYPES = {
     "auto", "code", "config", "conversation", "decision", "fact", "home",
     "knowledge", "log", "message", "note", "observation", "plan", "preference",
     "reference", "scratchpad", "snippet", "summary", "task", "user_fact",
+    "chat_log",
 }
 
 FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n(.*)\Z", re.DOTALL)

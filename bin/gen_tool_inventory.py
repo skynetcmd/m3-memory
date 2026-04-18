@@ -26,10 +26,20 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 BIN_DIR = BASE_DIR / "bin"
+SCRIPTS_DIR = BASE_DIR / "scripts"
+SOURCE_DIRS = [BIN_DIR, SCRIPTS_DIR]
 OUT_DIR = BASE_DIR / "memory" / "tool_inventory"
 
 SKIP = {"gen_tool_inventory.py", "__init__.py"}
 PRIVATE = {"discord_bot.py", "status_api.py", "embed_server_gpu.py"}
+
+# Core library modules worth auditing even though they lack a CLI surface —
+# central enough that other tools import them, so they belong in the graph.
+CORE_LIBRARIES = {
+    "memory_core.py", "memory_bridge.py", "mcp_tool_catalog.py", "mcp_proxy.py",
+    "m3_sdk.py", "auth_utils.py", "temporal_utils.py", "agent_protocol.py",
+    "embedding_utils.py", "custom_tool_bridge.py", "debug_agent_bridge.py",
+}
 
 _ENV_RE = re.compile(r"""os\.(?:environ\.get|getenv)\(\s*['"]([A-Z0-9_]+)['"]""")
 
@@ -108,7 +118,9 @@ def extract_argparse(tree: ast.Module) -> list[dict]:
     return args
 
 
-def is_cli_tool(tree: ast.Module, source: str) -> bool:
+def is_cli_tool(tree: ast.Module, source: str, name: str = "") -> bool:
+    if name in CORE_LIBRARIES:
+        return True
     if "argparse.ArgumentParser" in source:
         return True
     if "__main__" in source and ("def main" in source or "async def main" in source):
@@ -124,8 +136,10 @@ def _repo_module_set() -> set[str]:
     project packages we ship without __init__.py.
     """
     mods: set[str] = set()
-    for p in BIN_DIR.glob("*.py"):
-        mods.add(p.stem)
+    for d in SOURCE_DIRS:
+        if d.is_dir():
+            for p in d.glob("*.py"):
+                mods.add(p.stem)
     for pkg_dir in BASE_DIR.iterdir():
         if pkg_dir.is_dir() and (pkg_dir / "__init__.py").exists():
             mods.add(pkg_dir.name)
@@ -342,7 +356,12 @@ def main() -> None:
     repo_mods = _repo_module_set()
     index_entries: list[tuple[str, str, bool]] = []
 
-    for src in sorted(BIN_DIR.glob("*.py")):
+    sources: list[Path] = []
+    for d in SOURCE_DIRS:
+        if d.is_dir():
+            sources.extend(sorted(d.glob("*.py")))
+
+    for src in sources:
         if src.name in SKIP:
             continue
         try:
@@ -352,7 +371,7 @@ def main() -> None:
             print(f"skip {src.name}: {e}")
             continue
 
-        if not is_cli_tool(tree, source):
+        if not is_cli_tool(tree, source, src.name):
             continue
 
         doc = extract_docstring(tree)
@@ -366,7 +385,7 @@ def main() -> None:
         mtime = datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc).isoformat()
         private = src.name in PRIVATE
 
-        rel = f"bin/{src.name}"
+        rel = f"{src.parent.name}/{src.name}"
         out_path = OUT_DIR / (src.stem + ".md")
         out_path.write_text(
             render_entry(rel, sha1, mtime, doc, args, env_vars,
