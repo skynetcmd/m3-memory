@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.4.8"
-description = "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search, GDPR, no cloud"
+version = "2026.4.20"
+description = "Local-first persistent memory for MCP agents — 46 tools, 89% LongMemEval, hybrid search, GDPR, zero cloud"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -28,6 +28,10 @@ keywords = [
     "contradiction-detection",
     "bitemporal",
     "local-first",
+    "multi-agent",
+    "knowledge-graph",
+    "persistent-memory",
+    "longmemeval",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -42,31 +46,31 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "fastmcp>=3.2,<4",
-    "mcp>=1.3,<2",
-    "httpx[http2]>=0.28,<1",
-    "requests>=2.33,<3",
-    "psycopg2-binary>=2.9,<3",
-    "chromadb-client>=0.6,<1",
-    "cryptography>=46.0,<47",
-    "keyring>=25.7,<26",
-    "numpy>=1.22.5,<2.0.0",
-    "python-dotenv>=1.2,<2",
-    "PyYAML>=6.0,<7",
-    "psutil>=7.2,<8",
+    "fastmcp>=3.2.4,<4",
+    "mcp>=1.27.0,<2",
+    "httpx[http2]>=0.28.1,<1",
+    "requests>=2.33.1,<3",
+    "psycopg2-binary>=2.9.11,<3",
+    "chromadb-client>=1.5.7,<2",
+    "cryptography>=46.0.7,<47",
+    "keyring>=25.7.0,<26",
+    "numpy>=2.4.4,<3",
+    "python-dotenv>=1.2.2,<2",
+    "PyYAML>=6.0.3,<7",
+    "psutil>=7.2.2,<8",
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary]>=3.2,<4"]
+postgres = ["psycopg[binary]>=3.2.0,<4"]
 dev = [
-    "pytest>=9.0,<10",
-    "pytest-asyncio>=1.3,<2",
-    "ruff>=0.9,<1",
-    "mypy>=1.15,<2",
-    "types-requests",
-    "types-setuptools",
-    "twine>=6.0,<7",
-    "build>=1.2,<2",
+    "pytest>=9.0.3,<10",
+    "pytest-asyncio>=1.3.0,<2",
+    "ruff>=0.15.10,<1",
+    "mypy>=1.20.1,<2",
+    "types-requests>=2.33.0.20260408",
+    "types-setuptools>=82.0.0.20260408",
+    "twine>=6.2.0,<7",
+    "build>=1.4.2,<2",
 ]
 
 [project.scripts]
@@ -106,3 +110,25 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "benchmarks", ".venv", "venv"]
+# B101: asserts in tests are expected.
+# B404: every bin/ tool that shells out imports `subprocess`; the import itself
+#   isn't a vulnerability, only specific call patterns are.
+# B110: try/except/pass is idiomatic in the bridge/daemon fail-open paths in
+#   this repo. Individual cases that hide real bugs are addressed via code
+#   review, not by flagging every swallow.
+# B112: try/except/continue — same reasoning as B110.
+# B603: subprocess call with shell=False and a static argv list is safe here;
+#   all subprocess targets in bin/ are OS binaries (git, security, lsof, etc.)
+#   invoked with non-user-controllable args. Call sites that take user input
+#   are already audited.
+# B607: partial executable paths ("git", "docker") rely on $PATH, which in
+#   our user-facing CLI context is acceptable. Hardened deployments should
+#   set absolute paths via env.
+# B608: f-string SQL construction in this repo only ever inlines generated
+#   `?` placeholder lists or static column names — all user values reach the
+#   DB through the parameter tuple. Bandit's regex can't distinguish safe
+#   from unsafe f-string SQL; code review catches new unsafe sites.
+skips = ["B101", "B110", "B112", "B404", "B603", "B607", "B608"]

@@ -1,4 +1,4 @@
-# <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> M3 Memory — Agent Instructions
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Agent Instructions
 
 > **For AI agents only.** This file tells your agent how to use M3 Memory effectively.
 > For human-readable docs, see [README.md](./README.md), [QUICKSTART.md](./QUICKSTART.md), or [CORE_FEATURES.md](./CORE_FEATURES.md).
@@ -7,7 +7,7 @@
 
 ---
 
-## Memory Protocol Override
+## 🚨 Memory Protocol Override
 
 **This project uses the m3-memory MCP server as its sole memory store.**
 
@@ -21,7 +21,7 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 ---
 
-## Core Behavioral Rules
+## 🧠 Core Behavioral Rules
 
 You have full access to **M3 Memory** — a persistent, local-first agentic memory layer via MCP tools. This gives you long-term continuity across sessions, projects, and conversations.
 
@@ -83,7 +83,7 @@ preserved in `memory_history`; you are not creating a duplicate row.
 
 ---
 
-## Memory Tools — When and How to Use
+## 🧰 Memory Tools — When and How to Use
 
 ### Writing Memories
 
@@ -227,7 +227,7 @@ Use `memory_suggest` instead of `memory_search` when you need to explain WHY res
 
 ---
 
-## Multi-Agent / Mixed-Fleet Collaboration
+## 👥 Multi-Agent / Mixed-Fleet Collaboration
 
 M3 is provider-agnostic. A single session can include Claude agents, Gemini
 agents, Aider or other local-LLM agents, and anything else that speaks MCP —
@@ -327,7 +327,7 @@ vector/semantic retrieval across the fleet, leave `embed` at its default
 
 ---
 
-## Health Check
+## 💓 Health Check
 
 ```bash
 python bin/test_memory_bridge.py    # 41 end-to-end tests

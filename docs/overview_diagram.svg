@@ -1,0 +1,90 @@
+<svg style="background:transparent;font-family:Arial, sans-serif;" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 460" height="460" width="820">
+  <defs>
+    
+    <marker orient="auto" markerHeight="6" markerWidth="5" markerUnits="strokeWidth" refY="5" refX="8" viewBox="0 0 10 10" id="greenArrow">
+      <path fill="#34a853" d="M 0 0 L 10 5 L 0 10 z"></path>
+    </marker>
+    <marker orient="auto" markerHeight="6" markerWidth="5" markerUnits="strokeWidth" refY="5" refX="8" viewBox="0 0 10 10" id="redArrow">
+      <path fill="#ea4335" d="M 0 0 L 10 5 L 0 10 z"></path>
+    </marker>
+
+    
+    <marker orient="auto" markerHeight="5" markerWidth="4" markerUnits="strokeWidth" refY="5" refX="8" viewBox="0 0 10 10" id="arrowhead">
+      <path fill="#1f2937" d="M 0 0 L 10 5 L 0 10 z"></path>
+    </marker>
+    <marker orient="auto-start-reverse" markerHeight="5" markerWidth="4" markerUnits="strokeWidth" refY="5" refX="2" viewBox="0 0 10 10" id="arrowheadStart">
+      <path fill="#1f2937" d="M 0 0 L 10 5 L 0 10 z"></path>
+    </marker>
+  </defs>
+
+  
+  <rect opacity="0.95" stroke-width="2" stroke="#6c757d" fill="#f8f9fa" ry="12" rx="12" height="225" width="320" y="30" x="40"></rect>
+  
+  <ellipse fill="#1f2937" ry="19" rx="78" cy="22" cx="200"></ellipse>
+  <text font-size="15.5" font-weight="bold" fill="white" text-anchor="middle" y="27" x="200">Machine A</text>
+
+  
+  <rect stroke-width="3" stroke="#1a73e8" fill="#4285f4" ry="8" rx="8" height="50" width="140" y="65" x="190"></rect>
+  <text font-size="14" font-weight="bold" fill="white" text-anchor="middle" y="92" x="260">Gemini CLI</text>
+
+  
+  <g>
+    <rect stroke-width="3" stroke="#1e8e3e" fill="#34a853" ry="8" rx="8" height="62" width="110" y="145" x="95"></rect>
+    <ellipse opacity="0.75" fill="#4ade6b" ry="9" rx="55" cy="145" cx="150"></ellipse>
+    <text font-size="12.5" font-weight="bold" fill="white" text-anchor="middle" y="168" x="150">Local SQLite</text>
+    <text font-size="13" font-weight="600" font-style="italic" fill="#1f2937" text-anchor="middle" y="185" x="150">M3 Memory</text>
+  </g>
+
+  
+  <rect opacity="0.95" stroke-width="2" stroke="#6c757d" fill="#f8f9fa" ry="12" rx="12" height="225" width="320" y="30" x="420"></rect>
+  
+  <ellipse fill="#1f2937" ry="19" rx="78" cy="22" cx="580"></ellipse>
+  <text font-size="15.5" font-weight="bold" fill="white" text-anchor="middle" y="27" x="580">Machine B</text>
+
+  
+  <rect stroke-width="3" stroke="#f29900" fill="#fbbc05" ry="8" rx="8" height="50" width="140" y="65" x="460"></rect>
+  <text font-size="14" font-weight="bold" fill="#202124" text-anchor="middle" y="92" x="530">Claude Code</text>
+
+  
+  <g>
+    <rect stroke-width="3" stroke="#1e8e3e" fill="#34a853" ry="8" rx="8" height="62" width="110" y="145" x="535"></rect>
+    <ellipse opacity="0.75" fill="#4ade6b" ry="9" rx="55" cy="145" cx="590"></ellipse>
+    <text font-size="12.5" font-weight="bold" fill="white" text-anchor="middle" y="168" x="590">Local SQLite</text>
+    <text font-size="13" font-weight="600" font-style="italic" fill="#1f2937" text-anchor="middle" y="185" x="590">M3 Memory</text>
+  </g>
+
+  
+  <rect opacity="0.95" stroke-width="2" stroke="#6c757d" fill="#f8f9fa" ry="12" rx="12" height="135" width="260" y="275" x="270"></rect>
+  <text fill="#333" font-size="16" font-weight="bold" text-anchor="middle" y="265" x="400">Sync Layer</text>
+
+  
+  <g>
+    <rect stroke-width="4" stroke="#4b5563" fill="#9ca3af" ry="10" rx="10" height="82" width="130" y="295" x="335"></rect>
+    <ellipse stroke-width="4" stroke="#4b5563" fill="#6b7280" ry="11" rx="65" cy="295" cx="400"></ellipse>
+    <ellipse opacity="0.55" fill="#d1d5db" ry="9" rx="65" cy="373" cx="400"></ellipse>
+    <text font-size="14.5" font-weight="bold" fill="#111827" text-anchor="middle" y="335" x="400">PostgreSQL</text>
+  </g>
+
+  
+
+  
+  <line marker-start="url(#arrowheadStart)" marker-end="url(#arrowhead)" stroke-width="3" stroke="#1f2937" y2="147" x2="165" y1="117" x1="255"></line>
+
+  
+  <line marker-start="url(#arrowheadStart)" marker-end="url(#arrowhead)" stroke-width="3" stroke="#1f2937" y2="147" x2="585" y1="117" x1="535"></line>
+
+  
+
+  
+  <path marker-end="url(#greenArrow)" stroke-dasharray="7,4" stroke-width="3" stroke="#34a853" fill="none" d="M 150 207 Q 230 250 335 305"></path>
+
+  
+  <path marker-end="url(#greenArrow)" stroke-dasharray="7,4" stroke-width="3" stroke="#34a853" fill="none" d="M 590 207 Q 510 250 465 305"></path>
+
+  
+  <path marker-end="url(#redArrow)" stroke-dasharray="7,4" stroke-width="3" stroke="#ea4335" fill="none" d="M 335 320 Q 240 265 150 217"></path>
+
+  
+  <path marker-end="url(#redArrow)" stroke-dasharray="7,4" stroke-width="3" stroke="#ea4335" fill="none" d="M 465 320 Q 540 265 590 217"></path>
+
+</svg>

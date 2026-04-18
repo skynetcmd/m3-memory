@@ -61,10 +61,11 @@ def check_lm_studio():
     token = get_lm_token()
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        req = urllib.request.Request(
-            f"{LM_STUDIO_URL}/v1/models", headers=headers
-        )
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        url = f"{LM_STUDIO_URL}/v1/models"
+        if not url.startswith(("http://", "https://")):
+            return "down", "invalid LM_STUDIO_URL scheme"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=3) as resp:  # nosec B310 - scheme checked above
             data = json.loads(resp.read())
             models = data.get("data", [])
             inference = [
@@ -129,6 +130,7 @@ class StatusHandler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = http.server.HTTPServer(("0.0.0.0", PORT), StatusHandler)
-    print(f"MacBook status server listening on 0.0.0.0:{PORT}", flush=True)
+    host = os.environ.get("MACBOOK_STATUS_HOST", "127.0.0.1")
+    server = http.server.HTTPServer((host, PORT), StatusHandler)
+    print(f"MacBook status server listening on {host}:{PORT}", flush=True)
     server.serve_forever()

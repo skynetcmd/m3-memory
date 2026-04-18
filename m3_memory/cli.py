@@ -62,10 +62,11 @@ Docs: https://github.com/skynetcmd/m3-memory
     if bin_dir not in sys.path:
         sys.path.insert(0, bin_dir)
 
-    # Execute the bridge in the current process
+    # Execute the bridge in the current process — equivalent to
+    # `python memory_bridge.py`, not dynamic code from an untrusted source.
     with open(bridge) as f:
         code = compile(f.read(), bridge, "exec")
-    exec(code, {"__file__": bridge, "__name__": "__main__"})
+    exec(code, {"__file__": bridge, "__name__": "__main__"})  # nosec B102 - loads a bundled script file by path
 
 
 if __name__ == "__main__":

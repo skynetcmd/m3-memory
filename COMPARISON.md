@@ -1,4 +1,4 @@
-# M3 Memory — Comparison Guide
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Comparison Guide
 
 > Last updated: April 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
@@ -6,7 +6,7 @@ Several tools address agentic memory. This document explains where M3 Memory fit
 
 ---
 
-## M3-Memory vs Mem0
+## ⚔️ M3-Memory vs Mem0
 
 Mem0 is a popular agentic memory library with broad ecosystem adoption. It's excellent for cloud-hosted, multi-session personalization in LangChain/LangGraph/CrewAI apps. M3-Memory targets a different audience: developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
 
@@ -46,7 +46,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. It's exc
 
 ---
 
-## M3-Memory vs Letta
+## ⚔️ M3-Memory vs Letta
 
 Letta (formerly MemGPT) is a **full stateful agent runtime** with memory built in — not just a memory layer. It uses hierarchical memory blocks (core / recall / archival) that the agent itself edits via tool calls. Letta Code adds git-backed agent state. It's a powerful platform for long-lived, self-improving agents.
 
@@ -89,7 +89,7 @@ Yes. Letta agents can call external MCP tools. You could run M3-Memory as the pe
 
 ---
 
-## M3-Memory vs Zep
+## ⚔️ M3-Memory vs Zep
 
 Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It has strong temporal reasoning capabilities, but requires more infrastructure than M3.
 
@@ -104,7 +104,7 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 
 ---
 
-## M3-Memory vs LangChain Memory / LangMem
+## ⚔️ M3-Memory vs LangChain Memory / LangMem
 
 LangChain Memory (including LangGraph's thread/store memory and the newer LangMem library) is memory that lives inside the LangChain ecosystem. It covers short-term thread memory, long-term JSON stores, and LangMem's episodic/semantic/procedural memory types. It's the natural choice if you're already building LangGraph agents.
 
@@ -138,7 +138,7 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 
 ---
 
-## Summary Decision Matrix
+## 📋 Summary Decision Matrix
 
 | I need... | Best choice |
 |-----------|-------------|
@@ -157,7 +157,7 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 
 ---
 
-## Where M3 Memory fits
+## 🎯 Where M3 Memory fits
 
 M3 Memory targets a specific intersection that other tools don't fully cover:
 

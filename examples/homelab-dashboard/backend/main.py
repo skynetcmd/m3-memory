@@ -261,4 +261,7 @@ if os.path.exists(frontend_dist):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
+    # Example homelab dashboard is intentionally exposed on the LAN so other
+    # devices on the trusted home network can view host status. Deployers who
+    # want stricter binding can override via their process manager.
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)  # nosec B104

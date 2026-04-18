@@ -1,4 +1,4 @@
-# <img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"> Memory — Technical Reference
+# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Technical Reference
 
 
 > Implementation specifics: schema, search internals, sync protocol, security, configuration, testing, and developer tooling.
@@ -9,7 +9,7 @@
 
 ---
 
-## LLM Server Requirements
+## 📡 LLM Server Requirements
 
 M3 Memory is **server-agnostic**. It communicates with local LLMs via the OpenAI-compatible API. Any server that exposes these two endpoints will work:
 
@@ -25,7 +25,7 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 ---
 
-## Storage Implementation
+## 💾 Storage Implementation
 
 > For the conceptual storage hierarchy (SQLite → PostgreSQL → ChromaDB), see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
@@ -141,7 +141,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ---
 
-## Search Engine
+## 🔍 Search Engine
 
 > For the conceptual search pipeline overview, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
@@ -181,7 +181,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ---
 
-## Intelligence Features
+## 🧠 Intelligence Features
 
 ### Contradiction Detection
 
@@ -223,7 +223,7 @@ When `type="auto"` is passed to `memory_write`:
 
 ---
 
-## Security
+## 🔒 Security
 
 ### Credential Resolution (`bin/auth_utils.py`)
 
@@ -261,7 +261,7 @@ Master key (`AGENT_OS_MASTER_KEY`) must be in native OS keyring. Never stored in
 
 ---
 
-## Scoping & Multi-Tenancy
+## 👥 Scoping & Multi-Tenancy
 
 | Scope | Isolation | Behavior |
 |-------|-----------|----------|
@@ -274,7 +274,7 @@ Every `memory_search` accepts `user_id`, `scope`, and `conversation_id` filters.
 
 ---
 
-## Refresh Lifecycle
+## 🔄 Refresh Lifecycle
 
 Memories can be flagged with `refresh_on` (ISO-8601 timestamp) and `refresh_reason` on write or update. When the timestamp has arrived, the memory enters the **refresh queue** — a read-only view exposed via the `memory_refresh_queue` tool. Maintenance never mutates these flags; actual refresh goes through `memory_update` and is recorded in `memory_history`.
 
@@ -314,7 +314,7 @@ Early design considered soft-deleting old memories on refresh and inserting new 
 
 ---
 
-## Sync System (`bin/pg_sync.py`)
+## 🔁 Sync System (`bin/pg_sync.py`)
 
 ### Delta Sync Protocol
 
@@ -335,7 +335,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 ### Environment Variables
 
@@ -354,6 +354,10 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `PG_URL` | (vault/env) | PostgreSQL connection string |
 | `LLM_ENDPOINTS_CSV` | `http://localhost:1234/v1` | Comma-separated OpenAI-compatible LLM server endpoints |
 | `MMR_LAMBDA` | 0.7 | MMR relevance vs. diversity balance |
+| `M3_SPEAKER_IN_TITLE` | `1` | When a memory's `metadata.role` is a proper name, prepend `[Role]` to the title at write time so FTS5 can match speaker-scoped queries. Set to `0` to disable. |
+| `M3_SHORT_TURN_THRESHOLD` | 20 | Character-length threshold below which the ranker applies a length penalty (floor 0.3×) to suppress filler turns like "ok cool". |
+| `M3_TITLE_MATCH_BOOST` | 0.05 | Per-query-token-overlap boost applied when the title echoes query tokens. Set to 0 to disable. |
+| `M3_IMPORTANCE_WEIGHT` | 0.05 | Weight of the caller-supplied `importance` field in final ranking. Set to 0 to ignore importance during ranking. |
 
 ### Valid Memory Types (18)
 
@@ -365,7 +369,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 
 ---
 
-## Testing
+## 🧪 Testing
 
 ### End-to-End Test Suite (`bin/test_memory_bridge.py`)
 
@@ -395,7 +399,7 @@ Seeds 20 diverse test memories, runs 10 labeled queries, cleans up after. Gracef
 
 ---
 
-## Developer Tooling
+## 🛠️ Developer Tooling
 
 ### M3 SDK (`bin/m3_sdk.py`)
 

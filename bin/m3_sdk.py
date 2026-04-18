@@ -71,6 +71,9 @@ class M3Context:
                         conn.execute("PRAGMA synchronous = NORMAL")
                         conn.execute("PRAGMA foreign_keys = ON")
                         conn.execute("PRAGMA busy_timeout = 10000")
+                        conn.execute("PRAGMA cache_size = -64000")   # 64 MB
+                        conn.execute("PRAGMA mmap_size = 536870912") # 512 MB memory-mapped I/O
+                        conn.execute("PRAGMA temp_store = MEMORY")   # temp tables in RAM
                         _SQLITE_POOL.put(conn)
                     except sqlite3.Error as e:
                         logger.error(f"Failed to create SQLite connection: {e}")
@@ -151,7 +154,7 @@ class M3Context:
                     self._record_failure(service)
                     logger.error(f"HTTP Request failed after {retries} attempts: {exc}")
                     raise
-                wait = (2 ** attempt) + random.uniform(0, 1)
+                wait = (2 ** attempt) + random.uniform(0, 1)  # nosec B311 - backoff jitter, not cryptographic
                 logger.warning(f"Request to {url} failed ({exc}). Retrying in {wait:.1f}s...")
                 await asyncio.sleep(wait)
 
