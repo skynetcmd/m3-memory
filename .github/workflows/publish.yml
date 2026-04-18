@@ -8,7 +8,11 @@ on:
       dry_run:
         description: "Dry run (upload to TestPyPI instead)"
         required: false
+        type: choice
         default: "false"
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: read
