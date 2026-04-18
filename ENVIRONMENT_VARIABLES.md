@@ -90,6 +90,22 @@ These knobs change how results are ranked. Defaults are safe — override only i
 | `M3_TITLE_MATCH_BOOST` | `0.05` | Multiplier for the title-overlap boost: if a fraction `f` of query tokens appear in the title, add `M3_TITLE_MATCH_BOOST * f` to the final score. Set to `0` to disable. |
 | `M3_IMPORTANCE_WEIGHT` | `0.05` | Weight of the caller-supplied `importance` field (0.0–1.0) in final ranking. Set to `0` to ignore importance entirely. |
 
+### Ingestion Enrichment (opt-in)
+
+All off by default. These change how much work each `memory_write` does and can multiply the row count on chatty conversations — turn them on deliberately. They only fire for `type="message"` rows written with a `conversation_id`; other writes are unaffected.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_INGEST_WINDOW_CHUNKS` | `0` | On writes, emit a `type="summary"` row every N turns that concatenates the previous N message bodies. Captures Q&A pairs that single-turn embeds miss. |
+| `M3_INGEST_WINDOW_SIZE` | `3` | Number of consecutive turns combined into each window chunk when `M3_INGEST_WINDOW_CHUNKS=1`. |
+| `M3_INGEST_GIST_ROWS` | `0` | On writes, emit a heuristic `type="summary"` gist row for the conversation once it passes the minimum-turn threshold and every stride thereafter. Deterministic; no LLM. |
+| `M3_INGEST_GIST_MIN_TURNS` | `8` | Minimum turns in a conversation before the first gist row is emitted. |
+| `M3_INGEST_GIST_STRIDE` | `8` | After the first gist, emit a new one every N additional turns. |
+| `M3_INGEST_EVENT_ROWS` | `0` | Regex-extract event sentences (`<ProperNoun> <verb> ... <date hint>`) from each message and emit one `type="event_extraction"` row per match, linked back via `references`. Deterministic; no LLM. |
+| `M3_QUERY_TYPE_ROUTING` | `0` | Retrieval-side: when a query matches "When/what date/which day" plus a proper noun, shift `vector_weight` to `0.3` (BM25-heavy) so the named-entity signal isn't diluted by embedding similarity. |
+
+**Always-on:** resolved temporal anchors from `metadata.temporal_anchors` are now automatically prefixed to the embed text as `[YYYY-MM-DD] …` so vector and FTS searches can hit absolute dates even when the source text says "yesterday". No flag; free when anchors are absent.
+
 ### Local LLM selection
 
 M3 does not pin a specific chat model. `bin/llm_failover.py` discovers whatever is loaded on your OpenAI-compatible endpoint(s) and picks the largest model by parameter count, filtering out embedding-only models. To minimize latency for enrichment features (auto-classify, summarization), keep a **small** instruct model (0.5B–1B) loaded alongside your embedder:

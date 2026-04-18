@@ -27,7 +27,7 @@ VALID_MEMORY_TYPES = frozenset({
     "note", "fact", "decision", "preference", "conversation", "message",
     "task", "code", "config", "observation", "plan", "summary", "snippet",
     "reference", "log", "home", "user_fact", "scratchpad", "auto",
-    "knowledge",
+    "knowledge", "event_extraction",
 })
 
 # ── Dataclass ────────────────────────────────────────────────────────────────
