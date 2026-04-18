@@ -2,7 +2,7 @@
 tool: bin/bench_longmemeval.py
 sha1: e32489c7b540
 mtime_utc: 2026-04-18T21:41:24.574902+00:00
-generated_utc: 2026-04-18T21:41:24.574902+00:00
+generated_utc: 2026-04-18T21:58:22.980856+00:00
 private: false
 ---
 
@@ -52,17 +52,17 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 |---|---|---|---|---|---|
 | `--dataset` |  | `DEFAULT_DATASET` | Loads longmemeval_s_cleaned.json from data/longmemeval/ | Path | Uses provided JSON file path |
 | `--limit` | subsample first N instances (0 = all) | `0` | Process all instances | int | Process first N instances only |
-| `--skip-ingest` |  | — | Runs phase 1 (ingest) + phase 2 (retrieve/judge) | store_true | Skips phase 1, reuses DB from previous run |
-| `--no-judge` |  | — | Writes hypotheses.jsonl + runs judge | store_true | Writes hypotheses.jsonl only (skip judge scoring) |
+| `--skip-ingest` |  | `False` | Runs phase 1 (ingest) + phase 2 (retrieve/judge) | store_true | Skips phase 1, reuses DB from previous run |
+| `--no-judge` |  | `False` | Writes hypotheses.jsonl + runs judge | store_true | Writes hypotheses.jsonl only (skip judge scoring) |
 | `--k` | top-K retrieved turns per question | `20` | Retrieve top 20 turns per question | int | Retrieve top N turns (boost to 30 for temporal if --smart-retrieval) |
-| `--adaptive-k` | Enable elbow trim for adaptive K | — | Uses fixed K value | store_true | Applies elbow trim heuristic to reduce K for low-signal |
-| `--smart-retrieval` | Enable temporal-aware smart retrieval | — | No temporal boost | store_true | Boosts K to 30 for temporal-classified questions |
+| `--adaptive-k` | Enable elbow trim for adaptive K | `False` | Uses fixed K value | store_true | Applies elbow trim heuristic to reduce K for low-signal |
+| `--smart-retrieval` | Enable temporal-aware smart retrieval | `False` | No temporal boost | store_true | Boosts K to 30 for temporal-classified questions |
 | `--cluster-size` | episodic expansion: pull +/- N surrounding turns (0 = off) | `5` | Expands hits ±5 turns in same conversation | int | Expands hits ±N turns (0 disables episodic expansion) |
 | `--graph-depth` | graph expansion hops from initial hits (0 = off) | `1` | Traverses 1-hop relationships from retrieved items | int | Traverses N-hop graph (0 disables graph expansion) |
 | `--generator-model` |  | `os.environ.get('EVAL_GENERATOR_MODEL')` | Reads EVAL_GENERATOR_MODEL env var | str | Model ID for answer generation |
 | `--judge-model` |  | `os.environ.get('EVAL_JUDGE_MODEL')` | Reads EVAL_JUDGE_MODEL env var | str | Model ID for answer scoring |
 | `--ingest-concurrency` | number of instances to ingest in parallel | `4` | Ingests 4 instances in parallel | int | Ingests N instances in parallel with asyncio.Semaphore |
-| `--per-item` | use memory_write_impl per-turn (enables Phase 1 enrichers). Much slower than bulk path; default off. | — | Uses memory_write_bulk_impl (fast) | store_true | Uses memory_write_impl per-turn (enables enrichers, slower) |
+| `--per-item` | use memory_write_impl per-turn (enables Phase 1 enrichers). Much slower than bulk path; default off. | `False` | Uses memory_write_bulk_impl (fast) | store_true | Uses memory_write_impl per-turn (enables enrichers, slower) |
 | `--variant` | tag every ingested row with this variant label | `` | No variant label | str | Tags all ingested items with variant ID |
 
 ## Environment variables read

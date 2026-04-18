@@ -2,7 +2,7 @@
 tool: bin/setup_secret.py
 sha1: 54a4dc30d9d9
 mtime_utc: 2026-04-18T03:18:29.586755+00:00
-generated_utc: 2026-04-18T16:33:21.745225+00:00
+generated_utc: 2026-04-18T21:58:23.168124+00:00
 private: false
 ---
 
@@ -29,7 +29,7 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--list` | list stored services (no values) | — | Runs interactive service picker and secret entry flow (getpass-hidden input). | store_true | Displays table of vault entries (service name, version, origin device, updated_at); exits. |
+| `--list` | list stored services (no values) | `False` | Runs interactive service picker and secret entry flow (getpass-hidden input). | store_true | Displays table of vault entries (service name, version, origin device, updated_at); exits. |
 | `--delete` | remove a service from the vault | — | Runs interactive service picker and secret entry flow (getpass-hidden input). | str | Deletes specified service after confirmation prompt; exits. |
 
 ## Environment variables read

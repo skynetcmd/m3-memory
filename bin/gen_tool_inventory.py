@@ -110,6 +110,7 @@ def extract_argparse(tree: ast.Module) -> list[dict]:
             "names": arg_names,
             "help": _literal(kw.get("help")) or "",
             "default": _literal(kw.get("default")),
+            "default_passed": "default" in kw,
             "type": _literal(kw.get("type")),
             "action": _literal(kw.get("action")),
             "required": _literal(kw.get("required")),
@@ -255,17 +256,112 @@ def extract_file_deps(source: str) -> list[str]:
     return sorted(found)[:40]
 
 
+_FLAG_OVERRIDES_KEY = tuple[str, str]  # (default_behavior, impact_when_set)
+
+_GEN_UTC_RE = re.compile(r"^generated_utc:\s*(\S+)\s*$", re.MULTILINE)
+_MTIME_RE = re.compile(r"^mtime_utc:\s*(\S+)\s*$", re.MULTILINE)
+_SHA1_RE = re.compile(r"^sha1:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def _read_front_field(path: Path, field_re: re.Pattern[str]) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = field_re.search(text)
+    return m.group(1) if m else None
+
+
+def _body_without_volatile_fields(path: Path, mtime_placeholder: str,
+                                  gen_placeholder: str) -> str | None:
+    """Load prior file with generated_utc AND mtime_utc replaced by
+    placeholders. Lets us detect whether the *content* changed while ignoring
+    non-content metadata that might shift between runs (e.g. filesystem
+    touches that bump mtime without changing sha1). Returns None if missing.
+    """
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    text = _GEN_UTC_RE.sub(f"generated_utc: {gen_placeholder}", text, count=1)
+    text = _MTIME_RE.sub(f"mtime_utc: {mtime_placeholder}", text, count=1)
+    return text
+
+
+def parse_existing_flag_overrides(path: Path) -> dict[tuple[str, int], tuple[str, str, str]]:
+    """Read hand-curated cells from a prior inventory file's CLI flag table.
+    Keyed by (first_flag_name, ordinal_occurrence). Value is a triple of
+    (help_text, default_behavior, impact_when_set).
+
+    Ordinal disambiguates files that define the same flag multiple times
+    (e.g. migrate_memory.py has `--target` in several subparsers with
+    different semantics). AST walk order is stable, so ordinals are stable
+    across regens as long as argparse calls aren't reordered in source.
+
+    Columns 4 (Default behavior) and 6 (Impact when set) are human-written
+    and always preserved when non-empty. Column 2 (Help) is preserved only
+    as a fallback when the source has no `help=` kwarg — if the source
+    later adds one, the source wins. Returns empty dict if file doesn't
+    exist, lacks the flag table, or the table is malformed.
+    """
+    if not path.exists():
+        return {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    # Find the CLI flag table. The header row locks in column order.
+    header_re = re.compile(
+        r"^\|\s*Flag\(s\)\s*\|.*Default behavior.*Impact when set\s*\|\s*$",
+        re.MULTILINE,
+    )
+    m = header_re.search(text)
+    if not m:
+        return {}
+    # Scan table body lines until we hit a non-table line.
+    out: dict[tuple[str, int], tuple[str, str, str]] = {}
+    seen_count: dict[str, int] = {}
+    start = text.find("\n", m.end()) + 1  # skip to line after the `|---|...|` separator
+    start = text.find("\n", start) + 1    # now past the separator
+    for line in text[start:].splitlines():
+        if not line.startswith("|"):
+            break
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 6:
+            continue
+        flag_cell, help_text, _default, default_behavior, _type, impact = cells[:6]
+        # First flag name, stripped of `` and commas.
+        first_flag = flag_cell.split(",", 1)[0].strip().strip("`").strip()
+        if not first_flag or first_flag == "_positional_":
+            continue
+        ordinal = seen_count.get(first_flag, 0)
+        seen_count[first_flag] = ordinal + 1
+        # Only keep if any column was filled by hand.
+        if help_text or default_behavior or impact:
+            out[(first_flag, ordinal)] = (help_text, default_behavior, impact)
+    return out
+
+
 def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
                  args: list[dict], env_vars: list[str],
                  entry_points: list[str], intra_imports: list[str],
                  external_imports: list[str], external_calls: dict[str, list[str]],
-                 file_deps: list[str], private: bool) -> str:
+                 file_deps: list[str], private: bool,
+                 flag_overrides: dict[tuple[str, int], tuple[str, str, str]] | None = None,
+                 generated_utc: str | None = None) -> str:
+    flag_overrides = flag_overrides or {}
+    if generated_utc is None:
+        generated_utc = datetime.now(timezone.utc).isoformat()
     L: list[str] = []
     L += ["---",
           f"tool: {relpath}",
           f"sha1: {sha1}",
           f"mtime_utc: {mtime}",
-          f"generated_utc: {datetime.now(timezone.utc).isoformat()}",
+          f"generated_utc: {generated_utc}",
           f"private: {'true' if private else 'false'}",
           "---",
           "",
@@ -288,13 +384,36 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
     else:
         L.append("| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |")
         L.append("|---|---|---|---|---|---|")
+        ordinal_counter: dict[str, int] = {}
         for a in args:
             names = ", ".join(f"`{n}`" for n in a["names"]) or "_positional_"
             help_ = (a["help"] or "").replace("|", "\\|").replace("\n", " ")
             default = a["default"]
-            default_s = "—" if default is None else f"`{default}`"
-            ta = a.get("type") or a.get("action") or ""
-            L.append(f"| {names} | {help_} | {default_s} |  | {ta} |  |")
+            if a.get("default_passed"):
+                # Explicit default= was supplied (even if the value is None).
+                default_s = "None" if default is None else f"`{default}`"
+            elif a.get("action") == "store_true":
+                default_s = "`False`"
+            elif a.get("action") == "store_false":
+                default_s = "`True`"
+            else:
+                default_s = "—"
+            # argparse defaults unspecified type to str for flags that take a
+            # value. store_true / store_false supply action instead. Preserve
+            # that implicit info rather than leaving the column blank.
+            ta = a.get("type") or a.get("action")
+            if not ta:
+                ta = "" if a.get("action") else "str"
+            first_flag = a["names"][0] if a["names"] else ""
+            ordinal = ordinal_counter.get(first_flag, 0)
+            ordinal_counter[first_flag] = ordinal + 1
+            prior_help, default_behavior, impact = flag_overrides.get(
+                (first_flag, ordinal), ("", "", ""))
+            # Help column: source wins when present; fall back to prior
+            # hand-curated help when source has none.
+            if not help_ and prior_help:
+                help_ = prior_help
+            L.append(f"| {names} | {help_} | {default_s} | {default_behavior} | {ta} | {impact} |")
     L += ["", "## Environment variables read", ""]
     if not env_vars:
         L.append("_(none detected)_")
@@ -387,12 +506,67 @@ def main() -> None:
 
         rel = f"{src.parent.name}/{src.name}"
         out_path = OUT_DIR / (src.stem + ".md")
-        out_path.write_text(
-            render_entry(rel, sha1, mtime, doc, args, env_vars,
-                         entry_points, intra, external, external_calls,
-                         file_deps, private),
-            encoding="utf-8",
-        )
+
+        # Preserve hand-curated flag columns from the prior file.
+        flag_overrides = parse_existing_flag_overrides(out_path)
+        # Build the live (flag, ordinal) set so we can warn about orphans
+        # (overrides pointing at flags that were removed from source).
+        live_keys: set[tuple[str, int]] = set()
+        _live_counter: dict[str, int] = {}
+        for a in args:
+            if not a["names"]:
+                continue
+            fn = a["names"][0]
+            ord_ = _live_counter.get(fn, 0)
+            _live_counter[fn] = ord_ + 1
+            live_keys.add((fn, ord_))
+        orphans = [k for k in flag_overrides if k not in live_keys]
+        for orphan in orphans:
+            name, ord_ = orphan
+            suffix = f" (occurrence #{ord_ + 1})" if ord_ else ""
+            print(f"  warn: {rel} — dropping override for removed flag {name!r}{suffix}")
+            flag_overrides.pop(orphan, None)
+
+        # Preserve generated_utc + mtime_utc when content is unchanged, to
+        # avoid spurious git diffs. Policy:
+        #   - If prior sha1 matches AND the rendered body (minus volatile
+        #     metadata) matches, keep the prior mtime and generated_utc.
+        #   - If sha1 matches but body differs (flag override edited by hand,
+        #     docstring reparsed differently, etc.), refresh generated_utc
+        #     but keep the prior mtime.
+        #   - If sha1 differs (real source change), refresh both.
+        prior_sha1 = _read_front_field(out_path, _SHA1_RE)
+        prior_mtime = _read_front_field(out_path, _MTIME_RE)
+        prior_generated_utc = _read_front_field(out_path, _GEN_UTC_RE)
+
+        gen_placeholder = "__GEN_UTC_PLACEHOLDER__"
+        mtime_placeholder = "__MTIME_PLACEHOLDER__"
+        candidate = render_entry(rel, sha1, mtime_placeholder, doc, args, env_vars,
+                                 entry_points, intra, external, external_calls,
+                                 file_deps, private, flag_overrides,
+                                 generated_utc=gen_placeholder)
+        prior_body = _body_without_volatile_fields(
+            out_path, mtime_placeholder, gen_placeholder)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if prior_sha1 == sha1 and prior_body == candidate:
+            # Fully unchanged — keep prior metadata verbatim.
+            mtime_to_write = prior_mtime or mtime
+            generated_utc = prior_generated_utc or now_iso
+        elif prior_sha1 == sha1:
+            # Source content unchanged but rendered body differs — keep
+            # prior mtime (it still describes the source), refresh gen time.
+            mtime_to_write = prior_mtime or mtime
+            generated_utc = now_iso
+        else:
+            # Real source change.
+            mtime_to_write = mtime
+            generated_utc = now_iso
+
+        rendered = (candidate
+                    .replace(gen_placeholder, generated_utc, 1)
+                    .replace(mtime_placeholder, mtime_to_write, 1))
+        out_path.write_text(rendered, encoding="utf-8")
         index_entries.append((rel, doc.split("\n", 1)[0] or "(no docstring)", private))
         print(f"wrote {out_path.relative_to(BASE_DIR)}")
 

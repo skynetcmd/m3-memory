@@ -2,7 +2,7 @@
 tool: bin/weekly_auditor.py
 sha1: d948d7c30c0a
 mtime_utc: 2026-04-18T05:12:21.138117+00:00
-generated_utc: 2026-04-18T16:33:21.788156+00:00
+generated_utc: 2026-04-18T21:58:23.218464+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ Use --no-memory to skip the memory write step.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--no-memory` | Skip writing summary to memory system and ChromaDB | — | Generates PDF + writes summary to memory_items + chroma_sync | store_true | Generates PDF only; skips memory_write & chroma_sync (line 414) |
+| `--no-memory` | Skip writing summary to memory system and ChromaDB | `False` | Generates PDF + writes summary to memory_items + chroma_sync | store_true | Generates PDF only; skips memory_write & chroma_sync (line 414) |
 
 ## Environment variables read
 
