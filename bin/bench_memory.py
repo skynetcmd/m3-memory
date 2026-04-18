@@ -5,15 +5,15 @@ Seeds test data, measures latency/throughput, reports pass/fail against targets.
 
 Usage: python bin/bench_memory.py
 """
-import sqlite3
-import os
-import sys
 import json
+import os
+import random
+import sqlite3
+import statistics
+import struct
+import sys
 import time
 import uuid
-import struct
-import random
-import statistics
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
@@ -138,7 +138,7 @@ def bench_fts_search(conn, trials=50):
     for i in range(trials):
         q = queries[i % len(queries)]
         t0 = time.perf_counter()
-        rows = conn.execute(
+        conn.execute(
             """SELECT mi.id, rank
                FROM memory_items_fts fts
                JOIN memory_items mi ON mi.rowid = fts.rowid

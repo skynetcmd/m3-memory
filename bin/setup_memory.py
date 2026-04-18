@@ -4,13 +4,13 @@ setup_memory.py — Bootstrap the m3-memory memory system on any OS.
 Usage: python bin/setup_memory.py
 All progress logged to stderr; final config JSON printed to stdout.
 """
-import sys
-import os
-import platform
-import subprocess
-import pathlib
-import sqlite3
 import json
+import os
+import pathlib
+import platform
+import sqlite3
+import subprocess
+import sys
 
 BASE   = pathlib.Path(__file__).parent.parent.resolve()
 IS_WIN = platform.system() == "Windows"

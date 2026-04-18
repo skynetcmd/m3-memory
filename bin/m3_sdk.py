@@ -1,19 +1,18 @@
-import os
-import sys
-import sqlite3
-import logging
-import httpx
 import asyncio
 import atexit
+import logging
+import os
 import queue
 import random
+import sqlite3
+import sys
 import threading
-import json
 import time
-import platform
-from datetime import datetime, timezone
-from typing import Optional, Any
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+import httpx
 from auth_utils import get_api_key
 
 try:
@@ -138,7 +137,7 @@ class M3Context:
     async def request_with_retry(self, method: str, url: str, retries: int = 3, **kwargs):
         """Resilient HTTP requests with exponential backoff and Circuit Breaker."""
         service = url.split("//")[-1].split("/")[0]
-        
+
         if not self._check_circuit(service):
             raise httpx.HTTPStatusError(f"Circuit open for {service}", request=None, response=None) # type: ignore
 

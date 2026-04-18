@@ -1,11 +1,12 @@
-import os
 import json
+import os
+
 
 def generate_configs():
     """Updates gemini-settings.json and claude-settings.json with current project paths."""
     m3_memory_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     config_dir = os.path.join(m3_memory_root, "config")
-    
+
     # Detect the working python command for this platform.
     # Prefer "python3" only if "python" is unavailable (rare on modern installs).
     python_cmd = "python"
@@ -93,10 +94,10 @@ def generate_configs():
     if os.path.exists(aider_path):
         with open(aider_path, 'r') as f:
             content = f.read()
-        
+
         # Replace placeholder with absolute path
         new_content = content.replace("[M3_MEMORY_ROOT]", m3_memory_root.replace("\\", "/"))
-        
+
         if new_content != content:
             with open(aider_path, 'w') as f:
                 f.write(new_content)

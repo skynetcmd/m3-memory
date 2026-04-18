@@ -6,11 +6,12 @@ Tries endpoints in order: LM Studio (local + remote), then Ollama.
 Used by custom_tool_bridge.py and memory_bridge.py.
 """
 
-import os
-import httpx
 import logging
+import os
 import re
 from typing import Optional
+
+import httpx
 
 logger = logging.getLogger("llm_failover")
 

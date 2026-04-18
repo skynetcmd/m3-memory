@@ -16,13 +16,12 @@ import getpass
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
 
 BIN_DIR = os.path.dirname(os.path.abspath(__file__))
 if BIN_DIR not in sys.path:
     sys.path.insert(0, BIN_DIR)
 
-from auth_utils import DB_PATH, get_api_key, get_master_key, set_api_key, _get_fernet
+from auth_utils import DB_PATH, _get_fernet, get_api_key, get_master_key, set_api_key
 
 # Known external services. Format validators return (ok, message).
 KNOWN_SERVICES: list[dict] = [
@@ -245,7 +244,7 @@ def _interactive_add() -> None:
         _fail("vault round-trip failed: decrypted value does not match stored value")
 
     prefix = decrypted[: min(8, len(decrypted))]
-    print(f"  stored ✓")
+    print("  stored ✓")
     print(f"  vault verification: {len(decrypted)}-char value starting with '{prefix}...'")
 
     # Warn if an earlier resolution tier would shadow the vault value
@@ -253,11 +252,11 @@ def _interactive_add() -> None:
     if resolved and resolved != value:
         print()
         print(f"  ⚠  heads up: get_api_key('{name}') currently returns a DIFFERENT value")
-        print(f"     than what you just stored. An earlier tier (env var, Windows")
-        print(f"     Credential Manager, macOS Keychain, or Linux Secret Service) is")
-        print(f"     shadowing the vault. Code calling get_api_key will see that value,")
-        print(f"     not the one you just stored. Remove the shadowing entry if you want")
-        print(f"     the vault to take effect:")
+        print("     than what you just stored. An earlier tier (env var, Windows")
+        print("     Credential Manager, macOS Keychain, or Linux Secret Service) is")
+        print("     shadowing the vault. Code calling get_api_key will see that value,")
+        print("     not the one you just stored. Remove the shadowing entry if you want")
+        print("     the vault to take effect:")
         print(f"       • env var:     unset {name}  (or remove from shell profile)")
         print(f"       • Windows:     cmdkey /delete:{name}")
         print(f"       • macOS:       security delete-generic-password -s {name}")
@@ -268,7 +267,7 @@ def _interactive_add() -> None:
     print(f"  • Code can now call: from auth_utils import get_api_key; get_api_key('{name}')")
     if name == "OPENAI_API_KEY":
         print("  • Set a usage limit: https://platform.openai.com/settings/organization/limits")
-    print(f"  • To rotate this key, re-run: python bin/setup_secret.py")
+    print("  • To rotate this key, re-run: python bin/setup_secret.py")
     print(f"  • To delete it:             python bin/setup_secret.py --delete {name}")
 
 

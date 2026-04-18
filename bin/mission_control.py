@@ -5,18 +5,19 @@ Run:  python bin/mission_control.py
 """
 from __future__ import annotations
 
-import psutil
-import os
-import sqlite3
-import time
-import requests
-import subprocess
-import re
 import logging
-import sys
-import platform
-from datetime import datetime
+import os
 import pathlib
+import platform
+import re
+import sqlite3
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+import psutil
+import requests
 
 # ── Platform detection ────────────────────────────────────────────────────────
 IS_WIN   = platform.system() == "Windows"

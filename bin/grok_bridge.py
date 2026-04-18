@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
-import httpx
 import logging
-import sys
 import os
+import sys
+
+import httpx
+from mcp.server.fastmcp import FastMCP
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 # All logs go to stderr. stdout is the MCP stdio transport channel.
@@ -21,6 +22,7 @@ logger = logging.getLogger("grok_intel")
 # Linux Secret Service) → macOS Keychain direct → encrypted SQLite vault.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from m3_sdk import M3Context
+
 ctx = M3Context()
 
 mcp = FastMCP("Grok Intel")

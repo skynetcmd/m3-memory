@@ -439,7 +439,7 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
     L += ["", "## Notable external imports", ""]
     if external_imports:
         interesting = [i for i in external_imports
-                       if not i.split(" ", 1)[0].split(".", 1)[0] in {
+                       if i.split(" ", 1)[0].split(".", 1)[0] not in {
                            "os", "sys", "re", "json", "time", "datetime",
                            "pathlib", "typing", "argparse", "collections",
                            "contextlib", "functools", "itertools", "asyncio",

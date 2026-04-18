@@ -31,7 +31,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 import re
 import sqlite3
 import sys
@@ -558,7 +557,7 @@ async def run(args) -> int:
             if src == "gemini":
                 # We can't safely delete individual bullets — tell the user to edit
                 print(f"  {path}")
-                print(f"    (gemini: edit file manually — remove the following bullets:)")
+                print("    (gemini: edit file manually — remove the following bullets:)")
                 for r in items:
                     print(f"      - {r.item.source_locator}: {r.item.title[:80]}")
             elif src == "claude":

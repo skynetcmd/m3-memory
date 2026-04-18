@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-import sqlite3
-import os
-import sys
 import json
 import logging
+import os
+import sqlite3
+import sys
 from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
@@ -16,7 +16,7 @@ def fix_missing_timestamps(conn):
     """Ensures all items have at least a created_at timestamp."""
     logger.info("Checking for missing timestamps...")
     now = datetime.now(timezone.utc).isoformat() + "Z"
-    
+
     # Fix items with NULL created_at
     res = conn.execute(
         "UPDATE memory_items SET created_at = ? WHERE created_at IS NULL",

@@ -1,7 +1,8 @@
-import psycopg2
 import logging
 import os
 import sys
+
+import psycopg2
 from auth_utils import get_api_key
 
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')

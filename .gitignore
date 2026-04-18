@@ -28,6 +28,8 @@ memory/
 *.db
 *.db-shm
 *.db-wal
+*.db.*.bak
+*.bak
 *.sqlite
 
 # Scratch / temp files

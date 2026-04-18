@@ -95,8 +95,8 @@ def toolbar():
         git_part = f'{GRN}🌿 {git["branch"]}{R} {s}{m}{space}{DIM}│{R}  '
 
     lm_dot  = f'{GRN}●{R}' if lm             else f'{RED}●{R}'
-    
-    # We consolidated to 2 servers in our project, but we should report 
+
+    # We consolidated to 2 servers in our project, but we should report
     # whatever is actually configured in the settings.json we found.
     mcp_total = mcp
     mcp_dot = (f'{GRN}●{R}' if mcp > 0
@@ -123,4 +123,5 @@ _pts.PromptSession = _PatchedSession
 # ── Hand off to aider ─────────────────────────────────────────────────────────
 sys.argv[0] = 'aider'
 from aider.main import main  # noqa: E402  (must come after patch)
+
 main()

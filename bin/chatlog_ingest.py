@@ -23,8 +23,6 @@ import platform
 import signal
 import sys
 import time
-from datetime import datetime, timezone
-from typing import Optional
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("chatlog_ingest")

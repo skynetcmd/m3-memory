@@ -1,5 +1,5 @@
-import sys
 import os
+import sys
 
 # Ensure bin is in path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,7 +17,7 @@ def test_key(service):
         if res:
             print(f"✅ Success! Length: {len(res)}")
         else:
-            print(f"❌ Failed: Secret not found in any store.")
+            print("❌ Failed: Secret not found in any store.")
     except Exception as e:
         print(f"❌ Failed: {e}")
 
