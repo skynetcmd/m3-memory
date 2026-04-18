@@ -16,7 +16,7 @@ def _get_pg_url() -> str:
     if url:
         return url
     python_cmd = "python" if os.name == "nt" else "python3"
-    logger.error(f"PG_URL not found. Set PG_URL env var or store it via: {python_cmd} -c \"from auth_utils import set_api_key; set_api_key('PG_URL', 'postgresql://user:pass@host:5432/db')\"")
+    logger.error(f"PG_URL not found. Set PG_URL env var or store it via: {python_cmd} -c \"from auth_utils import set_api_key; set_api_key('PG_URL', 'postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host:5432/db')\"")
     sys.exit(1)
 
 SCHEMA_SQL = """
