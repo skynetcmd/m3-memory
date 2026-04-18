@@ -299,7 +299,7 @@ async def ingest_instance(instance: dict, variant: str = "", per_item: bool = Fa
                 variant=it.get("variant"),
             )
     else:
-        await memory_write_bulk_impl(items)
+        await memory_write_bulk_impl(items, variant=variant or None)
     return len(items), time.perf_counter() - t0
 
 
