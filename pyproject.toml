@@ -117,6 +117,9 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "slow: long-running tests (>1s); use -m 'not slow' to skip",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests", "benchmarks", ".venv", "venv"]
