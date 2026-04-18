@@ -1,21 +1,30 @@
 ---
-tool: bin/temporal_utils.py
-sha1: a5d46393391d
-mtime_utc: 2026-04-18T03:45:31.264360+00:00
-generated_utc: 2026-04-18T16:33:21.749615+00:00
+tool: bin/chatlog_status_line.py
+sha1: 5f762a417acb
+mtime_utc: 2026-04-18T15:52:17.239427+00:00
+generated_utc: 2026-04-18T16:33:21.610259+00:00
 private: false
 ---
 
-# bin/temporal_utils.py
+# bin/chatlog_status_line.py
 
 ## Purpose
 
-Enhanced temporal resolution utility for m3-memory.
-Resolves relative date expressions (yesterday, last Friday, the Sunday before June 1st) 
-into absolute ISO-8601 dates based on an anchor timestamp.
+chatlog_status_line.py — anomaly-only status line generator.
+
+Keystroke-fast: reads state file only, no DB. Prints one tag or nothing.
+Exit 0 always.
+
+Shows highest-severity anomaly when multiple fire.
+Order: regex_errors > silent_hook > spill > queue_backpressure > embed_backlog.
+
+Respects env:
+- CHATLOG_STATUSLINE=off → no output
+- CHATLOG_STATUSLINE_ASCII=1 → use [!] instead of ⚠
 
 ## Entry points
 
+- `def main()` (line 103)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -24,11 +33,12 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `CHATLOG_STATUSLINE`
+- `CHATLOG_STATUSLINE_ASCII`
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `chatlog_config`
 
 ## Calls OUT (external side-channels)
 

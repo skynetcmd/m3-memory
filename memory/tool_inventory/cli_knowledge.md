@@ -2,7 +2,7 @@
 tool: bin/cli_knowledge.py
 sha1: 58608ef16ebb
 mtime_utc: 2026-04-07T00:27:48.664201+00:00
-generated_utc: 2026-04-18T05:16:53.100150+00:00
+generated_utc: 2026-04-18T16:33:21.617088+00:00
 private: false
 ---
 
@@ -21,21 +21,21 @@ _(no module docstring — update the source file.)_
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `-a`, `--add` | Add a knowledge item with this content | — |  | str |  |
-| `-u`, `--update` | Update an existing knowledge item by ID | — |  | str |  |
-| `-s`, `--search` | Search knowledge items | — |  | str |  |
-| `-l`, `--list` | List recent knowledge items | — |  | store_true |  |
-| `-d`, `--delete` | Delete a knowledge item by ID | — |  | str |  |
-| `-c`, `--content` | Updated content for the item (with -u) | `` |  | str |  |
-| `-t`, `--type` | Filter or set item type (use 'all' or '?' to list types in DB) | `` |  | str |  |
-| `-k`, `--limit` | Number of results for search/list (default: 5) | `5` |  | int |  |
-| `--title` | Title for added/updated item | `` |  | str |  |
-| `--source` | Optional source for added item | `` |  | str |  |
-| `--tags` | Comma-separated tags for added item | `` |  | str |  |
-| `--metadata` | Raw JSON metadata string (overrides source/tags on add, appends/replaces on update) | `` |  | str |  |
-| `--importance` | Importance score for update (0.0 to 1.0) | `-1.0` |  | float |  |
-| `--reembed` | Force vector re-embedding during update | — |  | store_true |  |
-| `--hard` | Permanently delete from database (requires exact string 'WIPE') | — |  | str |  |
+| `-a`, `--add` | Add a knowledge item with this content | (None) | No item created; prompts help if no action specified | str | Creates new knowledge item with specified content using add_knowledge() |
+| `-u`, `--update` | Update an existing knowledge item by ID | (None) | No update occurs; prompts help if no action specified | str | Updates item by ID using update_knowledge(); requires -c/--content or other modifiers |
+| `-s`, `--search` | Search knowledge items | (None) | No search; prompts help if no action specified | str | Searches KB using search_knowledge() with specified query; limited by -k |
+| `-l`, `--list` | List recent knowledge items | (false) | No listing; prompts help if no action specified | store_true | Lists recent items using list_knowledge() up to -k limit |
+| `-d`, `--delete` | Delete a knowledge item by ID | (None) | No deletion; prompts help if no action specified | str | Soft-deletes item by ID (hard delete if --hard WIPE is passed) |
+| `-c`, `--content` | Updated content for the item (with -u) | (empty string) | Ignored unless -u is specified | str | Sets new content for updated item; appended to update_knowledge() call |
+| `-t`, `--type` | Filter or set item type (use 'all' or '?' to list types in DB) | (empty string) | No type filtering; no type set on add. With no action, lists all types if provided. | str | On add: sets item type (default "knowledge" if empty); on search/list: filters by type (wildcard support) |
+| `-k`, `--limit` | Number of results for search/list (default: 5) | (5) | search_knowledge() and list_knowledge() return 5 items max | int | Limits search/list results to N items |
+| `--title` | Title for added/updated item | (empty string) | No title set or updated | str | Sets title for new item or updates existing item's title |
+| `--source` | Optional source for added item | (empty string) | No source recorded for new item | str | Sets metadata source field for new item (ignored on update) |
+| `--tags` | Comma-separated tags for added item | (empty string) | No tags applied | str | Parses CSV into tag list for new item; added to metadata['tags'] |
+| `--metadata` | Raw JSON metadata string (overrides source/tags on add, appends/replaces on update) | (empty string) | No metadata override; uses source/tags as specified | str | Parses as JSON; on add: replaces all metadata; on update: appends/merges with existing |
+| `--importance` | Importance score for update (0.0 to 1.0) | (-1.0) | No importance change on update; -1.0 signals no-op to update_knowledge() | float | Sets item importance to specified value (0.0–1.0 range) |
+| `--reembed` | Force vector re-embedding during update | (false) | Update does not re-embed vectors | store_true | Forces vector re-embedding during update via update_knowledge() |
+| `--hard` | Permanently delete from database (requires exact string 'WIPE') | (None) | Soft-delete only (tombstone); data recoverable | str | Hard-delete (permanent) only if value is exactly "WIPE"; any other value errors |
 
 ## Environment variables read
 

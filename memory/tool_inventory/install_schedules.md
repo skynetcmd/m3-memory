@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 72e5704fae15
-mtime_utc: 2026-04-11T18:30:35.531344+00:00
-generated_utc: 2026-04-18T05:16:53.120416+00:00
+sha1: 8ac772425fb7
+mtime_utc: 2026-04-18T16:10:37.204749+00:00
+generated_utc: 2026-04-18T16:33:21.638772+00:00
 private: false
 ---
 
@@ -16,12 +16,16 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 132)
+- `def main()` (line 205)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
-_(no argparse arguments detected)_
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--list` | List configured schedules and exit. | — | No-op; prints "Nothing to do" message and exits | store_true | Lists all 5 configured schedules (auditor, sync, maintenance, rotator, chatlog-embed-sweep) and exits |
+| `--add` | Install one schedule by name (e.g. chatlog-embed-sweep) or 'all'. | — | No-op; prints "Nothing to do" message and exits | str | Installs Windows Task(s) or crontab entries matching NAME; 'all' installs all 5 schedules |
+| `--remove` | Remove one schedule by name, or 'all'. | — | No-op; prints "Nothing to do" message and exits | str | Removes Windows Task(s) matching NAME; 'all' removes all 5 schedules; Unix users edit crontab manually |
 
 ## Environment variables read
 
@@ -35,10 +39,11 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['crontab', '-l']`` (line 34)
-- `subprocess.run()  → `['crontab', tmp_path]`` (line 53)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 107)
-- `subprocess.run()  → `schtasks_cmd`` (line 121)
+- `subprocess.run()  → `['crontab', '-l']`` (line 49)
+- `subprocess.run()  → `['crontab', tmp_path]`` (line 68)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 154)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 185)
+- `subprocess.run()  → `schtasks_cmd`` (line 167)
 
 
 ## Notable external imports

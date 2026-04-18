@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_flat_memory.py
-sha1: 796600e92365
-mtime_utc: 2026-04-12T16:16:33.867030+00:00
-generated_utc: 2026-04-18T05:16:53.199179+00:00
+sha1: d59caea0c32f
+mtime_utc: 2026-04-18T15:36:00.869292+00:00
+generated_utc: 2026-04-18T16:33:21.721136+00:00
 private: false
 ---
 
@@ -36,20 +36,20 @@ Usage:
 
 ## Entry points
 
-- `async def run()` (line 470)
-- `def main()` (line 609)
+- `async def run()` (line 471)
+- `def main()` (line 610)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--sources` | Comma-separated list of sources. Valid: claude, gemini, openclaw, rules. Default: claude,gemini,openclaw | `claude,gemini,openclaw` |  |  |  |
-| `--include-rules` | Also import CLAUDE.md / GEMINI.md / AGENTS.md / CONVENTIONS.md as type=preference. These are behavioral rules loaded by each agent's system prompt — importing them makes them searchable in m3-memory but does NOT replace the source files. | — |  | store_true |  |
-| `--claude-project-slug` | Restrict Claude source to a single project slug under ~/.claude/projects/. Default: all projects. | — |  |  |  |
-| `--dry-run` | Discover + plan but don't write. | — |  | store_true |  |
-| `-y`, `--yes` | Skip confirmation prompt. | — |  | store_true |  |
-| `-v`, `--verbose` | DEBUG logging. | — |  | store_true |  |
+| `--sources` | Comma-separated list of sources. Valid: claude, gemini, openclaw, rules. Default: claude,gemini,openclaw | `claude,gemini,openclaw` | Migrates from claude, gemini, and openclaw sources (rules excluded). | str | Scans only specified sources; rules included only if explicitly set. |
+| `--include-rules` | Also import CLAUDE.md / GEMINI.md / AGENTS.md / CONVENTIONS.md as type=preference. These are behavioral rules loaded by each agent's system prompt — importing them makes them searchable in m3-memory but does NOT replace the source files. | — | Rules files not migrated. | store_true | Adds "rules" to source list; imports behavior rule files as type=preference. |
+| `--claude-project-slug` | Restrict Claude source to a single project slug under ~/.claude/projects/. Default: all projects. | — | Scans all projects under ~/.claude/projects/. | str | Restricts Claude scanner to single project; bypasses project enumeration. |
+| `--dry-run` | Discover + plan but don't write. | — | Discovers items, dedupes, prompts for confirmation, then writes to m3-memory. | store_true | Prints plan but skips all writes; no confirmation prompt required. |
+| `-y`, `--yes` | Skip confirmation prompt. | — | Confirms migration interactively before writing. | store_true | Bypasses confirmation prompt; proceeds directly to write phase. |
+| `-v`, `--verbose` | DEBUG logging. | — | INFO-level logs to stderr. | store_true | Sets log level to DEBUG; verbose output for development/debugging. |
 
 ## Environment variables read
 
@@ -64,7 +64,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `uri`` (line 308)
+- `sqlite3.connect()  → `uri`` (line 309)
 
 
 ## Notable external imports

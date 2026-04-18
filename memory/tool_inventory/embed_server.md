@@ -2,7 +2,7 @@
 tool: bin/embed_server.py
 sha1: 752edd542fc0
 mtime_utc: 2026-04-18T03:45:31.260359+00:00
-generated_utc: 2026-04-18T05:16:53.113689+00:00
+generated_utc: 2026-04-18T16:33:21.630999+00:00
 private: false
 ---
 
@@ -29,9 +29,9 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--model` | HuggingFace model ID | `DEFAULT_MODEL_ID` |  |  |  |
-| `--port` | Port to serve on | `1234` |  | int |  |
-| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` |  |  |  |
+| `--model` | HuggingFace model ID | `DEFAULT_MODEL_ID` | Loads Qwen/Qwen3-Embedding-0.6B via SentenceTransformer | str | Loads specified HuggingFace model instead |
+| `--port` | Port to serve on | `1234` | Serves /v1/embeddings endpoint on localhost:1234 | int | Serves on specified port |
+| `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` | Binds only to 127.0.0.1 (localhost only) | str | Binds to specified host (0.0.0.0 for LAN access) |
 
 ## Environment variables read
 
