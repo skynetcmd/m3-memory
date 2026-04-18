@@ -1,6 +1,6 @@
-import subprocess
-import os
 import logging
+import os
+import subprocess
 from datetime import datetime
 
 # Structured Logging for macOS Unified Logging
@@ -21,7 +21,7 @@ def run_git(args):
 
 def sync():
     logger.info("🚀 Starting Deep-Sync & Housekeeping for M3 Max...")
-    
+
     # 0. Perform Housekeeping (Space optimization)
     try:
         cleanup_script = os.path.join(WORKSPACE, "bin", "cleanup_logs.sh")
@@ -35,7 +35,7 @@ def sync():
         # 1. Add all changes (scripts, reports, etc.) respecting .gitignore
         logger.info("Adding workspace changes...")
         run_git(["add", "."])
-        
+
         # 2. Commit (only if there are changes)
         try:
             run_git(["commit", "-m", BACKUP_MSG])

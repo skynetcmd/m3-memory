@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-import sys
+import logging
 import os
 import secrets
 import string
-import logging
+import sys
 from datetime import datetime, timezone
 
 # Add the bin directory to path so we can import SDK modules if called from elsewhere
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from m3_sdk import M3Context
 from auth_utils import set_api_key
+from m3_sdk import M3Context
 
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
 logger = logging.getLogger("SecretRotator")
@@ -32,7 +32,7 @@ def rotate_secrets(dry_run: bool = False):
     for key_name in ROTATION_TARGETS:
         try:
             logger.info(f"Rotating secret for: {key_name}")
-            
+
             # 1. Fetch current secret for backup
             old_secret = ctx.get_secret(key_name)
             if old_secret and not dry_run:
@@ -48,14 +48,14 @@ def rotate_secrets(dry_run: bool = False):
 
             # 2. Generate new cryptographically secure key
             new_secret = generate_secure_token()
-            
+
             if dry_run:
                 logger.info(f"[DRY RUN] Would rotate {key_name} to new {len(new_secret)} char token.")
                 continue
 
             # 3. Store securely in the local SQLite vault
             set_api_key(key_name, new_secret)
-            
+
             # 4. Log the rotation event
             ctx.log_event(
                 category="security",
@@ -63,7 +63,7 @@ def rotate_secrets(dry_run: bool = False):
                 detail_b=f"Successfully rotated {key_name} and encrypted to vault."
             )
             logger.info(f"Successfully rotated and vaulted {key_name}.")
-            
+
         except Exception as e:
             logger.error(f"Failed to rotate {key_name}: {e}")
             if not dry_run:

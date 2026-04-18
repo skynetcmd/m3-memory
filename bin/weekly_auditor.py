@@ -352,7 +352,7 @@ def write_summary_to_memory(summary_text, week_label):
     if bin_dir not in sys.path:
         sys.path.insert(0, bin_dir)
 
-    from memory_bridge import memory_write, chroma_sync
+    from memory_bridge import chroma_sync, memory_write
 
     result = asyncio.run(memory_write(
         type="document",

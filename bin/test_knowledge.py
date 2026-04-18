@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-import unittest
 import os
 import sys
+import unittest
 import uuid
 
 # Ensure BASE_DIR is in path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
-from memory.knowledge_helpers import add_knowledge, search_knowledge, list_knowledge, delete_knowledge
+from memory.knowledge_helpers import add_knowledge, delete_knowledge, list_knowledge, search_knowledge
+
 
 class TestKnowledge(unittest.TestCase):
     def test_add_and_list_knowledge(self):
@@ -16,12 +17,12 @@ class TestKnowledge(unittest.TestCase):
         content = "This is a test knowledge item."
         source = "unit_test"
         tags = ["test", "unittest"]
-        
+
         # Add
         result = add_knowledge(content, title=title, source=source, tags=tags)
         self.assertTrue(result.startswith("Created:"), f"Failed to add knowledge: {result}")
         item_id = result.split(":")[1].strip()
-        
+
         # List
         items = list_knowledge(limit=10)
         found = False
@@ -34,11 +35,11 @@ class TestKnowledge(unittest.TestCase):
                 self.assertEqual(item['tags'], tags)
                 break
         self.assertTrue(found, "Added item not found in list")
-        
+
         # Delete
         del_result = delete_knowledge(item_id, hard=True)
         self.assertTrue("deleted" in del_result.lower(), f"Unexpected delete result: {del_result}")
-        
+
         # Verify gone
         items_after = list_knowledge(limit=10)
         found_after = False

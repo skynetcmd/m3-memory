@@ -12,22 +12,23 @@ All internal paths are relative to BASE_DIR (auto-detected or AI_WORKSPACE_DIR e
 """
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
-import sqlite3
-import os
-import re
+import asyncio
 import logging
+import os
+import platform
+import re
+import sqlite3
 import sys
 import uuid
-import platform
-import asyncio
 from datetime import datetime, timezone
+
+from mcp.server.fastmcp import FastMCP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from embedding_utils import (
     parse_model_size as _parse_model_size,
 )
-from m3_sdk import M3Context, LM_STUDIO_BASE
+from m3_sdk import LM_STUDIO_BASE, M3Context
 from thermal_utils import get_thermal_status
 
 ctx = M3Context()
@@ -61,6 +62,8 @@ ORIGIN_DEVICE        = os.environ.get("ORIGIN_DEVICE", platform.node())
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 from contextlib import contextmanager
+
+
 @contextmanager
 def _conn():
     with ctx.get_sqlite_conn() as c:
@@ -267,15 +270,15 @@ async def debug_correlate(log_file: str = "", time_range: str = "24h", pattern: 
 @mcp.tool()
 def debug_history(keyword: str = "", limit: int = 10):
     """
-    Search past debugging sessions. 
+    Search past debugging sessions.
     Efficiency: Uses hybrid relevance logic if keyword is provided.
     """
     if keyword.strip():
         # Efficiency Suggestion #2: Simple ranking logic
         query = """
-            SELECT title, findings 
-            FROM debug_reports 
-            WHERE title LIKE ? OR findings LIKE ? 
+            SELECT title, findings
+            FROM debug_reports
+            WHERE title LIKE ? OR findings LIKE ?
             ORDER BY (CASE WHEN title LIKE ? THEN 2 ELSE 0 END + CASE WHEN findings LIKE ? THEN 1 ELSE 0 END) DESC
             LIMIT ?
         """
@@ -283,7 +286,7 @@ def debug_history(keyword: str = "", limit: int = 10):
         rows = ctx.query_memory(query, (pattern, pattern, pattern, pattern, limit))
     else:
         rows = ctx.query_memory("SELECT title, findings FROM debug_reports ORDER BY created_at DESC LIMIT ?", (limit,))
-    
+
     sl.log("History Queried", "audit", keyword=keyword, results=len(rows))
     return "\n".join([f"- {r[0]}: {r[1]}" for r in rows]) if rows else "No history found."
 

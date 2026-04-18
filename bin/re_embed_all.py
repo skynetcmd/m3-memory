@@ -1,19 +1,20 @@
 import asyncio
-import sqlite3
 import os
+import sqlite3
 import sys
 
 # Add bin to path for imports
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(BASE_DIR, "bin"))
 
-from memory_core import _embed, _pack, DB_PATH
+from memory_core import DB_PATH, _embed, _pack
+
 
 async def re_embed_all():
     print(f"Connecting to {DB_PATH}...")
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    
+
     items = conn.execute("SELECT id, content, title FROM memory_items WHERE is_deleted = 0").fetchall()
     print(f"Found {len(items)} active items to re-embed.")
 
@@ -28,7 +29,7 @@ async def re_embed_all():
 
         print(f"[{updated+1}/{len(items)}] Re-embedding {rid}...")
         vec, model = await _embed(text)
-        
+
         if vec:
             blob = _pack(vec)
             existing = conn.execute(
@@ -48,7 +49,7 @@ async def re_embed_all():
             updated += 1
         else:
             print(f"FAILED to embed {rid}")
-            
+
     conn.commit()
     conn.close()
     print(f"Successfully re-embedded {updated} items.")

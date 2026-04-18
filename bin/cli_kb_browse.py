@@ -28,6 +28,7 @@ DB_PATH     = REPO_ROOT / "memory" / "agent_memory.db"
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 from m3_sdk import resolve_venv_python
 
+
 def ensure_venv():
     venv_python = resolve_venv_python()
     if os.path.exists(venv_python) and sys.executable != venv_python:

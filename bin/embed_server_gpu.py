@@ -6,15 +6,17 @@ Runs on Port 9903 by default.
 """
 
 from __future__ import annotations
+
 import argparse
 import logging
-import time
-import subprocess
 import os
 import signal
+import subprocess
 import sys
-import numpy as np
+import time
+
 import httpx
+import numpy as np
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -46,12 +48,12 @@ def l2_normalize(v):
 @app.post("/v1/embeddings")
 async def create_embeddings(req: EmbeddingRequest):
     texts = [req.input] if isinstance(req.input, str) else req.input
-    
+
     # 1. Append <|endoftext|> as required by Qwen3 GGUF logic
     processed_texts = [t + "<|endoftext|>" if not t.endswith("<|endoftext|>") else t for t in texts]
-    
+
     t0 = time.perf_counter()
-    
+
     async with httpx.AsyncClient() as client:
         # 2. Forward to llama-server
         # llama-server uses /embedding endpoint (standard) or /v1/embeddings
@@ -61,20 +63,20 @@ async def create_embeddings(req: EmbeddingRequest):
             json={"input": processed_texts, "model": "qwen3"},
             timeout=60.0
         )
-        
+
     if response.status_code != 200:
         logger.error(f"llama-server error: {response.text}")
         return {"error": "llama-server failed", "details": response.text}
 
     data = response.json()
-    
+
     # 3. Apply L2 Normalization (llama-server currently lacks --embd-normalize for some builds)
     for entry in data["data"]:
         entry["embedding"] = l2_normalize(np.array(entry["embedding"]))
-    
+
     elapsed = time.perf_counter() - t0
     logger.info(f"Embedded {len(texts)} text(s) via llama-server in {elapsed:.3f}s (Vulkan)")
-    
+
     return data
 
 def start_llama_server():
@@ -90,10 +92,10 @@ def start_llama_server():
         "--pooling", "last",
         "--log-disable"
     ]
-    
+
     logger.info(f"Starting llama-server: {' '.join(cmd)}")
     llama_process = subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-    
+
     # Wait for server to be ready
     max_retries = 30
     for i in range(max_retries):
@@ -104,10 +106,10 @@ def start_llama_server():
                 if r.status_code == 200:
                     logger.info("llama-server is ready.")
                     return True
-        except:
+        except Exception:
             pass
         time.sleep(1)
-    
+
     logger.error("llama-server failed to start in 30s")
     return False
 

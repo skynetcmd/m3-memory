@@ -31,7 +31,7 @@ import queue
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Literal, Optional
 
 logger = logging.getLogger("chatlog_config")

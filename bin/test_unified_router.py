@@ -1,4 +1,5 @@
 import os
+
 import requests
 
 # Constants
@@ -7,7 +8,7 @@ API_TOKEN = os.getenv("LM_API_TOKEN") or "no-token-found"
 
 def test_payload(model, description):
     print(f"\n--- Testing: {description} (Model: {model}) ---")
-    
+
     payload = {
         "model": model,
         "messages": [
@@ -15,12 +16,12 @@ def test_payload(model, description):
             {"role": "user", "content": "Hello! Confirm you received this OpenAI-style payload."}
         ]
     }
-    
+
     headers = {
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json"
     }
-    
+
     try:
         # Increased timeout to 60s for reasoning models
         response = requests.post(ROUTER_URL, headers=headers, json=payload, timeout=60)
@@ -40,10 +41,10 @@ def test_payload(model, description):
 if __name__ == "__main__":
     # Test local routing (DeepSeek/LM Studio)
     test_payload("deepseek-r1-distill-llama-70b-mlx", "Local LM Studio / DeepSeek")
-    
+
     # If keys are present, test cloud routing
     if os.getenv("ANTHROPIC_API_KEY"):
         test_payload("claude-3-5-sonnet", "Anthropic Claude Translation")
-    
+
     if os.getenv("GEMINI_API_KEY"):
         test_payload("gemini-1.5-pro", "Google Gemini Translation")

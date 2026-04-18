@@ -15,11 +15,11 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
-import memory_core
-import memory_sync
-import memory_maintenance
 import chatlog_core
 import chatlog_status
+import memory_core
+import memory_maintenance
+import memory_sync
 
 # ── Validation Constants (hoisted from memory_bridge.py) ─────────────────────
 MAX_CONTENT_SIZE = 50_000

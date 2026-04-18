@@ -3,9 +3,9 @@
 test_mission_control.py — Single-pass smoke test for mission_control.py.
 Runs one iteration of the dashboard and validates all subsystems.
 """
-import sys
-import platform
 import pathlib
+import platform
+import sys
 
 # UTF-8 stdout on Windows
 if platform.system() == "Windows":
@@ -19,18 +19,20 @@ BASE = pathlib.Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(BASE / "bin"))
 
 from mission_control import (
+    DB_PATH,
+    IS_LINUX,
+    IS_MAC,
+    IS_WIN,
+    draw_bar,
     get_api_token,
-    get_kv_stats,
     get_gpu_usage,
+    get_hw_info,
+    get_kv_stats,
+    get_latest_activity,
     get_vram_usage,
     gpu_label,
     ping_ms,
-    get_hw_info,
-    get_latest_activity,
-    draw_bar,
     run_dashboard,
-    DB_PATH,
-    IS_WIN, IS_MAC, IS_LINUX,
 )
 
 PASS = 0

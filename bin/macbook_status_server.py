@@ -8,8 +8,8 @@ import http.server
 import json
 import os
 import subprocess
-import urllib.request
 import urllib.error
+import urllib.request
 
 PORT = 9876
 LM_STUDIO_URL = "http://localhost:1234"

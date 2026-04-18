@@ -126,6 +126,10 @@ def cleanup():
 async def run(lm_online: bool, jina_loaded: bool) -> bool:
     import memory_core
     from memory_bridge import (
+        VALID_MEMORY_TYPES,
+        _content_hash,
+        _ensure_sync_tables,
+        _pack,
         agent_get,
         agent_heartbeat,
         agent_list,
@@ -135,34 +139,34 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         conversation_append,
         conversation_messages,
         conversation_search,
-        conversation_summarize,
         conversation_start,
+        conversation_summarize,
+        gdpr_export,
+        gdpr_forget,
+        memory_consolidate,
+        memory_cost_report,
         memory_delete,
+        memory_export,
         memory_get,
         memory_graph,
+        memory_handoff,
         memory_history,
+        memory_import,
+        memory_inbox,
+        memory_inbox_ack,
         memory_link,
         memory_maintenance,
         memory_search,
+        memory_set_retention,
         memory_suggest,
-        memory_consolidate,
-        memory_export,
-        memory_import,
         memory_update,
+        memory_verify,
         memory_write,
-        notify,
         notifications_ack,
         notifications_ack_all,
         notifications_poll,
+        notify,
         sync_status,
-        memory_verify,
-        memory_set_retention,
-        gdpr_export,
-        gdpr_forget,
-        memory_cost_report,
-        memory_handoff,
-        memory_inbox,
-        memory_inbox_ack,
         task_assign,
         task_create,
         task_get,
@@ -170,10 +174,6 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         task_set_result,
         task_tree,
         task_update,
-        VALID_MEMORY_TYPES,
-        _ensure_sync_tables,
-        _content_hash,
-        _pack,
     )
 
     cleanup()  # fresh slate
@@ -249,7 +249,7 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
             conn.close()
             if blob:
                 n = len(blob[0]) // 4
-                floats = struct.unpack(f"{n}f", blob[0])
+                struct.unpack(f"{n}f", blob[0])
                 check("embedding blob decodes to floats", n > 0, f"len={n}")
     else:
         skip("memory_write embed=True", "jina-embeddings-v5 not loaded in LM Studio")
@@ -622,7 +622,7 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     print("\n── 20: memory_search with scope filter ────────────────────────")
     if lm_online and jina_loaded and scoped_id:
         # Write an unscoped item to verify filtering
-        r_unscoped = await memory_write(
+        await memory_write(
             type="note",
             content="Unscoped note for contrast test.",
             title="Unscoped contrast",
@@ -856,7 +856,7 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         scope="user",
         embed=False,
     )
-    gdpr_id = gdpr_item.split("Created: ")[1].split()[0] if "Created:" in gdpr_item else None
+    gdpr_item.split("Created: ")[1].split()[0] if "Created:" in gdpr_item else None
 
     export_r = gdpr_export(user_id="gdpr_test_user")
     check("gdpr_export returns JSON string", isinstance(export_r, str))
@@ -964,16 +964,16 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     if lm_online:
         c_sum_r = await conversation_start(title="Summarization Test", agent_id=AGENT)
         c_sum_id = c_sum_r.replace("Conversation started: ", "").strip() if "started:" in c_sum_r.lower() else None
-        
+
         if c_sum_id:
             await conversation_append(c_sum_id, "user", "What is the capital of France?", embed=False)
             await conversation_append(c_sum_id, "assistant", "The capital of France is Paris.", embed=False)
             await conversation_append(c_sum_id, "user", "Thank you, that is helpful.", embed=False)
-            
+
             summary = await conversation_summarize(c_sum_id, threshold=2)
             check("summarize returns string", isinstance(summary, str))
             check("summary not error", "Error:" not in summary, summary[:80])
-            
+
             # Verify relationship
             conn = sqlite3.connect(DB_PATH)
             rel = conn.execute(
@@ -1011,7 +1011,7 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     for item in import_payload["items"]:
         item["agent_id"] = NEW_AGENT
         item["id"] = str(_uuid.uuid4()) # New ID to avoid collision if desired, though UPSERT is tested
-    
+
     import_res = memory_import(json.dumps(import_payload))
     check("import successful", "Imported" in import_res)
     # 4. Verify
@@ -1029,10 +1029,10 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         CONS_AGENT = f"cons_{_uuid.uuid4().hex[:4]}"
         for i in range(5):
             await memory_write(type="note", content=f"Consolidation note {i}", title=f"Note {i}", agent_id=CONS_AGENT, embed=False)
-        
+
         cons_res = await memory_consolidate(type_filter="note", agent_filter=CONS_AGENT, threshold=3)
         check("consolidate returns success", "Consolidated 2 note items" in cons_res)
-        
+
         # Verify summary exists
         summary_search = await memory_search(query="Consolidated note", agent_filter=CONS_AGENT, type_filter="summary")
         check("consolidation summary created", "Consolidated note" in summary_search)
