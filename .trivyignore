@@ -1,0 +1,6 @@
+# Trivy secret scanner exemptions — placeholder connection strings only
+config/zshenv.example
+validate_env.py
+ENVIRONMENT_VARIABLES.md
+bin/pg_setup.py
+examples/sandbox-openclaw/.env.example
