@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_flat_memory.py
-sha1: d59caea0c32f
-mtime_utc: 2026-04-18T15:36:00.869292+00:00
-generated_utc: 2026-04-18T16:33:21.721136+00:00
+sha1: 5b11d899eeb4
+mtime_utc: 2026-04-18T20:37:50.758297+00:00
+generated_utc: 2026-04-18T21:58:23.139274+00:00
 private: false
 ---
 
@@ -45,11 +45,11 @@ Usage:
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
 | `--sources` | Comma-separated list of sources. Valid: claude, gemini, openclaw, rules. Default: claude,gemini,openclaw | `claude,gemini,openclaw` | Migrates from claude, gemini, and openclaw sources (rules excluded). | str | Scans only specified sources; rules included only if explicitly set. |
-| `--include-rules` | Also import CLAUDE.md / GEMINI.md / AGENTS.md / CONVENTIONS.md as type=preference. These are behavioral rules loaded by each agent's system prompt — importing them makes them searchable in m3-memory but does NOT replace the source files. | — | Rules files not migrated. | store_true | Adds "rules" to source list; imports behavior rule files as type=preference. |
-| `--claude-project-slug` | Restrict Claude source to a single project slug under ~/.claude/projects/. Default: all projects. | — | Scans all projects under ~/.claude/projects/. | str | Restricts Claude scanner to single project; bypasses project enumeration. |
-| `--dry-run` | Discover + plan but don't write. | — | Discovers items, dedupes, prompts for confirmation, then writes to m3-memory. | store_true | Prints plan but skips all writes; no confirmation prompt required. |
-| `-y`, `--yes` | Skip confirmation prompt. | — | Confirms migration interactively before writing. | store_true | Bypasses confirmation prompt; proceeds directly to write phase. |
-| `-v`, `--verbose` | DEBUG logging. | — | INFO-level logs to stderr. | store_true | Sets log level to DEBUG; verbose output for development/debugging. |
+| `--include-rules` | Also import CLAUDE.md / GEMINI.md / AGENTS.md / CONVENTIONS.md as type=preference. These are behavioral rules loaded by each agent's system prompt — importing them makes them searchable in m3-memory but does NOT replace the source files. | `False` | Rules files not migrated. | store_true | Adds "rules" to source list; imports behavior rule files as type=preference. |
+| `--claude-project-slug` | Restrict Claude source to a single project slug under ~/.claude/projects/. Default: all projects. | None | Scans all projects under ~/.claude/projects/. | str | Restricts Claude scanner to single project; bypasses project enumeration. |
+| `--dry-run` | Discover + plan but don't write. | `False` | Discovers items, dedupes, prompts for confirmation, then writes to m3-memory. | store_true | Prints plan but skips all writes; no confirmation prompt required. |
+| `-y`, `--yes` | Skip confirmation prompt. | `False` | Confirms migration interactively before writing. | store_true | Bypasses confirmation prompt; proceeds directly to write phase. |
+| `-v`, `--verbose` | DEBUG logging. | `False` | INFO-level logs to stderr. | store_true | Sets log level to DEBUG; verbose output for development/debugging. |
 
 ## Environment variables read
 

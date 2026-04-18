@@ -2,7 +2,7 @@
 tool: bin/bench_locomo.py
 sha1: dd445cc496a8
 mtime_utc: 2026-04-18T14:52:11.799641+00:00
-generated_utc: 2026-04-18T16:33:21.572043+00:00
+generated_utc: 2026-04-18T21:58:22.970108+00:00
 private: false
 ---
 
@@ -36,8 +36,8 @@ Includes:
 | `--dataset` |  | `DEFAULT_DATASET` | Loads locomo10.json from data/locomo/ | Path | Uses provided JSON file path |
 | `--limit-samples` |  | `0` | Process all samples | int | Process first N samples only |
 | `--limit-questions` |  | `0` | Process all questions | int | Stop after N questions total |
-| `--skip-ingest` |  | — | Ingests & links data in phase 1 | store_true | Skips ingest, starts at phase 2 (retrieve) |
-| `--ingest-only` |  | — | Runs ingest + retrieve + judge | store_true | Stops after phase 1 (ingest) |
+| `--skip-ingest` |  | `False` | Ingests & links data in phase 1 | store_true | Skips ingest, starts at phase 2 (retrieve) |
+| `--ingest-only` |  | `False` | Runs ingest + retrieve + judge | store_true | Stops after phase 1 (ingest) |
 | `--k` |  | `40` | Retrieve top 40 items from search | int | Retrieve top N items (adaptive: +20 for temporal, -10 for adversarial) |
 | `--cluster-size` |  | `5` | No episodic expansion | int | Expand hits ±N turns in same conversation |
 | `--graph-depth` |  | `1` | Single-hop graph expansion | int | Traverse N hops in relationship graph |
@@ -45,7 +45,7 @@ Includes:
 | `--judge-model` |  | `os.environ.get('EVAL_JUDGE_MODEL')` | Reads EVAL_JUDGE_MODEL env var | str | Model ID for scoring answers |
 | `--openai-base-url` | Custom base URL for OpenAI-compatible API (e.g. MCP proxy or LM Studio) | None | Uses official OpenAI/Anthropic endpoint | str | Routes generator to custom provider |
 | `--variant` | Pipeline identifier passed to bulk-insert and enrichers for A/B tracking. | `` | No pipeline variant label | str | Tags all ingested items with variant ID |
-| `--verbose` | Dump full msg objects per question into run.log | — | Logs only status/errors | store_true | Logs full OpenAI message objects |
+| `--verbose` | Dump full msg objects per question into run.log | `False` | Logs only status/errors | store_true | Logs full OpenAI message objects |
 
 ## Environment variables read
 

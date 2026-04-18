@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-04-18T16:33:21.794296+00:00._
+_Generated 2026-04-18T21:58:23.226275+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -31,7 +31,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |
 | [bin/memory_bridge.py](memory_bridge.md) | (no docstring) |  |
-| [bin/memory_core.py](memory_core.md) | (no docstring) |  |
+| [bin/memory_core.py](memory_core.md) | Core memory primitives: single + bulk write, search, enrichment, emitters. |  |
 | [bin/memory_doctor.py](memory_doctor.md) | (no docstring) |  |
 | [bin/migrate_flat_memory.py](migrate_flat_memory.md) | migrate_flat_memory.py — one-way ETL from flat-file / SQLite agent memory |  |
 | [bin/migrate_memory.py](migrate_memory.md) | Migration runner for the m3-memory SQLite databases. |  |

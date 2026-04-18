@@ -2,7 +2,7 @@
 tool: bin/install_schedules.py
 sha1: 8ac772425fb7
 mtime_utc: 2026-04-18T16:10:37.204749+00:00
-generated_utc: 2026-04-18T16:33:21.638772+00:00
+generated_utc: 2026-04-18T21:58:23.050239+00:00
 private: false
 ---
 
@@ -23,7 +23,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--list` | List configured schedules and exit. | — | No-op; prints "Nothing to do" message and exits | store_true | Lists all 5 configured schedules (auditor, sync, maintenance, rotator, chatlog-embed-sweep) and exits |
+| `--list` | List configured schedules and exit. | `False` | No-op; prints "Nothing to do" message and exits | store_true | Lists all 5 configured schedules (auditor, sync, maintenance, rotator, chatlog-embed-sweep) and exits |
 | `--add` | Install one schedule by name (e.g. chatlog-embed-sweep) or 'all'. | — | No-op; prints "Nothing to do" message and exits | str | Installs Windows Task(s) or crontab entries matching NAME; 'all' installs all 5 schedules |
 | `--remove` | Remove one schedule by name, or 'all'. | — | No-op; prints "Nothing to do" message and exits | str | Removes Windows Task(s) matching NAME; 'all' removes all 5 schedules; Unix users edit crontab manually |
 
