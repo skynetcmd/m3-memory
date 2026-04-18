@@ -76,7 +76,7 @@ Memories written inside a multi-turn or multi-agent session can be tagged with a
 
 M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI, `llama.cpp --server`):
 
-- **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 20 types
+- **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 21 types
 - **Conversation summarization** — compress long conversation threads into 3-5 key points
 - **Multi-layered consolidation** — merge groups of related memories into comprehensive summaries
 

@@ -111,6 +111,18 @@ SHORT_TURN_THRESHOLD   = int(os.environ.get("M3_SHORT_TURN_THRESHOLD", "20"))
 TITLE_MATCH_BOOST      = float(os.environ.get("M3_TITLE_MATCH_BOOST", "0.05"))
 IMPORTANCE_WEIGHT      = float(os.environ.get("M3_IMPORTANCE_WEIGHT", "0.05"))
 
+# Phase 1 ingestion optimizations. Three opt-in emitters (off by default) and
+# one retrieval-side router. All safe-no-op when gated off. See the helpers
+# _maybe_emit_event_rows / _maybe_emit_window_chunk / _maybe_emit_gist_row
+# and _maybe_route_query for behavior.
+INGEST_WINDOW_CHUNKS   = os.environ.get("M3_INGEST_WINDOW_CHUNKS", "0").lower() in ("1", "true", "yes")
+INGEST_GIST_ROWS       = os.environ.get("M3_INGEST_GIST_ROWS", "0").lower() in ("1", "true", "yes")
+INGEST_EVENT_ROWS      = os.environ.get("M3_INGEST_EVENT_ROWS", "0").lower() in ("1", "true", "yes")
+QUERY_TYPE_ROUTING     = os.environ.get("M3_QUERY_TYPE_ROUTING", "0").lower() in ("1", "true", "yes")
+INGEST_WINDOW_SIZE     = int(os.environ.get("M3_INGEST_WINDOW_SIZE", "3"))
+INGEST_GIST_MIN_TURNS  = int(os.environ.get("M3_INGEST_GIST_MIN_TURNS", "8"))
+INGEST_GIST_STRIDE     = int(os.environ.get("M3_INGEST_GIST_STRIDE", "8"))
+
 VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "grok", "manual", "system", "unknown", "legacy"}
 
 _FTS_OPERATORS = re.compile(r'\b(OR|AND|NOT|NEAR)\b|[*()\[\]{}]')
@@ -165,6 +177,266 @@ def _query_title_overlap(query: str, title: str) -> float:
     overlap = q_tokens & t_tokens
     return len(overlap) / len(q_tokens)
 
+
+# Always-on: lift resolved temporal anchors into embed_text so FTS and vector
+# search can match on absolute dates even when the original text says
+# "yesterday" or "last month". Caller supplies anchors via
+# metadata["temporal_anchors"] (list of iso strings); a no-op when absent.
+def _augment_embed_text_with_anchors(embed_text: str, metadata: str | dict | None) -> str:
+    if not embed_text:
+        return embed_text
+    if not metadata:
+        return embed_text
+    try:
+        meta = metadata if isinstance(metadata, dict) else json.loads(metadata)
+    except (json.JSONDecodeError, TypeError):
+        return embed_text
+    anchors = meta.get("temporal_anchors")
+    if not isinstance(anchors, (list, tuple)) or not anchors:
+        return embed_text
+    tags: list[str] = []
+    for a in anchors:
+        if not a:
+            continue
+        if isinstance(a, str):
+            tags.append(a[:10])
+        elif isinstance(a, dict):
+            v = a.get("iso") or a.get("date") or a.get("value")
+            if isinstance(v, str):
+                tags.append(v[:10])
+    if not tags:
+        return embed_text
+    return "[" + ", ".join(tags) + "] " + embed_text
+
+
+# Heuristic event extraction. Matches "<Name> <verb> ... <date-ish>" patterns
+# in a single turn. Returns a list of (sentence, verb) pairs. Emitted as
+# type='event_extraction' rows by _maybe_emit_event_rows.
+_EVENT_VERB_LIST = (
+    "went", "visited", "met", "started", "joined", "attended", "bought",
+    "moved", "celebrated", "finished", "began", "saw", "watched", "played",
+    "traveled", "arrived", "left", "returned", "called", "texted", "married",
+    "graduated", "quit", "hired", "adopted", "painted",
+)
+_EVENT_PROPER_NOUN = re.compile(r"\b([A-Z][a-z]{2,})\b")
+_EVENT_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_EVENT_DATE_HINT = re.compile(
+    r"\b(yesterday|today|tomorrow|last|this|next|ago|on\s+\d|"
+    r"january|february|march|april|may|june|july|august|"
+    r"september|october|november|december|monday|tuesday|wednesday|"
+    r"thursday|friday|saturday|sunday|\d{4})\b",
+    re.IGNORECASE,
+)
+_EVENT_VERB_RE = re.compile(
+    r"\b(" + "|".join(_EVENT_VERB_LIST) + r")\b", re.IGNORECASE
+)
+
+
+def _extract_event_sentences(content: str) -> list[tuple[str, str]]:
+    """Return list of (sentence, verb) for sentences that mention a proper
+    noun, one of the event verbs, and a date-ish token. Cheap regex only."""
+    if not content:
+        return []
+    out: list[tuple[str, str]] = []
+    for sent in _EVENT_SENT_SPLIT.split(content):
+        s = sent.strip()
+        if len(s) < 12 or len(s) > 400:
+            continue
+        if not _EVENT_PROPER_NOUN.search(s):
+            continue
+        m = _EVENT_VERB_RE.search(s)
+        if not m:
+            continue
+        if not _EVENT_DATE_HINT.search(s):
+            continue
+        out.append((s, m.group(1).lower()))
+        if len(out) >= 4:
+            break
+    return out
+
+
+# Query-type routing for retrieval. When QUERY_TYPE_ROUTING is on and a query
+# looks like "When/what date ... <ProperNoun>", shift vector_weight toward
+# BM25 so proper-noun signal doesn't get diluted by embedding similarity.
+_TEMPORAL_QUERY_RE = re.compile(
+    r"\b(when|what\s+date|which\s+day|on\s+what)\b", re.IGNORECASE
+)
+
+
+def _maybe_route_query(query: str, vector_weight: float) -> float:
+    if not QUERY_TYPE_ROUTING:
+        return vector_weight
+    if not query:
+        return vector_weight
+    if not _TEMPORAL_QUERY_RE.search(query):
+        return vector_weight
+    if not _EVENT_PROPER_NOUN.search(query):
+        return vector_weight
+    return 0.3
+
+
+async def _maybe_emit_event_rows(
+    content: str,
+    metadata: str | dict | None,
+    conversation_id: str,
+    user_id: str,
+    parent_id: str,
+) -> None:
+    """Extract event-like sentences from a message and emit one
+    type='event_extraction' row per match, linked back to the parent via
+    `references`. Embed_text includes resolved temporal anchors so date
+    queries can hit these rows directly. Idempotent: skipped if the caller
+    did not provide a conversation_id."""
+    if not conversation_id:
+        return
+    events = _extract_event_sentences(content)
+    if not events:
+        return
+    meta_dict: dict[str, Any] = {}
+    if metadata:
+        try:
+            meta_dict = metadata if isinstance(metadata, dict) else json.loads(metadata)
+        except (json.JSONDecodeError, TypeError):
+            meta_dict = {}
+    session_id = meta_dict.get("session_id", "")
+    for sent, verb in events:
+        ev_meta = {
+            "source_message_id": parent_id,
+            "verb": verb,
+            "session_id": session_id,
+            "temporal_anchors": meta_dict.get("temporal_anchors") or [],
+        }
+        try:
+            created = await memory_write_impl(
+                type="event_extraction",
+                content=sent,
+                title=f"event:{verb}",
+                metadata=json.dumps(ev_meta),
+                user_id=user_id,
+                source="event_extraction",
+                conversation_id=conversation_id,
+                embed=True,
+            )
+            m = re.search(r"Created:\s*([a-f0-9-]+)", created or "")
+            if m:
+                try:
+                    memory_link_impl(m.group(1), parent_id, "references")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"event_extraction emit failed: {e}")
+
+
+async def _maybe_emit_window_chunk(conversation_id: str, user_id: str) -> None:
+    """Emit a sliding 3-turn (INGEST_WINDOW_SIZE) summary row that embeds the
+    concatenated text of the most recent N message rows in a conversation.
+    Fires only on turns whose count is a multiple of the window size, so a
+    conversation of 9 turns emits 3 window rows rather than 9 overlapping
+    ones. Does not fire until at least INGEST_WINDOW_SIZE turns exist."""
+    if not conversation_id:
+        return
+    try:
+        with _db() as db:
+            rows = db.execute(
+                "SELECT id, content, title FROM memory_items "
+                "WHERE conversation_id = ? AND type = 'message' "
+                "AND is_deleted = 0 ORDER BY created_at ASC",
+                (conversation_id,),
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"window chunk query failed: {e}")
+        return
+    n = len(rows)
+    if n < INGEST_WINDOW_SIZE or (n % INGEST_WINDOW_SIZE) != 0:
+        return
+    window_rows = rows[-INGEST_WINDOW_SIZE:]
+    joined = "\n".join((r["content"] or "") for r in window_rows if r["content"])
+    if not joined.strip():
+        return
+    try:
+        await memory_write_impl(
+            type="summary",
+            content=joined,
+            title=f"window:{conversation_id}:{n}",
+            metadata=json.dumps({
+                "kind": "window_chunk",
+                "window_end_turn": n,
+                "window_size": INGEST_WINDOW_SIZE,
+                "source_message_ids": [r["id"] for r in window_rows],
+            }),
+            user_id=user_id,
+            source="window_chunk",
+            conversation_id=conversation_id,
+            embed=True,
+        )
+    except Exception as e:
+        logger.debug(f"window chunk emit failed: {e}")
+
+
+async def _maybe_emit_gist_row(conversation_id: str, user_id: str) -> None:
+    """Emit a heuristic gist row for a conversation once it has passed
+    INGEST_GIST_MIN_TURNS turns, and every INGEST_GIST_STRIDE additional
+    turns thereafter. The gist concatenates the first sentence of each
+    message and a deduped list of capitalized tokens seen across the
+    conversation — cheap, deterministic, no LLM."""
+    if not conversation_id:
+        return
+    try:
+        with _db() as db:
+            rows = db.execute(
+                "SELECT id, content FROM memory_items "
+                "WHERE conversation_id = ? AND type = 'message' "
+                "AND is_deleted = 0 ORDER BY created_at ASC",
+                (conversation_id,),
+            ).fetchall()
+    except Exception as e:
+        logger.debug(f"gist query failed: {e}")
+        return
+    n = len(rows)
+    if n < INGEST_GIST_MIN_TURNS:
+        return
+    if ((n - INGEST_GIST_MIN_TURNS) % INGEST_GIST_STRIDE) != 0:
+        return
+    sentences: list[str] = []
+    entities: list[str] = []
+    seen_ent: set[str] = set()
+    for r in rows:
+        c = (r["content"] or "").strip()
+        if not c:
+            continue
+        first = _EVENT_SENT_SPLIT.split(c, maxsplit=1)[0]
+        if first:
+            sentences.append(first[:200])
+        for m in _EVENT_PROPER_NOUN.findall(c):
+            if m not in seen_ent:
+                seen_ent.add(m)
+                entities.append(m)
+            if len(entities) >= 16:
+                break
+    if not sentences:
+        return
+    gist = " | ".join(sentences[:12])
+    if entities:
+        gist = f"[{', '.join(entities[:16])}] {gist}"
+    try:
+        await memory_write_impl(
+            type="summary",
+            content=gist,
+            title=f"gist:{conversation_id}:{n}",
+            metadata=json.dumps({
+                "kind": "conversation_gist",
+                "turn_count": n,
+                "entities": entities[:16],
+            }),
+            user_id=user_id,
+            source="conversation_gist",
+            conversation_id=conversation_id,
+            embed=True,
+        )
+    except Exception as e:
+        logger.debug(f"gist emit failed: {e}")
+
+
 _POISON_PATTERNS = [
     re.compile(r'<script\b', re.I),
     re.compile(r'(?:DROP|DELETE|ALTER)\s+TABLE', re.I),
@@ -214,6 +486,7 @@ async def _auto_classify(content: str, title: str) -> str:
         "note", "fact", "decision", "preference", "conversation", "message",
         "task", "code", "config", "observation", "plan", "summary", "snippet",
         "reference", "log", "home", "user_fact", "scratchpad", "knowledge",
+        "event_extraction",
     }
     
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
@@ -737,7 +1010,9 @@ async def memory_write_bulk_impl(items: list[dict]) -> list[str]:
                 "refresh_on": it.get("refresh_on") or None,
                 "refresh_reason": it.get("refresh_reason") or None,
                 "embed": it.get("embed", True),
-                "embed_text": (it.get("embed_text") or content or title),
+                "embed_text": _augment_embed_text_with_anchors(
+                    it.get("embed_text") or content or title, meta
+                ),
                 "variant": it.get("variant") or None,
             }
         )
@@ -1040,6 +1315,8 @@ async def memory_search_scored_impl(
     _track_cost("search_calls")
     if _depth > 1:
         return []
+
+    vector_weight = _maybe_route_query(query, vector_weight)
 
     q_vec, _ = await _embed(query)
     if not q_vec:
@@ -1806,13 +2083,16 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
 
     vec = None
     if embed:
-        vec, m = await _embed(embed_text or content or title)
+        _et = _augment_embed_text_with_anchors(
+            embed_text or content or title, metadata
+        )
+        vec, m = await _embed(_et)
         if vec:
             with _db() as db:
                 db.execute(
                     "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
                     "VALUES (?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(embed_text or content or title))
+                    (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(_et))
                 )
 
     _record_history(item_id, "create", None, content, "content", agent_id or agent)
@@ -1829,6 +2109,23 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
                 logger.debug(f"Auto-linked {item_id} -> {best_id} (score={best_score:.3f})")
             except Exception:
                 pass
+
+    # Opt-in ingestion emitters. Each one is gated off by default and fails
+    # open — errors are logged but never propagate to the caller. They only
+    # fire for 'message' rows; other types (facts, notes, etc.) are skipped
+    # since windowing/gist/event-extraction are conversation-shaped features.
+    if type == "message" and _cid:
+        try:
+            if INGEST_EVENT_ROWS:
+                await _maybe_emit_event_rows(
+                    content or "", metadata, _cid, user_id, item_id
+                )
+            if INGEST_WINDOW_CHUNKS:
+                await _maybe_emit_window_chunk(_cid, user_id)
+            if INGEST_GIST_ROWS:
+                await _maybe_emit_gist_row(_cid, user_id)
+        except Exception as e:
+            logger.debug(f"ingest emitter failed: {e}")
 
     result = f"Created: {item_id}"
     if superseded_ids:

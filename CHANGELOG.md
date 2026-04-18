@@ -4,6 +4,26 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [Unreleased] — Phase 1 Ingestion Optimizations
+
+### Added
+- **Always-on: temporal-anchor prefix in `embed_text`.** When `metadata["temporal_anchors"]` contains resolved `YYYY-MM-DD` dates, they are prepended to the embed text as `[YYYY-MM-DD, ...] …` before embedding. No flag; free when anchors are absent. Lets vector / FTS queries hit absolute dates even when the source says "yesterday".
+- **New memory type `event_extraction`** added to `VALID_MEMORY_TYPES` (now 21 types) and the `type="auto"` classifier's local set.
+- **Opt-in ingestion enrichment** (off by default; fire only for `type="message"` rows with a `conversation_id`):
+  - `M3_INGEST_WINDOW_CHUNKS=1` — emit a `type="summary"` row every `M3_INGEST_WINDOW_SIZE` (default 3) turns concatenating prior bodies. Captures Q&A pairs single-turn embeds miss.
+  - `M3_INGEST_GIST_ROWS=1` — emit a heuristic `type="summary"` gist row once a conversation passes `M3_INGEST_GIST_MIN_TURNS` (default 8), then every `M3_INGEST_GIST_STRIDE` (default 8) turns. Deterministic; no LLM.
+  - `M3_INGEST_EVENT_ROWS=1` — regex-extract `<ProperNoun> <verb> ... <date hint>` sentences and emit one `type="event_extraction"` row per match, linked back via `references`. Deterministic; no LLM.
+  - `M3_QUERY_TYPE_ROUTING=1` — retrieval-side: when a query matches "When / what date / which day" + a proper noun, shift `vector_weight` to `0.3` (BM25-heavy) so the named-entity signal isn't diluted by embedding similarity.
+
+### Docs
+- **ENVIRONMENT_VARIABLES.md** — new "Ingestion Enrichment (opt-in)" section with the five new env vars and the always-on temporal-anchor behavior.
+- **TECHNICAL_DETAILS.md** — env-var rows added; valid-type count corrected 20 → 21 (includes `knowledge` and new `event_extraction`).
+
+### Notes
+- Emitters run from the per-item `memory_write` path only; `memory_write_bulk` intentionally bypasses enrichment for fast loader throughput.
+
+---
+
 ## [2026.4.12b] — April 12, 2026 — Conversation Grouping, Refresh Lifecycle, Reversible Migrations
 
 ### Added

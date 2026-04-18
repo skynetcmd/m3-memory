@@ -358,10 +358,19 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `M3_SHORT_TURN_THRESHOLD` | 20 | Character-length threshold below which the ranker applies a length penalty (floor 0.3×) to suppress filler turns like "ok cool". |
 | `M3_TITLE_MATCH_BOOST` | 0.05 | Per-query-token-overlap boost applied when the title echoes query tokens. Set to 0 to disable. |
 | `M3_IMPORTANCE_WEIGHT` | 0.05 | Weight of the caller-supplied `importance` field in final ranking. Set to 0 to ignore importance during ranking. |
+| `M3_INGEST_WINDOW_CHUNKS` | 0 | Emit a rolling `type="summary"` row every `M3_INGEST_WINDOW_SIZE` turns of a conversation. Off by default. |
+| `M3_INGEST_WINDOW_SIZE` | 3 | Turns combined into each window chunk when window chunks are enabled. |
+| `M3_INGEST_GIST_ROWS` | 0 | Emit a heuristic per-conversation gist row once the turn count passes `M3_INGEST_GIST_MIN_TURNS`, and every `M3_INGEST_GIST_STRIDE` after. Deterministic; no LLM. |
+| `M3_INGEST_GIST_MIN_TURNS` | 8 | Threshold before the first gist is written. |
+| `M3_INGEST_GIST_STRIDE` | 8 | Stride between subsequent gist updates. |
+| `M3_INGEST_EVENT_ROWS` | 0 | Regex-extract event sentences from each message and emit `type="event_extraction"` rows linked back via `references`. Deterministic; no LLM. |
+| `M3_QUERY_TYPE_ROUTING` | 0 | When a query matches "when/what date/which day" + a proper noun, shift `vector_weight` to 0.3 (BM25-heavy) so named-entity signal isn't diluted. |
 
-### Valid Memory Types (18)
+Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are prefixed to the embed text as `[YYYY-MM-DD] …` so absolute-date queries hit rows even when the source text says "yesterday". No flag; no-op when anchors are absent.
 
-`note`, `fact`, `decision`, `preference`, `conversation`, `message`, `task`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `home`, `user_fact`, `scratchpad`, `auto` (triggers LLM classification)
+### Valid Memory Types (21)
+
+`note`, `fact`, `decision`, `preference`, `conversation`, `message`, `task`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `home`, `user_fact`, `scratchpad`, `knowledge`, `event_extraction`, `auto` (triggers LLM classification)
 
 ### Valid Relationship Types (8)
 
