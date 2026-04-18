@@ -21,7 +21,16 @@ def perf_test_env(tmp_path, monkeypatch):
     monkeypatch.setattr(chatlog_config, "STATE_FILE", str(state_file))
     monkeypatch.setattr(chatlog_config, "SPILL_DIR", str(spill_dir))
     monkeypatch.setenv("CHATLOG_MODE", "separate")
+    # CHATLOG_DB_PATH env is the reliable redirect: the dataclass default
+    # `db_path: str = DEFAULT_DB_PATH` is captured at class-definition time,
+    # so patching DEFAULT_DB_PATH alone doesn't affect new ChatlogConfig()
+    # instances. The env var is applied after construction in resolve_config().
+    monkeypatch.setenv("CHATLOG_DB_PATH", str(db_path))
     chatlog_config.invalidate_cache()
+    # Reset connection pool so _ensure_pool() rebuilds against the temp DB.
+    with chatlog_config._POOL_LOCK:
+        chatlog_config._POOL = None
+        chatlog_config._POOL_DB_PATH = None
 
     # Create schema
     _create_perf_schema(str(db_path))
