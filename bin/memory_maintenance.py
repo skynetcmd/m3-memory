@@ -4,7 +4,9 @@ import logging
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+DEFAULT_PROTECTED_TYPES = ("preference", "user_fact", "task", "plan")
 
 import memory_core
 from memory_core import (
@@ -388,8 +390,26 @@ def memory_import_impl(data: str):
 
     return f"Imported {i_count} items, {e_count} embeddings, {r_count} relationships"
 
-async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20):
-    """Consolidate old memories of the same type into summaries using the local LLM."""
+async def memory_consolidate_impl(
+    type_filter="",
+    agent_filter="",
+    threshold=20,
+    stale_days: int = 0,
+    max_importance: float = 1.0,
+    protected_types=DEFAULT_PROTECTED_TYPES,
+    dry_run: bool = False,
+):
+    """Consolidate old memories of the same type into summaries using the local LLM.
+
+    Safety gates:
+      stale_days: only consider items older than N days (0 = no age filter)
+      max_importance: skip items with importance above this floor (default 1.0 = no filter)
+      protected_types: types never consolidated (defaults to preference/user_fact/task/plan)
+      dry_run: preview what would happen without writes or LLM calls
+    """
+    now_dt = datetime.now(timezone.utc)
+    stale_cutoff = (now_dt - timedelta(days=stale_days)).isoformat() if stale_days > 0 else None
+
     # 1. Query groups exceeding threshold
     sql = "SELECT type, agent_id, COUNT(*) as cnt FROM memory_items WHERE is_deleted = 0"
     params = []
@@ -399,6 +419,10 @@ async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20)
     if agent_filter:
         sql += " AND agent_id = ?"
         params.append(agent_filter)
+    if protected_types:
+        placeholders = ",".join(["?"] * len(protected_types))
+        sql += f" AND type NOT IN ({placeholders})"
+        params.extend(protected_types)
     sql += " GROUP BY type, agent_id HAVING cnt > ?"
     params.append(threshold)
 
@@ -407,6 +431,10 @@ async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20)
 
     if not groups:
         return "No memory groups exceed consolidation threshold."
+
+    if dry_run:
+        preview = [f"{g['type']}/{g['agent_id']}: {g['cnt'] - threshold} items would consolidate" for g in groups]
+        return "DRY RUN — no changes. Candidates:\n" + "\n".join(preview)
 
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
     client = _get_embed_client()
@@ -420,12 +448,21 @@ async def memory_consolidate_impl(type_filter="", agent_filter="", threshold=20)
         g_type, g_agent = g["type"], g["agent_id"]
         n_to_consolidate = g["cnt"] - threshold
 
-        # 2. Fetch oldest N items
+        # 2. Fetch oldest N items, honoring stale_days + importance gates
+        fetch_sql = (
+            "SELECT id, title, content FROM memory_items "
+            "WHERE type = ? AND agent_id = ? AND is_deleted = 0 "
+            "AND COALESCE(importance, 0) <= ?"
+        )
+        fetch_params = [g_type, g_agent, max_importance]
+        if stale_cutoff:
+            fetch_sql += " AND created_at < ?"
+            fetch_params.append(stale_cutoff)
+        fetch_sql += " ORDER BY created_at ASC LIMIT ?"
+        fetch_params.append(n_to_consolidate)
+
         with _db() as db:
-            rows = db.execute(
-                "SELECT id, title, content FROM memory_items WHERE type = ? AND agent_id = ? AND is_deleted = 0 ORDER BY created_at ASC LIMIT ?",
-                (g_type, g_agent, n_to_consolidate)
-            ).fetchall()
+            rows = db.execute(fetch_sql, fetch_params).fetchall()
 
         if not rows: continue
 
