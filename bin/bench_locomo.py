@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import time
 import uuid
@@ -43,6 +44,37 @@ from memory_core import (  # noqa: E402
 )
 
 DEFAULT_DATASET = BASE_DIR / "data" / "locomo" / "locomo10.json"
+
+_LOCOMO_DATE_RE = re.compile(
+    r"(\d+):(\d+)\s+(am|pm)\s+on\s+(\d+)\s+([A-Za-z]+),\s+(\d+)"
+)
+
+
+def parse_locomo_date(date_str: str) -> datetime | None:
+    """Parses LOCOMO date format like '1:56 pm on 8 May, 2023'"""
+    try:
+        match = _LOCOMO_DATE_RE.search(date_str)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            meridiem = match.group(3).lower()
+            day = int(match.group(4))
+            month_name = match.group(5).lower()
+            year = int(match.group(6))
+
+            if meridiem == "pm" and hour < 12:
+                hour += 12
+            if meridiem == "am" and hour == 12:
+                hour = 0
+
+            month = temporal_utils.MONTHS.index(month_name) + 1
+            return datetime(year, month, day, hour, minute)
+    except Exception:
+        pass
+    return None
+
+
+temporal_utils.register_anchor_parser(parse_locomo_date)
 
 CATEGORIES = {
     1: "multi-hop",
@@ -150,7 +182,7 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
         if sess_key not in conv or not conv[sess_key]: continue
 
         sess_date_str = conv.get(f"session_{i}_date_time", "Unknown")
-        anchor_dt = temporal_utils.parse_locomo_date(sess_date_str)
+        anchor_dt = parse_locomo_date(sess_date_str)
 
         for t_idx, turn in enumerate(conv[sess_key]):
             role = speaker_a if turn.get("speaker") == "speaker_a" else speaker_b
@@ -194,7 +226,7 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
         if ok not in obs or not obs[ok]: continue
 
         sess_date_str = conv.get(f"session_{i}_date_time", "Unknown")
-        anchor_dt = temporal_utils.parse_locomo_date(sess_date_str)
+        anchor_dt = parse_locomo_date(sess_date_str)
         obs_data = obs[ok]
         if not isinstance(obs_data, dict): continue
 
@@ -236,7 +268,7 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
         sk = f"session_{i}_summary"
         if sk not in sums or not sums[sk]: continue
         sess_date_str = conv.get(f"session_{i}_date_time", "Unknown")
-        anchor_dt = temporal_utils.parse_locomo_date(sess_date_str)
+        anchor_dt = parse_locomo_date(sess_date_str)
         content = sums[sk]
         anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
         ref_year = anchor_dt.year if isinstance(anchor_dt, datetime) else 2023
