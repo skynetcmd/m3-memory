@@ -18,7 +18,7 @@ Persistent, local memory for MCP agents.
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
   <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-46_tools-orange?style=flat-square"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-55_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
@@ -102,7 +102,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | ✨ **[Core features](https://github.com/skynetcmd/m3-memory/blob/main/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](https://github.com/skynetcmd/m3-memory/blob/main/examples/multi-agent-team/README.md)** |
 | 🏗️ **[System design](https://github.com/skynetcmd/m3-memory/blob/main/docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](https://github.com/skynetcmd/m3-memory/blob/main/COMPARISON.md)** |
 | 🔧 **[Implementation details](https://github.com/skynetcmd/m3-memory/blob/main/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](https://github.com/skynetcmd/m3-memory/blob/main/ENVIRONMENT_VARIABLES.md)** |
-| 🤖 **[Agent rules + all 46 tools](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](https://github.com/skynetcmd/m3-memory/blob/main/ROADMAP.md)** |
+| 🤖 **[Agent rules + all 55 tools](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](https://github.com/skynetcmd/m3-memory/blob/main/ROADMAP.md)** |
 
 ---
 
@@ -121,7 +121,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| **46 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, and tasks for multi-agent orchestration |
+| **55 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, and chat-log capture for multi-agent orchestration |
 | **193 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, and orchestration paths |
 | **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
@@ -161,13 +161,13 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 46 tools are documented in [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md).
+All 55 tools are documented in [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md).
 
 ---
 
 ## 🤖 For AI agents
 
-M3 Memory exposes 46 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, and tasks for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
+M3 Memory exposes 55 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, and chat-log capture for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
 
 To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
 

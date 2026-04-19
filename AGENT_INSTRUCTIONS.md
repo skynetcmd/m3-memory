@@ -93,7 +93,7 @@ Call `memory_write` to persist any fact, decision, preference, observation, or k
 
 | Parameter | Required | Notes |
 |-----------|----------|-------|
-| `type` | Yes | One of: `note`, `fact`, `decision`, `preference`, `task`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `home`, `user_fact`, `scratchpad`, `auto` |
+| `type` | Yes | One of: `note`, `fact`, `decision`, `preference`, `task`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `home`, `user_fact`, `scratchpad`, `auto`, `conversation`, `message`, `knowledge`, `event_extraction`, `chat_log` |
 | `content` | Yes | The memory content (max 50,000 chars) |
 | `title` | No | Short descriptive title — used for contradiction matching |
 | `importance` | No | 0.0–1.0 (default 0.5). Higher = slower decay, higher search ranking |
