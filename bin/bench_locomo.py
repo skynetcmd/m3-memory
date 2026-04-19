@@ -160,7 +160,21 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
 
             content = turn.get("text", "") or ""
             anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
+            ref_year = anchor_dt.year if isinstance(anchor_dt, datetime) else 2023
+            ref_dates = temporal_utils.extract_referenced_dates(content, default_year=ref_year)
+            # Promote resolved relative dates ("last Saturday") into referenced_dates.
+            # LOCOMO turns rarely contain absolute dates; most temporal signal is relative.
+            anchor_dates = [a["absolute"] for a in anchors if a.get("absolute")]
+            if anchor_dates:
+                ref_dates = sorted(set((ref_dates or []) + anchor_dates))
 
+            meta = {
+                "role": role, "session_id": f"S{i}", "session_date": sess_date_str,
+                "session_index": i, "turn_index": t_idx, "dia_id": dia_id,
+                "temporal_anchors": anchors,
+            }
+            if ref_dates:
+                meta["referenced_dates"] = ref_dates
             items.append({
                 "id": mid,
                 "type": "message",
@@ -170,11 +184,7 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
                 "conversation_id": f"{sid}::S{i}",
                 "source": "locomo",
                 "embed": True,
-                "metadata": {
-                    "role": role, "session_id": f"S{i}", "session_date": sess_date_str,
-                    "session_index": i, "turn_index": t_idx, "dia_id": dia_id,
-                    "temporal_anchors": anchors
-                }
+                "metadata": meta,
             })
 
     # 2. Build Observation Items + Links
@@ -193,7 +203,18 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
                 text = line[0]
                 ev = line[1]
                 anchors = temporal_utils.resolve_temporal_expressions(text, anchor_dt)
+                ref_year = anchor_dt.year if isinstance(anchor_dt, datetime) else 2023
+                ref_dates = temporal_utils.extract_referenced_dates(text, default_year=ref_year)
+                anchor_dates = [a["absolute"] for a in anchors if a.get("absolute")]
+                if anchor_dates:
+                    ref_dates = sorted(set((ref_dates or []) + anchor_dates))
                 mid = str(uuid.uuid4())
+                obs_meta = {
+                    "session_index": i, "session_date": sess_date_str,
+                    "speaker": speaker, "temporal_anchors": anchors,
+                }
+                if ref_dates:
+                    obs_meta["referenced_dates"] = ref_dates
                 items.append({
                     "id": mid,
                     "type": "observation",
@@ -203,10 +224,7 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
                     "conversation_id": f"{sid}::S{i}",
                     "source": "locomo_obs",
                     "embed": True,
-                    "metadata": {
-                        "session_index": i, "session_date": sess_date_str,
-                        "speaker": speaker, "temporal_anchors": anchors
-                    }
+                    "metadata": obs_meta,
                 })
                 ev_list = ev if isinstance(ev, list) else [ev]
                 for dia_id in ev_list:
@@ -221,6 +239,17 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
         anchor_dt = temporal_utils.parse_locomo_date(sess_date_str)
         content = sums[sk]
         anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
+        ref_year = anchor_dt.year if isinstance(anchor_dt, datetime) else 2023
+        ref_dates = temporal_utils.extract_referenced_dates(content, default_year=ref_year)
+        anchor_dates = [a["absolute"] for a in anchors if a.get("absolute")]
+        if anchor_dates:
+            ref_dates = sorted(set((ref_dates or []) + anchor_dates))
+        sum_meta = {
+            "session_index": i, "session_date": sess_date_str,
+            "temporal_anchors": anchors,
+        }
+        if ref_dates:
+            sum_meta["referenced_dates"] = ref_dates
         items.append({
             "type": "note",
             "title": f"Sum:S{i}",
@@ -229,10 +258,7 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
             "conversation_id": f"{sid}::S{i}",
             "source": "locomo_sum",
             "embed": True,
-            "metadata": {
-                "session_index": i, "session_date": sess_date_str,
-                "temporal_anchors": anchors
-            }
+            "metadata": sum_meta,
         })
 
     t0 = time.perf_counter()
@@ -289,7 +315,11 @@ async def ingest_sample_with_graph(sample: dict, variant: str = "") -> tuple[int
     print(f"Created {count} relationships")
     return len(items), time.perf_counter() - t0
 
-async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: int = 0, graph_depth: int = 0, q_signal: str = "default") -> list[dict]:
+async def retrieve_for_question(
+    sid: str, question: str, k: int,
+    cluster_size: int = 0, graph_depth: int = 0, q_signal: str = "default",
+    smart_time_boost: float = 0.0, smart_neighbor_sessions: int = 0,
+) -> list[dict]:
     from memory_core import memory_search_scored_impl
 
     # Per-category K gating
@@ -302,8 +332,10 @@ async def retrieve_for_question(sid: str, question: str, k: int, cluster_size: i
 
     ranked = await memory_search_scored_impl(
         question, k=actual_k, user_id=sid,
-        extra_columns=["metadata_json", "conversation_id"],
-        recency_bias=rb
+        extra_columns=["metadata_json", "conversation_id", "valid_from", "user_id"],
+        recency_bias=rb,
+        smart_time_boost=smart_time_boost,
+        smart_neighbor_sessions=smart_neighbor_sessions,
     )
     if not ranked: return []
     hits = []
@@ -518,7 +550,12 @@ async def run(args: argparse.Namespace) -> None:
                     if not sys_prompt.endswith("/no_think"):
                         sys_prompt = sys_prompt.strip() + " /no_think"
 
-                hits = await retrieve_for_question(sid, q, args.k, args.cluster_size, args.graph_depth, q_signal=q_signal)
+                smart_on = bool(getattr(args, "smart_retrieval", False))
+                hits = await retrieve_for_question(
+                    sid, q, args.k, args.cluster_size, args.graph_depth, q_signal=q_signal,
+                    smart_time_boost=0.15 if smart_on else 0.0,
+                    smart_neighbor_sessions=1 if smart_on else 0,
+                )
                 last_d = "Unknown"
                 for i in range(35, 0, -1):
                     dk = f"session_{i}_date_time"
@@ -630,6 +667,8 @@ def parse_args():
                    default=os.environ.get("EVAL_JUDGE_MODEL"))
     p.add_argument("--openai-base-url", default=None, help="Custom base URL for OpenAI-compatible API (e.g. MCP proxy or LM Studio)")
     p.add_argument("--variant", default="", help="Pipeline identifier passed to bulk-insert and enrichers for A/B tracking.")
+    p.add_argument("--smart-retrieval", action="store_true",
+                   help="Enable smart_time_boost + neighbor-session expansion for time-aware retrieval.")
     p.add_argument("--verbose", action="store_true", help="Dump full msg objects per question into run.log")
     return p.parse_args()
 
