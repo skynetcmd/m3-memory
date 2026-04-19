@@ -63,7 +63,7 @@ All notable changes to M3 Memory are documented here.
 - **`m3-team` CLI** — `m3-team init|check|run` for spinning up multi-agent teams from a single YAML file
 - **`examples/multi-agent-team/`** — provider-agnostic orchestrator with bounded dispatch loop (`DispatchLimits`: max_turns=8, max_tool_calls=24, max_seconds=120, provider_retries=3) and terminal `DispatchResult` taxonomy
 - **`team.minimal.yaml`** — single LM Studio agent example, zero API keys required
-- **`bin/mcp_tool_catalog.py`** — single source of truth for all MCP tool definitions via `ToolSpec` dataclass; 44 tools (55 with destructive enabled)
+- **`bin/mcp_tool_catalog.py`** — single source of truth for all MCP tool definitions via `ToolSpec` dataclass; 55 tools (66 with destructive enabled)
 - **MCP proxy v2** (`bin/mcp_proxy.py`) — catalog-driven dispatch replacing the prior 15-tool hardcoded list; reads `X-Agent-Id` header and enforces `inject_agent_id` so client-claimed identity cannot be bypassed
 - **`MCP_PROXY_ALLOW_DESTRUCTIVE`** env flag — gates 9 destructive tools (`memory_delete`, `chroma_sync`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`) behind opt-in
 - **`bin/test_mcp_proxy_unit.py`** — 12 in-process unit tests covering imports, tool counts, destructive filtering, dispatch, and agent_id injection
@@ -75,7 +75,7 @@ All notable changes to M3 Memory are documented here.
 
 ### Fixed
 - **mcp_proxy ImportError** — `LM_STUDIO_BASE` and `LM_READ_TIMEOUT` were imported from `m3_sdk` but no longer exist there; inlined as proxy-local env reads
-- **Tool count gap** — proxy clients had access to only 15 of 44 catalog tools; now have full parity
+- **Tool count gap** — proxy clients had access to only 15 of 55 catalog tools; now have full parity
 - **Agent identity bypass** — proxy did not enforce `inject_agent_id`, letting clients spoof `agent_id` on `memory_write`; now overridden from `X-Agent-Id` header
 
 ### Test Coverage
@@ -109,7 +109,7 @@ All notable changes to M3 Memory are documented here.
 - **Portable export/import** — JSON round-trip backup including embeddings and relationships
 - **Retrieval benchmarks** — `bin/bench_memory.py` measures MRR, Hit@k, and latency
 - **Configurable thresholds** — `DEDUP_LIMIT`, `DEDUP_THRESHOLD`, `CONTRADICTION_THRESHOLD`, `SEARCH_ROW_CAP` via env vars
-- **MCP tool set** — memory ops, knowledge graph, conversations, lifecycle, data governance, and operations (44 tools as of 2026.4.12)
+- **MCP tool set** — memory ops, knowledge graph, conversations, lifecycle, data governance, and operations (55 catalog tools as of 2026.4.12)
 
 ### Fixed
 - Search recursion bug in `memory_search_impl` — FTS-to-semantic fallback was incorrectly passing state into bitemporal filter parameters

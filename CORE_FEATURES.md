@@ -1,6 +1,6 @@
 # <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 44 MCP tools. 193 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
+> 66 MCP tools. 193 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -163,17 +163,22 @@ Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local L
 
 ---
 
-## 🧰 46 MCP Tools at a Glance
+## 🧰 66 MCP Tools at a Glance
 
 | Category | Tools |
 |----------|-------|
-| **Memory Ops** | `memory_write`, `memory_search`, `memory_suggest`, `memory_get`, `memory_update`, `memory_delete`, `memory_verify` |
+| **Memory Ops** | `memory_write`, `memory_search`, `memory_suggest`, `memory_get`, `memory_update`, `memory_delete`, `memory_verify`, `memory_feedback` |
 | **Knowledge Graph** | `memory_link`, `memory_graph`, `memory_history` |
 | **Conversations** | `conversation_start`, `conversation_append`, `conversation_search`, `conversation_summarize` |
-| **Lifecycle** | `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention`, `memory_feedback`, `memory_refresh_queue` |
-| **Orchestration** | `memory_handoff`, `memory_inbox`, `memory_inbox_ack`, `agent_register`, `agent_heartbeat`, `agent_list`, `agent_get`, `agent_offline`, `notify`, `notifications_poll`, `notifications_ack`, `notifications_ack_all`, `task_create`, `task_get`, `task_assign`, `task_update`, `task_set_result`, `task_list`, `task_tree` |
+| **Task Management** | `task_create`, `task_assign`, `task_update`, `task_delete`, `task_set_result`, `task_get`, `task_list`, `task_tree` |
+| **Agent Registry** | `agent_register`, `agent_heartbeat`, `agent_list`, `agent_get`, `agent_offline` |
+| **Notifications** | `notify`, `notifications_poll`, `notifications_ack`, `notifications_ack_all` |
+| **Multi-Agent Coordination** | `memory_handoff`, `memory_inbox`, `memory_inbox_ack`, `memory_refresh_queue` |
+| **Chat Log System** | `chatlog_write`, `chatlog_write_bulk`, `chatlog_search`, `chatlog_promote`, `chatlog_list_conversations`, `chatlog_cost_report`, `chatlog_set_redaction`, `chatlog_status`, `chatlog_rescrub` |
 | **Data Governance** | `gdpr_export`, `gdpr_forget`, `memory_export`, `memory_import` |
-| **Operations** | `memory_cost_report`, `chroma_sync` |
+| **Operational Protocol** | `log_activity`, `query_decisions`, `update_focus`, `retire_focus`, `check_thermal_load` |
+| **Debug Agent** | `debug_analyze`, `debug_bisect`, `debug_trace`, `debug_correlate`, `debug_history`, `debug_report` |
+| **Infrastructure** | `memory_cost_report`, `chroma_sync`, `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention` |
 
 ---
 

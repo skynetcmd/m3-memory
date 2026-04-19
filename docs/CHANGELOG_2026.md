@@ -43,8 +43,8 @@
 
 ### 🐛 Bug Fixes
 - **mcp_proxy ImportError**: `from m3_sdk import M3Context, LM_STUDIO_BASE, LM_READ_TIMEOUT` failed because `m3_sdk.py` only exports `M3Context`. Inlined the constants as proxy-local env reads (`LMSTUDIO_BASE`, `READ_TIMEOUT`).
-- **15-tool gap**: Proxy clients (Aider, OpenClaw) previously had access to only 15 of 44 catalog tools. Now full parity at 44/55.
-- **Agent identity bypass**: Proxy did not enforce `inject_agent_id`, letting clients spoof `agent_id` on `memory_write`. Now overridden from `X-Agent-Id` header.
+- **15-tool gap**: Proxy clients (Aider, OpenClaw) previously had access to only 15 of 44 catalog tools. Now full parity at 55/55.
+- Agent identity bypass**: Proxy did not enforce `inject_agent_id`, letting clients spoof `agent_id` on `memory_write`. Now overridden from `X-Agent-Id` header.
 - **Stale `memory_write` schema**: Proxy advertised an outdated parameter set; now sourced from catalog `ToolSpec`.
 
 ### 📚 Documentation & Architecture
@@ -57,8 +57,8 @@
 ### ✅ Verification
 - **Test Suite**: 193/193 end-to-end tests passing.
 - **MCP Proxy Unit Tests**: 12/12 passing in `bin/test_mcp_proxy_unit.py`.
-- **Default tool count**: 5 protocol + 6 debug + 35 catalog = 46.
-- **With `MCP_PROXY_ALLOW_DESTRUCTIVE=1`**: 5 + 6 + 44 = 55.
+- **Default tool count**: 5 protocol + 6 debug + 46 catalog = 57.
+- **With `MCP_PROXY_ALLOW_DESTRUCTIVE=1`**: 5 + 6 + 55 = 66.
 
 ---
 
