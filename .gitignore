@@ -30,6 +30,11 @@ memory/
 *.db-wal
 *.sqlite
 
+# Machine-local chatlog config/state (contains absolute paths and live runtime state)
+memory/.chatlog_config.json
+memory/.chatlog_state.json
+memory/.chatlog_ingest_cursor.json
+
 # Scratch / temp files
 .scratch/
 x.xx*
