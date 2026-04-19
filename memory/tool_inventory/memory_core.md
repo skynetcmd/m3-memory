@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 0e5311f66513
-mtime_utc: 2026-04-18T22:46:54.173256+00:00
-generated_utc: 2026-04-19T00:39:16.070582+00:00
+sha1: e4794d7983b4
+mtime_utc: 2026-04-19T02:44:47.980819+00:00
+generated_utc: 2026-04-19T02:53:55.476093+00:00
 private: false
 ---
 
@@ -94,12 +94,13 @@ _(no argparse arguments detected)_
 - `embedding_utils (unpack)`
 - `llm_failover (get_best_embed, get_best_llm, get_smallest_llm)`
 - `m3_sdk (M3Context)`
+- `temporal_utils (extract_referenced_dates, has_temporal_cues)`
 
 ## Calls OUT (external side-channels)
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '-y']`` (line 728)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes']`` (line 728)
 
 
 ## Notable external imports

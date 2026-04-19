@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server.py
-sha1: 752edd542fc0
-mtime_utc: 2026-04-18T03:45:31.260359+00:00
-generated_utc: 2026-04-18T16:33:21.630999+00:00
+sha1: 0233005d186d
+mtime_utc: 2026-04-19T02:44:47.973132+00:00
+generated_utc: 2026-04-19T02:53:55.392076+00:00
 private: false
 ---
 
@@ -32,6 +32,7 @@ Usage:
 | `--model` | HuggingFace model ID | `DEFAULT_MODEL_ID` | Loads Qwen/Qwen3-Embedding-0.6B via SentenceTransformer | str | Loads specified HuggingFace model instead |
 | `--port` | Port to serve on | `1234` | Serves /v1/embeddings endpoint on localhost:1234 | int | Serves on specified port |
 | `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` | Binds only to 127.0.0.1 (localhost only) | str | Binds to specified host (0.0.0.0 for LAN access) |
+| `--device` | Device to use (e.g. cuda:0, cpu) | None |  | str |  |
 
 ## Environment variables read
 
@@ -50,6 +51,7 @@ _(no subprocess / http / sqlite calls detected)_
 - `fastapi (FastAPI)`
 - `pydantic (BaseModel, Field)`
 - `sentence_transformers (SentenceTransformer)`
+- `torch`
 - `uvicorn`
 
 ## File dependencies (repo paths referenced)
