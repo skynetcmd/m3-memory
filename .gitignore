@@ -7,7 +7,12 @@ dist/
 build/
 .venv/
 venv/
+venv_*/
 env/
+
+# ML model weights directory (individual .safetensors/.gguf/etc already ignored above;
+# this ignores the folder itself so it doesn't show in git status)
+models/
 
 # MLX / model weights
 *.safetensors
@@ -45,6 +50,10 @@ x.xxx*
 *.tmp
 *.log
 *.jsonl
+# Ad-hoc diagnostic scripts at repo root (throwaway queries, one-off checks)
+/get_*.py
+/check_*.py
+/debug_*.py
 
 # macOS
 .DS_Store
