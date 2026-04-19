@@ -34,25 +34,24 @@ def get_lm_headers():
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 import base64
+import re
 from pathlib import Path
 
 ICON_CACHE_DIR = Path(__file__).parent / "cache" / "icons"
 ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 ICON_CACHE_DIR = ICON_CACHE_DIR.resolve()
 
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.svg$")
+
 def get_safe_filename(name):
     return base64.urlsafe_b64encode(name.encode()).decode().rstrip("=") + ".svg"
-
-def _resolve_under(base: Path, name: str) -> Path:
-    candidate = (base / name).resolve()
-    if not candidate.is_relative_to(base):
-        raise HTTPException(status_code=400, detail="Invalid path")
-    return candidate
 
 @app.get("/api/icon")
 async def get_icon(name: str):
     safe_name = get_safe_filename(name)
-    cache_path = _resolve_under(ICON_CACHE_DIR, safe_name)
+    if not _SAFE_NAME_RE.match(safe_name):
+        raise HTTPException(status_code=400, detail="Invalid icon name")
+    cache_path = ICON_CACHE_DIR / safe_name
 
     if cache_path.exists():
         return FileResponse(str(cache_path), media_type="image/svg+xml")
@@ -262,8 +261,14 @@ if frontend_dist_path.exists():
         if not full_path:
             return FileResponse(str(index_path), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
+        if ".." in full_path.split("/") or full_path.startswith("/") or "\\" in full_path:
+            return FileResponse(str(index_path), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
         candidate = (frontend_dist_path / full_path).resolve()
-        if candidate.is_relative_to(frontend_dist_path) and candidate.is_file():
+        try:
+            candidate.relative_to(frontend_dist_path)
+        except ValueError:
+            return FileResponse(str(index_path), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+        if candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(str(index_path), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
