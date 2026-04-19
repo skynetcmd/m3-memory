@@ -720,13 +720,17 @@ def _ensure_sync_tables() -> None:
     import subprocess
     try:
         migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
-        # -y skips the interactive confirmation. Without it, migrate_memory.py
-        # hits input() which returns "" on a non-TTY stdin (CI, daemon, subprocess
-        # without a pipe), silently skipping all migrations — leaving the DB
-        # empty of tasks/chatlog tables. Increase timeout to 300s to handle
+        # "up --yes" + stdin=DEVNULL are both required: without --yes the prompt
+        # would EOF-read an empty string and silently skip migrations, leaving
+        # the DB missing tasks/chatlog tables. DEVNULL belt-and-braces in case
+        # any future code path still reaches input(). Timeout 300s handles
         # backups of multi-GB databases (#46).
-        subprocess.run([sys.executable, migration_script, "up", "-y"],
-                       check=True, timeout=300)
+        subprocess.run(
+            [sys.executable, migration_script, "up", "--yes"],
+            check=True,
+            timeout=300,
+            stdin=subprocess.DEVNULL,
+        )
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
 
@@ -1482,6 +1486,8 @@ async def memory_search_scored_impl(
     recency_bias=0.0,
     vector_weight=0.7,
     adaptive_k=False,
+    smart_time_boost=0.0,
+    smart_neighbor_sessions=0,
     variant="",
     _depth=0,
 ):
@@ -1569,10 +1575,15 @@ async def memory_search_scored_impl(
 
     def _recurse_semantic():
         return memory_search_scored_impl(
-            query, k, type_filter, agent_filter, "semantic",
-            user_id, scope, as_of, conversation_id, explain,
-            extra_columns, recency_bias, vector_weight, adaptive_k,
-            variant, _depth + 1,
+            query, k=k, type_filter=type_filter, agent_filter=agent_filter,
+            search_mode="semantic", user_id=user_id, scope=scope, as_of=as_of,
+            conversation_id=conversation_id, explain=explain,
+            extra_columns=extra_columns, recency_bias=recency_bias,
+            vector_weight=vector_weight, adaptive_k=adaptive_k,
+            smart_time_boost=smart_time_boost,
+            smart_neighbor_sessions=smart_neighbor_sessions,
+            variant=variant,
+            _depth=_depth + 1,
         )
 
     try:
@@ -1736,6 +1747,120 @@ async def memory_search_scored_impl(
             except Exception as e:
                 logger.debug(f"Search result timestamp update failed: {e}")
 
+    # Time-aware boost + neighbor-session expansion. Both are off unless the
+    # caller opts in with smart_time_boost > 0 or smart_neighbor_sessions > 0.
+    # Caller must include "metadata_json" in extra_columns so referenced_dates
+    # / session_index metadata is available on rows.
+    if ranked and (smart_time_boost > 0.0 or smart_neighbor_sessions > 0):
+        from temporal_utils import extract_referenced_dates, has_temporal_cues
+
+        def _meta_for(item: dict) -> dict:
+            m = item.get("metadata")
+            if isinstance(m, dict):
+                return m
+            raw = item.get("metadata_json") or "{}"
+            try:
+                m = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            except (json.JSONDecodeError, TypeError):
+                m = {}
+            item["metadata"] = m
+            return m
+
+        query_dates = extract_referenced_dates(query) if smart_time_boost > 0.0 else []
+        query_has_temporal = has_temporal_cues(query)
+
+        if smart_time_boost > 0.0 and query_dates:
+            query_dt_set: list[datetime] = []
+            for ds in query_dates:
+                try:
+                    query_dt_set.append(datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=timezone.utc))
+                except ValueError:
+                    pass
+            if query_dt_set:
+                boosted: list[tuple[float, dict]] = []
+                for score, item in ranked:
+                    new_score = score
+                    vf = item.get("valid_from") or ""
+                    if vf:
+                        try:
+                            h_dt = datetime.fromisoformat(vf)
+                            for qdt in query_dt_set:
+                                if abs((h_dt - qdt).days) <= 30:
+                                    new_score += smart_time_boost
+                                    break
+                        except (ValueError, TypeError):
+                            pass
+                    meta = _meta_for(item)
+                    for rd in meta.get("referenced_dates") or []:
+                        try:
+                            rd_dt = datetime.strptime(rd, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            for qdt in query_dt_set:
+                                if abs((rd_dt - qdt).days) <= 14:
+                                    new_score += smart_time_boost
+                                    break
+                            if new_score != score:
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                    boosted.append((new_score, item))
+                boosted.sort(key=lambda t: t[0], reverse=True)
+                ranked = boosted
+
+        if smart_neighbor_sessions > 0 and ranked:
+            hit_session_indices: set[int] = set()
+            hit_user_ids: set[str] = set()
+            for _s, item in ranked:
+                meta = _meta_for(item)
+                si = meta.get("session_index")
+                if si is not None:
+                    try:
+                        hit_session_indices.add(int(si))
+                    except (TypeError, ValueError):
+                        pass
+                uid = item.get("user_id")
+                if uid:
+                    hit_user_ids.add(uid)
+            multi_session_signal = len(hit_session_indices) >= 2
+            if (query_has_temporal or multi_session_signal) and hit_session_indices and hit_user_ids:
+                neighbor_indices: set[int] = set()
+                for si in hit_session_indices:
+                    for offset in range(-smart_neighbor_sessions, smart_neighbor_sessions + 1):
+                        if offset != 0 and (si + offset) >= 0:
+                            neighbor_indices.add(si + offset)
+                neighbor_indices -= hit_session_indices
+                if neighbor_indices:
+                    already = {item["id"] for _s, item in ranked}
+                    try:
+                        with _db() as db:
+                            for uid in hit_user_ids:
+                                for si in neighbor_indices:
+                                    rows = db.execute(
+                                        "SELECT id, content, title, type, metadata_json, conversation_id "
+                                        "FROM memory_items "
+                                        "WHERE user_id = ? AND is_deleted = 0 AND type = 'message' "
+                                        "  AND metadata_json LIKE ? ",
+                                        (uid, f'%"session_index": {si}%'),
+                                    ).fetchall()
+                                    for r in rows:
+                                        if r["id"] in already:
+                                            continue
+                                        already.add(r["id"])
+                                        meta_raw = r["metadata_json"] or "{}"
+                                        try:
+                                            meta = json.loads(meta_raw)
+                                        except (json.JSONDecodeError, TypeError):
+                                            meta = {}
+                                        neighbor_item = {
+                                            "id": r["id"], "content": r["content"],
+                                            "title": r["title"], "type": r["type"],
+                                            "metadata_json": meta_raw, "metadata": meta,
+                                            "conversation_id": r["conversation_id"],
+                                            "_smart_neighbor": True,
+                                        }
+                                        ranked.append((0.0, neighbor_item))
+                    except Exception as e:
+                        logger.debug(f"smart_neighbor_sessions expansion failed: {e}")
+
     return ranked
 
 
@@ -1774,9 +1899,9 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
     lines.append("-" * 40)
     return "\n".join(lines)
 
-async def memory_suggest_impl(query: str, k: int = 5) -> str:
+async def memory_suggest_impl(query: str, k: int = 5, variant: str = "__none__") -> str:
     """Returns which memories would be retrieved for a query and explains why."""
-    return await memory_search_impl(query, k=k, explain=True)
+    return await memory_search_impl(query, k=k, explain=True, variant=variant)
 
 def memory_get_impl(id):
     with _db() as db:
