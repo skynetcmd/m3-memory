@@ -571,12 +571,32 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
     local_rows = sl_cur.fetchall()
     push_count = 0
     push_errors = 0
+    skipped_fk = 0
 
     if local_rows:
+        # Pre-filter: drop embeddings whose parent memory_item hasn't landed in
+        # PG yet. Otherwise the FK fires and rolls back the whole batch. These
+        # embeddings re-queue on the next sync after their parent lands.
+        candidate_ids = [row[1] for row in local_rows]
+        existing_ids: set[str] = set()
+        for i in range(0, len(candidate_ids), BATCH_SIZE):
+            chunk = candidate_ids[i:i+BATCH_SIZE]
+            pg_cur.execute(
+                "SELECT id FROM memory_items WHERE id = ANY(%s)", (chunk,)
+            )
+            existing_ids.update(r[0] for r in pg_cur.fetchall())
+
+        filtered_rows = [r for r in local_rows if r[1] in existing_ids]
+        skipped_fk = len(local_rows) - len(filtered_rows)
+        if skipped_fk:
+            logger.info(
+                f"Skipping {skipped_fk} embeddings whose memory_item is not yet in PG"
+            )
+
         try:
             # Convert sqlite3.Row to tuples with Binary-wrapped embedding blobs
             values = []
-            for row in local_rows:
+            for row in filtered_rows:
                 row_list = list(row)
                 # row[2] is the embedding blob — wrap for PG BYTEA
                 row_list[2] = Binary(row_list[2])
@@ -595,11 +615,14 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
                 push_count += len(batch)
         except Exception as exc:
             logger.error(f"Batch embedding push failed: {type(exc).__name__}: {exc}")
-            push_errors = len(local_rows)
+            push_errors = len(filtered_rows)
 
     _set_watermark(sl_cur, "emb_push", now)
     sl_conn.commit()
-    logger.info(f"Pushed {push_count} embeddings to warehouse ({push_errors} errors).")
+    logger.info(
+        f"Pushed {push_count} embeddings to warehouse "
+        f"({push_errors} errors, {skipped_fk} deferred for missing parent)."
+    )
 
     # 2. PULL: Remote to Local (delta)
     watermark = _get_watermark(sl_cur, "emb_pull")
