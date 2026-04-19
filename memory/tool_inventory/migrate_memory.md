@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: 99c409ab5227
-mtime_utc: 2026-04-18T15:41:09.975266+00:00
-generated_utc: 2026-04-18T21:58:23.147658+00:00
+sha1: 504742a91f88
+mtime_utc: 2026-04-18T23:27:41.245535+00:00
+generated_utc: 2026-04-19T00:39:16.091840+00:00
 private: false
 ---
 
@@ -65,7 +65,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `chatlog_config (chatlog_mode, chatlog_db_path, CHATLOG_MIGRATIONS_DIR)`
+- `chatlog_config (CHATLOG_MIGRATIONS_DIR, chatlog_db_path, chatlog_mode)`
 
 ## Calls OUT (external side-channels)
 

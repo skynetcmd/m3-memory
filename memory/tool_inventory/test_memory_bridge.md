@@ -1,8 +1,8 @@
 ---
 tool: bin/test_memory_bridge.py
-sha1: 8a29fb2ad2aa
-mtime_utc: 2026-04-16T05:02:41.663747+00:00
-generated_utc: 2026-04-18T16:33:21.780457+00:00
+sha1: 248a578537c8
+mtime_utc: 2026-04-18T22:29:31.727456+00:00
+generated_utc: 2026-04-19T00:39:16.147009+00:00
 private: false
 ---
 
@@ -35,7 +35,7 @@ _(no argparse arguments detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
-- `memory_bridge (agent_get, agent_heartbeat, agent_list, agent_offline, agent_register, chroma_sync, conversation_append, conversation_messages, conversation_search, conversation_summarize, conversation_start, memory_delete, memory_get, memory_graph, memory_history, memory_link, memory_maintenance, memory_search, memory_suggest, memory_consolidate, memory_export, memory_import, memory_update, memory_write, notify, notifications_ack, notifications_ack_all, notifications_poll, sync_status, memory_verify, memory_set_retention, gdpr_export, gdpr_forget, memory_cost_report, memory_handoff, memory_inbox, memory_inbox_ack, task_assign, task_create, task_get, task_list, task_set_result, task_tree, task_update, VALID_MEMORY_TYPES, _ensure_sync_tables, _content_hash, _pack)`
+- `memory_bridge (VALID_MEMORY_TYPES, _content_hash, _ensure_sync_tables, _pack, agent_get, agent_heartbeat, agent_list, agent_offline, agent_register, chroma_sync, conversation_append, conversation_messages, conversation_search, conversation_start, conversation_summarize, gdpr_export, gdpr_forget, memory_consolidate, memory_cost_report, memory_delete, memory_export, memory_get, memory_graph, memory_handoff, memory_history, memory_import, memory_inbox, memory_inbox_ack, memory_link, memory_maintenance, memory_search, memory_set_retention, memory_suggest, memory_update, memory_verify, memory_write, notifications_ack, notifications_ack_all, notifications_poll, notify, sync_status, task_assign, task_create, task_get, task_list, task_set_result, task_tree, task_update)`
 - `memory_core`
 
 ## Calls OUT (external side-channels)

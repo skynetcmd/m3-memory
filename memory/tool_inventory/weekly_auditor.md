@@ -1,8 +1,8 @@
 ---
 tool: bin/weekly_auditor.py
-sha1: d948d7c30c0a
-mtime_utc: 2026-04-18T05:12:21.138117+00:00
-generated_utc: 2026-04-18T21:58:23.218464+00:00
+sha1: 9a0ff8cd9916
+mtime_utc: 2026-04-18T22:28:14.300396+00:00
+generated_utc: 2026-04-19T00:39:16.155346+00:00
 private: false
 ---
 
@@ -39,7 +39,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `memory_bridge (memory_write, chroma_sync)`
+- `memory_bridge (chroma_sync, memory_write)`
 
 ## Calls OUT (external side-channels)
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_status_line.py
-sha1: c1147f0a9021
-mtime_utc: 2026-04-18T20:37:50.749788+00:00
-generated_utc: 2026-04-18T21:58:23.013346+00:00
+sha1: c47701e2cf45
+mtime_utc: 2026-04-18T22:28:14.291348+00:00
+generated_utc: 2026-04-19T00:39:15.967657+00:00
 private: false
 ---
 
@@ -24,7 +24,7 @@ Respects env:
 
 ## Entry points
 
-- `def main()` (line 103)
+- `def main()` (line 102)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
