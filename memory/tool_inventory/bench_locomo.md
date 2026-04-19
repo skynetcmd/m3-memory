@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_locomo.py
-sha1: 9c5e837333d2
-mtime_utc: 2026-04-19T02:44:47.961231+00:00
-generated_utc: 2026-04-19T02:53:55.295493+00:00
+sha1: 92990e421c84
+mtime_utc: 2026-04-19T16:35:24.074742+00:00
+generated_utc: 2026-04-19T21:10:11.532883+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Includes:
 
 ## Entry points
 
-- `async def run()` (line 485)
+- `async def run()` (line 517)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments

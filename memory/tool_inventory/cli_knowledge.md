@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_knowledge.py
-sha1: 5c30a882543a
-mtime_utc: 2026-04-18T22:28:14.283974+00:00
-generated_utc: 2026-04-19T00:39:15.975373+00:00
+sha1: 5c2f8c197892
+mtime_utc: 2026-04-19T19:34:36.499306+00:00
+generated_utc: 2026-04-19T21:10:11.583474+00:00
 private: false
 ---
 
@@ -14,7 +14,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 31)
+- `def main()` (line 32)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
