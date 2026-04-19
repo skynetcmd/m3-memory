@@ -62,6 +62,27 @@ from memory_core import (  # noqa: E402
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
 
+_LONGMEMEVAL_DATE_RE = re.compile(
+    r"(\d{4})/(\d{2})/(\d{2})\s+\([A-Za-z]+\)\s+(\d{2}):(\d{2})"
+)
+
+
+def parse_longmemeval_date(date_str: str) -> datetime | None:
+    """Parses LongMemEval date format like '2023/05/20 (Sat) 02:21'"""
+    try:
+        match = _LONGMEMEVAL_DATE_RE.search(date_str)
+        if match:
+            return datetime(
+                int(match.group(1)), int(match.group(2)), int(match.group(3)),
+                int(match.group(4)), int(match.group(5)),
+            )
+    except Exception:
+        pass
+    return None
+
+
+temporal_utils.register_anchor_parser(parse_longmemeval_date)
+
 
 # ── Answer generation + judge prompts (from upstream LongMemEval) ────────────
 
@@ -242,7 +263,7 @@ def build_turn_items(instance: dict, variant: str = "") -> list[dict]:
     session_dates: list[str] = instance["haystack_dates"]
 
     for s_idx, (sess_id, sess_date, session) in enumerate(zip(session_ids, session_dates, sessions)):
-        anchor_dt = temporal_utils.parse_longmemeval_date(sess_date)
+        anchor_dt = parse_longmemeval_date(sess_date)
         ref_year = anchor_dt.year if anchor_dt else 2023
         for t_idx, turn in enumerate(session):
             role = turn.get("role", "user")
