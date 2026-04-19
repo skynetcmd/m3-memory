@@ -41,6 +41,7 @@ import httpx
 
 import memory_core
 import temporal_utils
+import bench_locomo
 from memory_core import memory_write_impl, _db, _content_hash
 
 
@@ -164,7 +165,7 @@ def build_items_from_turns(sample: dict, n_turns: int, variant: str) -> list[dic
     speaker_b = conv.get("speaker_b", "Speaker B")
 
     sess_date_str = conv.get("session_1_date_time", "Unknown")
-    anchor_dt = temporal_utils.parse_locomo_date(sess_date_str)
+    anchor_dt = bench_locomo.parse_locomo_date(sess_date_str)
     turns = conv.get("session_1", [])[:n_turns]
 
     items: list[dict] = []
