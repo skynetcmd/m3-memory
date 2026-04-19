@@ -5,75 +5,15 @@ import time
 import pytest
 import sqlite3
 
+from conftest import isolate_chatlog_env, create_memory_items_schema
+
 
 @pytest.fixture
 def perf_test_env(tmp_path, monkeypatch):
-    """Set up environment for performance tests."""
-    import chatlog_config
-
-    db_path = tmp_path / "agent_chatlog.db"
-    main_db_path = tmp_path / "agent_memory.db"
-    state_file = tmp_path / ".chatlog_state.json"
-    spill_dir = tmp_path / "chatlog_spill"
-
-    monkeypatch.setattr(chatlog_config, "DEFAULT_DB_PATH", str(db_path))
-    monkeypatch.setattr(chatlog_config, "MAIN_DB_PATH", str(main_db_path))
-    monkeypatch.setattr(chatlog_config, "STATE_FILE", str(state_file))
-    monkeypatch.setattr(chatlog_config, "SPILL_DIR", str(spill_dir))
-    monkeypatch.setenv("CHATLOG_MODE", "separate")
-    # CHATLOG_DB_PATH env is the reliable redirect: the dataclass default
-    # `db_path: str = DEFAULT_DB_PATH` is captured at class-definition time,
-    # so patching DEFAULT_DB_PATH alone doesn't affect new ChatlogConfig()
-    # instances. The env var is applied after construction in resolve_config().
-    monkeypatch.setenv("CHATLOG_DB_PATH", str(db_path))
-    chatlog_config.invalidate_cache()
-    # Reset connection pool so _ensure_pool() rebuilds against the temp DB.
-    with chatlog_config._POOL_LOCK:
-        chatlog_config._POOL = None
-        chatlog_config._POOL_DB_PATH = None
-
-    # Create schema
-    _create_perf_schema(str(db_path))
-
-    yield {
-        "db_path": db_path,
-        "main_db_path": main_db_path,
-        "state_file": state_file,
-        "spill_dir": spill_dir,
-    }
-
-
-def _create_perf_schema(db_path):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE memory_items (
-            id TEXT PRIMARY KEY,
-            type TEXT,
-            title TEXT,
-            content TEXT,
-            metadata_json TEXT,
-            agent_id TEXT,
-            model_id TEXT,
-            change_agent TEXT,
-            importance REAL,
-            source TEXT,
-            origin_device TEXT,
-            user_id TEXT,
-            scope TEXT,
-            expires_at TEXT,
-            created_at TEXT,
-            valid_from TEXT,
-            valid_to TEXT,
-            conversation_id TEXT,
-            refresh_on TEXT,
-            refresh_reason TEXT,
-            content_hash TEXT,
-            variant TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    """Isolated chatlog env for perf tests. See conftest.isolate_chatlog_env."""
+    paths = isolate_chatlog_env(monkeypatch, tmp_path)
+    create_memory_items_schema(paths["db_path"])
+    yield paths
 
 
 @pytest.mark.slow
@@ -92,6 +32,7 @@ async def test_chatlog_perf_10k_enqueue(perf_test_env):
             "provider": "anthropic",
             "model_id": "claude-3-sonnet",
             "turn_index": i,
+            "variant": "test",
         })
 
     start = time.time()
@@ -119,6 +60,7 @@ async def test_chatlog_perf_flush_throughput(perf_test_env):
             "host_agent": "claude-code",
             "provider": "anthropic",
             "model_id": "claude-3-sonnet",
+            "variant": "test",
         }
         for i in range(10000)
     ]
@@ -151,6 +93,7 @@ async def test_chatlog_perf_batch_write_latency(perf_test_env):
             "host_agent": "claude-code",
             "provider": "anthropic",
             "model_id": "claude-3-sonnet",
+            "variant": "test",
         }
 
         start = time.time()
