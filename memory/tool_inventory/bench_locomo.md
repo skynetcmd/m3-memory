@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_locomo.py
-sha1: 2439d744315b
-mtime_utc: 2026-04-18T22:30:21.922439+00:00
-generated_utc: 2026-04-19T00:39:15.927936+00:00
+sha1: 9c5e837333d2
+mtime_utc: 2026-04-19T02:44:47.961231+00:00
+generated_utc: 2026-04-19T02:53:55.295493+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Includes:
 
 ## Entry points
 
-- `async def run()` (line 453)
+- `async def run()` (line 485)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -45,6 +45,7 @@ Includes:
 | `--judge-model` |  | `os.environ.get('EVAL_JUDGE_MODEL')` | Reads EVAL_JUDGE_MODEL env var | str | Model ID for scoring answers |
 | `--openai-base-url` | Custom base URL for OpenAI-compatible API (e.g. MCP proxy or LM Studio) | None | Uses official OpenAI/Anthropic endpoint | str | Routes generator to custom provider |
 | `--variant` | Pipeline identifier passed to bulk-insert and enrichers for A/B tracking. | `` | No pipeline variant label | str | Tags all ingested items with variant ID |
+| `--smart-retrieval` | Enable smart_time_boost + neighbor-session expansion for time-aware retrieval. | `False` |  | store_true |  |
 | `--verbose` | Dump full msg objects per question into run.log | `False` | Logs only status/errors | store_true | Logs full OpenAI message objects |
 
 ## Environment variables read
