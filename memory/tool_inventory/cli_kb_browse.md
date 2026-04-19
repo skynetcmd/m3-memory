@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_kb_browse.py
-sha1: 0d0310f324a4
-mtime_utc: 2026-04-18T22:28:14.281644+00:00
-generated_utc: 2026-04-19T00:39:15.972619+00:00
+sha1: da53400e5ee3
+mtime_utc: 2026-04-19T19:34:34.103652+00:00
+generated_utc: 2026-04-19T21:10:11.580625+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 199)
+- `def main()` (line 200)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -49,7 +49,7 @@ Usage:
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(db_path)`` (line 92)
+- `sqlite3.connect()  → `str(db_path)`` (line 93)
 
 
 ## Notable external imports

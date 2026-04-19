@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-04-19T02:54:15.567845+00:00._
+_Generated 2026-04-19T21:10:11.788320+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -13,7 +13,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/bench_longmemeval.py](bench_longmemeval.md) | Long-session QA benchmark runner for m3-memory. |  |
 | [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. |  |
 | [bin/chatlog_embed_sweeper.py](chatlog_embed_sweeper.md) | chatlog_embed_sweeper.py — lazy embed chat log rows missing embeddings. |  |
-| [bin/chatlog_ingest.py](chatlog_ingest.md) | chatlog_ingest.py — single-entry-point CLI for ingesting host-agent chat logs. |  |
+| [bin/chatlog_ingest.py](chatlog_ingest.md) | chatlog_ingest.py — CLI that reads a host-agent transcript file and writes |  |
 | [bin/chatlog_init.py](chatlog_init.md) | chatlog_init.py — interactive setup CLI for the chat log subsystem. |  |
 | [bin/chatlog_status.py](chatlog_status.md) | chatlog_status.py — single-call summary of the chat log subsystem state. |  |
 | [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
