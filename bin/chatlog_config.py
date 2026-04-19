@@ -31,7 +31,7 @@ import queue
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Literal, Optional
 
 logger = logging.getLogger("chatlog_config")
@@ -61,6 +61,10 @@ class HookSpec:
     enabled: bool = False
     hook_path: str = ""
     last_seen: str = ""
+    # claude-code only: if True, also capture on every assistant turn (Stop hook)
+    # in addition to PreCompact. Default off — PreCompact alone is enough for
+    # most users and avoids a Python spawn per turn. Cursor dedupes either way.
+    stop_hook: bool = False
 
 
 @dataclass
@@ -206,6 +210,7 @@ def _build_from_dict(d: dict) -> ChatlogConfig:
                 enabled=bool(spec_in.get("enabled", False)),
                 hook_path=str(spec_in.get("hook_path", "") or ""),
                 last_seen=str(spec_in.get("last_seen", "") or ""),
+                stop_hook=bool(spec_in.get("stop_hook", False)),
             )
 
     base.embed_default = bool(d.get("embed_default", base.embed_default))
