@@ -7,11 +7,12 @@ Supports multiple migration targets:
     - chatlog — optional, controlled by chatlog_config.chatlog_mode()
 
 Subcommands:
-    status              Show current version and pending migrations
-    up [--to N]         Apply pending migrations (prompts for backup dir + confirmation)
-    down [--to N]       Roll back to version N (requires .down.sql files)
-    backup [--out PATH] Take a standalone backup
-    restore <PATH>      Restore the database from a backup file
+    status                    Show current version and pending migrations
+    plan [--to N]             Preview DDL that pending migrations would run (no changes)
+    up [--to N] [--dry-run]   Apply pending migrations (prompts for backup + confirmation)
+    down --to N [--dry-run]   Roll back to version N (requires .down.sql files)
+    backup [--out PATH]       Take a standalone backup
+    restore <PATH>            Restore the database from a backup file
 
 All subcommands accept --target {main,chatlog,all} to select which DB(s) to operate on.
 Default is "all" (operates on all configured targets).
@@ -171,11 +172,26 @@ def take_backup(backup_dir: str, version_before: int, tag: str, target: Migratio
     db_basename = os.path.basename(target.db_path).replace(".db", "")
     basename = f"{db_basename}.v{version_before:03d}.{tag}.{ts}.db"
     dst = os.path.join(target_backup_dir, basename)
-    shutil.copy2(target.db_path, dst)
-    for suffix in ("-wal", "-shm"):
-        src = target.db_path + suffix
-        if os.path.exists(src):
-            shutil.copy2(src, dst + suffix)
+    # Prefer SQLite's online backup API — it takes a consistent snapshot even
+    # while other connections are writing. Falls back to file-copy if the
+    # source can't be opened (rare on a locked DB on Windows).
+    try:
+        src_conn = sqlite3.connect(target.db_path)
+        try:
+            dst_conn = sqlite3.connect(dst)
+            try:
+                src_conn.backup(dst_conn)
+            finally:
+                dst_conn.close()
+        finally:
+            src_conn.close()
+    except sqlite3.Error as e:
+        logger.warning(f"Online backup failed ({e}); falling back to file copy.")
+        shutil.copy2(target.db_path, dst)
+        for suffix in ("-wal", "-shm", "-journal"):
+            src = target.db_path + suffix
+            if os.path.exists(src):
+                shutil.copy2(src, dst + suffix)
     logger.info(f"Backup written: {dst}")
     return dst
 
@@ -187,16 +203,23 @@ def restore_backup(backup_path: str, target: MigrationTarget):
     if os.path.exists(target.db_path):
         sidecar = target.db_path + ".pre-restore"
         shutil.move(target.db_path, sidecar)
-        for suffix in ("-wal", "-shm"):
+        for suffix in ("-wal", "-shm", "-journal"):
             if os.path.exists(target.db_path + suffix):
                 shutil.move(target.db_path + suffix, sidecar + suffix)
     try:
         shutil.copy2(backup_path, target.db_path)
-        for suffix in ("-wal", "-shm"):
+        for suffix in ("-wal", "-shm", "-journal"):
             src = backup_path + suffix
             if os.path.exists(src):
                 shutil.copy2(src, target.db_path + suffix)
-        logger.info(f"Restored {target.db_path} from {backup_path}")
+        verify = sqlite3.connect(target.db_path)
+        try:
+            result = verify.execute("PRAGMA integrity_check").fetchone()
+            if not result or result[0] != "ok":
+                raise RuntimeError(f"integrity_check failed: {result}")
+        finally:
+            verify.close()
+        logger.info(f"Restored {target.db_path} from {backup_path} (integrity_check ok)")
     except Exception as e:
         logger.error(f"Restore failed: {e}")
         sys.exit(1)
@@ -210,11 +233,17 @@ def discover_migrations(migrations_dir: str):
     Returns a dict: { version: { 'name': str, 'up': path|None, 'down': path|None } }.
     Legacy NNN_name.sql files map to 'up' with down=None.
 
+    Filesystems do not guarantee `glob` ordering, so we sort filenames before
+    iterating — this makes version conflicts (e.g. two files with the same
+    NNN prefix) deterministic, with later sort-order winning and a warning
+    emitted.
+
     Args:
         migrations_dir: Directory to scan for migration files.
     """
     out: dict[int, dict[str, Optional[str]]] = {}
-    for filepath in glob.glob(os.path.join(migrations_dir, "*.sql")):
+    seen_paths: dict[tuple[int, str], str] = {}
+    for filepath in sorted(glob.glob(os.path.join(migrations_dir, "*.sql"))):
         fname = os.path.basename(filepath)
         m = _FNAME_RE.match(fname)
         if not m:
@@ -222,17 +251,27 @@ def discover_migrations(migrations_dir: str):
             continue
         version = int(m.group(1))
         name = m.group(2)
-        direction = m.group(3)  # 'up', 'down', or None (legacy)
+        direction = m.group(3) or "up"  # 'up', 'down', or legacy (treated as 'up')
+        key = (version, direction)
+        if key in seen_paths:
+            logger.warning(
+                f"Duplicate migration for v{version:03d} {direction}: "
+                f"{os.path.basename(seen_paths[key])} vs {fname} — using {fname}."
+            )
+        seen_paths[key] = filepath
         entry = out.setdefault(version, {"name": name, "up": None, "down": None})
         if direction == "down":
             entry["down"] = filepath
         else:
-            # 'up' or legacy (no direction)
             entry["up"] = filepath
             entry["name"] = name
     return out
 
 def init_migrations_table(conn):
+    # FK enforcement matches the runtime pool settings in m3_sdk so that
+    # migrations which rely on ON DELETE CASCADE (e.g. 002) behave identically
+    # when run here vs. when the app is running.
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS schema_versions (
             version INTEGER PRIMARY KEY,
@@ -253,10 +292,55 @@ def current_version(conn) -> int:
 # ── Core apply / revert ─────────────────────────────────────────────────────
 
 def _run_sql_transaction(conn, filepath: str):
+    """Run a migration script atomically.
+
+    sqlite3's `executescript` issues an implicit COMMIT before the script and
+    does not itself run in a transaction, so a plain `BEGIN` wrapper is
+    discarded. We instead wrap the script in a SAVEPOINT — SAVEPOINT semantics
+    survive executescript's implicit commit and give us all-or-nothing
+    behaviour. Migration files must NOT contain their own COMMIT/ROLLBACK
+    statements (the repo convention; enforced by _validate_migration_sql).
+    """
     with open(filepath, "r", encoding="utf-8") as f:
         sql_script = f.read()
-    conn.execute("BEGIN")
-    conn.executescript(sql_script)
+    _validate_migration_sql(filepath, sql_script)
+    wrapped = (
+        "SAVEPOINT mig_apply;\n"
+        f"{sql_script}\n"
+        "RELEASE SAVEPOINT mig_apply;\n"
+    )
+    try:
+        conn.executescript(wrapped)
+    except sqlite3.Error:
+        # Best-effort rollback of the savepoint; swallow if the script never
+        # got far enough to open it.
+        try: conn.execute("ROLLBACK TO SAVEPOINT mig_apply")
+        except sqlite3.Error: pass
+        try: conn.execute("RELEASE SAVEPOINT mig_apply")
+        except sqlite3.Error: pass
+        raise
+
+_FORBIDDEN_STATEMENTS_RE = re.compile(
+    r"(?im)^\s*(COMMIT|ROLLBACK|BEGIN|END\s+TRANSACTION)\b"
+)
+
+def _validate_migration_sql(filepath: str, sql: str) -> None:
+    """Reject migration files that issue their own COMMIT / ROLLBACK / BEGIN.
+
+    Those statements break our SAVEPOINT-based atomicity wrapper. Strips
+    `-- ...` and `/* ... */` comments before checking so commentary using
+    those words doesn't trip the detector.
+    """
+    stripped = re.sub(r"--[^\n]*", "", sql)
+    stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.DOTALL)
+    m = _FORBIDDEN_STATEMENTS_RE.search(stripped)
+    if m:
+        raise ValueError(
+            f"Migration {os.path.basename(filepath)} contains a top-level "
+            f"{m.group(1).upper()} statement, which conflicts with the "
+            f"SAVEPOINT wrapper used by migrate_memory.py. Remove it — "
+            f"migrations run inside an implicit transaction."
+        )
 
 def apply_migration(conn, version: int, name: str, up_path: str):
     logger.info(f"Applying migration {version:03d}: {os.path.basename(up_path)}")
@@ -269,11 +353,15 @@ def apply_migration(conn, version: int, name: str, up_path: str):
         conn.commit()
         logger.info(f"  -> applied v{version:03d}")
     except sqlite3.OperationalError as e:
-        conn.rollback()
+        try: conn.rollback()
+        except sqlite3.Error: pass
         err = str(e).lower()
         if "duplicate column name" in err or "already exists" in err:
             # Preserve legacy idempotency: schema already has what this migration adds
-            logger.warning(f"v{version:03d} already partially applied ({e}); marking applied.")
+            logger.warning(
+                f"v{version:03d} partial-apply detected ({e}); marking applied. "
+                "Inspect schema if this recurs."
+            )
             conn.execute(
                 "INSERT OR IGNORE INTO schema_versions (version, filename) VALUES (?, ?)",
                 (version, os.path.basename(up_path)),
@@ -291,7 +379,8 @@ def revert_migration(conn, version: int, down_path: str):
         conn.commit()
         logger.info(f"  -> reverted v{version:03d}")
     except sqlite3.OperationalError as e:
-        conn.rollback()
+        try: conn.rollback()
+        except sqlite3.Error: pass
         logger.error(f"Failed to revert v{version:03d}: {e}")
         raise
 
@@ -346,6 +435,23 @@ def _confirm(prompt: str, assume_yes: bool) -> bool:
     ans = input(f"{prompt} [y/N]: ").strip().lower()
     return ans in ("y", "yes")
 
+def _print_pending_plan(pending: list[int], migs: dict, direction: str) -> None:
+    """Pretty-print the SQL that would run for each pending/to-revert version."""
+    print("\n--- Migration plan ---")
+    for v in pending:
+        entry = migs[v]
+        path = entry["up"] if direction == "up" else entry["down"]
+        if not path:
+            print(f"\n# v{v:03d} ({direction}): MISSING")
+            continue
+        print(f"\n# v{v:03d} ({direction}): {os.path.basename(path)}")
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                print(f.read().rstrip())
+        except OSError as e:
+            print(f"# <error reading {path}: {e}>")
+    print("\n--- end of plan ---\n")
+
 def cmd_up(args):
     target_list = targets(args.target)
     if not target_list:
@@ -380,6 +486,11 @@ def cmd_up(args):
                 entry = migs[v]
                 down = "has down" if entry["down"] else "NO down (legacy, irreversible)"
                 print(f"  + v{v:03d}  {entry['name']}  [{down}]")
+
+            if getattr(args, "dry_run", False):
+                _print_pending_plan(pending, migs, "up")
+                logger.info(f"{target.name}: Dry run — no changes made.")
+                continue
 
             if not _confirm(f"\nApply {len(pending)} migration(s) to {target.name}?", args.yes):
                 logger.info("Aborted by user.")
@@ -444,6 +555,11 @@ def cmd_down(args):
             for v in to_revert:
                 print(f"  - v{v:03d}  {migs[v]['name']}")
 
+            if getattr(args, "dry_run", False):
+                _print_pending_plan(to_revert, migs, "down")
+                logger.info(f"{target.name}: Dry run — no changes made.")
+                continue
+
             if not _confirm(f"\nRevert {len(to_revert)} migration(s) on {target.name}?", args.yes):
                 logger.info("Aborted by user.")
                 continue
@@ -494,6 +610,33 @@ def cmd_restore(args):
         return
     restore_backup(args.path, target)
 
+def cmd_plan(args):
+    """Dry-run preview: print DDL for every pending migration without touching the DB."""
+    target_list = targets(args.target)
+    if not target_list:
+        logger.error(f"No targets matched: {args.target}")
+        sys.exit(1)
+
+    for target in target_list:
+        if len(target_list) > 1:
+            print(f"=== {target.name} ===")
+
+        os.makedirs(os.path.dirname(target.db_path), exist_ok=True)
+        conn = sqlite3.connect(target.db_path)
+        try:
+            init_migrations_table(conn)
+            applied = set(get_applied_versions(conn))
+            migs = discover_migrations(target.migrations_dir)
+            all_versions = sorted(migs.keys())
+            target_ver = args.to if args.to is not None else (max(all_versions) if all_versions else 0)
+            pending = [v for v in all_versions if v not in applied and v <= target_ver]
+            if not pending:
+                logger.info(f"{target.name}: No pending migrations.")
+                continue
+            _print_pending_plan(pending, migs, "up")
+        finally:
+            conn.close()
+
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 def build_parser():
@@ -510,6 +653,7 @@ def build_parser():
     sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
                     help="Which DB target to operate on (default: all configured)")
     sp.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
+    sp.add_argument("--dry-run", action="store_true", help="Print the plan + DDL without applying anything")
     sp.set_defaults(func=cmd_up)
 
     sp = sub.add_parser("down", help="Roll back migrations")
@@ -517,7 +661,14 @@ def build_parser():
     sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
                     help="Which DB target to operate on (default: all configured)")
     sp.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
+    sp.add_argument("--dry-run", action="store_true", help="Print the plan + DDL without reverting anything")
     sp.set_defaults(func=cmd_down)
+
+    sp = sub.add_parser("plan", help="Preview DDL that pending migrations would run (no changes)")
+    sp.add_argument("--to", type=int, default=None, help="Plan up to this version (default: latest)")
+    sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
+                    help="Which DB target to operate on (default: all configured)")
+    sp.set_defaults(func=cmd_plan)
 
     sp = sub.add_parser("backup", help="Take a standalone backup of the database")
     sp.add_argument("--out", type=str, default=None, help="Backup directory (overrides saved default)")

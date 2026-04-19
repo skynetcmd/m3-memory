@@ -243,6 +243,7 @@ def build_turn_items(instance: dict, variant: str = "") -> list[dict]:
 
     for s_idx, (sess_id, sess_date, session) in enumerate(zip(session_ids, session_dates, sessions)):
         anchor_dt = temporal_utils.parse_longmemeval_date(sess_date)
+        ref_year = anchor_dt.year if anchor_dt else 2023
         for t_idx, turn in enumerate(session):
             role = turn.get("role", "user")
             content = turn.get("content", "") or ""
@@ -250,6 +251,13 @@ def build_turn_items(instance: dict, variant: str = "") -> list[dict]:
                 content = content[:MAX_TURN_CHARS]
             has_answer = bool(turn.get("has_answer", False))
             anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
+            ref_dates = temporal_utils.extract_referenced_dates(content, default_year=ref_year)
+            # Promote resolved relative dates (yesterday/last week) into referenced_dates
+            # so smart_time_boost fires on them even when content has no explicit calendar date.
+            for a in anchors:
+                abs_date = a.get("absolute")
+                if abs_date and abs_date not in ref_dates:
+                    ref_dates.append(abs_date)
             item = {
                 "type": "message",
                 "title": f"{role}:{sess_id}:{t_idx}",
@@ -266,6 +274,7 @@ def build_turn_items(instance: dict, variant: str = "") -> list[dict]:
                     "turn_index": t_idx,
                     "has_answer": has_answer,
                     "temporal_anchors": anchors,
+                    "referenced_dates": ref_dates,
                 },
             }
             if variant:
@@ -303,13 +312,17 @@ async def retrieve_for_question(
     cluster_size: int = 0, graph_depth: int = 0,
     recency_bias: float = 0.0,
     adaptive_k: bool = False,
+    smart_time_boost: float = 0.0,
+    smart_neighbor_sessions: int = 0,
 ) -> list[dict]:
     """Hybrid FTS5+vector search with optional graph expansion and episodic clustering."""
     ranked = await memory_search_scored_impl(
         question, k=k, user_id=qid,
-        extra_columns=["metadata_json", "conversation_id"],
+        extra_columns=["metadata_json", "conversation_id", "valid_from", "user_id"],
         recency_bias=recency_bias,
         adaptive_k=adaptive_k,
+        smart_time_boost=smart_time_boost,
+        smart_neighbor_sessions=smart_neighbor_sessions,
     )
     if not ranked:
         return []
@@ -694,6 +707,8 @@ async def run(args: argparse.Namespace) -> None:
                     graph_depth=args.graph_depth,
                     recency_bias=0.15 if q_signal == "update" else 0.0,
                     adaptive_k=args.adaptive_k or args.smart_retrieval,
+                    smart_time_boost=0.15 if args.smart_retrieval else 0.0,
+                    smart_neighbor_sessions=1 if args.smart_retrieval else 0,
                 )
             except Exception as e:
                 log(f"  [{qid}] retrieval failed: {e}")
