@@ -10,7 +10,8 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [
-    { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" }
+    { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" },
+    { name = "Gemini CLI", email = "gemini-cli@google.com" }
 ]
 keywords = [
     "mcp",
