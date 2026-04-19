@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_longmemeval.py
-sha1: 8fe9cf7956a5
-mtime_utc: 2026-04-19T02:44:47.961231+00:00
-generated_utc: 2026-04-19T02:53:55.340005+00:00
+sha1: 5c138b7c7163
+mtime_utc: 2026-04-19T16:35:24.074742+00:00
+generated_utc: 2026-04-19T21:10:11.544787+00:00
 private: false
 ---
 
@@ -42,8 +42,8 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 
 ## Entry points
 
-- `async def run()` (line 608)
-- `def main()` (line 855)
+- `async def run()` (line 629)
+- `def main()` (line 876)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
