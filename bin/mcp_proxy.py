@@ -90,6 +90,7 @@ ANTHROPIC_VERSION = "2023-06-01"
 GOOGLE_AI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
 GROK_BASE = "https://api.x.ai/v1"
 PERPLEXITY_BASE = "https://api.perplexity.ai"
+OPENAI_BASE = "https://api.openai.com/v1"
 LMSTUDIO_BASE = os.environ.get("LM_STUDIO_BASE", "http://localhost:1234/v1")
 MAX_TOOL_ROUNDS = 10
 CONNECT_TIMEOUT = 5.0
@@ -153,6 +154,10 @@ def _grok_key() -> str:
 
 def _perplexity_key() -> str:
     return _get_key("PERPLEXITY_API_KEY")
+
+
+def _openai_key() -> str:
+    return _get_key("OPENAI_API_KEY")
 
 # ── Bridge imports (lazy — avoids side effects at module load) ─────────────────
 
@@ -523,6 +528,8 @@ def _route(model: str) -> tuple[str, str, str]:
         return "openai_compat", GROK_BASE, _grok_key()
     if "sonar" in base or "perplexity" in base:
         return "openai_compat", PERPLEXITY_BASE, _perplexity_key()
+    if base.startswith(("gpt-", "o1-", "o3-", "o4-", "chatgpt-")) or base in ("gpt-4o", "gpt-4", "gpt-3.5-turbo", "o1", "o3", "o4"):
+        return "openai_compat", OPENAI_BASE, _openai_key()
     return "openai_compat", LMSTUDIO_BASE, _lmstudio_key()
 
 # ── OpenAI ↔ Anthropic format adapters ───────────────────────────────────────
@@ -731,15 +738,19 @@ async def _run_with_tools(
     client_tools: list,
     max_tokens: int,
     agent_id: str = "mcp-proxy-client",
+    skip_mcp: bool = False,
 ) -> dict:
     """
     Main loop:
-      1. Inject MCP tools alongside any tools the client already sent.
+      1. Inject MCP tools alongside any tools the client already sent (unless skip_mcp=True).
       2. Call the appropriate backend (no streaming — we need to inspect for tool_calls).
       3. Execute tool_calls in parallel, append results, repeat.
       4. Return the first response with finish_reason != tool_calls.
     """
-    all_tools = get_mcp_tools() + client_tools
+    all_tools = client_tools
+    if not skip_mcp:
+        all_tools = get_mcp_tools() + client_tools
+    
     working = list(messages)
     btype, burl, bkey = _route(model)
 
@@ -918,6 +929,7 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
     tools: Optional[List[dict]] = None
+    tool_choice: Optional[Union[str, dict]] = None
     stream: Optional[bool] = False
     max_tokens: Optional[int] = Field(default=None, ge=0)
     temperature: Optional[float] = 0.7
@@ -947,6 +959,11 @@ async def chat_completions(request: Request) -> JSONResponse:
     wants_stream = body.stream
     agent_id = request.headers.get("X-Agent-Id", "mcp-proxy-client")
 
+    # Clients can opt out of MCP tool injection via either the standard
+    # tool_choice="none" field or the proxy-specific X-MCP-NoTools header.
+    no_tools_header = request.headers.get("X-MCP-NoTools", "0") == "1"
+    explicit_none = (body.tool_choice == "none")
+
     # Fix M8: Correctly handle max_tokens=0 or missing
     if body.max_tokens is not None and body.max_tokens > 0:
         max_tokens = body.max_tokens
@@ -956,11 +973,18 @@ async def chat_completions(request: Request) -> JSONResponse:
     btype, burl, _ = _route(model)
     log.info(
         f"Request: model={model} backend={btype} url={burl.split('/')[2]} "
-        f"agent={agent_id} messages={len(messages)} client_tools={len(client_tools)} stream={wants_stream}"
+        f"agent={agent_id} messages={len(messages)} client_tools={len(client_tools)} stream={wants_stream} bypass={no_tools_header or explicit_none}"
     )
 
     try:
-        result = await _run_with_tools(messages, model, client_tools, max_tokens, agent_id)
+        result = await _run_with_tools(
+            messages, 
+            model, 
+            client_tools, 
+            max_tokens, 
+            agent_id, 
+            skip_mcp=(no_tools_header or explicit_none)
+        )
 
         if wants_stream:
             return StreamingResponse(

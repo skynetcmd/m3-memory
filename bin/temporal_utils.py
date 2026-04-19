@@ -179,6 +179,130 @@ def parse_longmemeval_date(date_str: str) -> datetime | None:
         pass
     return None
 
+# ── Time-aware retrieval helpers ─────────────────────────────────────────────
+# Used by memory_search_scored_impl(smart_time_boost=...) and bench ingest to
+# annotate turns with calendar dates they reference, so queries that ask about
+# a specific date can match content without oracle metadata.
+
+_MONTH_NAMES = (
+    "january|february|march|april|may|june|july|august|september|october|november|december"
+    "|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec"
+)
+_DATE_PATTERNS: list[re.Pattern[str]] = [
+    # Month-first: "May 7", "May 7th", "May 7 2023", "May 7, 2023".
+    # Day must not be immediately followed by more digits (prevents "May 20"
+    # from eating the "20" of "May 2023"). Year is optional.
+    re.compile(
+        rf"({_MONTH_NAMES})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?!\d)(?:\s*,?\s*(\d{{4}}))?",
+        re.IGNORECASE,
+    ),
+    # Day-first: "7 May 2023", "7th May 2023". Year required.
+    re.compile(
+        rf"(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_NAMES})\s+(\d{{4}})",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})"),
+    re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})"),
+]
+
+_RELATIVE_TIME_RE = re.compile(
+    r"(\d+)\s+(day|week|month|year)s?\s+ago"
+    r"|last\s+(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|week|month|year)"
+    r"|(\d+)\s+(day|week|month)s?\s+(?:later|after|before|from\s+now)"
+    r"|how\s+many\s+(day|week|month|year)s?\s+(?:passed|between|since|ago|have\s+passed)",
+    re.IGNORECASE,
+)
+
+_TEMPORAL_KEYWORDS = (
+    "how many days", "how many weeks", "how many months", "how many years",
+    "how long", "when did", "what date", "which came first", "in what order",
+    "before or after", "earlier", "later", "first to last", "last to first",
+    "chronological", "timeline", "sequence",
+)
+
+_MONTH_INDEX: dict[str, int] = {}
+for _idx, _name in enumerate(MONTHS, start=1):
+    _MONTH_INDEX[_name] = _idx
+    _MONTH_INDEX[_name[:3]] = _idx
+_MONTH_INDEX["sept"] = 9
+
+
+def extract_referenced_dates(text: str, default_year: int = 2023) -> list[str]:
+    """Pull explicit YYYY-MM-DD dates mentioned in text.
+
+    Used at ingest time to annotate turns with the calendar dates they reference,
+    so time-aware retrieval can match query dates against content dates without
+    needing oracle metadata. `default_year` is applied only when a month+day
+    appears without a year.
+    """
+    if not text:
+        return []
+    dates: list[str] = []
+    seen: set[str] = set()
+
+    def _emit(y: int, mo: int, d: int) -> None:
+        try:
+            iso = f"{y:04d}-{mo:02d}-{d:02d}"
+            datetime.strptime(iso, "%Y-%m-%d")
+        except ValueError:
+            return
+        if iso not in seen:
+            seen.add(iso)
+            dates.append(iso)
+
+    for m in _DATE_PATTERNS[0].finditer(text):
+        mo = _MONTH_INDEX.get(m.group(1).lower(), 0)
+        if not mo:
+            continue
+        try:
+            day = int(m.group(2))
+        except (TypeError, ValueError):
+            continue
+        year = int(m.group(3)) if m.group(3) else default_year
+        _emit(year, mo, day)
+
+    for m in _DATE_PATTERNS[1].finditer(text):
+        try:
+            day = int(m.group(1))
+            mo = _MONTH_INDEX.get(m.group(2).lower(), 0)
+            if not mo:
+                continue
+            year = int(m.group(3))
+        except (TypeError, ValueError):
+            continue
+        _emit(year, mo, day)
+
+    for m in _DATE_PATTERNS[2].finditer(text):
+        try:
+            _emit(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except (TypeError, ValueError):
+            continue
+
+    for m in _DATE_PATTERNS[3].finditer(text):
+        try:
+            _emit(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+        except (TypeError, ValueError):
+            continue
+
+    return dates
+
+
+def has_temporal_cues(text: str) -> bool:
+    """Return True if text likely asks for time-aware reasoning.
+
+    Detects explicit date strings, relative-time expressions, and a
+    keyword list covering ordering/duration/when-style phrasing.
+    """
+    if not text:
+        return False
+    if _RELATIVE_TIME_RE.search(text):
+        return True
+    if any(p.search(text) for p in _DATE_PATTERNS):
+        return True
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in _TEMPORAL_KEYWORDS)
+
+
 if __name__ == "__main__":
     # Test cases
     anchor = parse_locomo_date("1:14 pm on 25 May, 2023")

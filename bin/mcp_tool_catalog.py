@@ -79,6 +79,25 @@ def _memory_search_validator(args: dict) -> Any:
     args["k"] = max(1, min(k, MAX_K))
     return args
 
+def _variant_gate(args: dict) -> dict:
+    """Bench-data gate for memory_search / memory_suggest. If include_bench_data=True,
+    drop the variant filter; otherwise default to '__none__' so bench rows hide."""
+    include_bench = bool(args.pop("include_bench_data", False))
+    if include_bench:
+        args["variant"] = ""
+    elif not args.get("variant"):
+        args["variant"] = "__none__"
+    return args
+
+def _memory_search_gated_validator(args: dict) -> Any:
+    r = _memory_search_validator(args)
+    if isinstance(r, str):
+        return r
+    return _variant_gate(r)
+
+def _memory_suggest_validator(args: dict) -> Any:
+    return _variant_gate(args)
+
 def _memory_update_validator(args: dict) -> Any:
     md = args.get("metadata", "")
     if isinstance(md, dict):
@@ -268,12 +287,14 @@ TOOLS: list[ToolSpec] = [
                 "conversation_id":    {"type": "string", "description": "Restrict to a conversation / team session.", "default": ""},
                 "recency_bias":       {"type": "number", "description": "Boost newer items (0.0=off, 0.1-0.2=moderate, higher=aggressive). Useful for 'current' or 'latest' queries.", "default": 0.0},
                 "adaptive_k":         {"type": "boolean", "description": "Auto-trim results at the score drop-off point, returning only high-relevance items.", "default": False},
+                "variant":            {"type": "string", "description": "Ingest-pipeline filter. '' = real user data only (default, equivalent to IS NULL). Pass a specific variant name (e.g. 'heuristic_c1c4') to scope to that bench ingest.", "default": ""},
+                "include_bench_data": {"type": "boolean", "description": "Opt in to LOCOMO / LongMemEval bench rows. Default False hides any row with a variant tag.", "default": False},
             },
             "required": ["query"],
         },
         impl=memory_core.memory_search_impl,
         is_async=True,
-        validators=(_memory_search_validator,),
+        validators=(_memory_search_gated_validator,),
         default_allowed=True,
         inject_agent_id=False,
     ),
@@ -283,14 +304,16 @@ TOOLS: list[ToolSpec] = [
         parameters={
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query."},
-                "k":     {"type": "integer", "description": "Max results to preview.", "default": 5},
+                "query":              {"type": "string", "description": "Search query."},
+                "k":                  {"type": "integer", "description": "Max results to preview.", "default": 5},
+                "variant":            {"type": "string", "description": "Ingest-pipeline filter. Default '__none__' = real user data only.", "default": "__none__"},
+                "include_bench_data": {"type": "boolean", "description": "Opt in to bench rows. Default False.", "default": False},
             },
             "required": ["query"],
         },
         impl=memory_core.memory_suggest_impl,
         is_async=True,
-        validators=(),
+        validators=(_memory_suggest_validator,),
         default_allowed=True,
         inject_agent_id=False,
     ),
