@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_knowledge.py
-sha1: 58608ef16ebb
-mtime_utc: 2026-04-07T00:27:48.664201+00:00
-generated_utc: 2026-04-18T21:58:23.022786+00:00
+sha1: 5c30a882543a
+mtime_utc: 2026-04-18T22:28:14.283974+00:00
+generated_utc: 2026-04-19T00:39:15.975373+00:00
 private: false
 ---
 
@@ -14,7 +14,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 22)
+- `def main()` (line 31)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -51,7 +51,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `memory.knowledge_helpers (add_knowledge, search_knowledge, list_knowledge, delete_knowledge, get_all_types, update_knowledge)`
+- `memory.knowledge_helpers (add_knowledge, delete_knowledge, get_all_types, list_knowledge, search_knowledge, update_knowledge)`
 
 ## File dependencies (repo paths referenced)
 

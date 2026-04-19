@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_secret.py
-sha1: 54a4dc30d9d9
-mtime_utc: 2026-04-18T03:18:29.586755+00:00
-generated_utc: 2026-04-18T21:58:23.168124+00:00
+sha1: 5590e8ae807f
+mtime_utc: 2026-04-18T22:28:14.283148+00:00
+generated_utc: 2026-04-19T00:39:16.109420+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 275)
+- `def main()` (line 274)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -38,16 +38,16 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils (DB_PATH, get_api_key, get_master_key, set_api_key, _get_fernet)`
+- `auth_utils (DB_PATH, _get_fernet, get_api_key, get_master_key, set_api_key)`
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 117)
-- `sqlite3.connect()  → `DB_PATH`` (line 141)
-- `sqlite3.connect()  → `DB_PATH`` (line 230)
-- `sqlite3.connect()  → `DB_PATH`` (line 95)
+- `sqlite3.connect()  → `DB_PATH`` (line 116)
+- `sqlite3.connect()  → `DB_PATH`` (line 140)
+- `sqlite3.connect()  → `DB_PATH`` (line 229)
+- `sqlite3.connect()  → `DB_PATH`` (line 94)
 
 
 ## Notable external imports

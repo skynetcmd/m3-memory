@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_bridge.py
-sha1: f9587a13dd1f
-mtime_utc: 2026-04-18T03:34:10.130691+00:00
-generated_utc: 2026-04-18T16:33:21.666099+00:00
+sha1: a37c2b89cff2
+mtime_utc: 2026-04-18T22:28:14.312829+00:00
+generated_utc: 2026-04-19T00:39:16.028047+00:00
 private: false
 ---
 
@@ -28,8 +28,6 @@ _(none detected)_
 
 - `mcp_tool_catalog`
 - `memory_core`
-- `memory_maintenance`
-- `memory_sync`
 
 ## Calls OUT (external side-channels)
 
