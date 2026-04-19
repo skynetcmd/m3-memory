@@ -61,6 +61,7 @@ import logging
 import os
 import sys
 import time
+import urllib.parse
 import uuid
 from typing import Any, AsyncIterator, List, Optional, Union
 
@@ -950,7 +951,7 @@ async def chat_completions(request: Request) -> JSONResponse:
         log.error(f"Invalid request body: {exc}")
         return JSONResponse(
             status_code=400,
-            content={"error": {"message": f"Invalid request: {exc}", "type": "invalid_request"}},
+            content={"error": {"message": "Invalid request body", "type": "invalid_request"}},
         )
 
     model = body.model
@@ -971,8 +972,9 @@ async def chat_completions(request: Request) -> JSONResponse:
         max_tokens = (8096 if "claude" in model else 32768)
 
     btype, burl, _ = _route(model)
+    backend_host = urllib.parse.urlparse(burl).hostname or "?"
     log.info(
-        f"Request: model={model} backend={btype} url={burl.split('/')[2]} "
+        f"Request: model={model} backend={btype} host={backend_host} "
         f"agent={agent_id} messages={len(messages)} client_tools={len(client_tools)} stream={wants_stream} bypass={no_tools_header or explicit_none}"
     )
 
