@@ -90,51 +90,110 @@ Each hook ingests chat logs when the agent exits or checkpoints. Absolute paths 
 
 #### Claude Code
 
-Add to `~/.claude/settings.json`:
+Claude Code offers two capture triggers:
 
-```json
-{
-  "hooks": {
-    "preCompaction": [
-      "python /absolute/path/to/m3-memory/bin/chatlog_ingest.py --format claude-code"
-    ]
-  }
-}
-```
+| Trigger      | Fires                                  | Default | When you want it                             |
+| ------------ | -------------------------------------- | ------- | -------------------------------------------- |
+| `PreCompact` | Only when the context is about to compact | **on**  | Always — this is the sensible default.      |
+| `Stop`       | After every assistant turn              | off     | You want per-turn captures (at the cost of a Python spawn per turn). |
 
-Or copy the ready-made hook:
+`PreCompact` alone is enough for most users: it fires whenever the session compacts **and** captures the full transcript up to that point. The `Stop` hook is opt-in because it fires per turn; the per-session UUID cursor in `chatlog_ingest.py` prevents duplicate rows, but each invocation still spawns Python and reads the transcript.
+
+**Selecting the trigger**: the Stop hook is controlled by `host_agents.claude-code.stop_hook` in `memory/.chatlog_config.json`. Toggle it via:
 
 ```bash
-cp /absolute/path/to/m3-memory/bin/hooks/chatlog/claude_code_precompact.sh ~/.claude/hooks/precompact
-chmod +x ~/.claude/hooks/precompact
+python bin/chatlog_init.py --enable-stop-hook    # capture per-turn + at compact
+python bin/chatlog_init.py --disable-stop-hook   # revert to PreCompact-only (default)
 ```
 
-Then add to `~/.claude/settings.json`:
+The toggle writes the config and prints an updated `~/.claude/settings.json` snippet for you to copy-paste (the subsystem does not auto-edit `settings.json`).
+
+**Wiring**: add to `~/.claude/settings.json` (PreCompact only — remove the `Stop` block if `stop_hook=false`):
 
 ```json
 {
   "hooks": {
-    "preCompaction": [
-      "~/.claude/hooks/precompact"
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\absolute\\path\\to\\m3-memory\\bin\\hooks\\chatlog\\claude_code_precompact.ps1"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\absolute\\path\\to\\m3-memory\\bin\\hooks\\chatlog\\claude_code_precompact.ps1"
+          }
+        ]
+      }
     ]
   }
 }
 ```
+
+On macOS/Linux, swap the `command` for `bash /absolute/path/to/m3-memory/bin/hooks/chatlog/claude_code_precompact.sh`.
+
+Both events route through the **same** hook script; it reads `hook_event_name` from the Claude Code envelope and stamps rows with `variant="pre_compact"` or `variant="stop"` so you can distinguish them later. The event names here (`PreCompact`, `Stop`) are the canonical names from the [Claude Code hooks reference](https://code.claude.com/docs/en/hooks.md) — not the older `preCompaction` spelling seen in some earlier drafts.
+
+### 2. Host Agent Wiring
+
+Each host agent needs to be told to call the `m3-memory` ingest hook. The `chatlog_init.py` script provides specific instructions for each agent you enable.
+
+#### Claude Code
+
+Claude Code uses hooks in `~/.claude/settings.json`. The `chatlog_init.py` will print a JSON snippet you can copy-paste.
+
+Both events (`PreCompact` and `Stop`) route through the **same** hook script; it reads `hook_event_name` from the Claude Code envelope and stamps rows with `variant="pre_compact"` or `variant="stop"` so you can distinguish them later.
 
 #### Gemini CLI
 
-Copy or symlink the hook to the Gemini session exit directory:
+Gemini CLI offers a single `SessionEnd` trigger that fires when the CLI exits (for any reason).
 
-```bash
-ln -s /absolute/path/to/m3-memory/bin/hooks/chatlog/gemini_cli_onexit.sh ~/.gemini/hooks/onExit
-chmod +x /absolute/path/to/m3-memory/bin/hooks/chatlog/gemini_cli_onexit.sh
+Register the hook in `~/.gemini/settings.json` using the absolute path to the repo's hook script (do **not** copy the script, as it needs to find `bin/chatlog_ingest.py` relative to the repo root):
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\path\\to\\m3-memory\\bin\\hooks\\chatlog\\gemini_cli_onexit.ps1"
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
-Or on Windows:
+On macOS/Linux, use the `.sh` wrapper:
 
-```powershell
-Copy-Item "C:\absolute\path\to\m3-memory\bin\hooks\chatlog\gemini_cli_onexit.ps1" "$env:USERPROFILE\.gemini\hooks\onExit.ps1"
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/sh /path/to/m3-memory/bin/hooks/chatlog/gemini_cli_onexit.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
+
+The wrapper encodes the CLI's exit `reason` into the row `variant` (`session_end_exit`, `session_end_clear`, `session_end_logout`, etc.) so you can tell an intentional quit from a `/clear` or a forced logout later.
 
 #### OpenCode
 
@@ -557,12 +616,25 @@ Existing redacted content is not un-redacted (hashes are stored for audit). To c
 
 ### Testing the Ingest Pipeline
 
-Feed a test message to ingest:
+The ingest CLI reads a real transcript file (not stdin); to smoke-test, point it at one of the fixture transcripts under `tests/fixtures/`:
 
 ```bash
-echo '{"type":"message","role":"user","content":"test","model":"claude-opus-4-7","conversation_id":"test-conv-123","usage":{"input_tokens":10,"output_tokens":5}}' \
-  | python bin/chatlog_ingest.py --format claude-code
+python bin/chatlog_ingest.py \
+  --format claude-code \
+  --transcript-path tests/fixtures/claude_code_sample.jsonl \
+  --variant test
 ```
+
+Or for Gemini:
+
+```bash
+python bin/chatlog_ingest.py \
+  --format gemini-cli \
+  --transcript-path tests/fixtures/gemini_session_sample.json \
+  --variant test
+```
+
+A per-session UUID cursor at `memory/.chatlog_ingest_cursor.json` makes re-runs idempotent; delete the session's entry if you want to re-ingest the same transcript.
 
 Check that it landed:
 
@@ -578,10 +650,18 @@ Hook stdout/stderr are logged to:
 - OpenCode: `~/.opencode/logs/`
 - Aider: tmux session or systemd journal
 
-To debug a hook manually:
+To debug a hook manually, feed it a real envelope on stdin:
 
 ```bash
-bash /path/to/m3-memory/bin/hooks/chatlog/claude_code_precompact.sh
+echo '{"session_id":"debug","transcript_path":"/abs/path/to/session.jsonl","hook_event_name":"PreCompact","cwd":"."}' \
+  | bash /path/to/m3-memory/bin/hooks/chatlog/claude_code_precompact.sh
+```
+
+On Windows:
+
+```powershell
+Get-Content -Raw envelope.json |
+  powershell -NoProfile -ExecutionPolicy Bypass -File ...\claude_code_precompact.ps1
 ```
 
 ### Inspecting Spill Files

@@ -1,28 +1,32 @@
-"""chatlog_ingest.py — single-entry-point CLI for ingesting host-agent chat logs.
+"""chatlog_ingest.py — CLI that reads a host-agent transcript file and writes
+canonical chat-log rows via chatlog_core.chatlog_write_bulk_impl.
 
-Normalizes logs from claude-code, gemini-cli, opencode, and aider into canonical
-format and writes to the chat log subsystem via chatlog_core.chatlog_write_bulk_impl.
+Invoked by host-agent hooks (Claude Code PreCompact/Stop, Gemini SessionEnd, etc.),
+which receive a JSON envelope from the host and forward the transcript path as
+--transcript-path. Parsers target the real on-disk transcript schemas, not a
+hypothetical canonical format.
 
-Usage:
-  python bin/chatlog_ingest.py --format {claude-code,gemini-cli,opencode,aider,auto} [--watch DIR] [--conversation-id ID] [input-file]
-  - Reads stdin when no input file given.
-  - --watch mode: polls a directory for new/updated log files, keeps a cursor at
-    memory/.chatlog_ingest_cursor.json (atomic rename on update), debounces 500ms.
-    Exits cleanly on SIGTERM or KeyboardInterrupt.
+CLI:
+  python bin/chatlog_ingest.py --format {claude-code,gemini-cli}
+                               --transcript-path FILE
+                               [--session-id ID] [--variant LABEL]
+
+A per-session cursor at memory/.chatlog_ingest_cursor.json records which
+message ids / indices have been ingested so re-invoking on the same transcript
+(e.g. Stop hook every turn) stays idempotent.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 import logging
 import os
 import platform
-import signal
 import sys
-import time
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("chatlog_ingest")
@@ -47,388 +51,322 @@ def infer_provider(model_id: str) -> str:
     return "other"
 
 
-def _parse_claude_code(raw: str) -> list[dict]:
-    """Parse claude-code JSONL: lines with type=message, role, content, model, conversation_id, usage."""
-    out = []
+# ─── Claude Code parser ───────────────────────────────────────────────────────
+# Real on-disk schema (one JSONL record per line at
+# ~/.claude/projects/<slug>/<session-uuid>.jsonl):
+#   {"type": "user"|"assistant"|"system"|"attachment"|"permission-mode"|
+#            "file-history-snapshot",
+#    "uuid": "...", "parentUuid": "...", "sessionId": "...", "timestamp": "...",
+#    "cwd": "...", "version": "...", "gitBranch": "...", "userType": "external",
+#    "message": {"role": "user"|"assistant",
+#                "content": "str" | [{"type":"text","text":"..."}, ...],
+#                "model": "claude-...", "usage": {"input_tokens": N, ...}}}
+# Only user/assistant records carry chat content; the rest are skipped.
+
+def _claude_content_to_text(content: Any) -> str:
+    """Flatten Claude Code message.content to plain text.
+
+    String content is returned as-is. List content (assistant blocks) is filtered
+    to text-type blocks and joined; non-text blocks (tool_use, tool_result) are
+    skipped — they aren't chat material.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return "".join(parts)
+    return ""
+
+
+def _parse_claude_code(raw: str) -> tuple[list[dict], Optional[str]]:
+    """Parse Claude Code JSONL. Returns (items, sessionId)."""
+    items: list[dict] = []
+    session_id: Optional[str] = None
     if not raw.strip():
-        return out
-    for line in raw.strip().split("\n"):
+        return items, session_id
+    for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
         try:
             obj = json.loads(line)
         except json.JSONDecodeError as e:
-            logger.warning(f"Skipping malformed JSON line: {e}")
+            logger.warning(f"Skipping malformed JSONL line: {e}")
             continue
-        if obj.get("type") != "message":
+        rec_type = obj.get("type")
+        if rec_type not in ("user", "assistant"):
             continue
-        role = obj.get("role", "")
-        content = obj.get("content", "")
-        model = obj.get("model", "unknown")
-        conversation_id = obj.get("conversation_id", "")
-        usage = obj.get("usage", {})
-        tokens_in = usage.get("input_tokens")
-        tokens_out = usage.get("output_tokens")
-        if not content or not role:
+        msg = obj.get("message") or {}
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
             continue
-        provider = infer_provider(model)
-        out.append({
+        content = _claude_content_to_text(msg.get("content"))
+        if not content:
+            continue
+        model = msg.get("model") or ""
+        usage = msg.get("usage") or {}
+        if session_id is None:
+            session_id = obj.get("sessionId")
+        items.append({
             "content": content,
             "role": role,
-            "model_id": model,
-            "conversation_id": conversation_id,
-            "provider": provider,
-            "tokens_in": tokens_in,
-            "tokens_out": tokens_out,
+            "model_id": model or "unknown",
+            "conversation_id": obj.get("sessionId", ""),
+            "provider": infer_provider(model),
+            "tokens_in": usage.get("input_tokens"),
+            "tokens_out": usage.get("output_tokens"),
+            "timestamp": obj.get("timestamp", ""),
+            "uuid": obj.get("uuid"),
         })
-    return out
+    return items, session_id
 
 
-def _parse_gemini_cli(raw: str) -> list[dict]:
-    """Parse gemini-cli JSON: {history: [{role, parts, model}, ...]}. Flatten parts to content."""
-    out = []
+# ─── Gemini CLI parser ────────────────────────────────────────────────────────
+# Real on-disk schema at ~/.gemini/tmp/<projectHash>/chats/session-<ISO>-<id>.json:
+#   {"sessionId": "...", "projectHash": "...",
+#    "startTime": "...", "lastUpdated": "...",
+#    "messages": [
+#       {"id": "...", "timestamp": "...",
+#        "type": "user"|"gemini"|"info",
+#        "content": "str"  |  [{"text": "..."}, ...],
+#        "thoughts": [...], "tokens": {"input":N,"output":N,"cached":N},
+#        "model": "...", "toolCalls": [...]}]}
+# "info" messages (CLI chrome) are skipped. "gemini" → assistant role.
+
+def _gemini_content_to_text(content: Any) -> str:
+    """Flatten Gemini message.content to plain text.
+
+    User content is typically [{"text": "..."}]; assistant content is typically a
+    string. Accept both; join text parts from lists.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return ""
+
+
+def _parse_gemini_cli(raw: str) -> tuple[list[dict], Optional[str]]:
+    """Parse Gemini CLI session JSON. Returns (items, sessionId)."""
     if not raw.strip():
-        return out
+        return [], None
     try:
-        obj = json.loads(raw)
+        data = json.loads(raw)
     except json.JSONDecodeError as e:
-        logger.warning(f"Malformed JSON: {e}")
-        return out
-    history = obj.get("history", [])
-    if not isinstance(history, list):
-        return out
-    for msg in history:
-        role = msg.get("role", "")
-        parts = msg.get("parts", [])
-        model = msg.get("model", "gemini-unknown")
-        if not role or not parts:
+        logger.warning(f"Malformed Gemini session JSON: {e}")
+        return [], None
+    session_id = data.get("sessionId")
+    messages = data.get("messages") or []
+    if not isinstance(messages, list):
+        return [], session_id
+    items: list[dict] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
             continue
-        content_parts = []
-        for part in parts:
-            if isinstance(part, dict):
-                content_parts.append(part.get("text", ""))
-            elif isinstance(part, str):
-                content_parts.append(part)
-        content = "".join(content_parts).strip()
-        if not content:
-            continue
-        out.append({
-            "content": content,
-            "role": role,
-            "model_id": model,
-            "provider": "google",
-        })
-    return out
-
-
-def _parse_opencode(raw: str) -> list[dict]:
-    """Parse opencode JSONL: {role, parts, model, session_id, ...}."""
-    out = []
-    if not raw.strip():
-        return out
-    for line in raw.strip().split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Skipping malformed JSON line: {e}")
-            continue
-        role = obj.get("role", "")
-        parts = obj.get("parts", [])
-        model = obj.get("model", "unknown")
-        if not role or not parts:
-            continue
-        content_parts = []
-        for part in parts:
-            if isinstance(part, dict):
-                content_parts.append(part.get("text", ""))
-            elif isinstance(part, str):
-                content_parts.append(part)
-        content = "".join(content_parts).strip()
-        if not content:
-            continue
-        provider = infer_provider(model)
-        out.append({
-            "content": content,
-            "role": role,
-            "model_id": model,
-            "provider": provider,
-        })
-    return out
-
-
-def _parse_aider(raw: str) -> list[dict]:
-    """Parse aider markdown: turns separated by #### headers, with > USER: and assistant blocks."""
-    out = []
-    if not raw.strip():
-        return out
-    lines = raw.split("\n")
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith("#### "):
-            i += 1
-            role = None
-            content_lines = []
-            while i < len(lines) and not lines[i].startswith("#### "):
-                if lines[i].startswith("> USER:"):
-                    role = "user"
-                    rest = lines[i][7:].strip()
-                    if rest:
-                        content_lines.append(rest)
-                elif role and lines[i].startswith(">"):
-                    content_lines.append(lines[i][1:].strip())
-                elif role and not lines[i].startswith(">"):
-                    if content_lines or lines[i].strip():
-                        content_lines.append(lines[i])
-                else:
-                    content_lines.append(lines[i])
-                i += 1
-            if role and content_lines:
-                content = "\n".join(content_lines).strip()
-                if content:
-                    out.append({
-                        "content": content,
-                        "role": role,
-                        "model_id": "unknown",
-                        "provider": "other",
-                        "host_agent": "aider",
-                    })
+        rec_type = msg.get("type")
+        if rec_type == "user":
+            role = "user"
+        elif rec_type == "gemini":
+            role = "assistant"
         else:
-            i += 1
-    return out
+            continue
+        content = _gemini_content_to_text(msg.get("content"))
+        if not content:
+            continue
+        model = msg.get("model") or ""
+        tokens = msg.get("tokens") or {}
+        items.append({
+            "content": content,
+            "role": role,
+            "model_id": model or "unknown",
+            "conversation_id": session_id or "",
+            "provider": "google",
+            "tokens_in": tokens.get("input"),
+            "tokens_out": tokens.get("output"),
+            "timestamp": msg.get("timestamp", ""),
+            "uuid": msg.get("id"),
+        })
+    return items, session_id
 
 
-def _sniff_format(data: str) -> str:
-    """Sniff format from first 4KB: claude-code, gemini, opencode, aider."""
-    head = data[:4096]
-    if head.strip().startswith("{") and '"type":"message"' in head:
-        return "claude-code"
-    if '{"history":' in head or '"history":[' in head:
-        return "gemini-cli"
-    if '"parts":' in head and '"role":' in head:
-        return "opencode"
-    if "#### " in head or "> USER:" in head:
-        return "aider"
-    return "auto"
+# ─── Cursor (per-sessionId idempotency) ───────────────────────────────────────
+
+def _cursor_path() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "memory", ".chatlog_ingest_cursor.json")
 
 
-def normalize_items(items: list[dict], format_name: str, conversation_id: str = "",
-                   host_agent: str = "", model_id_override: str = "") -> list[dict]:
-    """Enrich items with required fields: host_agent, conversation_id, agent_id."""
-    out = []
-    for item in items:
-        if not item.get("conversation_id") and conversation_id:
-            item["conversation_id"] = conversation_id
-        if not item.get("host_agent"):
-            if host_agent:
-                item["host_agent"] = host_agent
-            else:
-                item["host_agent"] = format_name
-        if model_id_override and (not item.get("model_id") or item["model_id"] == "unknown"):
-            item["model_id"] = model_id_override
-        if not item.get("conversation_id"):
-            item["conversation_id"] = "unknown"
-        if not item.get("model_id"):
-            item["model_id"] = "unknown"
-        out.append(item)
-    return out
-
-
-def derive_conversation_id(filename: str) -> str:
-    """Hash filename to 16-char conversation_id."""
-    return hashlib.blake2b(filename.encode(), digest_size=8).hexdigest()
-
-
-def make_agent_id() -> str:
-    """Build agent_id: host_agent:username@hostname."""
-    user = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
-    host = platform.node()
-    return f"ingest:{user}@{host}"
-
-
-def read_cursor() -> dict:
-    """Load cursor state from INGEST_CURSOR."""
-    cursor_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "memory", ".chatlog_ingest_cursor.json")
+def _load_cursor() -> dict:
     try:
-        with open(cursor_path, "r") as f:
+        with open(_cursor_path(), "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
-def write_cursor(state: dict) -> None:
-    """Atomic save of cursor state."""
-    cursor_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "memory", ".chatlog_ingest_cursor.json")
-    os.makedirs(os.path.dirname(cursor_path), exist_ok=True)
-    tmp = cursor_path + ".tmp"
-    with open(tmp, "w") as f:
+def _save_cursor(state: dict) -> None:
+    path = _cursor_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f)
-    os.replace(tmp, cursor_path)
+    os.replace(tmp, path)
 
 
-async def ingest_file(filepath: str, format_name: str, conversation_id: str = "",
-                     model_id_override: str = "") -> dict:
-    """Read, parse, and ingest a single file. Returns summary dict."""
-    sys.path.insert(0, os.path.dirname(__file__))
-    import chatlog_core
+def _filter_new_items(items: list[dict], session_id: str, cursor: dict) -> list[dict]:
+    """Drop items whose uuid is already in the cursor's seen-set for this session.
+    Items without a uuid fall back to positional index within this batch."""
+    if not session_id:
+        return items
+    seen: set[str] = set(cursor.get("sessions", {}).get(session_id, {}).get("seen_uuids", []))
+    new_items: list[dict] = []
+    for item in items:
+        uuid_key = item.get("uuid")
+        if uuid_key and uuid_key in seen:
+            continue
+        new_items.append(item)
+    return new_items
+
+
+def _commit_cursor(items: list[dict], session_id: str, cursor: dict) -> None:
+    if not session_id:
+        return
+    sessions = cursor.setdefault("sessions", {})
+    entry = sessions.setdefault(session_id, {"seen_uuids": []})
+    seen_uuids = set(entry.get("seen_uuids", []))
+    for item in items:
+        u = item.get("uuid")
+        if u:
+            seen_uuids.add(u)
+    entry["seen_uuids"] = sorted(seen_uuids)
+    entry["last_ingested_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _save_cursor(cursor)
+
+
+# ─── Normalization ────────────────────────────────────────────────────────────
+
+def _make_agent_id(host_agent: str) -> str:
+    user = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
+    host = platform.node()
+    return f"{host_agent}:{user}@{host}"
+
+
+def _normalize(items: list[dict], host_agent: str, variant: Optional[str],
+               session_override: str) -> list[dict]:
+    agent_id = _make_agent_id(host_agent)
+    user_id = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
+    out: list[dict] = []
+    for item in items:
+        if session_override and not item.get("conversation_id"):
+            item["conversation_id"] = session_override
+        if not item.get("conversation_id"):
+            item["conversation_id"] = "unknown"
+        item["host_agent"] = host_agent
+        item["agent_id"] = agent_id
+        item["user_id"] = user_id
+        if variant:
+            item["variant"] = variant
+        item.pop("uuid", None)  # internal; not part of write schema
+        out.append(item)
+    return out
+
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+PARSERS = {
+    "claude-code": _parse_claude_code,
+    "gemini-cli":  _parse_gemini_cli,
+}
+
+
+async def _ingest(format_name: str, transcript_path: str,
+                  session_override: str, variant: Optional[str]) -> dict:
+    if not os.path.isfile(transcript_path):
+        logger.warning(f"Transcript path not found: {transcript_path}")
+        return {"written": 0, "skipped": 0, "failed": 0,
+                "error": f"transcript not found: {transcript_path}"}
+
+    parser = PARSERS.get(format_name)
+    if parser is None:
+        return {"written": 0, "skipped": 0, "failed": 1,
+                "error": f"unknown format: {format_name}"}
 
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(transcript_path, "r", encoding="utf-8") as f:
             raw = f.read()
     except OSError as e:
-        logger.error(f"Failed to read {filepath}: {e}")
-        return {"written": 0, "spilled": 0, "failed": 1, "errors": [str(e)]}
+        logger.error(f"Failed to read {transcript_path}: {e}")
+        return {"written": 0, "skipped": 0, "failed": 1, "error": str(e)}
 
-    if not raw.strip():
-        return {"written": 0, "spilled": 0, "failed": 0, "errors": []}
-
-    if format_name == "auto":
-        format_name = _sniff_format(raw)
-        logger.info(f"Auto-detected format: {format_name}")
-
-    if format_name == "claude-code":
-        items = _parse_claude_code(raw)
-    elif format_name == "gemini-cli":
-        items = _parse_gemini_cli(raw)
-    elif format_name == "opencode":
-        items = _parse_opencode(raw)
-    elif format_name == "aider":
-        items = _parse_aider(raw)
-    else:
-        logger.error(f"Unknown format: {format_name}")
-        return {"written": 0, "spilled": 0, "failed": 1, "errors": [f"Unknown format: {format_name}"]}
-
-    if not conversation_id:
-        conversation_id = derive_conversation_id(os.path.basename(filepath))
-
-    items = normalize_items(items, format_name, conversation_id, format_name, model_id_override)
+    items, parsed_session = parser(raw)
+    # Transcript's self-identifying sessionId wins — the per-item conversation_id
+    # comes from there, so the cursor must use the same value to stay coherent.
+    # session_override is a fallback for transcripts that don't self-identify.
+    if session_override and parsed_session and session_override != parsed_session:
+        logger.warning(
+            "session_id mismatch: envelope=%r, transcript=%r; using transcript value",
+            session_override, parsed_session,
+        )
+    session_id = parsed_session or session_override or ""
 
     if not items:
-        logger.warning(f"No items parsed from {filepath}")
-        return {"written": 0, "spilled": 0, "failed": 0, "errors": []}
+        logger.info(f"No parseable items in {transcript_path}")
+        return {"written": 0, "skipped": 0, "failed": 0, "session_id": session_id}
 
-    agent_id = make_agent_id()
-    for item in items:
-        item["agent_id"] = agent_id
-        item["user_id"] = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
+    cursor = _load_cursor()
+    new_items = _filter_new_items(items, session_id, cursor)
+    skipped = len(items) - len(new_items)
 
-    result = await chatlog_core.chatlog_write_bulk_impl(items, embed=False)
+    if not new_items:
+        logger.info(f"All {len(items)} items already ingested for session {session_id}")
+        return {"written": 0, "skipped": skipped, "failed": 0, "session_id": session_id}
 
+    # Capture uuids before _normalize strips them — the cursor needs them.
+    uuids_to_commit = [it.get("uuid") for it in new_items if it.get("uuid")]
+    normalized = _normalize(new_items, format_name, variant, session_id)
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import chatlog_core
+    result = await chatlog_core.chatlog_write_bulk_impl(normalized, embed=False)
     written = len(result.get("written_ids", []))
-    spilled = result.get("spilled", 0)
     failed = result.get("failed", 0)
-    errors = result.get("errors", [])
+    spilled = result.get("spilled", 0)
 
-    logger.info(f"Ingested {filepath}: written={written}, spilled={spilled}, failed={failed}")
-    return {"written": written, "spilled": spilled, "failed": failed, "errors": errors}
+    if written > 0:
+        _commit_cursor([{"uuid": u} for u in uuids_to_commit], session_id, cursor)
 
-
-async def watch_directory(watch_dir: str, format_name: str, conversation_id: str = "",
-                         model_id_override: str = "") -> None:
-    """Poll directory for new/updated log files. Debounce 500ms. Exit on SIGTERM/CTRL-C."""
-    logger.info(f"Watching {watch_dir} for {format_name} logs...")
-    cursor = read_cursor()
-    tracked = cursor.get("tracked_files", {})
-
-    shutdown_event = asyncio.Event()
-
-    def handle_signal(signum, frame):
-        logger.info("Received signal, shutting down...")
-        shutdown_event.set()
-
-    signal.signal(signal.SIGTERM, handle_signal)
-    signal.signal(signal.SIGINT, handle_signal)
-
-    last_scan = 0.0
-    while not shutdown_event.is_set():
-        now = time.time()
-        if now - last_scan < 0.5:
-            await asyncio.sleep(0.1)
-            continue
-        last_scan = now
-
-        if not os.path.isdir(watch_dir):
-            logger.warning(f"Watch directory {watch_dir} does not exist")
-            await asyncio.sleep(1.0)
-            continue
-
-        try:
-            for entry in os.scandir(watch_dir):
-                if entry.is_file() and (entry.name.endswith(".jsonl") or entry.name.endswith(".md") or entry.name.endswith(".json")):
-                    file_path = entry.path
-                    mtime = entry.stat().st_mtime
-                    tracked_mtime = tracked.get(file_path, 0)
-                    if mtime > tracked_mtime:
-                        logger.info(f"Processing {file_path}")
-                        result = await ingest_file(file_path, format_name, conversation_id, model_id_override)
-                        tracked[file_path] = mtime
-                        logger.info(f"Result: {result}")
-        except OSError as e:
-            logger.error(f"Error scanning directory: {e}")
-
-        cursor["tracked_files"] = tracked
-        write_cursor(cursor)
-        await asyncio.sleep(0.5)
+    logger.info(f"Ingested {transcript_path}: written={written}, skipped={skipped}, "
+                f"spilled={spilled}, failed={failed}, session_id={session_id}")
+    return {
+        "written": written, "skipped": skipped, "spilled": spilled, "failed": failed,
+        "errors": result.get("errors", []), "session_id": session_id,
+    }
 
 
-async def main() -> None:
-    parser = argparse.ArgumentParser(description="Ingest chat logs into the chat log subsystem.")
-    parser.add_argument("--format", choices=["claude-code", "gemini-cli", "opencode", "aider", "auto"],
-                       default="auto", help="Log format")
-    parser.add_argument("--watch", type=str, help="Poll directory for new log files")
-    parser.add_argument("--conversation-id", type=str, default="", help="Override conversation_id")
-    parser.add_argument("--model", type=str, default="", help="Override model_id (aider)")
-    parser.add_argument("input_file", nargs="?", help="Input file (stdin if omitted)")
-
+async def main() -> int:
+    parser = argparse.ArgumentParser(description="Ingest a host-agent transcript into the chat log subsystem.")
+    parser.add_argument("--format", required=True, choices=sorted(PARSERS.keys()),
+                        help="Transcript format / host agent")
+    parser.add_argument("--transcript-path", required=True, help="Path to the transcript file on disk")
+    parser.add_argument("--session-id", default="",
+                        help="Override conversation_id (defaults to parsed sessionId)")
+    parser.add_argument("--variant", default=None,
+                        help="Provenance tag (e.g. pre_compact, stop, session_end, test)")
     args = parser.parse_args()
 
-    if args.watch:
-        await watch_directory(args.watch, args.format, args.conversation_id, args.model)
-        return
-
-    if args.input_file:
-        result = await ingest_file(args.input_file, args.format, args.conversation_id, args.model)
-        print(json.dumps(result, indent=2))
-    else:
-        raw = sys.stdin.read()
-        sys.path.insert(0, os.path.dirname(__file__))
-        import chatlog_core
-
-        if args.format == "auto":
-            args.format = _sniff_format(raw)
-
-        if args.format == "claude-code":
-            items = _parse_claude_code(raw)
-        elif args.format == "gemini-cli":
-            items = _parse_gemini_cli(raw)
-        elif args.format == "opencode":
-            items = _parse_opencode(raw)
-        elif args.format == "aider":
-            items = _parse_aider(raw)
-        else:
-            print(json.dumps({"error": f"Unknown format: {args.format}"}))
-            return
-
-        conversation_id = args.conversation_id or derive_conversation_id("stdin")
-        items = normalize_items(items, args.format, conversation_id, args.format, args.model)
-
-        agent_id = make_agent_id()
-        for item in items:
-            item["agent_id"] = agent_id
-            item["user_id"] = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
-
-        result = await chatlog_core.chatlog_write_bulk_impl(items, embed=False)
-        print(json.dumps({
-            "written": len(result.get("written_ids", [])),
-            "spilled": result.get("spilled", 0),
-            "failed": result.get("failed", 0),
-            "errors": result.get("errors", []),
-        }, indent=2))
+    result = await _ingest(args.format, args.transcript_path, args.session_id, args.variant)
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("failed", 0) == 0 else 1
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

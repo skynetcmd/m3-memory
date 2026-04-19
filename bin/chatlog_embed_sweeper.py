@@ -18,6 +18,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from glob import glob
+from pathlib import Path
 
 # Setup path so we can import bin/ modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -55,38 +56,47 @@ async def drain_spill(conn: sqlite3.Connection) -> int:
                         logger.warning("Skipping malformed JSON in %s: %s", spill_path, e)
                         continue
 
-                    # Build memory_items row from spill entry
-                    memory_id = str(uuid.uuid4())
-                    role = doc.get("role", "unknown")
-                    content = doc.get("content", "")
+                    # Spill files are written by chatlog_core._spill_batch with the
+                    # full post-normalize item dict, so the _id / _content / _title /
+                    # _metadata_json / _created_at / variant fields are already there.
+                    # Fall back to synthesis only for the legacy spill format.
+                    memory_id = doc.get("_id") or str(uuid.uuid4())
+                    content = doc.get("_content", doc.get("content", ""))
+                    title = doc.get("_title", "")
                     conversation_id = doc.get("conversation_id", "")
                     host_agent = doc.get("host_agent", "unknown")
-                    provider = doc.get("provider", "unknown")
-                    model_id = doc.get("model_id", "unknown")
-                    timestamp = doc.get("timestamp", datetime.now(timezone.utc).isoformat())
+                    variant = doc.get("variant")
+                    timestamp = (
+                        doc.get("_created_at")
+                        or doc.get("timestamp")
+                        or datetime.now(timezone.utc).isoformat()
+                    )
 
-                    # Build metadata JSON with provenance
-                    metadata = {
-                        "role": role,
-                        "provider": provider,
-                        "model_id": model_id,
-                        "spill_source": True,
-                    }
-                    metadata_json = json.dumps(metadata)
+                    if doc.get("_metadata_json"):
+                        metadata_json = doc["_metadata_json"]
+                    else:
+                        metadata = {
+                            "role": doc.get("role", "unknown"),
+                            "provider": doc.get("provider", "unknown"),
+                            "model_id": doc.get("model_id", "unknown"),
+                            "host_agent": host_agent,
+                            "spill_source": True,
+                        }
+                        metadata_json = json.dumps(metadata)
 
-                    # agent_id marks this as spilled
-                    agent_id = f"{host_agent}:spill"
+                    agent_id = doc.get("agent_id") or f"{host_agent}:spill"
 
                     rows_to_insert.append((
                         memory_id,
                         content,
-                        "",  # title (empty)
+                        title,
                         metadata_json,
                         "chat_log",  # type
                         agent_id,
                         conversation_id,
                         0,  # is_deleted
                         timestamp,
+                        variant,
                     ))
 
             if rows_to_insert:
@@ -94,8 +104,8 @@ async def drain_spill(conn: sqlite3.Connection) -> int:
                     conn.executemany(
                         """
                         INSERT OR IGNORE INTO memory_items
-                        (id, content, title, metadata_json, type, agent_id, conversation_id, is_deleted, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, content, title, metadata_json, type, agent_id, conversation_id, is_deleted, created_at, variant)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         rows_to_insert,
                     )
@@ -134,8 +144,8 @@ async def embed_batch(
     texts = [content for _, content, _, _ in batch]
 
     # Import embedding function lazily
-    from embedding_utils import pack as _pack
     from memory_core import _embed_many as embed_many
+    from embedding_utils import pack as _pack
 
     try:
         embeddings = await embed_many(texts)
