@@ -13,7 +13,6 @@ def ensure_venv():
     if os.path.exists(venv_python) and sys.executable != venv_python:
         os.execl(venv_python, venv_python, *sys.argv)
 
-ensure_venv()
 
 import json
 import logging
@@ -779,4 +778,5 @@ def main():
 
 
 if __name__ == "__main__":
+    ensure_venv()
     main()
