@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: a26a6b67d7ae
-mtime_utc: 2026-04-18T22:28:14.303009+00:00
-generated_utc: 2026-04-19T00:39:15.957841+00:00
+sha1: 93843e7fd0b7
+mtime_utc: 2026-04-19T16:35:24.077742+00:00
+generated_utc: 2026-04-19T21:10:11.564115+00:00
 private: false
 ---
 
@@ -10,32 +10,38 @@ private: false
 
 ## Purpose
 
-chatlog_ingest.py — single-entry-point CLI for ingesting host-agent chat logs.
+chatlog_ingest.py — CLI that reads a host-agent transcript file and writes
+canonical chat-log rows via chatlog_core.chatlog_write_bulk_impl.
 
-Normalizes logs from claude-code, gemini-cli, opencode, and aider into canonical
-format and writes to the chat log subsystem via chatlog_core.chatlog_write_bulk_impl.
+Invoked by host-agent hooks (Claude Code PreCompact/Stop, Gemini SessionEnd, etc.),
+which receive a JSON envelope from the host and forward the transcript path as
+--transcript-path. Parsers target the real on-disk transcript schemas, not a
+hypothetical canonical format.
 
-Usage:
-  python bin/chatlog_ingest.py --format {claude-code,gemini-cli,opencode,aider,auto} [--watch DIR] [--conversation-id ID] [input-file]
-  - Reads stdin when no input file given.
-  - --watch mode: polls a directory for new/updated log files, keeps a cursor at
-    memory/.chatlog_ingest_cursor.json (atomic rename on update), debounces 500ms.
-    Exits cleanly on SIGTERM or KeyboardInterrupt.
+CLI:
+  python bin/chatlog_ingest.py --format {claude-code,gemini-cli}
+                               --transcript-path FILE
+                               [--session-id ID] [--variant LABEL]
+
+A per-session cursor at memory/.chatlog_ingest_cursor.json records which
+message ids / indices have been ingested so re-invoking on the same transcript
+(e.g. Stop hook every turn) stays idempotent.
 
 ## Entry points
 
-- `async def main()` (line 378)
+- `async def main()` (line 355)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--format` | Log format | `auto` | Auto-detects format from first 4KB of data | str | Parses as specified format (claude-code/gemini-cli/opencode/aider) |
-| `--watch` | Poll directory for new log files | — | Reads input_file or stdin once | str | Polls DIR every 500ms for new .jsonl/.md/.json files |
-| `--conversation-id` | Override conversation_id | `` | Derives from input filename using blake2b hash | str | Uses specified conversation_id for all ingested items |
-| `--model` | Override model_id (aider) | `` | Uses model_id from parsed data | str | Replaces model_id for items with unknown/missing model |
-| `input_file` | Input file (stdin if omitted) | — | Reads from stdin | str | Reads specified file instead of stdin |
+| `--format` | Transcript format / host agent | — | Auto-detects format from first 4KB of data | str | Parses as specified format (claude-code/gemini-cli/opencode/aider) |
+| `--transcript-path` | Path to the transcript file on disk | — |  | str |  |
+| `--session-id` | Override conversation_id (defaults to parsed sessionId) | `` |  | str |  |
+| `--variant` | Provenance tag (e.g. pre_compact, stop, session_end, test) | None |  | str |  |
+| `--db` | Override chatlog DB path for this run (dev smoke tests). Sets CHATLOG_DB_PATH for the duration of the process. | None |  | str |  |
+| `--spill-dir` | Override spill directory for this run (dev smoke tests). Prevents stale spill files from polluting production. | None |  | str |  |
 
 ## Environment variables read
 
@@ -44,6 +50,7 @@ Usage:
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `chatlog_config`
 - `chatlog_core`
 
 ## Calls OUT (external side-channels)
@@ -57,8 +64,6 @@ _(no subprocess / http / sqlite calls detected)_
 ## File dependencies (repo paths referenced)
 
 - `.chatlog_ingest_cursor.json`
-- `.json`
-- `.md`
 
 ## Re-validation
 
