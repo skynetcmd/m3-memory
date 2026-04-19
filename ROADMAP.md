@@ -15,7 +15,7 @@
 - [x] GDPR compliance — `gdpr_forget` (Article 17), `gdpr_export` (Article 20)
 - [x] Cross-device sync — SQLite ↔ PostgreSQL ↔ ChromaDB
 - [x] LLM auto-classification, conversation summarization, memory consolidation
-- [x] 44 MCP tools, 41 end-to-end tests
+- [x] 66 MCP tools, 193 end-to-end tests
 
 ### v2026.4.8 — PyPI Launch (April 10, 2026)
 
@@ -28,7 +28,7 @@
 
 - [x] Agent registry, handoffs, notifications, and task trees
 - [x] `m3-team` CLI for multi-agent teams from YAML
-- [x] MCP proxy v2 — catalog-driven dispatch, 46 tools
+- [x] MCP proxy v2 — catalog-driven dispatch, 57 tools (66 total)
 - [x] License → Apache 2.0
 
 ### v2026.4.12b — Conversation Grouping & Refresh Lifecycle (April 12, 2026)
