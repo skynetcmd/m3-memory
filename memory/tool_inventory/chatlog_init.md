@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_init.py
-sha1: 010765cca83c
-mtime_utc: 2026-04-18T20:37:50.748787+00:00
-generated_utc: 2026-04-18T21:58:23.007087+00:00
+sha1: 1a40d84d611c
+mtime_utc: 2026-04-18T22:29:31.722838+00:00
+generated_utc: 2026-04-19T00:39:15.961981+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ Guides the user through:
 
 ## Entry points
 
-- `def main()` (line 292)
+- `def main()` (line 291)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -40,14 +40,14 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `chatlog_config (ChatlogConfig, HookSpec, RedactionSpec, CostTrackingSpec, EmbedSweeperSpec, CONFIG_PATH, DEFAULT_DB_PATH, MAIN_DB_PATH, VALID_MODES, VALID_HOST_AGENTS, resolve_config, save_config)`
+- `chatlog_config (CONFIG_PATH, DEFAULT_DB_PATH, MAIN_DB_PATH, VALID_HOST_AGENTS, VALID_MODES, ChatlogConfig, CostTrackingSpec, EmbedSweeperSpec, HookSpec, RedactionSpec, resolve_config, save_config)`
 
 ## Calls OUT (external side-channels)
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 228)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 203)
+- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 227)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 202)
 
 
 ## Notable external imports

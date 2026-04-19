@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 07600a556568
-mtime_utc: 2026-04-18T21:42:09.778629+00:00
-generated_utc: 2026-04-18T21:58:23.124532+00:00
+sha1: 0e5311f66513
+mtime_utc: 2026-04-18T22:46:54.173256+00:00
+generated_utc: 2026-04-19T00:39:16.070582+00:00
 private: false
 ---
 
@@ -87,8 +87,11 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `embedding_utils (batch_cosine)`
 - `embedding_utils (cosine)`
-- `embedding_utils (pack, unpack, batch_cosine, infer_change_agent)`
+- `embedding_utils (infer_change_agent)`
+- `embedding_utils (pack)`
+- `embedding_utils (unpack)`
 - `llm_failover (get_best_embed, get_best_llm, get_smallest_llm)`
 - `m3_sdk (M3Context)`
 
@@ -96,7 +99,7 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script]`` (line 716)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '-y']`` (line 728)
 
 
 ## Notable external imports

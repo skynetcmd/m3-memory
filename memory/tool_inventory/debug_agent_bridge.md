@@ -1,8 +1,8 @@
 ---
 tool: bin/debug_agent_bridge.py
-sha1: d56f4de3dbb8
-mtime_utc: 2026-04-18T03:45:31.260359+00:00
-generated_utc: 2026-04-18T16:33:21.625896+00:00
+sha1: 626203c99082
+mtime_utc: 2026-04-18T22:29:31.710731+00:00
+generated_utc: 2026-04-19T00:39:15.985006+00:00
 private: false
 ---
 
@@ -38,7 +38,7 @@ _(no argparse arguments detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `embedding_utils (parse_model_size)`
-- `m3_sdk (M3Context, LM_STUDIO_BASE)`
+- `m3_sdk (LM_STUDIO_BASE, M3Context)`
 - `thermal_utils (get_thermal_status)`
 
 ## Calls OUT (external side-channels)

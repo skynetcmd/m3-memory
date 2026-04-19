@@ -1,8 +1,8 @@
 ---
 tool: bin/temporal_utils.py
-sha1: a5d46393391d
-mtime_utc: 2026-04-18T03:45:31.264360+00:00
-generated_utc: 2026-04-18T16:33:21.749615+00:00
+sha1: 7850f9345df7
+mtime_utc: 2026-04-18T22:29:31.709732+00:00
+generated_utc: 2026-04-19T00:39:16.114428+00:00
 private: false
 ---
 
@@ -11,7 +11,7 @@ private: false
 ## Purpose
 
 Enhanced temporal resolution utility for m3-memory.
-Resolves relative date expressions (yesterday, last Friday, the Sunday before June 1st) 
+Resolves relative date expressions (yesterday, last Friday, the Sunday before June 1st)
 into absolute ISO-8601 dates based on an anchor timestamp.
 
 ## Entry points

@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server_gpu.py
-sha1: 078970016f69
-mtime_utc: 2026-04-18T03:24:41.215160+00:00
-generated_utc: 2026-04-18T16:33:21.632648+00:00
+sha1: bfd0441d26b1
+mtime_utc: 2026-04-18T22:29:00.263249+00:00
+generated_utc: 2026-04-19T00:39:15.992068+00:00
 private: true
 ---
 
@@ -16,7 +16,7 @@ Runs on Port 9903 by default.
 
 ## Entry points
 
-- `def main()` (line 114)
+- `def main()` (line 116)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -41,12 +41,12 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `cmd`` (line 95)
+- `subprocess.Popen()  → `cmd`` (line 97)
 
 **http**
 
-- `httpx.AsyncClient()` (line 55)
-- `httpx.Client()` (line 102)
+- `httpx.AsyncClient()` (line 57)
+- `httpx.Client()` (line 104)
 
 
 ## Notable external imports

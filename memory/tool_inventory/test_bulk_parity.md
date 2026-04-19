@@ -1,8 +1,8 @@
 ---
 tool: bin/test_bulk_parity.py
-sha1: 0c28c4dd1975
-mtime_utc: 2026-04-18T20:37:50.761296+00:00
-generated_utc: 2026-04-18T21:58:23.180068+00:00
+sha1: ad7408dc7879
+mtime_utc: 2026-04-18T23:28:15.108008+00:00
+generated_utc: 2026-04-19T00:39:16.119922+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ variant handling, contradiction detection, and conversation emitters.
 
 ## Entry points
 
-- `async def main()` (line 559)
+- `async def main()` (line 558)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -37,15 +37,15 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 110)
-- `sqlite3.connect()  → `db_path`` (line 177)
-- `sqlite3.connect()  → `db_path`` (line 239)
-- `sqlite3.connect()  → `db_path`` (line 266)
+- `sqlite3.connect()  → `db_path`` (line 109)
+- `sqlite3.connect()  → `db_path`` (line 176)
+- `sqlite3.connect()  → `db_path`` (line 238)
+- `sqlite3.connect()  → `db_path`` (line 265)
 
 
 ## Notable external imports
 
-- `unittest.mock (AsyncMock, patch, MagicMock)`
+- `unittest.mock (AsyncMock, patch)`
 
 ## File dependencies (repo paths referenced)
 

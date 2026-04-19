@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_locomo.py
-sha1: dd445cc496a8
-mtime_utc: 2026-04-18T14:52:11.799641+00:00
-generated_utc: 2026-04-18T21:58:22.970108+00:00
+sha1: 2439d744315b
+mtime_utc: 2026-04-18T22:30:21.922439+00:00
+generated_utc: 2026-04-19T00:39:15.927936+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Includes:
 
 ## Entry points
 
-- `async def run()` (line 452)
+- `async def run()` (line 453)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -56,9 +56,8 @@ Includes:
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
-- `memory_core`
+- `memory_core (_db, memory_link_impl, memory_write_bulk_impl)`
 - `memory_core (memory_search_scored_impl)`
-- `memory_core (memory_write_bulk_impl, memory_link_impl, _db)`
 - `temporal_utils`
 
 ## Calls OUT (external side-channels)
