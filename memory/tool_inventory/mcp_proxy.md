@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_proxy.py
-sha1: 62e2d2ea920f
-mtime_utc: 2026-04-18T03:45:31.261360+00:00
-generated_utc: 2026-04-18T16:33:21.653010+00:00
+sha1: 36314785defa
+mtime_utc: 2026-04-18T22:28:14.300899+00:00
+generated_utc: 2026-04-19T00:39:16.014076+00:00
 private: false
 ---
 
@@ -95,7 +95,7 @@ _(no argparse arguments detected)_
 
 ## Notable external imports
 
-- `fastapi (FastAPI, Request, HTTPException)`
+- `fastapi (FastAPI, HTTPException, Request)`
 - `fastapi.responses (JSONResponse, StreamingResponse)`
 - `httpx`
 - `pydantic (BaseModel, Field)`

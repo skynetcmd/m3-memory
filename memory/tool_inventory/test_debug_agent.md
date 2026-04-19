@@ -1,8 +1,8 @@
 ---
 tool: bin/test_debug_agent.py
-sha1: 0976552a06cb
-mtime_utc: 2026-04-06T00:25:00.989103+00:00
-generated_utc: 2026-04-18T16:33:21.758307+00:00
+sha1: 2a724c1744d9
+mtime_utc: 2026-04-18T23:28:41.425525+00:00
+generated_utc: 2026-04-19T00:39:16.124266+00:00
 private: false
 ---
 
@@ -17,8 +17,8 @@ gracefully skipped when LM Studio is offline.
 
 ## Entry points
 
-- `async def run()` (line 110)
-- `async def main()` (line 287)
+- `async def run()` (line 109)
+- `async def main()` (line 286)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -38,14 +38,14 @@ _(none detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 56)
+- `httpx.AsyncClient()` (line 55)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 173)
-- `sqlite3.connect()  → `DB_PATH`` (line 181)
-- `sqlite3.connect()  → `DB_PATH`` (line 81)
-- `sqlite3.connect()  → `DB_PATH`` (line 92)
+- `sqlite3.connect()  → `DB_PATH`` (line 172)
+- `sqlite3.connect()  → `DB_PATH`` (line 180)
+- `sqlite3.connect()  → `DB_PATH`` (line 80)
+- `sqlite3.connect()  → `DB_PATH`` (line 91)
 
 
 ## Notable external imports

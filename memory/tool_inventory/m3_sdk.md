@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_sdk.py
-sha1: acac09c9d759
-mtime_utc: 2026-04-18T16:11:38.046416+00:00
-generated_utc: 2026-04-18T16:33:21.643094+00:00
+sha1: 3336b7f5edd4
+mtime_utc: 2026-04-18T22:28:14.314353+00:00
+generated_utc: 2026-04-19T00:39:16.003852+00:00
 private: false
 ---
 
@@ -36,12 +36,12 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 123)
-- `httpx.AsyncClient()` (line 126)
+- `httpx.AsyncClient()` (line 122)
+- `httpx.AsyncClient()` (line 125)
 
 **sqlite**
 
-- `sqlite3.connect()  → `self.db_path`` (line 68)
+- `sqlite3.connect()  → `self.db_path`` (line 67)
 
 
 ## Notable external imports
@@ -49,7 +49,6 @@ _(no argparse arguments detected)_
 - `atexit`
 - `dotenv (load_dotenv)`
 - `httpx`
-- `platform`
 - `psycopg2`
 
 ## File dependencies (repo paths referenced)

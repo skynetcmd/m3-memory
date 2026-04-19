@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: 02f475266e2a
-mtime_utc: 2026-04-18T20:37:50.748787+00:00
-generated_utc: 2026-04-18T21:58:23.002353+00:00
+sha1: a26a6b67d7ae
+mtime_utc: 2026-04-18T22:28:14.303009+00:00
+generated_utc: 2026-04-19T00:39:15.957841+00:00
 private: false
 ---
 
@@ -24,7 +24,7 @@ Usage:
 
 ## Entry points
 
-- `async def main()` (line 380)
+- `async def main()` (line 378)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments

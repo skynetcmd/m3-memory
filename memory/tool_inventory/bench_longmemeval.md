@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_longmemeval.py
-sha1: e32489c7b540
-mtime_utc: 2026-04-18T21:41:24.574902+00:00
-generated_utc: 2026-04-18T21:58:22.980856+00:00
+sha1: 851389d1e1e5
+mtime_utc: 2026-04-18T22:28:14.317358+00:00
+generated_utc: 2026-04-19T00:39:15.938024+00:00
 private: false
 ---
 
@@ -42,8 +42,8 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 
 ## Entry points
 
-- `async def run()` (line 600)
-- `def main()` (line 845)
+- `async def run()` (line 595)
+- `def main()` (line 840)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -73,8 +73,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
-- `memory_core`
-- `memory_core (memory_write_bulk_impl, memory_write_impl, memory_link_impl, memory_search_scored_impl, _embed, _batch_cosine, _unpack, _db)`
+- `memory_core (_db, memory_search_scored_impl, memory_write_bulk_impl, memory_write_impl)`
 - `temporal_utils`
 
 ## Calls OUT (external side-channels)
