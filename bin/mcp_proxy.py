@@ -750,7 +750,7 @@ async def _run_with_tools(
     all_tools = client_tools
     if not skip_mcp:
         all_tools = get_mcp_tools() + client_tools
-    
+
     working = list(messages)
     btype, burl, bkey = _route(model)
 
@@ -978,11 +978,11 @@ async def chat_completions(request: Request) -> JSONResponse:
 
     try:
         result = await _run_with_tools(
-            messages, 
-            model, 
-            client_tools, 
-            max_tokens, 
-            agent_id, 
+            messages,
+            model,
+            client_tools,
+            max_tokens,
+            agent_id,
             skip_mcp=(no_tools_header or explicit_none)
         )
 

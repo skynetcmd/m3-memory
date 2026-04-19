@@ -18,7 +18,6 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from glob import glob
-from pathlib import Path
 
 # Setup path so we can import bin/ modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -144,8 +143,8 @@ async def embed_batch(
     texts = [content for _, content, _, _ in batch]
 
     # Import embedding function lazily
-    from memory_core import _embed_many as embed_many
     from embedding_utils import pack as _pack
+    from memory_core import _embed_many as embed_many
 
     try:
         embeddings = await embed_many(texts)

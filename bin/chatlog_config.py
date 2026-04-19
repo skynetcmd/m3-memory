@@ -31,7 +31,7 @@ import queue
 import sqlite3
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Literal, Optional
 
 logger = logging.getLogger("chatlog_config")
@@ -362,9 +362,11 @@ def _selftest() -> None:
     assert chatlog_db_path() == MAIN_DB_PATH
     os.environ.pop("CHATLOG_MODE")
 
-    os.environ["CHATLOG_DB_PATH"] = "/tmp/alt_chatlog.db"
+    import tempfile
+    tmp_db = os.path.join(tempfile.gettempdir(), "alt_chatlog.db")
+    os.environ["CHATLOG_DB_PATH"] = tmp_db
     invalidate_cache()
-    assert resolve_config().db_path == "/tmp/alt_chatlog.db"
+    assert resolve_config().db_path == tmp_db
     os.environ.pop("CHATLOG_DB_PATH")
     invalidate_cache()
 

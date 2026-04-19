@@ -8,3 +8,4 @@ validate_env.py
 ENVIRONMENT_VARIABLES.md
 bin/pg_setup.py
 examples/sandbox-openclaw/.env.example
+data/locomo/

@@ -266,9 +266,8 @@ def draw_bar(pct: float, width: int = 30, color: str = GREEN) -> str:
 def clear_screen(is_apple_terminal: bool) -> None:
     if is_apple_terminal:
         print("\n" * 2)
-    elif IS_WIN:
-        os.system("cls")
     else:
+        # \033[H: cursor to top-left, \033[J: clear from cursor to end of screen
         print("\033[H\033[J", end="", flush=True)
 
 

@@ -7,9 +7,9 @@ Usage:
     mcp-memory --help     # Show this help
 """
 
-import sys
-import os
 import argparse
+import os
+import sys
 
 
 def main() -> None:

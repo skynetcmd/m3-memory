@@ -32,7 +32,8 @@ from m3_sdk import resolve_venv_python
 def ensure_venv():
     venv_python = resolve_venv_python()
     if os.path.exists(venv_python) and sys.executable != venv_python:
-        os.execl(venv_python, venv_python, *sys.argv)
+        # venv_python is an absolute path within the project root, so this is safe.
+        os.execl(venv_python, venv_python, *sys.argv)  # nosec B606
 
 ensure_venv()
 

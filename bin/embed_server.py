@@ -103,7 +103,7 @@ def main():
     args = parser.parse_args()
 
     model_name = "qwen3-embedding"
-    
+
     # Auto-detect CUDA if device not specified
     device = args.device
     if device is None:
