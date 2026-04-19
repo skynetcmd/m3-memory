@@ -114,7 +114,7 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 |---------|-----------|---------------------------|
 | **Ecosystem** | Any MCP agent | LangChain / LangGraph only |
 | **MCP support** | Native — 44 tools | No |
-| **Memory types** | 20 types + auto-classification | Thread, store, episodic, semantic, procedural |
+| **Memory types** | 21 types + auto-classification | Thread, store, episodic, semantic, procedural |
 | **Contradiction handling** | Automatic — bitemporal superseding | Manual / LLM-driven via procedural memory |
 | **GDPR tooling** | Built-in `gdpr_forget` + `gdpr_export` | Custom implementation required |
 | **Search** | FTS5 + vector + MMR | Depends on configured backend store |

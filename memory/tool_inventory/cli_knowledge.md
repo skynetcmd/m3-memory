@@ -2,7 +2,7 @@
 tool: bin/cli_knowledge.py
 sha1: 58608ef16ebb
 mtime_utc: 2026-04-07T00:27:48.664201+00:00
-generated_utc: 2026-04-17T04:17:01.687995+00:00
+generated_utc: 2026-04-18T05:16:53.100150+00:00
 private: false
 ---
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_memory.py
-sha1: 189db45b1307
-mtime_utc: 2026-04-06T00:25:00.978104+00:00
-generated_utc: 2026-04-17T04:17:01.680351+00:00
+sha1: 617c734e07f6
+mtime_utc: 2026-04-18T03:34:10.128688+00:00
+generated_utc: 2026-04-18T05:16:53.092429+00:00
 private: false
 ---
 
@@ -31,6 +31,10 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
+
+## Implementation notes
+
+**SQLite-only:** This benchmark tool operates directly on SQLite (agent_memory.db) and does not use bulk-insert or memory_write_bulk_impl. No embedding or ingest pipeline integration. Useful for isolated performance testing on local database operations.
 
 ## Calls OUT (external side-channels)
 

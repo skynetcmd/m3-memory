@@ -44,6 +44,7 @@ Includes:
 | `--generator-model` | Generator LLM identifier | EVAL_GENERATOR_MODEL env | No default set | string | Specify answer model |
 | `--judge-model` | Judge LLM identifier | EVAL_JUDGE_MODEL env | No default set | string | Specify scoring model |
 | `--openai-base-url` | Custom API endpoint | — | Use official OpenAI | string | Route to local proxy |
+| `--variant` | Pipeline identifier for A/B tracking | `""` (empty) | Items carry no variant tag; bulk rows have variant=NULL | string | Tags every bulk-inserted row with the variant, propagated to enrichers |
 | `--verbose` | Log full message objects | — | Minimal logging | store_true | Debug mode with details |
 
 ## Environment variables read

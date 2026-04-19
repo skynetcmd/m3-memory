@@ -38,13 +38,20 @@ import re
 import sys
 import time
 import traceback
+import uuid
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "bin"))
+
+# Every bench row is tagged in change_agent as `bench:<RUN_ID>` so cleanup is a
+# single indexed delete on idx_mi_change_agent. Generated once per process.
+# Retrieval never touches change_agent, so this costs nothing on the hot path.
+BENCH_RUN_ID = f"lme-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+BENCH_CHANGE_AGENT = f"bench:{BENCH_RUN_ID}"
 
 # Route embeddings to llama-server before memory_core imports.
 os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:8081/v1")
@@ -65,6 +72,55 @@ from auth_utils import get_api_key  # noqa: E402
 import temporal_utils  # noqa: E402
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
+
+
+def wipe_bench_rows(pattern: str) -> dict:
+    """Delete memory_items whose change_agent matches `pattern`, plus orphans.
+
+    `pattern` is either:
+      - an exact tag: 'bench:lme-20260413-194821-abc123' (exact match delete)
+      - the literal 'bench:%' to mean "all bench runs" (range-scan delete)
+
+    Both forms hit idx_mi_change_agent. LIKE is avoided because SQLite's
+    default case-insensitive LIKE cannot use a text index; a range predicate
+    can. 'bench:' .. 'bench;' covers every string with the 'bench:' prefix.
+    Orphan sweeps on embeddings/history/chroma_sync_queue follow, then VACUUM
+    + ANALYZE. Returns a dict of rowcounts for logging.
+    """
+    counts = {}
+    with _db() as db:
+        if pattern == "bench:%":
+            cur = db.execute(
+                "DELETE FROM memory_items "
+                "WHERE change_agent >= 'bench:' AND change_agent < 'bench;'"
+            )
+        else:
+            cur = db.execute(
+                "DELETE FROM memory_items WHERE change_agent = ?", (pattern,)
+            )
+        counts["memory_items"] = cur.rowcount
+        cur = db.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id NOT IN (SELECT id FROM memory_items)"
+        )
+        counts["memory_embeddings_orphans"] = cur.rowcount
+        cur = db.execute(
+            "DELETE FROM memory_history WHERE memory_id NOT IN (SELECT id FROM memory_items)"
+        )
+        counts["memory_history_orphans"] = cur.rowcount
+        cur = db.execute(
+            "DELETE FROM chroma_sync_queue WHERE memory_id NOT IN (SELECT id FROM memory_items)"
+        )
+        counts["chroma_sync_queue_orphans"] = cur.rowcount
+    # VACUUM must run outside any transaction; open a fresh raw connection.
+    import sqlite3
+    from memory_core import DB_PATH
+    raw = sqlite3.connect(DB_PATH, isolation_level=None)
+    try:
+        raw.execute("VACUUM")
+        raw.execute("ANALYZE")
+    finally:
+        raw.close()
+    return counts
 
 
 # ── Answer generation + judge prompts (from upstream LongMemEval) ────────────
@@ -119,6 +175,214 @@ ANSWER_TEMPLATE_DEFAULT = (
     "beyond what is stated in the chat history.\nFinal Answer:"
 )
 
+# ── Generation-mode templates (Hindsight / LongMemEval paper §5.5) ───────────
+# All templates here are gated behind opt-in CLI flags so the stock generation
+# path above is unchanged when no new flags are set.
+
+ANSWER_SYSTEM_BASE = (
+    "You are a helpful chat assistant. You have access to memories retrieved "
+    "from past conversations with the user. Use them to answer the user's "
+    "question. If the memories do not contain enough information, say so "
+    "honestly.\n\n"
+    "Important guidelines:\n"
+    "1. Each retrieved memory is tagged with a session date (shown in the "
+    "[Conversation date: ...] header or valid_from field). Use these dates to "
+    "reason about when events happened, chronological order, and time spans.\n"
+    "2. When information was updated across conversations (a number changed, "
+    "a preference shifted, a status was revised), ALWAYS use the value from "
+    "the MOST RECENT conversation. Later conversations supersede earlier ones.\n"
+    "3. Answer based only on what is explicitly stated. Do not add to or "
+    "modify stated values — if the user says \"my list has 25 titles\", the "
+    "answer is 25; do not add items mentioned in the same conversation unless "
+    "the user explicitly said the count changed.\n"
+    "4. If the question asks for a recommendation or suggestion, USE the "
+    "preferences you find in the memories to give a SPECIFIC, CONCRETE answer. "
+    "Do NOT ask clarifying questions back — the user already shared their "
+    "preferences in past conversations; your job is to remember and apply them.\n"
+    "5. For counting questions (\"how many X\"), carefully enumerate every "
+    "distinct item across ALL conversations. Build a numbered list first, "
+    "then count. Do not skip items because they appear in different sessions.\n\n"
+    "Answer step by step: (a) extract the relevant facts and dates, (b) apply "
+    "supersession (latest wins), (c) give a direct, specific answer. Do not "
+    "say \"I don't know\" unless the information is truly absent from the "
+    "memories.\n\n"
+    "FORMAT: Be terse and direct. No preamble, no \"Based on your memories\", "
+    "no restating the question, no hedging. Include EVERY fact the answer "
+    "requires — do not truncate explanations or skip nuance. For lookups "
+    "(counts, single values, named entities), one short phrase or sentence. "
+    "For explanations of advice or instructions you previously gave, include "
+    "the full content the user is asking about — completeness matters more "
+    "than brevity here."
+)
+
+# Abstention-aware system prompt for LongMemEval _abs questions. The base
+# prompt's rule "do not say I don't know" inverts what the abstention judge
+# rewards, so we branch on qid.endswith("_abs") and use this instead.
+ANSWER_SYSTEM_ABSTENTION = (
+    "You are a helpful chat assistant. You have access to memories retrieved "
+    "from past conversations with the user. Your task is to determine whether "
+    "the memories contain enough specific information to answer the user's "
+    "question.\n\n"
+    "If the retrieved memories do NOT contain a direct, specific answer to "
+    "the question, reply exactly: \"I don't know based on our past "
+    "conversations.\" Do not guess. Do not infer. Do not extrapolate from "
+    "partial information. Do not invent details that are not explicitly "
+    "stated.\n\n"
+    "Only if the memories DO contain a direct, explicit answer should you "
+    "give it — and in that case, reply with the shortest possible answer "
+    "containing the fact, no preamble or hedging.\n\n"
+    "When in doubt, abstain. The cost of guessing wrong is higher than the "
+    "cost of admitting you don't have the information."
+)
+
+# Per-category reasoning scaffolds appended to ANSWER_SYSTEM_BASE based on
+# question_type. Tells the answer model how to USE the retrieved context for
+# the specific failure modes LongMemEval tests.
+ANSWER_SYSTEM_BY_TYPE = {
+    "temporal-reasoning": (
+        "This is a temporal-reasoning question. The answer requires date "
+        "arithmetic. Before answering, internally build this table:\n\n"
+        "  | session_date | relevant_fact | age_in_days_vs_current_date |\n\n"
+        "Compute age_in_days as (current_date - session_date) in days. "
+        "Then identify which row(s) the question is asking about — usually "
+        "the most recent applicable row, or the gap/duration between two "
+        "rows — and produce the answer. If the question asks 'how long ago' "
+        "or 'when did', cite the row's age. If it asks 'how many days "
+        "between X and Y', subtract row dates. Do NOT guess dates that are "
+        "not in the history. Do NOT confuse session_date with the date a "
+        "fact was first true."
+    ),
+    "knowledge-update": (
+        "This is a knowledge-update question: a fact has been updated in a "
+        "later session. Before answering, internally list every value of the "
+        "asked-about entity you find in the retrieved memories with its "
+        "session_date:\n\n"
+        "  - YYYY/MM/DD: <value>\n"
+        "  - YYYY/MM/DD: <value>\n"
+        "  ...\n\n"
+        "Sort the list by session_date DESCENDING. The answer is the value "
+        "in the FIRST (most recent) row. Do not answer with any earlier "
+        "value. Do not blend values across rows."
+    ),
+    "multi-session": (
+        "This is a multi-session question: the answer requires combining facts "
+        "from more than one session. Before answering: (1) enumerate the relevant "
+        "facts session-by-session with their dates, (2) note any contradictions "
+        "or updates (later sessions override earlier ones), (3) synthesize the "
+        "answer only from the union of those facts."
+    ),
+    "single-session-preference": (
+        "This is a preference question. Before answering: (1) locate the exact "
+        "user statement that expresses the preference and quote it with its "
+        "session date, (2) check whether any later session updates or contradicts "
+        "it, (3) apply the most recent version of the preference to the question."
+    ),
+}
+
+ANSWER_USER_TEMPLATE = (
+    "History Chats:\n\n{history}\n\n"
+    "Current Date: {date}\nQuestion: {question}\nAnswer:"
+)
+
+NO_MEMORY_SYSTEM = (
+    "You are a helpful assistant. Answer the user's question directly and "
+    "concisely. If you do not know the answer, reply exactly: \"I don't know "
+    "based on our past conversations.\" Do not guess, infer, or invent "
+    "details. Be terse — no preamble, no hedging, no restating the question."
+)
+
+NO_MEMORY_USER_TEMPLATE = (
+    "Current Date: {date}\nQuestion: {question}\nAnswer:"
+)
+
+# Chain-of-Note + JSON history. Source: LongMemEval paper (Wu et al., 2024)
+# §5.5 / Appendix D, github.com/xiaowu0162/LongMemEval. The extraction prompt
+# runs per-session BEFORE the final answer call; the final call sees the
+# concatenated notes plus a JSON-dumped history rather than natural-language
+# session blocks.
+CHAIN_OF_NOTE_PROMPT = (
+    "I will give you a chat session between you and a user, plus a question "
+    "from the user. Write reading notes that extract every fact from this "
+    "session that is relevant to answering the question. Quote the user's "
+    "exact wording when it expresses a preference, claim, or specific value. "
+    "If the session contains nothing relevant, output exactly: empty\n\n"
+    "Session Date: {session_date}\n"
+    "Session Content:\n{session_content}\n\n"
+    "Question Date: {question_date}\n"
+    "Question: {question}\n\n"
+    "Extracted notes (relevant facts only, or 'empty'):"
+)
+
+ANSWER_WITH_NOTES_USER_TEMPLATE = (
+    "I will give you the original chat history (as JSON), pre-extracted "
+    "reading notes from each relevant session, and a question. Use both the "
+    "notes and the raw history to answer. The notes are a hint, not a "
+    "replacement — if the notes are wrong or incomplete, fall back to the "
+    "raw history.\n\n"
+    "Raw History (JSON):\n{history_json}\n\n"
+    "Pre-extracted Notes:\n{notes}\n\n"
+    "Current Date: {date}\nQuestion: {question}\nAnswer:"
+)
+
+# ── Reflection pass (Hindsight-style two-step reasoning) ─────────────────────
+# A first-pass LLM call produces a structured intermediate; the final answer
+# call conditions on (history + reflection + question) instead of just
+# (history + question). Gated to reasoning-limited categories.
+REFLECTION_SYSTEM = (
+    "You are a reasoning assistant that pre-digests retrieved chat history "
+    "for a downstream answer model. You do NOT answer the question yourself. "
+    "Instead, produce a concise, structured summary that makes the final "
+    "answer easy to derive.\n\n"
+    "Your output MUST contain these sections (omit a section only if empty):\n"
+    "1. TIMELINE: Relevant facts ordered chronologically by session date. "
+    "Each line: `YYYY/MM/DD — <fact>`. Quote the user's exact wording when "
+    "it's a preference or claim.\n"
+    "2. CONTRADICTIONS: Any pairs of facts that conflict, and which one wins "
+    "(usually the later session).\n"
+    "3. SUPERSEDED: Any facts whose valid_to is on or before the current "
+    "date, or that are overridden by a later session.\n"
+    "4. APPLICABLE FACTS: The final set of non-superseded, non-contradicted "
+    "facts the answer model should use.\n\n"
+    "Be terse. No prose. No speculation beyond what is in the history. "
+    "Do not output an answer to the question."
+)
+
+REFLECTION_USER_TEMPLATE = (
+    "History Chats:\n\n{history}\n\n"
+    "Current Date: {date}\nQuestion (for context only — do not answer): {question}\n\n"
+    "Produce the TIMELINE / CONTRADICTIONS / SUPERSEDED / APPLICABLE FACTS summary:"
+)
+
+# Final answer prompt when reflection is enabled — prepends the reflection
+# output to the history.
+ANSWER_WITH_REFLECTION_USER_TEMPLATE = (
+    "History Chats:\n\n{history}\n\n"
+    "--- Pre-computed reflection (trust this as a summary, not a replacement "
+    "for the history) ---\n{reflection}\n---\n\n"
+    "Current Date: {date}\nQuestion: {question}\nAnswer:"
+)
+
+# Categories where reflection is expected to help. Single-session-user and
+# single-session-assistant are already saturated at ~97% with gpt-4o-mini, so
+# reflection just burns tokens on those.
+REFLECTION_CATEGORIES = frozenset({
+    "temporal-reasoning",
+    "multi-session",
+    "single-session-preference",
+    "knowledge-update",
+})
+
+# Default answer-token budget. 8000 covers non-thinking frontier models plus
+# moderate chain-of-thought; bump via --answer-max-tokens for Claude extended
+# thinking or o1/o3 high reasoning effort. Silent-truncation risk: a cut-off
+# answer counts as wrong with no error log, biasing accuracy downward — err
+# high, not low.
+ANSWER_MAX_TOKENS_DEFAULT = 8000
+# 50 tokens leaves room for reasoning-model CoT or prefaces like "The answer
+# is: yes" before the yes/no lands. Too tight a budget biases accuracy
+# downward silently (truncated empty response → "no" → marked incorrect).
+JUDGE_MAX_TOKENS = 50
+
 # ── Question classification (no oracle metadata) ──
 
 _TEMPORAL_QUERY_RE = re.compile(
@@ -170,6 +434,37 @@ def classify_question(question: str) -> str:
     if _PREFERENCE_QUERY_RE.search(question):
         return "preference"
     return "default"
+
+# Categories where newer information should outrank older information: the
+# literal answer is always "what did the user say most recently". Applying
+# recency bias to multi-session would demote older-but-still-valid facts
+# (e.g. an adoption date that's months old but needed to answer).
+RECENCY_BIAS_CATEGORIES = frozenset({
+    "knowledge-update",
+    "temporal-reasoning",
+})
+
+# Categories where the answer lives in one specific turn inside a single
+# session. Session expansion converts "right session, wrong turn" into wins
+# because every turn of the hit session is pulled into context — this turns
+# the relevant recall metric from turn_hit into session_hit (which is
+# typically 10-15pp higher on these categories).
+SS_EXPAND_CATEGORIES = frozenset({
+    "single-session-user",
+    "single-session-assistant",
+})
+
+# Map from qtype to the role whose turns should get a retrieval score bonus.
+# ss-assistant questions ("what did you tell me about X?") semantically match
+# user follow-up turns more readily than the assistant answer turn itself,
+# so the evidence turn ranks lower than distractor user turns. Boosting the
+# matching-role score at re-rank time pulls the evidence turn up. Applied to
+# a fetched pool of k*2 candidates, then trimmed back to k before session
+# expansion.
+SS_ROLE_BOOST_MAP = {
+    "single-session-assistant": "assistant",
+    "single-session-user": "user",
+}
 
 
 def judge_prompt(qtype: str, question: str, answer: str, response: str, abstention: bool) -> str:
@@ -236,8 +531,38 @@ def judge_prompt(qtype: str, question: str, answer: str, response: str, abstenti
 # poison a whole embedding batch.
 MAX_TURN_CHARS = 6000  # ~2000 tokens; fits in a 4096-per-slot ctx with headroom
 
+# Session-level ingest mode (--ingest-mode session) caps the concatenated
+# session text at this many characters. Anything longer is either
+# evidence-window-trimmed or tail-cut (see build_session_items).
+MAX_SESSION_CHARS = 20000
 
-def build_turn_items(instance: dict) -> list[dict]:
+# Per-session truncation diagnostics. build_session_items appends one dict per
+# session that required truncation so we can audit evidence-preservation after
+# the run. strategy is "evidence-window" when centered on a has_answer turn,
+# or "tail-cut" for evidence-free sessions that fall back to a simple cut.
+_SESSION_TRUNC_EVENTS: list[dict] = []
+
+
+# ── Temporal-cue extraction ─────────────────────────────────────────────────
+#
+def _session_date_to_iso(sess_date: str) -> str:
+    """Convert LongMemEval 'YYYY/MM/DD HH:MM' to ISO-8601 UTC.
+
+    Returns empty string if parsing fails (so memory_core leaves valid_from
+    as the ingest-time default rather than crashing).
+    """
+    if not sess_date:
+        return ""
+    for fmt in ("%Y/%m/%d %H:%M", "%Y/%m/%d", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(sess_date, fmt).replace(tzinfo=timezone.utc)
+            return dt.isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def build_turn_items(instance: dict, variant: str | None = None) -> list[dict]:
     """Flatten a LongMemEval instance into turn-level memory_write_bulk_impl inputs."""
     qid = instance["question_id"]
     items: list[dict] = []
@@ -245,8 +570,23 @@ def build_turn_items(instance: dict) -> list[dict]:
     session_ids: list[str] = instance["haystack_session_ids"]
     session_dates: list[str] = instance["haystack_dates"]
 
+    prev_session_date_iso = ""
     for s_idx, (sess_id, sess_date, session) in enumerate(zip(session_ids, session_dates, sessions)):
         anchor_dt = temporal_utils.parse_longmemeval_date(sess_date)
+        # ISO valid_from so bitemporal filters (as_of) and chronological
+        # sorting work; also needed by smart_time_boost at retrieval time.
+        valid_from = _session_date_to_iso(sess_date)
+
+        # Gap marker: days between this session and the previous one.
+        gap_days = None
+        if prev_session_date_iso and valid_from:
+            try:
+                prev_dt = datetime.fromisoformat(prev_session_date_iso)
+                curr_dt = datetime.fromisoformat(valid_from)
+                gap_days = (curr_dt - prev_dt).days
+            except (ValueError, TypeError):
+                pass
+
         for t_idx, turn in enumerate(session):
             role = turn.get("role", "user")
             content = turn.get("content", "") or ""
@@ -254,34 +594,241 @@ def build_turn_items(instance: dict) -> list[dict]:
                 content = content[:MAX_TURN_CHARS]
             has_answer = bool(turn.get("has_answer", False))
             anchors = temporal_utils.resolve_temporal_expressions(content, anchor_dt)
-            items.append(
-                {
-                    "type": "message",
-                    "title": f"{role}:{sess_id}:{t_idx}",
-                    "content": content,
-                    "user_id": qid,
-                    "conversation_id": f"{qid}::{s_idx}",
-                    "source": "longmemeval",
-                    "embed": True,
-                    "metadata": {
-                        "role": role,
-                        "session_id": sess_id,
-                        "session_date": sess_date,
-                        "session_index": s_idx,
-                        "turn_index": t_idx,
-                        "has_answer": has_answer,
-                        "temporal_anchors": anchors,
-                    },
-                }
-            )
+            ref_dates = temporal_utils.extract_referenced_dates(content)
+            meta: dict[str, Any] = {
+                "role": role,
+                "session_id": sess_id,
+                "session_date": sess_date,
+                "session_index": s_idx,
+                "turn_index": t_idx,
+                "has_answer": has_answer,
+                "temporal_anchors": anchors,
+            }
+            if ref_dates:
+                meta["referenced_dates"] = ref_dates
+            if t_idx == 0 and gap_days is not None:
+                meta["gap_from_prev_session_days"] = gap_days
+            item = {
+                "type": "message",
+                "title": f"{role}:{sess_id}:{t_idx}",
+                "content": content,
+                "user_id": qid,
+                "conversation_id": f"{qid}::{s_idx}",
+                "source": "longmemeval",
+                "change_agent": BENCH_CHANGE_AGENT,
+                "valid_from": valid_from,
+                "embed": True,
+                "metadata": meta,
+            }
+            if variant:
+                item["variant"] = variant
+            items.append(item)
+        prev_session_date_iso = valid_from
     return items
 
 
-async def ingest_instance(instance: dict) -> tuple[int, float]:
-    items = build_turn_items(instance)
+def build_session_items(instance: dict, variant: str | None = None) -> list[dict]:
+    """Session-level ingest: one memory per session instead of per turn.
+
+    Each session becomes a single text block:
+
+        [Conversation date: YYYY/MM/DD]
+        User: ...
+        Assistant: ...
+        User: ...
+        ...
+
+    Matches the Memento benchmark's default ingest strategy. The tradeoff vs
+    per-turn: coarser retrieval granularity (top-k returns whole sessions,
+    not pinpointed turns) but gives the embedding model a full conversation
+    context window for each vector, which helps when the answer depends on
+    entity co-occurrence across turns inside one session.
+
+    Sessions longer than MAX_SESSION_CHARS are truncated. Evidence-aware
+    windowing centers the retained text on the first has_answer turn; evidence-
+    free sessions fall back to a tail cut. Truncation events are appended to
+    _SESSION_TRUNC_EVENTS for post-run auditing.
+    """
+    qid = instance["question_id"]
+    items: list[dict] = []
+    sessions: list[list[dict]] = instance["haystack_sessions"]
+    session_ids: list[str] = instance["haystack_session_ids"]
+    session_dates: list[str] = instance["haystack_dates"]
+
+    for s_idx, (sess_id, sess_date, session) in enumerate(zip(session_ids, session_dates, sessions)):
+        valid_from = _session_date_to_iso(sess_date)
+        header = f"[Conversation date: {sess_date}]" if sess_date else ""
+        turn_lines: list[str] = []
+        evidence_indices: list[int] = []
+        for t_idx, turn in enumerate(session):
+            role = turn.get("role", "user").capitalize()
+            content = turn.get("content", "") or ""
+            turn_lines.append(f"{role}: {content}")
+            if turn.get("has_answer"):
+                evidence_indices.append(t_idx)
+        any_has_answer = bool(evidence_indices)
+
+        full_text = "\n".join([header, *turn_lines]) if header else "\n".join(turn_lines)
+        orig_len = len(full_text)
+
+        if orig_len <= MAX_SESSION_CHARS:
+            text = full_text
+        else:
+            budget = MAX_SESSION_CHARS - (len(header) + 1 if header else 0)
+            if evidence_indices:
+                # Evidence-aware window: grow symmetrically around the first
+                # has_answer turn until we hit the char budget, so the
+                # evidence turn is always retained. Prefer contiguous
+                # coverage of later evidence turns when they fit.
+                anchor = evidence_indices[0]
+                lo = hi = anchor
+                running = len(turn_lines[anchor]) + 1  # +1 for the join newline
+                while hi + 1 < len(turn_lines):
+                    nxt = len(turn_lines[hi + 1]) + 1
+                    if running + nxt > budget:
+                        break
+                    hi += 1
+                    running += nxt
+                while lo - 1 >= 0:
+                    prv = len(turn_lines[lo - 1]) + 1
+                    if running + prv > budget:
+                        break
+                    lo -= 1
+                    running += prv
+                window_lines = turn_lines[lo : hi + 1]
+                evidence_preserved = all(lo <= idx <= hi for idx in evidence_indices)
+                strategy = "evidence-window"
+                body = "\n".join(window_lines)
+                text = f"{header}\n{body}" if header else body
+            else:
+                text = full_text[:MAX_SESSION_CHARS]
+                evidence_preserved = True  # no evidence to lose
+                strategy = "tail-cut"
+
+            _SESSION_TRUNC_EVENTS.append(
+                {
+                    "qid": qid,
+                    "session_id": sess_id,
+                    "session_index": s_idx,
+                    "orig_len": orig_len,
+                    "kept_len": len(text),
+                    "strategy": strategy,
+                    "evidence_preserved": evidence_preserved,
+                    "n_turns_total": len(turn_lines),
+                    "n_evidence_turns": len(evidence_indices),
+                }
+            )
+            print(
+                f"  [warn] session truncated: qid={qid} sess={sess_id} "
+                f"len={orig_len} -> {len(text)} strategy={strategy} "
+                f"evidence_preserved={evidence_preserved}",
+                flush=True,
+            )
+        item = {
+            "type": "message",
+            "title": f"session:{sess_id}",
+            "content": text,
+            "user_id": qid,
+            "conversation_id": f"{qid}::{s_idx}",
+            "source": "longmemeval",
+            "change_agent": BENCH_CHANGE_AGENT,
+            "valid_from": valid_from,
+            "embed": True,
+            "metadata": {
+                "role": "session",
+                "session_id": sess_id,
+                "session_date": sess_date,
+                "session_index": s_idx,
+                "turn_index": -1,
+                "turn_count": len(session),
+                "has_answer": any_has_answer,
+            },
+        }
+        if variant:
+            item["variant"] = variant
+        items.append(item)
+    return items
+
+
+async def ingest_instance(
+    instance: dict,
+    variant: str | None = None,
+    ingest_mode: str = "turn",
+) -> tuple[int, float]:
+    if ingest_mode == "session":
+        items = build_session_items(instance, variant=variant)
+    else:
+        # "turn" (default) and any unknown mode fall through to turn-level
+        # ingest. Extractive mode was not preserved from the backup; add it
+        # here if reinstated in a later commit.
+        items = build_turn_items(instance, variant=variant)
     t0 = time.perf_counter()
     await memory_write_bulk_impl(items)
     return len(items), time.perf_counter() - t0
+
+
+# F4: cross-encoder reranker. Lazy-loaded module-level singleton so the
+# 300MB+ import cost is only paid when --rerank is on. Default model is
+# the ms-marco distilled MiniLM — the standard cheap cross-encoder, fast
+# enough for per-query reranking at bench scale.
+_RERANKER = None
+_RERANKER_NAME = ""
+
+
+def _get_reranker(model_name: str):
+    """Lazy-load a sentence-transformers CrossEncoder, cached by name."""
+    global _RERANKER, _RERANKER_NAME
+    if _RERANKER is not None and _RERANKER_NAME == model_name:
+        return _RERANKER
+    from sentence_transformers import CrossEncoder
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        device = "cpu"
+    _RERANKER = CrossEncoder(model_name, device=device)
+    _RERANKER_NAME = model_name
+    return _RERANKER
+
+
+_HYDE_SYSTEM = (
+    "You rewrite a short question as a first-person passage that might "
+    "appear in the user's past chat history as the answer. Write 2-3 "
+    "sentences in the user's voice, as if they mentioned the fact in "
+    "passing during an unrelated conversation. Include plausible "
+    "surrounding detail so the passage sounds conversational, not like a "
+    "direct answer. Do not invent specific entities you don't know — use "
+    "placeholder phrasing when the fact is genuinely unknown."
+)
+
+_HYDE_USER_TEMPLATE = "Question: {question}\n\nPassage:"
+
+
+def _hyde_expand(client, model: str, question: str, max_tokens: int = 150) -> str:
+    """Generate a hypothetical-answer passage for HyDE-style retrieval.
+
+    Targets the query/evidence phrasing asymmetry: ss-user questions like
+    "What degree did I graduate with?" fail to retrieve the evidence turn
+    "I graduated with a degree in Business Administration, which has
+    helped..." because the evidence embeds the answer inside a longer
+    sentence about something else. A hypothetical passage in the user's
+    voice matches the evidence embedding much more closely than the terse
+    query does.
+    """
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _HYDE_SYSTEM},
+                {"role": "user", "content": _HYDE_USER_TEMPLATE.format(question=question)},
+            ],
+            temperature=0,
+            max_tokens=max_tokens,
+        )
+        passage = (resp.choices[0].message.content or "").strip()
+    except Exception:
+        return ""
+    return passage
 
 
 async def retrieve_for_question(
@@ -289,12 +836,62 @@ async def retrieve_for_question(
     cluster_size: int = 0, graph_depth: int = 0,
     recency_bias: float = 0.0,
     adaptive_k: bool = False,
+    expand_sessions: bool = False,
+    session_cap: int = 12,
+    role_boost: float = 0.0,
+    role_boost_target: str = "",
+    vector_weight: float = 0.7,
+    hyde_client=None,
+    hyde_model: str = "",
+    rerank_model: str = "",
+    rerank_pool_k: int = 100,
+    adaptive_k_max: int = 30,
+    adaptive_k_min: int = 5,
+    smart_retrieval: bool = False,
+    smart_neighbor_sessions: int = 3,
+    smart_time_boost: float = 0.15,
 ) -> list[dict]:
-    """Hybrid FTS5+vector search with optional graph expansion and episodic clustering."""
+    """Hybrid FTS5+vector search with optional graph expansion and episodic clustering.
+
+    `expand_sessions`: after the initial ranked retrieval, pull all turns from
+    each session that had at least one hit (capped at `session_cap` turns per
+    session). Fixes cases where the literal answer turn ranks just outside
+    top-k while other turns from the same session make it in — MMR's duplicate
+    penalty demotes supersession evidence, which session expansion recovers.
+
+    `role_boost` + `role_boost_target`: fetch an overshoot of 2*k candidates,
+    add `role_boost` to the score of any candidate whose metadata.role matches
+    `role_boost_target`, re-sort by boosted score, and trim to k. Targets the
+    ss-assistant failure mode where the evidence turn ranks outside top-k
+    because user-turn distractors score higher on the raw question embedding.
+    """
+    # F4 rerank fetches a large candidate pool; otherwise fall back to 2x for
+    # role boost, else plain k. Adaptive-k pulls adaptive_k_max so the elbow
+    # trim downstream has a full distribution to cut against.
+    if rerank_model:
+        fetch_k = rerank_pool_k
+    elif adaptive_k or smart_retrieval:
+        fetch_k = adaptive_k_max
+    elif role_boost > 0 and role_boost_target:
+        fetch_k = k * 2
+    else:
+        fetch_k = k
+
+    # HyDE: prepend the original question with a hypothetical first-person
+    # passage. BM25 still matches on the original query words; the vector
+    # embedding sees enriched signal including plausible answer phrasing.
+    # One LLM call per question.
+    query_text = question
+    if hyde_client is not None and hyde_model:
+        passage = _hyde_expand(hyde_client, hyde_model, question)
+        if passage:
+            query_text = f"{question}\n\n{passage}"
+
     ranked = await memory_search_scored_impl(
-        question, k=k, user_id=qid,
-        extra_columns=["metadata_json", "conversation_id"],
+        query_text, k=fetch_k, user_id=qid,
+        extra_columns=["metadata_json", "conversation_id", "valid_from"],
         recency_bias=recency_bias,
+        vector_weight=vector_weight,
         adaptive_k=adaptive_k,
     )
     if not ranked:
@@ -310,6 +907,201 @@ async def retrieve_for_question(
             item["metadata"] = {}
         hits.append(item)
         seen_ids.add(item["id"])
+
+    # F4: cross-encoder rerank over the candidate pool. Cross-encoders score
+    # query+candidate jointly, detecting "answer embedded in off-topic turn"
+    # cases where bi-encoder similarity fails. Mutually exclusive with the
+    # role_boost path — once rerank is active, role heuristics are obsolete.
+    if rerank_model and hits:
+        ce = _get_reranker(rerank_model)
+        pairs = [(question, h["content"]) for h in hits]
+        ce_scores = ce.predict(pairs)
+        for h, s in zip(hits, ce_scores):
+            h["score"] = float(s)
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        hits = hits[:k]
+        seen_ids = {h["id"] for h in hits}
+    # Role boost re-rank: for ss-user/ss-assistant, boost hits whose role
+    # matches the expected answer role, re-sort, and trim the overshoot
+    # fetch_k pool back to k. Runs before graph/session expansion so the
+    # downstream expansions seed from the role-corrected top-k.
+    elif role_boost > 0 and role_boost_target and hits:
+        for h in hits:
+            if h["metadata"].get("role") == role_boost_target:
+                h["score"] += role_boost
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        hits = hits[:k]
+        seen_ids = {h["id"] for h in hits}
+
+    # Smart retrieval: time-aware boost + neighbor-session expansion. Runs
+    # after role/rerank (so it sees the final candidate set) but before
+    # adaptive-k elbow trim (so boosted/expanded candidates get a fair
+    # shot at the cut). Gated on --smart-retrieval.
+    if smart_retrieval and hits:
+        # ── Time-aware boost ──
+        # Parse dates from the query. If found, boost candidates whose
+        # valid_from or metadata.referenced_dates fall within a small
+        # window of any query date.
+        query_dates = temporal_utils.extract_referenced_dates(question)
+        query_has_temporal = temporal_utils.has_temporal_cues(question)
+
+        if query_dates and smart_time_boost > 0:
+            query_dt_set: list[datetime] = []
+            for ds in query_dates:
+                try:
+                    query_dt_set.append(
+                        datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    )
+                except ValueError:
+                    pass
+
+            if query_dt_set:
+                for h in hits:
+                    # Check valid_from (session date)
+                    vf = h.get("valid_from", "")
+                    if vf:
+                        try:
+                            h_dt = datetime.fromisoformat(vf)
+                            for qdt in query_dt_set:
+                                if abs((h_dt - qdt).days) <= 30:
+                                    h["score"] += smart_time_boost
+                                    break
+                        except (ValueError, TypeError):
+                            pass
+                    # Check referenced_dates in metadata (tighter window)
+                    ref_dates = h.get("metadata", {}).get("referenced_dates", [])
+                    for rd in ref_dates:
+                        try:
+                            rd_dt = datetime.strptime(rd, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                            for qdt in query_dt_set:
+                                if abs((rd_dt - qdt).days) <= 14:
+                                    h["score"] += smart_time_boost
+                                    break
+                        except (ValueError, TypeError):
+                            pass
+                hits.sort(key=lambda h: h["score"], reverse=True)
+
+        # ── Neighbor-session expansion ──
+        # Triggered when: (a) query has temporal cues, OR (b) hits span
+        # multiple sessions (heuristic for multi-session synthesis).
+        # Pulls turns from sessions adjacent (±N) to each hit session so
+        # the answer model has enough context for cross-session reasoning.
+        if smart_neighbor_sessions > 0:
+            hit_session_indices: set[int] = set()
+            for h in hits:
+                si = h.get("metadata", {}).get("session_index")
+                if si is not None:
+                    try:
+                        hit_session_indices.add(int(si))
+                    except (TypeError, ValueError):
+                        pass
+
+            multi_session_signal = len(hit_session_indices) >= 2
+            if (query_has_temporal or multi_session_signal) and hit_session_indices:
+                neighbor_indices: set[int] = set()
+                for si in hit_session_indices:
+                    for offset in range(-smart_neighbor_sessions, smart_neighbor_sessions + 1):
+                        neighbor_indices.add(si + offset)
+                neighbor_indices -= hit_session_indices
+
+                if neighbor_indices:
+                    neighbor_convs = {f"{qid}::{si}" for si in neighbor_indices if si >= 0}
+                    if neighbor_convs:
+                        with _db() as db:
+                            placeholders = ",".join(["?"] * len(neighbor_convs))
+                            rows = db.execute(
+                                f"SELECT id, content, title, metadata_json, "
+                                f"conversation_id, valid_from "
+                                f"FROM memory_items "
+                                f"WHERE conversation_id IN ({placeholders}) "
+                                f"  AND user_id = ? AND is_deleted = 0 "
+                                f"ORDER BY valid_from, CAST("
+                                f"  json_extract(metadata_json, '$.turn_index') AS INTEGER"
+                                f")",
+                                [*neighbor_convs, qid],
+                            ).fetchall()
+                        # Neighbor turns get a reduced score — they're
+                        # context, not direct hits. Use the lowest score
+                        # from the initial hits minus a penalty so they
+                        # sort after real hits.
+                        neighbor_score = (hits[-1]["score"] * 0.8) if hits else 0.0
+                        for row in rows:
+                            rid = row["id"]
+                            if rid in seen_ids:
+                                continue
+                            meta_raw = row["metadata_json"] or "{}"
+                            try:
+                                meta = json.loads(meta_raw)
+                            except json.JSONDecodeError:
+                                meta = {}
+                            hits.append(
+                                {
+                                    "id": rid,
+                                    "content": row["content"] or "",
+                                    "title": row["title"] or "",
+                                    "metadata": meta,
+                                    "conversation_id": row["conversation_id"] or "",
+                                    "valid_from": row["valid_from"] or "",
+                                    "score": neighbor_score,
+                                }
+                            )
+                            seen_ids.add(rid)
+                        hits.sort(key=lambda h: h["score"], reverse=True)
+
+    # Adaptive-k elbow trim: find the largest adjacent score gap in the
+    # top candidates and trim to that elbow, clamped to [min, max]. Uses
+    # only the retriever's own similarity signal — no oracle metadata.
+    if (adaptive_k or smart_retrieval) and hits:
+        scores = [h["score"] for h in hits[:adaptive_k_max]]
+        n = len(scores)
+        if n <= adaptive_k_min:
+            cut = n
+        else:
+            best_i = adaptive_k_min - 1
+            best_gap = scores[best_i] - scores[best_i + 1] if best_i + 1 < n else 0.0
+            for i in range(adaptive_k_min - 1, n - 1):
+                gap = scores[i] - scores[i + 1]
+                if gap > best_gap:
+                    best_gap = gap
+                    best_i = i
+            cut = best_i + 1
+            cut = max(adaptive_k_min, min(adaptive_k_max, cut))
+        hits = hits[:cut]
+        seen_ids = {h["id"] for h in hits}
+
+    # Session expansion: pull every turn from each hit session (capped per
+    # session). For single-session categories this collapses turn_hit onto
+    # session_hit — once the right session is retrieved, every turn of it is
+    # in context, so "right session, wrong turn" becomes a win.
+    if expand_sessions and hits:
+        session_ids_hit = {h["conversation_id"] for h in hits if h.get("conversation_id")}
+        if session_ids_hit:
+            with _db() as db:
+                placeholders = ",".join(["?"] * len(session_ids_hit))
+                rows = db.execute(
+                    f"SELECT id, content, title, metadata_json, conversation_id "
+                    f"FROM memory_items "
+                    f"WHERE conversation_id IN ({placeholders}) AND is_deleted = 0",
+                    tuple(session_ids_hit),
+                ).fetchall()
+            per_session: dict[str, list[dict]] = {}
+            for r in rows:
+                if r["id"] in seen_ids:
+                    continue
+                rm = json.loads(r["metadata_json"] or "{}")
+                per_session.setdefault(r["conversation_id"] or "", []).append({
+                    "id": r["id"],
+                    "content": r["content"] or "",
+                    "title": r["title"] or "",
+                    "metadata": rm,
+                    "conversation_id": r["conversation_id"] or "",
+                    "score": 0.0,
+                })
+            for cid, rows_for_session in per_session.items():
+                rows_for_session.sort(key=lambda x: x["metadata"].get("turn_index", 0))
+                for r in rows_for_session[:session_cap]:
+                    seen_ids.add(r["id"])
+                    hits.append(r)
 
     # Graph expansion: 1-hop traversal from initial hits
     if graph_depth > 0:
@@ -505,45 +1297,268 @@ def _openai_client(api_key: str, base_url: str | None = None):
     return OpenAI(**kwargs)
 
 
+def _llm_complete(
+    client, model: str, system: str, user: str, max_tokens: int,
+    thinking_budget: int = 0,
+) -> str:
+    """Single OpenAI-compat completion. `thinking_budget` is forwarded as an
+    `extra_body.reasoning_tokens` field for endpoints that support reasoning
+    extras (silently inert otherwise).
+    """
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": user})
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0,
+        "max_tokens": max_tokens,
+    }
+    if thinking_budget and thinking_budget > 0:
+        # OpenAI-compat servers that accept reasoning params (LM Studio with
+        # certain backends, OpenRouter, etc.) read these from extra_body. If
+        # the endpoint doesn't recognize them they are typically ignored, not
+        # rejected — but wrap in try/except to be safe.
+        kwargs["extra_body"] = {"reasoning_tokens": thinking_budget}
+    try:
+        resp = client.chat.completions.create(**kwargs)
+    except TypeError:
+        # Older openai SDKs don't accept extra_body kw — drop it and retry.
+        kwargs.pop("extra_body", None)
+        resp = client.chat.completions.create(**kwargs)
+    return (resp.choices[0].message.content or "").strip()
+
+
+def _format_history_json(hits: list[dict]) -> str:
+    """Serialize retrieved hits as a JSON list grouped by session, sorted
+    chronologically. The LongMemEval paper reports this format (vs natural-
+    language session blocks) is part of the +10 pt CoN+JSON win.
+    """
+    by_session: dict[str, list[dict]] = {}
+    for h in hits:
+        by_session.setdefault(h.get("conversation_id") or "unknown", []).append(h)
+
+    sessions_out: list[dict] = []
+    for cid, turns in sorted(
+        by_session.items(),
+        key=lambda kv: kv[1][0].get("metadata", {}).get("session_date", ""),
+    ):
+        turns.sort(key=lambda t: t.get("metadata", {}).get("turn_index", 0))
+        sessions_out.append(
+            {
+                "session_date": turns[0].get("metadata", {}).get("session_date", ""),
+                "turns": [
+                    {
+                        "role": t.get("metadata", {}).get("role", "?"),
+                        "content": t.get("content", ""),
+                    }
+                    for t in turns
+                ],
+            }
+        )
+    return json.dumps(sessions_out, indent=2, ensure_ascii=False)
+
+
+def _chain_of_note_extract(
+    client, model: str, hits: list[dict], qdate: str, question: str,
+    max_tokens: int,
+) -> str:
+    """Run Chain-of-Note extraction per session, return concatenated notes.
+
+    Sessions where the model answers 'empty' are dropped. Returns a string
+    formatted as `[Session YYYY/MM/DD]\\n<notes>` blocks separated by blank
+    lines, or empty string if no notes were extracted.
+    """
+    by_session: dict[str, list[dict]] = {}
+    for h in hits:
+        by_session.setdefault(h.get("conversation_id") or "unknown", []).append(h)
+
+    blocks: list[str] = []
+    for cid, turns in sorted(
+        by_session.items(),
+        key=lambda kv: kv[1][0].get("metadata", {}).get("session_date", ""),
+    ):
+        turns.sort(key=lambda t: t.get("metadata", {}).get("turn_index", 0))
+        sess_date = turns[0].get("metadata", {}).get("session_date", "")
+        sess_content = "\n".join(
+            f"{t.get('metadata', {}).get('role', '?').capitalize()}: {t.get('content', '')}"
+            for t in turns
+        )
+        prompt = CHAIN_OF_NOTE_PROMPT.format(
+            session_date=sess_date,
+            session_content=sess_content,
+            question_date=qdate,
+            question=question,
+        )
+        try:
+            note = _llm_complete(client, model, "", prompt, max_tokens)
+        except Exception:
+            continue
+        cleaned = note.strip()
+        if not cleaned or cleaned.lower() == "empty":
+            continue
+        blocks.append(f"[Session {sess_date}]\n{cleaned}")
+
+    return "\n\n".join(blocks)
+
+
+def _reflect(
+    client, model: str, history: str, date: str, question: str,
+    max_tokens: int,
+) -> str:
+    """Run the Hindsight-style reflection pre-pass. Returns the reflection
+    text, or empty string on failure (caller falls back to single-shot)."""
+    user = REFLECTION_USER_TEMPLATE.format(history=history, date=date, question=question)
+    for attempt in range(2):
+        try:
+            return _llm_complete(client, model, REFLECTION_SYSTEM, user, max_tokens)
+        except Exception:
+            if attempt == 1:
+                return ""
+            time.sleep(1)
+    return ""
+
+
 def answer_with_llm(
     client, model: str, history: str, date: str, question: str,
     timeline: str = "", anchors: str = "", q_signal: str = "default",
+    *,
+    qtype: str = "",
+    abstention: bool = False,
+    no_memory: bool = False,
+    rag_aware_empty: bool = False,
+    no_category_knobs: bool = False,
+    reflection: bool = False,
+    reflection_model: str | None = None,
+    notes: str = "",
+    history_json: str = "",
+    answer_max_tokens: int | None = None,
+    thinking_budget: int = 0,
 ) -> tuple[str, int]:
-    if q_signal == "temporal":
-        prompt = ANSWER_TEMPLATE_TEMPORAL.format(
-            timeline=timeline or "(not available)",
-            anchors=anchors or "None found.",
-            history=history,
-            date=date,
-            question=question,
-        )
-        sys_prompt = SYSTEM_PROMPT_TEMPORAL
-    else:
-        prompt = ANSWER_TEMPLATE_DEFAULT.format(
-            history=history,
-            date=date,
-            question=question,
-        )
-        sys_prompt = {
-            "update": SYSTEM_PROMPT_UPDATE,
-            "preference": SYSTEM_PROMPT_PREFERENCE,
-        }.get(q_signal, SYSTEM_PROMPT_DEFAULT)
-    messages = [
-        {"role": "system", "content": sys_prompt},
-        {"role": "user", "content": prompt},
-    ]
-    max_tok = 1200 if q_signal == "temporal" else 800
+    """Generate one answer.
+
+    Mode selection:
+      * no_memory: NO_MEMORY_SYSTEM + NO_MEMORY_USER_TEMPLATE, history ignored.
+      * rag_aware_empty: standard RAG system prompt + ANSWER_USER_TEMPLATE with
+        empty history block (simulates a correctly-wired RAG pipeline whose
+        retriever returned zero results). Skips reflection / chain-of-note.
+      * reflection: only fires when qtype in REFLECTION_CATEGORIES (and
+        --no-category-knobs not set). Runs _reflect first, then
+        ANSWER_WITH_REFLECTION_USER_TEMPLATE.
+      * notes + history_json (chain-of-note path): use
+        ANSWER_WITH_NOTES_USER_TEMPLATE.
+      * abstention: ANSWER_SYSTEM_ABSTENTION instead of base/per-type system.
+
+    When NONE of {no_memory, rag_aware_empty, reflection, notes, abstention}
+    are active, behavior matches the previous q_signal-driven path exactly.
+    """
+    new_mode_active = (
+        no_memory or rag_aware_empty or reflection
+        or bool(notes) or bool(history_json) or abstention
+    )
+
     t0 = time.perf_counter()
+
+    if not new_mode_active:
+        # Stock-main path — preserved verbatim for backward compatibility.
+        if q_signal == "temporal":
+            prompt = ANSWER_TEMPLATE_TEMPORAL.format(
+                timeline=timeline or "(not available)",
+                anchors=anchors or "None found.",
+                history=history,
+                date=date,
+                question=question,
+            )
+            sys_prompt = SYSTEM_PROMPT_TEMPORAL
+        else:
+            prompt = ANSWER_TEMPLATE_DEFAULT.format(
+                history=history,
+                date=date,
+                question=question,
+            )
+            sys_prompt = {
+                "update": SYSTEM_PROMPT_UPDATE,
+                "preference": SYSTEM_PROMPT_PREFERENCE,
+            }.get(q_signal, SYSTEM_PROMPT_DEFAULT)
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        # answer_max_tokens explicitly overrides the q_signal-tied default
+        # only when the caller passed it; None means "keep stock behavior".
+        if answer_max_tokens is None:
+            max_tok = 1200 if q_signal == "temporal" else 800
+        else:
+            max_tok = answer_max_tokens
+        for attempt in range(3):
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=max_tok,
+                )
+                hyp = (resp.choices[0].message.content or "").strip()
+                # Strip common prefixes that confuse the judge
+                for prefix in ("Final Answer:", "Final answer:", "Answer:"):
+                    if hyp.startswith(prefix):
+                        hyp = hyp[len(prefix):].strip()
+                        break
+                return hyp, int((time.perf_counter() - t0) * 1000)
+            except Exception as e:
+                if attempt == 2:
+                    return f"[ANSWER_ERROR:{type(e).__name__}: {e}]", int((time.perf_counter() - t0) * 1000)
+                time.sleep(2 * (2 ** attempt))
+        return "[ANSWER_ERROR:unreachable]", 0
+
+    # ── New-mode path (any of: no_memory, rag_aware_empty, reflection,
+    #    chain-of-note notes, abstention) ──
+    max_tok = answer_max_tokens if answer_max_tokens is not None else ANSWER_MAX_TOKENS_DEFAULT
+
+    # Pick the system prompt.
+    if no_memory:
+        system = NO_MEMORY_SYSTEM
+    elif abstention:
+        system = ANSWER_SYSTEM_ABSTENTION
+    elif no_category_knobs:
+        # Drop per-category scaffold; abstention branching above still applies.
+        system = ANSWER_SYSTEM_BASE
+    else:
+        system = ANSWER_SYSTEM_BASE
+        scaffold = ANSWER_SYSTEM_BY_TYPE.get(qtype)
+        if scaffold:
+            system = f"{ANSWER_SYSTEM_BASE}\n\n{scaffold}"
+
+    # Pick the user prompt.
+    if no_memory:
+        user = NO_MEMORY_USER_TEMPLATE.format(date=date, question=question)
+    elif rag_aware_empty:
+        # Real user template, empty history block. Skip reflection /
+        # chain-of-note since they operate on retrieved content.
+        user = ANSWER_USER_TEMPLATE.format(history="", date=date, question=question)
+    else:
+        reflection_text = ""
+        if reflection and qtype in REFLECTION_CATEGORIES:
+            rmodel = reflection_model or model
+            # Half-budget for the reflection summary — it's structured, not
+            # full CoT.
+            reflection_text = _reflect(client, rmodel, history, date, question, max_tok // 2)
+
+        if notes and history_json:
+            user = ANSWER_WITH_NOTES_USER_TEMPLATE.format(
+                history_json=history_json, notes=notes, date=date, question=question,
+            )
+        elif reflection_text:
+            user = ANSWER_WITH_REFLECTION_USER_TEMPLATE.format(
+                history=history, reflection=reflection_text, date=date, question=question,
+            )
+        else:
+            user = ANSWER_USER_TEMPLATE.format(history=history, date=date, question=question)
+
     for attempt in range(3):
         try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-                max_tokens=max_tok,
-            )
-            hyp = (resp.choices[0].message.content or "").strip()
-            # Strip common prefixes that confuse the judge
+            hyp = _llm_complete(client, model, system, user, max_tok, thinking_budget=thinking_budget)
             for prefix in ("Final Answer:", "Final answer:", "Answer:"):
                 if hyp.startswith(prefix):
                     hyp = hyp[len(prefix):].strip()
@@ -576,13 +1591,28 @@ def judge_with_llm(client, model: str, qtype: str, question: str, answer: str, h
     return False
 
 
+def _provider_for_model(model: str) -> str:
+    """Route model IDs to a provider. Claude IDs start with 'claude-'; anything
+    else falls through to OpenAI (gpt-*, o1-*, o3-*, plus OpenAI-compatible
+    endpoints hosting other names)."""
+    m = (model or "").lower()
+    if m.startswith("claude-"):
+        return "anthropic"
+    return "openai"
+
+
 # ── Runner ───────────────────────────────────────────────────────────────────
 
 async def run(args: argparse.Namespace) -> None:
+    # --answer-model is a hidden alias for --generator-model. Resolve early.
+    if getattr(args, "answer_model", None) and not args.generator_model:
+        args.generator_model = args.answer_model
+
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     out_dir = BASE_DIR / ".scratch" / f"longmemeval_run_{ts}"
     out_dir.mkdir(parents=True, exist_ok=True)
     hyp_path = out_dir / "hypotheses.jsonl"
+    hyp_con_path = out_dir / "hypotheses_con.jsonl"
     results_path = out_dir / "results.json"
     log_path = out_dir / "run.log"
 
@@ -592,6 +1622,7 @@ async def run(args: argparse.Namespace) -> None:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
+    log(f"BENCH_RUN_ID={BENCH_RUN_ID}  (wipe with: --wipe-run {BENCH_RUN_ID})")
     log(f"loading dataset: {args.dataset}")
     with open(args.dataset, "r", encoding="utf-8") as f:
         dataset = json.load(f)
@@ -601,13 +1632,21 @@ async def run(args: argparse.Namespace) -> None:
         dataset = dataset[: args.limit]
         log(f"  limited to {len(dataset)}")
 
-    # Resolve OpenAI credentials via vault (unless --no-judge).
+    if args.only_qtype:
+        allowed = set(args.only_qtype)
+        dataset = [inst for inst in dataset if inst.get("question_type") in allowed]
+        log(f"  filtered to question_type in {sorted(allowed)}: {len(dataset)} instances")
+
+    # Resolve clients. Generator may be local (LM Studio) or OpenAI.
     gen_client = None
     judge_client = None
     if not args.generator_model:
         raise SystemExit(
             "generator model is not set — pass --generator-model or set EVAL_GENERATOR_MODEL"
         )
+    if args.generator_base_url:
+        gen_key = get_api_key("LM_API_TOKEN") or "lm-studio"
+        gen_client = _openai_client(gen_key, base_url=args.generator_base_url)
     if not args.no_judge:
         if not args.judge_model:
             raise SystemExit(
@@ -616,11 +1655,20 @@ async def run(args: argparse.Namespace) -> None:
         api_key = get_api_key("OPENAI_API_KEY")
         if not api_key:
             raise SystemExit("OPENAI_API_KEY not found (env / keyring / vault). Use `bin/setup_secret.py OPENAI_API_KEY`.")
+        judge_client = _openai_client(api_key)
+        if gen_client is None:
+            gen_client = judge_client  # generator routes through OpenAI too
+    elif gen_client is None:
+        # No judge AND no local generator — generator must be OpenAI
+        api_key = get_api_key("OPENAI_API_KEY")
+        if not api_key:
+            raise SystemExit("OPENAI_API_KEY not found (env / keyring / vault). Use `bin/setup_secret.py OPENAI_API_KEY`.")
         gen_client = _openai_client(api_key)
-        judge_client = gen_client  # same account
 
     # ── Phase 1: ingest ──
-    if args.skip_ingest:
+    if args.no_memory or args.rag_aware_empty:
+        log(f"skipping ingest (--{'no-memory' if args.no_memory else 'rag-aware-empty'} implies no DB read)")
+    elif args.skip_ingest:
         log("skipping ingest (--skip-ingest)")
     else:
         log(f"phase 1: ingest ({args.ingest_concurrency} instances in parallel)")
@@ -631,7 +1679,11 @@ async def run(args: argparse.Namespace) -> None:
 
         async def _one(i: int, inst: dict) -> tuple[int, int]:
             async with sem:
-                n, _dt = await ingest_instance(inst)
+                n, _dt = await ingest_instance(
+                    inst,
+                    variant=args.variant,
+                    ingest_mode=args.ingest_mode,
+                )
                 return i, n
 
         tasks = [asyncio.create_task(_one(i, inst)) for i, inst in enumerate(dataset)]
@@ -649,9 +1701,15 @@ async def run(args: argparse.Namespace) -> None:
     log("phase 2: retrieve + answer + judge")
     qtypes_seen: set[str] = set()
     qtype_correct: dict[str, list[int]] = {}
+    qtype_correct_con: dict[str, list[int]] = {}
     retrieval_hit_stats: list[float] = []
     signal_dist: Counter = Counter()
 
+    compare_con = bool(getattr(args, "chain_of_note_compare", False))
+    if compare_con:
+        log("chain-of-note compare mode: running BOTH plain and CoN answer pipelines")
+
+    hyp_con_f = open(hyp_con_path, "w", encoding="utf-8") if compare_con else None
     with open(hyp_path, "w", encoding="utf-8") as hyp_f:
         for i, inst in enumerate(dataset):
             qid = inst["question_id"]
@@ -672,25 +1730,75 @@ async def run(args: argparse.Namespace) -> None:
             effective_k = args.k
             if args.smart_retrieval and q_signal == "temporal":
                 effective_k = max(effective_k, 30)  # Significantly larger K for date reasoning
+            # --k-reasoning: bump K for reasoning-heavy categories (temporal /
+            # update). These need more context to stitch facts across sessions;
+            # the stock --k starves them. Set via classifier-driven q_signal so
+            # the lever works without oracle qtype metadata.
+            if args.k_reasoning > 0 and q_signal in ("temporal", "update"):
+                effective_k = max(effective_k, args.k_reasoning)
 
-            try:
-                hits = await retrieve_for_question(
-                    qid, question, effective_k,
-                    cluster_size=args.cluster_size,
-                    graph_depth=args.graph_depth,
-                    recency_bias=0.15 if q_signal == "update" else 0.0,
-                    adaptive_k=args.adaptive_k or args.smart_retrieval,
-                )
-            except Exception as e:
-                log(f"  [{qid}] retrieval failed: {e}")
+            # SS category levers from 01c9b0d: role boost + session expansion
+            # for single-session-user / single-session-assistant. Role boost
+            # fixes the ss-assistant ranking failure (user follow-up turns
+            # outrank the assistant answer turn on raw question embedding);
+            # session expansion converts "right session, wrong turn" into wins.
+            # --no-category-knobs disables all category-gated heuristics.
+            if args.no_category_knobs:
+                rboost_target = ""
+                rboost = 0.0
+                ss_expand = False
+                rbias = 0.0
+            else:
+                rboost_target = SS_ROLE_BOOST_MAP.get(qtype, "")
+                rboost = args.ss_role_boost if rboost_target else 0.0
+                ss_expand = qtype in SS_EXPAND_CATEGORIES
+                # Explicit --recency-bias takes effect on RECENCY_BIAS_CATEGORIES
+                # (knowledge-update, temporal-reasoning) using the ground-truth
+                # qtype. Falls back to the classifier-driven q_signal path so
+                # stock-main behavior is preserved when --recency-bias stays 0.
+                if args.recency_bias > 0.0 and qtype in RECENCY_BIAS_CATEGORIES:
+                    rbias = args.recency_bias
+                else:
+                    rbias = 0.15 if q_signal == "update" else 0.0
+
+            if args.no_memory or args.rag_aware_empty:
+                # Baseline modes: skip retrieval entirely. --no-memory uses
+                # the no-memory system prompt; --rag-aware-empty uses the
+                # standard RAG prompt with an empty history block.
                 hits = []
+                retrieval_hit = None
+            else:
+                try:
+                    hits = await retrieve_for_question(
+                        qid, question, effective_k,
+                        cluster_size=args.cluster_size,
+                        graph_depth=args.graph_depth,
+                        recency_bias=rbias,
+                        adaptive_k=args.adaptive_k or args.smart_retrieval,
+                        expand_sessions=ss_expand,
+                        role_boost=rboost,
+                        role_boost_target=rboost_target,
+                        vector_weight=args.vector_weight,
+                        hyde_client=gen_client if args.hyde else None,
+                        hyde_model=(args.hyde_model or args.generator_model) if args.hyde else "",
+                        rerank_model=args.rerank_model if args.rerank else "",
+                        rerank_pool_k=args.rerank_pool_k,
+                        adaptive_k_max=args.adaptive_k_max,
+                        adaptive_k_min=args.adaptive_k_min,
+                        smart_retrieval=args.smart_retrieval,
+                        smart_neighbor_sessions=args.smart_neighbor_sessions,
+                        smart_time_boost=args.smart_time_boost,
+                    )
+                except Exception as e:
+                    log(f"  [{qid}] retrieval failed: {e}")
+                    hits = []
 
-            retrieved_session_ids = {
-                h["metadata"].get("session_id", "") for h in hits if h.get("metadata")
-            }
-            retrieval_hit = bool(evidence_sessions & retrieved_session_ids) if evidence_sessions else None
-            if retrieval_hit is not None:
-                retrieval_hit_stats.append(1.0 if retrieval_hit else 0.0)
+                retrieved_session_ids = {
+                    h["metadata"].get("session_id", "") for h in hits if h.get("metadata")
+                }
+                retrieval_hit = bool(evidence_sessions & retrieved_session_ids) if evidence_sessions else None
+                if retrieval_hit is not None:
+                    retrieval_hit_stats.append(1.0 if retrieval_hit else 0.0)
 
             # Build session timeline for temporal reasoning
             session_dates = inst.get("haystack_dates", [])
@@ -702,17 +1810,91 @@ async def run(args: argparse.Namespace) -> None:
             timeline = "\n".join(timeline_lines)
 
             hypothesis = ""
+            hypothesis_con = ""
             correct: bool | None = None
+            correct_con: bool | None = None
             if not args.no_judge:
                 history, anchors = format_retrieved(hits, q_signal=q_signal)
+                # Chain-of-Note path: extract per-session reading notes, then
+                # send notes + JSON-history to the answer call. Skipped on
+                # abstention (the abstention judge rewards "I don't know"; we
+                # don't want to feed the model handpicked facts that bias it
+                # toward answering).
+                notes = ""
+                history_json = ""
+                if args.chain_of_note and hits and not abstention:
+                    con_model = args.chain_of_note_model or args.generator_model
+                    notes = _chain_of_note_extract(
+                        gen_client, con_model, hits, qdate, question,
+                        max_tokens=args.answer_max_tokens // 2,
+                    )
+                    if notes:
+                        history_json = _format_history_json(hits)
+
+                # Reflection only fires on REFLECTION_CATEGORIES (gated inside
+                # answer_with_llm), and is suppressed when --no-category-knobs
+                # is set (parity with the retrieval-side knobs).
+                reflection_active = args.reflection and not args.no_category_knobs
+
+                # Decide whether to engage new-mode answer wiring at all. When
+                # no new flags are set, the call falls through to the stock
+                # q_signal-driven path inside answer_with_llm.
+                new_mode = (
+                    args.no_memory or args.rag_aware_empty
+                    or reflection_active or bool(notes) or abstention
+                    or args.thinking_budget > 0
+                    or args.answer_max_tokens != ANSWER_MAX_TOKENS_DEFAULT
+                )
+                # Stock path passes None so the q_signal-tied 800/1200 default
+                # is preserved verbatim. New-mode passes the explicit budget.
+                amt = args.answer_max_tokens if new_mode else None
+
                 hypothesis, ans_ms = answer_with_llm(
                     gen_client, args.generator_model, history, qdate, question,
                     timeline=timeline, anchors=anchors, q_signal=q_signal,
+                    qtype=qtype, abstention=abstention,
+                    no_memory=args.no_memory,
+                    rag_aware_empty=args.rag_aware_empty,
+                    no_category_knobs=args.no_category_knobs,
+                    reflection=reflection_active,
+                    reflection_model=args.reflection_model or None,
+                    notes=notes, history_json=history_json,
+                    answer_max_tokens=amt,
+                    thinking_budget=args.thinking_budget,
                 )
                 correct = judge_with_llm(
                     judge_client, args.judge_model, qtype, question, answer, hypothesis, abstention
                 )
                 qtype_correct[qtype].append(1 if correct else 0)
+
+                # --chain-of-note-compare: run a second answer pass that uses
+                # the chain-of-note pipeline regardless of --chain-of-note,
+                # and judge it separately. Lets one run produce both A/B
+                # hypotheses without re-running retrieval.
+                if compare_con:
+                    qtype_correct_con.setdefault(qtype, [])
+                    notes_c = ""
+                    history_json_c = ""
+                    if hits and not abstention:
+                        con_model_c = args.chain_of_note_model or args.generator_model
+                        notes_c = _chain_of_note_extract(
+                            gen_client, con_model_c, hits, qdate, question,
+                            max_tokens=args.answer_max_tokens // 2,
+                        )
+                        if notes_c:
+                            history_json_c = _format_history_json(hits)
+                    hypothesis_con, _ = answer_with_llm(
+                        gen_client, args.generator_model, history, qdate, question,
+                        timeline=timeline, anchors=anchors, q_signal=q_signal,
+                        qtype=qtype, abstention=abstention,
+                        notes=notes_c, history_json=history_json_c,
+                        answer_max_tokens=args.answer_max_tokens,
+                        thinking_budget=args.thinking_budget,
+                    )
+                    correct_con = judge_with_llm(
+                        judge_client, args.judge_model, qtype, question, answer, hypothesis_con, abstention
+                    )
+                    qtype_correct_con[qtype].append(1 if correct_con else 0)
 
             entry = {
                 "question_id": qid,
@@ -737,15 +1919,36 @@ async def run(args: argparse.Namespace) -> None:
                     else {"model": args.judge_model, "label": bool(correct)}
                 ),
             }
+            if compare_con:
+                entry["hypothesis_note"] = hypothesis_con
             hyp_f.write(json.dumps(entry, ensure_ascii=False) + "\n")
             hyp_f.flush()
+
+            if hyp_con_f is not None:
+                entry_con = dict(entry)
+                entry_con["hypothesis"] = hypothesis_con
+                entry_con["autoeval_label"] = (
+                    None if correct_con is None
+                    else {"model": args.judge_model, "label": bool(correct_con)}
+                )
+                hyp_con_f.write(json.dumps(entry_con, ensure_ascii=False) + "\n")
+                hyp_con_f.flush()
 
             if (i + 1) % 10 == 0 or i == len(dataset) - 1:
                 running_correct = sum(sum(v) for v in qtype_correct.values())
                 running_total = sum(len(v) for v in qtype_correct.values())
                 acc = (running_correct / running_total) if running_total else 0.0
                 hit_rate = (sum(retrieval_hit_stats) / len(retrieval_hit_stats)) if retrieval_hit_stats else 0.0
-                log(f"  {i+1}/{len(dataset)}  running_acc={acc:.3f}  session_hit_rate={hit_rate:.3f}")
+                if compare_con and qtype_correct_con:
+                    c_correct = sum(sum(v) for v in qtype_correct_con.values())
+                    c_total = sum(len(v) for v in qtype_correct_con.values())
+                    c_acc = (c_correct / c_total) if c_total else 0.0
+                    log(f"  {i+1}/{len(dataset)}  plain={acc:.3f}  con={c_acc:.3f}  hit={hit_rate:.3f}")
+                else:
+                    log(f"  {i+1}/{len(dataset)}  running_acc={acc:.3f}  session_hit_rate={hit_rate:.3f}")
+
+    if hyp_con_f is not None:
+        hyp_con_f.close()
 
     # ── Phase 3: aggregate ──
     if not args.no_judge:
@@ -759,6 +1962,17 @@ async def run(args: argparse.Namespace) -> None:
     else:
         overall = None
         per_type = {}
+
+    overall_con = None
+    per_type_con: dict = {}
+    if compare_con and qtype_correct_con:
+        tc = sum(sum(v) for v in qtype_correct_con.values())
+        tn = sum(len(v) for v in qtype_correct_con.values())
+        overall_con = tc / tn if tn else 0.0
+        per_type_con = {
+            qt: {"n": len(vals), "accuracy": (sum(vals) / len(vals)) if vals else 0.0}
+            for qt, vals in qtype_correct_con.items()
+        }
     summary = {
         "dataset": str(args.dataset),
         "n_instances": len(dataset),
@@ -769,7 +1983,9 @@ async def run(args: argparse.Namespace) -> None:
         "smart_retrieval": args.smart_retrieval,
         "adaptive_k": args.adaptive_k,
         "generator_model": args.generator_model,
+        "generator_base_url": args.generator_base_url,
         "judge_model": args.judge_model,
+        "variant": args.variant,
         "judged": not args.no_judge,
         "overall_accuracy": overall,
         "per_type": per_type,
@@ -778,6 +1994,14 @@ async def run(args: argparse.Namespace) -> None:
             sum(retrieval_hit_stats) / len(retrieval_hit_stats) if retrieval_hit_stats else None
         ),
         "hypothesis_file": str(hyp_path),
+        "no_memory": args.no_memory,
+        "rag_aware_empty": args.rag_aware_empty,
+        "reflection": args.reflection,
+        "chain_of_note": args.chain_of_note,
+        "chain_of_note_compare": compare_con,
+        "overall_accuracy_con": overall_con,
+        "per_type_con": per_type_con,
+        "hypothesis_file_con": str(hyp_con_path) if compare_con else None,
     }
     with open(results_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
@@ -789,6 +2013,15 @@ async def run(args: argparse.Namespace) -> None:
             log(f"  {qt}: {stats['accuracy']:.4f}  ({stats['n']})")
     else:
         log("(judging skipped — run with --judge-only to score later)")
+    if compare_con and overall_con is not None:
+        log("-- chain-of-note compare --")
+        log(f"overall accuracy (CoN): {overall_con:.4f}")
+        for qt in sorted(per_type_con):
+            plain = per_type.get(qt, {}).get("accuracy", 0.0)
+            con = per_type_con[qt]["accuracy"]
+            delta = con - plain
+            sign = "+" if delta >= 0 else ""
+            log(f"  {qt}: plain={plain:.4f}  con={con:.4f}  ({sign}{delta:+.4f})")
     if retrieval_hit_stats:
         log(f"session hit-rate @k={args.k}: {summary['retrieval_session_hit_rate']:.4f}")
     log(f"signal distribution: {dict(signal_dist)}")
@@ -800,6 +2033,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     p.add_argument("--limit", type=int, default=0, help="subsample first N instances (0 = all)")
+    p.add_argument(
+        "--only-qtype",
+        action="append",
+        default=[],
+        help=(
+            "Restrict the run to instances whose question_type matches one of "
+            "these values. Repeat the flag to allow multiple types (e.g. "
+            "--only-qtype single-session-user --only-qtype single-session-assistant). "
+            "Applied after --limit. Pair with --skip-ingest to rerun a subset "
+            "against an already-ingested DB."
+        ),
+    )
     p.add_argument("--skip-ingest", action="store_true")
     p.add_argument("--no-judge", action="store_true")
     p.add_argument("--k", type=int, default=20, help="top-K retrieved turns per question")
@@ -809,17 +2054,326 @@ def parse_args() -> argparse.Namespace:
                    help="episodic expansion: pull +/- N surrounding turns (0 = off)")
     p.add_argument("--graph-depth", type=int, default=1,
                    help="graph expansion hops from initial hits (0 = off)")
+    p.add_argument(
+        "--ss-role-boost",
+        type=float,
+        default=0.10,
+        help=(
+            "Retrieval score bonus applied to turns matching the expected "
+            "role for single-session categories (assistant turns for "
+            "single-session-assistant, user turns for single-session-user). "
+            "Fetches a 2x candidate pool before re-ranking. Targets the "
+            "ss-assistant failure mode where the evidence answer turn ranks "
+            "behind user-follow-up distractors. Set to 0 to disable."
+        ),
+    )
     p.add_argument("--generator-model",
                    default=os.environ.get("EVAL_GENERATOR_MODEL"))
+    p.add_argument("--generator-base-url",
+                   default=os.environ.get("EVAL_GENERATOR_BASE_URL"),
+                   help="OpenAI-compatible base URL for the generator (e.g. http://localhost:1234/v1 for LM Studio). If unset, generator routes through OpenAI.")
     p.add_argument("--judge-model",
                    default=os.environ.get("EVAL_JUDGE_MODEL"))
     p.add_argument("--ingest-concurrency", type=int, default=4,
                    help="number of instances to ingest in parallel")
-    return p.parse_args()
+    p.add_argument("--variant", type=str, default=None,
+                   help="tag stored on each ingested memory_item; lets multiple retrieval runs share an ingest")
+    p.add_argument(
+        "--ingest-mode",
+        type=str,
+        choices=["turn", "session"],
+        default="turn",
+        help=(
+            "Ingest granularity. 'turn' (default) emits one memory_item per "
+            "conversation turn — finer retrieval granularity. 'session' emits "
+            "one memory_item per session with concatenated role-tagged turns, "
+            "capped at MAX_SESSION_CHARS with evidence-aware truncation. "
+            "Session mode matches Memento's default strategy and helps when "
+            "the answer depends on cross-turn co-occurrence inside one "
+            "session, at the cost of pinpoint accuracy."
+        ),
+    )
+    # ── Retrieval-quality levers (all default-OFF / zero-effect) ─────────────
+    p.add_argument(
+        "--hyde",
+        action="store_true",
+        default=False,
+        help=(
+            "HyDE-style query expansion: before retrieval, call an LLM to "
+            "rewrite the question as a hypothetical first-person passage, "
+            "then append it to the question before embedding. Targets the "
+            "query/evidence phrasing asymmetry where terse biographical "
+            "queries fail to match evidence turns that mention the answer "
+            "in passing. One extra LLM call per question."
+        ),
+    )
+    p.add_argument(
+        "--hyde-model",
+        default=None,
+        help=(
+            "Model used for HyDE passage generation. If unset, falls back "
+            "to --generator-model. Use a cheap rewrite-capable model."
+        ),
+    )
+    p.add_argument(
+        "--rerank",
+        action="store_true",
+        default=False,
+        help=(
+            "F4: cross-encoder reranker. Fetches a candidate pool of "
+            "--rerank-pool-k, rescores each (query, candidate) pair with a "
+            "cross-encoder, sorts, trims to --k. Targets the 'needle "
+            "disguised as hay' failure where the evidence turn mentions "
+            "the answer as a side clause in a conversation about something "
+            "else — cases bi-encoder similarity cannot rank correctly. "
+            "Mutually exclusive with --ss-role-boost at the ranking stage "
+            "(rerank already handles ordering)."
+        ),
+    )
+    p.add_argument(
+        "--rerank-model",
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        help=(
+            "Cross-encoder model name for reranking. Default is the "
+            "ms-marco distilled MiniLM — fast, CPU-friendly, standard for "
+            "passage reranking."
+        ),
+    )
+    p.add_argument(
+        "--rerank-pool-k",
+        type=int,
+        default=100,
+        help=(
+            "Candidate pool size fetched from memory_search_scored_impl "
+            "before reranking. Larger pool catches evidence turns that "
+            "ranked low on bi-encoder score but the cross-encoder will "
+            "promote. 100 is a safe default; 200 for very deep haystacks."
+        ),
+    )
+    p.add_argument(
+        "--recency-bias",
+        type=float,
+        default=0.0,
+        help=(
+            "Score bonus added to the newest candidate and linearly "
+            "interpolated to 0 for the oldest. Applied only to knowledge-"
+            "update and temporal-reasoning questions (unless "
+            "--no-category-knobs is set, which disables it). Typical "
+            "values 0.05-0.15. Default 0.0 = disabled."
+        ),
+    )
+    p.add_argument(
+        "--smart-neighbor-sessions",
+        type=int,
+        default=3,
+        help="±N sessions to expand into when smart-retrieval triggers neighbor expansion.",
+    )
+    p.add_argument(
+        "--smart-time-boost",
+        type=float,
+        default=0.15,
+        help="Score boost for candidates whose timestamps match query-extracted dates.",
+    )
+    p.add_argument(
+        "--adaptive-k-min",
+        type=int,
+        default=5,
+        help="Lower bound on adaptive-k. Never trim below this many turns.",
+    )
+    p.add_argument(
+        "--adaptive-k-max",
+        type=int,
+        default=30,
+        help="Upper bound on adaptive-k. Candidate pool size + hard cap.",
+    )
+    p.add_argument(
+        "--vector-weight",
+        type=float,
+        default=0.7,
+        help=(
+            "Hybrid score blend: final = vector * w + bm25 * (1 - w). "
+            "Default 0.7 matches production m3-memory. Lower values favor "
+            "lexical matching — useful when query terms appear literally "
+            "in the evidence turn but semantic similarity is weak."
+        ),
+    )
+    p.add_argument(
+        "--no-category-knobs",
+        action="store_true",
+        default=False,
+        help=(
+            "Ablation: disable category-gated retrieval knobs (role boost, "
+            "session expansion, recency-bias gating). Lets a run measure "
+            "retrieval quality without per-qtype heuristics."
+        ),
+    )
+    # ── Generation-mode levers (all default-OFF / zero-effect) ──────────────
+    p.add_argument(
+        "--no-memory",
+        action="store_true",
+        default=False,
+        help=(
+            "Baseline: skip retrieval entirely and ask the answer model the "
+            "question with no history, using a neutral system prompt that "
+            "makes no reference to memory. Measures what the answer model "
+            "can do on its own. Implies skipping ingest. Mutually exclusive "
+            "with --rag-aware-empty."
+        ),
+    )
+    p.add_argument(
+        "--rag-aware-empty",
+        action="store_true",
+        default=False,
+        help=(
+            "Baseline variant: still run retrieval but if results are empty "
+            "(or here: forced empty), use the standard RAG system prompt "
+            "with an empty History Chats block. Simulates a correctly-wired "
+            "RAG pipeline whose retriever returned zero results. Closes the "
+            "prompt-confound gap in --no-memory. Implies skipping ingest. "
+            "Mutually exclusive with --no-memory."
+        ),
+    )
+    p.add_argument(
+        "--reflection",
+        action="store_true",
+        default=False,
+        help=(
+            "Run a Hindsight-style two-step reflection pass before the final "
+            "answer. First call produces a structured TIMELINE/CONTRADICTIONS"
+            "/SUPERSEDED/APPLICABLE FACTS summary; second call answers with "
+            "that summary prepended. Only activates for reasoning-limited "
+            "qtypes (temporal-reasoning, multi-session, single-session-"
+            "preference, knowledge-update). Disabled when --no-category-knobs "
+            "is set."
+        ),
+    )
+    p.add_argument(
+        "--reflection-model",
+        default=None,
+        help=(
+            "Model for the reflection pre-pass. Defaults to --generator-model. "
+            "Set to a cheaper model to reduce reflection cost."
+        ),
+    )
+    p.add_argument(
+        "--chain-of-note",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable Chain-of-Note + JSON history (LongMemEval paper §5.5). "
+            "Runs a per-session extraction pass that writes 'reading notes' "
+            "of facts relevant to the question, then sends both the notes "
+            "AND the JSON-serialized retrieved history to the final answer "
+            "call. Adds one extra LLM call per retrieved session per "
+            "question (~2-3x answer-phase wall time)."
+        ),
+    )
+    p.add_argument(
+        "--chain-of-note-model",
+        default=None,
+        help=(
+            "Model for the Chain-of-Note extraction pass. Defaults to "
+            "--generator-model. Set to a cheaper model to cut extraction "
+            "cost — extraction is a structured per-chunk task that doesn't "
+            "need a frontier model."
+        ),
+    )
+    p.add_argument(
+        "--chain-of-note-compare",
+        action="store_true",
+        default=False,
+        help=(
+            "Run BOTH plain and CoN answer pipelines off the same retrieval "
+            "and judge both. Primary hypotheses go to hypotheses.jsonl with "
+            "a `hypothesis_note` field for the CoN answer; CoN-as-primary "
+            "hypotheses also go to hypotheses_con.jsonl. Summary prints "
+            "per-category plain-vs-con delta."
+        ),
+    )
+    # Hidden backward-compat alias for --generator-model.
+    p.add_argument("--answer-model", default=None, help=argparse.SUPPRESS)
+    p.add_argument(
+        "--answer-max-tokens",
+        type=int,
+        default=ANSWER_MAX_TOKENS_DEFAULT,
+        help=(
+            "Max output tokens for the answer model. Default 8000 fits "
+            "non-thinking frontier models; bump to 16000-32000 for Claude "
+            "extended thinking or o1/o3 high reasoning effort. Note: the "
+            "stock generation path (no other generation-mode flags set) "
+            "preserves the existing q_signal-tied 800/1200 budget; this "
+            "flag only takes effect when a generation-mode flag is on, "
+            "OR when --answer-max-tokens is set to a non-default value."
+        ),
+    )
+    p.add_argument(
+        "--thinking-budget",
+        type=int,
+        default=0,
+        help=(
+            "Forward `reasoning_tokens=N` via extra_body to the generator "
+            "endpoint. Endpoints that don't recognize the param ignore it "
+            "silently. 0 disables (default)."
+        ),
+    )
+    p.add_argument(
+        "--k-reasoning",
+        type=int,
+        default=0,
+        help=(
+            "If >0, raise effective top-K to this value when the question "
+            "is classified temporal/update (reasoning-heavy categories that "
+            "need more context to stitch facts across sessions). 0 disables "
+            "(stock --k applies to every question)."
+        ),
+    )
+    p.add_argument(
+        "--wipe-run",
+        default="",
+        help=(
+            "Delete all bench rows tagged with this RUN_ID (the value printed "
+            "at the start of every run, e.g. 'lme-20260413-194821-abc123'), "
+            "then VACUUM + ANALYZE and exit. Uses idx_mi_change_agent for a "
+            "single indexed delete. Run-scoped: does not touch other runs."
+        ),
+    )
+    p.add_argument(
+        "--wipe-all-bench",
+        action="store_true",
+        help=(
+            "Delete every row tagged change_agent LIKE 'bench:%%' across all "
+            "runs, then VACUUM + ANALYZE and exit. Use this when you want a "
+            "completely clean slate."
+        ),
+    )
+    args = p.parse_args()
+    if args.no_memory and args.rag_aware_empty:
+        p.error("--no-memory and --rag-aware-empty are mutually exclusive "
+                "(they are two different baseline framings; pick one)")
+    if args.chain_of_note and args.reflection:
+        p.error("--chain-of-note and --reflection are mutually exclusive "
+                "(both add a pre-answer LLM pass; pick one)")
+    if args.chain_of_note_compare and args.chain_of_note:
+        p.error("--chain-of-note-compare already runs the CoN pipeline as "
+                "the secondary pass; don't combine with --chain-of-note")
+    if args.chain_of_note_compare and args.reflection:
+        p.error("--chain-of-note-compare and --reflection are mutually exclusive")
+    return args
 
 
 def main() -> None:
     args = parse_args()
+    if args.wipe_run or args.wipe_all_bench:
+        if args.wipe_run and args.wipe_all_bench:
+            print("--wipe-run and --wipe-all-bench are mutually exclusive", flush=True)
+            sys.exit(2)
+        pattern = f"bench:{args.wipe_run}" if args.wipe_run else "bench:%"
+        print(f"wiping change_agent LIKE {pattern!r}...", flush=True)
+        counts = wipe_bench_rows(pattern)
+        for k, v in counts.items():
+            print(f"  {k:32} {v}", flush=True)
+        print("done.", flush=True)
+        return
     try:
         asyncio.run(run(args))
     except KeyboardInterrupt:

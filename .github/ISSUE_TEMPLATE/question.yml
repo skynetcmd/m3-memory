@@ -1,0 +1,40 @@
+name: Question
+description: Get help or ask a question about M3 Memory
+labels: ["question", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking a question, please check the [Documentation](https://github.com/skynetcmd/m3-memory/tree/main/docs) and existing [Discussions](https://github.com/skynetcmd/m3-memory/discussions).
+        
+        You can also join our [Discord community](https://discord.gg/m3-memory) for real-time help.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What is your question?
+      description: Be as specific as possible. If it's about a tool, mention the tool name.
+      placeholder: How do I configure the MMR re-ranking lambda?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why are you asking this? What are you trying to achieve?
+      placeholder: I'm trying to optimize retrieval for a large codebase with many similar function names...
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Configuration
+        - Usage / Tool calls
+        - Retrieval quality
+        - Performance
+        - Sync / Multi-device
+        - Other
+    validations:
+      required: true
