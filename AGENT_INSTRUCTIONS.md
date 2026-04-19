@@ -237,45 +237,18 @@ primitives. Nothing in the API is tied to a specific model family.
 ### Identity: one `agent_id` per agent, not per model
 
 Every agent must register itself with a **unique `agent_id`** before doing
-orchestration work. The `model_id` field records *which* model is behind that
+orchestration work using `agent_register`. The `model_id` field records *which* model is behind that
 agent and is free-form (e.g. `claude-opus-4-6`, `gemini-2.5-pro`,
 `deepseek-coder-v2-local`). Two agents running the same model still need
 distinct `agent_id`s.
 
-```
-agent_register(agent_id="claude-planner",  model_id="claude-opus-4-6",  role="planner")
-agent_register(agent_id="claude-reviewer", model_id="claude-opus-4-6",  role="reviewer")
-agent_register(agent_id="gemini-researcher", model_id="gemini-2.5-pro", role="researcher")
-agent_register(agent_id="aider-local",     model_id="deepseek-coder-v2", role="implementer")
-```
-
-Call `agent_heartbeat` periodically (or let the team runner do it) so
-`agent_list` reflects who is actually online. Call `agent_offline` at shutdown
-— it's also one of the two points where a refresh backlog hint is surfaced.
-
-### Sharing a conversation across the fleet
-
-Use `conversation_id` to scope a working session across every participating
-agent. It lives in the same ID space as `conversation_start` /
-`conversation_append`, so you can use a conversation thread as the ID:
-
-```
-conv = conversation_start(title="Ship v2.3 release")  # returns a conversation_id
-# every agent writes memories tagged with this id:
-memory_write(type="decision", content="...", agent_id="claude-planner",  conversation_id=conv)
-memory_write(type="note",     content="...", agent_id="gemini-researcher", conversation_id=conv)
-memory_write(type="code",     content="...", agent_id="aider-local",     conversation_id=conv)
-```
-
-Later, any agent can retrieve the session's shared context with:
-
-```
-memory_search(query="release blockers", conversation_id=conv)
-```
-
-The `conversation_id` filter is backed by a composite partial index
-`(conversation_id, created_at) WHERE is_deleted = 0`, so scoping is cheap even
-on large stores — use it liberally.
+| Tool | Use |
+|------|-----|
+| `agent_register(agent_id, role, capabilities, metadata)` | Register an agent and its role. |
+| `agent_heartbeat(agent_id)` | Update last_seen and set status=active. |
+| `agent_list(status, role)` | List registered agents. |
+| `agent_get(agent_id)` | Get full record for one agent. |
+| `agent_offline(agent_id)` | Mark an agent as offline. |
 
 ### Handoffs, inbox, notifications, tasks
 
@@ -283,13 +256,37 @@ These work identically regardless of which model is on either side:
 
 | Tool | Use |
 |------|-----|
-| `memory_handoff(from_agent, to_agent, memory_ids, note)` | Hand a bundle of memories from one agent to another. Creates an inbox item for the recipient. |
-| `memory_inbox(agent_id)` | Check pending handoffs addressed to you. Call at session start and at breakpoints. |
-| `memory_inbox_ack(inbox_id)` | Acknowledge after processing. |
-| `notify(to_agent, kind, payload)` | Push a structured event to another agent. |
-| `notifications_poll(agent_id)` | Pull unacked notifications (including `refresh_due` from maintenance). |
-| `notifications_ack(id)` / `notifications_ack_all(agent_id)` | Dismiss after addressing. |
-| `task_create` / `task_assign` / `task_update` / `task_set_result` / `task_tree` | Shared task graph across the fleet — any agent can read or update. |
+| `memory_handoff(from_agent, to_agent, context_ids, note, task_id)` | Hand a bundle of memories from one agent to another. Creates an inbox item for the recipient. |
+| `memory_inbox(agent_id, unread_only, limit)` | Check pending handoffs addressed to you. Call at session start and at breakpoints. |
+| `memory_inbox_ack(memory_id)` | Acknowledge after processing. |
+| `notify(agent_id, kind, payload)` | Push a structured event to another agent. |
+| `notifications_poll(agent_id, unread_only, limit)` | Pull unacked notifications (including `refresh_due` from maintenance). |
+| `notifications_ack(notification_id)` / `notifications_ack_all(agent_id)` | Dismiss after addressing. |
+| `task_create` / `task_assign` / `task_update` / `task_delete` / `task_set_result` / `task_get` / `task_list` / `task_tree` | Shared task graph across the fleet — any agent can read or update. |
+
+### Chat Log System
+
+M3 automatically captures chat turns from host agents (Claude Code, Gemini CLI, Aider, OpenCode) into a dedicated high-fidelity store.
+
+| Tool | Use |
+|------|-----|
+| `chatlog_search(query, ...)` | Search chat turns using FTS5. |
+| `chatlog_promote(ids, conversation_id, ...)` | Promote chat logs into the main memory DB as a specific type. |
+| `chatlog_list_conversations(...)` | List distinct sessions with turn counts. |
+| `chatlog_status()` | Check the health and redaction state of the chat log system. |
+| `chatlog_rescrub(...)` | Re-apply redaction to existing logs. |
+
+### Operational Protocol & Debug Tools (Proxy-Only)
+
+When running through `bin/mcp_proxy.py`, additional tools are available for system hygiene and reasoning.
+
+| Tool | Use |
+|------|-----|
+| `log_activity`, `query_decisions` | Protocol-mandated activity logging and decision lookups. |
+| `update_focus`, `retire_focus` | Protocol-mandated trajectory tracking. |
+| `check_thermal_load` | Hardware pressure check (M3 Max optimization). |
+| `debug_analyze`, `debug_bisect`, `debug_trace` | Advanced root-cause analysis and automated debugging. |
+| `debug_correlate`, `debug_history`, `debug_report` | Log correlation and debugging reporting. |
 
 ### Filter scoping is strict — no leaks across conversations
 

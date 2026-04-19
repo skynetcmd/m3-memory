@@ -167,7 +167,7 @@ def _register_catalog_tools():
 
     The catalog is the single source of truth for tool name, schema, validators,
     and impl callable. This loop preserves the existing MCP-facing surface
-    (44 tools) while making the bridge a thin shim.
+    (55 tools) while making the bridge a thin shim.
     """
     for spec in mcp_tool_catalog.TOOLS:
         _register_one(spec)
