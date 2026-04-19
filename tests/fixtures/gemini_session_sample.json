@@ -1,0 +1,38 @@
+{
+  "sessionId": "fix-gemini-0001",
+  "projectHash": "abc123def",
+  "startTime": "2026-04-19T12:00:00.000Z",
+  "lastUpdated": "2026-04-19T12:01:00.000Z",
+  "kind": "chat",
+  "messages": [
+    {
+      "id": "m-1",
+      "timestamp": "2026-04-19T12:00:10.000Z",
+      "type": "user",
+      "content": [{"text": "what is chat log status"}]
+    },
+    {
+      "id": "m-2",
+      "timestamp": "2026-04-19T12:00:12.000Z",
+      "type": "gemini",
+      "content": "I'll check the chat log status now.",
+      "model": "gemini-2.5-pro",
+      "thoughts": [{"subject": "plan", "description": "...", "timestamp": "2026-04-19T12:00:11.500Z"}],
+      "tokens": {"input": 120, "output": 18, "cached": 0}
+    },
+    {
+      "id": "m-3",
+      "timestamp": "2026-04-19T12:00:14.000Z",
+      "type": "info",
+      "content": "[tool call suppressed]"
+    },
+    {
+      "id": "m-4",
+      "timestamp": "2026-04-19T12:00:20.000Z",
+      "type": "gemini",
+      "content": "Status: healthy, 0 spill files.",
+      "model": "gemini-2.5-pro",
+      "tokens": {"input": 140, "output": 9, "cached": 0}
+    }
+  ]
+}
