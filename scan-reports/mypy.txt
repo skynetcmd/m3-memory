@@ -1,0 +1,6 @@
+/data/repos/m3-memory/memory/knowledge_helpers.py: error: Source file found twice under different module names: "knowledge_helpers" and "memory.knowledge_helpers"
+/data/repos/m3-memory/memory/knowledge_helpers.py: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#mapping-file-paths-to-modules for more info
+/data/repos/m3-memory/memory/knowledge_helpers.py: note: Common resolutions include:
+/data/repos/m3-memory/memory/knowledge_helpers.py: note:     a) adding `__init__.py` somewhere,
+/data/repos/m3-memory/memory/knowledge_helpers.py: note:     b) using `--explicit-package-bases` or adjusting `MYPYPATH`
+Found 1 error in 1 file (errors prevented further checking)
