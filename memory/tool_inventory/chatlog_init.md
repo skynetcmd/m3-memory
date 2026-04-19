@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_init.py
-sha1: 1a40d84d611c
-mtime_utc: 2026-04-18T22:29:31.722838+00:00
-generated_utc: 2026-04-19T00:39:15.961981+00:00
+sha1: 9eae7069ab2d
+mtime_utc: 2026-04-19T19:36:52.762039+00:00
+generated_utc: 2026-04-19T21:10:11.569737+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ Guides the user through:
 
 ## Entry points
 
-- `def main()` (line 291)
+- `def main()` (line 351)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -33,6 +33,8 @@ Guides the user through:
 | `--non-interactive` | Use defaults, skip prompts and post-setup steps | `False` | Interactive setup with all prompts and post-setup steps | store_true | Skips all prompts, uses defaults (mode=separate, cost_tracking=on, redaction=off), skips migrations and schedules |
 | `--mode` | Deployment mode (separate, integrated, hybrid) | None | If not provided, prompts interactively via interactive_mode() | str | Uses specified mode; ignored in interactive flow if --non-interactive is absent |
 | `--db-path` | Database path (for separate/hybrid mode) | None | If not provided, prompts via interactive_db_path(mode) or uses DEFAULT_DB_PATH | str | Uses specified path; skips path validation for custom paths in interactive mode |
+| `--enable-stop-hook` | Enable per-turn capture via Claude Code's Stop hook in addition to PreCompact. Writes config and prints an updated settings.json snippet. Default is PreCompact-only. | `False` |  | store_true |  |
+| `--disable-stop-hook` | Disable the Stop hook (revert to PreCompact-only capture). | `False` |  | store_true |  |
 
 ## Environment variables read
 
@@ -46,8 +48,8 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 227)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 202)
+- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 237)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 212)
 
 
 ## Notable external imports
@@ -56,7 +58,8 @@ _(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- ` section below to add hooks to ~/.claude/settings.json`
+- `claude_code_precompact.sh`
 
 ## Re-validation
 
