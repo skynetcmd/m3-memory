@@ -6,5 +6,5 @@ Bitemporal history · GDPR Article 17/20 · Cross-device sync · 100% local
 """
 
 __version__ = "2026.4.20"
-__author__ = "skynetcmd"
+__author__ = "skynetcmd, Gemini CLI"
 __license__ = "Apache-2.0"
