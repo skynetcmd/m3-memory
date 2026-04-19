@@ -34,20 +34,28 @@ def get_lm_headers():
     return {"Authorization": f"Bearer {key}"} if key else {}
 
 import base64
+from pathlib import Path
 
-ICON_CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache", "icons")
-os.makedirs(ICON_CACHE_DIR, exist_ok=True)
+ICON_CACHE_DIR = Path(__file__).parent / "cache" / "icons"
+ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+ICON_CACHE_DIR = ICON_CACHE_DIR.resolve()
 
 def get_safe_filename(name):
     return base64.urlsafe_b64encode(name.encode()).decode().rstrip("=") + ".svg"
 
+def _resolve_under(base: Path, name: str) -> Path:
+    candidate = (base / name).resolve()
+    if not candidate.is_relative_to(base):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    return candidate
+
 @app.get("/api/icon")
 async def get_icon(name: str):
     safe_name = get_safe_filename(name)
-    cache_path = os.path.join(ICON_CACHE_DIR, safe_name)
-    
-    if os.path.exists(cache_path):
-        return FileResponse(cache_path, media_type="image/svg+xml")
+    cache_path = _resolve_under(ICON_CACHE_DIR, safe_name)
+
+    if cache_path.exists():
+        return FileResponse(str(cache_path), media_type="image/svg+xml")
 
     async with httpx.AsyncClient() as client:
         try:
@@ -59,26 +67,26 @@ async def get_icon(name: str):
                 if res.status_code == 200:
                     content = res.content
                     media_type = res.headers.get("content-type", "image/svg+xml")
-            
+
             elif name.startswith("si-"):
                 # SimpleIcons
                 icon_name = name[3:]
                 res = await client.get(f"https://cdn.jsdelivr.net/npm/simple-icons@v13/icons/{icon_name}.svg", timeout=5.0)
                 if res.status_code == 200:
                     content = res.content
-            
+
             elif name.startswith("mdi-"):
                 # Material Design Icons
                 icon_name = name[4:]
                 res = await client.get(f"https://cdn.jsdelivr.net/npm/@mdi/svg@7.4.47/svg/{icon_name}.svg", timeout=5.0)
                 if res.status_code == 200:
                     content = res.content
-            
+
             if content:
                 with open(cache_path, "wb") as f:
                     f.write(content)
                 return Response(content=content, media_type=media_type)
-            
+
             raise HTTPException(status_code=404, detail="Icon not found")
         except Exception:
             raise HTTPException(status_code=404, detail="Icon not found")
@@ -240,24 +248,24 @@ async def analyze_infrastructure():
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"AI Analysis failed: {e}")
 
-frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+frontend_dist_path = (Path(__file__).parent / ".." / "frontend" / "dist").resolve()
 
-if os.path.exists(frontend_dist):
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
-    
+if frontend_dist_path.exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist_path / "assets")), name="assets")
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        index_path = os.path.join(frontend_dist, "index.html")
+        index_path = frontend_dist_path / "index.html"
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="API route not found")
-        
+
         if not full_path:
-            return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
-            
-        file_path = os.path.join(frontend_dist, full_path)
-        if os.path.exists(file_path):
-            return FileResponse(file_path)
-        return FileResponse(index_path, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+            return FileResponse(str(index_path), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+        candidate = (frontend_dist_path / full_path).resolve()
+        if candidate.is_relative_to(frontend_dist_path) and candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(index_path), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 if __name__ == "__main__":
     import uvicorn
