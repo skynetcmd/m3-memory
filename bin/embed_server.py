@@ -99,11 +99,24 @@ def main():
         default=os.environ.get("EMBED_SERVER_HOST", "127.0.0.1"),
         help="Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN)",
     )
+    parser.add_argument("--device", default=None, help="Device to use (e.g. cuda:0, cpu)")
     args = parser.parse_args()
 
     model_name = "qwen3-embedding"
-    logger.info(f"Loading {args.model}...")
-    model = SentenceTransformer(args.model)
+    
+    # Auto-detect CUDA if device not specified
+    device = args.device
+    if device is None:
+        import torch
+        if torch.cuda.is_available():
+            device = "cuda:0"
+            logger.info("Auto-detected GPU0 (CUDA) for embeddings.")
+        else:
+            device = "cpu"
+            logger.info("No GPU detected, falling back to CPU.")
+
+    logger.info(f"Loading {args.model} on {device}...")
+    model = SentenceTransformer(args.model, device=device)
     model_dim = model.get_embedding_dimension()
     logger.info(f"Serving {model_name} (dim={model_dim}) on {args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
