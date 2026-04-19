@@ -38,6 +38,7 @@ import re
 import sys
 import time
 import traceback
+import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,6 +46,12 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "bin"))
+
+# Every bench row is tagged in change_agent as `bench:<RUN_ID>` so cleanup is a
+# single indexed delete on idx_mi_change_agent. Generated once per process.
+# Retrieval never touches change_agent, so this costs nothing on the hot path.
+BENCH_RUN_ID = f"lme-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+BENCH_CHANGE_AGENT = f"bench:{BENCH_RUN_ID}"
 
 # Route embeddings to llama-server before memory_core imports.
 os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:8081/v1")
@@ -65,6 +72,55 @@ from auth_utils import get_api_key  # noqa: E402
 import temporal_utils  # noqa: E402
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
+
+
+def wipe_bench_rows(pattern: str) -> dict:
+    """Delete memory_items whose change_agent matches `pattern`, plus orphans.
+
+    `pattern` is either:
+      - an exact tag: 'bench:lme-20260413-194821-abc123' (exact match delete)
+      - the literal 'bench:%' to mean "all bench runs" (range-scan delete)
+
+    Both forms hit idx_mi_change_agent. LIKE is avoided because SQLite's
+    default case-insensitive LIKE cannot use a text index; a range predicate
+    can. 'bench:' .. 'bench;' covers every string with the 'bench:' prefix.
+    Orphan sweeps on embeddings/history/chroma_sync_queue follow, then VACUUM
+    + ANALYZE. Returns a dict of rowcounts for logging.
+    """
+    counts = {}
+    with _db() as db:
+        if pattern == "bench:%":
+            cur = db.execute(
+                "DELETE FROM memory_items "
+                "WHERE change_agent >= 'bench:' AND change_agent < 'bench;'"
+            )
+        else:
+            cur = db.execute(
+                "DELETE FROM memory_items WHERE change_agent = ?", (pattern,)
+            )
+        counts["memory_items"] = cur.rowcount
+        cur = db.execute(
+            "DELETE FROM memory_embeddings WHERE memory_id NOT IN (SELECT id FROM memory_items)"
+        )
+        counts["memory_embeddings_orphans"] = cur.rowcount
+        cur = db.execute(
+            "DELETE FROM memory_history WHERE memory_id NOT IN (SELECT id FROM memory_items)"
+        )
+        counts["memory_history_orphans"] = cur.rowcount
+        cur = db.execute(
+            "DELETE FROM chroma_sync_queue WHERE memory_id NOT IN (SELECT id FROM memory_items)"
+        )
+        counts["chroma_sync_queue_orphans"] = cur.rowcount
+    # VACUUM must run outside any transaction; open a fresh raw connection.
+    import sqlite3
+    from memory_core import DB_PATH
+    raw = sqlite3.connect(DB_PATH, isolation_level=None)
+    try:
+        raw.execute("VACUUM")
+        raw.execute("ANALYZE")
+    finally:
+        raw.close()
+    return counts
 
 
 # ── Answer generation + judge prompts (from upstream LongMemEval) ────────────
@@ -673,6 +729,7 @@ def build_turn_items(instance: dict, variant: str | None = None) -> list[dict]:
                 "user_id": qid,
                 "conversation_id": f"{qid}::{s_idx}",
                 "source": "longmemeval",
+                "change_agent": BENCH_CHANGE_AGENT,
                 "valid_from": valid_from,
                 "embed": True,
                 "metadata": meta,
@@ -788,6 +845,7 @@ def build_session_items(instance: dict, variant: str | None = None) -> list[dict
             "user_id": qid,
             "conversation_id": f"{qid}::{s_idx}",
             "source": "longmemeval",
+            "change_agent": BENCH_CHANGE_AGENT,
             "valid_from": valid_from,
             "embed": True,
             "metadata": {
@@ -1647,6 +1705,16 @@ def judge_with_llm(client, model: str, qtype: str, question: str, answer: str, h
     return False
 
 
+def _provider_for_model(model: str) -> str:
+    """Route model IDs to a provider. Claude IDs start with 'claude-'; anything
+    else falls through to OpenAI (gpt-*, o1-*, o3-*, plus OpenAI-compatible
+    endpoints hosting other names)."""
+    m = (model or "").lower()
+    if m.startswith("claude-"):
+        return "anthropic"
+    return "openai"
+
+
 # ── Runner ───────────────────────────────────────────────────────────────────
 
 async def run(args: argparse.Namespace) -> None:
@@ -1668,6 +1736,7 @@ async def run(args: argparse.Namespace) -> None:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
+    log(f"BENCH_RUN_ID={BENCH_RUN_ID}  (wipe with: --wipe-run {BENCH_RUN_ID})")
     log(f"loading dataset: {args.dataset}")
     with open(args.dataset, "r", encoding="utf-8") as f:
         dataset = json.load(f)
@@ -2372,6 +2441,25 @@ def parse_args() -> argparse.Namespace:
             "(stock --k applies to every question)."
         ),
     )
+    p.add_argument(
+        "--wipe-run",
+        default="",
+        help=(
+            "Delete all bench rows tagged with this RUN_ID (the value printed "
+            "at the start of every run, e.g. 'lme-20260413-194821-abc123'), "
+            "then VACUUM + ANALYZE and exit. Uses idx_mi_change_agent for a "
+            "single indexed delete. Run-scoped: does not touch other runs."
+        ),
+    )
+    p.add_argument(
+        "--wipe-all-bench",
+        action="store_true",
+        help=(
+            "Delete every row tagged change_agent LIKE 'bench:%%' across all "
+            "runs, then VACUUM + ANALYZE and exit. Use this when you want a "
+            "completely clean slate."
+        ),
+    )
     args = p.parse_args()
     if args.no_memory and args.rag_aware_empty:
         p.error("--no-memory and --rag-aware-empty are mutually exclusive "
@@ -2389,6 +2477,17 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.wipe_run or args.wipe_all_bench:
+        if args.wipe_run and args.wipe_all_bench:
+            print("--wipe-run and --wipe-all-bench are mutually exclusive", flush=True)
+            sys.exit(2)
+        pattern = f"bench:{args.wipe_run}" if args.wipe_run else "bench:%"
+        print(f"wiping change_agent LIKE {pattern!r}...", flush=True)
+        counts = wipe_bench_rows(pattern)
+        for k, v in counts.items():
+            print(f"  {k:32} {v}", flush=True)
+        print("done.", flush=True)
+        return
     try:
         asyncio.run(run(args))
     except KeyboardInterrupt:
