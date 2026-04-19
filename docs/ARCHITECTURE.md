@@ -11,7 +11,7 @@ M3 Memory is a local-first persistent memory system for MCP agents. An agent cal
 ```
 Agent (Claude Code / Gemini CLI / Aider)
     ↕ MCP protocol (stdio)
-Memory Bridge — 44 tools (bin/memory_bridge.py, sourced from bin/mcp_tool_catalog.py)
+Memory Bridge — 55 catalog tools (bin/memory_bridge.py, sourced from bin/mcp_tool_catalog.py)
     ↕
 SQLite (local, primary)
     ↕ optional

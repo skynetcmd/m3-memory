@@ -99,7 +99,7 @@ Restart your agent after saving the config.
 
 ### Agents without native MCP support
 
-Some agents can't speak MCP directly — Aider and Openclaw are the two we support today. For them, route chat completions through the bundled [`mcp_proxy`](./bin/mcp_proxy.py), an OpenAI-compatible server on `localhost:9000` that injects m3-memory tools (and the rest of the catalog — 55 tools total) into every request and executes `tool_calls` by calling bridge functions directly.
+Some agents can't speak MCP directly — Aider and Openclaw are the two we support today. For them, route chat completions through the bundled [`mcp_proxy`](./bin/mcp_proxy.py), an OpenAI-compatible server on `localhost:9000` that injects m3-memory tools (and the rest of the catalog — 66 tools total) into every request and executes `tool_calls` by calling bridge functions directly.
 
 **High-level flow:** agent → `localhost:9000/v1` (OpenAI-compatible) → proxy injects tools → real model provider (Anthropic / Google / xAI / LM Studio) → model may emit `tool_calls` → proxy executes them against m3-memory → results fed back → final answer returned to agent.
 
@@ -176,7 +176,7 @@ Openclaw is self-hosted, doesn't speak MCP, and has its own internal `session-me
    Back up the file first: `cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak`
 3. Seed the system prompt. Openclaw's `hooks.internal.entries.boot-md` is enabled by default — drop a markdown file that tells the model: *"Before answering, call `memory_search` to check m3-memory. After learning anything important, call `memory_write`."* Without that instruction the injected tools are available but the model won't know to use them.
 4. (Optional) Keep Openclaw's own `session-memory` hook enabled — it runs in parallel and doesn't conflict. Or disable it in `hooks.internal.entries.session-memory.enabled = false` if you want m3-memory to be the sole store.
-5. Restart Openclaw. It will now route through the proxy, get all 44 catalog tools injected into every request, and execute them via the bridge layer directly against m3-memory's SQLite.
+5. Restart Openclaw. It will now route through the proxy, get all 55 catalog tools injected into every request, and execute them via the bridge layer directly against m3-memory's SQLite.
 
 Caveat: when the proxy is down, Openclaw's chat completions **will fail** because `OPENAI_BASE_URL` points at a dead local port. Either autostart the proxy (see above) or revert the `env` change when you want to run Openclaw standalone.
 
@@ -249,6 +249,6 @@ See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL` and `CHR
 ## ▶️ Next steps
 
 - [CORE_FEATURES.md](./CORE_FEATURES.md) — what M3 Memory can do
-- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 44 MCP tools and agent behavioral rules
+- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 66 MCP tools and agent behavioral rules
 - [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — search internals, schema, sync, security
 - [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) — credentials and runtime config
