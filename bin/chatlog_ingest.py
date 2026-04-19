@@ -361,7 +361,24 @@ async def main() -> int:
                         help="Override conversation_id (defaults to parsed sessionId)")
     parser.add_argument("--variant", default=None,
                         help="Provenance tag (e.g. pre_compact, stop, session_end, test)")
+    parser.add_argument("--db", default=None,
+                        help="Override chatlog DB path for this run (dev smoke tests). "
+                             "Sets CHATLOG_DB_PATH for the duration of the process.")
+    parser.add_argument("--spill-dir", default=None,
+                        help="Override spill directory for this run (dev smoke tests). "
+                             "Prevents stale spill files from polluting production.")
     args = parser.parse_args()
+
+    if args.db or args.spill_dir:
+        sys.path.insert(0, os.path.dirname(__file__))
+        import chatlog_config
+        if args.db:
+            os.environ["CHATLOG_DB_PATH"] = args.db
+            logger.info("Overriding DB path: %s", args.db)
+        if args.spill_dir:
+            chatlog_config.SPILL_DIR = args.spill_dir
+            logger.info("Overriding spill dir: %s", args.spill_dir)
+        chatlog_config.invalidate_cache()
 
     result = await _ingest(args.format, args.transcript_path, args.session_id, args.variant)
     print(json.dumps(result, indent=2))
