@@ -14,24 +14,25 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
 import subprocess
 import sys
+import logging
+from pathlib import Path
 
 # Import config module from same directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chatlog_config import (
+    ChatlogConfig,
+    HookSpec,
+    RedactionSpec,
+    CostTrackingSpec,
+    EmbedSweeperSpec,
     CONFIG_PATH,
     DEFAULT_DB_PATH,
     MAIN_DB_PATH,
-    VALID_HOST_AGENTS,
     VALID_MODES,
-    ChatlogConfig,
-    CostTrackingSpec,
-    EmbedSweeperSpec,
-    HookSpec,
-    RedactionSpec,
+    VALID_HOST_AGENTS,
     resolve_config,
     save_config,
 )
@@ -59,7 +60,7 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
 def prompt_choice(question: str, choices: list[str], default: str) -> str:
     """Prompt for one of several choices. Return the chosen value."""
     choices_str = "/".join(choices)
-    choices.index(default) if default in choices else 0
+    default_idx = choices.index(default) if default in choices else 0
     while True:
         response = input(f"{question} ({choices_str}): ").strip().lower()
         if response == "":
@@ -101,9 +102,19 @@ def get_hook_path_for_agent(agent: str) -> tuple[str, str]:
 def show_hook_wiring_instructions(agent: str, hook_spec: HookSpec) -> None:
     """Print instructions for wiring up a hook for the given agent."""
     sh_path, ps1_path, desc = get_hook_path_for_agent(agent)
+    is_windows = sys.platform == "win32"
     print(f"\n  {agent} ({desc}):")
-    print(f"    - macOS/Linux: source '{sh_path}' in your shell startup")
-    print(f"    - Windows PowerShell: . '{ps1_path}' in your profile")
+    if agent == "claude-code":
+        print("    - Follow the 'Claude Code Settings' section below to add hooks to ~/.claude/settings.json")
+    elif agent == "gemini-cli":
+        print("    - Register the hook in ~/.gemini/settings.json (see docs/CHATLOG.md for snippet)")
+        if is_windows:
+            print(f"    - Command: powershell -NoProfile -ExecutionPolicy Bypass -File {ps1_path}")
+        else:
+            print(f"    - Command: /bin/sh {sh_path}")
+    else:
+        print(f"    - macOS/Linux: source '{sh_path}' in your shell startup")
+        print(f"    - Windows PowerShell: . '{ps1_path}' in your profile")
 
 
 def interactive_mode() -> str:
@@ -235,22 +246,72 @@ def install_schedules() -> bool:
         return False
 
 
-def show_status_line_snippet(config_path: str) -> None:
-    """Show the snippet for Claude Code settings.json."""
+def show_claude_code_settings_snippet(config: ChatlogConfig) -> None:
+    """Print the hooks + statusLine snippet for ~/.claude/settings.json.
+
+    Includes the PreCompact hook unconditionally and the Stop hook only when
+    config.host_agents['claude-code'].stop_hook is True. The two hooks share
+    the same PS1 entry point — it derives the variant from hook_event_name.
+    """
     print_section("Claude Code Settings (optional)")
-    print("To show chat log status in Claude Code, add this to ~/.claude/settings.json:")
+    print("Add the following to ~/.claude/settings.json under `hooks` and `statusLine`:")
     print()
+
+    ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
+                       "claude_code_precompact.ps1").replace("/", "\\")
+    sh = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
+                      "claude_code_precompact.sh")
+    # Emit the snippet that matches the current OS; show the alternate below.
+    is_windows = sys.platform == "win32"
+    if is_windows:
+        hook_cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
+        alt_label, alt_cmd = "macOS/Linux", f"/bin/sh {sh}"
+    else:
+        hook_cmd = f"/bin/sh {sh}"
+        alt_label, alt_cmd = "Windows", (
+            f"powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
+        )
+
+    hooks_block: dict = {
+        "PreCompact": [
+            {"hooks": [{"type": "command", "command": hook_cmd}]}
+        ],
+    }
+    cc = config.host_agents.get("claude-code")
+    stop_enabled = bool(cc and cc.stop_hook)
+    if stop_enabled:
+        hooks_block["Stop"] = [
+            {"hooks": [{"type": "command", "command": hook_cmd}]}
+        ]
 
     status_script = os.path.join(BASE_DIR, "bin", "chatlog_status_line.py")
     snippet = {
+        "hooks": hooks_block,
         "statusLine": {
             "type": "command",
-            "command": f"python {status_script}"
-        }
+            "command": f"python {status_script}",
+        },
     }
     print(json.dumps(snippet, indent=2))
     print()
+    print(f"Stop hook: {'ENABLED' if stop_enabled else 'disabled (PreCompact only)'}")
+    print("Toggle with: chatlog_init.py --enable-stop-hook | --disable-stop-hook")
+    print(f"{alt_label} equivalent command: {alt_cmd}")
+    print()
     print("Do NOT auto-edit settings.json. Copy-paste the above manually.")
+
+
+def apply_stop_hook_toggle(enable: bool) -> int:
+    """Flip host_agents['claude-code'].stop_hook, persist, re-print snippet."""
+    cfg = resolve_config()
+    cc = cfg.host_agents.setdefault("claude-code", HookSpec())
+    cc.stop_hook = enable
+    save_config(cfg)
+    state = "enabled" if enable else "disabled"
+    print(f"Claude Code Stop hook {state} in {CONFIG_PATH}")
+    print("Update ~/.claude/settings.json to match:")
+    show_claude_code_settings_snippet(cfg)
+    return 0
 
 
 def print_summary(config: ChatlogConfig) -> None:
@@ -313,8 +374,27 @@ def main() -> int:
         default=None,
         help="Database path (for separate/hybrid mode)",
     )
+    hook_group = parser.add_mutually_exclusive_group()
+    hook_group.add_argument(
+        "--enable-stop-hook",
+        action="store_true",
+        help=("Enable per-turn capture via Claude Code's Stop hook in addition "
+              "to PreCompact. Writes config and prints an updated settings.json "
+              "snippet. Default is PreCompact-only."),
+    )
+    hook_group.add_argument(
+        "--disable-stop-hook",
+        action="store_true",
+        help="Disable the Stop hook (revert to PreCompact-only capture).",
+    )
 
     args = parser.parse_args()
+
+    # Standalone toggle actions: apply and exit without reconfigure prompts.
+    if args.enable_stop_hook:
+        return apply_stop_hook_toggle(enable=True)
+    if args.disable_stop_hook:
+        return apply_stop_hook_toggle(enable=False)
 
     try:
         # Check if config exists
@@ -362,7 +442,7 @@ def main() -> int:
         # Post-setup steps
         run_migrations()
         install_schedules()
-        show_status_line_snippet(CONFIG_PATH)
+        show_claude_code_settings_snippet(config)
 
         print()
         print("Setup complete!")
