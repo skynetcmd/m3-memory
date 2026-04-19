@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: 504742a91f88
-mtime_utc: 2026-04-18T23:27:41.245535+00:00
-generated_utc: 2026-04-19T00:39:16.091840+00:00
+sha1: 4487fb528ab4
+mtime_utc: 2026-04-19T02:44:47.983823+00:00
+generated_utc: 2026-04-19T02:53:55.499421+00:00
 private: false
 ---
 
@@ -17,11 +17,12 @@ Supports multiple migration targets:
     - chatlog — optional, controlled by chatlog_config.chatlog_mode()
 
 Subcommands:
-    status              Show current version and pending migrations
-    up [--to N]         Apply pending migrations (prompts for backup dir + confirmation)
-    down [--to N]       Roll back to version N (requires .down.sql files)
-    backup [--out PATH] Take a standalone backup
-    restore <PATH>      Restore the database from a backup file
+    status                    Show current version and pending migrations
+    plan [--to N]             Preview DDL that pending migrations would run (no changes)
+    up [--to N] [--dry-run]   Apply pending migrations (prompts for backup + confirmation)
+    down --to N [--dry-run]   Roll back to version N (requires .down.sql files)
+    backup [--out PATH]       Take a standalone backup
+    restore <PATH>            Restore the database from a backup file
 
 All subcommands accept --target {main,chatlog,all} to select which DB(s) to operate on.
 Default is "all" (operates on all configured targets).
@@ -38,7 +39,7 @@ transaction already committed.
 
 ## Entry points
 
-- `def main()` (line 538)
+- `def main()` (line 689)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -49,14 +50,18 @@ transaction already committed.
 | `--to` | Apply up to this version (default: latest) | None | Applies all pending migrations up to latest available version. | int | Applies migrations up to specified version; stops before newer ones. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; applies migrations to all configured targets. | str | Applies migrations to only specified target. |
 | `-y`, `--yes` | Skip confirmation prompts | `False` | Prompts user to confirm backup dir and migration execution. | store_true | Auto-selects default backup dir (~/.m3-memory/backups) and confirms migration. |
+| `--dry-run` | Print the plan + DDL without applying anything | `False` |  | store_true |  |
 | `--to` | Roll back to this version | — | Requires explicit version (no default). | int | Reverts migrations above specified version; checks for down files first. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; rolls back all configured targets. | str | Rolls back only specified target. |
 | `-y`, `--yes` | Skip confirmation prompts | `False` | Prompts user to confirm backup dir and rollback execution. | store_true | Auto-selects default backup dir and confirms rollback. |
-| `--out` | Backup directory (overrides saved default) | None | Uses saved backup dir from .migrate_config.json; prompts if missing. | str | Uses specified directory instead of saved config; still requires confirmation if not -y. |
+| `--dry-run` | Print the plan + DDL without reverting anything | `False` |  | store_true |  |
+| `--to` | Plan up to this version (default: latest) | None |  | int |  |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Creates backup for all configured targets in backup_dir/<target>/ subdirs. | str | Creates backup for only specified target. |
+| `--out` | Backup directory (overrides saved default) | None | Uses saved backup dir from .migrate_config.json; prompts if missing. | str | Uses specified directory instead of saved config; still requires confirmation if not -y. |
+| `--target` | Which DB target to operate on (default: all configured) | `all` | Restores main database; warns if --target all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
 | `-y`, `--yes` | Skip interactive prompts | `False` | Prompts user for confirmation before creating backup. | store_true | Skips confirmation; creates backup immediately. |
 | `path` | Path to the backup .db file | — | Required positional argument; no default. | str | Restores from specified backup file path. |
-| `--target` | Which DB target to restore (default: main; use chatlog for chat log DB) | `main` | Restores main database; warns if --target all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
+| `--target` | Which DB target to restore (default: main; use chatlog for chat log DB) | `main` |  | str |  |
 | `-y`, `--yes` | Skip confirmation | `False` | Prompts user to confirm before overwriting current DB. | store_true | Skips confirmation; proceeds directly to restore. |
 
 ## Environment variables read
@@ -71,10 +76,14 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `target.db_path`` (line 311)
-- `sqlite3.connect()  → `target.db_path`` (line 362)
-- `sqlite3.connect()  → `target.db_path`` (line 417)
-- `sqlite3.connect()  → `target.db_path`` (line 469)
+- `sqlite3.connect()  → `dst`` (line 181)
+- `sqlite3.connect()  → `target.db_path`` (line 179)
+- `sqlite3.connect()  → `target.db_path`` (line 215)
+- `sqlite3.connect()  → `target.db_path`` (line 400)
+- `sqlite3.connect()  → `target.db_path`` (line 468)
+- `sqlite3.connect()  → `target.db_path`` (line 528)
+- `sqlite3.connect()  → `target.db_path`` (line 585)
+- `sqlite3.connect()  → `target.db_path`` (line 625)
 
 
 ## Notable external imports
