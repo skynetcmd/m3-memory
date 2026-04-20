@@ -2,19 +2,33 @@ from __future__ import annotations
 
 import json
 import logging
-
+import sqlite3
+from contextlib import contextmanager
 from memory_core import (
-    CHROMA_BASE_URL,
-    CHROMA_COLLECTION,
-    CHROMA_CONTENT_MAX,
-    CHROMA_V2_PREFIX,
-    EMBED_DIM,
-    _db,
-    _pack,
-    _unpack,
+    ctx, _pack, _unpack, CHROMA_BASE_URL, CHROMA_COLLECTION, CHROMA_V2_PREFIX, CHROMA_CONTENT_MAX, EMBED_DIM
 )
+import migrate_memory
 
 logger = logging.getLogger("memory_sync")
+
+@contextmanager
+def _get_db(db_path: str):
+    """Simple context manager for any SQLite DB."""
+    conn = sqlite3.connect(db_path, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def _table_exists(db, table_name: str) -> bool:
+    """Check if a table exists in the SQLite DB."""
+    res = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone()
+    return res is not None
 
 async def _get_collection_dim(client, col_path) -> int | None:
     """Query ChromaDB collection to determine its expected embedding dimension."""
@@ -29,8 +43,12 @@ async def _get_collection_dim(client, col_path) -> int | None:
     return None
 
 
-async def _push_to_chroma(client, col_id, col_path, max_items):
-    with _db() as db:
+async def _push_to_chroma(client, col_id, col_path, max_items, target):
+    with _get_db(target.db_path) as db:
+        if not _table_exists(db, "chroma_sync_queue"):
+            logger.debug(f"[{target.name}] Skipping push: chroma_sync_queue table not found.")
+            return 0, 0, ""
+
         queue = db.execute("SELECT id, memory_id, operation FROM chroma_sync_queue WHERE attempts < 3 ORDER BY queued_at ASC LIMIT ?", (max_items,)).fetchall()
         if not queue: return 0, 0, ""
 
@@ -49,7 +67,7 @@ async def _push_to_chroma(client, col_id, col_path, max_items):
                     vec = _unpack(emb["embedding"])
                     # Skip vectors with wrong dimension for this collection
                     if col_dim and len(vec) != col_dim:
-                        logger.warning(f"Dimension mismatch for {mid}: got {len(vec)}, collection expects {col_dim} — skipping")
+                        logger.warning(f"[{target.name}] Dimension mismatch for {mid}: got {len(vec)}, collection expects {col_dim} — skipping")
                         skip_qids.append(qid)
                         continue
                     batch_ids.append(mid)
@@ -59,7 +77,8 @@ async def _push_to_chroma(client, col_id, col_path, max_items):
                         "type": item["type"], "title": item["title"] or "",
                         "origin_device": item["origin_device"] or "",
                         "importance": str(item["importance"] or 0.5),
-                        "created_at": item["created_at"] or ""
+                        "created_at": item["created_at"] or "",
+                        "target_db": target.name
                     })
                     batch_qids.append(qid)
                 else: skip_qids.append(qid)
@@ -74,7 +93,7 @@ async def _push_to_chroma(client, col_id, col_path, max_items):
                 if batch_qids:
                     db.execute(f"DELETE FROM chroma_sync_queue WHERE id IN ({','.join(['?']*len(batch_qids))})", batch_qids)
             except Exception as e:
-                logger.exception(f"ChromaDB upsert failed for {len(batch_ids)} items: {e}")
+                logger.exception(f"[{target.name}] ChromaDB upsert failed for {len(batch_ids)} items: {e}")
                 failed += len(batch_ids)
 
         if delete_ids:
@@ -84,66 +103,65 @@ async def _push_to_chroma(client, col_id, col_path, max_items):
                 if delete_qids:
                     db.execute(f"DELETE FROM chroma_sync_queue WHERE id IN ({','.join(['?']*len(delete_qids))})", delete_qids)
             except Exception as e:
-                logger.exception(f"ChromaDB delete failed for {len(delete_ids)} items: {e}")
+                logger.exception(f"[{target.name}] ChromaDB delete failed for {len(delete_ids)} items: {e}")
                 failed += len(delete_ids)
 
         if skip_qids:
             db.execute(f"DELETE FROM chroma_sync_queue WHERE id IN ({','.join(['?']*len(skip_qids))})", skip_qids)
         return synced, failed, ""
 
-async def _pull_from_chroma(client, col_id, col_path, max_items):
-    """Pulls new items from ChromaDB and stores them in chroma_mirror."""
-    from datetime import datetime, timezone
+async def _pull_from_chroma(client, col_id, col_path, max_items, target):
+    """Pulls new items from ChromaDB and stores them in chroma_mirror.
+    Currently only pulls into the 'main' target.
+    """
+    if target.name != "main":
+        return 0, 0, ""
 
+    from datetime import datetime, timezone
+    
     # 1. Get last pull timestamp
     last_pull = "1970-01-01T00:00:00Z"
-    with _db() as db:
+    with _get_db(target.db_path) as db:
+        if not _table_exists(db, "sync_state"):
+            return 0, 0, ""
         row = db.execute("SELECT last_pull_at FROM sync_state WHERE collection_name = ?", (CHROMA_COLLECTION,)).fetchone()
         if row: last_pull = row[0]
 
-    # 2. Query Chroma for items updated since last_pull
-    # Chroma doesn't have a direct 'greater than' filter for metadatas in some versions,
-    # but we'll attempt a metadata filter. If it fails, we fetch and filter locally.
+    # 2. Query Chroma for items
     pulled, failed = 0, 0
     try:
-        # Note: Chroma's python client/API handles filters differently across versions.
-        # We'll fetch the most recent items and filter.
         resp = await client.post(f"{col_path}/get", json={
             "limit": max_items,
             "include": ["documents", "metadatas", "embeddings"]
         }, timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
-
+        
         if not data.get("ids"): return 0, 0, ""
 
-        # Validate parallel arrays have consistent lengths
         ids = data["ids"]
         documents = data.get("documents") or []
         metadatas = data.get("metadatas") or []
         embeddings_list = data.get("embeddings") or []
         if not (len(ids) == len(documents) == len(metadatas) == len(embeddings_list)):
-            logger.error(f"ChromaDB pull: array length mismatch — ids={len(ids)}, docs={len(documents)}, metas={len(metadatas)}, embs={len(embeddings_list)}")
+            logger.error(f"[{target.name}] ChromaDB pull: array length mismatch")
             return 0, 0, ""
 
-        with _db() as db:
+        with _get_db(target.db_path) as db:
+            if not _table_exists(db, "chroma_mirror"):
+                return 0, 0, ""
+                
             for i in range(len(ids)):
                 mid = ids[i]
                 meta = metadatas[i]
                 content = documents[i]
                 emb_vec = embeddings_list[i]
 
-                # Validate embedding dimension before storing
                 if emb_vec and len(emb_vec) != EMBED_DIM:
-                    logger.warning(f"ChromaDB pull: dimension mismatch for {mid}: got {len(emb_vec)}, expected {EMBED_DIM} — skipping")
                     continue
 
-                # Skip if it's our own local item (optional, depending on architecture)
-                # if meta.get("origin_device") == platform.node(): continue
-
-                # Insert into mirror
                 db.execute("""
-                    INSERT INTO chroma_mirror
+                    INSERT INTO chroma_mirror 
                     (id, type, title, content, metadata_json, agent_id, model_id, origin_device, importance, remote_created_at, pulled_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
@@ -152,13 +170,12 @@ async def _pull_from_chroma(client, col_id, col_path, max_items):
                         importance = excluded.importance,
                         pulled_at = excluded.pulled_at
                 """, (
-                    mid, meta.get("type", "note"), meta.get("title", ""), content,
+                    mid, meta.get("type", "note"), meta.get("title", ""), content, 
                     json.dumps(meta), meta.get("agent_id", ""), meta.get("model_id", ""),
                     meta.get("origin_device", ""), meta.get("importance", 0.5),
                     meta.get("created_at", last_pull), datetime.now(timezone.utc).isoformat()
                 ))
-
-                # Insert embedding
+                
                 db.execute("""
                     INSERT INTO chroma_mirror_embeddings (id, mirror_id, embedding, dim, pulled_at)
                     VALUES (?, ?, ?, ?, ?)
@@ -166,38 +183,39 @@ async def _pull_from_chroma(client, col_id, col_path, max_items):
                         embedding = excluded.embedding,
                         pulled_at = excluded.pulled_at
                 """, (mid, mid, _pack(emb_vec), len(emb_vec), datetime.now(timezone.utc).isoformat()))
-
+                
                 pulled += 1
 
-            # Update sync state
             db.execute("INSERT OR REPLACE INTO sync_state (collection_name, last_pull_at) VALUES (?, ?)",
                       (CHROMA_COLLECTION, datetime.now(timezone.utc).isoformat()))
-
+            
     except Exception as e:
-        logger.exception(f"ChromaDB pull failed: {e}")
-        failed = max_items # approximation
+        logger.exception(f"[{target.name}] ChromaDB pull failed: {e}")
+        failed = max_items
 
     return pulled, failed, ""
 
 async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
     if direction not in ("push", "pull", "both"):
-        return f"Error: invalid direction '{direction}'. Must be push, pull, or both."
-    from memory_core import ctx
+        return f"Error: invalid direction '{direction}'."
+        
+    targets = migrate_memory.targets("all")
+    
     if reset_stalled:
-        with _db() as db:
-            db.execute("UPDATE chroma_sync_queue SET attempts = 0, stalled_since = NULL WHERE attempts >= 3")
-
+        for target in targets:
+            try:
+                with _get_db(target.db_path) as db:
+                    if _table_exists(db, "chroma_sync_queue"):
+                        db.execute("UPDATE chroma_sync_queue SET attempts = 0, stalled_since = NULL WHERE attempts >= 3")
+            except Exception:
+                pass
+    
     if not CHROMA_BASE_URL:
-        logger.debug("ChromaDB sync skipped: CHROMA_BASE_URL not set.")
         return "ChromaDB sync skipped: CHROMA_BASE_URL not set."
 
     client = ctx.get_async_client()
     try:
         url = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{CHROMA_COLLECTION}"
-        if not url.startswith("http"):
-            logger.error(f"Invalid CHROMA_BASE_URL: {CHROMA_BASE_URL} (missing protocol)")
-            return "ChromaDB unreachable: Invalid URL"
-
         resp = await client.get(url, timeout=10.0)
         resp.raise_for_status()
         col_id = resp.json()["id"]
@@ -206,14 +224,22 @@ async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
         return "ChromaDB unreachable"
 
     col_path = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{col_id}"
-
-    pushed, p_failed = 0, 0
-    pulled, l_failed = 0, 0
-
-    if direction in ("push", "both"):
-        pushed, p_failed, _ = await _push_to_chroma(client, col_id, col_path, max_items)
-
-    if direction in ("pull", "both"):
-        pulled, l_failed, _ = await _pull_from_chroma(client, col_id, col_path, max_items)
-
-    return f"Synced: {pushed} pushed, {pulled} pulled, {p_failed + l_failed} failed"
+    
+    total_pushed, total_pulled, total_failed = 0, 0, 0
+    
+    for target in targets:
+        logger.info(f"--- Chroma Sync target: {target.name} ---")
+        pushed, p_failed = 0, 0
+        pulled, l_failed = 0, 0
+        
+        if direction in ("push", "both"):
+            pushed, p_failed, _ = await _push_to_chroma(client, col_id, col_path, max_items, target)
+        
+        if direction in ("pull", "both"):
+            pulled, l_failed, _ = await _pull_from_chroma(client, col_id, col_path, max_items, target)
+        
+        total_pushed += pushed
+        total_pulled += pulled
+        total_failed += (p_failed + l_failed)
+        
+    return f"Synced: {total_pushed} pushed, {total_pulled} pulled, {total_failed} failed"
