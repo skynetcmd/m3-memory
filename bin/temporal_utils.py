@@ -94,10 +94,10 @@ def resolve_temporal_expressions(text: str, anchor_date: datetime | str) -> list
         (r"\brecently\b", 0), # Map recently to roughly today
     ]
     for pattern, days in simple_rel:
-        if re.search(pattern, text_lower):
+        for match in re.finditer(pattern, text_lower):
             resolved = anchor + timedelta(days=days)
             results.append({
-                "ref": re.search(pattern, text_lower).group(0),
+                "ref": match.group(0),
                 "absolute": resolved.date().isoformat()
             })
 
@@ -108,13 +108,20 @@ def resolve_temporal_expressions(text: str, anchor_date: datetime | str) -> list
         (r"\b(\d+)\s+months?\s+ago\b", lambda m: timedelta(days=int(m)*30)),
         (r"\b(\d+)\s+years?\s+ago\b", lambda y: timedelta(days=int(y)*365)),
     ]
+    MAX_DAYS = 365 * 100 # 100 years
     for pattern, delta_fn in numeric_patterns:
         for match in re.finditer(pattern, text_lower):
-            resolved = anchor - delta_fn(match.group(1))
-            results.append({
-                "ref": match.group(0),
-                "absolute": resolved.date().isoformat()
-            })
+            try:
+                delta = delta_fn(match.group(1))
+                if abs(delta.days) > MAX_DAYS:
+                    continue
+                resolved = anchor - delta
+                results.append({
+                    "ref": match.group(0),
+                    "absolute": resolved.date().isoformat()
+                })
+            except (OverflowError, ValueError):
+                continue
 
     # 4. "last [weekday]"
     weekday_pattern = r"\blast\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b"
@@ -133,14 +140,31 @@ def resolve_temporal_expressions(text: str, anchor_date: datetime | str) -> list
         (r"\blast\s+month\b", lambda a: a - timedelta(days=30)),
     ]
     for pattern, resolver in static_rel:
-        if re.search(pattern, text_lower):
+        for match in re.finditer(pattern, text_lower):
             resolved = resolver(anchor)
             results.append({
-                "ref": re.search(pattern, text_lower).group(0),
+                "ref": match.group(0),
                 "absolute": resolved.date().isoformat()
             })
 
     return results
+
+def has_temporal_cues(text: str) -> bool:
+    """Returns True if the text contains any of common temporal expressions."""
+    cues = [
+        r"\b(when|before|after|how long|timeline|date)\b",
+        r"\b(yesterday|today|tomorrow|recently|ago)\b",
+        r"\blast\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|weekend|month)\b",
+    ]
+    for cue in cues:
+        if re.search(cue, text, re.IGNORECASE):
+            return True
+    return False
+
+def extract_referenced_dates(text: str) -> list[str]:
+    """Extracts raw ISO-8601 dates referenced in the text like '2023-05-25'."""
+    pattern = r"\b(\d{4}-\d{2}-\d{2})\b"
+    return re.findall(pattern, text)
 
 def parse_locomo_date(date_str: str) -> datetime | None:
     """Parses LOCOMO date format like '1:56 pm on 8 May, 2023'"""
