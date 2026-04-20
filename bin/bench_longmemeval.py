@@ -53,8 +53,8 @@ sys.path.insert(0, str(BASE_DIR / "bin"))
 BENCH_RUN_ID = f"lme-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
 BENCH_CHANGE_AGENT = f"bench:{BENCH_RUN_ID}"
 
-# Route embeddings to llama-server before memory_core imports.
-os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:8081/v1")
+# Route embeddings to LM Studio before memory_core imports.
+os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://100.100.50.80:1234/v1")
 os.environ.setdefault("EMBED_BULK_CHUNK", "1024")
 os.environ.setdefault("EMBED_BULK_CONCURRENCY", "4")
 
@@ -911,13 +911,15 @@ async def retrieve_for_question(
     smart_time_boost: float = 0.15,
     runtime_question_type: str = "hybrid",
     embedder_config: dict | None = None,
-) -> list[dict]:
+    variant: str = "",
+    ) -> list[dict]:
     """Hybrid FTS5+vector search with adaptive policies and custom embedders."""
 
     # ── Phase 1: Runtime Question Typing (Adaptive Policy) ──
+
     inferred_type = "default"
     if runtime_question_type != "off":
-        inferred_type = get_question_type(question, mode=runtime_question_type)
+        inferred_type = await get_question_type(question, mode=runtime_question_type)
 
     # Type-to-Policy Mapping (Phase 1/2)
     # Mapping table from PLAN4:
@@ -1812,6 +1814,7 @@ async def run(args: argparse.Namespace) -> None:
                         smart_time_boost=args.smart_time_boost,
                         runtime_question_type=args.runtime_question_type,
                         embedder_config=e_config,
+                        variant=args.variant,
                     )
                 except Exception as e:
                     log(f"  [{qid}] retrieval failed: {e}")
@@ -2078,8 +2081,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--smart-retrieval", action="store_true", help="Enable temporal-aware smart retrieval")
     p.add_argument("--runtime-question-type", choices=["off", "regex", "hybrid"], default="hybrid")
     p.add_argument("--embedder-mode", choices=["dense", "hybrid"], default="dense")
-    p.add_argument("--rerank", action="store_true", help="Enable lightweight reranking")
-    p.add_argument("--rerank-pool-k", type=int, default=40, help="Initial pool size for reranking")
     p.add_argument("--cluster-size", type=int, default=5,
                    help="episodic expansion: pull +/- N surrounding turns (0 = off)")
     p.add_argument("--graph-depth", type=int, default=1,
