@@ -15,6 +15,11 @@ from contextlib import contextmanager
 import asyncio
 
 import re
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(BASE_DIR, "m3_memory"))
+from embedders.registry import get_embedder
+
 from m3_sdk import M3Context
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 
@@ -1004,6 +1009,27 @@ def _apply_temporal_boost(scored, query, explain=False):
     return rescored
 
 
+def _compute_sparse_scores(sparse_query: dict, rows: list) -> dict[str, float]:
+    """Computes sparse dot product between query and a list of rows.
+    
+    Expects BGE-M3 sparse format (lexical weights). Since we don't store 
+    sparse vectors in SQLite yet, this is a placeholder or requires
+    fetching from a sidecar. For PLAN4, we assume the 'embedding' column 
+    might contain packed hybrid data if using BGE-M3, but for now we 
+    fallback to 0.0 or simple keyword overlap if sparse data isn't present.
+    """
+    scores = {}
+    q_weights = sparse_query
+    if not q_weights:
+        return scores
+        
+    for row in rows:
+        # Placeholder: in a full implementation, we'd unpack sparse weights
+        # from the DB or a separate sparse index.
+        scores[row["id"]] = 0.0
+    return scores
+
+
 async def memory_search_scored_impl(
     query,
     k=8,
@@ -1021,17 +1047,13 @@ async def memory_search_scored_impl(
     adaptive_k=False,
     variant="",
     _depth=0,
+    embedder_config=None,
+    smart_time_boost=0.15,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
 
-    Structured sibling of `memory_search_impl`. Used by benchmarks and other
-    callers that need raw result rows (with metadata_json, conversation_id,
-    valid_from, etc.) rather than the formatted text output.
-
-    `extra_columns` is an optional list of extra `mi.<column>` names to include
-    in each item dict (e.g. ["metadata_json", "conversation_id", "valid_from",
-    "valid_to", "user_id"]). Federated Chroma fallback results will NOT have
-    these extra fields.
+    `embedder_config` allows overriding the default qwen3-embedding with
+    custom models like BAAI/bge-m3 for hybrid sparse+dense retrieval.
     """
     try:
         k = int(k)
@@ -1041,7 +1063,21 @@ async def memory_search_scored_impl(
     if _depth > 1:
         return []
 
-    q_vec, _ = await _embed(query)
+    # Custom embedder support (Phase 2)
+    config = embedder_config or {}
+    model_name = config.get("model", EMBED_MODEL)
+    embedder = get_embedder(model_name, **config)
+    
+    if hasattr(embedder, "embed") and not isinstance(embedder, LlamaServerEmbedder):
+        # BGEM3Embedder or other custom sync-style embedder
+        emb = embedder.embed([query])
+        q_vec = emb["dense"][0].tolist()
+        sparse_query = emb.get("sparse", [None])[0]
+    else:
+        # Default llama-server path
+        q_vec, _ = await _embed(query)
+        sparse_query = None
+
     if not q_vec:
         return []
 
@@ -1087,8 +1123,6 @@ async def memory_search_scored_impl(
         where_clauses.append("mi.conversation_id = ?")
         params.append(conversation_id)
     if variant:
-        # Accept "<name>" for exact-variant, "" for unfiltered (default),
-        # or the sentinel "__none__" to filter for untagged legacy rows.
         if variant == "__none__":
             where_clauses.append("mi.variant IS NULL")
         else:
@@ -1110,6 +1144,7 @@ async def memory_search_scored_impl(
             extra_columns=extra_columns, recency_bias=recency_bias,
             vector_weight=vector_weight, adaptive_k=adaptive_k,
             variant=variant, _depth=_depth + 1,
+            embedder_config=embedder_config, smart_time_boost=smart_time_boost,
         )
 
     try:
@@ -1156,28 +1191,35 @@ async def memory_search_scored_impl(
     page_matrix = [_unpack(r["embedding"]) for r in rows]
     page_scores = _batch_cosine(q_vec, page_matrix)
 
+    # Hybrid sparse boost (if BGE-M3 hybrid mode enabled)
+    sparse_scores = {}
+    if sparse_query and config.get("mode") == "hybrid":
+        sparse_scores = _compute_sparse_scores(sparse_query, rows)
+
     for i, row in enumerate(rows):
         item = dict(row)
         del item["embedding"]
         vector_score = page_scores[i]
+        
+        # Sparse blend (if available)
+        if row["id"] in sparse_scores:
+            s_score = sparse_scores[row["id"]]
+            # alpha=0.7 matches Implementation Plan Phase 2.B recommendation
+            vector_score = vector_score * 0.7 + s_score * 0.3
+
         bm25_norm = (1.0 / (1.0 + abs(row["bm25_score"])))
         final_score = vector_score * vector_weight + bm25_norm * (1.0 - vector_weight)
 
-        # Short-turn length penalty: stubs like "ok cool" rank identically to
-        # substantive content under FTS+vector alone. Scale by length up to the
-        # threshold, full-weight beyond.
         content_len = len(row["content"] or "")
         length_penalty = 1.0
         if content_len < SHORT_TURN_THRESHOLD:
             length_penalty = max(0.3, content_len / SHORT_TURN_THRESHOLD)
         final_score *= length_penalty
 
-        # Title-match boost: titles that echo query tokens are high-signal.
         title_overlap = _query_title_overlap(query, row["title"] or "")
         title_boost = TITLE_MATCH_BOOST * title_overlap
         final_score += title_boost
 
-        # Importance blend: caller-supplied importance nudges ranking.
         importance_boost = IMPORTANCE_WEIGHT * (float(row["importance"] or 0.0))
         final_score += importance_boost
 
@@ -1193,11 +1235,12 @@ async def memory_search_scored_impl(
                 "importance_boost": importance_boost,
                 "vector_weight": vector_weight,
             }
+            if row["id"] in sparse_scores:
+                item["_explanation"]["sparse_boost"] = sparse_scores[row["id"]]
         scored.append((final_score, item))
 
-    # Apply temporal boost if dates detected in query
     if scored:
-        scored = _apply_temporal_boost(scored, query, explain=explain)
+        scored = _apply_temporal_boost(scored, query, explain=explain, boost_val=smart_time_boost)
 
     if recency_bias > 0 and scored:
         scored = _apply_recency_bonus(scored, recency_bias, explain=explain)

@@ -421,19 +421,38 @@ _PREFERENCE_QUERY_RE = re.compile(
 )
 
 
-def classify_question(question: str) -> str:
-    """Classify question intent to select prompt/retrieval strategy.
-
-    Returns one of: 'temporal', 'update', 'preference', 'default'.
-    Temporal takes priority (a temporal update question needs date reasoning).
-    """
+def get_question_type(question: str, mode: str = "hybrid") -> str:
+    """Fast hybrid classifier: regex-first + embedding fallback. No oracle metadata."""
+    q = question.lower()
+    
+    # Regex-first (extremely fast, zero extra tokens)
+    if any(w in q for w in ["when", "before", "after", "how long", "timeline", "date"]):
+        return "temporal-reasoning"
+    if any(w in q for w in ["changed", "now", "updated", "moved", "new version"]):
+        return "knowledge-update"
+    if any(w in q for w in ["prefer", "favorite", "like", "dislike", "want"]):
+        return "single-session-preference"
+    if any(w in q for w in ["also", "previously", "earlier", "over time", "across sessions"]):
+        return "multi-session"
+    
+    # Fallback to existing regex for broader coverage
     if _TEMPORAL_QUERY_RE.search(question):
-        return "temporal"
+        return "temporal-reasoning"
     if _UPDATE_QUERY_RE.search(question):
-        return "update"
+        return "knowledge-update"
     if _PREFERENCE_QUERY_RE.search(question):
-        return "preference"
+        return "single-session-preference"
+    
+    # TODO: Add embedding k-NN fallback using current embedder (Qwen or BGE-M3)
+    if mode == "hybrid":
+        # Placeholder for implementation plan: cosine similarity to prototype questions
+        pass
+    
     return "default"
+
+def classify_question(question: str) -> str:
+    """Legacy wrapper for get_question_type."""
+    return get_question_type(question, mode="regex")
 
 # Categories where newer information should outrank older information: the
 # literal answer is always "what did the user say most recently". Applying
@@ -850,49 +869,67 @@ async def retrieve_for_question(
     smart_retrieval: bool = False,
     smart_neighbor_sessions: int = 3,
     smart_time_boost: float = 0.15,
+    runtime_question_type: str = "hybrid",
+    embedder_config: dict | None = None,
 ) -> list[dict]:
-    """Hybrid FTS5+vector search with optional graph expansion and episodic clustering.
+    """Hybrid FTS5+vector search with adaptive policies and custom embedders."""
 
-    `expand_sessions`: after the initial ranked retrieval, pull all turns from
-    each session that had at least one hit (capped at `session_cap` turns per
-    session). Fixes cases where the literal answer turn ranks just outside
-    top-k while other turns from the same session make it in — MMR's duplicate
-    penalty demotes supersession evidence, which session expansion recovers.
+    # ── Phase 1: Runtime Question Typing (Adaptive Policy) ──
+    inferred_type = "default"
+    if runtime_question_type != "off":
+        inferred_type = get_question_type(question, mode=runtime_question_type)
 
-    `role_boost` + `role_boost_target`: fetch an overshoot of 2*k candidates,
-    add `role_boost` to the score of any candidate whose metadata.role matches
-    `role_boost_target`, re-sort by boosted score, and trim to k. Targets the
-    ss-assistant failure mode where the evidence turn ranks outside top-k
-    because user-turn distractors score higher on the raw question embedding.
-    """
-    # F4 rerank fetches a large candidate pool; otherwise fall back to 2x for
-    # role boost, else plain k. Adaptive-k pulls adaptive_k_max so the elbow
-    # trim downstream has a full distribution to cut against.
+    # Type-to-Policy Mapping (Phase 1/2)
+    # Mapping table from PLAN4:
+    # temporal-reasoning: Target k=15, Max k=20, neighbor=3, time-boost=0.20
+    # knowledge-update:   Target k=12, Max k=15, recency=0.25
+    # preference:         Target k=8,  Max k=10, user-role boost=1.0
+    # multi-session:      Target k=15, Max k=20, neighbor=2, graph=1
+
+    policy = {
+        "temporal-reasoning": {"k": 15, "ak_max": 20, "neighbor": 3, "time_boost": 0.20},
+        "knowledge-update":   {"k": 12, "ak_max": 15, "recency": 0.25},
+        "single-session-preference": {"k": 8, "ak_max": 10, "role_boost": 1.0},
+        "multi-session":      {"k": 15, "ak_max": 20, "neighbor": 2, "graph": 1},
+        "default":            {"k": k, "ak_max": adaptive_k_max}
+    }.get(inferred_type, {"k": k, "ak_max": adaptive_k_max})
+
+    # Apply policy overrides
+    target_k = policy.get("k", k)
+    ak_max = policy.get("ak_max", adaptive_k_max)
+    neighbor_sessions = policy.get("neighbor", smart_neighbor_sessions)
+    time_boost = policy.get("time_boost", smart_time_boost)
+    r_bias = policy.get("recency", recency_bias)
+    if policy.get("graph"):
+        graph_depth = max(graph_depth, policy["graph"])
+    if policy.get("role_boost"):
+        role_boost = max(role_boost, policy["role_boost"])
+
+    # F4 rerank fetches a large candidate pool
     if rerank_model:
         fetch_k = rerank_pool_k
     elif adaptive_k or smart_retrieval:
-        fetch_k = adaptive_k_max
+        fetch_k = ak_max
     elif role_boost > 0 and role_boost_target:
-        fetch_k = k * 2
+        fetch_k = target_k * 2
     else:
-        fetch_k = k
+        fetch_k = target_k
 
-    # HyDE: prepend the original question with a hypothetical first-person
-    # passage. BM25 still matches on the original query words; the vector
-    # embedding sees enriched signal including plausible answer phrasing.
-    # One LLM call per question.
     query_text = question
     if hyde_client is not None and hyde_model:
         passage = _hyde_expand(hyde_client, hyde_model, question)
         if passage:
             query_text = f"{question}\n\n{passage}"
 
+    # Use the updated memory_search_scored_impl with embedder_config support
     ranked = await memory_search_scored_impl(
         query_text, k=fetch_k, user_id=qid,
         extra_columns=["metadata_json", "conversation_id", "valid_from"],
-        recency_bias=recency_bias,
+        recency_bias=r_bias,
         vector_weight=vector_weight,
         adaptive_k=adaptive_k,
+        embedder_config=embedder_config,
+        smart_time_boost=time_boost,
     )
     if not ranked:
         return []
@@ -908,10 +945,7 @@ async def retrieve_for_question(
         hits.append(item)
         seen_ids.add(item["id"])
 
-    # F4: cross-encoder rerank over the candidate pool. Cross-encoders score
-    # query+candidate jointly, detecting "answer embedded in off-topic turn"
-    # cases where bi-encoder similarity fails. Mutually exclusive with the
-    # role_boost path — once rerank is active, role heuristics are obsolete.
+    # F4: rerank
     if rerank_model and hits:
         ce = _get_reranker(rerank_model)
         pairs = [(question, h["content"]) for h in hits]
@@ -919,74 +953,20 @@ async def retrieve_for_question(
         for h, s in zip(hits, ce_scores):
             h["score"] = float(s)
         hits.sort(key=lambda h: h["score"], reverse=True)
-        hits = hits[:k]
+        hits = hits[:target_k]
         seen_ids = {h["id"] for h in hits}
-    # Role boost re-rank: for ss-user/ss-assistant, boost hits whose role
-    # matches the expected answer role, re-sort, and trim the overshoot
-    # fetch_k pool back to k. Runs before graph/session expansion so the
-    # downstream expansions seed from the role-corrected top-k.
     elif role_boost > 0 and role_boost_target and hits:
         for h in hits:
             if h["metadata"].get("role") == role_boost_target:
                 h["score"] += role_boost
         hits.sort(key=lambda h: h["score"], reverse=True)
-        hits = hits[:k]
+        hits = hits[:target_k]
         seen_ids = {h["id"] for h in hits}
 
-    # Smart retrieval: time-aware boost + neighbor-session expansion. Runs
-    # after role/rerank (so it sees the final candidate set) but before
-    # adaptive-k elbow trim (so boosted/expanded candidates get a fair
-    # shot at the cut). Gated on --smart-retrieval.
+    # Smart retrieval (neighbor expansion)
     if smart_retrieval and hits:
-        # ── Time-aware boost ──
-        # Parse dates from the query. If found, boost candidates whose
-        # valid_from or metadata.referenced_dates fall within a small
-        # window of any query date.
-        query_dates = temporal_utils.extract_referenced_dates(question)
         query_has_temporal = temporal_utils.has_temporal_cues(question)
-
-        if query_dates and smart_time_boost > 0:
-            query_dt_set: list[datetime] = []
-            for ds in query_dates:
-                try:
-                    query_dt_set.append(
-                        datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                    )
-                except ValueError:
-                    pass
-
-            if query_dt_set:
-                for h in hits:
-                    # Check valid_from (session date)
-                    vf = h.get("valid_from", "")
-                    if vf:
-                        try:
-                            h_dt = datetime.fromisoformat(vf)
-                            for qdt in query_dt_set:
-                                if abs((h_dt - qdt).days) <= 30:
-                                    h["score"] += smart_time_boost
-                                    break
-                        except (ValueError, TypeError):
-                            pass
-                    # Check referenced_dates in metadata (tighter window)
-                    ref_dates = h.get("metadata", {}).get("referenced_dates", [])
-                    for rd in ref_dates:
-                        try:
-                            rd_dt = datetime.strptime(rd, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                            for qdt in query_dt_set:
-                                if abs((rd_dt - qdt).days) <= 14:
-                                    h["score"] += smart_time_boost
-                                    break
-                        except (ValueError, TypeError):
-                            pass
-                hits.sort(key=lambda h: h["score"], reverse=True)
-
-        # ── Neighbor-session expansion ──
-        # Triggered when: (a) query has temporal cues, OR (b) hits span
-        # multiple sessions (heuristic for multi-session synthesis).
-        # Pulls turns from sessions adjacent (±N) to each hit session so
-        # the answer model has enough context for cross-session reasoning.
-        if smart_neighbor_sessions > 0:
+        if neighbor_sessions > 0:
             hit_session_indices: set[int] = set()
             for h in hits:
                 si = h.get("metadata", {}).get("session_index")
@@ -1000,7 +980,7 @@ async def retrieve_for_question(
             if (query_has_temporal or multi_session_signal) and hit_session_indices:
                 neighbor_indices: set[int] = set()
                 for si in hit_session_indices:
-                    for offset in range(-smart_neighbor_sessions, smart_neighbor_sessions + 1):
+                    for offset in range(-neighbor_sessions, neighbor_sessions + 1):
                         neighbor_indices.add(si + offset)
                 neighbor_indices -= hit_session_indices
 
@@ -1020,10 +1000,6 @@ async def retrieve_for_question(
                                 f")",
                                 [*neighbor_convs, qid],
                             ).fetchall()
-                        # Neighbor turns get a reduced score — they're
-                        # context, not direct hits. Use the lowest score
-                        # from the initial hits minus a penalty so they
-                        # sort after real hits.
                         neighbor_score = (hits[-1]["score"] * 0.8) if hits else 0.0
                         for row in rows:
                             rid = row["id"]
@@ -1048,11 +1024,9 @@ async def retrieve_for_question(
                             seen_ids.add(rid)
                         hits.sort(key=lambda h: h["score"], reverse=True)
 
-    # Adaptive-k elbow trim: find the largest adjacent score gap in the
-    # top candidates and trim to that elbow, clamped to [min, max]. Uses
-    # only the retriever's own similarity signal — no oracle metadata.
+    # Adaptive-k elbow trim
     if (adaptive_k or smart_retrieval) and hits:
-        scores = [h["score"] for h in hits[:adaptive_k_max]]
+        scores = [h["score"] for h in hits[:ak_max]]
         n = len(scores)
         if n <= adaptive_k_min:
             cut = n
@@ -1065,14 +1039,11 @@ async def retrieve_for_question(
                     best_gap = gap
                     best_i = i
             cut = best_i + 1
-            cut = max(adaptive_k_min, min(adaptive_k_max, cut))
+            cut = max(adaptive_k_min, min(ak_max, cut))
         hits = hits[:cut]
         seen_ids = {h["id"] for h in hits}
 
-    # Session expansion: pull every turn from each hit session (capped per
-    # session). For single-session categories this collapses turn_hit onto
-    # session_hit — once the right session is retrieved, every turn of it is
-    # in context, so "right session, wrong turn" becomes a win.
+    # Session expansion
     if expand_sessions and hits:
         session_ids_hit = {h["conversation_id"] for h in hits if h.get("conversation_id")}
         if session_ids_hit:
@@ -1103,7 +1074,7 @@ async def retrieve_for_question(
                     seen_ids.add(r["id"])
                     hits.append(r)
 
-    # Graph expansion: 1-hop traversal from initial hits
+    # Graph expansion
     if graph_depth > 0:
         graph_hits = []
         for h in hits:
@@ -1129,9 +1100,9 @@ async def retrieve_for_question(
                         })
         hits.extend(graph_hits)
 
-    # Episodic cluster expansion: pull surrounding turns from same session
-    MIN_EXPANSION_SCORE = 0.3  # don't expand low-quality hits
-    MAX_HITS_PER_SESSION = 8   # cap per-session at retrieval level
+    # Episodic cluster expansion
+    MIN_EXPANSION_SCORE = 0.3
+    MAX_HITS_PER_SESSION = 8
     if cluster_size > 0:
         expanded = list(hits)
         session_hit_counts: dict[str, int] = {}
@@ -1175,7 +1146,8 @@ async def retrieve_for_question(
     return hits
 
 
-MAX_TURNS_PER_SESSION = 6  # cap per-session turns to reduce noise
+MAX_TURNS_PER_SESSION = 6
+  # cap per-session turns to reduce noise
 
 
 def format_retrieved(
@@ -1697,8 +1669,18 @@ async def run(args: argparse.Namespace) -> None:
                 log(f"  {done_count}/{len(dataset)}  items={total_items}  {rate:.0f}/s")
         log(f"ingest done: {total_items} turns in {time.perf_counter()-ingest_start:.1f}s")
 
+    if getattr(args, "ingest_only", False):
+        log("stopping after ingestion (--ingest-only)")
+        return
+
     # ── Phase 2: retrieve + answer + judge ──
     log("phase 2: retrieve + answer + judge")
+    
+    # embedder_config (Phase 2)
+    e_config = {
+        "model": os.environ.get("EMBED_MODEL", "qwen3-embedding:0.6b-q8"),
+        "mode": args.embedder_mode
+    }
     qtypes_seen: set[str] = set()
     qtype_correct: dict[str, list[int]] = {}
     qtype_correct_con: dict[str, list[int]] = {}
@@ -1788,6 +1770,8 @@ async def run(args: argparse.Namespace) -> None:
                         smart_retrieval=args.smart_retrieval,
                         smart_neighbor_sessions=args.smart_neighbor_sessions,
                         smart_time_boost=args.smart_time_boost,
+                        runtime_question_type=args.runtime_question_type,
+                        embedder_config=e_config,
                     )
                 except Exception as e:
                     log(f"  [{qid}] retrieval failed: {e}")
@@ -2046,10 +2030,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument("--skip-ingest", action="store_true")
+    p.add_argument("--ingest-only", action="store_true", help="Stop after ingestion")
+    p.add_argument("--skip-judge", action="store_true", help="Alias for --no-judge")
     p.add_argument("--no-judge", action="store_true")
     p.add_argument("--k", type=int, default=20, help="top-K retrieved turns per question")
     p.add_argument("--adaptive-k", action="store_true", help="Enable elbow trim for adaptive K")
     p.add_argument("--smart-retrieval", action="store_true", help="Enable temporal-aware smart retrieval")
+    p.add_argument("--runtime-question-type", choices=["off", "regex", "hybrid"], default="hybrid")
+    p.add_argument("--embedder-mode", choices=["dense", "hybrid"], default="dense")
+    p.add_argument("--rerank", action="store_true", help="Enable lightweight reranking")
+    p.add_argument("--rerank-pool-k", type=int, default=40, help="Initial pool size for reranking")
     p.add_argument("--cluster-size", type=int, default=5,
                    help="episodic expansion: pull +/- N surrounding turns (0 = off)")
     p.add_argument("--graph-depth", type=int, default=1,
@@ -2076,7 +2066,7 @@ def parse_args() -> argparse.Namespace:
                    default=os.environ.get("EVAL_JUDGE_MODEL"))
     p.add_argument("--ingest-concurrency", type=int, default=4,
                    help="number of instances to ingest in parallel")
-    p.add_argument("--variant", type=str, default=None,
+    p.add_argument("--variant", type=str, default="LME-ingestion",
                    help="tag stored on each ingested memory_item; lets multiple retrieval runs share an ingest")
     p.add_argument(
         "--ingest-mode",
@@ -2093,6 +2083,9 @@ def parse_args() -> argparse.Namespace:
             "session, at the cost of pinpoint accuracy."
         ),
     )
+    p.add_argument("--per-item", action="store_true",
+                   help="use memory_write_impl per-turn (enables Phase 1 enrichers). "
+                        "Much slower than bulk path; default off.")
     # ── Retrieval-quality levers (all default-OFF / zero-effect) ─────────────
     p.add_argument(
         "--hyde",
