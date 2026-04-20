@@ -18,7 +18,7 @@ import re
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "m3_memory"))
-from embedders.registry import get_embedder
+from embedders.registry import get_embedder, LlamaServerEmbedder
 
 from m3_sdk import M3Context
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
@@ -963,7 +963,7 @@ def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -
     return ranked
 
 
-def _apply_temporal_boost(scored, query, explain=False):
+def _apply_temporal_boost(scored, query, explain=False, boost_val=0.15):
     """Detects dates in query and boosts items with matching or nearby valid_from dates."""
     # 1. Extract potential dates from query (YYYY-MM-DD)
     date_patterns = [
@@ -971,11 +971,12 @@ def _apply_temporal_boost(scored, query, explain=False):
         r"\b(\d+)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b",
     ]
     query_dates = []
+    from datetime import date
     for pattern in date_patterns:
         for match in re.finditer(pattern, query.lower()):
             try:
                 if "-" in match.group(0):
-                    query_dates.append(datetime.fromisoformat(match.group(0)).date())
+                    query_dates.append(datetime.fromisoformat(match.group(0).split("T")[0]).date())
                 else:
                     d, m, y = match.groups()
                     months = ["january", "february", "march", "april", "may", "june", 
@@ -988,6 +989,10 @@ def _apply_temporal_boost(scored, query, explain=False):
         return scored
 
     rescored = []
+    # Scaled boosts based on boost_val (default 0.15)
+    # diff=0: 0.25 -> boost_val * (0.25/0.15) ~= boost_val * 1.66
+    # diff<=2: 0.15 -> boost_val
+    # diff<=7: 0.05 -> boost_val * 0.33
     for s, it in scored:
         boost = 0.0
         vf_str = it.get("valid_from", "")
@@ -996,9 +1001,9 @@ def _apply_temporal_boost(scored, query, explain=False):
                 vf_date = datetime.fromisoformat(vf_str.split("T")[0]).date()
                 for qd in query_dates:
                     diff = abs((vf_date - qd).days)
-                    if diff == 0: boost = max(boost, 0.25)
-                    elif diff <= 2: boost = max(boost, 0.15)
-                    elif diff <= 7: boost = max(boost, 0.05)
+                    if diff == 0: boost = max(boost, boost_val * 1.66)
+                    elif diff <= 2: boost = max(boost, boost_val)
+                    elif diff <= 7: boost = max(boost, boost_val * 0.33)
             except Exception:
                 pass
         

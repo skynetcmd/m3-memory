@@ -70,6 +70,8 @@ from memory_core import (  # noqa: E402
 )
 from auth_utils import get_api_key  # noqa: E402
 import temporal_utils  # noqa: E402
+import rerank_utils  # noqa: E402
+import hyde_utils  # noqa: E402
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
 
