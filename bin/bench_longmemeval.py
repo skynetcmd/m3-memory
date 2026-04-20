@@ -73,6 +73,27 @@ import temporal_utils  # noqa: E402
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
 
+# Phase 1: Prototype questions for hybrid k-NN classification
+PROTOTYPE_QUESTIONS = {
+    "temporal-reasoning": "When did I last visit the dentist and how many days has it been since then?",
+    "knowledge-update": "What is my current home address? I moved recently so please give me the newest one.",
+    "single-session-preference": "Based on my previous mentions of food, what kind of pizza should I order tonight?",
+    "multi-session": "Across our past few conversations, how has my project on sustainable energy evolved?",
+    "single-session-user": "What did I say my favorite color was in our first chat?",
+    "single-session-assistant": "What advice did you give me about fixing my leaky faucet?",
+}
+
+_EMBED_CACHE: dict[str, list[float]] = {}
+
+
+async def _get_embedding_cached(text: str) -> list[float]:
+    if text in _EMBED_CACHE:
+        return _EMBED_CACHE[text]
+    vec, _ = await _embed(text)
+    if vec:
+        _EMBED_CACHE[text] = vec
+    return vec or []
+
 
 def wipe_bench_rows(pattern: str) -> dict:
     """Delete memory_items whose change_agent matches `pattern`, plus orphans.
@@ -421,7 +442,7 @@ _PREFERENCE_QUERY_RE = re.compile(
 )
 
 
-def get_question_type(question: str, mode: str = "hybrid") -> str:
+async def get_question_type(question: str, mode: str = "hybrid") -> str:
     """Fast hybrid classifier: regex-first + embedding fallback. No oracle metadata."""
     q = question.lower()
     
@@ -443,16 +464,35 @@ def get_question_type(question: str, mode: str = "hybrid") -> str:
     if _PREFERENCE_QUERY_RE.search(question):
         return "single-session-preference"
     
-    # TODO: Add embedding k-NN fallback using current embedder (Qwen or BGE-M3)
+    # Embedding k-NN fallback (Phase 1)
     if mode == "hybrid":
-        # Placeholder for implementation plan: cosine similarity to prototype questions
-        pass
+        try:
+            q_vec = await _get_embedding_cached(question)
+            if q_vec:
+                best_type = "default"
+                best_sim = -1.0
+                
+                # Compare against prototypes
+                for qtype, proto_text in PROTOTYPE_QUESTIONS.items():
+                    p_vec = await _get_embedding_cached(proto_text)
+                    if p_vec:
+                        sim = _batch_cosine(q_vec, [p_vec])[0]
+                        if sim > best_sim:
+                            best_sim = sim
+                            best_type = qtype
+                
+                # Confidence threshold for k-NN fallback
+                if best_sim > 0.6:
+                    return best_type
+        except Exception:
+            pass # fallback to default
     
     return "default"
 
-def classify_question(question: str) -> str:
+
+async def classify_question(question: str) -> str:
     """Legacy wrapper for get_question_type."""
-    return get_question_type(question, mode="regex")
+    return await get_question_type(question, mode="regex")
 
 # Categories where newer information should outrank older information: the
 # literal answer is always "what did the user say most recently". Applying
@@ -1705,7 +1745,7 @@ async def run(args: argparse.Namespace) -> None:
             qtypes_seen.add(qtype)
             qtype_correct.setdefault(qtype, [])
 
-            q_signal = classify_question(question)
+            q_signal = await classify_question(question)
             signal_dist[q_signal] += 1
 
             # Smart retrieval logic: boost K for temporal reasoning
