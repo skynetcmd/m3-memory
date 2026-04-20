@@ -455,7 +455,8 @@ async def get_question_type(question: str, mode: str = "hybrid") -> str:
         return "knowledge-update"
     if any(w in q for w in ["prefer", "favorite", "like", "dislike", "want"]):
         return "single-session-preference"
-    if any(w in q for w in ["also", "previously", "earlier", "over time", "across sessions"]):
+    # Added keywords for multi-session detection: overall, evolution, progress, history
+    if any(w in q for w in ["also", "previously", "earlier", "over time", "across sessions", "overall", "evolution", "progress", "history"]):
         return "multi-session"
     
     # Fallback to existing regex for broader coverage
