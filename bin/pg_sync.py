@@ -21,6 +21,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from m3_sdk import M3Context
+import migrate_memory
 
 # Python 3.12+ sqlite3 datetime adapter deprecation fix
 sqlite3.register_adapter(datetime, lambda val: val.isoformat())
@@ -30,7 +31,6 @@ logger = logging.getLogger("pg_sync")
 
 # Initialize SDK context
 ctx = M3Context()
-DB_PATH = ctx.db_path
 
 BATCH_SIZE = 100  # commit every N rows
 
@@ -47,33 +47,36 @@ def _get_pg_url() -> str:
     sys.exit(1)
 
 
-def _get_watermark(sl_cur, direction: str) -> str | None:
-    """Read last sync watermark for a direction ('pg_push' or 'pg_pull')."""
+def _get_watermark(sl_cur, direction: str, target_name: str) -> str | None:
+    """Read last sync watermark for a direction and target database."""
+    # Prefix direction with target_name for separate watermarks per DB
+    prefixed_direction = f"{target_name}_{direction}" if target_name != "main" else direction
     try:
-        sl_cur.execute("SELECT last_synced_at FROM sync_watermarks WHERE direction = ?", (direction,))
+        sl_cur.execute("SELECT last_synced_at FROM sync_watermarks WHERE direction = ?", (prefixed_direction,))
         row = sl_cur.fetchone()
         return row[0] if row else None
     except sqlite3.OperationalError:
         return None
 
 
-def _set_watermark(sl_cur, direction: str, ts: str) -> None:
-    """Update last sync watermark.
-
-    Note: Watermark updates are NOT atomic with the data push/pull they follow.
-    A crash between data write and watermark update could cause duplicate rows
-    on next sync. This is safe because all sync operations use UPSERT
-    (ON CONFLICT DO UPDATE), providing at-least-once delivery semantics.
-    """
+def _set_watermark(sl_cur, direction: str, ts: str, target_name: str) -> None:
+    """Update last sync watermark for a direction and target database."""
+    prefixed_direction = f"{target_name}_{direction}" if target_name != "main" else direction
     try:
         sl_cur.execute(
             """INSERT INTO sync_watermarks (direction, last_synced_at)
                VALUES (?, ?)
                ON CONFLICT(direction) DO UPDATE SET last_synced_at = excluded.last_synced_at""",
-            (direction, ts),
+            (prefixed_direction, ts),
         )
     except sqlite3.OperationalError:
         pass
+
+
+def _table_exists(sl_cur, table_name: str) -> bool:
+    """Check if a table exists in the local SQLite DB."""
+    sl_cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    return sl_cur.fetchone() is not None
 
 
 def _ensure_pg_schema(pg_cur):
@@ -136,13 +139,13 @@ def _ensure_pg_tier_tables(pg_cur):
     logger.info("PG schema: ensured agent_retention_policies and gdpr_requests tables exist")
 
 
-def sync_memory_items(sl_cur, pg_cur, sl_conn):
-    logger.info("Synchronizing memory_items (UUID-based, delta sync)...")
+def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
+    logger.info(f"[{target_name}] Synchronizing memory_items (UUID-based, delta sync)...")
     _ensure_pg_schema(pg_cur)
     now = datetime.now(timezone.utc).isoformat()
 
     # 1. PUSH: Local to Remote (delta — only changed rows since last push)
-    watermark = _get_watermark(sl_cur, "pg_push")
+    watermark = _get_watermark(sl_cur, "pg_push", target_name)
     if watermark:
         sl_cur.execute("""
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
@@ -153,7 +156,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
             FROM memory_items
             WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)
         """, (watermark, watermark))
-        logger.info(f"Delta push: rows changed since {watermark}")
+        logger.info(f"[{target_name}] Delta push: rows changed since {watermark}")
     else:
         sl_cur.execute("""
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
@@ -163,7 +166,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
                    COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
         """)
-        logger.info("Full push: no watermark found (first sync)")
+        logger.info(f"[{target_name}] Full push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
     push_count = 0
@@ -206,15 +209,15 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
                 execute_values(pg_cur, upsert_query, batch)
                 push_count += len(batch)
         except Exception as exc:
-            logger.error(f"Batch push failed: {type(exc).__name__}: {exc}")
+            logger.error(f"[{target_name}] Batch push failed: {type(exc).__name__}: {exc}")
             push_errors = len(local_rows)
 
-    _set_watermark(sl_cur, "pg_push", now)
+    _set_watermark(sl_cur, "pg_push", now, target_name)
     sl_conn.commit()
-    logger.info(f"Pushed {push_count} local memory items ({push_errors} errors).")
+    logger.info(f"[{target_name}] Pushed {push_count} local memory items ({push_errors} errors).")
 
     # 2. PULL: Remote to Local (delta — only changed rows since last pull)
-    watermark = _get_watermark(sl_cur, "pg_pull")
+    watermark = _get_watermark(sl_cur, "pg_pull", target_name)
     if watermark:
         pg_cur.execute("""
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
@@ -225,7 +228,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
             FROM memory_items
             WHERE updated_at > %s OR (updated_at IS NULL AND created_at > %s)
         """, (watermark, watermark))
-        logger.info(f"Delta pull: rows changed since {watermark}")
+        logger.info(f"[{target_name}] Delta pull: rows changed since {watermark}")
     else:
         pg_cur.execute("""
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
@@ -235,7 +238,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
                    COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
         """)
-        logger.info("Full pull: no watermark found (first sync)")
+        logger.info(f"[{target_name}] Full pull: no watermark found (first sync)")
 
     remote_rows = pg_cur.fetchall()
     pull_count = 0
@@ -282,21 +285,21 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn):
                 pull_count += len(batch)
                 sl_conn.commit()
         except Exception as exc:
-            logger.error(f"Batch pull failed: {type(exc).__name__}: {exc}")
+            logger.error(f"[{target_name}] Batch pull failed: {type(exc).__name__}: {exc}")
             pull_errors = len(remote_rows)
 
-    _set_watermark(sl_cur, "pg_pull", now)
-    logger.info(f"Pulled {pull_count} remote memory items ({pull_errors} errors).")
+    _set_watermark(sl_cur, "pg_pull", now, target_name)
+    logger.info(f"[{target_name}] Pulled {pull_count} remote memory items ({pull_errors} errors).")
 
 
-def sync_memory_relationships(sl_cur, pg_cur, sl_conn):
+def sync_memory_relationships(sl_cur, pg_cur, sl_conn, target_name: str):
     """Synchronizes the memory_relationships table bi-directionally with watermark logic."""
-    logger.info("Synchronizing memory_relationships...")
+    logger.info(f"[{target_name}] Synchronizing memory_relationships...")
     from psycopg2.extras import execute_values
     now = datetime.now(timezone.utc).isoformat()
 
     # 1. PUSH: Local to Remote
-    watermark = _get_watermark(sl_cur, "rel_push")
+    watermark = _get_watermark(sl_cur, "rel_push", target_name)
     if watermark:
         sl_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships WHERE created_at > ?", (watermark,))
     else:
@@ -309,14 +312,14 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn):
             execute_values(pg_cur, "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES %s ON CONFLICT (id) DO NOTHING", local_rows)
             push_count = len(local_rows)
         except Exception as exc:
-            logger.warning(f"Batch Relationship push failed: {type(exc).__name__}")
+            logger.warning(f"[{target_name}] Batch Relationship push failed: {type(exc).__name__}")
 
-    _set_watermark(sl_cur, "rel_push", now)
+    _set_watermark(sl_cur, "rel_push", now, target_name)
     sl_conn.commit()
-    logger.info(f"Pushed {push_count} relationships to warehouse.")
+    logger.info(f"[{target_name}] Pushed {push_count} relationships to warehouse.")
 
     # 2. PULL: Remote to Local
-    watermark = _get_watermark(sl_cur, "rel_pull")
+    watermark = _get_watermark(sl_cur, "rel_pull", target_name)
     if watermark:
         pg_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships WHERE created_at > %s", (watermark,))
     else:
@@ -330,15 +333,15 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn):
             pull_count = len(remote_rows)
             sl_conn.commit()
         except Exception as exc:
-            logger.warning(f"Batch Relationship pull failed: {type(exc).__name__}")
+            logger.warning(f"[{target_name}] Batch Relationship pull failed: {type(exc).__name__}")
 
-    _set_watermark(sl_cur, "rel_pull", now)
+    _set_watermark(sl_cur, "rel_pull", now, target_name)
     sl_conn.commit()
-    logger.info(f"Pulled {pull_count} relationships from warehouse.")
+    logger.info(f"[{target_name}] Pulled {pull_count} relationships from warehouse.")
 
 
-def sync_secrets(sl_cur, pg_cur):
-    logger.info("Synchronizing encrypted secrets vault...")
+def sync_secrets(sl_cur, pg_cur, target_name: str):
+    logger.info(f"[{target_name}] Synchronizing encrypted secrets vault...")
     from psycopg2.extras import execute_values
 
     # 1. PUSH: Local to Remote
@@ -360,9 +363,9 @@ def sync_secrets(sl_cur, pg_cur):
             """, local_rows)
             push_count = len(local_rows)
         except Exception as exc:
-            logger.warning(f"Batch Secret push failed: {type(exc).__name__}")
+            logger.warning(f"[{target_name}] Batch Secret push failed: {type(exc).__name__}")
 
-    logger.info(f"Pushed {push_count} local secrets to the warehouse.")
+    logger.info(f"[{target_name}] Pushed {push_count} local secrets to the warehouse.")
 
     # 2. PULL: Remote to Local
     pg_cur.execute("SELECT service_name, encrypted_value, version, origin_device, updated_at FROM synchronized_secrets")
@@ -383,9 +386,9 @@ def sync_secrets(sl_cur, pg_cur):
             """, remote_rows)
             pull_count = len(remote_rows)
         except Exception as exc:
-            logger.warning(f"Batch Secret pull failed: {type(exc).__name__}")
+            logger.warning(f"[{target_name}] Batch Secret pull failed: {type(exc).__name__}")
 
-    logger.info(f"Pulled {pull_count} remote secrets from the warehouse.")
+    logger.info(f"[{target_name}] Pulled {pull_count} remote secrets from the warehouse.")
 
 
 def _ensure_pg_tasks_schema(pg_cur):
@@ -415,7 +418,7 @@ def _ensure_pg_tasks_schema(pg_cur):
     logger.info("PG schema: ensured tasks table exists (with deleted_at tombstone column)")
 
 
-def sync_tasks(sl_cur, pg_cur, sl_conn):
+def sync_tasks(sl_cur, pg_cur, sl_conn, target_name: str):
     """Bi-directional delta sync for the tasks table, including soft-delete tombstones.
 
     Tombstones ride through as ordinary UPSERTs: deleted_at is just a column,
@@ -423,7 +426,7 @@ def sync_tasks(sl_cur, pg_cur, sl_conn):
     free. Sync is UPSERT-only (no DELETE propagation) — cross-peer hard-delete
     is out of scope; peers converge via tombstones.
     """
-    logger.info("Synchronizing tasks...")
+    logger.info(f"[{target_name}] Synchronizing tasks...")
     from psycopg2.extras import execute_values
     now = datetime.now(timezone.utc).isoformat()
 
@@ -435,16 +438,16 @@ def sync_tasks(sl_cur, pg_cur, sl_conn):
     )
 
     # 1. PUSH: local → remote (delta on updated_at)
-    watermark = _get_watermark(sl_cur, "tasks_push")
+    watermark = _get_watermark(sl_cur, "tasks_push", target_name)
     if watermark:
         sl_cur.execute(
             f"SELECT {task_cols} FROM tasks WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)",
             (watermark, watermark),
         )
-        logger.info(f"Delta task push: rows changed since {watermark}")
+        logger.info(f"[{target_name}] Delta task push: rows changed since {watermark}")
     else:
         sl_cur.execute(f"SELECT {task_cols} FROM tasks")
-        logger.info("Full task push: no watermark found (first sync)")
+        logger.info(f"[{target_name}] Full task push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
     push_count = 0
@@ -470,23 +473,23 @@ def sync_tasks(sl_cur, pg_cur, sl_conn):
                 execute_values(pg_cur, upsert, batch)
                 push_count += len(batch)
         except Exception as exc:
-            logger.error(f"Batch task push failed: {type(exc).__name__}: {exc}")
+            logger.error(f"[{target_name}] Batch task push failed: {type(exc).__name__}: {exc}")
 
-    _set_watermark(sl_cur, "tasks_push", now)
+    _set_watermark(sl_cur, "tasks_push", now, target_name)
     sl_conn.commit()
-    logger.info(f"Pushed {push_count} tasks to warehouse.")
+    logger.info(f"[{target_name}] Pushed {push_count} tasks to warehouse.")
 
     # 2. PULL: remote → local (delta on updated_at)
-    watermark = _get_watermark(sl_cur, "tasks_pull")
+    watermark = _get_watermark(sl_cur, "tasks_pull", target_name)
     if watermark:
         pg_cur.execute(
             f"SELECT {task_cols} FROM tasks WHERE updated_at > %s OR (updated_at IS NULL AND created_at > %s)",
             (watermark, watermark),
         )
-        logger.info(f"Delta task pull: rows changed since {watermark}")
+        logger.info(f"[{target_name}] Delta task pull: rows changed since {watermark}")
     else:
         pg_cur.execute(f"SELECT {task_cols} FROM tasks")
-        logger.info("Full task pull: no watermark found (first sync)")
+        logger.info(f"[{target_name}] Full task pull: no watermark found (first sync)")
 
     remote_rows = pg_cur.fetchall()
     pull_count = 0
@@ -514,11 +517,11 @@ def sync_tasks(sl_cur, pg_cur, sl_conn):
                 pull_count += len(batch)
                 sl_conn.commit()
         except Exception as exc:
-            logger.error(f"Batch task pull failed: {type(exc).__name__}: {exc}")
+            logger.error(f"[{target_name}] Batch task pull failed: {type(exc).__name__}: {exc}")
 
-    _set_watermark(sl_cur, "tasks_pull", now)
+    _set_watermark(sl_cur, "tasks_pull", now, target_name)
     sl_conn.commit()
-    logger.info(f"Pulled {pull_count} tasks from warehouse.")
+    logger.info(f"[{target_name}] Pulled {pull_count} tasks from warehouse.")
 
 
 def _ensure_pg_embeddings_schema(pg_cur):
@@ -544,9 +547,9 @@ def _ensure_pg_embeddings_schema(pg_cur):
         logger.info("PG schema: created memory_embeddings table")
 
 
-def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
+def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
     """Synchronizes the memory_embeddings table bi-directionally with watermark logic."""
-    logger.info("Synchronizing memory_embeddings...")
+    logger.info(f"[{target_name}] Synchronizing memory_embeddings...")
     from psycopg2 import Binary
     from psycopg2.extras import execute_values
     now = datetime.now(timezone.utc).isoformat()
@@ -554,19 +557,21 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
     _ensure_pg_embeddings_schema(pg_cur)
 
     # 1. PUSH: Local to Remote (delta)
-    watermark = _get_watermark(sl_cur, "emb_push")
+    watermark = _get_watermark(sl_cur, "emb_push", target_name)
     if watermark:
-        # memory_embeddings has no updated_at, so join on memory_items.updated_at
+        # memory_embeddings has no updated_at, so filter by parent memory_item timestamps
         sl_cur.execute("""
-            SELECT me.id, me.memory_id, me.embedding, me.embed_model, me.dim
-            FROM memory_embeddings me
-            JOIN memory_items mi ON me.memory_id = mi.id
-            WHERE mi.updated_at > ? OR (mi.updated_at IS NULL AND mi.created_at > ?)
+            SELECT id, memory_id, embedding, embed_model, dim
+            FROM memory_embeddings
+            WHERE memory_id IN (
+                SELECT id FROM memory_items
+                WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)
+            )
         """, (watermark, watermark))
-        logger.info(f"Delta embedding push: rows changed since {watermark}")
+        logger.info(f"[{target_name}] Delta embedding push: rows changed since {watermark}")
     else:
         sl_cur.execute("SELECT id, memory_id, embedding, embed_model, dim FROM memory_embeddings")
-        logger.info("Full embedding push: no watermark found (first sync)")
+        logger.info(f"[{target_name}] Full embedding push: no watermark found (first sync)")
 
     local_rows = sl_cur.fetchall()
     push_count = 0
@@ -582,7 +587,7 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
         for i in range(0, len(candidate_ids), BATCH_SIZE):
             chunk = candidate_ids[i:i+BATCH_SIZE]
             pg_cur.execute(
-                "SELECT id FROM memory_items WHERE id = ANY(%s)", (chunk,)
+                "SELECT mi.id FROM memory_items mi WHERE mi.id = ANY(%s)", (chunk,)
             )
             existing_ids.update(r[0] for r in pg_cur.fetchall())
 
@@ -590,7 +595,7 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
         skipped_fk = len(local_rows) - len(filtered_rows)
         if skipped_fk:
             logger.info(
-                f"Skipping {skipped_fk} embeddings whose memory_item is not yet in PG"
+                f"[{target_name}] Skipping {skipped_fk} embeddings whose memory_item is not yet in PG"
             )
 
         try:
@@ -614,18 +619,18 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
                 """, batch)
                 push_count += len(batch)
         except Exception as exc:
-            logger.error(f"Batch embedding push failed: {type(exc).__name__}: {exc}")
+            logger.error(f"[{target_name}] Batch embedding push failed: {type(exc).__name__}: {exc}")
             push_errors = len(filtered_rows)
 
-    _set_watermark(sl_cur, "emb_push", now)
+    _set_watermark(sl_cur, "emb_push", now, target_name)
     sl_conn.commit()
     logger.info(
-        f"Pushed {push_count} embeddings to warehouse "
+        f"[{target_name}] Pushed {push_count} embeddings to warehouse "
         f"({push_errors} errors, {skipped_fk} deferred for missing parent)."
     )
 
     # 2. PULL: Remote to Local (delta)
-    watermark = _get_watermark(sl_cur, "emb_pull")
+    watermark = _get_watermark(sl_cur, "emb_pull", target_name)
     if watermark:
         pg_cur.execute("""
             SELECT me.id, me.memory_id, me.embedding, me.embed_model, me.dim
@@ -633,10 +638,10 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
             JOIN memory_items mi ON me.memory_id = mi.id
             WHERE mi.updated_at > %s OR (mi.updated_at IS NULL AND mi.created_at > %s)
         """, (watermark, watermark))
-        logger.info(f"Delta embedding pull: rows changed since {watermark}")
+        logger.info(f"[{target_name}] Delta embedding pull: rows changed since {watermark}")
     else:
         pg_cur.execute("SELECT id, memory_id, embedding, embed_model, dim FROM memory_embeddings")
-        logger.info("Full embedding pull: no watermark found (first sync)")
+        logger.info(f"[{target_name}] Full embedding pull: no watermark found (first sync)")
 
     remote_rows = pg_cur.fetchall()
     pull_count = 0
@@ -664,12 +669,12 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn):
                 pull_count += len(batch)
                 sl_conn.commit()
         except Exception as exc:
-            logger.error(f"Batch embedding pull failed: {type(exc).__name__}: {exc}")
+            logger.error(f"[{target_name}] Batch embedding pull failed: {type(exc).__name__}: {exc}")
             pull_errors = len(remote_rows)
 
-    _set_watermark(sl_cur, "emb_pull", now)
+    _set_watermark(sl_cur, "emb_pull", now, target_name)
     sl_conn.commit()
-    logger.info(f"Pulled {pull_count} embeddings from warehouse ({pull_errors} errors).")
+    logger.info(f"[{target_name}] Pulled {pull_count} embeddings from warehouse ({pull_errors} errors).")
 
 
 def _acquire_sync_lock(sl_cur) -> bool:
@@ -701,80 +706,106 @@ def _release_sync_lock(sl_cur):
 
 def main():
     try:
-        logger.info("Connecting to local SQLite DB at %s...", DB_PATH)
-        with ctx.get_sqlite_conn() as sl_conn:
-            sl_cur = sl_conn.cursor()
-            if not _acquire_sync_lock(sl_cur):
-                logger.warning("Another sync is already in progress. Skipping.")
-                return
-            sl_conn.commit()
+        targets = migrate_memory.targets("all")
+        logger.info(f"Starting synchronization for {len(targets)} targets: {[t.name for t in targets]}")
+        
+        # Connect to data warehouse once
+        with ctx.pg_connection() as pg_conn:
+            pg_conn.autocommit = False
+            
+            for target in targets:
+                logger.info(f"--- Synchronizing target: {target.name} ({target.db_path}) ---")
+                
+                try:
+                    sl_conn = sqlite3.connect(target.db_path, timeout=30)
+                    sl_conn.row_factory = sqlite3.Row
+                except Exception as e:
+                    logger.error(f"Failed to connect to local DB {target.db_path}: {e}")
+                    continue
 
-            try:
-                logger.info("Connecting to data warehouse pool...")
-                with ctx.pg_connection() as pg_conn:
-                    pg_conn.autocommit = False
+                try:
+                    sl_cur = sl_conn.cursor()
+                    
+                    # Global sync lock is only checked on the main DB to prevent 
+                    # multiple instances of pg_sync from running simultaneously.
+                    if target.name == "main":
+                        if not _acquire_sync_lock(sl_cur):
+                            logger.warning("Another sync is already in progress (main lock found). Skipping.")
+                            sl_conn.close()
+                            return
+                        sl_conn.commit()
+
                     with pg_conn.cursor() as pg_cur:
                         # Step 1: Memory Items
                         try:
                             pg_cur.execute("SAVEPOINT items")
-                            sync_memory_items(sl_cur, pg_cur, sl_conn)
+                            sync_memory_items(sl_cur, pg_cur, sl_conn, target.name)
                             pg_cur.execute("RELEASE SAVEPOINT items")
                         except Exception as e:
                             pg_cur.execute("ROLLBACK TO SAVEPOINT items")
-                            logger.error(f"Memory items sync failed: {e}")
+                            logger.error(f"[{target.name}] Memory items sync failed: {e}")
 
-                        # Step 2: PG Tier Tables
-                        try:
-                            _ensure_pg_tier_tables(pg_cur)
-                        except Exception as e:
-                            logger.warning(f"Ensuring PG tier tables failed: {e}")
+                        # Step 2: PG Tier Tables (Main only)
+                        if target.name == "main":
+                            try:
+                                _ensure_pg_tier_tables(pg_cur)
+                            except Exception as e:
+                                logger.warning(f"Ensuring PG tier tables failed: {e}")
 
-                        # Step 3: Relationships (common source of FK violations)
-                        try:
-                            pg_cur.execute("SAVEPOINT rels")
-                            sync_memory_relationships(sl_cur, pg_cur, sl_conn)
-                            pg_cur.execute("RELEASE SAVEPOINT rels")
-                        except Exception as e:
-                            pg_cur.execute("ROLLBACK TO SAVEPOINT rels")
-                            logger.error(f"Relationships sync failed: {e}")
+                        # Step 3: Relationships
+                        if _table_exists(sl_cur, "memory_relationships"):
+                            try:
+                                pg_cur.execute("SAVEPOINT rels")
+                                sync_memory_relationships(sl_cur, pg_cur, sl_conn, target.name)
+                                pg_cur.execute("RELEASE SAVEPOINT rels")
+                            except Exception as e:
+                                pg_cur.execute("ROLLBACK TO SAVEPOINT rels")
+                                logger.error(f"[{target.name}] Relationships sync failed: {e}")
 
                         # Step 4: Embeddings
-                        try:
-                            pg_cur.execute("SAVEPOINT embs")
-                            sync_memory_embeddings(sl_cur, pg_cur, sl_conn)
-                            pg_cur.execute("RELEASE SAVEPOINT embs")
-                        except Exception as e:
-                            pg_cur.execute("ROLLBACK TO SAVEPOINT embs")
-                            logger.error(f"Embeddings sync failed: {e}")
+                        if _table_exists(sl_cur, "memory_embeddings"):
+                            try:
+                                pg_cur.execute("SAVEPOINT embs")
+                                sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target.name)
+                                pg_cur.execute("RELEASE SAVEPOINT embs")
+                            except Exception as e:
+                                pg_cur.execute("ROLLBACK TO SAVEPOINT embs")
+                                logger.error(f"[{target.name}] Embeddings sync failed: {e}")
 
-                        # Step 5: Tasks
-                        try:
-                            pg_cur.execute("SAVEPOINT tasks")
-                            sync_tasks(sl_cur, pg_cur, sl_conn)
-                            pg_cur.execute("RELEASE SAVEPOINT tasks")
-                        except Exception as e:
-                            pg_cur.execute("ROLLBACK TO SAVEPOINT tasks")
-                            logger.error(f"Tasks sync failed: {e}")
+                        # Step 5: Tasks (If exists)
+                        if _table_exists(sl_cur, "tasks"):
+                            try:
+                                pg_cur.execute("SAVEPOINT tasks")
+                                sync_tasks(sl_cur, pg_cur, sl_conn, target.name)
+                                pg_cur.execute("RELEASE SAVEPOINT tasks")
+                            except Exception as e:
+                                pg_cur.execute("ROLLBACK TO SAVEPOINT tasks")
+                                logger.error(f"[{target.name}] Tasks sync failed: {e}")
 
-                        # Step 6: Secrets
-                        try:
-                            sync_secrets(sl_cur, pg_cur)
-                        except Exception as e:
-                            logger.warning(f"Secrets sync failed: {e}")
+                        # Step 6: Secrets (If exists)
+                        if _table_exists(sl_cur, "synchronized_secrets"):
+                            try:
+                                sync_secrets(sl_cur, pg_cur, target.name)
+                            except Exception as e:
+                                logger.warning(f"[{target_name}] Secrets sync failed: {e}")
 
                     pg_conn.commit()
+                    sl_conn.commit()
+                    logger.info(f"Target '{target.name}' synchronization completed.")
+                    
+                    if target.name == "main":
+                        _release_sync_lock(sl_cur)
+                        sl_conn.commit()
 
-                sl_conn.commit()
-                logger.info("Data warehouse synchronization completed successfully!")
-            except Exception as e:
-                logger.error(f"PG Sync Transaction failed: {type(e).__name__}: {e}")
-                raise
-            finally:
-                _release_sync_lock(sl_cur)
-                sl_conn.commit()
+                except Exception as e:
+                    logger.error(f"Failed during sync of target {target.name}: {e}")
+                finally:
+                    sl_conn.close()
+
+            logger.info("Data warehouse synchronization completed successfully!")
 
     except Exception as e:
-        logger.error(f"Sync failed: {type(e).__name__}: {e}")
+        logger.error(f"PG Sync failed: {type(e).__name__}: {e}")
         sys.exit(1)
 
 
