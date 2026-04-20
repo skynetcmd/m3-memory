@@ -20,6 +20,7 @@ httpx[http2]>=0.28.1,<1
 h2>=4.3.0,<5
 requests>=2.33.1,<3
 urllib3>=2.6.3,<3
+openai>=1.65.1,<2
 
 # --- Database & Storage ---
 psycopg2-binary>=2.9.11,<3
@@ -40,10 +41,12 @@ pyobjc-framework-CoreWLAN; sys_platform == 'darwin'
 numpy>=2.4.4,<3
 scipy>=1.17.1,<2
 tqdm>=4.67.3,<5
+FlagEmbedding>=1.3.5,<2
 
 # --- Embedding Server ---
 sentence-transformers>=5.4.1,<6
 torch>=2.11.0,<3
+transformers>=4.49.0,<5
 
 # --- Utilities ---
 python-dotenv>=1.2.2,<2
