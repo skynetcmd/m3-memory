@@ -199,14 +199,17 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         db.execute("ANALYZE")
         report.append("Statistics updated (ANALYZE)")
 
-    # VACUUM must run outside any transaction
+    # VACUUM must run outside any transaction and needs the *active* DB path,
+    # which may differ from the import-time DB_PATH constant when a caller has
+    # set active_database() or M3_DATABASE.
     try:
+        active_path = memory_core._current_ctx().db_path
         # Skip VACUUM on databases > 500MB to prevent multi-minute hangs (#46)
-        db_size = os.path.getsize(DB_PATH)
+        db_size = os.path.getsize(active_path)
         if db_size > 500 * 1024 * 1024:
             report.append(f"VACUUM skipped: database too large ({db_size / 1e9:.2f} GB)")
         else:
-            vconn = sqlite3.connect(DB_PATH)
+            vconn = sqlite3.connect(active_path)
             vconn.execute("VACUUM")
             vconn.close()
             report.append("Space reclaimed (VACUUM)")

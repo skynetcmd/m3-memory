@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(mess
 logger = logging.getLogger("pg_sync")
 
 # Initialize SDK context
-ctx = M3Context()
+ctx = M3Context.for_db(None)
 
 BATCH_SIZE = 100  # commit every N rows
 

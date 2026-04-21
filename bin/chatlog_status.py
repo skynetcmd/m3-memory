@@ -39,16 +39,27 @@ def _load_state_file() -> dict[str, Any]:
 
 
 def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
+    """Count chat_log rows plus unembedded rows on the chatlog DB.
+
+    When the chatlog DB and the main DB are the same file, both counts reflect
+    that single file. When they differ, the chatlog file is queried on its own
+    and the main file is also polled for any chat_log rows that were promoted
+    into it.
+    """
+    from m3_sdk import resolve_db_path
+
     counts = {
         "main_chat_log_rows": 0,
         "chatlog_rows": 0,
         "chatlog_without_embed": 0,
     }
 
-    try:
-        main_db = config.effective_db_path() if config.mode == "integrated" else chatlog_config.MAIN_DB_PATH
+    chatlog_db = os.path.abspath(config.db_path)
+    main_db = os.path.abspath(resolve_db_path(None))
+    unified = chatlog_db == main_db
 
-        if config.mode in ("integrated", "hybrid"):
+    try:
+        if os.path.exists(main_db):
             try:
                 conn = sqlite3.connect(main_db, timeout=5)
                 conn.row_factory = sqlite3.Row
@@ -62,28 +73,29 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
             except sqlite3.Error:
                 pass
 
-        if config.mode in ("separate", "hybrid"):
-            chatlog_db = config.db_path
-            if os.path.exists(chatlog_db):
+        if not unified and os.path.exists(chatlog_db):
+            try:
+                conn = sqlite3.connect(chatlog_db, timeout=5)
+                conn.row_factory = sqlite3.Row
                 try:
-                    conn = sqlite3.connect(chatlog_db, timeout=5)
-                    conn.row_factory = sqlite3.Row
-                    try:
-                        row = conn.execute(
-                            "SELECT COUNT(*) as cnt FROM memory_items"
-                        ).fetchone()
-                        counts["chatlog_rows"] = row["cnt"] if row else 0
+                    row = conn.execute(
+                        "SELECT COUNT(*) as cnt FROM memory_items"
+                    ).fetchone()
+                    counts["chatlog_rows"] = row["cnt"] if row else 0
 
-                        row = conn.execute(
-                            "SELECT COUNT(*) as cnt FROM memory_items mi "
-                            "WHERE mi.type='chat_log' "
-                            "AND mi.id NOT IN (SELECT memory_id FROM memory_embeddings)"
-                        ).fetchone()
-                        counts["chatlog_without_embed"] = row["cnt"] if row else 0
-                    finally:
-                        conn.close()
-                except sqlite3.Error:
-                    pass
+                    row = conn.execute(
+                        "SELECT COUNT(*) as cnt FROM memory_items mi "
+                        "WHERE mi.type='chat_log' "
+                        "AND mi.id NOT IN (SELECT memory_id FROM memory_embeddings)"
+                    ).fetchone()
+                    counts["chatlog_without_embed"] = row["cnt"] if row else 0
+                finally:
+                    conn.close()
+            except sqlite3.Error:
+                pass
+        elif unified:
+            # Single file — report the same number in both slots for compat.
+            counts["chatlog_rows"] = counts["main_chat_log_rows"]
 
     except Exception as e:
         logger.warning(f"Error fetching row counts: {e}")
@@ -131,15 +143,20 @@ def _compute_warnings(
 
 
 def chatlog_status_impl() -> str:
+    from m3_sdk import resolve_db_path
+
     config = chatlog_config.resolve_config()
     state = _load_state_file()
     row_counts = _get_row_counts(config)
 
+    main_db = os.path.abspath(resolve_db_path(None))
+    chatlog_db = os.path.abspath(config.db_path)
+
     result = {
-        "mode": config.mode,
+        "unified": chatlog_db == main_db,
         "db_paths": {
-            "main": chatlog_config.MAIN_DB_PATH,
-            "chatlog": config.db_path,
+            "main": main_db,
+            "chatlog": chatlog_db,
         },
         "row_counts": row_counts,
         "queue": {
@@ -176,8 +193,9 @@ def chatlog_status_impl() -> str:
 def _format_table(data: dict[str, Any]) -> str:
     lines = []
     lines.append("=== Chat Log Status ===")
-    lines.append(f"Mode: {data['mode']}")
-    lines.append(f"Chatlog DB: {data['db_paths']['chatlog']}")
+    unified = data.get("unified", False)
+    lines.append(f"Main DB:    {data['db_paths']['main']}")
+    lines.append(f"Chatlog DB: {data['db_paths']['chatlog']}" + (" (unified with main)" if unified else ""))
     lines.append(f"Rows (main/chatlog/unembedded): {data['row_counts']['main_chat_log_rows']}/{data['row_counts']['chatlog_rows']}/{data['row_counts']['chatlog_without_embed']}")
     lines.append(f"Queue: {data['queue']['depth']}/{data['queue']['max']} (last flush {data['queue']['last_flush_ms_ago']}ms ago)")
     lines.append(f"Spill: {data['spill']['files']} files, {data['spill']['bytes']} bytes")

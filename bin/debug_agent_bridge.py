@@ -31,7 +31,7 @@ from embedding_utils import (
 from m3_sdk import LM_STUDIO_BASE, M3Context
 from thermal_utils import get_thermal_status
 
-ctx = M3Context()
+ctx = M3Context.for_db(None)
 sl = ctx.get_logger()
 
 # ── Logging ───────────────────────────────────────────────────────────────────

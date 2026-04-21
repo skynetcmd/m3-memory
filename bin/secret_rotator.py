@@ -29,7 +29,7 @@ def generate_secure_token(length: int = 64) -> str:
 
 def rotate_secrets(dry_run: bool = False):
     logger.info(f"Starting automated secret rotation {'(DRY RUN)' if dry_run else ''}...")
-    ctx = M3Context()
+    ctx = M3Context.for_db(None)
 
     for key_name in ROTATION_TARGETS:
         try:
@@ -80,7 +80,12 @@ def rotate_secrets(dry_run: bool = False):
 
 if __name__ == "__main__":
     import argparse
+    import os as _os
+    from m3_sdk import add_database_arg
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    add_database_arg(parser)
     args = parser.parse_args()
+    if args.database:
+        _os.environ["M3_DATABASE"] = args.database
     rotate_secrets(dry_run=args.dry_run)

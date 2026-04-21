@@ -3,8 +3,13 @@
 Memory system benchmark script.
 Seeds test data, measures latency/throughput, reports pass/fail against targets.
 
-Usage: python bin/bench_memory.py
+Usage: python bin/bench_memory.py [--database PATH]
+
+Point --database at a scratch DB (e.g. memory/bench.db) to keep benchmark
+data out of your live memory store. Default honors M3_DATABASE then falls
+back to memory/agent_memory.db.
 """
+import argparse
 import json
 import os
 import random
@@ -15,8 +20,10 @@ import sys
 import time
 import uuid
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from m3_sdk import add_database_arg, resolve_db_path
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 
 TARGETS = {
     "write_throughput_items_per_sec": 50,
@@ -46,8 +53,8 @@ def _cosine(a, b):
     return dot / (ma * mb) if (ma and mb) else 0.0
 
 
-def get_conn():
-    c = sqlite3.connect(DB_PATH, timeout=10)
+def get_conn(db_path: str):
+    c = sqlite3.connect(db_path, timeout=10)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode = WAL")
     c.execute("PRAGMA busy_timeout = 5000")
@@ -196,12 +203,18 @@ def cleanup(conn, ids):
 
 
 def main():
-    if not os.path.exists(DB_PATH):
-        print(f"Error: Database not found at {DB_PATH}")
+    parser = argparse.ArgumentParser(description="Memory system benchmark.")
+    add_database_arg(parser)
+    args = parser.parse_args()
+
+    db_path = resolve_db_path(args.database)
+    if not os.path.exists(db_path):
+        print(f"Error: Database not found at {db_path}")
         sys.exit(1)
 
-    conn = get_conn()
-    report = {}
+    print(f"Benchmarking: {db_path}")
+    conn = get_conn(db_path)
+    report = {"database": db_path}
     bench_ids = []
 
     try:

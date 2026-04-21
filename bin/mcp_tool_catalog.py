@@ -20,6 +20,7 @@ import chatlog_status
 import memory_core
 import memory_maintenance
 import memory_sync
+from m3_sdk import active_database
 
 # ── Validation Constants (hoisted from memory_bridge.py) ─────────────────────
 MAX_CONTENT_SIZE = 50_000
@@ -127,6 +128,19 @@ def get_tool(name: str) -> ToolSpec | None:
 def default_allowlist() -> set[str]:
     return {t.name for t in TOOLS if t.default_allowed}
 
+def _pop_database(args: dict) -> str | None:
+    """Pop the universal `database` arg so validators/impls never see it.
+
+    The field is injected into every ToolSpec.parameters at module end (see
+    ``_inject_database_arg``); MCP clients and direct Python callers can pass
+    it to target a non-default SQLite DB. Empty string is treated as absent.
+    """
+    db = args.pop("database", None)
+    if isinstance(db, str):
+        db = db.strip() or None
+    return db
+
+
 def validate_args(spec: ToolSpec, args: dict) -> tuple[dict, str | None]:
     for v in spec.validators:
         result = v(args)
@@ -140,15 +154,17 @@ async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:
     try:
         allowed_keys = set(spec.parameters.get("properties", {}).keys())
         args = {k: v for k, v in (args or {}).items() if k in allowed_keys}
+        database = _pop_database(args)
         if spec.inject_agent_id and "agent_id" in allowed_keys:
             args["agent_id"] = agent_id
         args, err = validate_args(spec, args)
         if err:
             return err
-        if spec.is_async:
-            result = await spec.impl(**args)
-        else:
-            result = spec.impl(**args)
+        with active_database(database):
+            if spec.is_async:
+                result = await spec.impl(**args)
+            else:
+                result = spec.impl(**args)
         return result if isinstance(result, str) else str(result)
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
@@ -1276,5 +1292,34 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
 ]
+
+
+# ── Universal `database` parameter injection ─────────────────────────────────
+# Every MCP tool gains an optional `database` argument so callers can route a
+# single tool call to a non-default SQLite DB (separate stores for chatlog /
+# memories / testing / benchmarking). Injection happens at module load so the
+# catalog stays the single source of truth and schemas FastMCP introspects
+# always include the field. The dispatcher (execute_tool and the
+# memory_bridge wrapper) pops the value and activates it via active_database()
+# before calling the impl — impl signatures do not change.
+_DATABASE_PARAM_SCHEMA = {
+    "type": "string",
+    "description": (
+        "Optional SQLite database path. Overrides M3_DATABASE env and the "
+        "default memory/agent_memory.db for this call only. Empty = use default."
+    ),
+    "default": "",
+}
+
+
+def _inject_database_arg() -> None:
+    for spec in TOOLS:
+        props = spec.parameters.setdefault("properties", {})
+        # Skip if some future spec already declared `database` explicitly.
+        if "database" not in props:
+            props["database"] = dict(_DATABASE_PARAM_SCHEMA)
+
+
+_inject_database_arg()
 
 _BY_NAME: dict[str, ToolSpec] = {t.name: t for t in TOOLS}

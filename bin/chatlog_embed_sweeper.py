@@ -283,7 +283,15 @@ async def main() -> int:
         action="store_true",
         help="Process spill files before embedding",
     )
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from m3_sdk import add_database_arg
+    add_database_arg(parser)
     args = parser.parse_args()
+
+    if args.database:
+        # M3_DATABASE unifies main+chatlog unless CHATLOG_DB_PATH overrides.
+        os.environ["M3_DATABASE"] = args.database
+        chatlog_config.invalidate_cache()
 
     # Resolve config
     cfg = chatlog_config.resolve_config()

@@ -112,7 +112,14 @@ def run_chroma_sync(dry_run: bool) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="Hourly sync runner")
     parser.add_argument("--dry-run", action="store_true", help="Check connectivity only")
+    sys.path.insert(0, str(BASE / "bin"))
+    from m3_sdk import add_database_arg
+    add_database_arg(parser)
     args = parser.parse_args()
+
+    if args.database:
+        # Pass-through env so pg_sync and chroma_sync subprocesses inherit.
+        os.environ["M3_DATABASE"] = args.database
 
     log.info(f"=== sync_all starting [{platform.system()}] ===")
 
