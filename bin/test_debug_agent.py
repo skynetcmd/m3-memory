@@ -40,7 +40,12 @@ def skip(name: str, reason: str = "") -> None:
     print(f"  {SKIP}  {name}  (skipped: {reason})")
 
 
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
+# Honors M3_DATABASE — run the suite against a scratch DB with:
+#   M3_DATABASE=memory/_test.db python bin/test_debug_agent.py
+sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
+from m3_sdk import resolve_db_path  # noqa: E402
+
+DB_PATH = resolve_db_path(None)
 AGENT = "test_debug_agent"
 
 
