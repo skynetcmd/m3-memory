@@ -1,5 +1,7 @@
 # LongMemEval-S Benchmark
 
+> Benchmark harnesses are not part of the published package. They live in `benchmarks/` and require a repository checkout to run — see [CONTRIBUTING.md](../../CONTRIBUTING.md) for reproduction steps. The harness is not shipped on PyPI.
+
 Without retrieval, the answer model scores 6–9%. With M3 Memory's hybrid retrieval, it reaches **89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500) — the 500-question long-horizon conversational memory benchmark from Wu et al., 2024.
 
 The 89.0% result uses oracle category metadata from the dataset. Without oracle metadata, accuracy is **74.8%** (smart retrieval with time-aware expansion) to **68.0%** (fixed-k baseline). Both numbers matter: the first measures the retrieval + answer ceiling; the second measures what the system achieves without privileged information.
@@ -99,12 +101,12 @@ git clone https://github.com/skynetcmd/m3-memory && cd m3-memory
 export ANTHROPIC_API_KEY=...
 export OPENAI_API_KEY=...
 
-python bin/bench_longmemeval.py                    # stock (89.0%)
-python bin/bench_longmemeval.py --smart-retrieval --skip-ingest    # smart retrieval (74.8%)
-python bin/bench_longmemeval.py --adaptive-k --skip-ingest         # adaptive-k (72.6%)
-python bin/bench_longmemeval.py --no-category-knobs --skip-ingest  # ablation (68.0%)
-python bin/bench_longmemeval.py --no-memory        # neutral baseline (6.4%)
-python bin/bench_longmemeval.py --rag-aware-empty  # RAG-aware baseline (8.4%)
+python benchmarks/longmemeval/bench_longmemeval.py                    # stock (89.0%)
+python benchmarks/longmemeval/bench_longmemeval.py --smart-retrieval --skip-ingest    # smart retrieval (74.8%)
+python benchmarks/longmemeval/bench_longmemeval.py --adaptive-k --skip-ingest         # adaptive-k (72.6%)
+python benchmarks/longmemeval/bench_longmemeval.py --no-category-knobs --skip-ingest  # ablation (68.0%)
+python benchmarks/longmemeval/bench_longmemeval.py --no-memory        # neutral baseline (6.4%)
+python benchmarks/longmemeval/bench_longmemeval.py --rag-aware-empty  # RAG-aware baseline (8.4%)
 ```
 
 Wall-clock on a single RTX 5080: ~50 min ingest, ~75 min judged answer phase. Baselines and `--skip-ingest` runs reuse an existing DB.
