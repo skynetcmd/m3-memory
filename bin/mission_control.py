@@ -34,7 +34,13 @@ if IS_WIN:
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE = pathlib.Path(__file__).parent.parent.resolve()
-DB_PATH  = BASE / "memory" / "agent_memory.db"
+import sys as _sys
+_sys.path.insert(0, str(BASE / "bin"))
+try:
+    from m3_sdk import resolve_db_path as _resolve_db
+    DB_PATH = pathlib.Path(_resolve_db(None))
+except ImportError:
+    DB_PATH = BASE / "memory" / "agent_memory.db"
 LOG_DIR  = BASE / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 

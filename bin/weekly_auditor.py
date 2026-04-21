@@ -25,9 +25,15 @@ from fpdf.enums import XPos, YPos
 
 # -- Constants ----------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 REPO_PATH = BASE_DIR
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
+
+# DB path is resolved at main() time so --database / M3_DATABASE overrides
+# work. Module-level default points at the active resolver's default so
+# top-level imports still work for tools that import helpers from this file.
+sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
+from m3_sdk import add_database_arg, resolve_db_path
+DB_PATH = resolve_db_path(None)
 
 
 # -- PDF class ----------------------------------------------------------------
@@ -57,7 +63,9 @@ def sanitize(text, max_len=200):
 
 
 def _db():
-    conn = sqlite3.connect(DB_PATH, timeout=10)
+    # Re-resolve per call so a late --database flag in main() is honored by
+    # section helpers invoked afterwards.
+    conn = sqlite3.connect(resolve_db_path(None), timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -377,7 +385,11 @@ def main():
         "--no-memory", action="store_true",
         help="Skip writing summary to memory system and ChromaDB",
     )
+    add_database_arg(parser)
     args = parser.parse_args()
+
+    if args.database:
+        os.environ["M3_DATABASE"] = args.database
 
     week_label = _week_label()
     pdf = AI_Report()

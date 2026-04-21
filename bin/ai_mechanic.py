@@ -1,23 +1,29 @@
+import argparse
 import os
+import sys
 import sqlite3
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from m3_sdk import add_database_arg, resolve_db_path
 
-def repair_database():
-    print("🛠️  Checking Database Schema...")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# This tool DROPs and recreates tables — it must never run against the live
+# memory store by accident. The argparse `--database` flag has no default,
+# so callers must pass a path explicitly.
+
+def repair_database(db_path: str):
+    print(f"🛠️  Checking Database Schema at {db_path}...")
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # Force-align project_decisions
         cursor.execute("DROP TABLE IF EXISTS project_decisions")
         cursor.execute("""CREATE TABLE project_decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project TEXT, decision TEXT, rationale TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
 
-        # Force-align system_focus
         cursor.execute("DROP TABLE IF EXISTS system_focus")
         cursor.execute("CREATE TABLE system_focus (id INTEGER PRIMARY KEY, summary TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
         cursor.execute("INSERT INTO system_focus (id, summary) VALUES (1, 'System Repaired & Calibrated')")
@@ -39,7 +45,24 @@ def check_bridges():
             print(f"⚠️  Missing Bridge: {bridge}")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Emergency schema repair (DESTRUCTIVE: drops project_decisions and system_focus)."
+    )
+    add_database_arg(parser)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Required. Confirms you understand this drops tables.",
+    )
+    args = parser.parse_args()
+
+    if not args.database:
+        parser.error("--database is required (this tool will not run against the default DB without an explicit path).")
+    if not args.force:
+        parser.error("--force is required to acknowledge the destructive DROP TABLE operations.")
+
+    db_path = resolve_db_path(args.database)
     print("🚀 Starting AI-OS Emergency Repair...")
-    repair_database()
+    repair_database(db_path)
     check_bridges()
     print("✨ Repair Cycle Finished. Restart your Pulse dashboard and AI CLI.")

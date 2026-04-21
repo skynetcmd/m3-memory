@@ -18,6 +18,14 @@ sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
 from memory_bridge import memory_delete, memory_write
 
+sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
+from m3_sdk import resolve_db_path
+
+def _db_path() -> str:
+    """Resolve DB path lazily so M3_DATABASE / --database win over the default."""
+    return resolve_db_path(None)
+
+# Legacy constant for any importers that still reach in for the default.
 DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 
 # ── Section definitions ───────────────────────────────────────────────────────
@@ -221,7 +229,7 @@ async def main() -> None:
 
     # ── Step 1: soft-delete any prior architecture items ──────────────────────
     print("\n[1/3] Cleaning prior architecture memory items...")
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_db_path())
     prior_ids = [
         r[0] for r in conn.execute(
             "SELECT id FROM memory_items WHERE agent_id = 'system' AND source = 'architecture'",
@@ -257,7 +265,7 @@ async def main() -> None:
 
     # ── Step 3: verify all embeddings landed ──────────────────────────────────
     print("\n[3/3] Verifying embeddings...")
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_db_path())
     ok = 0
     for item_id in written_ids:
         row = conn.execute(

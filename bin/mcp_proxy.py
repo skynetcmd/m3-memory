@@ -80,7 +80,7 @@ log = logging.getLogger("mcp_proxy")
 
 from m3_sdk import M3Context
 
-ctx = M3Context()
+ctx = M3Context.for_db(None)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PROXY_HOST = os.environ.get("MCP_PROXY_HOST", "127.0.0.1")

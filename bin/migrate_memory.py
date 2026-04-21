@@ -4,7 +4,7 @@ Migration runner for the m3-memory SQLite databases.
 
 Supports multiple migration targets:
     - main (agent_memory.db) — always present
-    - chatlog — optional, controlled by chatlog_config.chatlog_mode()
+    - chatlog — present when the configured chatlog DB path differs from main
 
 Subcommands:
     status                    Show current version and pending migrations
@@ -70,7 +70,14 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
         List of MigrationTarget objects configured for the selection.
         If chatlog_config import fails, returns only main.
     """
-    main_target = MigrationTarget(name="main", db_path=DB_PATH, migrations_dir=MIGRATIONS_DIR)
+    # Honor M3_DATABASE for the main target so migrations land on the DB the
+    # caller is targeting, not always agent_memory.db.
+    try:
+        from m3_sdk import resolve_db_path as _resolve_main
+        main_path = _resolve_main(None)
+    except ImportError:
+        main_path = DB_PATH
+    main_target = MigrationTarget(name="main", db_path=main_path, migrations_dir=MIGRATIONS_DIR)
 
     if selected == "main":
         return [main_target]
@@ -78,22 +85,24 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
     if selected == "all" or selected == "chatlog":
         result = [main_target]
 
-        # Try to load chatlog config
+        # Chatlog migrations only run when chatlog lives in a different file
+        # than the main DB. With path-equality unification, same-file means
+        # the chatlog migrations would already have been applied by the main
+        # migration run.
         try:
-            from chatlog_config import CHATLOG_MIGRATIONS_DIR, chatlog_db_path, chatlog_mode
-            mode = chatlog_mode()
-            if mode in ("separate", "hybrid"):
+            from chatlog_config import CHATLOG_MIGRATIONS_DIR, chatlog_db_path
+            chatlog_path = os.path.abspath(chatlog_db_path())
+            if chatlog_path != os.path.abspath(main_target.db_path):
                 chatlog_target = MigrationTarget(
                     name="chatlog",
-                    db_path=chatlog_db_path(),
+                    db_path=chatlog_path,
                     migrations_dir=CHATLOG_MIGRATIONS_DIR
                 )
                 if selected == "chatlog":
                     return [chatlog_target]
-                else:  # all
-                    result.append(chatlog_target)
+                result.append(chatlog_target)
             elif selected == "chatlog":
-                logger.warning(f"chatlog_mode() returned '{mode}', not 'separate' or 'hybrid'. No chatlog target.")
+                logger.warning("Chatlog DB path equals main DB path; chatlog migrations run as part of main.")
                 return []
         except ImportError:
             logger.warning("chatlog_config module not found. Operating on main DB only.")
@@ -641,6 +650,16 @@ def cmd_plan(args):
 
 def build_parser():
     p = argparse.ArgumentParser(description="m3-memory database migration runner")
+    # Top-level --database sets M3_DATABASE for the duration of the run so
+    # targets() picks up the override. Subcommand --target still selects which
+    # DB family (main / chatlog) to touch.
+    p.add_argument(
+        "--database",
+        default=None,
+        metavar="PATH",
+        help="SQLite main-DB path override. Sets M3_DATABASE for this run. "
+             "Default: memory/agent_memory.db.",
+    )
     sub = p.add_subparsers(dest="command")
 
     sp = sub.add_parser("status", help="Show current version and pending migrations")
@@ -693,6 +712,9 @@ def main():
 
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.database:
+        os.environ["M3_DATABASE"] = args.database
 
     # Back-compat: `python migrate_memory.py` with no args == `up` (the old behavior),
     # but now with the new prompts. Scripts that relied on the old no-arg invocation
