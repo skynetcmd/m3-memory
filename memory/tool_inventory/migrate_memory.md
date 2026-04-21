@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: 4487fb528ab4
-mtime_utc: 2026-04-19T02:44:47.983823+00:00
-generated_utc: 2026-04-19T02:53:55.499421+00:00
+sha1: 107d0d18f38c
+mtime_utc: 2026-04-21T20:42:15.284744+00:00
+generated_utc: 2026-04-21T21:22:27.179885+00:00
 private: false
 ---
 
@@ -14,7 +14,7 @@ Migration runner for the m3-memory SQLite databases.
 
 Supports multiple migration targets:
     - main (agent_memory.db) — always present
-    - chatlog — optional, controlled by chatlog_config.chatlog_mode()
+    - chatlog — present when the configured chatlog DB path differs from main
 
 Subcommands:
     status                    Show current version and pending migrations
@@ -39,13 +39,14 @@ transaction already committed.
 
 ## Entry points
 
-- `def main()` (line 689)
+- `def main()` (line 708)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
+| `--database` | SQLite main-DB path override. Sets M3_DATABASE for this run. Default: memory/agent_memory.db. | None |  | str |  |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Displays status for all configured targets (main + chatlog if available). | str | Shows status for only specified target. |
 | `--to` | Apply up to this version (default: latest) | None | Applies all pending migrations up to latest available version. | int | Applies migrations up to specified version; stops before newer ones. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; applies migrations to all configured targets. | str | Applies migrations to only specified target. |
@@ -70,20 +71,21 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `chatlog_config (CHATLOG_MIGRATIONS_DIR, chatlog_db_path, chatlog_mode)`
+- `chatlog_config (CHATLOG_MIGRATIONS_DIR, chatlog_db_path)`
+- `m3_sdk (resolve_db_path)`
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `dst`` (line 181)
-- `sqlite3.connect()  → `target.db_path`` (line 179)
-- `sqlite3.connect()  → `target.db_path`` (line 215)
-- `sqlite3.connect()  → `target.db_path`` (line 400)
-- `sqlite3.connect()  → `target.db_path`` (line 468)
-- `sqlite3.connect()  → `target.db_path`` (line 528)
-- `sqlite3.connect()  → `target.db_path`` (line 585)
-- `sqlite3.connect()  → `target.db_path`` (line 625)
+- `sqlite3.connect()  → `dst`` (line 190)
+- `sqlite3.connect()  → `target.db_path`` (line 188)
+- `sqlite3.connect()  → `target.db_path`` (line 224)
+- `sqlite3.connect()  → `target.db_path`` (line 409)
+- `sqlite3.connect()  → `target.db_path`` (line 477)
+- `sqlite3.connect()  → `target.db_path`` (line 537)
+- `sqlite3.connect()  → `target.db_path`` (line 594)
+- `sqlite3.connect()  → `target.db_path`` (line 634)
 
 
 ## Notable external imports

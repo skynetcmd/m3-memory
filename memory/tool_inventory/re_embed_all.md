@@ -1,12 +1,12 @@
 ---
-tool: bin/memory_bridge.py
-sha1: 268bb7ea82d8
-mtime_utc: 2026-04-21T20:54:48.405420+00:00
-generated_utc: 2026-04-21T21:22:27.111638+00:00
+tool: bin/re_embed_all.py
+sha1: 642efa7df146
+mtime_utc: 2026-04-21T20:42:41.491237+00:00
+generated_utc: 2026-04-21T21:26:01.953261+00:00
 private: false
 ---
 
-# bin/memory_bridge.py
+# bin/re_embed_all.py
 
 ## Purpose
 
@@ -14,11 +14,14 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
+- `def main()` (line 59)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
-_(no argparse arguments detected)_
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -26,17 +29,19 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (active_database)`
-- `mcp_tool_catalog`
-- `memory_core`
+- `m3_sdk (add_database_arg, resolve_db_path)`
+- `memory_core (_embed, _pack)`
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**sqlite**
+
+- `sqlite3.connect()  → `db_path`` (line 16)
+
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
+_(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
