@@ -1,0 +1,223 @@
+{
+  "n": 200,
+  "per_category": {
+    "temporal": {
+      "n": 38,
+      "zero_hit": 1,
+      "gold_in_top10": 5,
+      "gold_in_top40": 10,
+      "pct_gold_in_top10": 0.13157894736842105,
+      "pct_gold_in_top40": 0.2631578947368421,
+      "first_rank_median": 99,
+      "first_rank_p75": 111.5,
+      "first_rank_mean": 87.29729729729729,
+      "rank_histogram": {
+        "2-3": 3,
+        "4-5": 1,
+        "6-10": 1,
+        "11-20": 5,
+        "41-100": 10,
+        "100+": 17,
+        "never": 1
+      },
+      "mean_gold_frac_top10": 0.013157894736842106,
+      "mean_gold_frac_top40": 0.006578947368421053,
+      "temporal_session_date_in_top40": 38
+    },
+    "open-domain": {
+      "n": 13,
+      "zero_hit": 3,
+      "gold_in_top10": 1,
+      "gold_in_top40": 3,
+      "pct_gold_in_top10": 0.07692307692307693,
+      "pct_gold_in_top40": 0.23076923076923078,
+      "first_rank_median": 84.0,
+      "first_rank_p75": 131.75,
+      "first_rank_mean": 89.5,
+      "rank_histogram": {
+        "2-3": 1,
+        "11-20": 1,
+        "21-40": 1,
+        "41-100": 2,
+        "100+": 5,
+        "never": 3
+      },
+      "mean_gold_frac_top10": 0.009090909090909092,
+      "mean_gold_frac_top40": 0.009090909090909092,
+      "temporal_session_date_in_top40": null
+    },
+    "multi-hop": {
+      "n": 32,
+      "zero_hit": 1,
+      "gold_in_top10": 0,
+      "gold_in_top40": 5,
+      "pct_gold_in_top10": 0.0,
+      "pct_gold_in_top40": 0.15625,
+      "first_rank_median": 141,
+      "first_rank_p75": 169.0,
+      "first_rank_mean": 123.74193548387096,
+      "rank_histogram": {
+        "11-20": 2,
+        "21-40": 3,
+        "41-100": 6,
+        "100+": 20,
+        "never": 1
+      },
+      "mean_gold_frac_top10": 0.0,
+      "mean_gold_frac_top40": 0.00390625,
+      "temporal_session_date_in_top40": null
+    },
+    "single-hop": {
+      "n": 70,
+      "zero_hit": 2,
+      "gold_in_top10": 14,
+      "gold_in_top40": 29,
+      "pct_gold_in_top10": 0.2,
+      "pct_gold_in_top40": 0.4142857142857143,
+      "first_rank_median": 67.0,
+      "first_rank_p75": 146.25,
+      "first_rank_mean": 83.63235294117646,
+      "rank_histogram": {
+        "1": 4,
+        "2-3": 4,
+        "4-5": 1,
+        "6-10": 5,
+        "11-20": 6,
+        "21-40": 9,
+        "41-100": 6,
+        "100+": 33,
+        "never": 2
+      },
+      "mean_gold_frac_top10": 0.02,
+      "mean_gold_frac_top40": 0.010357142857142858,
+      "temporal_session_date_in_top40": null
+    },
+    "adversarial": {
+      "n": 47,
+      "zero_hit": 0,
+      "gold_in_top10": 17,
+      "gold_in_top40": 27,
+      "pct_gold_in_top10": 0.3617021276595745,
+      "pct_gold_in_top40": 0.574468085106383,
+      "first_rank_median": 25,
+      "first_rank_p75": 125.0,
+      "first_rank_mean": 63.8936170212766,
+      "rank_histogram": {
+        "1": 8,
+        "4-5": 1,
+        "6-10": 8,
+        "11-20": 5,
+        "21-40": 5,
+        "41-100": 6,
+        "100+": 14
+      },
+      "mean_gold_frac_top10": 0.03617021276595745,
+      "mean_gold_frac_top40": 0.014361702127659576,
+      "temporal_session_date_in_top40": null
+    }
+  },
+  "rank_distribution_overall": {
+    "1": 12,
+    "2-3": 8,
+    "4-5": 3,
+    "6-10": 14,
+    "11-20": 19,
+    "21-40": 18,
+    "41-100": 30,
+    "100+": 89,
+    "never": 7
+  },
+  "noise_floor": {
+    "mean_gold_frac_top10": 0.01868686868686869,
+    "mean_gold_frac_top40": 0.00946969696969697,
+    "interpretation": "Fraction of the top-K that is gold. 1-this = noise fraction the answerer must filter."
+  },
+  "zero_hit_diagnosis": [
+    {
+      "idx": 30,
+      "category": "open-domain",
+      "q_signal": "default",
+      "question": "Would Melanie be considered a member of the LGBTQ community?",
+      "gold": [],
+      "any_overlap_with_retrieved": false,
+      "retrieved_dia_count": 276
+    },
+    {
+      "idx": 37,
+      "category": "multi-hop",
+      "q_signal": "default",
+      "question": "What did Melanie paint recently?",
+      "gold": [
+        "D8:6; D9:17"
+      ],
+      "any_overlap_with_retrieved": false,
+      "retrieved_dia_count": 250
+    },
+    {
+      "idx": 45,
+      "category": "temporal",
+      "q_signal": "temporal",
+      "question": "When did Caroline attend a pride parade in August?",
+      "gold": [
+        "D11:4"
+      ],
+      "any_overlap_with_retrieved": false,
+      "retrieved_dia_count": 205
+    },
+    {
+      "idx": 46,
+      "category": "open-domain",
+      "q_signal": "default",
+      "question": "Would Melanie be considered an ally to the transgender community?",
+      "gold": [],
+      "any_overlap_with_retrieved": false,
+      "retrieved_dia_count": 262
+    },
+    {
+      "idx": 50,
+      "category": "open-domain",
+      "q_signal": "default",
+      "question": "What would Caroline's political leaning likely be?",
+      "gold": [
+        "D12:1"
+      ],
+      "any_overlap_with_retrieved": false,
+      "retrieved_dia_count": 242
+    },
+    {
+      "idx": 100,
+      "category": "single-hop",
+      "q_signal": "default",
+      "question": "What kind of place does Caroline want to create for people?",
+      "gold": [
+        "D4:15"
+      ],
+      "any_overlap_with_retrieved": false,
+      "retrieved_dia_count": 282
+    },
+    {
+      "idx": 126,
+      "category": "single-hop",
+      "q_signal": "default",
+      "question": "What activity did Caroline used to do with her dad?",
+      "gold": [
+        "D13:7"
+      ],
+      "any_overlap_with_retrieved": false,
+      "retrieved_dia_count": 239
+    }
+  ],
+  "temporal_session_date_visibility": {},
+  "top_k_composition": {
+    "role_distribution_top40": {
+      "Melanie": 6683,
+      "Gina": 17
+    },
+    "type_distribution_top40": {
+      "observation": 1300,
+      "message": 1320
+    },
+    "mean_unique_sessions_in_top40": 8.41,
+    "median_unique_sessions_in_top40": 8.0
+  }
+}

@@ -20,6 +20,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BASE_DIR / "bin"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Force embedding endpoint before memory_core import, same as bench_locomo.py.
 os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:1234/v1")

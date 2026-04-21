@@ -49,9 +49,9 @@ Conclusions:
 
 | Kind of change | Goes in | Visibility |
 |---|---|---|
-| LoCoMo-specific ingest (C1-C4 heuristics, session anchoring, dia_id mapping) | `bin/bench_locomo.py` | benchmark-only |
+| LoCoMo-specific ingest (C1-C4 heuristics, session anchoring, dia_id mapping) | `benchmarks/locomo/bench_locomo.py` | benchmark-only |
 | Shared ingest/retrieval levers (contextual key-expansion, smart-time-boost, neighbor-session, rerank) | `bin/memory_core.py` / `bin/temporal_utils.py` with gated flags default-off | shared, both benches |
-| Dataset anchor-date parser (LOCOMO's `"1:56 pm on 8 May, 2023"`) | `bin/bench_locomo.py`, registered via `temporal_utils.register_anchor_parser()` | benchmark-only |
+| Dataset anchor-date parser (LOCOMO's `"1:56 pm on 8 May, 2023"`) | `benchmarks/locomo/bench_locomo.py`, registered via `temporal_utils.register_anchor_parser()` | benchmark-only |
 
 ## 3. Current state on main
 
@@ -64,14 +64,14 @@ Conclusions:
 
 **Phase1 artifacts on main:**
 
-- `benchmarks/Phase1/retrieval_audit.py` — driver
-- `benchmarks/Phase1/reingest.py` — variant re-ingest helper
-- `benchmarks/Phase1/compare_runs.py` — pairwise comparison (requires `--a` / `--b`)
-- `benchmarks/Phase1/join_variant_reports.py` — aggregates variant runs into a report
-- `benchmarks/Phase1/probe_ingest_cost.py` — ingest cost probe
-- `benchmarks/Phase1/stamp_variants_from_chainlog.py` — stamp variant tags onto chain log rows
-- `benchmarks/Phase1/VARIANT_REPORT_4x500.md`, `VARIANT_REPORT_5x500.md` — shipped variant reports
-- `benchmarks/Phase1/runs/audit_20260417_*/` — per-run artifacts; 5 of the 5-variant runs have summary.json
+- `benchmarks/locomo/retrieval_audit.py` — driver
+- `benchmarks/locomo/reingest.py` — variant re-ingest helper
+- `benchmarks/locomo/compare_runs.py` — pairwise comparison (requires `--a` / `--b`)
+- `benchmarks/locomo/join_variant_reports.py` — aggregates variant runs into a report
+- `benchmarks/locomo/probe_ingest_cost.py` — ingest cost probe
+- `benchmarks/locomo/stamp_variants_from_chainlog.py` — stamp variant tags onto chain log rows
+- `benchmarks/locomo/VARIANT_REPORT_4x500.md`, `VARIANT_REPORT_5x500.md` — shipped variant reports
+- `benchmarks/locomo/runs/audit_20260417_*/` — per-run artifacts; 5 of the 5-variant runs have summary.json
 
 **Runs WITHOUT summary.json on main** (baseline + post-port runs have only `retrieval_trace.jsonl`):
 - `audit_20260417_141947` (the 500q baseline referenced by this plan)
@@ -83,7 +83,7 @@ These need summary regeneration (can be done from `retrieval_trace.jsonl` alone)
 **NOT on main (lives on `bench-Phase1`):**
 
 - `llm_v1_title_ctx` prompt changes in `memory_core.py` — superseded by `llm_v1` as plan target
-- `_extractive_title`, `_merge_short_turns`, `_session_gist`, `_session_context_for` in `bin/bench_locomo.py` — C1-C4 heuristic stack
+- `_extractive_title`, `_merge_short_turns`, `_session_gist`, `_session_context_for` in `benchmarks/locomo/bench_locomo.py` — C1-C4 heuristic stack
 - `analyze_handoff.py`, `analyze_prompt.py`, `probe_issues.py` — Phase 2/3 analysis tools
 - `VARIANT_PRESETS` with `llm_v1_title_ctx` entry — not needed under this plan
 
@@ -92,8 +92,8 @@ These need summary regeneration (can be done from `retrieval_trace.jsonl` alone)
 Every retrieval change must produce a Phase1 retrieval audit on the canonical 500q before merging to `main`. Gates:
 
 1. **Baseline** is the most recent measured variant on main — currently `llm_v1` once ported, or `audit_20260417_141947/summary.json` (once regenerated) for raw-only comparison.
-2. **Run** `python benchmarks/Phase1/retrieval_audit.py` on the canonical subset: 500 questions spanning conv-26, conv-30, conv-41, conv-42.
-3. **Compare** with `python benchmarks/Phase1/compare_runs.py --a <baseline> --b <new>`. A change is blocked if:
+2. **Run** `python benchmarks/locomo/retrieval_audit.py` on the canonical subset: 500 questions spanning conv-26, conv-30, conv-41, conv-42.
+3. **Compare** with `python benchmarks/locomo/compare_runs.py --a <baseline> --b <new>`. A change is blocked if:
    - Any category's `any_gold_hit_rate` drops — mechanical regression (pool coverage shrunk).
    - Any category's `mean_r@10` drops ≥1.5pp (provisional noise band; Phase1 re-runs are retrieval-deterministic so differences should be near-zero).
    - `zero_hit_count` increases by ≥3.
@@ -121,12 +121,12 @@ Every retrieval change must produce a Phase1 retrieval audit on the canonical 50
 
 **Code placement:**
 - **Shared (gated):** Add `embed_key_enricher: Callable[[dict], str] | None = None` kwarg to `memory_write_bulk_impl` in `bin/memory_core.py`. Default `None` preserves current behavior exactly. When supplied, the enricher receives the raw item dict and returns the string to embed (value still stored verbatim). No category coupling.
-- **Benchmark:** `bin/bench_locomo.py` provides a LoCoMo-specific enricher that computes `heuristic_title | llm_title | llm_entities | raw_turn` and passes it in. The enricher uses `_maybe_auto_title` / `_maybe_auto_entities` already in `memory_core.py`.
-- **CLI:** `bin/bench_locomo.py` adds `--contextual-keys` flag that wires the enricher.
+- **Benchmark:** `benchmarks/locomo/bench_locomo.py` provides a LoCoMo-specific enricher that computes `heuristic_title | llm_title | llm_entities | raw_turn` and passes it in. The enricher uses `_maybe_auto_title` / `_maybe_auto_entities` already in `memory_core.py`.
+- **CLI:** `benchmarks/locomo/bench_locomo.py` adds `--contextual-keys` flag that wires the enricher.
 
 **Approach:**
 1. Implement the `embed_key_enricher` hook in `memory_core.py` with unit test (enricher called once per item, output embedded, value stored raw).
-2. Implement LoCoMo enricher in `bin/bench_locomo.py`. Re-use the existing `_maybe_auto_title` / `_maybe_auto_entities` paths from memory_core.
+2. Implement LoCoMo enricher in `benchmarks/locomo/bench_locomo.py`. Re-use the existing `_maybe_auto_title` / `_maybe_auto_entities` paths from memory_core.
 3. Add `--contextual-keys` flag; re-ingest LoCoMo under variant `locomo-llm_v1-<date>`.
 4. Run full 500q Phase1 audit. Confirm `mean_r@10 ≈ 30.5%` (the published `llm_v1` number). Delta band: within ±2pp.
 5. If reproduction passes, document the new baseline on main.
@@ -139,24 +139,24 @@ Every retrieval change must produce a Phase1 retrieval audit on the canonical 50
 
 **Problem:** `smart_time_boost` + `smart_neighbor_sessions` + `extract_referenced_dates` shipped to main in commit `2235f88` but were never measured on LoCoMo directly. The LME-side published the temporal lift; LoCoMo should benefit similarly on the temporal category (baseline 11.0% mean_r@10).
 
-**Code placement:** no new code. `bin/bench_locomo.py` already has `--enable-smart-retrieval` via the driver's flag.
+**Code placement:** no new code. `benchmarks/locomo/bench_locomo.py` already has `--enable-smart-retrieval` via the driver's flag.
 
 **Approach:**
-1. Run Phase1 audit WITHOUT smart-retrieval: `python benchmarks/Phase1/retrieval_audit.py --limit 500`. Save as `audit_stage2_baseline_<ts>`.
+1. Run Phase1 audit WITHOUT smart-retrieval: `python benchmarks/locomo/retrieval_audit.py --limit 500`. Save as `audit_stage2_baseline_<ts>`.
 2. Run Phase1 audit WITH smart-retrieval: `... --enable-smart-retrieval`. Save as `audit_stage2_smart_<ts>`.
 3. `compare_runs.py` both. Target: temporal mean_r@10 lift; overall ± noise.
 4. Decision: if temporal lifts ≥3pp and no category regresses ≥1.5pp, smart-retrieval becomes default-on for Phase1 audits going forward.
 
 **Cost:** two audit runs, retrieval-only (~10min each).
 
-**Exit:** quantified LoCoMo benefit of the existing smart-retrieval machinery; `bin/bench_locomo.py` default updated if warranted.
+**Exit:** quantified LoCoMo benefit of the existing smart-retrieval machinery; `benchmarks/locomo/bench_locomo.py` default updated if warranted.
 
 ### Stage 3 — Multi-hop targeted retrieval
 
 **Hypothesis:** multi-hop questions stay at 6-10% mean_r@10 even with `llm_v1`. Cross-session connective tissue isn't retrievable by embedding similarity alone. Candidate levers:
 
 - **Neighbor-session expansion** (`smart_neighbor_sessions > 0`) — already on main. Stage 2 will measure its effect on multi-hop; if not enough, tune.
-- **Cross-encoder rerank over expanded pool** — Stage 2 of the LongMemEval PLAN ports rerank as a shared primitive (`bin/rerank_utils.py`). Consume here once available. Add `--rerank` flag to `bin/bench_locomo.py`.
+- **Cross-encoder rerank over expanded pool** — Stage 2 of the LongMemEval PLAN ports rerank as a shared primitive (`bin/rerank_utils.py`). Consume here once available. Add `--rerank` flag to `benchmarks/locomo/bench_locomo.py`.
 
 **Code placement:** rerank primitive is shared; LoCoMo-side flag plumbing only.
 
@@ -174,7 +174,7 @@ Every retrieval change must produce a Phase1 retrieval audit on the canonical 50
 Current audit is 500q of 1974 available. After Stages 0-3:
 
 1. Run audit on full 1974q to confirm trends hold.
-2. Only after full-audit confirms: cascade to the LoCoMo QA pipeline (`bin/bench_locomo.py` end-to-end, not retrieval-only).
+2. Only after full-audit confirms: cascade to the LoCoMo QA pipeline (`benchmarks/locomo/bench_locomo.py` end-to-end, not retrieval-only).
 3. Phase 2 + Phase 3 (prompt analysis + judge verification) are separate initiatives.
 
 ## 6. Test procedures (how-to)
@@ -182,14 +182,14 @@ Current audit is 500q of 1974 available. After Stages 0-3:
 ### A — Phase1 retrieval audit (canonical 500q)
 
 ```bash
-python benchmarks/Phase1/retrieval_audit.py \
+python benchmarks/locomo/retrieval_audit.py \
   --dataset data/locomo/locomo10.json \
   --limit 500 --k 40 \
   --variant "<descriptive-tag>" \
   2>&1 | tee .scratch/locomo_audit_$(date +%Y%m%d_%H%M%S).log
 ```
 
-Artifacts end up in `benchmarks/Phase1/runs/audit_<ts>/`:
+Artifacts end up in `benchmarks/locomo/runs/audit_<ts>/`:
 
 - `retrieval_trace.jsonl` — one line per question: gold dia_ids, retrieved dia_ids, hit positions.
 - `summary.json` — aggregate per-category metrics (schema shown in Section 1).
@@ -199,7 +199,7 @@ Artifacts end up in `benchmarks/Phase1/runs/audit_<ts>/`:
 ### B — Variant comparison
 
 ```bash
-python benchmarks/Phase1/compare_runs.py \
+python benchmarks/locomo/compare_runs.py \
   --a audit_20260417_141947 \
   --b audit_<new_ts>
 ```
@@ -209,12 +209,12 @@ Output: overall + per-category delta table. Use as regression check.
 ### C — Re-ingest under a new variant
 
 ```bash
-python benchmarks/Phase1/reingest.py \
+python benchmarks/locomo/reingest.py \
   --samples conv-26 conv-30 conv-41 conv-42 \
   --variants llm_v1
 ```
 
-Always re-ingest fresh under a new `change_agent` so cleanup is targeted and old variants don't contaminate future audits. Variant presets live in `benchmarks/Phase1/reingest.py::VARIANT_PRESETS`.
+Always re-ingest fresh under a new `change_agent` so cleanup is targeted and old variants don't contaminate future audits. Variant presets live in `benchmarks/locomo/reingest.py::VARIANT_PRESETS`.
 
 ### D — Zero-hit debugging loop
 
@@ -227,7 +227,7 @@ For any category where `zero_hit_count` > 0:
 ### E — Quick smoke (200q)
 
 ```bash
-python benchmarks/Phase1/retrieval_audit.py \
+python benchmarks/locomo/retrieval_audit.py \
   --dataset data/locomo/locomo10.json \
   --limit 200 --k 40 --variant "smoke-<feature>"
 ```
@@ -258,8 +258,8 @@ Wall time: ~5-10 min.
 
 ## 9. References
 
-- On-branch baseline: `benchmarks/Phase1/runs/audit_20260417_141947/` (summary.json pending regeneration)
+- On-branch baseline: `benchmarks/locomo/runs/audit_20260417_141947/` (summary.json pending regeneration)
 - Companion: [`benchmarks/longmemeval/PLAN.md`](../longmemeval/PLAN.md)
-- Variant report: [`benchmarks/Phase1/VARIANT_REPORT_5x500.md`](./VARIANT_REPORT_5x500.md)
+- Variant report: [`benchmarks/locomo/VARIANT_REPORT_5x500.md`](./VARIANT_REPORT_5x500.md)
 - Paper: [LoCoMo ACL 2024](https://aclanthology.org/2024.acl-long.747.pdf) — dia_id + session timestamps; 9K token, 35-session dialogues
 - LongMemEval paper (relevant for cross-benchmark transfer): [ICLR 2025](https://arxiv.org/html/2410.10813v1)
