@@ -1,5 +1,43 @@
 # M3 Memory System Changelog - 2026
 
+## April 21, 2026
+
+### 🔧 Database Parameter Refactor
+
+#### Universal per-call `database` routing
+- Every MCP tool (all 55 in the catalog) gained an optional `database` argument, injected at module load by `mcp_tool_catalog._inject_database_arg()`. The dispatcher pops it, resolves it via `m3_sdk.resolve_db_path()`, and wraps the impl call in `active_database(path)` — a `ContextVar` that `memory_core._db()` consults on every call. Impl signatures are unchanged.
+- Resolution order: explicit arg > `M3_DATABASE` env > active `ContextVar` > default `memory/agent_memory.db`.
+- `M3Context.for_db(path)` replaces `M3Context()` — per-path cached contexts, each with its own SQLite connection pool. Bounded LRU cache (default 16, override via `M3_CONTEXT_CACHE_SIZE`) evicts + closes cold pools to prevent growth on long-running servers.
+
+#### CLI flag on every DB-aware script
+- `--database PATH` wired into `bench_memory.py`, `ai_mechanic.py`, `build_kg_variant.py`, `chatlog_ingest.py`, `chatlog_embed_sweeper.py`, `cli_kb_browse.py`, `cli_knowledge.py`, `memory_doctor.py`, `migrate_memory.py`, `migrate_flat_memory.py`, `re_embed_all.py`, `secret_rotator.py`, `setup_secret.py`, `sync_all.py` (propagates via env to subprocesses), `weekly_auditor.py`, and `benchmarks/longmemeval/bench_longmemeval.py`. `ai_mechanic.py` requires `--database` explicitly (no default) since it drops tables.
+- Standardized via `m3_sdk.add_database_arg(parser)` helper — one call, identical semantics.
+
+#### New helper scripts
+- `bin/setup_test_db.py` seeds a fresh schema-complete scratch DB by applying every forward migration. Run with `--database memory/_test.db --force` to bootstrap an isolated test DB, then `M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py`.
+
+#### Chatlog unification
+- The three-mode (integrated / separate / hybrid) system is **removed**. The chatlog DB path now resolves via: `CHATLOG_DB_PATH` env > active `ContextVar` > `M3_DATABASE` env > `.chatlog_config.json` db_path > default `agent_chatlog.db`. Same path as main = unified-file behavior; different path = separate file with cross-DB `chatlog_promote`. `CHATLOG_MODE` env var is deprecated (warns once, then ignored). The `mode` field in `.chatlog_config.json` is ignored silently. `chatlog_status` output no longer has a `mode` field — gained `unified` bool instead.
+- Async-queue routing fixed: queued chatlog items now capture their target DB path at enqueue time (`_db_path` on each item), so the flush worker groups by path and writes to the correct DB even when items from multiple `database`-routed tool calls land in a single batch. Spill-drain (`chatlog_embed_sweeper.drain_spill`) honors the captured path too.
+
+#### NULL-semantic fixes
+- `memory_write_impl` and `memory_write_bulk_impl` now coerce empty-string `variant` and `valid_to` to SQL `NULL` before INSERT. Previously the write path stored `""` while the search path filtered untagged rows with `IS NULL`, silently hiding fresh writes from the default search. Symmetrical read-side predicate widened to accept both `NULL` and `""` so legacy rows keep working.
+- Migration `020_normalize_empty_to_null.up.sql` rewrites historical `""` rows to `NULL` so the inconsistency doesn't persist.
+
+#### Test suite routing
+- `test_memory_bridge.py`, `test_debug_agent.py`, `test_mcp_proxy.py` now resolve `DB_PATH` via `resolve_db_path(None)` at import time. Default behavior unchanged (env unset → live DB). To run against an isolated DB: `M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py`.
+
+#### Tool inventory generator
+- `bin/gen_tool_inventory.py` now walks `benchmarks/` recursively (previously only `bin/` and `scripts/`), covers more core libraries (chatlog_config, chatlog_core, memory_maintenance, memory_sync, llm_failover), and detects the `add_database_arg(parser)` helper to synthesize the `--database` row on every script that uses it. INDEX grew from ~50 to 60 tools.
+
+#### Docs
+- New `docs/CLI_REFERENCE.md` documents every DB-aware script and the `--database` / `M3_DATABASE` precedence.
+- `docs/MCP_TOOLS.md` gains a "Universal `database` parameter" section.
+- `docs/CHATLOG.md` rewritten for the unified model (removed three-mode explainer).
+
+#### ⚠️ Operational note — restart your MCP clients
+- Claude Code, Gemini CLI, and other MCP clients cache tool schemas at connection time. Adding the `database` parameter to every tool schema requires a **one-time client restart** before the clients can actually pass the argument. Existing tool calls that don't set `database` continue to work unchanged.
+
 ## April 12, 2026
 
 ### ✨ Multi-Agent Orchestration
