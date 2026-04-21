@@ -264,12 +264,30 @@ async def _flush_once() -> int:
 
 
 def _executemany_insert(batch: list[dict]) -> int:
-    """Synchronous bulk INSERT into the chatlog DB. Called from executor thread."""
-    from m3_sdk import M3Context
-    ctx = M3Context.for_db(None)
-    rows = []
+    """Synchronous bulk INSERT into chatlog DBs. Called from executor thread.
+
+    Items carry their target DB path (``_db_path``) captured at enqueue time.
+    A single batch can contain items routed to different DBs when callers pass
+    different ``database`` args on successive chatlog_* tool calls, so group
+    by path and run one executemany per distinct target. Items without
+    ``_db_path`` (legacy queued items from a running process pre-upgrade)
+    fall back to the live resolver.
+    """
+    from m3_sdk import active_database, M3Context
+
+    sql = (
+        "INSERT INTO memory_items ("
+        "id, type, title, content, metadata_json, agent_id, model_id, "
+        "change_agent, importance, source, origin_device, user_id, scope, expires_at, "
+        "created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, "
+        "content_hash, variant) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    )
+
+    groups: dict[str, list[tuple]] = {}
     for item in batch:
-        rows.append((
+        db_path = item.get("_db_path") or chatlog_config.chatlog_db_path()
+        groups.setdefault(db_path, []).append((
             item["_id"],
             "chat_log",
             item["_title"],
@@ -293,18 +311,19 @@ def _executemany_insert(batch: list[dict]) -> int:
             _content_hash(item["_content"]),
             item.get("variant"),
         ))
-    sql = (
-        "INSERT INTO memory_items ("
-        "id, type, title, content, metadata_json, agent_id, model_id, "
-        "change_agent, importance, source, origin_device, user_id, scope, expires_at, "
-        "created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, "
-        "content_hash, variant) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-    )
-    with ctx.get_chatlog_conn() as conn:
-        conn.executemany(sql, rows)
-        conn.commit()
-    return len(rows)
+
+    written = 0
+    for db_path, rows in groups.items():
+        # Activate the captured path so M3Context.for_db(None).get_chatlog_conn()
+        # routes to the right pool. (ContextVars are thread-local-ish; this
+        # executor-thread sets its own.)
+        with active_database(db_path):
+            ctx = M3Context.for_db(None)
+            with ctx.get_chatlog_conn() as conn:
+                conn.executemany(sql, rows)
+                conn.commit()
+        written += len(rows)
+    return written
 
 
 def _spill_batch(batch: list[dict]) -> None:
@@ -431,6 +450,11 @@ async def chatlog_write_impl(
     )
     now = timestamp or _utcnow_iso()
 
+    # Capture the target DB path at enqueue time. The flush loop runs in a
+    # different asyncio task context (spawned at queue init), so if we
+    # resolved the path at flush time it would miss the ContextVar set by
+    # the MCP `database` tool arg. Snapshotting here keeps per-call routing
+    # correct even across async-queue boundaries.
     queued = {
         **item,
         "_id": row_id,
@@ -438,6 +462,7 @@ async def chatlog_write_impl(
         "_content": scrubbed_content,
         "_metadata_json": meta_json,
         "_created_at": now,
+        "_db_path": chatlog_config.chatlog_db_path(),
     }
 
     q = _ensure_queue()
@@ -457,6 +482,8 @@ async def chatlog_write_bulk_impl(items: list[dict], embed: bool = False) -> dic
     errors: list[str] = []
     cfg = chatlog_config.resolve_config()
     q = _ensure_queue()
+    # Snapshot the target DB once per bulk call (see single-write impl note).
+    target_db = chatlog_config.chatlog_db_path()
 
     for item in items:
         try:
@@ -496,6 +523,7 @@ async def chatlog_write_bulk_impl(items: list[dict], embed: bool = False) -> dic
             "_content": scrubbed_content,
             "_metadata_json": meta_json,
             "_created_at": now,
+            "_db_path": target_db,
         }
         ids.append(row_id)
 
