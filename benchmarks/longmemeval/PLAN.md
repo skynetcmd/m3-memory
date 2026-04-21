@@ -76,7 +76,7 @@ Every retrieval change must produce a judged full-500q run before merging to `ma
    - `overall_accuracy` drops ≥1.5pp.
 4. **Noise band**: differences under ±1.5pp are treated as noise (published data shows ≈±0.7pp single-direction variance).
 5. **Budget**: plan for 2 runs per trialed feature — one A, one A+feature — on the same DB snapshot, same day, same LM Studio / llama-server process.
-6. **Cross-benchmark gate**: any change that modifies `memory_core.py` or `temporal_utils.py` must also pass the Phase1 LoCoMo audit (see `benchmarks/Phase1/PLAN.md`) before merging.
+6. **Cross-benchmark gate**: any change that modifies `memory_core.py` or `temporal_utils.py` must also pass the Phase1 LoCoMo audit (see `benchmarks/locomo/PLAN.md`) before merging.
 
 ## 5. Test inventory
 
@@ -287,7 +287,7 @@ Before drawing any conclusion from a sub-2pp delta, re-run the same config once 
 ## 10. References
 
 - Shipped: [`benchmarks/longmemeval/README.md`](./README.md), [`benchmarks/longmemeval/results.json`](./results.json)
-- Companion: [`benchmarks/Phase1/PLAN.md`](../Phase1/PLAN.md)
+- Companion: [`benchmarks/locomo/PLAN.md`](../locomo/PLAN.md)
 - [LongMemEval ICLR 2025](https://arxiv.org/html/2410.10813v1) — key expansion +4% recall / +5% accuracy; time-aware +11.4% recall on rounds
 - [Anthropic Contextual Retrieval](https://www.anthropic.com/news/contextual-retrieval) — −49% failure with contextual embeddings+BM25
 - Branch rebase-recovery context: memory entry `project_rebase_code_loss.md` — ~1200 lost lines recoverable from `backup-bench-wip-pre-merge` tip `97bc488`

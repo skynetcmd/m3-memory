@@ -14,8 +14,8 @@ def load(name):
 
 def main():
     p = argparse.ArgumentParser(description="Compare two Phase1 retrieval audit runs.")
-    p.add_argument("--a", required=True, help="Baseline run dir name under benchmarks/Phase1/runs/")
-    p.add_argument("--b", required=True, help="Candidate run dir name under benchmarks/Phase1/runs/")
+    p.add_argument("--a", required=True, help="Baseline run dir name under benchmarks/locomo/runs/")
+    p.add_argument("--b", required=True, help="Candidate run dir name under benchmarks/locomo/runs/")
     args = p.parse_args()
 
     a_s, a_h = load(args.a)
