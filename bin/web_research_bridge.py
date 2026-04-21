@@ -23,7 +23,7 @@ logger = logging.getLogger("web_research")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from m3_sdk import M3Context
 
-ctx = M3Context()
+ctx = M3Context.for_db(None)
 
 mcp = FastMCP("Web Research")
 

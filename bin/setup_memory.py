@@ -18,7 +18,17 @@ VENV   = BASE / ".venv"
 PY     = VENV / ("Scripts/python.exe" if IS_WIN else "bin/python")
 PIP    = VENV / ("Scripts/pip.exe"    if IS_WIN else "bin/pip")
 REQS   = BASE / ("requirements-windows.txt" if IS_WIN else "requirements.txt")
-DB     = BASE / "memory" / "agent_memory.db"
+# Bootstrap honors --database (positional for simplicity) and M3_DATABASE env.
+# Called before m3_sdk is importable in a fresh checkout, so resolution is
+# kept self-contained rather than delegated to resolve_db_path.
+_override = None
+if len(sys.argv) > 1 and sys.argv[1].startswith("--database="):
+    _override = sys.argv[1].split("=", 1)[1]
+elif "--database" in sys.argv:
+    i = sys.argv.index("--database")
+    if i + 1 < len(sys.argv):
+        _override = sys.argv[i + 1]
+DB     = pathlib.Path(_override or os.environ.get("M3_DATABASE") or (BASE / "memory" / "agent_memory.db"))
 MIGS   = BASE / "memory" / "migrations"
 
 def log(msg): print(f"[setup] {msg}", file=sys.stderr)

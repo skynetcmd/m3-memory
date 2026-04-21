@@ -26,7 +26,7 @@ REPO_ROOT   = SCRIPT_DIR.parent
 DB_PATH     = REPO_ROOT / "memory" / "agent_memory.db"
 
 sys.path.insert(0, str(REPO_ROOT / "bin"))
-from m3_sdk import resolve_venv_python
+from m3_sdk import add_database_arg, resolve_db_path, resolve_venv_python
 
 
 def ensure_venv():
@@ -203,10 +203,12 @@ def main():
     ap.add_argument("-t", "--type",      type=str,  default=None,  help="Filter by type (fact, decision, knowledge, project…)")
     ap.add_argument("-s", "--search",    type=str,  default=None,  help="Search title/content (case-insensitive)")
     ap.add_argument("--no-pager",        action="store_true",       help="Print all without paging")
-    ap.add_argument("--db",              type=str,  default=None,  help="Override DB path")
+    ap.add_argument("--db",              type=str,  default=None,  help="Deprecated alias for --database. Kept for backward compatibility.")
+    add_database_arg(ap)
     args = ap.parse_args()
 
-    db = Path(args.db) if args.db else DB_PATH
+    # --database is the canonical flag; --db remains for backward compat.
+    db = Path(resolve_db_path(args.database or args.db))
 
     rows = fetch(db, args.type, args.search, args.limit)
     total = len(rows)

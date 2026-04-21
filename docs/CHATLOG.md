@@ -4,11 +4,18 @@
 
 The chat log subsystem ingests chat transcripts from Claude Code, Gemini CLI, OpenCode, and Aider into a dedicated memory type `chat_log`. Each message is tagged with full provenance (host agent, provider, model, conversation ID) and optionally embedded for semantic search.
 
-The subsystem operates in three modes:
+### Database routing (unified model)
 
-- **Integrated**: Chat logs share the main `agent_memory.db` with other memory types. Best for small workloads and single-device setups.
-- **Separate**: Chat logs live in a dedicated `agent_chatlog.db`; search and storage are isolated. Best for high-volume ingest or privacy-conscious deployments.
-- **Hybrid**: Chat logs land in the separate DB; useful conversations are promoted (copied or moved) to the main DB on demand. Best for balancing isolation and unified search.
+Chat logs write to whatever path `chatlog_db_path()` resolves to. Resolution order:
+
+1. `CHATLOG_DB_PATH` env var — explicit chatlog-only override
+2. `M3_DATABASE` env var — unified main DB (chatlog shares it)
+3. `.chatlog_config.json` `db_path` field
+4. Default: `memory/agent_chatlog.db` (separate file)
+
+If the resolved chatlog path **equals** the main memory DB path, the two are a single file and full vector/hybrid search is delegated to the main search impl (what the old "integrated" mode did). If they **differ**, chatlog writes are append-tuned and `chatlog_promote` ATTACHes the main DB to copy rows across (what the old "separate"/"hybrid" modes did). The choice is now implicit in the path, not a configuration enum.
+
+> **Deprecation**: the `CHATLOG_MODE` env var and the `mode` field in `.chatlog_config.json` are ignored (a warning is emitted once per process if `CHATLOG_MODE` is set). To keep everything in a single file, set `M3_DATABASE` and `CHATLOG_DB_PATH` to the same path, or leave `CHATLOG_DB_PATH` unset so it follows `M3_DATABASE`.
 
 ### Data Flow
 

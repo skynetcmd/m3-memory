@@ -604,6 +604,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="Discover + plan but don't write.")
     p.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt.")
     p.add_argument("-v", "--verbose", action="store_true", help="DEBUG logging.")
+    from m3_sdk import add_database_arg
+    add_database_arg(p)
     return p
 
 def main() -> int:
@@ -619,6 +621,8 @@ def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
+    if args.database:
+        os.environ["M3_DATABASE"] = args.database
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
         log.setLevel(logging.DEBUG)
