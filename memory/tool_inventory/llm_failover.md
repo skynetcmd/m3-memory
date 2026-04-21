@@ -1,20 +1,24 @@
 ---
-tool: bin/memory_bridge.py
-sha1: 268bb7ea82d8
-mtime_utc: 2026-04-21T20:54:48.405420+00:00
-generated_utc: 2026-04-21T21:22:27.111638+00:00
+tool: bin/llm_failover.py
+sha1: dbbe8a2b19e0
+mtime_utc: 2026-04-21T20:02:02.931765+00:00
+generated_utc: 2026-04-21T21:26:01.833233+00:00
 private: false
 ---
 
-# bin/memory_bridge.py
+# bin/llm_failover.py
 
 ## Purpose
 
-_(no module docstring — update the source file.)_
+LLM Failover Module
+
+Cross-machine failover strategy for selecting LLM and embedding models.
+Tries endpoints in order: LM Studio (local + remote), then Ollama.
+Used by custom_tool_bridge.py and memory_bridge.py.
 
 ## Entry points
 
-- `if __name__ == "__main__"` guard
+_(no conventional entry point detected)_
 
 ## CLI flags / arguments
 
@@ -22,13 +26,11 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `LLM_ENDPOINTS_CSV`
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (active_database)`
-- `mcp_tool_catalog`
-- `memory_core`
+_(none detected)_
 
 ## Calls OUT (external side-channels)
 
@@ -36,7 +38,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
+- `httpx`
 
 ## File dependencies (repo paths referenced)
 

@@ -1,12 +1,12 @@
 ---
-tool: bin/bench_locomo.py
-sha1: 92990e421c84
-mtime_utc: 2026-04-19T16:35:24.074742+00:00
-generated_utc: 2026-04-19T21:10:11.532883+00:00
+tool: benchmarks/locomo/bench_locomo.py
+sha1: 30509385e060
+mtime_utc: 2026-04-21T20:02:02.907203+00:00
+generated_utc: 2026-04-21T21:26:02.034512+00:00
 private: false
 ---
 
-# bin/bench_locomo.py
+# benchmarks/locomo/bench_locomo.py
 
 ## Purpose
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_embed_sweeper.py
-sha1: 85cb868bb268
-mtime_utc: 2026-04-19T19:36:52.762039+00:00
-generated_utc: 2026-04-19T21:10:11.559090+00:00
+sha1: 02815f49b925
+mtime_utc: 2026-04-21T21:12:24.615772+00:00
+generated_utc: 2026-04-21T21:26:01.776593+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ and drains any spill-to-disk files from the async write queue.
 
 ## Entry points
 
-- `async def main()` (line 259)
+- `async def main()` (line 280)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -29,6 +29,7 @@ and drains any spill-to-disk files from the async write queue.
 | `--max-per-run` | Max rows per run (default from CHATLOG_EMBED_MAX_PER_RUN env or 10000) | None | Embeds up to 10000 rows per run | int | Processes up to N rows total per invocation |
 | `--dry-run` | Query and log but don't embed | `False` | Queries unembed rows, embeds in batches, updates DB | store_true | Queries and logs row counts without embedding |
 | `--drain-spill` | Process spill files before embedding | `False` | Skips spill drain (unless spill dir exists) | store_true | Always processes spill files before embedding |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -38,13 +39,15 @@ and drains any spill-to-disk files from the async write queue.
 
 - `chatlog_config`
 - `embedding_utils (pack)`
+- `m3_sdk (add_database_arg)`
 - `memory_core (_embed_many)`
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 303)
+- `sqlite3.connect()  → `db_path`` (line 118)
+- `sqlite3.connect()  → `db_path`` (line 332)
 
 
 ## Notable external imports

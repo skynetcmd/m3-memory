@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_kb_browse.py
-sha1: da53400e5ee3
-mtime_utc: 2026-04-19T19:34:34.103652+00:00
-generated_utc: 2026-04-19T21:10:11.580625+00:00
+sha1: 115ed862cb4e
+mtime_utc: 2026-04-21T20:41:27.549196+00:00
+generated_utc: 2026-04-21T21:26:01.799753+00:00
 private: false
 ---
 
@@ -33,7 +33,8 @@ Usage:
 | `-t`, `--type` | Filter by type (fact, decision, knowledge, project…) | None | No type filtering; SQL WHERE clause omitted | str | Filters by type; supports wildcard (e.g., fact*) or exact match (e.g., "fact") |
 | `-s`, `--search` | Search title/content (case-insensitive) | None | No search filtering; fetches all entries | str | Filters entries where title or content matches (case-insensitive LIKE); exact match if quoted |
 | `--no-pager` | Print all without paging | `False` | Renders all entries in paged mode (50 lines/page, prompts to continue) | store_true | Prints all rendered entries to stdout without pagination |
-| `--db` | Override DB path | None | Uses hardcoded DB_PATH (REPO_ROOT / "memory" / "agent_memory.db") | str | Connects to specified SQLite DB file instead of default |
+| `--db` | Deprecated alias for --database. Kept for backward compatibility. | None | Uses hardcoded DB_PATH (REPO_ROOT / "memory" / "agent_memory.db") | str | Connects to specified SQLite DB file instead of default |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -43,7 +44,7 @@ Usage:
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (resolve_venv_python)`
+- `m3_sdk (add_database_arg, resolve_db_path, resolve_venv_python)`
 
 ## Calls OUT (external side-channels)
 
