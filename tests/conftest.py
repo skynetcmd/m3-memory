@@ -71,8 +71,11 @@ def isolate_chatlog_env(monkeypatch, tmp_path):
     monkeypatch.setattr(chatlog_config, "MAIN_DB_PATH", str(main_db_path))
     monkeypatch.setattr(chatlog_config, "STATE_FILE", str(state_file))
     monkeypatch.setattr(chatlog_config, "SPILL_DIR", str(spill_dir))
-    monkeypatch.setenv("CHATLOG_MODE", "separate")
+    # CHATLOG_MODE is deprecated / ignored. Scope chatlog + main to tmp so a
+    # test run never touches the live store.
+    monkeypatch.delenv("CHATLOG_MODE", raising=False)
     monkeypatch.setenv("CHATLOG_DB_PATH", str(db_path))
+    monkeypatch.setenv("M3_DATABASE", str(main_db_path))
     chatlog_config.invalidate_cache()
 
     monkeypatch.setattr(chatlog_config, "_POOL", None)
