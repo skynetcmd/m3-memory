@@ -1126,7 +1126,7 @@ async def memory_write_bulk_impl(
                 "scope": scope,
                 "expires_at": expires_at,
                 "valid_from": it.get("valid_from") or now,
-                "valid_to": it.get("valid_to") or "",
+                "valid_to": it.get("valid_to") or None,
                 "conversation_id": it.get("conversation_id") or None,
                 "refresh_on": it.get("refresh_on") or None,
                 "refresh_reason": it.get("refresh_reason") or None,
@@ -1598,8 +1598,11 @@ async def memory_search_scored_impl(
             params.append(variant)
 
     if as_of:
-        where_clauses.append("(mi.valid_from = '' OR mi.valid_from <= ?)")
-        where_clauses.append("(mi.valid_to = '' OR mi.valid_to > ?)")
+        # Open-ended validity is represented as NULL by new writes; legacy
+        # rows may still carry "". Match both so a future write-path change
+        # to use NULL exclusively doesn't break historical data.
+        where_clauses.append("(mi.valid_from IS NULL OR mi.valid_from = '' OR mi.valid_from <= ?)")
+        where_clauses.append("(mi.valid_to   IS NULL OR mi.valid_to   = '' OR mi.valid_to   > ?)")
         params.extend([as_of, as_of])
 
     where_sql = " AND ".join(where_clauses)
@@ -2410,14 +2413,17 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
 
     with _db() as db:
         _vf = valid_from or now
-        _vt = valid_to or ""
+        # Canonicalize "open-ended validity" as NULL, not "". The as_of range
+        # predicate in memory_search_scored_impl historically had to allow both
+        # NULL and "" because the single-write path stored "" while the bulk
+        # path stored either; normalizing at write time lets future read paths
+        # rely on NULL alone without carrying that compat clause forever.
+        _vt = valid_to or None
         _cid = conversation_id or None
         _ron = refresh_on or None
         _rreason = refresh_reason or None
-        # Canonicalize "no variant" as NULL, not "". The MCP schema default is
-        # "" (for backward compat with callers that relied on a string arg),
-        # but the search path filters untagged rows with `variant IS NULL` —
-        # storing "" would silently hide new writes from the default search.
+        # Same story for variant — MCP schema default is "" but search filters
+        # untagged rows with `variant IS NULL`.
         _variant = variant or None
         db.execute(
             "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, variant) "
