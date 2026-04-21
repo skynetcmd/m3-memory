@@ -721,7 +721,7 @@ Search chat_log rows. FTS5 keyword when query is non-empty; filter-only when emp
 | `provider` | `string` | No | Filter by provider. | `` |
 | `model_id` | `string` | No | Filter by model id. | `` |
 | `agent_id` | `string` | No | Filter by agent id. | `` |
-| `search_mode` | `string` | No | hybrid\|fts\|vector (integrated mode only). | `hybrid` |
+| `search_mode` | `string` | No | hybrid\|fts\|vector. Only honored when the chatlog DB equals the main DB; otherwise FTS-only. | `hybrid` |
 | `since` | `string` | No | ISO-8601 lower bound on created_at. | `` |
 | `until` | `string` | No | ISO-8601 upper bound on created_at. | `` |
 
