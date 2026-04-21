@@ -19,6 +19,7 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BASE / "bin"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:1234/v1")
 
 import bench_locomo  # noqa: E402
