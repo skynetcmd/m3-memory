@@ -10,6 +10,7 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -28,8 +29,30 @@ logger = logging.getLogger("M3_SDK")
 # silently reusing the first-initialized pool. Multi-DB support requires a
 # pool per resolved DB path, so each M3Context instance owns its own pool and
 # instances are cached per absolute path in _CONTEXTS.
-_CONTEXTS: dict[str, "M3Context"] = {}
+#
+# LRU-bounded to prevent unbounded growth on long-running MCP servers that see
+# many distinct per-call `database` values. Hot paths (default DB, any DB the
+# process accesses repeatedly) get refreshed to most-recently-used on every
+# lookup, so the cap only ever evicts cold paths. Override via M3_CONTEXT_CACHE_SIZE.
+_CONTEXT_CACHE_SIZE = max(2, int(os.environ.get("M3_CONTEXT_CACHE_SIZE", "16")))
+_CONTEXTS: "OrderedDict[str, M3Context]" = OrderedDict()
 _CONTEXTS_LOCK = threading.Lock()
+
+
+def _close_context_pool(ctx: "M3Context") -> None:
+    """Close every connection in ctx's pool. Safe to call once; idempotent."""
+    pool = ctx._pool
+    if pool is None:
+        return
+    ctx._pool = None
+    while not pool.empty():
+        try:
+            conn = pool.get_nowait()
+            conn.close()
+        except queue.Empty:
+            break
+        except Exception as e:
+            logger.error(f"Error closing SQLite connection: {e}")
 
 _CIRCUITS = {}
 _CB_THRESHOLD = 3
@@ -128,13 +151,30 @@ class M3Context:
         Callers should prefer this over M3Context() so pool reuse works across
         invocations that target the same DB. Constructor remains public for
         legacy callers.
+
+        The cache is LRU-bounded. When full, the least-recently-used context's
+        pool is closed before the new one is inserted — in-flight connections
+        checked out of that pool stay usable (they were captured by the caller
+        via ``with get_sqlite_conn()``), but put-back will raise since the
+        pool is torn down. Callers that hold conns across context-cache
+        pressure should not; the whole design is request-scoped.
         """
         resolved = resolve_db_path(db_path)
         with _CONTEXTS_LOCK:
             ctx = _CONTEXTS.get(resolved)
-            if ctx is None:
-                ctx = cls(resolved)
-                _CONTEXTS[resolved] = ctx
+            if ctx is not None:
+                _CONTEXTS.move_to_end(resolved)
+                return ctx
+            # Miss — build and insert. Evict LRU if full.
+            ctx = cls(resolved)
+            _CONTEXTS[resolved] = ctx
+            while len(_CONTEXTS) > _CONTEXT_CACHE_SIZE:
+                evicted_key, evicted_ctx = _CONTEXTS.popitem(last=False)
+                logger.debug(
+                    f"M3Context cache evicting {evicted_key} "
+                    f"(cache size={len(_CONTEXTS) + 1}, cap={_CONTEXT_CACHE_SIZE})"
+                )
+                _close_context_pool(evicted_ctx)
             return ctx
 
     def get_path(self, relative_path: str) -> str:
@@ -364,16 +404,6 @@ def _cleanup():
         contexts = list(_CONTEXTS.values())
         _CONTEXTS.clear()
     for ctx in contexts:
-        pool = ctx._pool
-        if pool is None:
-            continue
-        while not pool.empty():
-            try:
-                conn = pool.get_nowait()
-                conn.close()
-            except queue.Empty:
-                break
-            except Exception as e:
-                logger.error(f"Error closing SQLite connection during cleanup: {e}")
+        _close_context_pool(ctx)
 
 atexit.register(_cleanup)
