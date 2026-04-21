@@ -46,7 +46,7 @@ DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 from m3_sdk import M3Context, StructuredLogger
 from thermal_utils import get_thermal_status
 
-ctx = M3Context()
+ctx = M3Context.for_db(None)
 sl = StructuredLogger()
 
 # ── Core tools ────────────────────────────────────────────────────────────────

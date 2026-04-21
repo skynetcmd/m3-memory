@@ -266,7 +266,7 @@ async def _flush_once() -> int:
 def _executemany_insert(batch: list[dict]) -> int:
     """Synchronous bulk INSERT into the chatlog DB. Called from executor thread."""
     from m3_sdk import M3Context
-    ctx = M3Context()
+    ctx = M3Context.for_db(None)
     rows = []
     for item in batch:
         rows.append((
@@ -544,14 +544,15 @@ async def chatlog_search_impl(
     # Ensure flushes complete before searching (best-effort)
     await _flush_once()
 
-    db_path = chatlog_config.chatlog_db_path()
-    mode = chatlog_config.chatlog_mode()
+    from m3_sdk import resolve_db_path
 
-    # memory_search_scored_impl reads the primary DB via the shared M3Context pool.
-    # In integrated mode, that's correct. In separate/hybrid, we need to point it at
-    # the chatlog DB — we do that by temporarily overriding the DB path for the search.
-    if mode == "integrated":
-        # Direct delegation
+    chatlog_path = os.path.abspath(chatlog_config.chatlog_db_path())
+    main_path = os.path.abspath(resolve_db_path(None))
+
+    # When the chatlog DB is the same file as the active main DB, delegate to
+    # memory_core's full-featured search (vector/hybrid/fts). When they
+    # differ, fall back to the FTS-only path against the chatlog DB.
+    if chatlog_path == main_path:
         results_json = await memory_core.memory_search_scored_impl(
             query=query, k=k, type_filter="chat_log",
             conversation_id=conversation_id, agent_id=agent_id,
@@ -560,17 +561,14 @@ async def chatlog_search_impl(
         return json.dumps({
             "results": json.loads(results_json).get("results", []),
             "count":   json.loads(results_json).get("count", 0),
-            "db_path": db_path,
-            "mode":    "integrated",
+            "db_path": chatlog_path,
+            "unified": True,
         })
 
-    # Separate/hybrid: run a lightweight FTS+filter query against the chat log DB directly.
-    # (Full vector/hybrid on the separate DB is out of scope for v1 — keyword-only is the
-    # dominant path for chat log lookup by role/conversation/time.)
     return await _chatlog_search_separate(
         query=query, k=k, conversation_id=conversation_id,
         host_agent=host_agent, provider=provider, model_id=model_id,
-        agent_id=agent_id, since=since, until=until, db_path=db_path,
+        agent_id=agent_id, since=since, until=until, db_path=chatlog_path,
     )
 
 
@@ -580,7 +578,7 @@ async def _chatlog_search_separate(
     db_path: str,
 ) -> str:
     from m3_sdk import M3Context
-    ctx = M3Context()
+    ctx = M3Context.for_db(None)
 
     def _run() -> dict:
         clauses = ["mi.type='chat_log'", "mi.is_deleted=0"]
@@ -651,7 +649,7 @@ async def _chatlog_search_separate(
     return json.dumps({
         **result,
         "db_path": db_path,
-        "mode": chatlog_config.chatlog_mode(),
+        "unified": False,
     })
 
 
@@ -667,18 +665,21 @@ async def chatlog_promote_impl(
     copy: bool = True,
     target_type: str = "conversation",
 ) -> str:
-    """Promote chat_log rows from chatlog DB into main DB with a new type.
+    """Promote chat_log rows from the chatlog DB into the main DB.
 
-    - In integrated mode: UPDATE type WHERE ...
-    - In separate/hybrid mode: ATTACH main DB and INSERT ... SELECT; when copy=False, also DELETE.
-    Returns JSON: {"promoted": N, "ids": [...], "mode": "..."}.
+    - Same-file case (chatlog path == main DB path): UPDATE type WHERE ...
+    - Cross-file case: ATTACH main DB onto a chatlog connection, INSERT ... SELECT;
+      when copy=False, also DELETE from the chatlog DB.
+    Returns JSON: {"promoted": N, "ids": [...], "unified": bool}.
     """
-    from m3_sdk import M3Context
+    from m3_sdk import M3Context, resolve_db_path
 
-    mode = chatlog_config.chatlog_mode()
+    chatlog_path = os.path.abspath(chatlog_config.chatlog_db_path())
+    main_path = os.path.abspath(resolve_db_path(None))
+    unified = chatlog_path == main_path
 
     def _run() -> dict:
-        ctx = M3Context()
+        ctx = M3Context.for_db(main_path)
 
         clauses = ["type='chat_log'", "is_deleted=0"]
         params: list[Any] = []
@@ -699,8 +700,7 @@ async def chatlog_promote_impl(
             raise ValueError("promote requires ids, conversation_id, since, or until")
         where = " AND ".join(clauses)
 
-        if mode == "integrated":
-            # Same DB — just flip type
+        if unified:
             with ctx.get_sqlite_conn() as conn:
                 rows = conn.execute(
                     f"SELECT id FROM memory_items WHERE {where}", params,
@@ -712,17 +712,16 @@ async def chatlog_promote_impl(
                         [target_type, _utcnow_iso()] + params,
                     )
                     conn.commit()
-                return {"promoted": len(row_ids), "ids": row_ids, "mode": "integrated"}
+                return {"promoted": len(row_ids), "ids": row_ids, "unified": True}
 
-        # Separate/hybrid: ATTACH the main DB onto a chatlog connection and copy
-        main_path = chatlog_config.MAIN_DB_PATH
+        # Cross-DB: ATTACH the main DB onto a chatlog connection and copy.
         with ctx.get_chatlog_conn() as conn:
             rows = conn.execute(
                 f"SELECT * FROM memory_items WHERE {where}", params,
             ).fetchall()
             row_ids = [r["id"] for r in rows]
             if not row_ids:
-                return {"promoted": 0, "ids": [], "mode": mode}
+                return {"promoted": 0, "ids": [], "unified": False}
 
             conn.execute("ATTACH DATABASE ? AS main_db", (main_path,))
             try:
@@ -765,7 +764,7 @@ async def chatlog_promote_impl(
             finally:
                 conn.execute("DETACH DATABASE main_db")
 
-            return {"promoted": len(row_ids), "ids": row_ids, "mode": mode}
+            return {"promoted": len(row_ids), "ids": row_ids, "unified": False}
 
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, _run)
@@ -781,7 +780,7 @@ def chatlog_list_conversations_impl(
 ) -> str:
     """List distinct conversation_ids with counts/timespans."""
     from m3_sdk import M3Context
-    ctx = M3Context()
+    ctx = M3Context.for_db(None)
 
     clauses = ["type='chat_log'", "is_deleted=0", "conversation_id IS NOT NULL"]
     params: list[Any] = []
@@ -834,7 +833,7 @@ async def chatlog_cost_report_impl(
         raise ValueError(f"group_by must be one of {sorted(_VALID_GROUPBY)}")
 
     from m3_sdk import M3Context
-    ctx = M3Context()
+    ctx = M3Context.for_db(None)
 
     if group_by == "day":
         gcol = "substr(created_at,1,10)"
@@ -927,7 +926,7 @@ async def chatlog_rescrub_impl(
     red_dict = _redaction_dict(cfg.redaction)
 
     from m3_sdk import M3Context
-    ctx = M3Context()
+    ctx = M3Context.for_db(None)
 
     clauses = ["type='chat_log'", "is_deleted=0"]
     params: list[Any] = []

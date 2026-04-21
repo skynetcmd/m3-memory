@@ -4,6 +4,7 @@ import os
 import sys
 
 from mcp.server.fastmcp import FastMCP
+from m3_sdk import active_database
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -131,25 +132,32 @@ def _build_typed_function(spec):
         src = f"def _impl({sig}):\n    return _wrapper(locals())"
 
     # The _wrapper closes over spec; locals() gives us the bound args.
+    # `database` is a universal injected parameter (see mcp_tool_catalog
+    # ._inject_database_arg); pop it before validators/impl run and activate
+    # the corresponding M3Context for the duration of the call.
     if spec.is_async:
         async def _wrapper(args):
             args.pop("__class__", None)  # locals() may include this in some Python versions
+            database = mcp_tool_catalog._pop_database(args)
             args, err = mcp_tool_catalog.validate_args(spec, args)
             if err:
                 return err
             try:
-                result = await spec.impl(**args)
+                with active_database(database):
+                    result = await spec.impl(**args)
                 return result if isinstance(result, str) else str(result)
             except Exception as e:
                 return f"Error: {type(e).__name__}: {e}"
     else:
         def _wrapper(args):
             args.pop("__class__", None)
+            database = mcp_tool_catalog._pop_database(args)
             args, err = mcp_tool_catalog.validate_args(spec, args)
             if err:
                 return err
             try:
-                result = spec.impl(**args)
+                with active_database(database):
+                    result = spec.impl(**args)
                 return result if isinstance(result, str) else str(result)
             except Exception as e:
                 return f"Error: {type(e).__name__}: {e}"

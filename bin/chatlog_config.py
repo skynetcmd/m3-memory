@@ -1,15 +1,19 @@
 """
-chatlog_config.py — canonical configuration resolver for the chat log subsystem.
+chatlog_config.py — configuration resolver for the chat log subsystem.
 
-Responsibilities:
-    - Resolve CHATLOG_MODE and CHATLOG_DB_PATH: env → config file → default.
-    - Provide a singleton `ChatlogConfig` with `invalidate_cache()` for tests.
-    - Offer a context-managed SQLite connection pool targeting the chat log DB.
+The three-mode (integrated/separate/hybrid) system has been collapsed: there
+is now only a single chatlog DB path. If it happens to equal the main memory
+DB path, chat log rows live in the main store (equivalent to the old
+"integrated" behavior). Otherwise they live in a dedicated file (equivalent
+to "separate"), and promote operations ATTACH the main DB and copy rows
+across (what used to be called "hybrid" is just copy=True, which is the
+default).
 
-Mode resolution:
-    - "integrated" : chat logs share the main DB (DB_PATH from memory_core).
-    - "separate"   : chat logs live at CHATLOG_DB_PATH (default).
-    - "hybrid"     : chat logs land in the separate DB; promote copies/moves to main.
+Resolution order for the chatlog DB path:
+    1. CHATLOG_DB_PATH env var (explicit chatlog override, highest priority)
+    2. M3_DATABASE env var (unified main DB — chatlog shares it)
+    3. .chatlog_config.json db_path field
+    4. Default: memory/agent_chatlog.db (separate file; historical default)
 
 Consumers:
     bin/chatlog_core.py       - write queue, search, promote, cost report
@@ -21,6 +25,11 @@ Consumers:
 
 Zero dependency on memory_core, memory_bridge, or mcp_tool_catalog. Safe to import
 from any module in bin/ without creating cycles.
+
+Deprecated env var:
+    CHATLOG_MODE — ignored with a warning. The former "integrated" behavior
+    is now achieved by setting CHATLOG_DB_PATH equal to the main DB (or by
+    leaving both unset when a shared M3_DATABASE covers everything).
 """
 from __future__ import annotations
 
@@ -46,8 +55,6 @@ SPILL_DIR = os.path.join(BASE_DIR, "memory", "chatlog_spill")
 INGEST_CURSOR = os.path.join(BASE_DIR, "memory", ".chatlog_ingest_cursor.json")
 CHATLOG_MIGRATIONS_DIR = os.path.join(BASE_DIR, "memory", "chatlog_migrations")
 
-Mode = Literal["integrated", "separate", "hybrid"]
-VALID_MODES: frozenset[str] = frozenset(("integrated", "separate", "hybrid"))
 VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "opencode", "aider"))
 VALID_PROVIDERS: frozenset[str] = frozenset((
     "anthropic", "google", "openai", "local", "xai",
@@ -91,7 +98,6 @@ class CostTrackingSpec:
 
 @dataclass
 class ChatlogConfig:
-    mode: Mode = "separate"
     db_path: str = DEFAULT_DB_PATH
     host_agents: dict[str, HookSpec] = field(default_factory=lambda: {
         "claude-code": HookSpec(),
@@ -108,12 +114,6 @@ class ChatlogConfig:
     cost_tracking: CostTrackingSpec = field(default_factory=CostTrackingSpec)
     redaction: RedactionSpec = field(default_factory=RedactionSpec)
 
-    def effective_db_path(self) -> str:
-        """Return the DB path chat log writes should target, respecting mode."""
-        if self.mode == "integrated":
-            return MAIN_DB_PATH
-        return self.db_path
-
     def to_dict(self) -> dict:
         d = asdict(self)
         return d
@@ -122,6 +122,7 @@ class ChatlogConfig:
 # ── Cache ─────────────────────────────────────────────────────────────────────
 _CACHE: Optional[ChatlogConfig] = None
 _CACHE_LOCK = threading.Lock()
+_MODE_WARN_EMITTED = False
 
 
 def invalidate_cache() -> None:
@@ -158,17 +159,6 @@ def save_config(cfg: ChatlogConfig) -> None:
 
 
 # ── Resolver ──────────────────────────────────────────────────────────────────
-def _mode_from_env() -> Optional[Mode]:
-    v = os.environ.get("CHATLOG_MODE")
-    if v is None:
-        return None
-    v = v.strip().lower()
-    if v not in VALID_MODES:
-        logger.warning("CHATLOG_MODE=%r is not valid; falling back to file/default.", v)
-        return None
-    return v  # type: ignore[return-value]
-
-
 def _path_from_env() -> Optional[str]:
     v = os.environ.get("CHATLOG_DB_PATH")
     if v is None:
@@ -177,29 +167,39 @@ def _path_from_env() -> Optional[str]:
     return v or None
 
 
-def _merge_dict(defaults: dict, overrides: dict) -> dict:
-    """Shallow-then-deep merge of overrides over defaults for known keys."""
-    out = dict(defaults)
-    for k, v in overrides.items():
-        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
-            out[k] = _merge_dict(out[k], v)
-        else:
-            out[k] = v
-    return out
+def _main_path_from_env() -> Optional[str]:
+    """Respect M3_DATABASE: if the user unified on a single DB, chatlog shares it
+    unless CHATLOG_DB_PATH explicitly says otherwise."""
+    v = os.environ.get("M3_DATABASE")
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
+
+
+def _warn_if_mode_env_set() -> None:
+    """CHATLOG_MODE has been removed in the unified model. Warn once per process
+    so stale shell configs surface visibly without breaking the caller."""
+    global _MODE_WARN_EMITTED
+    if _MODE_WARN_EMITTED:
+        return
+    if "CHATLOG_MODE" in os.environ:
+        logger.warning(
+            "CHATLOG_MODE is deprecated and ignored. The chatlog DB path is now "
+            "resolved from CHATLOG_DB_PATH > M3_DATABASE > .chatlog_config.json > "
+            "default. Set CHATLOG_DB_PATH equal to your main DB to restore the old "
+            "'integrated' behavior."
+        )
+    _MODE_WARN_EMITTED = True
 
 
 def _build_from_dict(d: dict) -> ChatlogConfig:
-    """Construct a ChatlogConfig from a possibly-partial dict. Unknown keys ignored."""
+    """Construct a ChatlogConfig from a possibly-partial dict. Unknown keys
+    (including the legacy `mode` field) are ignored."""
     base = ChatlogConfig()
     if not d:
         return base
 
-    mode = d.get("mode", base.mode)
-    if mode not in VALID_MODES:
-        logger.warning("Config mode=%r invalid; falling back to %r.", mode, base.mode)
-        mode = base.mode
-
-    base.mode = mode  # type: ignore[assignment]
     base.db_path = d.get("db_path", base.db_path) or base.db_path
 
     hooks_in = d.get("host_agents") or {}
@@ -254,36 +254,29 @@ def resolve_config() -> ChatlogConfig:
         if _CACHE is not None:
             return _CACHE
 
+        _warn_if_mode_env_set()
+
         file_data = _load_file()
         cfg = _build_from_dict(file_data)
 
-        env_mode = _mode_from_env()
-        if env_mode is not None:
-            cfg.mode = env_mode  # type: ignore[assignment]
         env_path = _path_from_env()
         if env_path is not None:
             cfg.db_path = env_path
+        else:
+            # No explicit chatlog override — honor the unified M3_DATABASE so
+            # a caller that set one env var gets a single-DB experience.
+            main_env = _main_path_from_env()
+            if main_env is not None:
+                cfg.db_path = main_env
 
         _CACHE = cfg
         return cfg
 
 
 # ── Convenience accessors ─────────────────────────────────────────────────────
-def chatlog_mode() -> Mode:
-    return resolve_config().mode
-
-
 def chatlog_db_path() -> str:
-    """Effective DB path for chat log writes — collapses to main DB in integrated mode."""
-    return resolve_config().effective_db_path()
-
-
-def is_integrated() -> bool:
-    return resolve_config().mode == "integrated"
-
-
-def is_separate_or_hybrid() -> bool:
-    return resolve_config().mode in ("separate", "hybrid")
+    """Effective DB path for chat log writes."""
+    return resolve_config().db_path
 
 
 # ── Connection pool ───────────────────────────────────────────────────────────
@@ -335,8 +328,13 @@ def _ensure_pool() -> "queue.Queue[sqlite3.Connection]":
 
 @contextmanager
 def chatlog_sqlite_conn():
-    """Context-managed connection from the chatlog pool (may be the main pool
-    in integrated mode if the caller routes through m3_sdk.get_chatlog_conn)."""
+    """Context-managed connection from the chatlog pool.
+
+    When chatlog_db_path() happens to equal the main DB, the pool here is
+    still chatlog-tuned (larger mmap/cache, 30s busy_timeout). Callers that
+    want the main-DB pool should route through ``M3Context.get_chatlog_conn``
+    which detects the path-equality case and reuses the main pool instead.
+    """
     pool = _ensure_pool()
     timeout = int(os.environ.get("CHATLOG_DB_POOL_TIMEOUT", "10"))
     conn = pool.get(timeout=timeout)
@@ -349,18 +347,16 @@ def chatlog_sqlite_conn():
 # ── CLI self-test ─────────────────────────────────────────────────────────────
 def _selftest() -> None:
     # Env > file > default
-    os.environ.pop("CHATLOG_MODE", None)
     os.environ.pop("CHATLOG_DB_PATH", None)
+    os.environ.pop("M3_DATABASE", None)
     invalidate_cache()
     c = resolve_config()
-    assert c.mode == "separate", f"default mode should be separate, got {c.mode}"
     assert c.db_path == DEFAULT_DB_PATH
 
-    os.environ["CHATLOG_MODE"] = "integrated"
+    os.environ["M3_DATABASE"] = MAIN_DB_PATH
     invalidate_cache()
-    assert resolve_config().mode == "integrated"
     assert chatlog_db_path() == MAIN_DB_PATH
-    os.environ.pop("CHATLOG_MODE")
+    os.environ.pop("M3_DATABASE")
 
     import tempfile
     tmp_db = os.path.join(tempfile.gettempdir(), "alt_chatlog.db")

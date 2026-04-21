@@ -12,9 +12,26 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Dynamically resolve DB path relative to project root
+# Dynamically resolve DB path relative to project root.
+# DB_PATH is the *default* location kept for legacy callers; vault reads and
+# writes below go through _vault_db_path() so that M3_DATABASE / --database
+# overrides on the surrounding CLI or MCP tool flow through here too.
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
+
+
+def _vault_db_path() -> str:
+    """Resolve the active DB path for vault reads/writes.
+
+    Lazy import to avoid the auth_utils ↔ m3_sdk circular dependency at
+    module-load time. If m3_sdk isn't on sys.path yet (rare — mostly during
+    installer bootstraps), fall back to DB_PATH.
+    """
+    try:
+        from m3_sdk import resolve_db_path
+        return resolve_db_path(None)
+    except ImportError:
+        return DB_PATH
 
 
 def get_master_key() -> str | None:
@@ -175,10 +192,11 @@ def get_api_key(service: str) -> str | None:
             logger.debug("D-Bus not available on this Linux system")
 
     # Fallback to the synchronized encrypted vault
-    if os.path.exists(DB_PATH):
+    vault_path = _vault_db_path()
+    if os.path.exists(vault_path):
         conn = None
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(vault_path)
             cur = conn.cursor()
             cur.execute("SELECT encrypted_value FROM synchronized_secrets WHERE service_name = ?", (service,))
             row = cur.fetchone()
@@ -235,7 +253,7 @@ def set_api_key(service: str, value: str):
 
     conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(_vault_db_path())
         cur = conn.cursor()
 
         # Get current version, increment by 1

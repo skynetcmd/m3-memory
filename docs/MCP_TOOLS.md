@@ -2,6 +2,24 @@
 
 This document provides a comprehensive inventory of all 66 MCP tools available in the M3 Memory system.
 
+## Universal `database` parameter
+
+Every tool below accepts an optional `database` argument. It does not appear in the per-tool parameter tables because it is injected by the dispatcher (`bin/mcp_tool_catalog.py`) onto every tool schema at module load.
+
+| Precedence | Source | Notes |
+| --- | --- | --- |
+| 1 | `database` tool argument | Overrides the surrounding call for this tool invocation only |
+| 2 | `M3_DATABASE` env var | Set by the MCP server's launch environment or a CLI that set it |
+| 3 | `memory/agent_memory.db` | Default, unchanged from prior releases |
+
+The dispatcher pops `database` out of the args, resolves it via `m3_sdk.resolve_db_path`, and wraps the impl call in `active_database(path)` — a `ContextVar` that `memory_core._db()` consults. The impl function signatures are unchanged; no existing caller breaks. Separate databases for chatlog, memories, testing, and benchmarking are just different paths fed into the same parameter.
+
+Example — point a single `memory_search` call at a benchmark DB:
+
+```json
+{ "name": "memory_search", "arguments": { "query": "foo", "database": "memory/bench_longmemeval.db" } }
+```
+
 ## Summary Table
 
 | Name | Category | Description |

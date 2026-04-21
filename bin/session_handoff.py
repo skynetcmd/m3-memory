@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
 from m3_sdk import M3Context
 
-ctx = M3Context()
+ctx = M3Context.for_db(None)
 DB_PATH = ctx.db_path
 
 logger = logging.getLogger("session_handoff")

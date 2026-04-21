@@ -21,7 +21,18 @@ BIN_DIR = os.path.dirname(os.path.abspath(__file__))
 if BIN_DIR not in sys.path:
     sys.path.insert(0, BIN_DIR)
 
-from auth_utils import DB_PATH, _get_fernet, get_api_key, get_master_key, set_api_key
+from auth_utils import _get_fernet, _vault_db_path, get_api_key, get_master_key, set_api_key
+
+
+def _db_path() -> str:
+    """Resolve the vault DB path at call time so --database / M3_DATABASE win."""
+    return _vault_db_path()
+
+
+# Expose DB_PATH for backward compat with any helper scripts that imported it
+# from here; it reflects the *default* location, not the active resolved path.
+import auth_utils as _auth_utils
+DB_PATH = _auth_utils.DB_PATH
 
 # Known external services. Format validators return (ok, message).
 KNOWN_SERVICES: list[dict] = [
@@ -88,10 +99,10 @@ def _check_master_key() -> None:
 
 
 def _list_vault() -> None:
-    if not os.path.exists(DB_PATH):
-        print("vault empty (no database at {DB_PATH})")
+    if not os.path.exists(_db_path()):
+        print(f"vault empty (no database at {_db_path()})")
         return
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_db_path())
     try:
         cur = conn.execute(
             "SELECT service_name, version, origin_device, updated_at "
@@ -111,9 +122,9 @@ def _list_vault() -> None:
 
 
 def _delete_service(service: str) -> None:
-    if not os.path.exists(DB_PATH):
-        _fail(f"vault database not found at {DB_PATH}")
-    conn = sqlite3.connect(DB_PATH)
+    if not os.path.exists(_db_path()):
+        _fail(f"vault database not found at {_db_path()}")
+    conn = sqlite3.connect(_db_path())
     try:
         cur = conn.execute(
             "SELECT version, updated_at FROM synchronized_secrets WHERE service_name = ?",
@@ -135,9 +146,9 @@ def _delete_service(service: str) -> None:
 
 
 def _existing_info(service: str) -> tuple[int, str] | None:
-    if not os.path.exists(DB_PATH):
+    if not os.path.exists(_db_path()):
         return None
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_db_path())
     try:
         row = conn.execute(
             "SELECT version, updated_at FROM synchronized_secrets WHERE service_name = ?",
@@ -226,7 +237,7 @@ def _interactive_add() -> None:
     # Verify the vault round-trip directly — bypass get_api_key's 3-tier lookup,
     # which would return an env var or OS keyring value from an earlier tier.
     master_key = get_master_key()
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_db_path())
     try:
         row = conn.execute(
             "SELECT encrypted_value FROM synchronized_secrets WHERE service_name = ?",
@@ -278,7 +289,12 @@ def main() -> None:
     )
     parser.add_argument("--list", action="store_true", help="list stored services (no values)")
     parser.add_argument("--delete", metavar="SERVICE", help="remove a service from the vault")
+    from m3_sdk import add_database_arg
+    add_database_arg(parser)
     args = parser.parse_args()
+
+    if args.database:
+        os.environ["M3_DATABASE"] = args.database
 
     if args.list:
         _list_vault()

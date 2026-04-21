@@ -8,7 +8,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
-from m3_sdk import resolve_venv_python
+from m3_sdk import add_database_arg, resolve_venv_python
 
 
 def ensure_venv():
@@ -58,8 +58,13 @@ def main():
     parser.add_argument("--importance", type=float, default=-1.0, help="Importance score for update (0.0 to 1.0)")
     parser.add_argument("--reembed", action="store_true", help="Force vector re-embedding during update")
     parser.add_argument("--hard", type=str, metavar="WIPE", default=None, help="Permanently delete from database (requires exact string 'WIPE')")
+    add_database_arg(parser)
 
     args = parser.parse_args()
+
+    if args.database:
+        # Set before knowledge_helpers touches the DB so memory_core picks it up.
+        os.environ["M3_DATABASE"] = args.database
 
     if args.type in ("?", "all"):
         types = get_all_types()

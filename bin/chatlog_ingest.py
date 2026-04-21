@@ -362,19 +362,28 @@ async def main() -> int:
     parser.add_argument("--variant", default=None,
                         help="Provenance tag (e.g. pre_compact, stop, session_end, test)")
     parser.add_argument("--db", default=None,
-                        help="Override chatlog DB path for this run (dev smoke tests). "
+                        help="Deprecated: chatlog-only override. Prefer --database. "
                              "Sets CHATLOG_DB_PATH for the duration of the process.")
     parser.add_argument("--spill-dir", default=None,
                         help="Override spill directory for this run (dev smoke tests). "
                              "Prevents stale spill files from polluting production.")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from m3_sdk import add_database_arg
+    add_database_arg(parser)
     args = parser.parse_args()
 
-    if args.db or args.spill_dir:
+    if args.database or args.db or args.spill_dir:
         sys.path.insert(0, os.path.dirname(__file__))
         import chatlog_config
+        if args.database:
+            # Unified model: --database sets M3_DATABASE so main + chatlog
+            # resolution both see it. CHATLOG_DB_PATH overrides that for the
+            # chatlog-only case (kept for the legacy --db flag).
+            os.environ["M3_DATABASE"] = args.database
+            logger.info("Overriding DB path via M3_DATABASE: %s", args.database)
         if args.db:
             os.environ["CHATLOG_DB_PATH"] = args.db
-            logger.info("Overriding DB path: %s", args.db)
+            logger.info("Overriding chatlog DB path via CHATLOG_DB_PATH: %s", args.db)
         if args.spill_dir:
             chatlog_config.SPILL_DIR = args.spill_dir
             logger.info("Overriding spill dir: %s", args.spill_dir)
