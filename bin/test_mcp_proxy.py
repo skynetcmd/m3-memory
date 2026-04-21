@@ -25,7 +25,13 @@ import httpx
 
 PROXY = "http://localhost:9000"
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
+
+# Honors M3_DATABASE — run the suite against a scratch DB with:
+#   M3_DATABASE=memory/_test.db python bin/test_mcp_proxy.py
+sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
+from m3_sdk import resolve_db_path  # noqa: E402
+
+DB_PATH = resolve_db_path(None)
 WORKSPACE = BASE_DIR
 
 PASS = "\033[32mPASS\033[0m"  # nosec B105

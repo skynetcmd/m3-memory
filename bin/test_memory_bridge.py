@@ -41,7 +41,15 @@ def skip(name: str, reason: str = "") -> None:
     print(f"  {SKIP}  {name}  (skipped: {reason})")
 
 
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
+# DB path is resolved via m3_sdk, so tests honor M3_DATABASE. Run the suite
+# against a scratch DB with:
+#   M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
+# Direct sqlite3.connect(DB_PATH) calls in this file verify rows the bridge
+# just wrote, so they must target the same DB the bridge routes to — using a
+# live resolver lookup keeps them in sync.
+from m3_sdk import resolve_db_path  # noqa: E402
+
+DB_PATH = resolve_db_path(None)
 AGENT   = "test_e2e_agent"
 
 
