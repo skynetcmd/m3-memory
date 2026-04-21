@@ -29,8 +29,15 @@ logger = logging.getLogger("chatlog_embed_sweeper")
 
 async def drain_spill(conn: sqlite3.Connection) -> int:
     """
-    Drain spill JSONL files back into the chat log DB.
-    Returns count of rows inserted.
+    Drain spill JSONL files back into the chat log DB(s).
+
+    Spilled items written after the DB-parameter refactor carry the target
+    path they were enqueued against (``_db_path``). We honor that per-item
+    so rows from a session that pointed at a dedicated test/benchmark DB
+    don't silently land in the live store. Legacy spill items without
+    ``_db_path`` fall back to ``conn`` (the sweeper's connection).
+
+    Returns count of rows inserted across all target DBs.
     """
     spill_dir = chatlog_config.SPILL_DIR
     if not os.path.exists(spill_dir):
@@ -40,10 +47,18 @@ async def drain_spill(conn: sqlite3.Connection) -> int:
     if not spill_files:
         return 0
 
+    insert_sql = (
+        "INSERT OR IGNORE INTO memory_items "
+        "(id, content, title, metadata_json, type, agent_id, conversation_id, is_deleted, created_at, variant) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
     total_drained = 0
     for spill_path in spill_files:
         try:
-            rows_to_insert = []
+            # Group rows by their captured target DB. Legacy spills (no
+            # _db_path) land on the sweeper's connection under the None key.
+            per_db: dict = {}
             with open(spill_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -55,10 +70,6 @@ async def drain_spill(conn: sqlite3.Connection) -> int:
                         logger.warning("Skipping malformed JSON in %s: %s", spill_path, e)
                         continue
 
-                    # Spill files are written by chatlog_core._spill_batch with the
-                    # full post-normalize item dict, so the _id / _content / _title /
-                    # _metadata_json / _created_at / variant fields are already there.
-                    # Fall back to synthesis only for the legacy spill format.
                     memory_id = doc.get("_id") or str(uuid.uuid4())
                     content = doc.get("_content", doc.get("content", ""))
                     title = doc.get("_title", "")
@@ -85,42 +96,52 @@ async def drain_spill(conn: sqlite3.Connection) -> int:
 
                     agent_id = doc.get("agent_id") or f"{host_agent}:spill"
 
-                    rows_to_insert.append((
-                        memory_id,
-                        content,
-                        title,
-                        metadata_json,
-                        "chat_log",  # type
-                        agent_id,
-                        conversation_id,
-                        0,  # is_deleted
-                        timestamp,
-                        variant,
-                    ))
-
-            if rows_to_insert:
-                try:
-                    conn.executemany(
-                        """
-                        INSERT OR IGNORE INTO memory_items
-                        (id, content, title, metadata_json, type, agent_id, conversation_id, is_deleted, created_at, variant)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        rows_to_insert,
+                    row = (
+                        memory_id, content, title, metadata_json,
+                        "chat_log", agent_id, conversation_id, 0,
+                        timestamp, variant,
                     )
-                    conn.commit()
-                    total_drained += len(rows_to_insert)
-                    logger.info("Drained %d rows from %s", len(rows_to_insert), spill_path)
-                except sqlite3.Error as e:
-                    logger.error("Failed to insert drained rows from %s: %s", spill_path, e)
-                    continue
+                    per_db.setdefault(doc.get("_db_path"), []).append(row)
 
-            # Delete the spill file on success
-            try:
-                os.remove(spill_path)
-                logger.info("Deleted spill file: %s", spill_path)
-            except OSError as e:
-                logger.warning("Failed to delete spill file %s: %s", spill_path, e)
+            file_drained = 0
+            had_error = False
+            for db_path, rows in per_db.items():
+                if not rows:
+                    continue
+                # Open a fresh short-lived connection for any path that
+                # differs from the sweeper's conn. This is the drain path —
+                # not hot — so the overhead is acceptable.
+                target_conn = conn
+                own_conn = False
+                if db_path and os.path.abspath(db_path) != os.path.abspath(getattr(conn, "_m3_db_path", "")):
+                    try:
+                        target_conn = sqlite3.connect(db_path, timeout=10)
+                        own_conn = True
+                    except sqlite3.Error as e:
+                        logger.error("Cannot open spill target DB %s: %s", db_path, e)
+                        had_error = True
+                        continue
+                try:
+                    target_conn.executemany(insert_sql, rows)
+                    target_conn.commit()
+                    file_drained += len(rows)
+                    logger.info("Drained %d rows from %s -> %s", len(rows), spill_path, db_path or "<sweeper-conn>")
+                except sqlite3.Error as e:
+                    logger.error("Failed to insert drained rows from %s into %s: %s", spill_path, db_path, e)
+                    had_error = True
+                finally:
+                    if own_conn:
+                        target_conn.close()
+
+            total_drained += file_drained
+
+            # Delete the spill file only if every group landed successfully.
+            if not had_error:
+                try:
+                    os.remove(spill_path)
+                    logger.info("Deleted spill file: %s", spill_path)
+                except OSError as e:
+                    logger.warning("Failed to delete spill file %s: %s", spill_path, e)
 
         except Exception as e:
             logger.error("Error processing spill file %s: %s", spill_path, e)
