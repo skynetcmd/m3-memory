@@ -1,8 +1,8 @@
 ---
 tool: bin/test_debug_agent.py
-sha1: 2a724c1744d9
-mtime_utc: 2026-04-18T23:28:41.425525+00:00
-generated_utc: 2026-04-19T00:39:16.124266+00:00
+sha1: d698fd7e3504
+mtime_utc: 2026-04-21T20:59:41.985179+00:00
+generated_utc: 2026-04-21T21:22:27.218306+00:00
 private: false
 ---
 
@@ -17,8 +17,8 @@ gracefully skipped when LM Studio is offline.
 
 ## Entry points
 
-- `async def run()` (line 109)
-- `async def main()` (line 286)
+- `async def run()` (line 114)
+- `async def main()` (line 291)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -33,19 +33,20 @@ _(none detected)_
 
 - `auth_utils (get_api_key)`
 - `debug_agent_bridge (_check_thermal, _get_largest_llm_model, _log_to_db, _safe_read_file, debug_analyze, debug_bisect, debug_correlate, debug_history, debug_report, debug_trace)`
+- `m3_sdk (resolve_db_path)`
 
 ## Calls OUT (external side-channels)
 
 **http**
 
-- `httpx.AsyncClient()` (line 55)
+- `httpx.AsyncClient()` (line 60)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 172)
-- `sqlite3.connect()  → `DB_PATH`` (line 180)
-- `sqlite3.connect()  → `DB_PATH`` (line 80)
-- `sqlite3.connect()  → `DB_PATH`` (line 91)
+- `sqlite3.connect()  → `DB_PATH`` (line 177)
+- `sqlite3.connect()  → `DB_PATH`` (line 185)
+- `sqlite3.connect()  → `DB_PATH`` (line 85)
+- `sqlite3.connect()  → `DB_PATH`` (line 96)
 
 
 ## Notable external imports
@@ -54,7 +55,7 @@ _(none detected)_
 
 ## File dependencies (repo paths referenced)
 
-- `agent_memory.db`
+_(none detected)_
 
 ## Re-validation
 

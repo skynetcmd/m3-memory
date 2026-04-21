@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_knowledge.py
-sha1: 5c2f8c197892
-mtime_utc: 2026-04-19T19:34:36.499306+00:00
-generated_utc: 2026-04-19T21:10:11.583474+00:00
+sha1: a90253ea9ab4
+mtime_utc: 2026-04-21T20:44:20.430808+00:00
+generated_utc: 2026-04-21T21:26:01.802917+00:00
 private: false
 ---
 
@@ -36,6 +36,7 @@ _(no module docstring — update the source file.)_
 | `--importance` | Importance score for update (0.0 to 1.0) | `-1.0` | No importance change on update; -1.0 signals no-op to update_knowledge() | float | Sets item importance to specified value (0.0–1.0 range) |
 | `--reembed` | Force vector re-embedding during update | `False` | Update does not re-embed vectors | store_true | Forces vector re-embedding during update via update_knowledge() |
 | `--hard` | Permanently delete from database (requires exact string 'WIPE') | None | Soft-delete only (tombstone); data recoverable | str | Hard-delete (permanent) only if value is exactly "WIPE"; any other value errors |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -43,7 +44,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (resolve_venv_python)`
+- `m3_sdk (add_database_arg, resolve_venv_python)`
 
 ## Calls OUT (external side-channels)
 

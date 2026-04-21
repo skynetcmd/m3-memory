@@ -1,12 +1,12 @@
 ---
-tool: bin/bench_longmemeval.py
-sha1: 5c138b7c7163
-mtime_utc: 2026-04-19T16:35:24.074742+00:00
-generated_utc: 2026-04-19T21:10:11.544787+00:00
+tool: benchmarks/longmemeval/bench_longmemeval.py
+sha1: 838b08a01527
+mtime_utc: 2026-04-21T20:43:37.932243+00:00
+generated_utc: 2026-04-21T21:26:02.062719+00:00
 private: false
 ---
 
-# bin/bench_longmemeval.py
+# benchmarks/longmemeval/bench_longmemeval.py
 
 ## Purpose
 
@@ -29,11 +29,11 @@ Routes embeddings through `memory_write_bulk_impl` / `_embed_many` and expects
 llama-server on http://localhost:8081/v1 (override with LLM_ENDPOINTS_CSV).
 
 Usage:
-    python bin/bench_longmemeval.py                         # full dataset
-    python bin/bench_longmemeval.py --limit 20              # subsample
-    python bin/bench_longmemeval.py --skip-ingest           # reuse already-loaded DB
-    python bin/bench_longmemeval.py --no-judge              # write hypotheses only
-    python bin/bench_longmemeval.py --cluster-size 0 --graph-depth 0  # ablation: hybrid only
+    python benchmarks/longmemeval/bench_longmemeval.py                         # full dataset
+    python benchmarks/longmemeval/bench_longmemeval.py --limit 20              # subsample
+    python benchmarks/longmemeval/bench_longmemeval.py --skip-ingest           # reuse already-loaded DB
+    python benchmarks/longmemeval/bench_longmemeval.py --no-judge              # write hypotheses only
+    python benchmarks/longmemeval/bench_longmemeval.py --cluster-size 0 --graph-depth 0  # ablation: hybrid only
 
 Artifacts go to .scratch/longmemeval_run_<timestamp>/:
     hypotheses.jsonl   one line per question
@@ -43,7 +43,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 ## Entry points
 
 - `async def run()` (line 629)
-- `def main()` (line 876)
+- `def main()` (line 878)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -64,6 +64,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 | `--ingest-concurrency` | number of instances to ingest in parallel | `4` | Ingests 4 instances in parallel | int | Ingests N instances in parallel with asyncio.Semaphore |
 | `--per-item` | use memory_write_impl per-turn (enables Phase 1 enrichers). Much slower than bulk path; default off. | `False` | Uses memory_write_bulk_impl (fast) | store_true | Uses memory_write_impl per-turn (enables enrichers, slower) |
 | `--variant` | tag every ingested row with this variant label | `` | No variant label | str | Tags all ingested items with variant ID |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -73,6 +74,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
+- `m3_sdk (add_database_arg)`
 - `memory_core (_db, memory_search_scored_impl, memory_write_bulk_impl, memory_write_impl)`
 - `temporal_utils`
 
