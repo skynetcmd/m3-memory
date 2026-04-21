@@ -58,7 +58,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
-from m3_sdk import M3Context
+from m3_sdk import M3Context, resolve_db_path
 
 
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
@@ -135,7 +135,20 @@ from embedding_utils import (
 )
 
 logger = logging.getLogger("memory_core")
-ctx = M3Context()
+# Default context (memory/agent_memory.db unless M3_DATABASE overrides at
+# import time). Per-call DB overrides flow through the active_database
+# ContextVar and _current_ctx() below — this attribute is kept for legacy
+# callers that reference ctx.get_secret(), ctx.get_async_client(), etc.
+ctx = M3Context.for_db(None)
+
+
+def _current_ctx() -> M3Context:
+    """Return the M3Context for the currently active DB path.
+
+    Honors (in order): active_database() ContextVar > M3_DATABASE env > default.
+    Cached per path so the hot path avoids repeat pool construction.
+    """
+    return M3Context.for_db(resolve_db_path(None))
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 BASE_DIR            = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -744,18 +757,36 @@ def _backfill_change_agent() -> None:
     except Exception as e:
         logger.warning(f"Backfill failed: {e}")
 
-def _lazy_init() -> None:
-    global _initialized
+_initialized_dbs: set[str] = set()
+
+def _lazy_init(db_path: str | None = None) -> None:
+    """Run one-time schema + backfill per DB path.
+
+    Previously a single module flag guarded init; multi-DB requires per-path
+    tracking so a fresh test/benchmark DB gets its sync tables created on
+    first touch. Uses _init_lock for cross-thread safety.
+    """
+    global _initialized  # kept for backward compat with any external probes
+    key = db_path or resolve_db_path(None)
     with _init_lock:
-        if not _initialized:
-            _initialized = True  # Set before init so re-entrant calls from _backfill_change_agent are no-ops
+        if key in _initialized_dbs:
+            return
+        _initialized_dbs.add(key)
+        _initialized = True  # legacy flag — once true, stays true
+        try:
             _ensure_sync_tables()
             _backfill_change_agent()
+        except Exception:
+            # Do not trap init in a permanently-failed state — let the next
+            # caller retry (removes the key so it's reattempted).
+            _initialized_dbs.discard(key)
+            raise
 
 @contextmanager
 def _db():
-    _lazy_init()
-    with ctx.get_sqlite_conn() as conn:
+    active_ctx = _current_ctx()
+    _lazy_init(active_ctx.db_path)
+    with active_ctx.get_sqlite_conn() as conn:
         try:
             yield conn
             conn.commit()

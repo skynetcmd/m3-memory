@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import logging
 import os
@@ -10,7 +11,8 @@ logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(mess
 logger = logging.getLogger("memory_doctor")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
+sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
+from m3_sdk import add_database_arg, resolve_db_path
 
 def fix_missing_timestamps(conn):
     """Ensures all items have at least a created_at timestamp."""
@@ -54,11 +56,16 @@ def fix_metadata_json(conn):
         logger.info(f"Repaired {fixed} items with invalid metadata JSON.")
 
 def main():
-    if not os.path.exists(DB_PATH):
-        logger.error(f"Database not found at {DB_PATH}")
+    parser = argparse.ArgumentParser(description="Memory health check and repair.")
+    add_database_arg(parser)
+    args = parser.parse_args()
+
+    db_path = resolve_db_path(args.database)
+    if not os.path.exists(db_path):
+        logger.error(f"Database not found at {db_path}")
         sys.exit(1)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path)
     try:
         fix_missing_timestamps(conn)
         validate_relationships(conn)

@@ -870,11 +870,21 @@ def parse_args() -> argparse.Namespace:
                         "Much slower than bulk path; default off.")
     p.add_argument("--variant", type=str, default="",
                    help="tag every ingested row with this variant label")
+    from m3_sdk import add_database_arg
+    add_database_arg(p)
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    # Set M3_DATABASE as early as possible so memory_core's default M3Context
+    # (created at import time) and all per-call _db() lookups hit the benchmark
+    # DB, not the production store. Safe to set after import: memory_core
+    # resolves the DB via _current_ctx() on every _db() call, which re-reads
+    # env via resolve_db_path().
+    if args.database:
+        os.environ["M3_DATABASE"] = args.database
+        print(f"[bench] M3_DATABASE = {args.database}", flush=True)
     try:
         asyncio.run(run(args))
     except KeyboardInterrupt:
