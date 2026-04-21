@@ -1,12 +1,12 @@
 ---
-tool: bin/memory_bridge.py
-sha1: 268bb7ea82d8
-mtime_utc: 2026-04-21T20:54:48.405420+00:00
-generated_utc: 2026-04-21T21:22:27.111638+00:00
+tool: bin/memory_sync.py
+sha1: 0c5e147c130f
+mtime_utc: 2026-04-21T20:02:02.936766+00:00
+generated_utc: 2026-04-21T21:26:01.920096+00:00
 private: false
 ---
 
-# bin/memory_bridge.py
+# bin/memory_sync.py
 
 ## Purpose
 
@@ -14,7 +14,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `if __name__ == "__main__"` guard
+_(no conventional entry point detected)_
 
 ## CLI flags / arguments
 
@@ -26,17 +26,19 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (active_database)`
-- `mcp_tool_catalog`
-- `memory_core`
+- `memory_core (ctx, _pack, _unpack, CHROMA_BASE_URL, CHROMA_COLLECTION, CHROMA_V2_PREFIX, CHROMA_CONTENT_MAX, EMBED_DIM)`
+- `migrate_memory`
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**sqlite**
+
+- `sqlite3.connect()  → `db_path`` (line 17)
+
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
+_(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: 59dfeb6e1e2c
-mtime_utc: 2026-04-19T02:44:47.979819+00:00
-generated_utc: 2026-04-19T02:53:55.428062+00:00
+sha1: 95cc7953a4d9
+mtime_utc: 2026-04-21T20:54:48.404416+00:00
+generated_utc: 2026-04-21T21:22:27.108867+00:00
 private: false
 ---
 
@@ -35,6 +35,7 @@ _(none detected)_
 
 - `chatlog_core`
 - `chatlog_status`
+- `m3_sdk (active_database)`
 - `memory_core`
 - `memory_maintenance`
 - `memory_sync`

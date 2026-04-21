@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: 93843e7fd0b7
-mtime_utc: 2026-04-19T16:35:24.077742+00:00
-generated_utc: 2026-04-19T21:10:11.564115+00:00
+sha1: a0019998654d
+mtime_utc: 2026-04-21T20:42:01.968806+00:00
+generated_utc: 2026-04-21T21:26:01.781527+00:00
 private: false
 ---
 
@@ -40,8 +40,9 @@ message ids / indices have been ingested so re-invoking on the same transcript
 | `--transcript-path` | Path to the transcript file on disk | — |  | str |  |
 | `--session-id` | Override conversation_id (defaults to parsed sessionId) | `` |  | str |  |
 | `--variant` | Provenance tag (e.g. pre_compact, stop, session_end, test) | None |  | str |  |
-| `--db` | Override chatlog DB path for this run (dev smoke tests). Sets CHATLOG_DB_PATH for the duration of the process. | None |  | str |  |
+| `--db` | Deprecated: chatlog-only override. Prefer --database. Sets CHATLOG_DB_PATH for the duration of the process. | None |  | str |  |
 | `--spill-dir` | Override spill directory for this run (dev smoke tests). Prevents stale spill files from polluting production. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -52,6 +53,7 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 - `chatlog_config`
 - `chatlog_core`
+- `m3_sdk (add_database_arg)`
 
 ## Calls OUT (external side-channels)
 

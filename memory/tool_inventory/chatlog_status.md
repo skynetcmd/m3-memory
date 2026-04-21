@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_status.py
-sha1: 90720e796394
-mtime_utc: 2026-04-18T22:28:14.289182+00:00
-generated_utc: 2026-04-19T00:39:15.965734+00:00
+sha1: 72a39ce9f7ff
+mtime_utc: 2026-04-21T20:38:49.512039+00:00
+generated_utc: 2026-04-21T21:22:27.043715+00:00
 private: false
 ---
 
@@ -21,7 +21,7 @@ Cold call <50ms (no full table scans).
 
 ## Entry points
 
-- `def main()` (line 194)
+- `def main()` (line 212)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -35,13 +35,14 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
+- `m3_sdk (resolve_db_path)`
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `chatlog_db`` (line 69)
-- `sqlite3.connect()  → `main_db`` (line 53)
+- `sqlite3.connect()  → `chatlog_db`` (line 78)
+- `sqlite3.connect()  → `main_db`` (line 64)
 
 
 ## Notable external imports
