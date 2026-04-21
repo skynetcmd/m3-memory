@@ -1,0 +1,88 @@
+{
+  "run_ts": "20260417_163654",
+  "dataset": "C:\\Users\\bhaba\\m3-memory\\data\\locomo\\locomo10.json",
+  "n_questions": 199,
+  "params": {
+    "k": 40,
+    "cluster_size": 5,
+    "graph_depth": 1,
+    "enable_smart_retrieval": false
+  },
+  "samples_touched": [
+    "conv-26"
+  ],
+  "q_signal_distribution": {
+    "temporal": 44,
+    "open-domain": 14,
+    "default": 109,
+    "multi-hop": 32
+  },
+  "overall": {
+    "any_gold_hit_rate": 0.9597989949748744,
+    "mean_first_gold_rank": 134.9895287958115,
+    "mean_r@1": 0.05527638190954774,
+    "mean_r@3": 0.11809045226130653,
+    "mean_r@5": 0.15829145728643215,
+    "mean_r@10": 0.34087102177554435,
+    "mean_r@20": 0.36599664991624786,
+    "mean_r@40": 0.42881072026800665
+  },
+  "per_category": {
+    "temporal": {
+      "n": 37,
+      "any_gold_hit_rate": 0.972972972972973,
+      "mean_first_gold_rank": 230.97222222222223,
+      "mean_r@1": 0.0,
+      "mean_r@3": 0.10810810810810811,
+      "mean_r@5": 0.1891891891891892,
+      "mean_r@10": 0.2702702702702703,
+      "mean_r@20": 0.2972972972972973,
+      "mean_r@40": 0.2972972972972973
+    },
+    "open-domain": {
+      "n": 13,
+      "any_gold_hit_rate": 0.7692307692307693,
+      "mean_first_gold_rank": 260.9,
+      "mean_r@1": 0.0,
+      "mean_r@3": 0.0,
+      "mean_r@5": 0.0,
+      "mean_r@10": 0.11538461538461539,
+      "mean_r@20": 0.19230769230769232,
+      "mean_r@40": 0.19230769230769232
+    },
+    "multi-hop": {
+      "n": 32,
+      "any_gold_hit_rate": 0.9375,
+      "mean_first_gold_rank": 213.4,
+      "mean_r@1": 0.0,
+      "mean_r@3": 0.03125,
+      "mean_r@5": 0.03125,
+      "mean_r@10": 0.08854166666666666,
+      "mean_r@20": 0.08854166666666666,
+      "mean_r@40": 0.15104166666666666
+    },
+    "single-hop": {
+      "n": 70,
+      "any_gold_hit_rate": 0.9857142857142858,
+      "mean_first_gold_rank": 64.34782608695652,
+      "mean_r@1": 0.04285714285714286,
+      "mean_r@3": 0.10714285714285714,
+      "mean_r@5": 0.16428571428571428,
+      "mean_r@10": 0.5,
+      "mean_r@20": 0.5428571428571428,
+      "mean_r@40": 0.6142857142857143
+    },
+    "adversarial": {
+      "n": 47,
+      "any_gold_hit_rate": 0.9787234042553191,
+      "mean_first_gold_rank": 87.32608695652173,
+      "mean_r@1": 0.1702127659574468,
+      "mean_r@3": 0.23404255319148937,
+      "mean_r@5": 0.2553191489361702,
+      "mean_r@10": 0.39361702127659576,
+      "mean_r@20": 0.39361702127659576,
+      "mean_r@40": 0.5106382978723404
+    }
+  },
+  "zero_hit_count": 8
+}

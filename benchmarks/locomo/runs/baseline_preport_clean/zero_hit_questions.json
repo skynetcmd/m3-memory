@@ -1,0 +1,61 @@
+[
+  {
+    "idx": 30,
+    "sample_id": "conv-26",
+    "category": "open-domain",
+    "question": "Would Melanie be considered a member of the LGBTQ community?",
+    "gold": []
+  },
+  {
+    "idx": 37,
+    "sample_id": "conv-26",
+    "category": "multi-hop",
+    "question": "What did Melanie paint recently?",
+    "gold": [
+      "D8:6; D9:17"
+    ]
+  },
+  {
+    "idx": 45,
+    "sample_id": "conv-26",
+    "category": "temporal",
+    "question": "When did Caroline attend a pride parade in August?",
+    "gold": [
+      "D11:4"
+    ]
+  },
+  {
+    "idx": 46,
+    "sample_id": "conv-26",
+    "category": "open-domain",
+    "question": "Would Melanie be considered an ally to the transgender community?",
+    "gold": []
+  },
+  {
+    "idx": 50,
+    "sample_id": "conv-26",
+    "category": "open-domain",
+    "question": "What would Caroline's political leaning likely be?",
+    "gold": [
+      "D12:1"
+    ]
+  },
+  {
+    "idx": 100,
+    "sample_id": "conv-26",
+    "category": "single-hop",
+    "question": "What kind of place does Caroline want to create for people?",
+    "gold": [
+      "D4:15"
+    ]
+  },
+  {
+    "idx": 126,
+    "sample_id": "conv-26",
+    "category": "single-hop",
+    "question": "What activity did Caroline used to do with her dad?",
+    "gold": [
+      "D13:7"
+    ]
+  }
+]
