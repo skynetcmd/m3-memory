@@ -15,7 +15,10 @@ def cost_report_db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(chatlog_config, "DEFAULT_DB_PATH", str(db_path))
     monkeypatch.setattr(chatlog_config, "MAIN_DB_PATH", str(main_db_path))
-    monkeypatch.setenv("CHATLOG_MODE", "separate")
+    # CHATLOG_MODE deprecated; pin chatlog DB via env for the resolver.
+    monkeypatch.delenv("CHATLOG_MODE", raising=False)
+    monkeypatch.setenv("CHATLOG_DB_PATH", str(db_path))
+    monkeypatch.setenv("M3_DATABASE", str(main_db_path))
     chatlog_config.invalidate_cache()
 
     # Create schema and seed data
