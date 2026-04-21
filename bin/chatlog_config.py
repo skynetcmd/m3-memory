@@ -10,10 +10,12 @@ across (what used to be called "hybrid" is just copy=True, which is the
 default).
 
 Resolution order for the chatlog DB path:
-    1. CHATLOG_DB_PATH env var (explicit chatlog override, highest priority)
-    2. M3_DATABASE env var (unified main DB — chatlog shares it)
-    3. .chatlog_config.json db_path field
-    4. Default: memory/agent_chatlog.db (separate file; historical default)
+    1. CHATLOG_DB_PATH env var (explicit chatlog-only override, highest priority)
+    2. active_database() ContextVar (per-call override set by the MCP tool
+       dispatcher when a caller passes `database` on a chatlog_* tool)
+    3. M3_DATABASE env var (unified main DB — chatlog shares it)
+    4. .chatlog_config.json db_path field
+    5. Default: memory/agent_chatlog.db (separate file; historical default)
 
 Consumers:
     bin/chatlog_core.py       - write queue, search, promote, cost report
@@ -248,7 +250,14 @@ def _build_from_dict(d: dict) -> ChatlogConfig:
 
 
 def resolve_config() -> ChatlogConfig:
-    """Return the active config. Cached; call invalidate_cache() after edits."""
+    """Return the active config (redaction, host_agents, queue settings, etc.).
+
+    Cached; call invalidate_cache() after edits. NOTE: the ``db_path`` field
+    on the returned config reflects only file + CHATLOG_DB_PATH env — it does
+    NOT honor the per-call active_database ContextVar. Callers that want the
+    *effective* path for the current call must use ``chatlog_db_path()``,
+    which re-resolves on every access.
+    """
     global _CACHE
     with _CACHE_LOCK:
         if _CACHE is not None:
@@ -275,7 +284,31 @@ def resolve_config() -> ChatlogConfig:
 
 # ── Convenience accessors ─────────────────────────────────────────────────────
 def chatlog_db_path() -> str:
-    """Effective DB path for chat log writes."""
+    """Effective chatlog DB path for the current call.
+
+    Re-resolved on every call so the ContextVar override set by the MCP tool
+    dispatcher (when a caller passes `database` on a chatlog_* tool) wins.
+    Order: CHATLOG_DB_PATH env > active_database() ContextVar > M3_DATABASE
+    env > .chatlog_config.json db_path > default. Using the cached config's
+    db_path directly would miss the ContextVar since the cache is populated
+    at first-call time.
+    """
+    env_path = _path_from_env()
+    if env_path is not None:
+        return env_path
+    # ContextVar — set by MCP dispatcher or CLI wrapper. Falls back to
+    # M3_DATABASE + default when no override is active.
+    try:
+        from m3_sdk import _active_db  # lazy: avoid import cycle at module load
+        ctx_val = _active_db.get()
+        if ctx_val:
+            return ctx_val
+    except ImportError:
+        pass
+    main_env = _main_path_from_env()
+    if main_env is not None:
+        return main_env
+    # Fall back to the cached config's stored db_path (file or default).
     return resolve_config().db_path
 
 
