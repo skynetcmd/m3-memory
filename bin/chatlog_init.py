@@ -3,12 +3,17 @@
 chatlog_init.py — interactive setup CLI for the chat log subsystem.
 
 Guides the user through:
-  - Choosing a mode (separate, integrated, or hybrid)
-  - Setting DB path (if separate/hybrid)
+  - Choosing a chatlog DB path (defaults to a dedicated file; set it equal
+    to the main DB to keep everything in one place)
   - Enabling host agents and showing wiring instructions
   - Configuring cost tracking and redaction
   - Running migrations and installing schedules
   - Showing Claude Code settings snippet
+
+The prior integrated/separate/hybrid mode selection has been removed: the
+same behaviors are now selected by setting the chatlog DB path equal to (or
+different from) the main DB. Promote semantics switch automatically based on
+path equality.
 """
 from __future__ import annotations
 
@@ -26,7 +31,6 @@ from chatlog_config import (
     DEFAULT_DB_PATH,
     MAIN_DB_PATH,
     VALID_HOST_AGENTS,
-    VALID_MODES,
     ChatlogConfig,
     CostTrackingSpec,
     EmbedSweeperSpec,
@@ -116,25 +120,14 @@ def show_hook_wiring_instructions(agent: str, hook_spec: HookSpec) -> None:
         print(f"    - Windows PowerShell: . '{ps1_path}' in your profile")
 
 
-def interactive_mode() -> str:
-    """Prompt for deployment mode."""
-    print_section("Deployment Mode")
-    print("Choose how chat logs are stored:")
-    print("  separate   - Dedicated DB for chat logs (recommended)")
-    print("  integrated - Share the main agent_memory.db")
-    print("  hybrid     - Separate DB with syncing to main")
-    mode = prompt_choice("Select mode", ["separate", "integrated", "hybrid"], "separate")
-    return mode
-
-
-def interactive_db_path(mode: str) -> str:
-    """Prompt for DB path if separate or hybrid."""
-    if mode == "integrated":
-        return MAIN_DB_PATH
-
+def interactive_db_path() -> str:
+    """Prompt for chat log DB path. Unified with main DB if the user types its path."""
     print_section("Database Path")
-    print(f"Default: {DEFAULT_DB_PATH}")
-    custom = input("Custom path (leave blank for default): ").strip()
+    print("Choose where chat logs are stored:")
+    print(f"  Default (dedicated file):  {DEFAULT_DB_PATH}")
+    print(f"  Unified (main memory DB):  {MAIN_DB_PATH}")
+    print("  (Type a different absolute path to use your own.)")
+    custom = input("DB path (leave blank for dedicated default): ").strip()
 
     if not custom:
         return DEFAULT_DB_PATH
@@ -316,8 +309,8 @@ def apply_stop_hook_toggle(enable: bool) -> int:
 def print_summary(config: ChatlogConfig) -> None:
     """Print final configuration summary."""
     print_section("Configuration Summary")
-    print(f"Mode:               {config.mode}")
-    print(f"DB Path:            {config.db_path}")
+    unified = os.path.abspath(config.db_path) == os.path.abspath(MAIN_DB_PATH)
+    print(f"DB Path:            {config.db_path}" + (" (unified with main)" if unified else ""))
 
     enabled_agents = [a for a, spec in config.host_agents.items() if spec.enabled]
     if enabled_agents:
@@ -337,9 +330,9 @@ def print_summary(config: ChatlogConfig) -> None:
 def show_existing_config() -> None:
     """Show existing config and exit."""
     cfg = resolve_config()
+    unified = os.path.abspath(cfg.db_path) == os.path.abspath(MAIN_DB_PATH)
     print_section("Existing Configuration")
-    print(f"Mode:             {cfg.mode}")
-    print(f"DB Path:          {cfg.db_path}")
+    print(f"DB Path:          {cfg.db_path}" + (" (unified with main)" if unified else ""))
     enabled = [a for a, s in cfg.host_agents.items() if s.enabled]
     print(f"Enabled Agents:   {', '.join(enabled) if enabled else '(none)'}")
     print(f"Cost Tracking:    {'ON' if cfg.cost_tracking.enabled else 'OFF'}")
@@ -363,15 +356,13 @@ def main() -> int:
         help="Use defaults, skip prompts and post-setup steps",
     )
     parser.add_argument(
-        "--mode",
-        choices=list(VALID_MODES),
-        default=None,
-        help="Deployment mode (separate, integrated, hybrid)",
-    )
-    parser.add_argument(
         "--db-path",
         default=None,
-        help="Database path (for separate/hybrid mode)",
+        help=(
+            "Chat log database path. Default: memory/agent_chatlog.db. "
+            "Set equal to the main DB (memory/agent_memory.db) to keep all "
+            "data in a single file."
+        ),
     )
     hook_group = parser.add_mutually_exclusive_group()
     hook_group.add_argument(
@@ -403,11 +394,9 @@ def main() -> int:
 
         # Non-interactive mode
         if args.non_interactive:
-            mode = args.mode or "separate"
             db_path = args.db_path or DEFAULT_DB_PATH
 
             config = ChatlogConfig(
-                mode=mode,  # type: ignore[assignment]
                 db_path=db_path,
                 host_agents={a: HookSpec() for a in VALID_HOST_AGENTS},
                 cost_tracking=CostTrackingSpec(enabled=True),
@@ -419,15 +408,13 @@ def main() -> int:
             return 0
 
         # Interactive mode
-        mode = args.mode or interactive_mode()
-        db_path = args.db_path or interactive_db_path(mode)
+        db_path = args.db_path or interactive_db_path()
         host_agents = interactive_host_agents()
         cost_tracking_enabled = interactive_cost_tracking()
         redaction = interactive_redaction()
 
         # Build config
         config = ChatlogConfig(
-            mode=mode,  # type: ignore[assignment]
             db_path=db_path,
             host_agents=host_agents,
             cost_tracking=CostTrackingSpec(enabled=cost_tracking_enabled),
