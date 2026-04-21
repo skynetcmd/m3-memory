@@ -1,19 +1,20 @@
 ---
-tool: bin/memory_bridge.py
-sha1: 268bb7ea82d8
-mtime_utc: 2026-04-21T20:54:48.405420+00:00
-generated_utc: 2026-04-21T21:22:27.111638+00:00
+tool: bin/gen_mcp_inventory.py
+sha1: 0a61683e1aa1
+mtime_utc: 2026-04-21T20:02:02.928761+00:00
+generated_utc: 2026-04-21T21:22:27.076721+00:00
 private: false
 ---
 
-# bin/memory_bridge.py
+# bin/gen_mcp_inventory.py
 
 ## Purpose
 
-_(no module docstring — update the source file.)_
+gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy.
 
 ## Entry points
 
+- `def main()` (line 206)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -26,9 +27,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (active_database)`
 - `mcp_tool_catalog`
-- `memory_core`
 
 ## Calls OUT (external side-channels)
 
@@ -36,11 +35,11 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
+_(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `MCP_TOOLS.md`
 
 ## Re-validation
 

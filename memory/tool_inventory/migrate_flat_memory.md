@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_flat_memory.py
-sha1: d9c4e6d39344
-mtime_utc: 2026-04-18T22:28:14.315357+00:00
-generated_utc: 2026-04-19T00:39:16.084067+00:00
+sha1: 943ef6d47ced
+mtime_utc: 2026-04-21T20:45:50.811588+00:00
+generated_utc: 2026-04-21T21:26:01.928047+00:00
 private: false
 ---
 
@@ -37,7 +37,7 @@ Usage:
 ## Entry points
 
 - `async def run()` (line 470)
-- `def main()` (line 609)
+- `def main()` (line 611)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -50,6 +50,7 @@ Usage:
 | `--dry-run` | Discover + plan but don't write. | `False` | Discovers items, dedupes, prompts for confirmation, then writes to m3-memory. | store_true | Prints plan but skips all writes; no confirmation prompt required. |
 | `-y`, `--yes` | Skip confirmation prompt. | `False` | Confirms migration interactively before writing. | store_true | Bypasses confirmation prompt; proceeds directly to write phase. |
 | `-v`, `--verbose` | DEBUG logging. | `False` | INFO-level logs to stderr. | store_true | Sets log level to DEBUG; verbose output for development/debugging. |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -57,6 +58,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `m3_sdk (add_database_arg)`
 - `memory_core`
 - `memory_core (_db)`
 

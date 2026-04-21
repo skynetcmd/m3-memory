@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: 4cdcd1ec7362
-mtime_utc: 2026-04-18T22:28:14.286287+00:00
-generated_utc: 2026-04-19T00:39:16.111667+00:00
+sha1: 1a8d9897929b
+mtime_utc: 2026-04-21T20:43:55.949210+00:00
+generated_utc: 2026-04-21T21:26:01.963752+00:00
 private: false
 ---
 
@@ -28,6 +28,7 @@ Usage:
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
 | `--dry-run` | Check connectivity only | `False` | Checks SYNC_TARGET_IP reachability, then calls pg_sync.py and chroma_sync_cli.py (both write to DBs/ChromaDB). | store_true | Checks reachability only; logs planned sync but skips subprocess calls (no actual writes). |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -36,7 +37,7 @@ Usage:
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (add_database_arg)`
 
 ## Calls OUT (external side-channels)
 

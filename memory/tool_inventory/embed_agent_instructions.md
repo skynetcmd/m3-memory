@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_agent_instructions.py
-sha1: fbfd0024bb9f
-mtime_utc: 2026-04-11T18:26:43.113999+00:00
-generated_utc: 2026-04-18T16:33:21.629530+00:00
+sha1: b3bf1769a873
+mtime_utc: 2026-04-21T20:46:05.778047+00:00
+generated_utc: 2026-04-21T21:22:27.067740+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ with embed=True. Idempotent: soft-deletes any prior architecture items
 
 ## Entry points
 
-- `async def main()` (line 217)
+- `async def main()` (line 225)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -31,14 +31,15 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `m3_sdk (resolve_db_path)`
 - `memory_bridge (memory_delete, memory_write)`
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 224)
-- `sqlite3.connect()  → `DB_PATH`` (line 260)
+- `sqlite3.connect()  → `_db_path()`` (line 232)
+- `sqlite3.connect()  → `_db_path()`` (line 268)
 
 
 ## Notable external imports

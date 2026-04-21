@@ -27,7 +27,11 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 BIN_DIR = BASE_DIR / "bin"
 SCRIPTS_DIR = BASE_DIR / "scripts"
+BENCHMARKS_DIR = BASE_DIR / "benchmarks"
+# Flat dirs scanned with *.py (top level). benchmarks/ is walked recursively
+# below because it has harness subfolders (longmemeval/, locomo/).
 SOURCE_DIRS = [BIN_DIR, SCRIPTS_DIR]
+RECURSIVE_SOURCE_DIRS = [BENCHMARKS_DIR]
 OUT_DIR = BASE_DIR / "memory" / "tool_inventory"
 
 SKIP = {"gen_tool_inventory.py", "__init__.py"}
@@ -39,6 +43,11 @@ CORE_LIBRARIES = {
     "memory_core.py", "memory_bridge.py", "mcp_tool_catalog.py", "mcp_proxy.py",
     "m3_sdk.py", "auth_utils.py", "temporal_utils.py", "agent_protocol.py",
     "embedding_utils.py", "custom_tool_bridge.py", "debug_agent_bridge.py",
+    # Post-2026-04-21 refactor additions: chatlog + maintenance + sync + LLM
+    # failover are load-bearing even without a CLI surface.
+    "chatlog_config.py", "chatlog_core.py", "chatlog_redaction.py",
+    "chatlog_status.py", "memory_maintenance.py", "memory_sync.py",
+    "llm_failover.py",
 }
 
 _ENV_RE = re.compile(r"""os\.(?:environ\.get|getenv)\(\s*['"]([A-Z0-9_]+)['"]""")
@@ -95,10 +104,20 @@ def _literal(n):
 
 def extract_argparse(tree: ast.Module) -> list[dict]:
     args: list[dict] = []
+    uses_database_helper = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
+        # Detect the standardized add_database_arg(parser) helper from m3_sdk.
+        # The helper wraps parser.add_argument under the hood, so the direct
+        # walk would miss the --database flag without this fallback.
+        if isinstance(func, ast.Name) and func.id == "add_database_arg":
+            uses_database_helper = True
+            continue
+        if isinstance(func, ast.Attribute) and func.attr == "add_database_arg":
+            uses_database_helper = True
+            continue
         if not (isinstance(func, ast.Attribute) and func.attr == "add_argument"):
             continue
         arg_names: list[str] = []
@@ -115,6 +134,22 @@ def extract_argparse(tree: ast.Module) -> list[dict]:
             "action": _literal(kw.get("action")),
             "required": _literal(kw.get("required")),
             "choices": _literal(kw.get("choices")),
+        })
+    if uses_database_helper and not any("--database" in a["names"] for a in args):
+        # Synthesize the canonical row so the inventory reflects the actual
+        # CLI surface. Matches m3_sdk.add_database_arg's signature.
+        args.append({
+            "names": ["--database"],
+            "help": (
+                "SQLite database path. Env: M3_DATABASE. "
+                "Default: memory/agent_memory.db."
+            ),
+            "default": None,
+            "default_passed": True,
+            "type": None,
+            "action": None,
+            "required": None,
+            "choices": None,
         })
     return args
 
@@ -140,6 +175,12 @@ def _repo_module_set() -> set[str]:
     for d in SOURCE_DIRS:
         if d.is_dir():
             for p in d.glob("*.py"):
+                mods.add(p.stem)
+    for d in RECURSIVE_SOURCE_DIRS:
+        if d.is_dir():
+            for p in d.rglob("*.py"):
+                if "__pycache__" in p.parts:
+                    continue
                 mods.add(p.stem)
     for pkg_dir in BASE_DIR.iterdir():
         if pkg_dir.is_dir() and (pkg_dir / "__init__.py").exists():
@@ -479,6 +520,15 @@ def main() -> None:
     for d in SOURCE_DIRS:
         if d.is_dir():
             sources.extend(sorted(d.glob("*.py")))
+    # Recursive dirs (e.g. benchmarks/) have harness subfolders — walk them
+    # but skip __pycache__ and site-packages-like trees.
+    for d in RECURSIVE_SOURCE_DIRS:
+        if not d.is_dir():
+            continue
+        for p in sorted(d.rglob("*.py")):
+            if "__pycache__" in p.parts:
+                continue
+            sources.append(p)
 
     for src in sources:
         if src.name in SKIP:
@@ -504,7 +554,12 @@ def main() -> None:
         mtime = datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc).isoformat()
         private = src.name in PRIVATE
 
-        rel = f"{src.parent.name}/{src.name}"
+        # Relative path rooted at repo root, with forward slashes for portability
+        # in markdown links.
+        try:
+            rel = src.relative_to(BASE_DIR).as_posix()
+        except ValueError:
+            rel = f"{src.parent.name}/{src.name}"
         out_path = OUT_DIR / (src.stem + ".md")
 
         # Preserve hand-curated flag columns from the prior file.

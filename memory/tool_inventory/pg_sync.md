@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_sync.py
-sha1: 9f6cd651a1f3
-mtime_utc: 2026-04-19T19:34:38.906772+00:00
-generated_utc: 2026-04-19T21:10:11.724130+00:00
+sha1: fd9265b2807f
+mtime_utc: 2026-04-21T20:46:27.558221+00:00
+generated_utc: 2026-04-21T21:22:27.193529+00:00
 private: false
 ---
 
@@ -14,7 +14,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 702)
+- `def main()` (line 707)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -29,10 +29,14 @@ _(no argparse arguments detected)_
 
 - `m3_sdk (M3Context)`
 - `m3_sdk (resolve_venv_python)`
+- `migrate_memory`
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**sqlite**
+
+- `sqlite3.connect()  → `target.db_path`` (line 720)
+
 
 ## Notable external imports
 

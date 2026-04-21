@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_secret.py
-sha1: 5590e8ae807f
-mtime_utc: 2026-04-18T22:28:14.283148+00:00
-generated_utc: 2026-04-19T00:39:16.109420+00:00
+sha1: c166da39d5fb
+mtime_utc: 2026-04-21T20:45:16.253141+00:00
+generated_utc: 2026-04-21T21:26:01.959808+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 274)
+- `def main()` (line 285)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -31,6 +31,7 @@ Usage:
 |---|---|---|---|---|---|
 | `--list` | list stored services (no values) | `False` | Runs interactive service picker and secret entry flow (getpass-hidden input). | store_true | Displays table of vault entries (service name, version, origin device, updated_at); exits. |
 | `--delete` | remove a service from the vault | — | Runs interactive service picker and secret entry flow (getpass-hidden input). | str | Deletes specified service after confirmation prompt; exits. |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
@@ -38,16 +39,18 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils (DB_PATH, _get_fernet, get_api_key, get_master_key, set_api_key)`
+- `auth_utils`
+- `auth_utils (_get_fernet, _vault_db_path, get_api_key, get_master_key, set_api_key)`
+- `m3_sdk (add_database_arg)`
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 116)
-- `sqlite3.connect()  → `DB_PATH`` (line 140)
-- `sqlite3.connect()  → `DB_PATH`` (line 229)
-- `sqlite3.connect()  → `DB_PATH`` (line 94)
+- `sqlite3.connect()  → `_db_path()`` (line 105)
+- `sqlite3.connect()  → `_db_path()`` (line 127)
+- `sqlite3.connect()  → `_db_path()`` (line 151)
+- `sqlite3.connect()  → `_db_path()`` (line 240)
 
 
 ## Notable external imports
