@@ -1132,7 +1132,7 @@ async def memory_write_bulk_impl(
                 "refresh_reason": it.get("refresh_reason") or None,
                 "embed": it.get("embed", True),
                 "embed_text": None,  # Will be set after enrichment
-                "variant": it.get("variant") or variant,
+                "variant": (it.get("variant") or variant) or None,
             }
         )
 
@@ -2414,10 +2414,15 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         _cid = conversation_id or None
         _ron = refresh_on or None
         _rreason = refresh_reason or None
+        # Canonicalize "no variant" as NULL, not "". The MCP schema default is
+        # "" (for backward compat with callers that relied on a string arg),
+        # but the search path filters untagged rows with `variant IS NULL` —
+        # storing "" would silently hide new writes from the default search.
+        _variant = variant or None
         db.execute(
             "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, variant) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason, variant)
+            (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason, _variant)
         )
         if embed:
             db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (item_id, "upsert"))
