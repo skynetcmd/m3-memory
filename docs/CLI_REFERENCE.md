@@ -28,6 +28,22 @@ python benchmarks/longmemeval/bench_longmemeval.py --database memory/bench_longm
 CHATLOG_DB_PATH=memory/my_chatlog.db python bin/chatlog_ingest.py --format claude-code --transcript-path foo.jsonl
 ```
 
+## Running tests against an isolated DB
+
+The test suites (`test_memory_bridge.py`, `test_debug_agent.py`, `test_mcp_proxy.py`) read their `DB_PATH` via `resolve_db_path(None)` at import time, so they honor `M3_DATABASE` set in the environment.
+
+Isolated test run:
+
+```bash
+# Seed a fresh schema-complete scratch DB
+python bin/setup_test_db.py --database memory/_test.db --force
+
+# Run any test suite against it
+M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
+```
+
+`setup_test_db.py` applies every forward migration in `memory/migrations/` (skipping `.down.sql` rollbacks). Pass `--force` to wipe the target before seeding.
+
 ## DB-aware scripts
 
 | Script | Purpose | Extra DB-related flags |
@@ -50,6 +66,7 @@ CHATLOG_DB_PATH=memory/my_chatlog.db python bin/chatlog_ingest.py --format claud
 | `bin/secret_rotator.py` | Rotate vault-stored secrets | — |
 | `bin/setup_memory.py` | Bootstrap (venv + deps + migrations) | Reads `M3_DATABASE` or `--database PATH` positionally |
 | `bin/setup_secret.py` | Add/list/delete vault keys | — |
+| `bin/setup_test_db.py` | Seed a scratch DB with the full schema (for test isolation) | `--force` wipes existing file before seeding |
 | `bin/sync_all.py` | Hourly sync runner (shells out to pg_sync + chroma_sync) | Propagates `--database` to subprocesses via `M3_DATABASE` |
 | `bin/weekly_auditor.py` | PDF weekly audit report | — |
 | `benchmarks/longmemeval/bench_longmemeval.py` | LongMemEval harness | Sets `M3_DATABASE` early so all ingest/search routes to the benchmark DB |
