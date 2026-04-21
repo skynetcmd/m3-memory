@@ -51,10 +51,11 @@ If the resolved chatlog path **equals** the main memory DB path, the two are a s
                 ▼                     ▼
     ┌──────────────────────┐ ┌──────────────────┐
     │ SQLite chatlog DB    │ │ SQLite main DB   │
-    │ (separate/hybrid)    │ │ (integrated)     │
+    │ (different path)     │ │ (same path = one │
+    │                      │ │  unified file)   │
     └──────────────────────┘ └──────────────────┘
                 │                     ▲
-                │ (hybrid mode only)  │
+                │ (cross-file only)   │
                 └─────────────────────┘
                         promote
 ```
@@ -69,7 +70,7 @@ If you already have m3-memory wired up as an MCP server in Claude Code, Gemini C
 Install the m3-memory chat log subsystem.
 ```
 
-The agent will run `bin/chatlog_init.py`, pick sensible defaults (separate mode, cost tracking on, redaction off), wire the PreCompact / session-end hook for whichever host it's running inside, install the 30-minute embed sweeper schedule, and smoke-test a write + search round-trip before reporting done. You can interject at any prompt to override defaults.
+The agent will run `bin/chatlog_init.py`, pick sensible defaults (dedicated `agent_chatlog.db` file, cost tracking on, redaction off), wire the PreCompact / session-end hook for whichever host it's running inside, install the 30-minute embed sweeper schedule, and smoke-test a write + search round-trip before reporting done. You can interject at any prompt to override defaults.
 
 Skip to [§3 Daily Operations](#3-daily-operations) once it finishes.
 
@@ -286,16 +287,16 @@ Use the `chatlog_search` MCP tool:
 chatlog_search(
     query="how to deploy kubernetes",
     k=5,
-    model_filter="claude-opus-4-7",
-    conversation_filter=None
+    model_id="claude-opus-4-7",
+    conversation_id=""
 )
 ```
 
-Returns scored results with full metadata. In separate/hybrid mode, FTS5 search is fast; in integrated mode, vector search includes embeddings if available.
+Returns scored results with full metadata. When the chatlog DB is a separate file, FTS5 keyword search is the only retrieval mode (fast but no vectors). When it equals the main DB, the call delegates to `memory_search_scored_impl` and gets full hybrid/vector search for free.
 
 ### Promote a Useful Conversation
 
-In hybrid mode, move or copy a chat log entry to the main `agent_memory.db`:
+When the chatlog DB is a different file from the main DB, move or copy a chat log entry to the main `agent_memory.db` (when the paths match, promote is a type-rename in place):
 
 ```python
 # MCP call
@@ -544,9 +545,9 @@ python bin/chatlog_status.py --json | jq '.queue_depth, .spill_files'
 
 ### "Search returns nothing"
 
-In separate/hybrid mode, search is FTS5-only (no vector embeddings). Check:
+When the chatlog DB is a different file from the main DB, search is FTS5-only (no vector embeddings). Check:
 
-1. Mode: `python bin/chatlog_status.py | grep mode`
+1. Unified status: `python bin/chatlog_status.py --json | jq '.unified, .db_paths'`
 2. Row count: `python bin/chatlog_status.py | grep chatlog_rows`
 3. Embed backlog: `chatlog_status.py | grep without_embed`
 
