@@ -1,8 +1,8 @@
 ---
 tool: bin/chroma_sync_cli.py
-sha1: 11dafadd01b5
-mtime_utc: 2026-04-18T22:28:14.293115+00:00
-generated_utc: 2026-04-19T00:39:15.968903+00:00
+sha1: 1ae5f8f1bb43
+mtime_utc: 2026-04-21T20:44:36.924503+00:00
+generated_utc: 2026-04-21T21:22:27.047064+00:00
 private: false
 ---
 

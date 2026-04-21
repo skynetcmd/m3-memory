@@ -1,24 +1,28 @@
 ---
-tool: bin/memory_bridge.py
-sha1: 268bb7ea82d8
-mtime_utc: 2026-04-21T20:54:48.405420+00:00
-generated_utc: 2026-04-21T21:22:27.111638+00:00
+tool: benchmarks/locomo/compare_runs.py
+sha1: 6ecab171c430
+mtime_utc: 2026-04-21T20:02:02.907203+00:00
+generated_utc: 2026-04-21T21:26:02.036832+00:00
 private: false
 ---
 
-# bin/memory_bridge.py
+# benchmarks/locomo/compare_runs.py
 
 ## Purpose
 
-_(no module docstring — update the source file.)_
+Compare two Phase 1 runs side-by-side.
 
 ## Entry points
 
+- `def main()` (line 15)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
-_(no argparse arguments detected)_
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--a` | Baseline run dir name under benchmarks/locomo/runs/ | — |  | str |  |
+| `--b` | Candidate run dir name under benchmarks/locomo/runs/ | — |  | str |  |
 
 ## Environment variables read
 
@@ -26,9 +30,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (active_database)`
-- `mcp_tool_catalog`
-- `memory_core`
+_(none detected)_
 
 ## Calls OUT (external side-channels)
 
@@ -36,11 +38,12 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
+_(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `handoff_analysis.json`
+- `summary.json`
 
 ## Re-validation
 

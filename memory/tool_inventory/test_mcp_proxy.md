@@ -1,8 +1,8 @@
 ---
 tool: bin/test_mcp_proxy.py
-sha1: b0b5de3d0acc
-mtime_utc: 2026-04-19T19:32:26.545616+00:00
-generated_utc: 2026-04-19T21:10:11.753854+00:00
+sha1: f4828f297b84
+mtime_utc: 2026-04-21T20:59:44.495160+00:00
+generated_utc: 2026-04-21T21:22:27.222381+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Usage:
 
 ## Entry points
 
-- `async def main()` (line 227)
+- `async def main()` (line 233)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -39,23 +39,23 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (resolve_db_path)`
 
 ## Calls OUT (external side-channels)
 
 **subprocess**
 
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'ANTHROPIC_API_KEY', '-w']`` (line 175)
-- `subprocess.run()  → `cmd`` (line 203)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'ANTHROPIC_API_KEY', '-w']`` (line 181)
+- `subprocess.run()  → `cmd`` (line 209)
 
 **http**
 
-- `httpx.AsyncClient()` (line 57)
-- `httpx.AsyncClient()` (line 80)
+- `httpx.AsyncClient()` (line 63)
+- `httpx.AsyncClient()` (line 86)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 68)
+- `sqlite3.connect()  → `DB_PATH`` (line 74)
 
 
 ## Notable external imports
@@ -64,7 +64,6 @@ _(none detected)_
 
 ## File dependencies (repo paths referenced)
 
-- `agent_memory.db`
 - `{WORKSPACE}/.aider.conf.yml`
 
 ## Re-validation

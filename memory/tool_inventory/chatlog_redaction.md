@@ -1,16 +1,19 @@
 ---
-tool: bin/memory_bridge.py
-sha1: 268bb7ea82d8
-mtime_utc: 2026-04-21T20:54:48.405420+00:00
-generated_utc: 2026-04-21T21:22:27.111638+00:00
+tool: bin/chatlog_redaction.py
+sha1: a6f9dcd842ef
+mtime_utc: 2026-04-21T19:15:03.919848+00:00
+generated_utc: 2026-04-21T21:26:01.789010+00:00
 private: false
 ---
 
-# bin/memory_bridge.py
+# bin/chatlog_redaction.py
 
 ## Purpose
 
-_(no module docstring — update the source file.)_
+Optional secret-scrubbing for chat log entries.
+
+Scans content with pre-compiled regex patterns for common secret formats
+and replaces matches with [REDACTED:<group>]. Disabled by default.
 
 ## Entry points
 
@@ -26,9 +29,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (active_database)`
-- `mcp_tool_catalog`
-- `memory_core`
+_(none detected)_
 
 ## Calls OUT (external side-channels)
 
@@ -36,7 +37,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
+_(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
