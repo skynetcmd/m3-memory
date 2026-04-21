@@ -20,12 +20,12 @@ def status_test_env(tmp_path, monkeypatch):
     monkeypatch.setattr(chatlog_config, "MAIN_DB_PATH", str(main_db_path))
     monkeypatch.setattr(chatlog_config, "STATE_FILE", str(state_file))
     monkeypatch.setattr(chatlog_config, "SPILL_DIR", str(spill_dir))
-    monkeypatch.setenv("CHATLOG_MODE", "separate")
-    # CHATLOG_DB_PATH env is the reliable redirect: the dataclass default
-    # `db_path: str = DEFAULT_DB_PATH` is captured at class-definition time,
-    # so patching DEFAULT_DB_PATH alone doesn't affect new ChatlogConfig()
-    # instances. The env var is applied after construction in resolve_config().
+    # Post-unification: CHATLOG_DB_PATH is the explicit chatlog-only override
+    # and M3_DATABASE controls the main DB. Also set M3_DATABASE so
+    # resolve_db_path(None) in chatlog_status doesn't fall back to the real
+    # repo's agent_memory.db.
     monkeypatch.setenv("CHATLOG_DB_PATH", str(db_path))
+    monkeypatch.setenv("M3_DATABASE", str(main_db_path))
     chatlog_config.invalidate_cache()
     with chatlog_config._POOL_LOCK:
         chatlog_config._POOL = None
@@ -79,7 +79,8 @@ def test_status_includes_required_fields(status_test_env):
     result = chatlog_status.chatlog_status_impl()
     parsed = json.loads(result)
 
-    assert "mode" in parsed
+    # `mode` was removed in the 2026-04-21 refactor; `unified` replaced it.
+    assert "unified" in parsed
     assert "db_paths" in parsed
     assert "row_counts" in parsed
     assert "queue" in parsed
@@ -88,14 +89,17 @@ def test_status_includes_required_fields(status_test_env):
     assert "last_write_at" in parsed or "warnings" in parsed
 
 
-def test_status_mode_field(status_test_env):
-    """Status includes the current mode."""
+def test_status_unified_field_reflects_path_equality(status_test_env):
+    """unified=True when chatlog path == main path, else False."""
     import chatlog_status
 
     result = chatlog_status.chatlog_status_impl()
     parsed = json.loads(result)
 
-    assert parsed["mode"] in ("integrated", "separate", "hybrid")
+    # The fixture sets chatlog and main to different paths.
+    assert parsed["unified"] is False
+    assert isinstance(parsed["db_paths"]["chatlog"], str)
+    assert isinstance(parsed["db_paths"]["main"], str)
 
 
 def test_status_row_counts_structure(status_test_env):
@@ -193,8 +197,9 @@ def test_status_no_state_file(status_test_env):
     parsed = json.loads(result)
 
     assert isinstance(parsed, dict)
-    # Should have some fields even with empty state
-    assert "mode" in parsed
+    # Should have some fields even with empty state. `unified` is the
+    # post-unification stand-in for the removed `mode` field.
+    assert "unified" in parsed
 
 
 def test_status_with_data_in_db(status_test_env):

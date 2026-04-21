@@ -46,7 +46,8 @@ class FakePgCursor:
         s = " ".join(sql.split())
         if s.startswith("SELECT EXISTS"):
             self._next_one = (True,)  # pretend table exists
-        elif s.startswith("SELECT id FROM memory_items WHERE id = ANY"):
+        elif s.startswith(("SELECT id FROM memory_items WHERE id = ANY",
+                           "SELECT mi.id FROM memory_items mi WHERE mi.id = ANY")):
             queried = params[0] if params else []
             self._next_all = [(i,) for i in queried if i in self.present_ids]
         elif s.startswith("SELECT me.id, me.memory_id") or \
@@ -123,7 +124,7 @@ def test_skips_embedding_when_parent_not_in_pg():
         conn.commit()
 
         pg_cur = FakePgCursor(present_ids={"mem-parent-present"})
-        pg_sync.sync_memory_embeddings(cur, pg_cur, conn)
+        pg_sync.sync_memory_embeddings(cur, pg_cur, conn, "test")
 
         deferred = [m for m in h.messages if "deferred for missing parent" in m]
         assert deferred, f"summary log should mention deferred count; got {h.messages}"
@@ -154,7 +155,7 @@ def test_all_parents_present_pushes_everything():
         conn.commit()
 
         pg_cur = FakePgCursor(present_ids={"a", "b", "c"})
-        pg_sync.sync_memory_embeddings(cur, pg_cur, conn)
+        pg_sync.sync_memory_embeddings(cur, pg_cur, conn, "test")
 
         summary = [m for m in h.messages if "Pushed" in m and "deferred" in m]
         assert summary, f"expected push summary log; got {h.messages}"
@@ -180,7 +181,7 @@ def test_all_parents_missing_pushes_nothing():
     conn.commit()
 
     pg_cur = FakePgCursor(present_ids=set())
-    pg_sync.sync_memory_embeddings(cur, pg_cur, conn)
+    pg_sync.sync_memory_embeddings(cur, pg_cur, conn, "test")
 
     assert pg_cur.inserted_batches == [], (
         "no rows should be inserted when every parent is missing")
