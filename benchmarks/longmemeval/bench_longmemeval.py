@@ -17,11 +17,11 @@ Routes embeddings through `memory_write_bulk_impl` / `_embed_many` and expects
 llama-server on http://localhost:8081/v1 (override with LLM_ENDPOINTS_CSV).
 
 Usage:
-    python bin/bench_longmemeval.py                         # full dataset
-    python bin/bench_longmemeval.py --limit 20              # subsample
-    python bin/bench_longmemeval.py --skip-ingest           # reuse already-loaded DB
-    python bin/bench_longmemeval.py --no-judge              # write hypotheses only
-    python bin/bench_longmemeval.py --cluster-size 0 --graph-depth 0  # ablation: hybrid only
+    python benchmarks/longmemeval/bench_longmemeval.py                         # full dataset
+    python benchmarks/longmemeval/bench_longmemeval.py --limit 20              # subsample
+    python benchmarks/longmemeval/bench_longmemeval.py --skip-ingest           # reuse already-loaded DB
+    python benchmarks/longmemeval/bench_longmemeval.py --no-judge              # write hypotheses only
+    python benchmarks/longmemeval/bench_longmemeval.py --cluster-size 0 --graph-depth 0  # ablation: hybrid only
 
 Artifacts go to .scratch/longmemeval_run_<timestamp>/:
     hypotheses.jsonl   one line per question
@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(BASE_DIR / "bin"))
 
 # Route embeddings to llama-server before memory_core imports.
