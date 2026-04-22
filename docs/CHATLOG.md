@@ -126,7 +126,7 @@ The toggle writes the config and prints an updated `~/.claude/settings.json` sni
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\absolute\\path\\to\\m3-memory\\bin\\hooks\\chatlog\\claude_code_precompact.ps1"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/absolute/path/to/m3-memory/bin/hooks/chatlog/claude_code_precompact.ps1"
           }
         ]
       }
@@ -136,7 +136,7 @@ The toggle writes the config and prints an updated `~/.claude/settings.json` sni
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\absolute\\path\\to\\m3-memory\\bin\\hooks\\chatlog\\claude_code_precompact.ps1"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/absolute/path/to/m3-memory/bin/hooks/chatlog/claude_code_precompact.ps1"
           }
         ]
       }
@@ -144,6 +144,8 @@ The toggle writes the config and prints an updated `~/.claude/settings.json` sni
   }
 }
 ```
+
+> **Windows paths**: use **forward slashes** in `-File` arguments. Claude Code's hook invocation chain strips backslash escapes, producing errors like `The argument 'CUsersyoum3-memory...' does not exist`. PowerShell accepts forward slashes on Windows, so they sidestep the whole escaping problem.
 
 On macOS/Linux, swap the `command` for `bash /absolute/path/to/m3-memory/bin/hooks/chatlog/claude_code_precompact.sh`.
 
@@ -173,7 +175,7 @@ Register the hook in `~/.gemini/settings.json` using the absolute path to the re
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\path\\to\\m3-memory\\bin\\hooks\\chatlog\\gemini_cli_onexit.ps1"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/path/to/m3-memory/bin/hooks/chatlog/gemini_cli_onexit.ps1"
           }
         ]
       }
@@ -669,7 +671,7 @@ On Windows:
 
 ```powershell
 Get-Content -Raw envelope.json |
-  powershell -NoProfile -ExecutionPolicy Bypass -File ...\claude_code_precompact.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File .../claude_code_precompact.ps1
 ```
 
 ### Inspecting Spill Files
