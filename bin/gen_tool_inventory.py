@@ -1,4 +1,4 @@
-"""Generate per-tool inventory memory entries under memory/tool_inventory/.
+"""Generate per-tool inventory entries under docs/tools/.
 
 Parses each Python file in bin/ that looks like a CLI tool (has argparse or
 __main__). Extracts, per tool:
@@ -32,7 +32,7 @@ BENCHMARKS_DIR = BASE_DIR / "benchmarks"
 # below because it has harness subfolders (longmemeval/, locomo/).
 SOURCE_DIRS = [BIN_DIR, SCRIPTS_DIR]
 RECURSIVE_SOURCE_DIRS = [BENCHMARKS_DIR]
-OUT_DIR = BASE_DIR / "memory" / "tool_inventory"
+OUT_DIR = BASE_DIR / "docs" / "tools"
 
 SKIP = {"gen_tool_inventory.py", "__init__.py"}
 PRIVATE = {"discord_bot.py", "status_api.py", "embed_server_gpu.py"}
