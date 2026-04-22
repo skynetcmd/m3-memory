@@ -38,6 +38,81 @@
 #### ⚠️ Operational note — restart your MCP clients
 - Claude Code, Gemini CLI, and other MCP clients cache tool schemas at connection time. Adding the `database` parameter to every tool schema requires a **one-time client restart** before the clients can actually pass the argument. Existing tool calls that don't set `database` continue to work unchanged.
 
+## April 21, 2026 (late) — intent routing + SLM classifier plumbing
+
+### 🔧 Ports from bench-wip to main (behind env gates)
+
+#### SLM intent classifier (`bin/slm_intent.py`)
+- New module with `classify_intent(query, profile=None)` and
+  `extract_entities(text, profile=None)`. Gated behind `M3_SLM_CLASSIFIER`
+  (off by default). Named profile loader reads YAML-per-name from
+  `config/slm/`; bench harnesses can stack their own dir ahead of the
+  default via `M3_SLM_PROFILES_DIR` (os.pathsep-separated list).
+- Ships 4 starter profiles: `default.yaml`, `memory.yaml`, `chatlog.yaml`
+  (intent triage stubs for each subsystem) and `entity_extract.yaml`
+  (free-text entity pull used by `bin/augment_memory.py`). The bench
+  profile intentionally lives with the harness, not in `config/slm/`.
+- 11 new pytest cases under `tests/test_slm_intent.py` covering gate,
+  profile loader, search-dir stacking, and label matching.
+
+#### Intent-aware retrieval in `memory_core`
+Three related capabilities, all behind the new `M3_INTENT_ROUTING` env
+gate and dormant by default:
+- `intent_hint` kwarg threaded through `memory_search_scored_impl` and
+  `memory_search_impl`. Auto-adds `metadata_json` + `conversation_id`
+  to extra_columns when a hint is present.
+- Role-biased score boost for user-authored turns when
+  `intent_hint == "user-fact"` (default +0.1, overridable via
+  `M3_INTENT_USER_FACT_BOOST`).
+- Predecessor-turn pull: when the top hits on a user-fact query are
+  assistant echoes at turn N+1, fetch turn N from the same
+  conversation so the user's original statement enters the candidate
+  set at 0.85x the parent score. Capped at top-10 to bound DB work.
+- `_maybe_route_query` extended to honor `intent_hint ==
+  "temporal-reasoning"` or `"multi-session"` for the BM25 weight shift.
+
+#### `bin/augment_memory.py` CLI (rewrite)
+Replaced the bench-wip placeholder stub with a real runnable utility.
+Two subcommands:
+- `link-adjacent` — create `related` edges between consecutive
+  conversation turns so graph expansion bridges the gap between an
+  assistant echo and the user statement behind it.
+- `enrich-titles` — use `slm_intent.extract_entities` to prefix user
+  turn titles with 1-3 pithy entities so BM25 hits on proper nouns
+  even when body text uses pronouns. Idempotent-ish (skips titles
+  that already have a ` | ` separator at the head).
+- `all` runs both in sequence. Full argparse with `--database` via the
+  standard helper.
+
+#### Smaller bench-wip ports
+- `bin/temporal_utils.py`: overflow guard on numeric relatives (cap
+  at 100 years), `finditer` instead of `search` in two loops, new
+  helpers `has_temporal_cues` and `extract_referenced_dates`.
+- `bin/agent_protocol.py`: `_THINK_TAG_RE` compiled once at module
+  scope and reused from `custom_tool_bridge` and `debug_agent_bridge`
+  instead of the 5 separate `re.compile`/`re.search`/`re.sub` calls
+  that existed before.
+- `bin/m3_sdk.py`: new `M3Context.get_logger()` and `query_memory()`
+  helpers from b97d2a2. Module-level `LM_STUDIO_BASE` and
+  `LM_READ_TIMEOUT` constants — resolves a pre-existing broken
+  import in `debug_agent_bridge` as a side effect.
+
+#### Environment variables added
+| Env | Role |
+|---|---|
+| `M3_SLM_CLASSIFIER` | Gate for `bin/slm_intent.py`. Off by default. |
+| `M3_SLM_PROFILE` | Default profile name when caller doesn't pass `profile=`. |
+| `M3_SLM_PROFILES_DIR` | `os.pathsep`-separated list of dirs searched before `config/slm/`. |
+| `M3_INTENT_ROUTING` | Gate for role-boost + predecessor-pull on `memory_search_scored_impl`. Off by default. |
+| `M3_INTENT_USER_FACT_BOOST` | Additive boost for user-authored turns (default 0.1). |
+| `LM_STUDIO_BASE` | Local LLM base URL (default `http://localhost:1234/v1`). |
+| `LM_READ_TIMEOUT` | Local LLM read timeout in seconds (default 4800.0). |
+
+### Test status
+Bridge tests 193/0/0, pytest 163/0/0 (152 prior + 11 new). Everything
+ported to main is dormant until its gate is enabled, so behavior with
+no env changes is byte-identical to the pre-port tree.
+
 ## April 12, 2026
 
 ### ✨ Multi-Agent Orchestration
