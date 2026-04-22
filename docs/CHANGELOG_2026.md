@@ -54,6 +54,9 @@
   profile intentionally lives with the harness, not in `config/slm/`.
 - 11 new pytest cases under `tests/test_slm_intent.py` covering gate,
   profile loader, search-dir stacking, and label matching.
+- Full reference: [docs/SLM_INTENT.md](SLM_INTENT.md) — YAML format, gate
+  combinations, and walkthroughs for Ollama / LM Studio / OpenAI / bench
+  harness setups.
 
 #### Intent-aware retrieval in `memory_core`
 Three related capabilities, all behind the new `M3_INTENT_ROUTING` env
