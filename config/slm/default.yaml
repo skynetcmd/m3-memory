@@ -1,11 +1,25 @@
 # Default SLM intent profile — fallback used when no named profile is specified.
 #
-# The labels here match the intent_hint values consumed by
-# memory_core.memory_search_scored_impl when M3_INTENT_ROUTING is on:
+# !! EDIT BEFORE ENABLING THE GATE (M3_SLM_CLASSIFIER=1) !!
+# The `url`, `model`, and `api_key_service` values below are STARTER DEFAULTS
+# that happen to point at a local Ollama + qwen2.5:1.5b-instruct setup. If
+# your environment uses something else (LM Studio, llama-server, vLLM,
+# OpenAI, a remote inference endpoint), edit those three fields to match.
+# The wire protocol is OpenAI-compatible /v1/chat/completions — any endpoint
+# speaking that API works. `api_key_service` is a keyring service name
+# resolved via bin/auth_utils.get_api_key; set to a non-empty service name
+# the keyring can look up, or leave as LM_API_TOKEN for the default local
+# setup. Nothing in this file is hardcoded at the code level — it all comes
+# from this YAML.
+#
+# The labels below MUST match the intent_hint values memory_core consumes
+# when M3_INTENT_ROUTING is on:
 #   - user-fact:          prefer user-authored turns, run predecessor pull
 #   - temporal-reasoning: route through date-aware retrieval
 #   - multi-session:      shift to BM25-heavy for cross-session queries
 #   - general:            no special routing
+# Changing label names here without updating memory_core will make the
+# classifier's output unrecognized — rename on both sides together.
 #
 # Keep the prompt terse — the SLM is called on the hot path of every search
 # when the gate is on, so any latency here budgets against retrieval.
