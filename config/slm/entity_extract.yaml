@@ -2,6 +2,12 @@
 # user-turn titles with pithy entities, making BM25 retrieval match on
 # "my dog Sparky" even when the body text is phrased differently.
 #
+# !! EDIT BEFORE USING augment_memory.py enrich-titles !!
+# `url`, `model`, and `api_key_service` below are STARTER DEFAULTS — replace
+# with whatever endpoint and model your deployment actually runs. The wire
+# protocol is OpenAI-compatible /v1/chat/completions. See default.yaml for
+# the full edit-time checklist.
+#
 # The `labels` field is required by the profile loader but unused here —
 # the model's output is free-text, comma-split by slm_intent.extract_entities.
 # Keep it a single placeholder so the YAML validates.
