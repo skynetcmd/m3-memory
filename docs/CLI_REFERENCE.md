@@ -50,6 +50,7 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 | --- | --- | --- |
 | `bin/bench_memory.py` | Write/search/dedup micro-benchmarks | — |
 | `bin/ai_mechanic.py` | DESTRUCTIVE schema repair | `--database` is **required** (no default); also requires `--force` |
+| `bin/augment_memory.py` | Post-ingest augmentation: adjacent-turn linking + SLM-based title enrichment | `link-adjacent` / `enrich-titles` / `all` subcommands; entity-enrichment requires `M3_SLM_CLASSIFIER=1` ([SLM_INTENT.md](SLM_INTENT.md)) |
 | `bin/build_kg_variant.py` | Build KG-enriched variant from a source variant | Honors legacy `AGENT_DB` env var as an alias |
 | `bin/chatlog_init.py` | Interactive chatlog setup | `--db-path PATH` sets the chatlog DB in the saved config |
 | `bin/chatlog_ingest.py` | Ingest a transcript into the chatlog DB | `--db PATH` (deprecated, alias for `CHATLOG_DB_PATH`) |
@@ -82,6 +83,23 @@ The chatlog subsystem has its own resolver (see `bin/chatlog_config.py`):
 | `CHATLOG_MODE` | **Deprecated** — ignored with a one-time warning. The three-mode system (integrated/separate/hybrid) has collapsed into path equality: same file = integrated behavior, different file = separate behavior, promote semantics switch automatically. |
 
 See [CHATLOG.md](CHATLOG.md) for the full chatlog architecture.
+
+## SLM intent classifier (dormant by default)
+
+A separate env-gated subsystem controls the Small-Language-Model intent
+classifier that `bin/augment_memory.py` uses and that future retrieval
+wiring can consume:
+
+| Env | Role |
+| --- | --- |
+| `M3_SLM_CLASSIFIER` | Master gate for `bin/slm_intent.py`. Off by default. |
+| `M3_INTENT_ROUTING` | Separate gate for the retrieval-side consumer (role-boost + predecessor-pull in `memory_core`). Off by default. |
+| `M3_SLM_PROFILE` | Named profile to load; defaults to `default` (reads `config/slm/default.yaml`). |
+| `M3_SLM_PROFILES_DIR` | `os.pathsep`-separated list of dirs searched before `config/slm/`. Bench harnesses stack their own dir here. |
+
+Profiles are YAML, one file per name. See [SLM_INTENT.md](SLM_INTENT.md) for
+the full format reference, the three useful gate combinations, and
+walkthroughs for Ollama / LM Studio / OpenAI / bench-harness setups.
 
 ## Scripts that don't need the flag
 
