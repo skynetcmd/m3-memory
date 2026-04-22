@@ -82,8 +82,8 @@ m3-team = "m3_memory.team_cli:main"
 Homepage = "https://github.com/skynetcmd/m3-memory"
 Repository = "https://github.com/skynetcmd/m3-memory"
 "Bug Tracker" = "https://github.com/skynetcmd/m3-memory/issues"
-Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md"
+Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/docs/CHANGELOG.md"
+Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/AGENT_INSTRUCTIONS.md"
 
 [tool.setuptools.packages.find]
 where = ["."]
