@@ -1,11 +1,66 @@
 #!/usr/bin/env python3
-import argparse, json, os, subprocess, sys, time
+"""Scan orchestrator for the m3-memory security pipeline on LXC 504.
+
+Runs the standard scanner suite (gitleaks / trufflehog / trivy / semgrep /
+bandit / pip-audit / checkov / osv-scanner / safety / scancode / kubescape
+/ ruff / mypy) against a checkout and uploads each report to DefectDojo.
+
+DD_TOKEN resolution (in priority order):
+  1. DD_TOKEN environment variable
+  2. ~/.config/defectdojo/token   (single line, mode 0600)
+  3. /etc/defectdojo/token        (LXC-wide fallback, mode 0600, root-owned)
+
+No hardcoded fallback. If no source yields a token the script exits 2
+with a setup hint. Rotate by overwriting the token file or re-exporting
+the env var — no code change required.
+"""
+import argparse, json, os, stat, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
 import urllib.request, urllib.parse
 
 DD_URL = os.environ.get('DD_URL', 'http://10.21.40.54:8080')
-DD_TOKEN = os.environ.get('DD_TOKEN', 'REDACTED_DEFECTDOJO_TOKEN')
+
+
+def _load_dd_token() -> str:
+    """Resolve DD_TOKEN from env → ~/.config/defectdojo/token → /etc/defectdojo/token."""
+    env_token = os.environ.get('DD_TOKEN', '').strip()
+    if env_token:
+        return env_token
+    candidates = [
+        Path.home() / '.config' / 'defectdojo' / 'token',
+        Path('/etc/defectdojo/token'),
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            mode = path.stat().st_mode & 0o777
+        except OSError:
+            continue
+        # Warn loudly on world/group readable files — don't refuse (operator
+        # may have intentionally loosened for a service account) but make it
+        # visible in the scan log.
+        if mode & 0o077:
+            print(f"WARNING: {path} is mode {oct(mode)}; should be 0600", file=sys.stderr)
+        try:
+            token = path.read_text(encoding='utf-8').strip()
+        except OSError:
+            continue
+        if token:
+            return token
+    print(
+        "ERROR: DD_TOKEN not set and no token file found.\n"
+        "  Set one of:\n"
+        "    export DD_TOKEN=<token>\n"
+        "    echo <token> > ~/.config/defectdojo/token && chmod 600 ~/.config/defectdojo/token\n"
+        "    sudo mkdir -p /etc/defectdojo && echo <token> > /etc/defectdojo/token && sudo chmod 600 /etc/defectdojo/token",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+
+DD_TOKEN = _load_dd_token()
 
 # Ensure all scanner paths are in the PATH
 os.environ['PATH'] = '/usr/local/bin:/usr/bin:/bin:/root/.local/bin'
