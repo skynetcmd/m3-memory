@@ -73,6 +73,19 @@ _STATIC_REL_PATTERNS: list[tuple[re.Pattern[str], Callable[[datetime], datetime]
     (re.compile(r"\blast\s+month\b"), lambda a: a - timedelta(days=30)),
 ]
 
+# Cap on "N <unit> ago" deltas. timedelta itself raises OverflowError for
+# days > ~2.7 million; 100 years is a sane ceiling for memory-item references.
+_MAX_RELATIVE_DAYS = 365 * 100
+
+# Temporal-cue detection used by retrieval to decide whether a query needs
+# date-aware ranking. Kept narrow — just the common surface forms.
+_TEMPORAL_CUE_RES = [
+    re.compile(r"\b(when|before|after|how long|timeline|date)\b", re.IGNORECASE),
+    re.compile(r"\b(yesterday|today|tomorrow|recently|ago)\b", re.IGNORECASE),
+    re.compile(r"\blast\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|weekend|month)\b", re.IGNORECASE),
+]
+_ISO_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+
 def parse_generic_date(text: str) -> datetime | None:
     """Tries to parse a date from a string like 'May 25, 2023' or '25 May 2023'."""
     text = text.lower().strip()
@@ -140,23 +153,34 @@ def resolve_temporal_expressions(text: str, anchor_date: datetime | str) -> list
             })
 
     # 2. Simple relative: "yesterday", "today", "tomorrow", "recently"
+    # finditer instead of search so every occurrence contributes a result —
+    # "yesterday I did X and yesterday I did Y" was previously collapsing.
     for pattern, days in _SIMPLE_REL_PATTERNS:
-        m = pattern.search(text_lower)
-        if m:
-            resolved = anchor + timedelta(days=days)
-            results.append({
-                "ref": m.group(0),
-                "absolute": resolved.date().isoformat()
-            })
-
-    # 3. Numeric relative: "N days/weeks/months/years ago"
-    for pattern, delta_fn in _NUMERIC_REL_PATTERNS:
         for match in pattern.finditer(text_lower):
-            resolved = anchor - delta_fn(match.group(1))
+            resolved = anchor + timedelta(days=days)
             results.append({
                 "ref": match.group(0),
                 "absolute": resolved.date().isoformat()
             })
+
+    # 3. Numeric relative: "N days/weeks/months/years ago"
+    # Guard against overflow: "99999999999 months ago" would raise
+    # OverflowError on timedelta construction. Skip deltas beyond 100 years
+    # (pathological input; legitimate memory items don't reference that far
+    # back) and swallow OverflowError/ValueError defensively.
+    for pattern, delta_fn in _NUMERIC_REL_PATTERNS:
+        for match in pattern.finditer(text_lower):
+            try:
+                delta = delta_fn(match.group(1))
+                if abs(delta.days) > _MAX_RELATIVE_DAYS:
+                    continue
+                resolved = anchor - delta
+                results.append({
+                    "ref": match.group(0),
+                    "absolute": resolved.date().isoformat()
+                })
+            except (OverflowError, ValueError):
+                continue
 
     # 4. "last [weekday]"
     for match in _LAST_WEEKDAY_RE.finditer(text_lower):
@@ -167,16 +191,32 @@ def resolve_temporal_expressions(text: str, anchor_date: datetime | str) -> list
         })
 
     # 5. "last weekend", "last week", "next month", "last month"
+    # Same finditer fix as _SIMPLE_REL_PATTERNS above.
     for pattern, resolver in _STATIC_REL_PATTERNS:
-        m = pattern.search(text_lower)
-        if m:
+        for match in pattern.finditer(text_lower):
             resolved = resolver(anchor)
             results.append({
-                "ref": m.group(0),
+                "ref": match.group(0),
                 "absolute": resolved.date().isoformat()
             })
 
     return results
+
+
+def has_temporal_cues(text: str) -> bool:
+    """Fast check: does ``text`` contain any common temporal expression?
+
+    Used by intent-routing and retrieval-side date boosts to decide whether
+    a query needs date-aware handling at all. Returns True on the first
+    match; no full enumeration.
+    """
+    return any(cue.search(text) for cue in _TEMPORAL_CUE_RES)
+
+
+def extract_referenced_dates(text: str) -> list[str]:
+    """Return ISO-8601 date substrings (YYYY-MM-DD) referenced in ``text``."""
+    return _ISO_DATE_RE.findall(text)
+
 
 # ── Time-aware retrieval helpers ─────────────────────────────────────────────
 # Used by memory_search_scored_impl(smart_time_boost=...) and bench ingest to
