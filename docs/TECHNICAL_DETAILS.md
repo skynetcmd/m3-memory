@@ -1,9 +1,9 @@
-# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Technical Reference
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Technical Reference
 
 
 > Implementation specifics: schema, search internals, sync protocol, security, configuration, testing, and developer tooling.
 >
-> For the conceptual system design, see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+> For the conceptual system design, see [docs/ARCHITECTURE.md](ARCHITECTURE.md).
 > For the AI/LLM agent instruction set, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 > For the feature overview, see [CORE_FEATURES.md](./CORE_FEATURES.md).
 
@@ -27,7 +27,7 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 ## 💾 Storage Implementation
 
-> For the conceptual storage hierarchy (SQLite → PostgreSQL → ChromaDB), see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+> For the conceptual storage hierarchy (SQLite → PostgreSQL → ChromaDB), see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### SQLite Configuration
 
@@ -143,7 +143,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ## 🔍 Search Engine
 
-> For the conceptual search pipeline overview, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
+> For the conceptual search pipeline overview, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Implementation Details
 

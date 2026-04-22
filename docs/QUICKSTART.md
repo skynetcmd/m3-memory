@@ -1,4 +1,4 @@
-# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Quick Start
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Quick Start
 
 Get persistent memory running with your MCP agent in under five minutes.
 
@@ -99,7 +99,7 @@ Restart your agent after saving the config.
 
 ### Agents without native MCP support
 
-Some agents can't speak MCP directly — Aider and Openclaw are the two we support today. For them, route chat completions through the bundled [`mcp_proxy`](./bin/mcp_proxy.py), an OpenAI-compatible server on `localhost:9000` that injects m3-memory tools (and the rest of the catalog — 66 tools total) into every request and executes `tool_calls` by calling bridge functions directly.
+Some agents can't speak MCP directly — Aider and Openclaw are the two we support today. For them, route chat completions through the bundled [`mcp_proxy`](../bin/mcp_proxy.py), an OpenAI-compatible server on `localhost:9000` that injects m3-memory tools (and the rest of the catalog — 66 tools total) into every request and executes `tool_calls` by calling bridge functions directly.
 
 **High-level flow:** agent → `localhost:9000/v1` (OpenAI-compatible) → proxy injects tools → real model provider (Anthropic / Google / xAI / LM Studio) → model may emit `tool_calls` → proxy executes them against m3-memory → results fed back → final answer returned to agent.
 
@@ -182,7 +182,7 @@ Caveat: when the proxy is down, Openclaw's chat completions **will fail** becaus
 
 #### Migrating existing flat-file memory
 
-If you already have memories in any of these stores — Claude Code flat files, `GEMINI.md` added-memories section, or Openclaw's SQLite — use [`bin/migrate_flat_memory.py`](./bin/migrate_flat_memory.py) to import them. It's idempotent (safe to re-run), verifies every write via SHA-256 round-trip, and prints a manual cleanup list after verification but never deletes source files itself.
+If you already have memories in any of these stores — Claude Code flat files, `GEMINI.md` added-memories section, or Openclaw's SQLite — use [`bin/migrate_flat_memory.py`](../bin/migrate_flat_memory.py) to import them. It's idempotent (safe to re-run), verifies every write via SHA-256 round-trip, and prints a manual cleanup list after verification but never deletes source files itself.
 
 ```bash
 python bin/migrate_flat_memory.py --dry-run                    # preview

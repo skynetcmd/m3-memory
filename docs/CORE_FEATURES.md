@@ -1,4 +1,4 @@
-# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
 > 66 MCP tools. 193 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
 
@@ -9,7 +9,7 @@ For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.
 ## 👁️ Overview
 
 <p align="center">
-  <img src="docs/overview_diagram.svg" alt="M3 Memory architecture overview" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/overview_diagram.svg" alt="M3 Memory architecture overview" width="100%">
 </p>
 
 M3 Memory combines persistent storage, hybrid search, contradiction detection, knowledge graph, and cross-device sync in a single local-first package. It runs entirely on your hardware — no cloud dependency, no API costs.
