@@ -36,7 +36,7 @@ _(no module docstring — update the source file.)_
 | `--importance` | Importance score for update (0.0 to 1.0) | `-1.0` | No importance change on update; -1.0 signals no-op to update_knowledge() | float | Sets item importance to specified value (0.0–1.0 range) |
 | `--reembed` | Force vector re-embedding during update | `False` | Update does not re-embed vectors | store_true | Forces vector re-embedding during update via update_knowledge() |
 | `--hard` | Permanently delete from database (requires exact string 'WIPE') | None | Soft-delete only (tombstone); data recoverable | str | Hard-delete (permanent) only if value is exactly "WIPE"; any other value errors |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
 ## Environment variables read
 

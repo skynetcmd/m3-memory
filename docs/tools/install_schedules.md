@@ -23,9 +23,9 @@ Uses project virtual environment paths and ensures log directories exist.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--list` | List configured schedules and exit. | `False` | No-op; prints "Nothing to do" message and exits | store_true | Lists all 5 configured schedules (auditor, sync, maintenance, rotator, chatlog-embed-sweep) and exits |
-| `--add` | Install one schedule by name (e.g. chatlog-embed-sweep) or 'all'. | — | No-op; prints "Nothing to do" message and exits | str | Installs Windows Task(s) or crontab entries matching NAME; 'all' installs all 5 schedules |
-| `--remove` | Remove one schedule by name, or 'all'. | — | No-op; prints "Nothing to do" message and exits | str | Removes Windows Task(s) matching NAME; 'all' removes all 5 schedules; Unix users edit crontab manually |
+| `--list` | List configured schedules and exit. | `False` | Prints "Nothing to do" message and exits. | store_true | Lists all 5 schedules (auditor, sync, maintenance, rotator, chatlog-embed-sweep). |
+| `--add` | Install one schedule by name (e.g. chatlog-embed-sweep) or 'all'. | — | Prints "Nothing to do" message and exits. | str | Installs Windows Task(s) or crontab entries matching NAME; 'all' installs all 5. |
+| `--remove` | Remove one schedule by name, or 'all'. | — | Prints "Nothing to do" message and exits. | str | Removes Windows Task(s) matching NAME; 'all' removes all; Unix users edit crontab. |
 
 ## Environment variables read
 

@@ -32,8 +32,8 @@ Questions answered:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--trace` |  | — |  | Path |  |
-| `--out` |  | None |  | Path |  |
+| `--trace` | Path to retrieval_trace.jsonl file. | — | Argument is required. | Path | Loads and analyzes the trace file at PATH. |
+| `--out` | Optional path to write JSON analysis results. | None | Analysis printed to stdout only. | Path | Writes analysis JSON to PATH; also prints to stdout. |
 
 ## Environment variables read
 

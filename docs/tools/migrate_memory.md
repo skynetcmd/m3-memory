@@ -46,23 +46,23 @@ transaction already committed.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--database` | SQLite main-DB path override. Sets M3_DATABASE for this run. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite main-DB path override. Sets M3_DATABASE for this run. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Displays status for all configured targets (main + chatlog if available). | str | Shows status for only specified target. |
 | `--to` | Apply up to this version (default: latest) | None | Applies all pending migrations up to latest available version. | int | Applies migrations up to specified version; stops before newer ones. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; applies migrations to all configured targets. | str | Applies migrations to only specified target. |
 | `-y`, `--yes` | Skip confirmation prompts | `False` | Prompts user to confirm backup dir and migration execution. | store_true | Auto-selects default backup dir (~/.m3-memory/backups) and confirms migration. |
-| `--dry-run` | Print the plan + DDL without applying anything | `False` |  | store_true |  |
+| `--dry-run` | Print the plan + DDL without applying anything | `False` | Applies changes. | store_true | Prints the plan without mutating any DB. |
 | `--to` | Roll back to this version | — | Requires explicit version (no default). | int | Reverts migrations above specified version; checks for down files first. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; rolls back all configured targets. | str | Rolls back only specified target. |
 | `-y`, `--yes` | Skip confirmation prompts | `False` | Prompts user to confirm backup dir and rollback execution. | store_true | Auto-selects default backup dir and confirms rollback. |
-| `--dry-run` | Print the plan + DDL without reverting anything | `False` |  | store_true |  |
-| `--to` | Plan up to this version (default: latest) | None |  | int |  |
+| `--dry-run` | Print the plan + DDL without reverting anything | `False` | Reverts migrations. | store_true | Prints the plan without mutating any DB. |
+| `--to` | Plan up to this version (default: latest) | None | Plans all pending migrations up to latest available version. | int | Plans migrations up to specified version; stops before newer ones. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Creates backup for all configured targets in backup_dir/<target>/ subdirs. | str | Creates backup for only specified target. |
 | `--out` | Backup directory (overrides saved default) | None | Uses saved backup dir from .migrate_config.json; prompts if missing. | str | Uses specified directory instead of saved config; still requires confirmation if not -y. |
 | `--target` | Which DB target to operate on (default: all configured) | `all` | Restores main database; warns if --target all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
 | `-y`, `--yes` | Skip interactive prompts | `False` | Prompts user for confirmation before creating backup. | store_true | Skips confirmation; creates backup immediately. |
 | `path` | Path to the backup .db file | — | Required positional argument; no default. | str | Restores from specified backup file path. |
-| `--target` | Which DB target to restore (default: main; use chatlog for chat log DB) | `main` |  | str |  |
+| `--target` | Which DB target to restore (default: main; use chatlog for chat log DB) | `main` | Restores main database; warns if all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
 | `-y`, `--yes` | Skip confirmation | `False` | Prompts user to confirm before overwriting current DB. | store_true | Skips confirmation; proceeds directly to restore. |
 
 ## Environment variables read

@@ -64,7 +64,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 | `--ingest-concurrency` | number of instances to ingest in parallel | `4` | Ingests 4 instances in parallel | int | Ingests N instances in parallel with asyncio.Semaphore |
 | `--per-item` | use memory_write_impl per-turn (enables Phase 1 enrichers). Much slower than bulk path; default off. | `False` | Uses memory_write_bulk_impl (fast) | store_true | Uses memory_write_impl per-turn (enables enrichers, slower) |
 | `--variant` | tag every ingested row with this variant label | `` | No variant label | str | Tags all ingested items with variant ID |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
 ## Environment variables read
 
