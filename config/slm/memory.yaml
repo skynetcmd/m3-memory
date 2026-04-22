@@ -1,5 +1,12 @@
 # Memory retrieval profile — production MCP memory_search / memory_suggest.
 #
+# !! EDIT BEFORE ENABLING THE GATE (M3_SLM_CLASSIFIER=1) !!
+# `url`, `model`, and `api_key_service` below are STARTER DEFAULTS — replace
+# with whatever endpoint and model your deployment actually runs. The wire
+# protocol is OpenAI-compatible /v1/chat/completions, so any OpenAI/Ollama/
+# LM Studio/llama-server/vLLM/remote host speaking that API works. See
+# default.yaml for the full edit-time checklist.
+#
 # Distinct from default.yaml mainly by being intentionally close to it —
 # we keep production routing stable and iterate prompt+model separately
 # in the `default` profile. Flip M3_SLM_PROFILE=memory on production
