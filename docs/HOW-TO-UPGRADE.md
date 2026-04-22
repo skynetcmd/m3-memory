@@ -1,6 +1,6 @@
 # How to Upgrade m3-memory
 
-This guide covers upgrading an existing checkout in place — pulling new code, updating dependencies, running schema migrations, and keeping the host OS current. For a fresh install see [`docs/install_linux.md`](docs/install_linux.md), [`docs/install_macos.md`](docs/install_macos.md), or [`docs/install_windows-powershell.md`](docs/install_windows-powershell.md).
+This guide covers upgrading an existing checkout in place — pulling new code, updating dependencies, running schema migrations, and keeping the host OS current. For a fresh install see [`docs/install_linux.md`](install_linux.md), [`docs/install_macos.md`](install_macos.md), or [`docs/install_windows-powershell.md`](install_windows-powershell.md).
 
 ---
 
@@ -306,4 +306,4 @@ pip install -r requirements.txt
 - **MCP server won't start after upgrade** → check `memory/logs/` for the last traceback, and confirm `python bin/migrate_memory.py status` shows no pending migrations.
 - **Pytest failures on first run after upgrade** → run `pytest --lf -vv` to re-run only the failing tests with full output; most often an env var (`M3_*`) or local LLM endpoint regressed.
 
-More recipes in [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+More recipes in [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md).

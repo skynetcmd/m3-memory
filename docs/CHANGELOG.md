@@ -128,4 +128,4 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
-For the full technical history see [docs/CHANGELOG_2026.md](./docs/CHANGELOG_2026.md).
+For the full technical history see [docs/CHANGELOG_2026.md](CHANGELOG_2026.md).
