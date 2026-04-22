@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_agent_instructions.py
-sha1: b3bf1769a873
-mtime_utc: 2026-04-21T20:46:05.778047+00:00
-generated_utc: 2026-04-21T21:22:27.067740+00:00
+sha1: 539fb6aea7aa
+mtime_utc: 2026-04-22T01:03:02.029175+00:00
+generated_utc: 2026-04-22T01:22:54.521056+00:00
 private: false
 ---
 
