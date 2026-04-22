@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/reingest.py
 sha1: 3f8d1fbd5f82
 mtime_utc: 2026-04-21T20:02:02.909000+00:00
-generated_utc: 2026-04-21T21:26:02.046218+00:00
+generated_utc: 2026-04-22T01:29:51.723889+00:00
 private: false
 ---
 
@@ -29,9 +29,9 @@ expressed on the CLI that isn't in presets is treated as heuristic-only.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--samples` | Sample IDs to ingest (default: the four Phase 1 convs). | `['conv-26', 'conv-30', 'conv-41', 'conv-42']` |  | str |  |
-| `--variants` | 'Variant names to produce in one process. Known presets: ' + ', '.join(VARIANT_PRESETS.keys()) + '. Unknown names default to heuristic-only.' | `['heuristic_c1c4']` |  | str |  |
-| `--features` | Comma-separated metadata.features override. Empty uses variant defaults. | `` |  | str |  |
+| `--samples` | Sample IDs to ingest (default: the four Phase 1 convs). | `['conv-26', 'conv-30', 'conv-41', 'conv-42']` | Ingests the four Phase 1 samples. | str | Ingests specified sample IDs (space-separated). |
+| `--variants` | 'Variant names to produce in one process. Known presets: ' + ', '.join(VARIANT_PRESETS.keys()) + '. Unknown names default to heuristic-only.' | `['heuristic_c1c4']` | Produces heuristic_c1c4 variant only. | str | Produces specified variant(s); unknown names default to heuristic-only. |
+| `--features` | Comma-separated metadata.features override. Empty uses variant defaults. | `` | Uses variant's default features. | str | Overrides feature list for all ingested items. |
 
 ## Environment variables read
 

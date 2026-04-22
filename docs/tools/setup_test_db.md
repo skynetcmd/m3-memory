@@ -31,8 +31,8 @@ Exits non-zero if any migration fails.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--force` | Wipe the target DB file before seeding (default: append to existing). | `False` |  | store_true |  |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--force` | Wipe the target DB file before seeding (default: append to existing). | `False` | Appends migrations to existing DB (idempotent). | store_true | Deletes DB + WAL/SHM files, then seeds fresh. |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 
 ## Environment variables read
 

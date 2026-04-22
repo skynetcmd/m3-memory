@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/analyze_prompt.py
 sha1: 8e143feb913a
 mtime_utc: 2026-04-21T20:02:02.907203+00:00
-generated_utc: 2026-04-21T21:26:02.024320+00:00
+generated_utc: 2026-04-22T01:29:51.701314+00:00
 private: false
 ---
 
@@ -32,9 +32,9 @@ Outputs:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--audit-dir` |  | `benchmarks/locomo/runs/audit_20260417_141947` |  | str |  |
-| `--dataset` |  | `str(BASE_DIR / 'data' / 'locomo' / 'locomo10.json')` |  | str |  |
-| `--limit` |  | `0` |  | int |  |
+| `--audit-dir` | Path to audit run directory containing retrieval_trace.jsonl. | `benchmarks/locomo/runs/audit_20260417_141947` | Uses fixed hardcoded audit directory. | str | Uses audit run at PATH instead. |
+| `--dataset` | Path to LOCOMO dataset JSON file. | `str(BASE_DIR / 'data' / 'locomo' / 'locomo10.json')` | Uses hardcoded dataset path. | str | Loads dataset from PATH. |
+| `--limit` | Process only first N questions from trace (0 = all). | `0` | Processes all questions in trace. | int | Limits processing to first N questions. |
 
 ## Environment variables read
 

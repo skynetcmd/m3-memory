@@ -29,7 +29,7 @@ summary.json (under key "variant") unless already present.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--chain-log` |  | — |  | Path |  |
+| `--chain-log` | Path to chain.log with START/DONE brackets. | — | Argument is required. | Path | Parses chain log and stamps variants into matching audit run summaries. |
 
 ## Environment variables read
 

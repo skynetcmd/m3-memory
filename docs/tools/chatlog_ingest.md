@@ -37,12 +37,12 @@ message ids / indices have been ingested so re-invoking on the same transcript
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
 | `--format` | Transcript format / host agent | — | Auto-detects format from first 4KB of data | str | Parses as specified format (claude-code/gemini-cli/opencode/aider) |
-| `--transcript-path` | Path to the transcript file on disk | — |  | str |  |
-| `--session-id` | Override conversation_id (defaults to parsed sessionId) | `` |  | str |  |
-| `--variant` | Provenance tag (e.g. pre_compact, stop, session_end, test) | None |  | str |  |
-| `--db` | Deprecated: chatlog-only override. Prefer --database. Sets CHATLOG_DB_PATH for the duration of the process. | None |  | str |  |
-| `--spill-dir` | Override spill directory for this run (dev smoke tests). Prevents stale spill files from polluting production. | None |  | str |  |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--transcript-path` | Path to the transcript file on disk | — | Reads transcript file at specified path | str | Uses the provided file path as transcript source |
+| `--session-id` | Override conversation_id (defaults to parsed sessionId) | `` | Uses conversation_id parsed from transcript | str | Overrides conversation_id; used if transcript lacks sessionId |
+| `--variant` | Provenance tag (e.g. pre_compact, stop, session_end, test) | None | No variant tag added to rows | str | Tags each ingested row with provided variant value |
+| `--db` | Deprecated: chatlog-only override. Prefer --database. Sets CHATLOG_DB_PATH for the duration of the process. | None | Deprecated alias for --database / CHATLOG_DB_PATH | str | Deprecated alias for --database / CHATLOG_DB_PATH |
+| `--spill-dir` | Override spill directory for this run (dev smoke tests). Prevents stale spill files from polluting production. | None | Uses configured spill directory | str | Routes spill writes to PATH instead of configured dir (dev smoke tests only) |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db | str | Routes this run against PATH for all DB reads/writes |
 
 ## Environment variables read
 
