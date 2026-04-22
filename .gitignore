@@ -104,6 +104,13 @@ examples/sandbox-openclaw/.env
 backups/
 AI_Folder_Backup/
 
+# Soft-delete staging area for files retired from the root / bin/. Anything
+# moved here is kept locally until manually deleted — safer than outright
+# `rm` for ad-hoc diagnostic scripts that might still be referenced from a
+# runbook or a stashed change somewhere. Review contents periodically and
+# `rm -r to_be_deleted/` once confirmed unneeded.
+to_be_deleted/
+
 # Generated MCP config (machine-specific paths; run bin/generate_configs.py to create)
 .mcp.json
 
