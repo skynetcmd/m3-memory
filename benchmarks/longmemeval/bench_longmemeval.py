@@ -321,7 +321,7 @@ async def ingest_instance(instance: dict, variant: str = "", per_item: bool = Fa
                 embed=it.get("embed", True),
                 user_id=it.get("user_id", ""),
                 conversation_id=it.get("conversation_id", ""),
-                variant=it.get("variant"),
+                variant=it.get("variant") or (variant or None),
             )
     else:
         await memory_write_bulk_impl(items, variant=variant or None)
@@ -866,8 +866,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ingest-concurrency", type=int, default=4,
                    help="number of instances to ingest in parallel")
     p.add_argument("--per-item", action="store_true",
-                   help="use memory_write_impl per-turn (enables Phase 1 enrichers). "
-                        "Much slower than bulk path; default off.")
+                   help="ingest one turn per transaction via memory_write_impl. "
+                        "Contradiction-check and emitters see prior turns in the "
+                        "same instance (bulk path writes the whole instance as a "
+                        "set and can't). Enrichment runs on both paths — this "
+                        "flag only changes transaction granularity and ordering "
+                        "semantics. Roughly 10x slower. Default off (bulk matches "
+                        "production MCP clients; per-item is an ablation knob).")
     p.add_argument("--variant", type=str, default="",
                    help="tag every ingested row with this variant label")
     from m3_sdk import add_database_arg
