@@ -1,0 +1,24 @@
+# Entity extraction profile — used by bin/augment_memory.py to prefix
+# user-turn titles with pithy entities, making BM25 retrieval match on
+# "my dog Sparky" even when the body text is phrased differently.
+#
+# The `labels` field is required by the profile loader but unused here —
+# the model's output is free-text, comma-split by slm_intent.extract_entities.
+# Keep it a single placeholder so the YAML validates.
+
+url: http://127.0.0.1:11434/v1/chat/completions
+model: qwen2.5:1.5b-instruct
+api_key_service: LM_API_TOKEN
+timeout_s: 5.0
+temperature: 0
+system: |
+  Extract 1 to 3 specific, concrete entities from the user's message.
+  Good entities: proper nouns, named locations, breed/model names, dates, amounts.
+  Skip: pronouns, common nouns alone, verbs, adjectives.
+
+  Reply with ONLY the entities separated by commas. No prose, no labels.
+
+  If the text contains no concrete entity, reply with a single dash.
+labels:
+  - extracted
+fallback: extracted
