@@ -1,0 +1,17 @@
+# Checkov configuration — picked up automatically from the repo root.
+#
+# `skip-check` entries are emitted as SKIPPED in both the console output and
+# the SARIF report, so downstream DefectDojo imports don't re-surface the
+# finding. Inline `# checkov:skip=<id>` comments in YAML files work for
+# console output but DO NOT remove findings from the SARIF file — that's
+# why this config exists instead.
+
+skip-check:
+  # CKV_GHA_7: GitHub Actions workflow_dispatch inputs. Our publish.yml has
+  # a single `dry_run` choice input used to route to TestPyPI vs PyPI; the
+  # only consumer is an equality check in a job `if:` condition. No value
+  # flows into build or publish commands.
+  - CKV_GHA_7
+
+quiet: true
+soft-fail: true

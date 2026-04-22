@@ -58,8 +58,8 @@ def _exchange_credentials_for_token(username: str, password: str) -> str | None:
         headers={'Content-Type': 'application/json'},
     )
     try:
-        # nosec B310: scheme is whitelisted at module load; see DD_URL check.
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        # B310: DD_URL scheme whitelisted to http/https at module load.
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
             data = json.loads(resp.read().decode('utf-8'))
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
         print(f"WARNING: credential exchange against {url} failed: {type(e).__name__}: {e}", file=sys.stderr)
@@ -192,8 +192,8 @@ def dd_request(path, method='GET', data=None):
     req = urllib.request.Request(url, method=method, headers={'Authorization': f'Token {DD_TOKEN}', 'Content-Type': 'application/json'})
     body = json.dumps(data).encode() if data else None
     try:
-        # nosec B310: scheme is whitelisted at module load; see DD_URL check.
-        with urllib.request.urlopen(req, body, timeout=30) as resp:
+        # B310: DD_URL scheme whitelisted to http/https at module load.
+        with urllib.request.urlopen(req, body, timeout=30) as resp:  # nosec B310
             return resp.status, resp.read().decode()
     except Exception as e:
         return 500, str(e)
