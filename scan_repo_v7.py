@@ -5,14 +5,27 @@ Runs the standard scanner suite (gitleaks / trufflehog / trivy / semgrep /
 bandit / pip-audit / checkov / osv-scanner / safety / scancode / kubescape
 / ruff / mypy) against a checkout and uploads each report to DefectDojo.
 
-DD_TOKEN resolution (in priority order):
-  1. DD_TOKEN environment variable
-  2. ~/.config/defectdojo/token   (single line, mode 0600)
-  3. /etc/defectdojo/token        (LXC-wide fallback, mode 0600, root-owned)
+DefectDojo credential resolution (first non-empty source wins):
+  1. DD_TOKEN env var                                  → API Key (direct)
+  2. DD_USERNAME + DD_PASSWORD env vars                → API Key (fetched via /api/v2/api-token-auth/)
+  3. ~/.config/defectdojo/token  (single line)         → API Key (direct)
+  4. ~/.config/defectdojo/credentials (user:pass)      → API Key (fetched)
+  5. /etc/defectdojo/token       (LXC-wide fallback)   → API Key (direct)
+  6. /etc/defectdojo/credentials (LXC-wide fallback)   → API Key (fetched)
+
+DefectDojo exposes two authentication paths in the admin UI: "API Key"
+(long-lived per-user token shown under each user's profile) and an
+"Auth Header" path reached by POSTing {username, password} to
+/api/v2/api-token-auth/, which *returns the same API Key* the UI shows.
+The wire format for both is identical once we have the token:
+    Authorization: Token <api-key>
+So the resolver supports both inputs but converges on a single static
+token at the transport layer — no JWT refresh loop, no in-memory expiry
+tracking. Credential files are expected at mode 0600; loose permissions
+warn but still load (operator may have relaxed for a service account).
 
 No hardcoded fallback. If no source yields a token the script exits 2
-with a setup hint. Rotate by overwriting the token file or re-exporting
-the env var — no code change required.
+with a setup hint covering both input shapes.
 """
 import argparse, json, os, stat, subprocess, sys, time
 from datetime import datetime
@@ -22,39 +35,101 @@ import urllib.request, urllib.parse
 DD_URL = os.environ.get('DD_URL', 'http://10.21.40.54:8080')
 
 
+def _exchange_credentials_for_token(username: str, password: str) -> str | None:
+    """POST credentials to /api/v2/api-token-auth/ and return the API Key string.
+
+    Returns None on any failure; caller logs + falls through to the next
+    source. Uses urllib so the resolver has zero third-party deps — the
+    `requests` import used by upload_import() is deferred to run-time.
+    """
+    url = f'{DD_URL}/api/v2/api-token-auth/'
+    payload = json.dumps({'username': username, 'password': password}).encode('utf-8')
+    req = urllib.request.Request(
+        url, data=payload, method='POST',
+        headers={'Content-Type': 'application/json'},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
+        print(f"WARNING: credential exchange against {url} failed: {type(e).__name__}: {e}", file=sys.stderr)
+        return None
+    token = (data.get('token') or '').strip() if isinstance(data, dict) else ''
+    return token or None
+
+
+def _read_secret_file(path: Path) -> str | None:
+    """Read a mode-0600 secret file; warn on loose perms, return stripped contents."""
+    if not path.exists():
+        return None
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        return None
+    if mode & 0o077:
+        print(f"WARNING: {path} is mode {oct(mode)}; should be 0600", file=sys.stderr)
+    try:
+        return path.read_text(encoding='utf-8').strip() or None
+    except OSError:
+        return None
+
+
 def _load_dd_token() -> str:
-    """Resolve DD_TOKEN from env → ~/.config/defectdojo/token → /etc/defectdojo/token."""
+    """Resolve a DefectDojo API Key from env vars or the file-based vault.
+
+    Accepts either a static token or username:password credentials at each
+    tier (env > ~/.config/defectdojo > /etc/defectdojo). Credentials are
+    exchanged for the same API Key the UI shows, so the transport path is
+    identical regardless of input shape.
+    """
+    # Tier 1: env token wins (what CI typically sets)
     env_token = os.environ.get('DD_TOKEN', '').strip()
     if env_token:
         return env_token
-    candidates = [
-        Path.home() / '.config' / 'defectdojo' / 'token',
-        Path('/etc/defectdojo/token'),
-    ]
-    for path in candidates:
-        if not path.exists():
-            continue
-        try:
-            mode = path.stat().st_mode & 0o777
-        except OSError:
-            continue
-        # Warn loudly on world/group readable files — don't refuse (operator
-        # may have intentionally loosened for a service account) but make it
-        # visible in the scan log.
-        if mode & 0o077:
-            print(f"WARNING: {path} is mode {oct(mode)}; should be 0600", file=sys.stderr)
-        try:
-            token = path.read_text(encoding='utf-8').strip()
-        except OSError:
-            continue
+    # Tier 1b: env username/password, exchanged
+    env_user = os.environ.get('DD_USERNAME', '').strip()
+    env_pass = os.environ.get('DD_PASSWORD', '').strip()
+    if env_user and env_pass:
+        token = _exchange_credentials_for_token(env_user, env_pass)
         if token:
             return token
+
+    # Tiers 2 and 3: filesystem. For each directory, check token file then
+    # credentials file — operator can drop whichever shape they prefer.
+    dirs = [
+        Path.home() / '.config' / 'defectdojo',
+        Path('/etc/defectdojo'),
+    ]
+    for d in dirs:
+        # Static token file
+        token = _read_secret_file(d / 'token')
+        if token:
+            return token
+        # Credentials file (user:pass on a single line, or user and password on two lines)
+        raw = _read_secret_file(d / 'credentials')
+        if not raw:
+            continue
+        if ':' in raw.splitlines()[0]:
+            u, _, p = raw.splitlines()[0].partition(':')
+        else:
+            lines = [x.strip() for x in raw.splitlines() if x.strip()]
+            if len(lines) < 2:
+                print(f"WARNING: {d/'credentials'} must be 'user:pass' or two lines", file=sys.stderr)
+                continue
+            u, p = lines[0], lines[1]
+        token = _exchange_credentials_for_token(u.strip(), p.strip())
+        if token:
+            return token
+
     print(
-        "ERROR: DD_TOKEN not set and no token file found.\n"
-        "  Set one of:\n"
-        "    export DD_TOKEN=<token>\n"
-        "    echo <token> > ~/.config/defectdojo/token && chmod 600 ~/.config/defectdojo/token\n"
-        "    sudo mkdir -p /etc/defectdojo && echo <token> > /etc/defectdojo/token && sudo chmod 600 /etc/defectdojo/token",
+        "ERROR: no DefectDojo credentials configured.\n"
+        "  Provide one of the following and rerun:\n"
+        "    export DD_TOKEN=<api-key>\n"
+        "    export DD_USERNAME=<user> DD_PASSWORD=<pass>\n"
+        "    echo <api-key> > ~/.config/defectdojo/token && chmod 600 ~/.config/defectdojo/token\n"
+        "    echo 'user:pass' > ~/.config/defectdojo/credentials && chmod 600 ~/.config/defectdojo/credentials\n"
+        "    sudo mkdir -p /etc/defectdojo && echo <api-key> > /etc/defectdojo/token && sudo chmod 600 /etc/defectdojo/token\n"
+        "    sudo mkdir -p /etc/defectdojo && echo 'user:pass' > /etc/defectdojo/credentials && sudo chmod 600 /etc/defectdojo/credentials",
         file=sys.stderr,
     )
     sys.exit(2)
