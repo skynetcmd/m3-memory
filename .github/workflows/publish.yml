@@ -3,6 +3,12 @@ name: Publish to PyPI
 # checkov:skip=CKV_GHA_7: dry_run is a constrained choice input used to route
 # between TestPyPI and PyPI; no value flows into build/publish commands beyond
 # an equality check.
+# checkov:skip=CKV2_GHA_1: publish.yml is release-triggered (`on: release`) or
+# manually invoked (`workflow_dispatch`). There is no PR/push trigger whose
+# permissions we could further constrain at the top level. The two publish
+# jobs each declare `permissions: id-token: write` and nothing else (trusted
+# publishing to PyPI/TestPyPI); the build job runs with the default
+# `contents: read` set at the workflow level.
 
 on:
   release:
