@@ -1,0 +1,32 @@
+# Default SLM intent profile — fallback used when no named profile is specified.
+#
+# The labels here match the intent_hint values consumed by
+# memory_core.memory_search_scored_impl when M3_INTENT_ROUTING is on:
+#   - user-fact:          prefer user-authored turns, run predecessor pull
+#   - temporal-reasoning: route through date-aware retrieval
+#   - multi-session:      shift to BM25-heavy for cross-session queries
+#   - general:            no special routing
+#
+# Keep the prompt terse — the SLM is called on the hot path of every search
+# when the gate is on, so any latency here budgets against retrieval.
+
+url: http://127.0.0.1:11434/v1/chat/completions
+model: qwen2.5:1.5b-instruct
+api_key_service: LM_API_TOKEN
+timeout_s: 5.0
+temperature: 0
+system: |
+  You classify a user's memory-retrieval query into exactly one category.
+  Reply with ONLY the category name — no explanation, no punctuation.
+
+  Categories:
+  - user-fact: asks about a fact the user stated (name, preference, profession, pet, location)
+  - temporal-reasoning: asks about time, dates, sequences, or "when/before/after/how long"
+  - multi-session: requires comparing or counting across multiple past sessions
+  - general: anything else (chat, follow-ups, commands)
+labels:
+  - user-fact
+  - temporal-reasoning
+  - multi-session
+  - general
+fallback: general
