@@ -9,6 +9,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_protocol import _THINK_TAG_RE  # shared compiled regex
 from llm_failover import get_best_llm
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -406,14 +407,14 @@ async def query_local_model(prompt: str):
     finish_reason = choice.get("finish_reason", "unknown")
     raw_content   = choice.get("message", {}).get("content", "")
 
-    # Extract answer by stripping <think> tags
-    content = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
+    # Extract answer by stripping <think> tags (shared compiled pattern)
+    content = _THINK_TAG_RE.sub("", raw_content).strip()
 
     # Protocol #1 — archive substantial reasoning chains
     # Some providers use 'reasoning_content', others put it inside <think> tags in 'content'
     raw_reasoning = choice["message"].get("reasoning_content", "")
     if not raw_reasoning:
-        think_match = re.search(r"<think>(.*?)</think>", raw_content, flags=re.DOTALL)
+        think_match = _THINK_TAG_RE.search(raw_content)
         if think_match:
             raw_reasoning = think_match.group(1).strip()
 
