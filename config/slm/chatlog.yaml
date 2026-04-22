@@ -1,0 +1,27 @@
+# Chatlog triage profile — classifies inbound chat log rows by sensitivity.
+#
+# Intended caller: future chatlog_core hook that decides whether redaction
+# should be forced on for a specific turn even if the global redaction gate
+# is off. Not wired up yet — this profile exists so the shape is pinned when
+# someone lands that integration. Today it's exercised only via
+# `python bin/slm_intent.py` smoke tests and explicit callers that pass
+# profile="chatlog".
+
+url: http://127.0.0.1:11434/v1/chat/completions
+model: qwen2.5:1.5b-instruct
+api_key_service: LM_API_TOKEN
+timeout_s: 5.0
+temperature: 0
+system: |
+  You classify a chat message by its sensitivity class. Reply with ONLY
+  the category name.
+
+  Categories:
+  - sensitive: contains credentials, personal identifiers, financial data, health info, or secrets
+  - administrative: routine ops, scheduling, system commands, session management
+  - routine: ordinary conversation with no sensitive content
+labels:
+  - sensitive
+  - administrative
+  - routine
+fallback: routine
