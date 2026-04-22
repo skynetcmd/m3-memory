@@ -1,12 +1,12 @@
 ---
-tool: bin/secret_rotator.py
-sha1: 609440546167
-mtime_utc: 2026-04-21T20:46:27.764240+00:00
-generated_utc: 2026-04-21T21:26:01.955056+00:00
+tool: bin/m3_sdk.py
+sha1: e1c1803db371
+mtime_utc: 2026-04-22T01:03:02.042549+00:00
+generated_utc: 2026-04-22T01:22:54.542906+00:00
 private: false
 ---
 
-# bin/secret_rotator.py
+# bin/m3_sdk.py
 
 ## Purpose
 
@@ -14,36 +14,53 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `if __name__ == "__main__"` guard
+_(no conventional entry point detected)_
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--dry-run` | Show planned rotations without writing | `False` | Rotates secrets: backs up old value, generates new token, encrypts to vault, logs event. | store_true | Logs planned rotations (new token length) but skips backup, encryption, vault write, and event logging. |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
-_(none detected)_
+- `DB_POOL_SIZE`
+- `DB_POOL_TIMEOUT`
+- `LM_READ_TIMEOUT`
+- `LM_STUDIO_BASE`
+- `M3_CONTEXT_CACHE_SIZE`
+- `M3_DATABASE`
+- `M3_MEMORY_ROOT`
+- `PG_URL`
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils (set_api_key)`
-- `m3_sdk (M3Context)`
-- `m3_sdk (add_database_arg)`
+- `auth_utils (get_api_key)`
+- `chatlog_config`
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**http**
+
+- `httpx.AsyncClient()` (line 257)
+- `httpx.AsyncClient()` (line 260)
+
+**sqlite**
+
+- `sqlite3.connect()  → `self.db_path`` (line 202)
+
 
 ## Notable external imports
 
-- `secrets`
+- `atexit`
+- `contextvars`
+- `dotenv (load_dotenv)`
+- `httpx`
+- `psycopg2`
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `agent_memory.db`
 
 ## Re-validation
 

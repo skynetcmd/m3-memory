@@ -1,12 +1,12 @@
 ---
-tool: bin/m3_sdk.py
-sha1: 63d0764eb65b
-mtime_utc: 2026-04-21T20:54:48.397156+00:00
-generated_utc: 2026-04-21T21:22:27.086868+00:00
+tool: bin/ai_mechanic.py
+sha1: 9ca99f6276c6
+mtime_utc: 2026-04-22T01:03:02.021007+00:00
+generated_utc: 2026-04-22T01:22:54.439621+00:00
 private: false
 ---
 
-# bin/m3_sdk.py
+# bin/ai_mechanic.py
 
 ## Purpose
 
@@ -14,50 +14,37 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-_(no conventional entry point detected)_
+- `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
+| `--force` | Required. Confirms you understand this drops tables. | `False` |  | store_true |  |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
 
-- `DB_POOL_SIZE`
-- `DB_POOL_TIMEOUT`
-- `M3_DATABASE`
-- `M3_MEMORY_ROOT`
-- `PG_URL`
+_(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils (get_api_key)`
-- `chatlog_config`
+- `m3_sdk (add_database_arg, resolve_db_path)`
 
 ## Calls OUT (external side-channels)
 
-**http**
-
-- `httpx.AsyncClient()` (line 210)
-- `httpx.AsyncClient()` (line 213)
-
 **sqlite**
 
-- `sqlite3.connect()  → `self.db_path`` (line 155)
+- `sqlite3.connect()  → `db_path`` (line 18)
 
 
 ## Notable external imports
 
-- `atexit`
-- `contextvars`
-- `dotenv (load_dotenv)`
-- `httpx`
-- `psycopg2`
+_(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
-- `agent_memory.db`
+_(none detected)_
 
 ## Re-validation
 
