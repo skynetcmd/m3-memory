@@ -1,19 +1,23 @@
 ---
-tool: bin/custom_tool_bridge.py
-sha1: 7d2f01623244
-mtime_utc: 2026-04-21T20:46:27.520462+00:00
-generated_utc: 2026-04-21T21:22:27.058959+00:00
+tool: scripts/inventory_graph.py
+sha1: 26d4c212fef1
+mtime_utc: 2026-04-22T01:22:46.234843+00:00
+generated_utc: 2026-04-22T01:22:54.722158+00:00
 private: false
 ---
 
-# bin/custom_tool_bridge.py
+# scripts/inventory_graph.py
 
 ## Purpose
 
-_(no module docstring — update the source file.)_
+Build a mermaid call-graph from tool-inventory markdown files.
+
+Edges come from each tool's "Calls INTO this repo" section (intra-repo imports)
+and "Calls OUT" subprocess invocations of sibling `bin/*.py` scripts.
 
 ## Entry points
 
+- `def main()` (line 39)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -26,9 +30,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `llm_failover (get_best_llm)`
-- `m3_sdk (M3Context, StructuredLogger)`
-- `thermal_utils (get_thermal_status)`
+_(none detected)_
 
 ## Calls OUT (external side-channels)
 
@@ -36,12 +38,12 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `httpx`
-- `mcp.server.fastmcp (FastMCP)`
+_(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
-- `agent_memory.db`
+- `CALL_GRAPH.md`
+- `INDEX.md`
 
 ## Re-validation
 

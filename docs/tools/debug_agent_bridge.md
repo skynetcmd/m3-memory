@@ -1,8 +1,8 @@
 ---
 tool: bin/debug_agent_bridge.py
-sha1: 0e966403ebcf
-mtime_utc: 2026-04-21T20:46:27.486731+00:00
-generated_utc: 2026-04-21T21:22:27.063283+00:00
+sha1: 68652d4557d2
+mtime_utc: 2026-04-22T01:03:02.028133+00:00
+generated_utc: 2026-04-22T01:22:54.517535+00:00
 private: false
 ---
 
@@ -37,6 +37,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `agent_protocol (_THINK_TAG_RE)`
 - `embedding_utils (parse_model_size)`
 - `m3_sdk (LM_STUDIO_BASE, M3Context)`
 - `thermal_utils (get_thermal_status)`
