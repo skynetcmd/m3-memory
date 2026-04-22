@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-04-22T01:41:57.998721+00:00._
+_Generated 2026-04-22T02:12:39.440550+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -81,6 +81,10 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
 | [bin/web_research_bridge.py](web_research_bridge.md) | (no docstring) |  |
 | [bin/weekly_auditor.py](weekly_auditor.md) | Weekly Audit Report -- M3 Memory |  |
+| [install_os.py](install_os.md) | (no docstring) |  |
+| [run_tests.py](run_tests.md) | (no docstring) |  |
+| [scan_repo_v7.py](scan_repo_v7.md) | Scan orchestrator for the m3-memory security pipeline on LXC 504. |  |
 | [scripts/inventory_graph.py](inventory_graph.md) | Build a mermaid call-graph from tool-inventory markdown files. |  |
 | [scripts/metadata_filler.py](metadata_filler.md) | (no docstring) |  |
 | [scripts/test_focus_fix.py](test_focus_fix.md) | (no docstring) |  |
+| [validate_env.py](validate_env.md) | (no docstring) |  |
