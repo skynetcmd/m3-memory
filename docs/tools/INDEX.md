@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-04-21T21:26:02.062979+00:00._
+_Generated 2026-04-22T01:22:54.777810+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -19,6 +19,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [benchmarks/longmemeval/bench_longmemeval.py](bench_longmemeval.md) | Long-session QA benchmark runner for m3-memory. |  |
 | [bin/agent_protocol.py](agent_protocol.md) | (no docstring) |  |
 | [bin/ai_mechanic.py](ai_mechanic.md) | (no docstring) |  |
+| [bin/augment_memory.py](augment_memory.md) | Offline post-ingest augmentation utilities for memory_items. |  |
 | [bin/auth_utils.py](auth_utils.md) | (no docstring) |  |
 | [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. |  |
 | [bin/build_kg_variant.py](build_kg_variant.md) | Build a KG-enriched variant from an existing source variant. |  |
