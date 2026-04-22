@@ -97,8 +97,12 @@ def get_hook_path_for_agent(agent: str) -> tuple[str, str]:
         "aider": ("aider_chat_watcher", "Aider chat watcher hook"),
     }
     base_name, desc = agent_map.get(agent, ("unknown", "unknown hook"))
-    sh_path = os.path.join(BASE_DIR, "bin", "hooks", "chatlog", f"{base_name}.sh")
-    ps1_path = os.path.join(BASE_DIR, "bin", "hooks", "chatlog", f"{base_name}.ps1")
+    # Forward-slash paths on Windows too — Claude Code's Stop hook chain
+    # eats backslash escapes, and PowerShell accepts forward slashes
+    # everywhere. Consistent with the settings.json snippet emitted by
+    # show_claude_code_settings_snippet().
+    sh_path = os.path.join(BASE_DIR, "bin", "hooks", "chatlog", f"{base_name}.sh").replace("\\", "/")
+    ps1_path = os.path.join(BASE_DIR, "bin", "hooks", "chatlog", f"{base_name}.ps1").replace("\\", "/")
     return sh_path, ps1_path, desc
 
 
@@ -273,10 +277,16 @@ def show_claude_code_settings_snippet(config: ChatlogConfig) -> None:
     print("Add the following to ~/.claude/settings.json under `hooks` and `statusLine`:")
     print()
 
+    # Use forward slashes on Windows. PowerShell accepts them, and unlike
+    # backslash-escaped paths they survive whatever shell interpretation
+    # layer Claude Code uses when invoking Stop / PreCompact hooks.
+    # Observed: C:\\Users\\bhaba\\... paths showed up stripped in the
+    # Claude Code hook error as "CUsersbhaba..." — the shell chain ate
+    # the escape sequences. Forward slashes sidestep the whole class.
     ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
-                       "claude_code_precompact.ps1").replace("/", "\\")
+                       "claude_code_precompact.ps1").replace("\\", "/")
     sh = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
-                      "claude_code_precompact.sh")
+                      "claude_code_precompact.sh").replace("\\", "/")
     # Emit the snippet that matches the current OS; show the alternate below.
     is_windows = sys.platform == "win32"
     if is_windows:
@@ -300,7 +310,7 @@ def show_claude_code_settings_snippet(config: ChatlogConfig) -> None:
             {"hooks": [{"type": "command", "command": hook_cmd}]}
         ]
 
-    status_script = os.path.join(BASE_DIR, "bin", "chatlog_status_line.py")
+    status_script = os.path.join(BASE_DIR, "bin", "chatlog_status_line.py").replace("\\", "/")
     snippet = {
         "hooks": hooks_block,
         "statusLine": {
