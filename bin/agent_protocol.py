@@ -2,6 +2,12 @@ import json
 import re
 import uuid
 
+# DeepSeek-R1 and similar reasoning models emit <think>...</think> chains.
+# The capturing group in _THINK_TAG_RE returns the inner text; re.sub with
+# the same pattern drops it in-place. Module-scope so every bridge that
+# imports agent_protocol shares one compiled pattern.
+_THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
 
 class AgentProtocol:
     """
@@ -89,10 +95,10 @@ class AgentProtocol:
     @staticmethod
     def extract_reasoning(content: str) -> tuple[str, str]:
         """Extracts DeepSeek reasoning tags <think>...</think> from content."""
-        think_match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+        think_match = _THINK_TAG_RE.search(content)
         if think_match:
             reasoning = think_match.group(1).strip()
-            final_content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            final_content = _THINK_TAG_RE.sub("", content).strip()
             return reasoning, final_content
         return "", content
 
