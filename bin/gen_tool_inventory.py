@@ -33,6 +33,19 @@ BENCHMARKS_DIR = BASE_DIR / "benchmarks"
 # below because it has harness subfolders (longmemeval/, locomo/).
 SOURCE_DIRS = [BIN_DIR, SCRIPTS_DIR]
 RECURSIVE_SOURCE_DIRS = [BENCHMARKS_DIR]
+# Top-level files at the repo root — a small set of user-facing entry
+# points that live at the root because install docs and runbooks point
+# users there (e.g. `python install_os.py` from the project root).
+# Scanned individually rather than via a glob so we never accidentally
+# pick up ad-hoc diagnostic scripts that land at the root during
+# development. Add new files here explicitly only after verifying they
+# belong in the published inventory.
+ROOT_FILES = [
+    BASE_DIR / "install_os.py",
+    BASE_DIR / "run_tests.py",
+    BASE_DIR / "scan_repo_v7.py",
+    BASE_DIR / "validate_env.py",
+]
 OUT_DIR = BASE_DIR / "docs" / "tools"
 
 SKIP = {"gen_tool_inventory.py", "__init__.py"}
@@ -586,6 +599,11 @@ def main() -> None:
         for p in sorted(d.rglob("*.py")):
             if "__pycache__" in p.parts:
                 continue
+            sources.append(p)
+    # Explicit root-level files (no glob — avoids accidentally picking up
+    # throwaway scripts that land at the root during development).
+    for p in ROOT_FILES:
+        if p.is_file():
             sources.append(p)
 
     for src in sources:
