@@ -1,12 +1,12 @@
 ---
-tool: bin/ai_mechanic.py
-sha1: febd2c0e7564
-mtime_utc: 2026-04-21T20:40:25.821853+00:00
-generated_utc: 2026-04-21T21:26:01.739129+00:00
+tool: bin/secret_rotator.py
+sha1: 77dae1eba22f
+mtime_utc: 2026-04-22T01:03:02.049780+00:00
+generated_utc: 2026-04-22T01:22:54.662247+00:00
 private: false
 ---
 
-# bin/ai_mechanic.py
+# bin/secret_rotator.py
 
 ## Purpose
 
@@ -20,7 +20,7 @@ _(no module docstring — update the source file.)_
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--force` | Required. Confirms you understand this drops tables. | `False` |  | store_true |  |
+| `--dry-run` | Show planned rotations without writing | `False` | Rotates secrets: backs up old value, generates new token, encrypts to vault, logs event. | store_true | Logs planned rotations (new token length) but skips backup, encryption, vault write, and event logging. |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
 
 ## Environment variables read
@@ -29,18 +29,17 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (add_database_arg, resolve_db_path)`
+- `auth_utils (set_api_key)`
+- `m3_sdk (M3Context)`
+- `m3_sdk (add_database_arg)`
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `db_path`` (line 18)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `secrets`
 
 ## File dependencies (repo paths referenced)
 

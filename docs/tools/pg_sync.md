@@ -1,23 +1,20 @@
 ---
-tool: scripts/inventory_graph.py
-sha1: dda2b640b17f
-mtime_utc: 2026-04-18T20:37:50.815027+00:00
-generated_utc: 2026-04-18T21:58:23.223315+00:00
+tool: bin/pg_sync.py
+sha1: d635f68b735e
+mtime_utc: 2026-04-22T01:03:02.049263+00:00
+generated_utc: 2026-04-22T01:22:54.658851+00:00
 private: false
 ---
 
-# scripts/inventory_graph.py
+# bin/pg_sync.py
 
 ## Purpose
 
-Build a mermaid call-graph from tool-inventory markdown files.
-
-Edges come from each tool's "Calls INTO this repo" section (intra-repo imports)
-and "Calls OUT" subprocess invocations of sibling `bin/*.py` scripts.
+_(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 39)
+- `def main()` (line 707)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -26,24 +23,29 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `PG_URL`
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (M3Context)`
+- `m3_sdk (resolve_venv_python)`
+- `migrate_memory`
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**sqlite**
+
+- `sqlite3.connect()  → `target.db_path`` (line 720)
+
 
 ## Notable external imports
 
-_(only stdlib)_
+- `psycopg2 (Binary)`
+- `psycopg2.extras (execute_values)`
 
 ## File dependencies (repo paths referenced)
 
-- `CALL_GRAPH.md`
-- `INDEX.md`
+_(none detected)_
 
 ## Re-validation
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 0ff30920728d
-mtime_utc: 2026-04-21T21:04:29.352563+00:00
-generated_utc: 2026-04-21T21:22:27.155977+00:00
+sha1: 3affdf175914
+mtime_utc: 2026-04-22T01:03:02.045652+00:00
+generated_utc: 2026-04-22T01:22:54.613901+00:00
 private: false
 ---
 
@@ -78,6 +78,8 @@ _(no argparse arguments detected)_
 - `M3_INGEST_GIST_STRIDE`
 - `M3_INGEST_WINDOW_CHUNKS`
 - `M3_INGEST_WINDOW_SIZE`
+- `M3_INTENT_ROUTING`
+- `M3_INTENT_USER_FACT_BOOST`
 - `M3_QUERY_TYPE_ROUTING`
 - `M3_SHORT_TURN_THRESHOLD`
 - `M3_SPEAKER_IN_TITLE`
@@ -100,7 +102,7 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes']`` (line 741)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes']`` (line 827)
 
 
 ## Notable external imports

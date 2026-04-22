@@ -262,7 +262,7 @@ def section_git(pdf, summary):
 
 # -- Section 6: Tool Inventory Refresh ---------------------------------------
 def section_tool_inventory(pdf, summary):
-    """Refresh memory/tool_inventory/ and report which tools drifted.
+    """Refresh docs/tools/ and report which tools drifted.
 
     Drift = the live file's sha1 has changed since the last inventory write.
     We snapshot the `sha1:` frontmatter values BEFORE running the generator,
@@ -273,7 +273,7 @@ def section_tool_inventory(pdf, summary):
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 9)
 
-    inv_dir = os.path.join(BASE_DIR, "memory", "tool_inventory")
+    inv_dir = os.path.join(BASE_DIR, "docs", "tools")
     gen_script = os.path.join(BASE_DIR, "bin", "gen_tool_inventory.py")
 
     def _snapshot_sha1s():

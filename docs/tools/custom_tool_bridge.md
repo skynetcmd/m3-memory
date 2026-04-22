@@ -1,12 +1,12 @@
 ---
-tool: bin/pg_sync.py
-sha1: fd9265b2807f
-mtime_utc: 2026-04-21T20:46:27.558221+00:00
-generated_utc: 2026-04-21T21:22:27.193529+00:00
+tool: bin/custom_tool_bridge.py
+sha1: 70e42ebeb9d8
+mtime_utc: 2026-04-22T01:03:02.027620+00:00
+generated_utc: 2026-04-22T01:22:54.513282+00:00
 private: false
 ---
 
-# bin/pg_sync.py
+# bin/custom_tool_bridge.py
 
 ## Purpose
 
@@ -14,7 +14,6 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 707)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -23,29 +22,27 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `PG_URL`
+_(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (M3Context)`
-- `m3_sdk (resolve_venv_python)`
-- `migrate_memory`
+- `agent_protocol (_THINK_TAG_RE)`
+- `llm_failover (get_best_llm)`
+- `m3_sdk (M3Context, StructuredLogger)`
+- `thermal_utils (get_thermal_status)`
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `target.db_path`` (line 720)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `psycopg2 (Binary)`
-- `psycopg2.extras (execute_values)`
+- `httpx`
+- `mcp.server.fastmcp (FastMCP)`
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `agent_memory.db`
 
 ## Re-validation
 
