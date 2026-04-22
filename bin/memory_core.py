@@ -182,6 +182,16 @@ INGEST_WINDOW_CHUNKS   = os.environ.get("M3_INGEST_WINDOW_CHUNKS", "0").lower() 
 INGEST_GIST_ROWS       = os.environ.get("M3_INGEST_GIST_ROWS", "0").lower() in ("1", "true", "yes")
 INGEST_EVENT_ROWS      = os.environ.get("M3_INGEST_EVENT_ROWS", "0").lower() in ("1", "true", "yes")
 QUERY_TYPE_ROUTING     = os.environ.get("M3_QUERY_TYPE_ROUTING", "0").lower() in ("1", "true", "yes")
+# Intent-driven retrieval routing. When on, memory_search_scored_impl honors
+# the intent_hint kwarg and applies two extras:
+#   1. Role-biased score boost for user-authored turns when intent=user-fact.
+#   2. Predecessor-turn pull (fetch turn N-1 when N was matched) so the user
+#      statement behind an assistant echo lands in the result set.
+# The hint is produced by bin/slm_intent.classify_intent() when its own gate
+# is on; callers that already know the intent can pass it directly. Dormant
+# otherwise — no caller, no cost. See the gate rationale in the SLM docstring.
+INTENT_ROUTING         = os.environ.get("M3_INTENT_ROUTING", "0").lower() in ("1", "true", "yes")
+INTENT_USER_FACT_BOOST = float(os.environ.get("M3_INTENT_USER_FACT_BOOST", "0.1"))
 INGEST_WINDOW_SIZE     = int(os.environ.get("M3_INGEST_WINDOW_SIZE", "3"))
 INGEST_GIST_MIN_TURNS  = int(os.environ.get("M3_INGEST_GIST_MIN_TURNS", "8"))
 INGEST_GIST_STRIDE     = int(os.environ.get("M3_INGEST_GIST_STRIDE", "8"))
@@ -326,7 +336,83 @@ _TEMPORAL_QUERY_RE = re.compile(
 )
 
 
-def _maybe_route_query(query: str, vector_weight: float) -> float:
+def _pull_predecessor_turns(scored: list) -> None:
+    """Append turn N-1 to ``scored`` when turn N is already present.
+
+    Used under M3_INTENT_ROUTING with intent_hint="user-fact" — bridges
+    the gap where the assistant echo is the best FTS match but the
+    user's original statement (one turn earlier) carries the actual
+    fact. Mutates the list in-place with the predecessor scored at
+    ~85% of the original turn's score so it competes but doesn't
+    automatically displace.
+
+    Caps at the top 10 current hits to bound extra DB work; most
+    user-fact queries only need a few predecessors, not a bulk pull.
+    Items without ``conversation_id`` or ``metadata_json.turn_index``
+    are skipped.
+    """
+    candidates: list[tuple[str, int, float]] = []  # (cid, target_idx, parent_score)
+    seen_ids = {item.get("id") for _, item in scored if item.get("id")}
+    for score, item in scored[:10]:
+        cid = item.get("conversation_id")
+        meta_raw = item.get("metadata_json")
+        if not cid or not meta_raw:
+            continue
+        try:
+            meta = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+            t_idx = meta.get("turn_index")
+            if isinstance(t_idx, int) and t_idx > 0:
+                candidates.append((cid, t_idx - 1, score))
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            continue
+    if not candidates:
+        return
+    # Single query per candidate keeps the code simple; at top-10 * 1 row
+    # each that's 10 point-lookups on an indexed table, well under 10ms.
+    try:
+        with _db() as db:
+            for cid, target_idx, parent_score in candidates:
+                row = db.execute(
+                    "SELECT id, content, title, type, importance, metadata_json, conversation_id "
+                    "FROM memory_items "
+                    "WHERE conversation_id = ? AND is_deleted = 0 "
+                    "  AND json_extract(metadata_json, '$.turn_index') = ?",
+                    (cid, target_idx),
+                ).fetchone()
+                if row is None or row["id"] in seen_ids:
+                    continue
+                seen_ids.add(row["id"])
+                pre_item = {
+                    "id": row["id"],
+                    "content": row["content"],
+                    "title": row["title"],
+                    "type": row["type"],
+                    "importance": row["importance"],
+                    "metadata_json": row["metadata_json"],
+                    "conversation_id": row["conversation_id"],
+                }
+                scored.append((parent_score * 0.85, pre_item))
+    except Exception as e:  # defensive — predecessor pull is best-effort
+        logger.debug(f"predecessor pull skipped: {type(e).__name__}: {e}")
+
+
+def _maybe_route_query(query: str, vector_weight: float, intent_hint: str = "") -> float:
+    """Decide whether to shift vector_weight toward BM25 based on query shape.
+
+    Two triggers — an SLM-supplied intent hint takes precedence, then the
+    heuristic fires as a fallback:
+      - intent_hint in {"temporal-reasoning", "multi-session"} → 0.3
+      - QUERY_TYPE_ROUTING on AND query starts with "when/what date/..."
+        AND contains a proper noun → 0.3
+    Both require the M3_QUERY_TYPE_ROUTING env gate. intent-hint path
+    ALSO works standalone when M3_INTENT_ROUTING is on (so bench callers
+    can opt in without touching both knobs).
+    """
+    # Intent-hint path: trusted signal from an upstream classifier.
+    if intent_hint and (QUERY_TYPE_ROUTING or INTENT_ROUTING):
+        if intent_hint in ("temporal-reasoning", "multi-session"):
+            return 0.3
+    # Heuristic path: unchanged from before.
     if not QUERY_TYPE_ROUTING:
         return vector_weight
     if not query:
@@ -1520,6 +1606,7 @@ async def memory_search_scored_impl(
     smart_time_boost=0.0,
     smart_neighbor_sessions=0,
     variant="",
+    intent_hint="",
     _depth=0,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
@@ -1532,6 +1619,14 @@ async def memory_search_scored_impl(
     in each item dict (e.g. ["metadata_json", "conversation_id", "valid_from",
     "valid_to", "user_id"]). Federated Chroma fallback results will NOT have
     these extra fields.
+
+    `intent_hint` is consumed only when M3_INTENT_ROUTING is on (or the
+    narrower M3_QUERY_TYPE_ROUTING handles the weight shift). Supported
+    values — "user-fact", "temporal-reasoning", "multi-session", "general"
+    — match the labels emitted by bin/slm_intent.classify_intent(). Off by
+    default; callers can pass the hint without enabling the gate and it'll
+    be silently ignored, which is what makes this safe to thread through
+    existing call sites.
     """
     try:
         k = int(k)
@@ -1541,7 +1636,7 @@ async def memory_search_scored_impl(
     if _depth > 1:
         return []
 
-    vector_weight = _maybe_route_query(query, vector_weight)
+    vector_weight = _maybe_route_query(query, vector_weight, intent_hint=intent_hint)
 
     q_vec, _ = await _embed(query)
     if not q_vec:
@@ -1617,6 +1712,7 @@ async def memory_search_scored_impl(
             smart_time_boost=smart_time_boost,
             smart_neighbor_sessions=smart_neighbor_sessions,
             variant=variant,
+            intent_hint=intent_hint,
             _depth=_depth + 1,
         )
 
@@ -1689,6 +1785,23 @@ async def memory_search_scored_impl(
         importance_boost = IMPORTANCE_WEIGHT * (float(row["importance"] or 0.0))
         final_score += importance_boost
 
+        # Role-biased boost (Piece 2 of intent routing). When the caller
+        # signals "user-fact" intent, bump user-authored turns so the
+        # user's original statement outranks the assistant's echo. Needs
+        # metadata_json available — `extra_columns` must include it or
+        # the boost silently no-ops.
+        role_boost = 0.0
+        if INTENT_ROUTING and intent_hint == "user-fact":
+            try:
+                meta_raw = row["metadata_json"] if "metadata_json" in row.keys() else None
+                if meta_raw:
+                    meta = json.loads(meta_raw)
+                    if isinstance(meta, dict) and meta.get("role") == "user":
+                        role_boost = INTENT_USER_FACT_BOOST
+                        final_score += role_boost
+            except (json.JSONDecodeError, TypeError, IndexError, KeyError):
+                pass
+
         if explain:
             item["_explanation"] = {
                 "vector": vector_score,
@@ -1700,6 +1813,8 @@ async def memory_search_scored_impl(
                 "title_boost": title_boost,
                 "importance_boost": importance_boost,
                 "vector_weight": vector_weight,
+                "intent_hint": intent_hint,
+                "role_boost": role_boost,
             }
         scored.append((final_score, item))
 
@@ -1709,6 +1824,15 @@ async def memory_search_scored_impl(
 
     if recency_bias > 0 and scored:
         scored = _apply_recency_bonus(scored, recency_bias, explain=explain)
+
+    # Predecessor pull (Piece 3 of intent routing). For user-fact intent
+    # the top-ranked turn is often the assistant echo at index N+1; fetch
+    # turn N from the same conversation so the user's original statement
+    # enters the candidate set. Only runs at _depth==0 to avoid unbounded
+    # recursion, and is capped to the current top 10 hits so the extra
+    # DB work stays bounded.
+    if INTENT_ROUTING and intent_hint == "user-fact" and _depth == 0 and scored:
+        _pull_predecessor_turns(scored)
 
     _MMR_LAMBDA = 0.7
     pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
@@ -1898,7 +2022,7 @@ async def memory_search_scored_impl(
     return ranked
 
 
-async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, variant="", _depth=0):
+async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, variant="", intent_hint="", _depth=0):
     ranked = await memory_search_scored_impl(
         query, k=k, type_filter=type_filter, agent_filter=agent_filter,
         search_mode=search_mode, user_id=user_id, scope=scope, as_of=as_of,
@@ -1906,6 +2030,10 @@ async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search
         recency_bias=float(recency_bias) if recency_bias else 0.0,
         adaptive_k=bool(adaptive_k),
         variant=variant,
+        intent_hint=intent_hint,
+        # metadata_json needed for role-boost + predecessor pull when
+        # intent_hint routing is live.
+        extra_columns=["metadata_json", "conversation_id"] if intent_hint else None,
     )
     if ranked is None:
         return "Search failed: FTS and semantic both unavailable."

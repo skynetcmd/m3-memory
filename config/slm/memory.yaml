@@ -1,0 +1,27 @@
+# Memory retrieval profile — production MCP memory_search / memory_suggest.
+#
+# Distinct from default.yaml mainly by being intentionally close to it —
+# we keep production routing stable and iterate prompt+model separately
+# in the `default` profile. Flip M3_SLM_PROFILE=memory on production
+# hosts to pin the prompt even if someone tweaks default.yaml later.
+
+url: http://127.0.0.1:11434/v1/chat/completions
+model: qwen2.5:1.5b-instruct
+api_key_service: LM_API_TOKEN
+timeout_s: 5.0
+temperature: 0
+system: |
+  You classify a memory-retrieval query for routing. Reply with ONLY
+  the category name.
+
+  Categories:
+  - user-fact: factual questions about the user (their name, pet, job, location, preferences)
+  - temporal-reasoning: questions about time (when, before, after, how long ago, on what date)
+  - multi-session: questions requiring summary or counting across past sessions ("how many times did I", "list all")
+  - general: default bucket for everything else
+labels:
+  - user-fact
+  - temporal-reasoning
+  - multi-session
+  - general
+fallback: general
