@@ -390,6 +390,33 @@ async def main() -> int:
         chatlog_config.invalidate_cache()
 
     result = await _ingest(args.format, args.transcript_path, args.session_id, args.variant)
+
+    # Shutdown drain: chatlog_write_bulk_impl enqueues rows on an async
+    # Queue drained by the _flush_loop background task. asyncio.run()
+    # cancels tasks without awaiting their drain, so rows in flight when
+    # main() returns get spilled to disk (or lost entirely if the executor
+    # is torn down mid-insert, surfacing as "cannot schedule new futures
+    # after interpreter shutdown"). Explicitly drain the queue and cancel
+    # the loop before returning so every row either lands in the DB or
+    # reaches the spill file cleanly.
+    try:
+        import chatlog_core as _cc
+        if _cc._QUEUE is not None:
+            # Drain remaining items. _flush_once is idempotent once the
+            # queue is empty so calling in a loop is safe.
+            while _cc._QUEUE.qsize() > 0:
+                written = await _cc._flush_once()
+                if written == 0:
+                    break  # nothing flushable (likely already spilled)
+        if _cc._FLUSH_TASK is not None and not _cc._FLUSH_TASK.done():
+            _cc._FLUSH_TASK.cancel()
+            try:
+                await _cc._FLUSH_TASK
+            except (asyncio.CancelledError, Exception):
+                pass
+    except Exception as e:
+        logger.warning(f"Shutdown drain non-fatal error: {type(e).__name__}: {e}")
+
     print(json.dumps(result, indent=2))
     return 0 if result.get("failed", 0) == 0 else 1
 
