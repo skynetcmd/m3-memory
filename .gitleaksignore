@@ -9,3 +9,8 @@ ENVIRONMENT_VARIABLES.md
 bin/pg_setup.py
 examples/sandbox-openclaw/.env.example
 data/locomo/
+
+# Redaction test fixtures MUST contain realistic-looking secrets as INPUT
+# to the redactor — the test proves the scrubber replaces them. Suppress
+# the whole test module since more fixture tokens may be added over time.
+tests/test_chatlog_redaction.py
