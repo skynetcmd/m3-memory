@@ -60,8 +60,12 @@ def test_scrub_jwt():
     """Scrub detects JWT tokens."""
     import chatlog_redaction
 
-    # Valid-looking JWT structure: header.payload.signature
-    content = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    # Valid-looking JWT structure: header.payload.signature.
+    # This is intentionally a realistic-looking test fixture (the classic
+    # jwt.io example payload for "John Doe") so the redactor can prove it
+    # matches the shape. Do NOT redact this literal — it's the input, not
+    # a leaked secret.
+    content = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"  # gitleaks:allow  # nosec B105 B106
     config = {
         "enabled": True,
         "patterns": ["jwt"],

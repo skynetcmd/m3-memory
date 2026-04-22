@@ -34,6 +34,15 @@ import urllib.request, urllib.parse
 
 DD_URL = os.environ.get('DD_URL', 'http://10.21.40.54:8080')
 
+# Scanner talks to DefectDojo over plain HTTP inside the homelab LAN, or HTTPS
+# if deployed differently. Reject any DD_URL scheme outside this whitelist so
+# a bad env var (or future misconfig) can't silently pivot urlopen to file://
+# or ftp:// — which would let a local file read masquerade as a DD call.
+_ALLOWED_SCHEMES = ('http://', 'https://')
+if not DD_URL.startswith(_ALLOWED_SCHEMES):
+    print(f"ERROR: DD_URL={DD_URL!r} must start with http:// or https://", file=sys.stderr)
+    sys.exit(2)
+
 
 def _exchange_credentials_for_token(username: str, password: str) -> str | None:
     """POST credentials to /api/v2/api-token-auth/ and return the API Key string.
@@ -49,6 +58,7 @@ def _exchange_credentials_for_token(username: str, password: str) -> str | None:
         headers={'Content-Type': 'application/json'},
     )
     try:
+        # nosec B310: scheme is whitelisted at module load; see DD_URL check.
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode('utf-8'))
     except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, TimeoutError) as e:
@@ -182,7 +192,8 @@ def dd_request(path, method='GET', data=None):
     req = urllib.request.Request(url, method=method, headers={'Authorization': f'Token {DD_TOKEN}', 'Content-Type': 'application/json'})
     body = json.dumps(data).encode() if data else None
     try:
-        with urllib.request.urlopen(req, body) as resp:
+        # nosec B310: scheme is whitelisted at module load; see DD_URL check.
+        with urllib.request.urlopen(req, body, timeout=30) as resp:
             return resp.status, resp.read().decode()
     except Exception as e:
         return 500, str(e)
@@ -203,9 +214,15 @@ def upload_import(engagement_id, scan_type, file_path):
     import requests
     url = f'{DD_URL}/api/v2/import-scan/'
     with open(file_path, 'rb') as f:
-        r = requests.post(url, headers={'Authorization': f'Token {DD_TOKEN}'},
+        # Scan files can be multi-MB (SARIF, trivy JSON); give the DD
+        # ingester a generous read budget. Connect is the short leg.
+        r = requests.post(
+            url,
+            headers={'Authorization': f'Token {DD_TOKEN}'},
             data={'engagement': engagement_id, 'scan_type': scan_type, 'active': True, 'verified': False},
-            files={'file': f})
+            files={'file': f},
+            timeout=(10, 300),
+        )
     return r.status_code, r.text[:200]
 
 def main():
