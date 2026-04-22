@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.4.22.1"
+version = "2026.4.22.2"
 description = "Local-first persistent memory for MCP agents — 66 tools, 89% LongMemEval, hybrid search, GDPR, zero cloud"
 readme = "README.md"
 license = "Apache-2.0"
