@@ -32,7 +32,7 @@ Usage:
 | `--model` | HuggingFace model ID | `DEFAULT_MODEL_ID` | Loads Qwen/Qwen3-Embedding-0.6B via SentenceTransformer | str | Loads specified HuggingFace model instead |
 | `--port` | Port to serve on | `1234` | Serves /v1/embeddings endpoint on localhost:1234 | int | Serves on specified port |
 | `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` | Binds only to 127.0.0.1 (localhost only) | str | Binds to specified host (0.0.0.0 for LAN access) |
-| `--device` | Device to use (e.g. cuda:0, cpu) | None |  | str |  |
+| `--device` | Device to use (e.g. cuda:0, cpu) | None | Auto-detects: picks cuda:0 if torch.cuda.is_available() else CPU. | str | Forces the SentenceTransformer onto the specified device. |
 
 ## Environment variables read
 
