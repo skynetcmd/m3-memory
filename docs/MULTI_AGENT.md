@@ -1,4 +1,4 @@
-# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Multi-Agent Orchestration
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Multi-Agent Orchestration
 
 M3 Memory provides the persistent memory and coordination substrate for multi-agent workflows. Agents share knowledge through scoped memory, pass context through handoffs and inboxes, and coordinate work through tasks, notifications, and a recursive task tree.
 
@@ -145,7 +145,7 @@ Agents react to events rather than following a fixed sequence. Add `task_complet
 
 ## 🚀 Full example
 
-The [`examples/multi-agent-team/`](./examples/multi-agent-team/) directory contains a complete, runnable orchestrator:
+The [`examples/multi-agent-team/`](../examples/multi-agent-team/) directory contains a complete, runnable orchestrator:
 
 - **`team.yaml`** — declarative agent definitions with provider, model, role, capabilities, and tool allowlists
 - **`orchestrator.py`** — polling loop that discovers work via notifications and dispatches to agents
@@ -167,7 +167,7 @@ task_assign(<task_id>, "local-agent")
 
 The agent picks it up on the next tick, executes tool calls against m3-memory, and writes results back.
 
-See [`examples/multi-agent-team/README.md`](./examples/multi-agent-team/README.md) for provider setup, resilience knobs, and how to add agents without code changes.
+See [`examples/multi-agent-team/README.md`](../examples/multi-agent-team/README.md) for provider setup, resilience knobs, and how to add agents without code changes.
 
 ## 🧭 Design principles
 

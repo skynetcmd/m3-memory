@@ -1,4 +1,4 @@
-# <a href="../../README.md"><img src="../../docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Multi-agent team
+# <a href="../../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Multi-agent team
 
 A provider-agnostic orchestrator that runs a team of LLM agents as **real
 MCP clients** on top of m3-memory's orchestration primitives. Each agent
