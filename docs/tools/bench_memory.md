@@ -28,7 +28,7 @@ back to memory/agent_memory.db.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
 ## Environment variables read
 

@@ -29,7 +29,7 @@ and drains any spill-to-disk files from the async write queue.
 | `--max-per-run` | Max rows per run (default from CHATLOG_EMBED_MAX_PER_RUN env or 10000) | None | Embeds up to 10000 rows per run | int | Processes up to N rows total per invocation |
 | `--dry-run` | Query and log but don't embed | `False` | Queries unembed rows, embeds in batches, updates DB | store_true | Queries and logs row counts without embedding |
 | `--drain-spill` | Process spill files before embedding | `False` | Skips spill drain (unless spill dir exists) | store_true | Always processes spill files before embedding |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db | str | Routes this run against PATH for all DB reads/writes |
 
 ## Environment variables read
 

@@ -34,7 +34,7 @@ Usage:
 | `-s`, `--search` | Search title/content (case-insensitive) | None | No search filtering; fetches all entries | str | Filters entries where title or content matches (case-insensitive LIKE); exact match if quoted |
 | `--no-pager` | Print all without paging | `False` | Renders all entries in paged mode (50 lines/page, prompts to continue) | store_true | Prints all rendered entries to stdout without pagination |
 | `--db` | Deprecated alias for --database. Kept for backward compatibility. | None | Uses hardcoded DB_PATH (REPO_ROOT / "memory" / "agent_memory.db") | str | Connects to specified SQLite DB file instead of default |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
 ## Environment variables read
 

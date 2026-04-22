@@ -50,7 +50,7 @@ Usage:
 | `--dry-run` | Discover + plan but don't write. | `False` | Discovers items, dedupes, prompts for confirmation, then writes to m3-memory. | store_true | Prints plan but skips all writes; no confirmation prompt required. |
 | `-y`, `--yes` | Skip confirmation prompt. | `False` | Confirms migration interactively before writing. | store_true | Bypasses confirmation prompt; proceeds directly to write phase. |
 | `-v`, `--verbose` | DEBUG logging. | `False` | INFO-level logs to stderr. | store_true | Sets log level to DEBUG; verbose output for development/debugging. |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 
 ## Environment variables read
 
