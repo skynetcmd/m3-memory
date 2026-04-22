@@ -45,7 +45,7 @@ Includes:
 | `--judge-model` |  | `os.environ.get('EVAL_JUDGE_MODEL')` | Reads EVAL_JUDGE_MODEL env var | str | Model ID for scoring answers |
 | `--openai-base-url` | Custom base URL for OpenAI-compatible API (e.g. MCP proxy or LM Studio) | None | Uses official OpenAI/Anthropic endpoint | str | Routes generator to custom provider |
 | `--variant` | Pipeline identifier passed to bulk-insert and enrichers for A/B tracking. | `` | No pipeline variant label | str | Tags all ingested items with variant ID |
-| `--smart-retrieval` | Enable smart_time_boost + neighbor-session expansion for time-aware retrieval. | `False` |  | store_true |  |
+| `--smart-retrieval` | Enable smart_time_boost + neighbor-session expansion for time-aware retrieval. | `False` | Uses fixed K and standard graph/cluster expansion | store_true | Enables time-aware boost and neighbor-session expansion for temporal questions |
 | `--verbose` | Dump full msg objects per question into run.log | `False` | Logs only status/errors | store_true | Logs full OpenAI message objects |
 
 ## Environment variables read

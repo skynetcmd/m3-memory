@@ -31,7 +31,7 @@ Usage:
 |---|---|---|---|---|---|
 | `--list` | list stored services (no values) | `False` | Runs interactive service picker and secret entry flow (getpass-hidden input). | store_true | Displays table of vault entries (service name, version, origin device, updated_at); exits. |
 | `--delete` | remove a service from the vault | — | Runs interactive service picker and secret entry flow (getpass-hidden input). | str | Deletes specified service after confirmation prompt; exits. |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 
 ## Environment variables read
 

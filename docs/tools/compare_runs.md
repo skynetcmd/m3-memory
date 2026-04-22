@@ -21,8 +21,8 @@ Compare two Phase 1 runs side-by-side.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--a` | Baseline run dir name under benchmarks/locomo/runs/ | — |  | str |  |
-| `--b` | Candidate run dir name under benchmarks/locomo/runs/ | — |  | str |  |
+| `--a` | Baseline run dir name under benchmarks/locomo/runs/ | — | Argument is required. | str | Loads baseline summary and handoff analysis from runs/A/. |
+| `--b` | Candidate run dir name under benchmarks/locomo/runs/ | — | Argument is required. | str | Loads candidate summary and handoff analysis from runs/B/; renders diff vs A. |
 
 ## Environment variables read
 
