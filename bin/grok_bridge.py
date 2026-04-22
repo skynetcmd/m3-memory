@@ -95,8 +95,9 @@ async def grok_ask(query: str):
         logger.error(f"Read timeout after {READ_TIMEOUT}s waiting for Grok.")
         return f"Error: Grok did not respond within {READ_TIMEOUT}s."
     except httpx.HTTPStatusError as exc:
-        logger.error(f"HTTP {exc.response.status_code} from Grok API.")
-        return f"Error: Grok returned HTTP {exc.response.status_code}."
+        body = exc.response.text
+        logger.error(f"HTTP {exc.response.status_code} from Grok API: {body}")
+        return f"Error: Grok returned HTTP {exc.response.status_code}. Details: {body}"
     except Exception as exc:
         logger.error(f"Unexpected error: {type(exc).__name__}")
         return f"Error: Unexpected failure ({type(exc).__name__}). Check stderr logs."
