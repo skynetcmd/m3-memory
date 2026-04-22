@@ -11,7 +11,7 @@ Persistent, local memory for MCP agents.
 
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
-> 🚀 **[New to M3? Start here with our 5-minute "Human-First" guide.](https://github.com/skynetcmd/m3-memory/blob/main/GETTING_STARTED.md)**
+> 🚀 **[New to M3? Start here with our 5-minute "Human-First" guide.](docs/GETTING_STARTED.md)**
 
 <p align="center">
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square"></a>
@@ -56,7 +56,7 @@ Qwen3-Embedding-0.6B (1024-dim, Q8 quantized, ~639 MB) is the model M3 Memory is
 
 As mentioned, you can use [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai) — load an embedding model and start its server.
 
-Want auto-classification, summarization, and consolidation? Load a small chat model alongside the embedder (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B instruct GGUF in LM Studio / llama.cpp). M3 auto-selects it; embedding-only features work without it. See [QUICKSTART → Optional: load a small chat model](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
+Want auto-classification, summarization, and consolidation? Load a small chat model alongside the embedder (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B instruct GGUF in LM Studio / llama.cpp). M3 auto-selects it; embedding-only features work without it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
 Restart your agent. Done!
 
@@ -98,11 +98,11 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| 🚀 **[Getting started](https://github.com/skynetcmd/m3-memory/blob/main/GETTING_STARTED.md)** | 👥 **[Multi-agent orchestration](https://github.com/skynetcmd/m3-memory/blob/main/MULTI_AGENT.md)** |
-| ✨ **[Core features](https://github.com/skynetcmd/m3-memory/blob/main/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](https://github.com/skynetcmd/m3-memory/blob/main/examples/multi-agent-team/README.md)** |
-| 🏗️ **[System design](https://github.com/skynetcmd/m3-memory/blob/main/docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](https://github.com/skynetcmd/m3-memory/blob/main/COMPARISON.md)** |
-| 🔧 **[Implementation details](https://github.com/skynetcmd/m3-memory/blob/main/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](https://github.com/skynetcmd/m3-memory/blob/main/ENVIRONMENT_VARIABLES.md)** |
-| 🤖 **[Agent rules + all 66 tools](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](https://github.com/skynetcmd/m3-memory/blob/main/ROADMAP.md)** |
+| 🚀 **[Getting started](docs/GETTING_STARTED.md)** | 👥 **[Multi-agent orchestration](docs/MULTI_AGENT.md)** |
+| ✨ **[Core features](docs/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](examples/multi-agent-team/README.md)** |
+| 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](docs/COMPARISON.md)** |
+| 🔧 **[Implementation details](docs/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](docs/ENVIRONMENT_VARIABLES.md)** |
+| 🤖 **[Agent rules + all 66 tools](docs/AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](docs/ROADMAP.md)** |
 
 ---
 
@@ -145,7 +145,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | knowledge-update | 78 | 92.3% |
 | **Overall** | **500** | **89.0%** |
 
-Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](https://github.com/skynetcmd/m3-memory/blob/main/benchmarks/longmemeval/README.md).
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](benchmarks/longmemeval/README.md).
 
 ---
 
@@ -161,7 +161,7 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 66 tools are documented in [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md).
+All 66 tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md).
 
 ---
 
@@ -175,7 +175,7 @@ To teach your agent best practices (search before answering, write aggressively,
 examples/AGENT_RULES.md
 ```
 
-Full tool reference with all parameters and behaviors: [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/AGENT_INSTRUCTIONS.md)
+Full tool reference with all parameters and behaviors: [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md)
 
 ---
 
@@ -213,7 +213,7 @@ Want auto-capture of every Claude Code / Gemini CLI / OpenCode / Aider conversat
 Install the m3-memory chat log subsystem.
 ```
 
-The agent runs `bin/chatlog_init.py`, wires the host-agent hook, and installs the embed sweeper schedule. See [docs/CHATLOG.md](https://github.com/skynetcmd/m3-memory/blob/main/docs/CHATLOG.md) for the architecture and ops guide.
+The agent runs `bin/chatlog_init.py`, wires the host-agent hook, and installs the embed sweeper schedule. See [docs/CHATLOG.md](docs/CHATLOG.md) for the architecture and ops guide.
 
 ---
 
@@ -242,7 +242,7 @@ The agent runs `bin/chatlog_init.py`, wires the host-agent hook, and installs th
 &nbsp;
 [![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-181717?logo=github&style=flat-square)](https://github.com/skynetcmd/m3-memory/issues)
 &nbsp;
-[Contributing](https://github.com/skynetcmd/m3-memory/blob/main/CONTRIBUTING.md) · [Good first issues](https://github.com/skynetcmd/m3-memory/blob/main/GOOD_FIRST_ISSUES.md)
+[Contributing](docs/CONTRIBUTING.md) · [Good first issues](docs/GOOD_FIRST_ISSUES.md)
 
 ---
 
