@@ -37,8 +37,8 @@ path equality.
 | `--reconfigure` | Reconfigure even if config exists | `False` | Shows existing config and exits | store_true | Re-runs full setup wizard even if CONFIG_PATH exists |
 | `--non-interactive` | Use defaults, skip prompts and post-setup steps | `False` | Interactive setup with all prompts and post-setup steps | store_true | Skips all prompts, uses defaults (mode=separate, cost_tracking=on, redaction=off), skips migrations and schedules |
 | `--db-path` | Chat log database path. Default: memory/agent_chatlog.db. Set equal to the main DB (memory/agent_memory.db) to keep all data in a single file. | None | If not provided, prompts via interactive_db_path(mode) or uses DEFAULT_DB_PATH | str | Uses specified path; skips path validation for custom paths in interactive mode |
-| `--enable-stop-hook` | Enable per-turn capture via Claude Code's Stop hook in addition to PreCompact. Writes config and prints an updated settings.json snippet. Default is PreCompact-only. | `False` |  | store_true |  |
-| `--disable-stop-hook` | Disable the Stop hook (revert to PreCompact-only capture). | `False` |  | store_true |  |
+| `--enable-stop-hook` | Enable per-turn capture via Claude Code's Stop hook in addition to PreCompact. Writes config and prints an updated settings.json snippet. Default is PreCompact-only. | `False` | PreCompact-only hook in Claude Code | store_true | Enables Stop hook; toggles stop_hook config, persists, re-prints settings.json snippet |
+| `--disable-stop-hook` | Disable the Stop hook (revert to PreCompact-only capture). | `False` | PreCompact-only hook in Claude Code | store_true | Disables Stop hook; toggles stop_hook config, persists, re-prints settings.json snippet |
 
 ## Environment variables read
 
