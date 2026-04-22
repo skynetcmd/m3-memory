@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from mcp.server.fastmcp import FastMCP
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from agent_protocol import _THINK_TAG_RE  # shared compiled regex
 from embedding_utils import (
     parse_model_size as _parse_model_size,
 )
@@ -191,7 +192,7 @@ async def _query_llm(prompt: str, max_tokens: int = LM_MAX_TOKENS) -> str:
         )
         data = response.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        return _THINK_TAG_RE.sub("", content).strip()
     except Exception as exc:
         return f"Error: LLM query failed: {type(exc).__name__}"
 
