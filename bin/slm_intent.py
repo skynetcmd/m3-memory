@@ -217,6 +217,71 @@ def _pick_label(raw_output: str, profile: Profile) -> str:
     return profile.fallback
 
 
+async def extract_entities(
+    text: str,
+    profile: Optional[str] = None,
+    client: Optional[httpx.AsyncClient] = None,
+) -> Optional[list[str]]:
+    """Free-text entity extraction via a named profile.
+
+    Sibling of ``classify_intent`` that reuses the profile-loader machinery
+    but returns a list of entities parsed from the model's reply instead of
+    a single label. The profile's ``labels`` field is ignored; whatever the
+    model returns is split by commas/newlines, trimmed, and filtered to
+    items <= 60 chars.
+
+    Returns ``None`` (not ``[]``) when the SLM gate is off, the profile is
+    missing, or the HTTP call fails — callers distinguish "no signal" from
+    "signal, but empty list."
+    """
+    if not _gate_on():
+        return None
+    if not text or not text.strip():
+        return None
+
+    prof_name = (profile or "").strip() or "entity_extract"
+    prof = load_profile(prof_name)
+    if prof is None:
+        return None
+
+    token = _resolve_api_key(prof.api_key_service)
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    payload = {
+        "model": prof.model,
+        "messages": [
+            {"role": "system", "content": prof.system},
+            {"role": "user", "content": text},
+        ],
+        "temperature": prof.temperature,
+    }
+
+    owns_client = client is None
+    try:
+        if owns_client:
+            client = httpx.AsyncClient(timeout=prof.timeout_s)
+        resp = await client.post(prof.url, headers=headers, json=payload, timeout=prof.timeout_s)
+        resp.raise_for_status()
+        data = resp.json()
+        raw = data["choices"][0]["message"]["content"]
+    except (httpx.HTTPError, KeyError, json.JSONDecodeError, TimeoutError) as e:
+        logger.warning(f"SLM extract via profile={prof_name!r} failed: {type(e).__name__}: {e}")
+        return None
+    finally:
+        if owns_client and client is not None:
+            await client.aclose()
+
+    # Split on commas and newlines, strip quotes/whitespace, drop empties
+    # and pathologically long items.
+    entities: list[str] = []
+    for piece in (raw or "").replace("\n", ",").split(","):
+        clean = piece.strip().strip('"').strip("'")
+        if clean and len(clean) <= 60:
+            entities.append(clean)
+    return entities
+
+
 async def classify_intent(
     query: str,
     profile: Optional[str] = None,
