@@ -1,4 +1,4 @@
-# <a href="./README.md"><img src="docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Welcome to M3 Memory!
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Welcome to M3 Memory!
 
 If you've ever felt like your AI agent is a "stranger" every time you start a new session—forgetting your architectural preferences, your naming conventions, or that specific bug you fixed yesterday—**you're in the right place.**
 
@@ -14,8 +14,10 @@ The best way to understand M3 is to see it "wake up." Let’s skip the technical
 If you have `pip` and an MCP-compatible agent (like Claude Code, Gemini CLI, or Aider), run:
 ```bash
 pip install m3-memory
-m3-memory setup  # This will walk you through a 1-minute local config
+mcp-memory --version  # Verify the command is available
 ```
+
+Then, add M3 Memory to your agent's configuration. See [Quick Start](./QUICKSTART.md) for the exact JSON to paste.
 
 ### 2. The "Cat Test" (Our Favorite Ritual)
 Open your favorite agent and try this simple experiment:
