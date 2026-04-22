@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/join_variant_reports.py
 sha1: e91b5cfad9bc
 mtime_utc: 2026-04-21T20:02:02.907203+00:00
-generated_utc: 2026-04-21T21:26:02.039724+00:00
+generated_utc: 2026-04-22T01:29:51.716989+00:00
 private: false
 ---
 
@@ -29,9 +29,9 @@ Writes a markdown report to stdout (or --out) summarizing:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--variants` | Variant ordering in report (default: baseline, heuristic_c1c4, llm_v1, llm_only) | `DEFAULT_VARIANTS` |  | str |  |
-| `--baseline` | Variant to show deltas against | `baseline` |  | str |  |
-| `--out` | Write report here instead of stdout | None |  | Path |  |
+| `--variants` | Variant ordering in report (default: baseline, heuristic_c1c4, llm_v1, llm_only) | `DEFAULT_VARIANTS` | Uses default column ordering. | str | Renders comparison columns in specified variant order. |
+| `--baseline` | Variant to show deltas against | `baseline` | Shows deltas relative to baseline variant. | str | Computes delta columns relative to specified variant. |
+| `--out` | Write report here instead of stdout | None | Writes markdown to stdout. | Path | Writes comparison report to PATH. |
 
 ## Environment variables read
 

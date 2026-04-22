@@ -30,12 +30,12 @@ Usage:
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--source-variant` |  | — |  | str |  |
-| `--target-variant` |  | — |  | str |  |
-| `--top-n` |  | — |  | int |  |
-| `--sim-threshold` |  | — |  | float |  |
-| `--wipe-target` | Delete any existing items/edges under target variant before building | `False` |  | store_true |  |
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None |  | str |  |
+| `--source-variant` |  | — | Required; fails if not provided | str | Variant to duplicate items/embeddings from |
+| `--target-variant` |  | — | Required; fails if not provided | str | New variant name for duplicated items and KG edges |
+| `--top-n` |  | — | Required; fails if not provided | int | Number of most similar items to link per item |
+| `--sim-threshold` |  | — | Required; fails if not provided | float | Minimum cosine similarity to create an edge |
+| `--wipe-target` | Delete any existing items/edges under target variant before building | `False` | Fails if target variant has existing items | store_true | Deletes all items/edges in target before duplicating source |
+| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
 ## Environment variables read
 
