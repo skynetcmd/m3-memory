@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,7 +36,17 @@ RECURSIVE_SOURCE_DIRS = [BENCHMARKS_DIR]
 OUT_DIR = BASE_DIR / "docs" / "tools"
 
 SKIP = {"gen_tool_inventory.py", "__init__.py"}
-PRIVATE = {"discord_bot.py", "status_api.py", "embed_server_gpu.py"}
+PRIVATE = {
+    "discord_bot.py", "status_api.py", "embed_server_gpu.py",
+    # macOS-oriented — runs on Win/Linux too but primary UX is a macOS pulse
+    # dashboard. Inventoried so imports show up in the call graph but flagged
+    # in INDEX.md's "Private" column to dampen general visibility.
+    "mission_control.py",
+    # Homepage dashboard endpoint — runs on a MacBook serving /status JSON.
+    # Mentions the device name in its docstring; mark private so the inventory
+    # table doesn't surface it in the default listing.
+    "macbook_status_server.py",
+}
 
 # Core library modules worth auditing even though they lack a CLI surface —
 # central enough that other tools import them, so they belong in the graph.
@@ -75,6 +86,33 @@ _EXTERNAL_BUCKETS: dict[tuple[str, ...], str] = {
     ("sqlite3", "connect"): "sqlite",
     ("aiosqlite", "connect"): "sqlite",
 }
+
+
+def _tracked_files() -> set[Path]:
+    """Absolute paths of every file currently tracked by git.
+
+    Used to filter gitignored / locally-added files out of the inventory pass
+    before we ever read their source. The motivation: some scripts under
+    bin/ are gitignored (like discord_bot.py) because they hardcode internal
+    homelab IPs or device names; the inventory generator reads the working
+    tree, so without this filter it would happily regenerate inventory
+    entries that leak those details into docs/tools/. Running git once per
+    invocation is cheap and the fallback (returning an empty set, which
+    disables filtering) keeps the tool usable in worktrees without git —
+    with a warning so the operator knows the gate is off.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(BASE_DIR), "ls-files"],
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        print(f"warn: git ls-files failed ({type(e).__name__}); "
+              f"generator will NOT filter untracked files. "
+              f"Check for leaks in output if this host is shared.",
+              flush=True)
+        return set()
+    return {(BASE_DIR / line).resolve() for line in result.stdout.splitlines() if line.strip()}
 
 
 def file_sha1(path: Path) -> str:
@@ -155,11 +193,23 @@ def extract_argparse(tree: ast.Module) -> list[dict]:
 
 
 def is_cli_tool(tree: ast.Module, source: str, name: str = "") -> bool:
+    """Decide whether a source file belongs in the inventory.
+
+    Previous logic required either an ``argparse.ArgumentParser`` literal
+    or a ``def main`` / ``async def main`` paired with a ``__main__`` guard.
+    That missed files like mission_control.py (entry point is
+    ``run_dashboard``) and benchmarks/locomo/probe_issues.py (entry is
+    ``probe_dataset`` + sibling probes). Relaxed to: any ``__main__`` guard
+    qualifies — the inventory's value (env vars, file deps, intra-repo
+    imports, call-out buckets) is useful even without argparse.
+    """
     if name in CORE_LIBRARIES:
         return True
     if "argparse.ArgumentParser" in source:
         return True
-    if "__main__" in source and ("def main" in source or "async def main" in source):
+    # A __main__ guard is sufficient. Regex matches both single- and
+    # double-quoted guards and tolerates whitespace variance.
+    if re.search(r"""if\s+__name__\s*==\s*['"]__main__['"]""", source):
         return True
     return False
 
@@ -516,6 +566,14 @@ def main() -> None:
     repo_mods = _repo_module_set()
     index_entries: list[tuple[str, str, bool]] = []
 
+    # Tracked-files filter: only generate inventory for files under version
+    # control. Untracked files in bin/ (gitignored WIP, machine-local
+    # experiments, leaks-by-accident) are silently ignored so their contents
+    # never reach docs/tools/. Empty set disables filtering — see the warning
+    # in _tracked_files() for when that happens.
+    tracked = _tracked_files()
+    untracked_skipped: list[str] = []
+
     sources: list[Path] = []
     for d in SOURCE_DIRS:
         if d.is_dir():
@@ -532,6 +590,9 @@ def main() -> None:
 
     for src in sources:
         if src.name in SKIP:
+            continue
+        if tracked and src.resolve() not in tracked:
+            untracked_skipped.append(str(src.relative_to(BASE_DIR)))
             continue
         try:
             source = src.read_text(encoding="utf-8")
@@ -639,6 +700,12 @@ def main() -> None:
         idx_lines.append(f"| [{rel}]({name}.md) | {summary_clean} | {'yes' if private else ''} |")
     (OUT_DIR / "INDEX.md").write_text("\n".join(idx_lines) + "\n", encoding="utf-8")
     print(f"wrote {(OUT_DIR / 'INDEX.md').relative_to(BASE_DIR)}")
+
+    if untracked_skipped:
+        print(f"skipped {len(untracked_skipped)} untracked file(s) "
+              f"(not in git ls-files — intentional if gitignored):")
+        for path in untracked_skipped:
+            print(f"  - {path}")
 
 
 if __name__ == "__main__":
