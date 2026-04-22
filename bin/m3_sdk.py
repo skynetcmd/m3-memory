@@ -24,6 +24,13 @@ except ImportError:
 
 logger = logging.getLogger("M3_SDK")
 
+# Single source of truth for the local LLM base URL + read timeout. Bridges
+# imported this from here in bench-wip; main had been redefining it in each
+# bridge. Still overridable via env so dev machines with LM Studio on a
+# different port (or a remote Ollama) work without code edits.
+LM_STUDIO_BASE = os.environ.get("LM_STUDIO_BASE", "http://localhost:1234/v1")
+LM_READ_TIMEOUT = float(os.environ.get("LM_READ_TIMEOUT", "4800.0"))
+
 # ── Per-path context registry ─────────────────────────────────────────────────
 # Previously a module-global _SQLITE_POOL was used, with singleton M3Context
 # silently reusing the first-initialized pool. Multi-DB support requires a
@@ -329,6 +336,28 @@ class M3Context:
         # creating a cycle if imported at module top.
         from auth_utils import get_api_key
         return get_api_key(service)
+
+    def get_logger(self, name: str = "m3") -> "StructuredLogger":
+        """Return a StructuredLogger for grep-friendly key=value output.
+
+        Thin convenience accessor; main's StructuredLogger is stateless so
+        the returned instance is shareable across calls. The ``name``
+        parameter is reserved for a future namespacing pass — currently
+        ignored, kept in the signature to match bench-wip callers.
+        """
+        return StructuredLogger()
+
+    def query_memory(self, sql: str, params: tuple = ()) -> list:
+        """Read-only ad-hoc SQL against the active pool.
+
+        Convenience wrapper for bridges that want to run a quick SELECT
+        without managing their own context manager. Callers must NOT pass
+        mutating SQL here — the wrapper doesn't commit and the connection
+        returns to the pool mid-transaction, which silently loses the
+        write on the next borrow. Use ``get_sqlite_conn()`` for writes.
+        """
+        with self.get_sqlite_conn() as conn:
+            return conn.execute(sql, params).fetchall()
 
     def log_event(self, category: str, detail_a: str,
                   detail_b: str = "", detail_c: str = "None") -> None:
