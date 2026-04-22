@@ -147,12 +147,36 @@ def interactive_host_agents() -> dict[str, HookSpec]:
     host_agents = {}
     for agent in sorted(VALID_HOST_AGENTS):
         enabled = prompt_yes_no(f"Enable {agent}?", default=False)
-        if enabled:
-            sh_path, ps1_path, desc = get_hook_path_for_agent(agent)
-            host_agents[agent] = HookSpec(enabled=True, hook_path=sh_path)
-            show_hook_wiring_instructions(agent, host_agents[agent])
-        else:
+        if not enabled:
             host_agents[agent] = HookSpec(enabled=False)
+            continue
+
+        sh_path, ps1_path, desc = get_hook_path_for_agent(agent)
+        spec = HookSpec(enabled=True, hook_path=sh_path)
+
+        # Claude Code has two hook points: PreCompact (fires when Claude
+        # summarizes its context, sporadic) and Stop (fires on every
+        # assistant turn). PreCompact alone is cheap but can leave gaps
+        # of hours or days between captures; Stop captures everything at
+        # the cost of one Python subprocess per turn (~50-150ms). Ask
+        # the user rather than defaulting because the tradeoff depends
+        # on workload.
+        if agent == "claude-code":
+            print()
+            print("  Claude Code supports two hook points:")
+            print("    PreCompact only (default) - fires when Claude compacts")
+            print("                                context. Light touch, but some")
+            print("                                sessions never compact and so")
+            print("                                never capture.")
+            print("    + Stop hook               - also fires on every assistant")
+            print("                                turn. Real-time capture; adds")
+            print("                                ~50-150ms per turn.")
+            spec.stop_hook = prompt_yes_no(
+                "  Enable Stop hook for per-turn capture?", default=False
+            )
+
+        host_agents[agent] = spec
+        show_hook_wiring_instructions(agent, spec)
 
     return host_agents
 
@@ -315,6 +339,10 @@ def print_summary(config: ChatlogConfig) -> None:
     enabled_agents = [a for a, spec in config.host_agents.items() if spec.enabled]
     if enabled_agents:
         print(f"Enabled Agents:     {', '.join(enabled_agents)}")
+        cc = config.host_agents.get("claude-code")
+        if cc and cc.enabled:
+            mode = "per-turn (PreCompact + Stop)" if cc.stop_hook else "PreCompact only"
+            print(f"  claude-code:      {mode}")
     else:
         print("Enabled Agents:     (none)")
 
@@ -335,6 +363,10 @@ def show_existing_config() -> None:
     print(f"DB Path:          {cfg.db_path}" + (" (unified with main)" if unified else ""))
     enabled = [a for a, s in cfg.host_agents.items() if s.enabled]
     print(f"Enabled Agents:   {', '.join(enabled) if enabled else '(none)'}")
+    cc = cfg.host_agents.get("claude-code")
+    if cc and cc.enabled:
+        mode = "per-turn (PreCompact + Stop)" if cc.stop_hook else "PreCompact only"
+        print(f"  claude-code:    {mode}")
     print(f"Cost Tracking:    {'ON' if cfg.cost_tracking.enabled else 'OFF'}")
     print(f"Redaction:        {'ON' if cfg.redaction.enabled else 'OFF'}")
     print()
