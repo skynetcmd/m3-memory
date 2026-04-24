@@ -1,0 +1,68 @@
+# Contextual-keys enrichment profile via Anthropic Haiku (cloud).
+#
+# OPT-IN CLOUD BACKEND. m3-memory defaults to local SLMs. This profile
+# is not loaded by any default code path — the only way to invoke it is
+# to pass it explicitly (e.g. `--contextual-keys-profile
+# contextual_keys_haiku` on the bench, or `profile=` kwarg in code).
+# Without an ANTHROPIC_API_KEY in the keyring / env, every request
+# returns an HTTP error and the caller falls back per its normal
+# empty-output contract.
+#
+# Same logical task as contextual_keys.yaml but uses Anthropic's
+# /v1/messages endpoint directly — enables prompt caching (system
+# prompt cached after first call, billed ~10% of input rate on
+# repeated calls) and much higher concurrency than a small local SLM.
+# Pricing is what Anthropic publishes for Haiku; check their website
+# for current rates before running at scale.
+#
+# Requires ANTHROPIC_API_KEY in env (resolved via auth_utils).
+
+url: https://api.anthropic.com/v1/messages
+model: claude-haiku-4-5-20251001
+backend: anthropic
+cache_system: true
+anthropic_version: "2023-06-01"
+api_key_service: ANTHROPIC_API_KEY
+timeout_s: 60.0
+temperature: 0
+system: |
+  You extract atomic facts FROM THE INPUT ONLY. Never invent or pad facts.
+  Never use information you know about the world that is not in the input.
+
+  Read the INPUT carefully. Identify 3–5 concrete facts explicitly stated
+  or directly implied. For assistant turns, the facts are what the
+  assistant recommends/suggests/tells. For user turns, the facts are what
+  the user reveals about themselves.
+
+  Output rules:
+    - Start your reply with the first fact directly, no preamble.
+    - Separate facts with " | " (space, pipe, space).
+    - Each fact: one clause, under 20 words, concrete and specific.
+    - NO numbered lists, NO bullet points, NO quotation marks, NO explanations.
+    - NO facts that aren't in the input.
+
+  If the input is too short, too generic, or contains no extractable facts,
+  reply with exactly one dash: -
+
+# `labels` + `fallback` are schema-required but unused by extract_text.
+labels:
+  - extracted
+fallback: extracted
+
+# Same post-processing as the local profile — Haiku is well-behaved but
+# we keep the belt-and-suspenders cleanup for safety.
+post:
+  skip_if_matches:
+    - '^[-_\.\s]*$'
+    - 'no (extractable )?facts'
+    - 'cannot extract'
+    - 'unable to (extract|identify)'
+  strip_prefixes:
+    - '^sure[,.]?\s*'
+    - '^(okay|ok)[,.]?\s*'
+    - '^here are (the )?(?:\d+ )?(?:extracted )?facts?\s*:?\s*'
+    - '^(extracted )?facts?\s*:?\s*'
+    - "^here['s]* what (i extracted|the user said)\\s*:?\\s*"
+    - '^\d+[\.\)]\s*'
+    - '^[-*•]\s+'
+    - '^\|+\s*'

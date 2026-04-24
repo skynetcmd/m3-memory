@@ -55,7 +55,7 @@ import threading
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
@@ -983,6 +983,10 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     await asyncio.sleep(wait)
 
         logger.error(f"Embedding generation failed after 3 attempts: {last_exc}")
+        # Forget the cached endpoint so the next call re-discovers (endpoint
+        # may have gone down or model may have been unloaded).
+        from llm_failover import clear_embed_cache
+        clear_embed_cache()
         return None, model
     finally:
         _EMBED_SEM.release()
@@ -1138,6 +1142,9 @@ async def memory_write_bulk_impl(
     check_contradictions: bool | None = None,
     emit_conversation: bool | None = None,
     variant: str | None = None,
+    embed_key_enricher: "Callable[[str, dict], Awaitable[str]] | None" = None,
+    embed_key_enricher_concurrency: int = 4,
+    dual_embed: bool = False,
 ) -> list[str]:
     """Bulk write that routes embeddings through `_embed_many`. Intended for
     benchmark / import paths where per-item contradiction detection would
@@ -1158,6 +1165,20 @@ async def memory_write_bulk_impl(
     exposed via MCP — they are bulk-only perf knobs used by benchmark and
     import drivers. Only variant is advertised on the memory_write MCP schema
     and via --variant on bench CLIs.
+
+    dual_embed=True (default False) combines with embed_key_enricher to write
+    TWO vectors per item instead of one: a 'default'-kind vector from the
+    raw `content` (what single-session terse queries match best) AND an
+    'enriched'-kind vector from the SLM-enriched embed_text (what multi-hop
+    aggregation queries match best). Requires v022+ schema. When dual_embed
+    is False (default), the enricher's output replaces the raw content in
+    embed_text as before — single-vector, original behavior. When True but
+    enricher is None, dual_embed is a no-op (only one thing to embed).
+
+    Retrieval-side fusion (vector_kind_strategy kwarg on
+    memory_search_scored_impl, upcoming commit) decides how to combine the
+    two vectors at query time. 'max' takes per-memory_id max score across
+    kinds.
     """
     if not items:
         return []
@@ -1252,6 +1273,59 @@ async def memory_write_bulk_impl(
             p["content"] or p["title"], p["metadata"]
         )
 
+    # Optional hook: rewrite embed_text via caller-supplied async enricher.
+    # The enricher receives (content, metadata_dict) and returns a string
+    # that REPLACES embed_text for the vector / FTS-index path. The stored
+    # `content` column is not touched — this is a "keys only, values verbatim"
+    # enrichment. Intended for bench / import drivers that want to prepend
+    # SLM-extracted atomic facts (LoCoMo `llm_v1` / LongMemEval contextual-keys
+    # pattern). Errors fall back to the un-enriched embed_text for that item.
+    #
+    # When enrichment fires, we also persist the enriched text to
+    # `metadata_json.enriched_embed_text` so post-hoc analysis can audit
+    # SLM output quality without rerunning the embedder or the enricher.
+    # The raw content stays verbatim in the `content` column; only the
+    # metadata grows. Callers who want to strip this for disk-space
+    # reasons can filter it out in a later pass.
+    if embed_key_enricher is not None and prepared:
+        sem = asyncio.Semaphore(max(1, int(embed_key_enricher_concurrency)))
+
+        async def _enrich_one(p: dict) -> None:
+            if not p.get("embed_text") or not p.get("embed"):
+                return
+            try:
+                meta = p.get("metadata") or "{}"
+                meta_dict = json.loads(meta) if isinstance(meta, str) else (meta or {})
+            except (json.JSONDecodeError, TypeError):
+                meta_dict = {}
+            raw_content = p.get("content") or ""
+            async with sem:
+                try:
+                    enriched = await embed_key_enricher(raw_content, meta_dict)
+                except Exception as e:
+                    logger.debug(f"embed_key_enricher failed on item {p.get('id')}: {e}")
+                    return
+                # Skip the pass-through case where the enricher returned the
+                # raw content unchanged (e.g. bench short-turn skip shortcut).
+                # Nothing to persist if nothing changed.
+                if not enriched or enriched == raw_content:
+                    return
+                # Keep the anchor-prefix semantics: run anchors AFTER enrichment
+                # so time-aware retrieval still works.
+                enriched = _augment_embed_text_with_anchors(enriched, p.get("metadata"))
+                # When dual_embed=True, preserve the pre-enrichment embed_text
+                # so Phase 2 can emit a SECOND vector (vector_kind='default')
+                # from the raw content. embed_text itself becomes the enriched
+                # string so Phase 2's existing path emits the 'enriched' vector.
+                if dual_embed:
+                    p["_dual_default_embed_text"] = p["embed_text"]
+                p["embed_text"] = enriched
+                # Persist the enriched text into metadata for post-hoc audit.
+                meta_dict["enriched_embed_text"] = enriched
+                p["metadata"] = json.dumps(meta_dict)
+
+        await asyncio.gather(*(_enrich_one(p) for p in prepared))
+
     # Phase 1: INSERT memory_items + chroma queue + history in one transaction.
     with _db() as db:
         for p in prepared:
@@ -1281,33 +1355,53 @@ async def memory_write_bulk_impl(
             )
 
     # Phase 2: batched embeddings for items that requested them.
-    # Dedup by content_hash(embed_text) so variants that share identical
-    # embed_text don't trigger duplicate embedder calls. Cache hits inside
+    # Dedup by content_hash(text) so variants/kinds that share identical
+    # text don't trigger duplicate embedder calls. Cache hits inside
     # _embed_many already handle DB-cached vectors, but this additionally
     # deduplicates within the current batch.
+    #
+    # Dual-embed: when p["_dual_default_embed_text"] is present, emit TWO
+    # rows — vector_kind='default' from the raw pre-enrichment text and
+    # vector_kind='enriched' from p["embed_text"]. Otherwise emit a single
+    # vector_kind='default' row from p["embed_text"].
     to_embed = [p for p in prepared if p["embed"] and p["embed_text"]]
     if to_embed:
         hash_to_first: dict[str, int] = {}
         unique_texts: list[str] = []
-        assign: list[int] = []  # idx into unique_texts for each item in to_embed
-        for p in to_embed:
-            h = _content_hash(p["embed_text"])
+        # List of (p, kind, idx) triples — one per vector to emit.
+        emit_plan: list[tuple[dict, str, int]] = []
+
+        def _schedule(p: dict, kind: str, text: str) -> None:
+            h = _content_hash(text)
             if h not in hash_to_first:
                 hash_to_first[h] = len(unique_texts)
-                unique_texts.append(p["embed_text"])
-            assign.append(hash_to_first[h])
+                unique_texts.append(text)
+            emit_plan.append((p, kind, hash_to_first[h]))
+
+        for p in to_embed:
+            raw = p.get("_dual_default_embed_text")
+            if raw:
+                _schedule(p, "default", raw)
+                _schedule(p, "enriched", p["embed_text"])
+            else:
+                _schedule(p, "default", p["embed_text"])
+
         unique_vecs = await _embed_many(unique_texts)
         with _db() as db:
-            for p, idx in zip(to_embed, assign):
+            for p, kind, idx in emit_plan:
                 vec, m = unique_vecs[idx]
                 if not vec:
                     continue
+                text_for_hash = (
+                    p["_dual_default_embed_text"] if kind == "default" and p.get("_dual_default_embed_text")
+                    else p["embed_text"]
+                )
                 db.execute(
-                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
-                    "VALUES (?,?,?,?,?,?,?)",
+                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
                     (
                         str(uuid.uuid4()), p["id"], _pack(vec), m, len(vec), now,
-                        _content_hash(p["embed_text"]),
+                        _content_hash(text_for_hash), kind,
                     ),
                 )
 
@@ -1603,10 +1697,14 @@ async def memory_search_scored_impl(
     recency_bias=0.0,
     vector_weight=0.7,
     adaptive_k=False,
+    elbow_sensitivity=1.5,
+    adaptive_k_min=0,
+    adaptive_k_max=0,
     smart_time_boost=0.0,
     smart_neighbor_sessions=0,
     variant="",
     intent_hint="",
+    vector_kind_strategy="default",
     _depth=0,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
@@ -1627,6 +1725,15 @@ async def memory_search_scored_impl(
     default; callers can pass the hint without enabling the gate and it'll
     be silently ignored, which is what makes this safe to thread through
     existing call sites.
+
+    `vector_kind_strategy` picks which rows from memory_embeddings to score
+    against when v022 dual-embedding is in play:
+      - "default" (back-compat): only vector_kind='default' rows.
+      - "max": score against every vector_kind; dedupe by memory_id keeping
+        the highest vector similarity. Used with dual_embed ingests where
+        both a raw ('default') and SLM-enriched ('enriched') vector exist
+        per turn, so a turn wins its bucket on whichever representation
+        the query favors.
     """
     try:
         k = int(k)
@@ -1700,6 +1807,17 @@ async def memory_search_scored_impl(
         where_clauses.append("(mi.valid_to   IS NULL OR mi.valid_to   = '' OR mi.valid_to   > ?)")
         params.extend([as_of, as_of])
 
+    # v022: filter the embeddings join by vector_kind unless caller opted
+    # into cross-kind fusion. Legacy rows (pre-v022 / single-embed ingests)
+    # carry vector_kind='default' via the migration's NOT NULL DEFAULT, so
+    # "default" strategy is a strict superset of pre-v022 behavior.
+    if vector_kind_strategy == "default":
+        where_clauses.append("me.vector_kind = 'default'")
+    elif vector_kind_strategy != "max":
+        raise ValueError(
+            f"vector_kind_strategy must be 'default' or 'max', got {vector_kind_strategy!r}"
+        )
+
     where_sql = " AND ".join(where_clauses)
 
     def _recurse_semantic():
@@ -1713,6 +1831,7 @@ async def memory_search_scored_impl(
             smart_neighbor_sessions=smart_neighbor_sessions,
             variant=variant,
             intent_hint=intent_hint,
+            vector_kind_strategy=vector_kind_strategy,
             _depth=_depth + 1,
         )
 
@@ -1759,6 +1878,21 @@ async def memory_search_scored_impl(
         rows = rows[:SEARCH_ROW_CAP]
     page_matrix = [_unpack(r["embedding"]) for r in rows]
     page_scores = _batch_cosine(q_vec, page_matrix)
+
+    # Max-kind fusion: when the SQL let through multiple vector_kind rows
+    # per memory_id, keep the row with the highest vector similarity so
+    # each item scores exactly once downstream. The FTS bm25 value is the
+    # same across a memory_id's rows (bm25 is per-item), so dropping the
+    # losing vector only discards vector-similarity information.
+    if vector_kind_strategy == "max" and rows:
+        best: dict[str, int] = {}
+        for i, row in enumerate(rows):
+            mid = row["id"]
+            if mid not in best or page_scores[i] > page_scores[best[mid]]:
+                best[mid] = i
+        keep_idx = sorted(best.values())
+        rows = [rows[i] for i in keep_idx]
+        page_scores = [page_scores[i] for i in keep_idx]
 
     for i, row in enumerate(rows):
         item = dict(row)
@@ -1839,8 +1973,12 @@ async def memory_search_scored_impl(
 
     # Adaptive K: Trim by elbow if requested
     if adaptive_k:
-        pre_ranked_all = _trim_by_elbow(pre_ranked_all)
-        # Recalculate k to match the trimmed length if it's smaller
+        pre_ranked_all = _trim_by_elbow(pre_ranked_all, sensitivity=elbow_sensitivity)
+        if adaptive_k_min and len(pre_ranked_all) < adaptive_k_min:
+            # Floor: undo the trim when it leaves fewer than the requested minimum.
+            pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)[:adaptive_k_min]
+        if adaptive_k_max and len(pre_ranked_all) > adaptive_k_max:
+            pre_ranked_all = pre_ranked_all[:adaptive_k_max]
         if len(pre_ranked_all) < k:
             k = len(pre_ranked_all)
 
