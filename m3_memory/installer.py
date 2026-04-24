@@ -178,7 +178,7 @@ def install_m3(repo_path: Optional[Path] = None, tag: Optional[str] = None, forc
         print(f"  removing existing {repo_path}")
         shutil.rmtree(repo_path)
 
-    print(f"fetching m3-memory {tag} → {repo_path}")
+    print(f"fetching m3-memory {tag} -> {repo_path}")
     if not _git_clone(tag, repo_path):
         print("  git not found; falling back to GitHub tarball")
         _download_tarball(tag, repo_path)
@@ -242,7 +242,7 @@ def doctor() -> int:
         print(f"  installed at:            {cfg.get('installed_at', '?')}")
         print(f"  repo_path:               {cfg.get('repo_path', '?')}")
     else:
-        print("  (no config — system not installed via `mcp-memory install-m3`)")
+        print("  (no config - system not installed via `mcp-memory install-m3`)")
 
     env = os.environ.get("M3_BRIDGE_PATH")
     if env:
