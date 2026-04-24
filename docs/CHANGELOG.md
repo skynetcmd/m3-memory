@@ -4,6 +4,30 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [2026.4.24.5] — April 24, 2026 — Auto-install on first `mcp-memory` run
+
+### Added
+
+- **One-command install.** `mcp-memory` now auto-fetches the system payload
+  when invoked against a missing `~/.m3-memory/repo/`. No more required
+  follow-up `mcp-memory install-m3` step for the common case — `pip install
+  m3-memory` is enough. Behavior depends on whether we're talking to a human:
+  - **Interactive TTY** (user at a shell): prompts `Fetch from GitHub? [Y/n]`
+    before cloning, since auto-downloading a GitHub repo on first run is
+    surprising enough to deserve a confirmation.
+  - **Non-interactive** (launched as an MCP subprocess by an agent; no TTY):
+    auto-fetches silently with a `[m3-memory] auto-fetching ...` line to
+    stderr. Prompting would deadlock the parent waiting for input.
+  - **`M3_AUTO_INSTALL=0` env**: hard opt-out. `mcp-memory` falls through
+    to the actionable error message pointing at explicit `install-m3`.
+
+  The explicit `mcp-memory install-m3` / `update` / `uninstall` / `doctor`
+  subcommands from 2026.4.24.3 remain available for users who prefer the
+  explicit flow. Tests: 5 new cases in `tests/test_installer.py` covering
+  each of the three paths + env opt-out + failure propagation.
+
+---
+
 ## [2026.4.24.4] — April 24, 2026 — Fix Windows Unicode crash in `install-m3`
 
 ### Fixed

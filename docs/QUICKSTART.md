@@ -8,14 +8,21 @@ Get persistent memory running with your MCP agent in under five minutes.
 
 ```bash
 pip install m3-memory
-mcp-memory install-m3
 ```
 
-The first command installs the CLI. The second fetches the system payload
-(the MCP server + all its dependencies) from GitHub into `~/.m3-memory/repo/`
-and records the path in `~/.m3-memory/config.json`. It's pinned to the
-wheel's version, so `pip install -U m3-memory && mcp-memory update` is the
-upgrade path.
+That's the whole install. On first `mcp-memory` run, the CLI fetches the
+system payload (the MCP server + its ~60 source files) from GitHub into
+`~/.m3-memory/repo/`, pinned to the wheel version, and records the path
+in `~/.m3-memory/config.json`.
+
+Two auto-install modes:
+
+- **Interactive TTY** (you running `mcp-memory` at a shell): prompts
+  `Fetch from GitHub? [Y/n]` before cloning.
+- **Non-interactive** (an MCP client launching the server): auto-fetches
+  silently with a log line to stderr.
+
+Upgrade path: `pip install -U m3-memory && mcp-memory update`.
 
 Verify everything resolved:
 
@@ -26,11 +33,17 @@ mcp-memory doctor
 If `mcp-memory` reports `command not found`, check that your Python scripts
 directory is on your PATH.
 
+### Opt-out and manual setup
+
+Set `M3_AUTO_INSTALL=0` to skip the first-run auto-fetch. You can then
+run `mcp-memory install-m3` explicitly, or set `M3_BRIDGE_PATH` to point
+at an existing clone.
+
 ### Already have the repo cloned?
 
-If you cloned `m3-memory` and did `pip install -e .`, you can skip
-`install-m3` — the CLI automatically detects a sibling `bin/memory_bridge.py`
-and uses it. Or point at any clone via `M3_BRIDGE_PATH`.
+If you cloned `m3-memory` and did `pip install -e .`, everything works
+without further action — the CLI automatically detects a sibling
+`bin/memory_bridge.py` via its package path and uses that.
 
 ---
 
