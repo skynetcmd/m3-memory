@@ -120,6 +120,43 @@ def _git_clone(tag: str, dest: Path) -> bool:
         return False
 
 
+def _safe_tar_member(member: "tarfile.TarInfo", dest_root: Path) -> "tarfile.TarInfo | None":
+    """Per-member filter for tarfile.extractall.
+
+    Blocks the classic path-traversal vectors:
+      - absolute paths (`/etc/passwd`)
+      - parent-dir escapes (`../../something`)
+      - symlinks or hardlinks that point outside dest_root
+      - device files, fifos, and other non-regular non-dir entries
+
+    Returns the member unchanged if safe, or None to drop it (extractall
+    skips filter-None entries). Raising would abort the whole extraction
+    which is too aggressive for a GitHub tarball that may carry innocuous
+    unusual entries; dropping is defensive but recoverable.
+    """
+    name = member.name
+    # Reject absolute paths outright.
+    if os.path.isabs(name) or name.startswith(("/", "\\")):
+        return None
+    # Normalize the member's target path and confirm it stays under dest_root.
+    resolved = (dest_root / name).resolve()
+    try:
+        resolved.relative_to(dest_root.resolve())
+    except ValueError:
+        return None
+    # Only allow regular files, directories, and links whose targets ALSO
+    # resolve safely. Block devices, fifos, character/block specials.
+    if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+        return None
+    if member.issym() or member.islnk():
+        link_target = (resolved.parent / member.linkname).resolve()
+        try:
+            link_target.relative_to(dest_root.resolve())
+        except ValueError:
+            return None
+    return member
+
+
 def _download_tarball(tag: str, dest: Path) -> None:
     """Fallback to downloading a release tarball and extracting it into ``dest``.
 
@@ -127,6 +164,11 @@ def _download_tarball(tag: str, dest: Path) -> None:
     Windows installs). The GitHub tarball's top-level dir is
     ``m3-memory-<tag-without-v>/`` — we strip that and move contents into
     ``dest`` so the layout matches a git clone.
+
+    Extraction is filtered through ``_safe_tar_member`` to block the
+    traditional tarslip / path-traversal / device-file attack classes.
+    Python 3.12's built-in ``filter='data'`` would also work, but we
+    support 3.11 so we roll our own filter.
     """
     url = TARBALL_URL_TEMPLATE.format(tag=tag)
     with tempfile.TemporaryDirectory() as tmp_s:
@@ -136,12 +178,8 @@ def _download_tarball(tag: str, dest: Path) -> None:
         with urllib.request.urlopen(url) as resp, archive.open("wb") as f:  # nosec B310 — trusted GitHub host
             shutil.copyfileobj(resp, f)
         with tarfile.open(archive, "r:gz") as tf:
-            # Safety: refuse any member whose resolved path escapes tmp.
-            for member in tf.getmembers():
-                target = (tmp / member.name).resolve()
-                if not str(target).startswith(str(tmp.resolve())):
-                    raise RuntimeError(f"tarball contains unsafe path: {member.name}")
-            tf.extractall(tmp)
+            tmp_resolved = tmp.resolve()
+            tf.extractall(tmp, filter=lambda m, _path: _safe_tar_member(m, tmp_resolved))  # nosec B202 - filter blocks tarslip
         # Find the single top-level dir extracted.
         top_level = [p for p in tmp.iterdir() if p.is_dir() and p.name.startswith("m3-memory-")]
         if len(top_level) != 1:
