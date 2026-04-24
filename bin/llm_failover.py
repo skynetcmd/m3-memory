@@ -37,6 +37,21 @@ LLM_EXCLUSIONS = ()  # nothing excluded for LLM selection — embedding models f
 CONNECT_TIMEOUT = 3.0    # fail fast on unreachable hosts
 READ_TIMEOUT = 10.0      # for model list fetches only
 
+# Process-global cache for embed-endpoint discovery. Discovered once on first
+# call; reused for all subsequent calls in the same process. Reset by calling
+# clear_embed_cache() explicitly (e.g. on repeated failure) or by process exit.
+# Avoids a GET /v1/models roundtrip before every POST /v1/embeddings call,
+# which otherwise dominates per-embed wall time on a warm LM Studio (~9s with
+# discovery vs ~50ms direct).
+_EMBED_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
+
+
+def clear_embed_cache() -> None:
+    """Forget the cached embed endpoint. Call after a persistent failure
+    so the next get_best_embed() re-discovers."""
+    global _EMBED_ENDPOINT_CACHE
+    _EMBED_ENDPOINT_CACHE = None
+
 
 def parse_model_size(model_id: str) -> float:
     """
@@ -225,6 +240,9 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
     Iterates LLM_ENDPOINTS in failover order. Prefers models matching EMBED_EXCLUSIONS.
     Falls back to first endpoint with any usable model if no embed model found.
 
+    Result is cached process-globally after first successful discovery. Reset
+    via clear_embed_cache() on persistent failure.
+
     Args:
         client: httpx.AsyncClient for making requests
         token: Bearer token for API authentication
@@ -232,6 +250,10 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
     Returns:
         Tuple of (base_url, model_id) or None if no models found anywhere
     """
+    global _EMBED_ENDPOINT_CACHE
+    if _EMBED_ENDPOINT_CACHE is not None:
+        return _EMBED_ENDPOINT_CACHE
+
     fallback_result = None
 
     for endpoint in LLM_ENDPOINTS:
@@ -282,10 +304,13 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
 
         # Prefer embedding model from this endpoint
         if embed_models:
-            return (endpoint, embed_models[0])
+            _EMBED_ENDPOINT_CACHE = (endpoint, embed_models[0])
+            return _EMBED_ENDPOINT_CACHE
 
         # Record fallback if this endpoint has any usable model
         if other_models and fallback_result is None:
             fallback_result = (endpoint, other_models[0])
 
+    if fallback_result is not None:
+        _EMBED_ENDPOINT_CACHE = fallback_result
     return fallback_result
