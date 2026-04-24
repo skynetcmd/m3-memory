@@ -47,7 +47,7 @@ Three env-var gates, each independent. All default **off**.
 
 | Gate | Controls |
 |---|---|
-| `M3_SLM_CLASSIFIER` | The SLM itself. When off, `classify_intent()` and `extract_entities()` return `None` immediately with no HTTP call. |
+| `M3_SLM_CLASSIFIER` | The SLM itself. When off, `classify_intent()`, `extract_entities()`, and `extract_text()` return `None` immediately with no HTTP call. |
 | `M3_INTENT_ROUTING` | The retrieval-side consumer. When off, `memory_search_scored_impl` silently ignores any `intent_hint` passed in. |
 | `M3_QUERY_TYPE_ROUTING` | A narrower heuristic that shifts `vector_weight` toward BM25 for temporal proper-noun queries. Pre-existing; `intent_hint` piggybacks on the same weight-shift logic. |
 
@@ -113,6 +113,36 @@ temperature: 0                   # passed through to the chat completion
 timeout_s: 5.0                   # httpx timeout; applied to connect+read
 api_key_service: LM_API_TOKEN    # keyring service name resolved via auth_utils;
                                  # omit or set null for auth-less endpoints
+
+# OPTIONAL — wire-format backend (default: openai)
+backend: openai                  # "openai" = /v1/chat/completions body,
+                                 #            reads choices[0].message.content
+                                 #            (Ollama, LM Studio default, llama-server,
+                                 #             vLLM, OpenAI itself)
+                                 # "anthropic" = /v1/messages body with top-level
+                                 #            system field, reads content[0].text
+                                 #            (Anthropic cloud; LM Studio 0.3+
+                                 #             serves this locally too)
+cache_system: true               # [anthropic only] wrap system prompt in a
+                                 # cache_control ephemeral block so repeated calls
+                                 # pay for the system prompt once (90% discount
+                                 # on cached reads, billed at ~$0.10/M on Haiku)
+anthropic_version: "2023-06-01"  # [anthropic only] API version header
+
+# OPTIONAL — post-processing (applied by extract_text / extract_entities,
+# NOT by classify_intent since label-picking handles prose cleanup inline).
+# All three fields are independent and any/all may be omitted.
+post:
+  skip_if_matches:               # regex patterns; if ANY matches the raw
+    - '^[-_\.\s]*$'              #   reply (case-insensitive, search), treat
+    - 'no (extractable )?facts'  #   the output as empty so callers fall back
+  strip_prefixes:                # regex patterns; stripped from the START of
+    - '^sure[,.]?\s*'            #   the reply in the order declared, then
+    - '^here are (the )?facts?\s*:?\s*'  # repeated until none match (so
+                                 #   stacked prefixes like "Sure. Here are..."
+                                 #   both peel off)
+  format: "[FACTS] {text}"       # optional wrapper around the cleaned text;
+                                 # MUST contain the literal "{text}" placeholder
 ```
 
 ### Nothing is hardcoded
@@ -130,6 +160,36 @@ put in the YAML.** Any server speaking `/v1/chat/completions` works:
 
 Change the three fields (`url`, `model`, `api_key_service`), keep everything
 else.
+
+### Cloud backends are opt-in
+
+m3-memory ships local-first: every profile in `config/slm/` that doesn't
+name a cloud host uses the OpenAI-compatible wire format against a
+`127.0.0.1` URL. No SLM call reaches the public internet unless **you**
+pick a profile that points there.
+
+To use a cloud backend:
+
+1. **Pick or write a profile** whose `url` points at the provider and
+   whose `api_key_service` names the keyring entry holding your key.
+   The shipped example is `config/slm/contextual_keys_haiku.yaml`, which
+   uses Anthropic Haiku with prompt caching.
+2. **Set the key**: `python bin/setup_secret.py <SERVICE>` (for
+   Anthropic, `ANTHROPIC_API_KEY`).
+3. **Invoke that profile explicitly**: every caller that loads SLM
+   profiles takes an explicit name (`--contextual-keys-profile
+   contextual_keys_haiku` on the bench, `profile=` kwarg in code). No
+   profile loads cloud automatically — the default-named profiles
+   (`default`, `memory`, `contextual_keys`, …) all point at local
+   servers.
+
+If a profile has `backend: anthropic` but the user hasn't set the API
+key, the first request returns an HTTP error and the caller falls back
+per its own contract (`extract_text` returns `""`, the bench's enricher
+falls back to raw content). No silent cloud calls, no billing surprises.
+
+Switching back to local is a one-line change (`--contextual-keys-profile
+contextual_keys` or edit the profile's `url` and `backend` fields).
 
 ### Label synchronization
 
@@ -184,21 +244,36 @@ export M3_SLM_PROFILES_DIR="$HOME/.config/m3-memory/slm:$PWD/benchmarks/longmeme
 
 ## 5. Shipped profiles
 
-Four files under `config/slm/`:
+Five files under `config/slm/`:
 
 | Profile | Purpose | Label set | Caller today |
 |---|---|---|---|
 | `default.yaml` | Fallback when no `profile=` and no `M3_SLM_PROFILE` | `user-fact / temporal-reasoning / multi-session / general` | `classify_intent()` with no args |
 | `memory.yaml` | Pin-to-this for production memory retrieval | Same as default | Future MCP `intent_hint` wiring |
 | `chatlog.yaml` | Chatlog turn sensitivity triage | `sensitive / administrative / routine` | Reserved for future chatlog_core hook |
-| `entity_extract.yaml` | Free-text entity extractor (not label-based) | single placeholder `extracted` | `bin/augment_memory.py enrich-titles` |
+| `entity_extract.yaml` | Free-text entity extractor (not label-based) | placeholder `extracted` | `bin/augment_memory.py enrich-titles` via `extract_entities()` |
+| `contextual_keys.yaml` | Atomic-fact extraction for ingest-time embed-key enrichment, local LLM | placeholder `extracted` | `benchmarks/longmemeval/bench_longmemeval.py --contextual-keys` via `extract_text()` |
+| `contextual_keys_haiku.yaml` | Same as above, via Anthropic Haiku cloud (prompt caching enabled) | placeholder `extracted` | `bench_longmemeval.py --contextual-keys --contextual-keys-profile contextual_keys_haiku` |
 
-`entity_extract.yaml` is special: `extract_entities()` uses the `system`
-prompt + the endpoint but ignores the `labels` field. The model's free-text
-reply is split on commas/newlines and returned as a list of strings.
+Free-text profiles (`entity_extract.yaml`, `contextual_keys.yaml`) use the
+`system` prompt + the endpoint but ignore the `labels` field for output.
+They carry a single placeholder label (`extracted`) only because the
+profile schema requires `labels` to be a non-empty list.
 
 Every file starts with a `!! EDIT BEFORE ENABLING THE GATE !!` comment block
 listing what to change for your environment.
+
+### Choosing the right extractor function
+
+| Function | Output | Splitting? | Post-processing? | Typical profile |
+|---|---|---|---|---|
+| `classify_intent(query, profile=...)` | One label from `profile.labels` | n/a (label picker handles it) | No — label picking is its own cleanup | `default`, `memory`, `chatlog` |
+| `extract_entities(text, profile=...)` | `list[str]` (comma/newline-split, ≤60 char filter) | Yes | Yes, before splitting | `entity_extract` |
+| `extract_text(text, profile=...)` | `str` (raw model reply, verbatim after post-processing) | No | Yes | `contextual_keys` |
+
+The `post:` block in the profile YAML is consumed only by `extract_entities`
+and `extract_text`. It's applied to the raw reply BEFORE any splitting so
+that preamble-strip rules see the whole response.
 
 ## 6. End-to-end walkthroughs
 
