@@ -1,0 +1,17 @@
+# Keep shell scripts + Python as LF on all platforms so Linux/macOS hook
+# execution isn't broken by Windows CRLF on a mixed-OS checkout.
+# Text files normalize to LF in the repo; native line endings in the
+# working tree are left to git's autocrlf default.
+*.sh       text eol=lf
+*.py       text eol=lf
+*.ps1      text eol=crlf
+
+# Binaries: never convert.
+*.db       binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.ico      binary
+*.gguf     binary
+*.tar.gz   binary
+*.zip      binary
