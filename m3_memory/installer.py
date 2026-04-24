@@ -368,13 +368,35 @@ def _prompt_capture_mode(interactive: bool, capture_flag: Optional[str]) -> Opti
     return {"1": "both", "2": "precompact", "3": "stop", "4": "none"}.get(reply)
 
 
-def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
-    """Run `chatlog_init.py --non-interactive --apply-claude --apply-gemini` so
-    the user's chatlog choice actually takes effect. Without this, capture_mode
-    persists in config but no settings.json is written and no migrations run.
+def _chatlog_init_supports(chatlog_init: Path, flag: str) -> bool:
+    """Probe whether bin/chatlog_init.py advertises a given flag.
 
-    Returns a status message for the post-install summary, or None on failure
-    (logged separately so the install still completes).
+    Needed because install-m3 can fetch a tarball whose bin/ predates the
+    flags we want to pass — that combination ships in any release where
+    the wheel rolls forward before the tag does, or when a user installs
+    the latest wheel against a pinned older tag. Falling back gracefully
+    is better than failing the install with 'unrecognized arguments'.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, str(chatlog_init), "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return flag in (result.stdout or "")
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
+    """Run `chatlog_init.py --non-interactive ...` to actualize capture_mode.
+
+    Without this, capture_mode persists in config but no settings.json is
+    written and no migrations run. We adapt the flag set to whatever
+    chatlog_init in the fetched repo supports, so wheel-vs-tag version skew
+    degrades gracefully rather than failing 'unrecognized arguments'.
+
+    Returns a status message for the post-install summary, or None on
+    failure (logged separately so the install still completes).
     """
     if capture_mode == "none":
         return "[=] chatlog hooks skipped (capture-mode=none)"
@@ -383,28 +405,47 @@ def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
     if not chatlog_init.is_file():
         return f"[!] chatlog_init.py missing under {bridge.parent}; skipping hook wiring"
 
-    cmd = [
-        sys.executable, str(chatlog_init),
-        "--non-interactive",
-        "--capture-mode", capture_mode,
-        "--apply-claude",
-    ]
-    # Wire Gemini hooks too if Gemini CLI is on PATH (or at the npm-global
-    # location) — same detection used by _register_gemini_mcp.
-    if shutil.which("gemini") or (Path.home() / ".npm-global" / "bin" / "gemini").exists():
+    cmd = [sys.executable, str(chatlog_init), "--non-interactive"]
+
+    # Probe each new flag. If the deployed chatlog_init is older than the
+    # wheel, we still get migrations + a saved config (legacy behavior),
+    # then fall back to printing manual-paste instructions.
+    has_capture_mode = _chatlog_init_supports(chatlog_init, "--capture-mode")
+    has_apply_claude = _chatlog_init_supports(chatlog_init, "--apply-claude")
+    has_apply_gemini = _chatlog_init_supports(chatlog_init, "--apply-gemini")
+
+    if has_capture_mode:
+        cmd += ["--capture-mode", capture_mode]
+    if has_apply_claude:
+        cmd.append("--apply-claude")
+    gemini_present = (
+        shutil.which("gemini")
+        or (Path.home() / ".npm-global" / "bin" / "gemini").exists()
+    )
+    if has_apply_gemini and gemini_present:
         cmd.append("--apply-gemini")
 
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        # chatlog_init prints multiple lines; take the last non-empty line as
-        # the summary so the post-install log stays compact.
-        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
-        tail = lines[-1] if lines else "configured"
-        return f"[+] chatlog wired ({capture_mode}): {tail}"
     except subprocess.CalledProcessError as e:
-        # Don't abort the install — surface the error and let the user re-run.
-        stderr = (e.stderr or "").strip() or "(no stderr)"
-        return f"[!] chatlog init failed: {stderr.splitlines()[-1] if stderr else e}"
+        stderr = (e.stderr or "").strip()
+        last = stderr.splitlines()[-1] if stderr else str(e)
+        return f"[!] chatlog init failed: {last}"
+
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    tail = lines[-1] if lines else "configured"
+
+    # Old chatlog_init that lacks --apply-* flags only saved config + ran
+    # migrations. Tell the user to do the rest by hand so they don't think
+    # the install is finished.
+    if not has_apply_claude:
+        return (
+            f"[~] chatlog config + migrations applied (capture-mode={capture_mode}); "
+            f"settings.json wiring requires manual paste — run "
+            f"`mcp-memory chatlog init --enable-stop-hook` and follow the snippet, "
+            f"or `mcp-memory update` once the next release ships."
+        )
+    return f"[+] chatlog wired ({capture_mode}): {tail}"
 
 
 def _post_install(
