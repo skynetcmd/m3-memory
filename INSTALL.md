@@ -87,6 +87,28 @@ spill files, per-agent capture timestamps).
 `mcp-memory chatlog doctor` is the same but exits nonzero on any warning —
 suitable for CI / health checks.
 
+## Gemini CLI gotchas
+
+Gemini CLI 0.39+ refuses to run in a non-trusted directory. Headless and
+automated invocations need one of:
+
+```bash
+gemini --skip-trust --prompt "..."                    # per-call opt-out
+GEMINI_CLI_TRUST_WORKSPACE=true gemini --prompt "..." # env-var opt-out
+```
+
+This affects:
+- **Cron / systemd / CI** — set `GEMINI_CLI_TRUST_WORKSPACE=true` in the unit's `Environment=` block.
+- **Hooks invoking `gemini`** — pass `--skip-trust` in the command.
+
+Interactive shells can trust the directory once via Gemini's TUI prompt and
+the choice persists; only headless contexts need the explicit opt-out.
+
+The `memory` MCP entry in `~/.gemini/settings.json` is written automatically
+by `mcp-memory install-m3` post-install. The `SessionEnd` chatlog hook is
+written by `mcp-memory chatlog init --apply-gemini` (or automatically when
+you pass `--capture-mode both` to `install-m3`).
+
 ## Per-OS walkthroughs
 
 These documents cover the from-scratch homelab install including optional
