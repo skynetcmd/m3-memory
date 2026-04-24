@@ -8,15 +8,29 @@ Get persistent memory running with your MCP agent in under five minutes.
 
 ```bash
 pip install m3-memory
+mcp-memory install-m3
 ```
 
-Verify the command is available:
+The first command installs the CLI. The second fetches the system payload
+(the MCP server + all its dependencies) from GitHub into `~/.m3-memory/repo/`
+and records the path in `~/.m3-memory/config.json`. It's pinned to the
+wheel's version, so `pip install -U m3-memory && mcp-memory update` is the
+upgrade path.
+
+Verify everything resolved:
 
 ```bash
-mcp-memory --help
+mcp-memory doctor
 ```
 
-If you get `command not found`, check that your Python scripts directory is on your PATH.
+If `mcp-memory` reports `command not found`, check that your Python scripts
+directory is on your PATH.
+
+### Already have the repo cloned?
+
+If you cloned `m3-memory` and did `pip install -e .`, you can skip
+`install-m3` — the CLI automatically detects a sibling `bin/memory_bridge.py`
+and uses it. Or point at any clone via `M3_BRIDGE_PATH`.
 
 ---
 

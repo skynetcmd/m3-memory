@@ -4,6 +4,37 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [2026.4.24.2] — April 24, 2026 — One-command install
+
+### Added
+
+- **`mcp-memory install-m3` / `update` / `uninstall` / `doctor` subcommands.**
+  The pip wheel still ships thin (tiny CLI only); `install-m3` fetches the
+  full system payload from GitHub into `~/.m3-memory/repo/` pinned to the
+  wheel version and writes a persistent config file pointing the bridge
+  there. Resolution order for finding the bridge, in precedence:
+    1. `$M3_BRIDGE_PATH` (unchanged; power-user override)
+    2. `~/.m3-memory/config.json` (written by `install-m3`)
+    3. Walk up from the package file looking for a sibling
+       `bin/memory_bridge.py` (preserves the `pip install -e .` dev flow)
+  `install-m3` prefers `git clone --depth 1 --branch v<version>` and falls
+  back to downloading the GitHub release tarball if git isn't available.
+  Tests: `tests/test_installer.py` (13 cases covering resolution order,
+  config persistence, git + tarball paths, uninstall, doctor output).
+
+### Fixed
+
+- **`mcp-memory --version`** now reads `m3_memory.__version__` instead of a
+  hardcoded string that had drifted to `2026.4.8`.
+
+### Docs
+
+- README.md + QUICKSTART.md updated: the canonical install flow is now
+  `pip install m3-memory && mcp-memory install-m3`. Clone-based dev setups
+  remain supported and auto-detected.
+
+---
+
 ## [2026.4.24.1] — April 24, 2026 — Dual-Embedding Retrieval + SLM-Enriched Embeds
 
 ### Upgrade notes
