@@ -368,6 +368,45 @@ def _prompt_capture_mode(interactive: bool, capture_flag: Optional[str]) -> Opti
     return {"1": "both", "2": "precompact", "3": "stop", "4": "none"}.get(reply)
 
 
+def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
+    """Run `chatlog_init.py --non-interactive --apply-claude --apply-gemini` so
+    the user's chatlog choice actually takes effect. Without this, capture_mode
+    persists in config but no settings.json is written and no migrations run.
+
+    Returns a status message for the post-install summary, or None on failure
+    (logged separately so the install still completes).
+    """
+    if capture_mode == "none":
+        return "[=] chatlog hooks skipped (capture-mode=none)"
+
+    chatlog_init = bridge.parent / "chatlog_init.py"
+    if not chatlog_init.is_file():
+        return f"[!] chatlog_init.py missing under {bridge.parent}; skipping hook wiring"
+
+    cmd = [
+        sys.executable, str(chatlog_init),
+        "--non-interactive",
+        "--capture-mode", capture_mode,
+        "--apply-claude",
+    ]
+    # Wire Gemini hooks too if Gemini CLI is on PATH (or at the npm-global
+    # location) — same detection used by _register_gemini_mcp.
+    if shutil.which("gemini") or (Path.home() / ".npm-global" / "bin" / "gemini").exists():
+        cmd.append("--apply-gemini")
+
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # chatlog_init prints multiple lines; take the last non-empty line as
+        # the summary so the post-install log stays compact.
+        lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+        tail = lines[-1] if lines else "configured"
+        return f"[+] chatlog wired ({capture_mode}): {tail}"
+    except subprocess.CalledProcessError as e:
+        # Don't abort the install — surface the error and let the user re-run.
+        stderr = (e.stderr or "").strip() or "(no stderr)"
+        return f"[!] chatlog init failed: {stderr.splitlines()[-1] if stderr else e}"
+
+
 def _post_install(
     bridge: Path,
     interactive: bool,
@@ -403,6 +442,14 @@ def _post_install(
         changed = True
     if changed:
         save_config(cfg)
+
+    # Wire chatlog hooks into agent settings.json files when the user picked
+    # a capture mode. Skips silently when capture_choice is None (user accepted
+    # defaults and we don't auto-touch their agent configs without consent).
+    if capture_choice is not None:
+        chatlog_msg = _run_chatlog_init(bridge, capture_choice)
+        if chatlog_msg:
+            messages.append(chatlog_msg)
 
     if not messages:
         # Nothing to report — the three helpers all returned None and the
@@ -458,12 +505,28 @@ def install_m3(
     endpoint_choice = _prompt_endpoint_choice(interactive, endpoint)
     capture_choice = _prompt_capture_mode(interactive, capture_mode)
 
+    # Preserve user data across --force / update. The repo tree under
+    # repo_path/memory/ holds chatlog DBs, the chatlog config, and the
+    # migration-tracking schema_version table — wiping them on every update
+    # would discard captured turns and force a re-init. Stash anything that
+    # looks like user data, wipe the code tree, then restore.
+    preserved_dir: Optional[Path] = None
     if repo_path.exists():
         if not force:
             raise RuntimeError(
                 f"{repo_path} already exists. Run `mcp-memory install-m3 --force` to replace it, "
                 f"or `mcp-memory update` to refresh to the current wheel version."
             )
+        memory_dir = repo_path / "memory"
+        if memory_dir.is_dir():
+            preserved_dir = Path(tempfile.mkdtemp(prefix="m3-preserve-"))
+            for item in memory_dir.iterdir():
+                # Keep .db / .json (chatlog config + state) / .jsonl (cursor).
+                # The migrations/ subdir ships with the repo and will be
+                # restored by the new clone, so we don't preserve it.
+                if item.is_file() and item.suffix in (".db", ".json", ".jsonl"):
+                    shutil.copy2(item, preserved_dir / item.name)
+            print(f"  preserving {sum(1 for _ in preserved_dir.iterdir())} user-data file(s) across update")
         print(f"  removing existing {repo_path}")
         shutil.rmtree(repo_path)
 
@@ -479,6 +542,18 @@ def install_m3(
             f"tag {tag!r} doesn't exist on GitHub yet. Check "
             f"https://github.com/skynetcmd/m3-memory/releases."
         )
+
+    # Restore preserved user data on top of the fresh tree.
+    if preserved_dir is not None:
+        memory_dir = repo_path / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        restored = 0
+        for item in preserved_dir.iterdir():
+            shutil.copy2(item, memory_dir / item.name)
+            restored += 1
+        shutil.rmtree(preserved_dir, ignore_errors=True)
+        if restored:
+            print(f"  restored {restored} user-data file(s) into {memory_dir}")
 
     save_config({
         "repo_path": str(repo_path),
