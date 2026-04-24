@@ -447,6 +447,22 @@ def main() -> int:
             )
             save_config(config)
             print(f"Configuration saved to {CONFIG_PATH}")
+
+            # Run migrations even in non-interactive mode — without them the
+            # chatlog DB is an empty SQLite file and any hook fire will error
+            # with 'no such table: memory_items'. The prompt-skipping flag
+            # shouldn't mean a broken install.
+            migrate_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
+            try:
+                subprocess.run(
+                    [sys.executable, migrate_script, "up", "--target", "chatlog", "-y"],
+                    check=True,
+                )
+                print("Migrations applied.")
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: migrations failed ({e}). Run manually with:")
+                print(f"  python {migrate_script} up --target chatlog -y")
+                # Don't fail the install — migrations can be retried.
             return 0
 
         # Interactive mode
