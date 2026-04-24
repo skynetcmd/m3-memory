@@ -37,8 +37,9 @@ Examples:
 Docs: https://github.com/skynetcmd/m3-memory
 """,
     )
+    from m3_memory import __version__
     parser.add_argument(
-        "--version", action="version", version="m3-memory 2026.4.8"
+        "--version", action="version", version=f"m3-memory {__version__}"
     )
     parser.parse_args()
 
