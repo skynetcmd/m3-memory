@@ -4,6 +4,32 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [2026.4.24.3] — April 24, 2026 — Fix max-kind retrieval pool-halving
+
+### Fixed
+
+- **`memory_search_scored_impl(vector_kind_strategy="max")` was returning a
+  truncated candidate pool.** The SQL join against `memory_embeddings`
+  returns one row per `(memory_id, vector_kind)` pair, but the SQL-level
+  `LIMIT 1000` and the in-Python `SEARCH_ROW_CAP` (default 500) were both
+  applied to the raw row count, so the effective unique-item pool was
+  `limit / kinds_in_use`. For a dual-embed corpus that halved the pool.
+  Symptom: large session-hit-rate regressions vs `vector_kind_strategy="default"`
+  on the same ingest (validated on 500-question LongMemEval-S:
+  0.706 → 0.976 SHR at k=20 post-fix, matching `strategy="default"` within
+  0.2pp).
+
+  Fix: double the SQL `LIMIT` under `strategy="max"` and defer the
+  `SEARCH_ROW_CAP` trim until after the dedup pass so the cap counts
+  unique items. No behavior change for `strategy="default"` (the base
+  cap already counts unique items since the SQL pins to one kind).
+
+  Callers on `2026.4.24.1` or `2026.4.24.2` who enabled the opt-in
+  dual-embed path should upgrade. Callers on default paths are
+  unaffected.
+
+---
+
 ## [2026.4.24.2] — April 24, 2026 — One-command install
 
 ### Added
