@@ -111,6 +111,18 @@ AI_Folder_Backup/
 # `rm -r to_be_deleted/` once confirmed unneeded.
 to_be_deleted/
 
+# Benchmark run artifacts — run-catalog, result JSONs, per-run probe
+# outputs, run plans. Keep these private; they carry operational detail
+# (run IDs, SHR numbers, endpoint URLs) that belongs in .scratch/, not
+# in the public repo. Published results live in README.md / docs/.
+benchmarks/longmemeval/RUN_CATALOG.md
+benchmarks/longmemeval/PLAN2.md
+benchmarks/longmemeval/results.json
+benchmarks/longmemeval/LME-*.json
+benchmarks/locomo/*_results.json
+benchmarks/locomo/RUN_CATALOG.md
+docs/tools/probe_ingest_cost.md
+
 # Generated MCP config (machine-specific paths; run bin/generate_configs.py to create)
 .mcp.json
 
