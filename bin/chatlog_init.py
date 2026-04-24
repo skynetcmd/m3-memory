@@ -397,6 +397,18 @@ def apply_gemini_settings() -> tuple[bool, str]:
 
     actions: list[str] = []
 
+    # 0. Try to ensure ~/.npm-global/bin is on the non-login shell PATH.
+    #    Idempotent and safe even if already done by install-m3 (which
+    #    skips this when Gemini wasn't installed yet — common in the
+    #    Gemini-first install order).
+    try:
+        from m3_memory.installer import _fix_npm_global_path
+        path_msg = _fix_npm_global_path()
+        if path_msg and path_msg.startswith("[+]"):
+            actions.append("npm-global PATH")
+    except Exception:
+        pass  # best-effort; not blocking
+
     # 1. mcpServers.memory — points Gemini at the mcp-memory CLI.
     mcp_servers = existing.setdefault("mcpServers", {})
     if "memory" not in mcp_servers:
