@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -279,6 +280,138 @@ def uninstall_m3(yes: bool = False) -> None:
         print(f"  removed {config_file()}")
 
 
+def _resolve_chatlog_db(cfg: dict) -> Optional[Path]:
+    """Best-effort resolution of the chatlog DB path.
+
+    Order: CHATLOG_DB_PATH env, M3_DATABASE env (shared DB case), config's
+    chatlog_db_path, else <repo_path>/memory/agent_chatlog.db.
+    Returns None only when no repo_path is configured AND no env override
+    is set — i.e. the system isn't installed yet.
+    """
+    env_chatlog = os.environ.get("CHATLOG_DB_PATH")
+    if env_chatlog:
+        return Path(env_chatlog).expanduser()
+    env_main = os.environ.get("M3_DATABASE")
+    if env_main:
+        return Path(env_main).expanduser()
+    cfg_chatlog = cfg.get("chatlog_db_path")
+    if cfg_chatlog:
+        return Path(cfg_chatlog).expanduser()
+    repo = cfg.get("repo_path")
+    if repo:
+        return Path(repo) / "memory" / "agent_chatlog.db"
+    # Developer case: `pip install -e .` from a repo clone. No config file,
+    # but the DB lives next to the sibling bridge we already resolve.
+    dev = _developer_bridge()
+    if dev:
+        return dev.parent.parent / "memory" / "agent_chatlog.db"
+    return None
+
+
+def _chatlog_db_stats(db_path: Path) -> dict:
+    """Open DB read-only, report row counts + last-capture timestamp.
+
+    Returns {ok, rows, last_at, error}. Uses stdlib sqlite3 only — no
+    dependency on the bin/ payload so doctor still works if the repo
+    clone is incomplete.
+    """
+    out = {"ok": False, "rows": 0, "last_at": "", "error": ""}
+    if not db_path.is_file():
+        out["error"] = "file not found"
+        return out
+    try:
+        uri = f"file:{db_path.as_posix()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=1.0)
+        try:
+            # Count rows the chatlog subsystem writes — types 'chat_log'
+            # and 'message'. Matches chatlog_status's totals so the two
+            # tools don't disagree.
+            row = conn.execute(
+                "SELECT COUNT(*), MAX(created_at) FROM memory_items "
+                "WHERE type IN ('chat_log', 'message')"
+            ).fetchone()
+            out["rows"] = row[0] or 0
+            out["last_at"] = row[1] or ""
+            out["ok"] = True
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as e:
+        # Table may not exist yet (fresh install before first write).
+        out["error"] = str(e)
+    return out
+
+
+def _read_json(path: Path) -> Optional[dict]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _claude_hook_state() -> dict:
+    """Detect Stop / PreCompact hooks in ~/.claude/settings.json."""
+    settings = _read_json(Path.home() / ".claude" / "settings.json")
+    if settings is None:
+        return {"configured": False}
+    hooks = settings.get("hooks") or {}
+    stop = any("chatlog" in json.dumps(h).lower() for h in (hooks.get("Stop") or []))
+    pre = any("chatlog" in json.dumps(h).lower() for h in (hooks.get("PreCompact") or []))
+    return {"configured": True, "stop": stop, "precompact": pre}
+
+
+def _gemini_hook_state() -> dict:
+    """Detect MCP registration in ~/.gemini/settings.json.
+
+    Gemini CLI has no Stop/PreCompact equivalent; chatlog capture for
+    Gemini flows through the MCP tool (chatlog_write) on assistant turns.
+    So "hook state" for Gemini really means "is the MCP registered so
+    the tool is callable at all."
+    """
+    settings = _read_json(Path.home() / ".gemini" / "settings.json")
+    if settings is None:
+        return {"configured": False}
+    mcp = (settings.get("mcpServers") or {})
+    return {"configured": True, "memory_mcp": "memory" in mcp}
+
+
+def _chatlog_section(cfg: dict) -> int:
+    """Emit the chatlog health section. Returns 0 (informational — never
+    the reason doctor exits nonzero)."""
+    print()
+    print("chatlog subsystem:")
+
+    db_path = _resolve_chatlog_db(cfg)
+    if db_path is None:
+        print("  db_path:                 (unresolved — install-m3 not run yet)")
+    else:
+        print(f"  db_path:                 {db_path}")
+        stats = _chatlog_db_stats(db_path)
+        if stats["ok"]:
+            last = stats["last_at"] or "(never)"
+            print(f"  captured rows:           {stats['rows']}")
+            print(f"  last capture at:         {last}")
+        elif stats["error"] == "file not found":
+            print("  status:                  db not yet created (no captures written)")
+        else:
+            print(f"  status:                  unreadable ({stats['error']})")
+
+    claude = _claude_hook_state()
+    if not claude["configured"]:
+        print("  claude hooks:            ~/.claude/settings.json not found")
+    else:
+        stop_mark = "[on]" if claude["stop"] else "[off]"
+        pre_mark = "[on]" if claude["precompact"] else "[off]"
+        print(f"  claude hooks:            Stop {stop_mark}  PreCompact {pre_mark}")
+
+    gemini = _gemini_hook_state()
+    if not gemini["configured"]:
+        print("  gemini mcp:              ~/.gemini/settings.json not found")
+    else:
+        mcp_mark = "[on]" if gemini["memory_mcp"] else "[off]"
+        print(f"  gemini mcp (memory):     {mcp_mark}  (no Stop/PreCompact hooks on Gemini)")
+    return 0
+
+
 def doctor() -> int:
     """Print diagnostic info and return 0 on healthy, 1 on missing payload."""
     from m3_memory import __version__
@@ -305,6 +438,8 @@ def doctor() -> int:
         print(f"developer sibling bridge:  {dev}")
     else:
         print("developer sibling bridge:  (not found)")
+
+    _chatlog_section(cfg)
 
     print()
     bridge = find_bridge()
