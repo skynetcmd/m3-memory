@@ -361,11 +361,20 @@ def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
 
 
 def apply_gemini_settings() -> tuple[bool, str]:
-    """Merge the SessionEnd hook into ~/.gemini/settings.json. Idempotent.
+    """Merge SessionEnd hook + memory MCP + auth method into ~/.gemini/settings.json.
 
-    Assumes the `memory` MCP entry is written by install-m3's post-install;
-    this function only handles the hook. Refuses to touch an unparseable
-    settings.json. Returns (changed, message).
+    Idempotent. Covers all three pieces a fresh Gemini install needs to
+    talk to m3-memory:
+      - mcpServers.memory: makes the m3-memory tool callable in-session
+      - security.auth.selectedType: 'oauth-personal' so headless flows
+        don't error with 'Please set an Auth method'
+      - hooks.SessionEnd: fires chatlog ingest on exit
+
+    Each piece is added only when missing, so re-running is safe and the
+    function correctly handles the Gemini-installed-after-m3 case where
+    install-m3's _register_gemini_mcp ran too early.
+
+    Refuses to touch an unparseable settings.json. Returns (changed, message).
     """
     settings_path = Path.home() / ".gemini" / "settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -386,14 +395,37 @@ def apply_gemini_settings() -> tuple[bool, str]:
     else:
         hook_cmd = f"/bin/sh {sh}"
 
+    actions: list[str] = []
+
+    # 1. mcpServers.memory — points Gemini at the mcp-memory CLI.
+    mcp_servers = existing.setdefault("mcpServers", {})
+    if "memory" not in mcp_servers:
+        mcp_servers["memory"] = {"command": "mcp-memory"}
+        actions.append("memory MCP")
+
+    # 2. security.auth.selectedType — required by Gemini >=0.39 for headless
+    #    invocation. Don't overwrite if user already chose a method.
+    security = existing.setdefault("security", {})
+    auth = security.setdefault("auth", {})
+    if "selectedType" not in auth:
+        # oauth-personal works once oauth_creds.json is present (e.g. after
+        # an interactive `gemini auth`). It doesn't authenticate by itself —
+        # it just tells Gemini which method to use. Users without creds will
+        # still be prompted on first run; this just unblocks the headless
+        # case once they've authed.
+        auth["selectedType"] = "oauth-personal"
+        actions.append("auth method")
+
+    # 3. hooks.SessionEnd — chatlog ingest on session exit.
     hooks = existing.setdefault("hooks", {})
     session_end = hooks.get("SessionEnd") or []
-    already = any("chatlog" in json.dumps(e).lower() for e in session_end)
-    if already:
-        return False, f"no change — SessionEnd chatlog hook already present in {settings_path}"
+    if not any("chatlog" in json.dumps(e).lower() for e in session_end):
+        session_end.append({"hooks": [{"type": "command", "command": hook_cmd}]})
+        hooks["SessionEnd"] = session_end
+        actions.append("SessionEnd hook")
 
-    session_end.append({"hooks": [{"type": "command", "command": hook_cmd}]})
-    hooks["SessionEnd"] = session_end
+    if not actions:
+        return False, f"no change — Gemini already wired for m3-memory in {settings_path}"
 
     if settings_path.is_file():
         stamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
@@ -401,7 +433,7 @@ def apply_gemini_settings() -> tuple[bool, str]:
         backup.write_text(settings_path.read_text(encoding="utf-8"), encoding="utf-8")
 
     settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-    return True, f"added SessionEnd chatlog hook to {settings_path}"
+    return True, f"added {', '.join(actions)} to {settings_path}"
 
 
 def show_claude_code_settings_snippet(config: ChatlogConfig) -> None:
