@@ -1,5 +1,9 @@
 # SLM Intent Classifier & Intent-Aware Retrieval
 
+> **Related**: [DUAL_EMBED.md](DUAL_EMBED.md) shows how an SLM profile
+> built on top of `extract_text()` can power dual-embedding ingest for
+> max-kind retrieval fusion. `extract_text()` is documented in §5 below.
+
 ## 1. Overview
 
 `bin/slm_intent.py` is a named-profile classifier that wraps a small local (or
