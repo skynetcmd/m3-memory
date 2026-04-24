@@ -600,18 +600,26 @@ def _claude_hook_state() -> dict:
 
 
 def _gemini_hook_state() -> dict:
-    """Detect MCP registration in ~/.gemini/settings.json.
+    """Detect MCP registration + SessionEnd hook in ~/.gemini/settings.json.
 
-    Gemini CLI has no Stop/PreCompact equivalent; chatlog capture for
-    Gemini flows through the MCP tool (chatlog_write) on assistant turns.
-    So "hook state" for Gemini really means "is the MCP registered so
-    the tool is callable at all."
+    Gemini CLI uses a single SessionEnd hook (no Stop/PreCompact split).
+    Capture works when (a) the memory MCP is registered so in-session
+    tool calls work and (b) the SessionEnd hook runs chatlog_ingest on exit.
     """
     settings = _read_json(Path.home() / ".gemini" / "settings.json")
     if settings is None:
         return {"configured": False}
     mcp = (settings.get("mcpServers") or {})
-    return {"configured": True, "memory_mcp": "memory" in mcp}
+    hooks = settings.get("hooks") or {}
+    session_end = any(
+        "chatlog" in json.dumps(h).lower()
+        for h in (hooks.get("SessionEnd") or [])
+    )
+    return {
+        "configured": True,
+        "memory_mcp": "memory" in mcp,
+        "session_end": session_end,
+    }
 
 
 def _chatlog_section(cfg: dict) -> int:
@@ -648,7 +656,8 @@ def _chatlog_section(cfg: dict) -> int:
         print("  gemini mcp:              ~/.gemini/settings.json not found")
     else:
         mcp_mark = "[on]" if gemini["memory_mcp"] else "[off]"
-        print(f"  gemini mcp (memory):     {mcp_mark}  (no Stop/PreCompact hooks on Gemini)")
+        se_mark = "[on]" if gemini["session_end"] else "[off]"
+        print(f"  gemini mcp (memory):     {mcp_mark}  SessionEnd {se_mark}")
     return 0
 
 
