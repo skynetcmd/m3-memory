@@ -380,32 +380,44 @@ def _post_install(
     install. install-m3's core job (repo on disk + config written) is already
     done by the time we get here.
     """
-    print()
-    print("post-install:")
-
-    for msg in (
-        _register_gemini_mcp(),
-        _sqlite3_cli_hint(),
-        _fix_npm_global_path(),
-    ):
-        if msg:
-            print(f"  {msg}")
-
-    # Persist user choices (if any) so llm_failover + chatlog_init can honor
-    # them on subsequent invocations.
+    # Collect all messages first so we can suppress the section entirely when
+    # nothing is actionable (every helper returning None = everything already
+    # fine, which is a common outcome on well-configured boxes).
+    messages = [
+        m for m in (
+            _register_gemini_mcp(),
+            _sqlite3_cli_hint(),
+            _fix_npm_global_path(),
+        ) if m
+    ]
     cfg = load_config()
     changed = False
     if endpoint_choice is not None:
         cfg["llm_endpoints_csv"] = endpoint_choice
         os.environ.setdefault("LLM_ENDPOINTS_CSV", endpoint_choice)
-        print(f"  [+] pinned LLM endpoint: {endpoint_choice}")
+        messages.append(f"[+] pinned LLM endpoint: {endpoint_choice}")
         changed = True
     if capture_choice is not None:
         cfg["chatlog_capture_mode"] = capture_choice
-        print(f"  [+] pinned chatlog capture mode: {capture_choice}")
+        messages.append(f"[+] pinned chatlog capture mode: {capture_choice}")
         changed = True
     if changed:
         save_config(cfg)
+
+    if not messages:
+        # Nothing to report — the three helpers all returned None and the
+        # user accepted silent defaults. Tell them what that means so the
+        # install doesn't end with silence that reads as "did it work?"
+        print()
+        print("post-install: no action needed (sqlite3 present, no Gemini CLI detected, no prompts).")
+        print("              run `mcp-memory doctor` anytime to re-check.")
+        return
+
+    print()
+    print("post-install:")
+    for msg in messages:
+        print(f"  {msg}")
+    print("  run `mcp-memory doctor` to re-check anytime.")
 
 
 def install_m3(
