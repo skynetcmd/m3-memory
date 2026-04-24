@@ -20,6 +20,20 @@ import os
 import sys
 
 
+# On Windows the default console code page is cp1252, which can't encode
+# characters outside that 8-bit range (em-dashes, arrows, box-drawing,
+# checkmarks, most non-Latin scripts). Any accidental non-ASCII in a
+# CLI print() would crash the whole command. Force the stdio streams
+# onto UTF-8 so user-facing output is safe to internationalize without
+# auditing every print site. Python 3.7+ .reconfigure() exists on the
+# real TextIOWrapper; during tests pytest substitutes a plain StringIO
+# that doesn't, so guard with hasattr.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def _run_bridge() -> None:
     """Locate and execute the MCP server bridge."""
     from m3_memory.installer import find_bridge, config_file
@@ -88,7 +102,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mcp-memory",
         description=(
-            "M3 Memory — local-first agentic memory MCP server.\n"
+            "M3 Memory - local-first agentic memory MCP server.\n"
             "Add to your agent's MCP config to get persistent, private memory."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

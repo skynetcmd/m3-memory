@@ -4,6 +4,30 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [2026.4.24.4] — April 24, 2026 — Fix Windows Unicode crash in `install-m3`
+
+### Fixed
+
+- **`mcp-memory install-m3` crashed on Windows consoles with a `UnicodeEncodeError`.**
+  The default Windows console code page is `cp1252`, which can't encode
+  the arrow (`→`) and em-dash (`—`) characters that had snuck into
+  user-facing print strings in `installer.py` and `cli.py`. Verified
+  end-to-end on a fresh venv: `pip install m3-memory==2026.4.24.3 &&
+  mcp-memory install-m3` crashed on the first print; `2026.4.24.4` runs
+  to completion and populates `~/.m3-memory/` correctly.
+
+  Two-layer fix:
+  1. Replace the non-ASCII glyphs in user-facing strings with ASCII
+     equivalents (`->`, `-`) so the output looks fine on every terminal.
+  2. Reconfigure `sys.stdout` / `sys.stderr` to UTF-8 with
+     `errors="backslashreplace"` at CLI entry, so future non-ASCII in
+     output strings degrades gracefully instead of crashing.
+
+  Linux/macOS users were not affected because those terminals default
+  to UTF-8.
+
+---
+
 ## [2026.4.24.3] — April 24, 2026 — Fix max-kind retrieval pool-halving
 
 ### Fixed
