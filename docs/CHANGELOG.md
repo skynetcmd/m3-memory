@@ -4,9 +4,21 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
-## [Unreleased] — Phase 1 Ingestion Optimizations
+## [2026.4.24.1] — April 24, 2026 — Dual-Embedding Retrieval + SLM-Enriched Embeds
+
+### Upgrade notes
+
+- New migrations **v021** (composite index on `memory_embeddings(content_hash, embed_model)`) and **v022** (`vector_kind` column on `memory_embeddings`) apply automatically on next `migrate_memory up`. Both are reversible. v021 is an index-only add; v022 is `ALTER TABLE ADD COLUMN` with `NOT NULL DEFAULT 'default'`, which is metadata-only on current SQLite versions (no row rewrite).
+- All new kwargs default to pre-release behavior. `memory_write`, `memory_search`, and every MCP tool schema are byte-identical to `2026.4.22.x`. The dual-embed and Anthropic-backend paths are opt-in; callers who don't touch them see no change.
 
 ### Added
+- **Dual-embedding ingest + max-kind retrieval fusion.** Migration **v022** adds a `vector_kind` column to `memory_embeddings` so a single `memory_id` can carry multiple embedding vectors distinguished by kind (`NOT NULL DEFAULT 'default'` — existing rows migrate in place).
+  - `memory_write_bulk_impl` gains `dual_embed: bool = False`. When `True` **and** an `embed_key_enricher` transforms `embed_text`, Phase 2 emits two rows per item: `vector_kind='default'` from the raw pre-enrichment text and `vector_kind='enriched'` from the SLM output. Pass-through enrichment and `dual_embed=False` emit a single `'default'` row — existing callers unaffected.
+  - `memory_search_scored_impl` gains `vector_kind_strategy: "default" | "max"`. `"default"` (the new default) pins the SQL join to `vector_kind='default'`, a strict superset of pre-v022 behavior. `"max"` lets all kinds through and dedupes by `memory_id` keeping the row with the highest query-vector cosine. `bm25` is per-item, so the drop only discards vector-similarity signal — no FTS information is lost.
+  - Tests: `tests/test_embed_key_enricher.py` (dual-embed cases), `tests/test_vector_kind_strategy.py`.
+
+- **SLM profile `backend: anthropic`** — `slm_intent` can now target Anthropic's `/v1/messages` endpoint in addition to OpenAI-compatible `/v1/chat/completions`. Anthropic path uses `x-api-key` header, sends `system` as a top-level field, and optionally wraps it in a `cache_control` ephemeral block (`cache_system: true`, default) so repeated calls pay the system prompt once. **Opt-in only** — no shipped default-named profile declares `anthropic`; pick a profile that names a cloud URL and pass it explicitly. Example profile at `config/slm/contextual_keys_haiku.yaml` (not loaded by any default code path).
+
 - **`embed_key_enricher` hook on `memory_write_bulk_impl`** — bulk-ingest callers can now supply an `async` callback that rewrites the `embed_text` of each prepared item before embedding. Content stays verbatim; only the vector-path key changes ("keys only, values verbatim" per the LoCoMo `llm_v1` / LongMemEval contextual-keys paper finding). New kwargs:
   - `embed_key_enricher: Callable[[str, dict], Awaitable[str]] | None = None` — `None` is a no-op (unchanged baseline behavior).
   - `embed_key_enricher_concurrency: int = 4` — semaphore cap on concurrent enricher calls.
