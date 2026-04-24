@@ -18,6 +18,7 @@ Usage:
 import argparse
 import os
 import sys
+from pathlib import Path  # noqa: F401 - used in _auto_install return-type comment
 
 
 # On Windows the default console code page is cp1252, which can't encode
@@ -34,20 +35,82 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
+def _auto_install(interactive: bool) -> "Path | None":
+    """Fetch the m3-memory system payload without an explicit `install-m3`.
+
+    Called from `_run_bridge()` when the bridge resolves to None. Behavior
+    depends on whether we're talking to a human:
+
+    - Interactive TTY: ask for confirmation, since auto-fetching a GitHub
+      repo on first run is surprising enough to deserve a prompt.
+    - Non-interactive (piped stdin, launched as an MCP subprocess, CI):
+      auto-fetch silently and log to stderr. Prompting would deadlock
+      the parent process waiting for input that will never come.
+
+    Respects M3_AUTO_INSTALL=0 as a hard opt-out for either mode.
+    Returns the resolved bridge path on success, None on refusal/failure.
+    """
+    # Look up via attribute (not `from ... import`) so tests can monkeypatch
+    # `m3_memory.installer.install_m3` and have it take effect here.
+    from m3_memory import installer
+
+    if os.environ.get("M3_AUTO_INSTALL", "").strip() == "0":
+        return None
+
+    dest = installer.default_repo_path()
+    if interactive:
+        print(
+            f"m3-memory system payload not found locally.\n"
+            f"Fetch it from GitHub into {dest} now? [Y/n] ",
+            end="", flush=True,
+        )
+        try:
+            reply = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("")  # newline after ^C / ^D
+            return None
+        if reply and reply not in ("y", "yes"):
+            return None
+    else:
+        print(
+            "[m3-memory] system payload not found; auto-fetching from GitHub "
+            f"into {dest} (set M3_AUTO_INSTALL=0 to disable).",
+            file=sys.stderr, flush=True,
+        )
+
+    try:
+        return installer.install_m3()
+    except RuntimeError as e:
+        print(f"[m3-memory] auto-install failed: {e}", file=sys.stderr)
+        return None
+
+
 def _run_bridge() -> None:
-    """Locate and execute the MCP server bridge."""
+    """Locate and execute the MCP server bridge.
+
+    If no bridge can be resolved, try to auto-install the payload before
+    giving up. See `_auto_install` for interactive vs non-interactive
+    semantics.
+    """
     from m3_memory.installer import find_bridge, config_file
 
     bridge = find_bridge()
     if bridge is None:
+        # Nothing on disk, no env override, no sibling — try to auto-install.
+        bridge = _auto_install(interactive=sys.stdin.isatty())
+
+    if bridge is None:
         print(
             "Error: m3-memory system payload is not installed.\n"
             "\n"
-            "Run this once after pip install:\n"
+            "Run this once to fetch it:\n"
             "    mcp-memory install-m3\n"
             "\n"
             f"Or, if you already have a clone, set M3_BRIDGE_PATH or edit\n"
-            f"    {config_file()}\n",
+            f"    {config_file()}\n"
+            "\n"
+            "(Auto-install is gated by M3_AUTO_INSTALL; set M3_AUTO_INSTALL=0\n"
+            "to permanently disable the prompt, or leave unset to accept.)\n",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -57,7 +120,7 @@ def _run_bridge() -> None:
     if bin_dir not in sys.path:
         sys.path.insert(0, bin_dir)
 
-    # Execute the bridge in this process — equivalent to `python memory_bridge.py`,
+    # Execute the bridge in this process - equivalent to `python memory_bridge.py`,
     # not dynamic code from an untrusted source; it's a file path from our own
     # config (or an explicit env var, or a sibling of this package).
     with open(bridge) as f:
