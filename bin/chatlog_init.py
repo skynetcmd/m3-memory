@@ -594,22 +594,23 @@ def main() -> int:
     if args.disable_stop_hook:
         return apply_stop_hook_toggle(enable=False)
 
-    # Standalone settings.json writers — useful when chatlog is already
-    # configured and the user just wants the hooks wired. Doesn't modify
-    # the chatlog config; reads it.
-    if args.apply_claude or args.apply_gemini:
+    # Standalone settings.json writers (no --non-interactive): useful when
+    # chatlog is already configured and the user just wants the hooks wired.
+    # Doesn't modify the chatlog config; reads it. If --non-interactive is
+    # ALSO set, fall through to the normal path so config + migrations + apply
+    # all happen in one command.
+    if (args.apply_claude or args.apply_gemini) and not args.non_interactive:
         cfg = resolve_config() if os.path.exists(CONFIG_PATH) else ChatlogConfig(
             db_path=DEFAULT_DB_PATH,
             host_agents={a: HookSpec() for a in VALID_HOST_AGENTS},
         )
-        rc = 0
         if args.apply_claude:
             changed, msg = apply_claude_settings(cfg)
             print(("[+] " if changed else "[=] ") + msg)
         if args.apply_gemini:
             changed, msg = apply_gemini_settings()
             print(("[+] " if changed else "[=] ") + msg)
-        return rc
+        return 0
 
     try:
         # Check if config exists
