@@ -1835,6 +1835,14 @@ async def memory_search_scored_impl(
             _depth=_depth + 1,
         )
 
+    # When strategy="max" the memory_embeddings join returns one row per
+    # (memory_id, vector_kind) pair, so a straight LIMIT 1000 would see
+    # each item N times (N = distinct kinds stored) and the effective
+    # unique-item pool would shrink to 1000/N. Double the SQL-level cap
+    # for max-kind so the unique pool stays near 1000. Strategy="default"
+    # pins to a single kind, so the base cap already counts unique items.
+    sql_row_limit = 2000 if vector_kind_strategy == "max" else 1000
+
     try:
         with _db() as db:
             if search_mode == "semantic":
@@ -1843,7 +1851,7 @@ async def memory_search_scored_impl(
                     FROM memory_items mi
                     JOIN memory_embeddings me ON mi.id = me.memory_id
                     WHERE {where_sql}
-                    LIMIT 1000
+                    LIMIT {sql_row_limit}
                 """
                 rows = db.execute(sql, params).fetchall()
             else:
@@ -1855,7 +1863,7 @@ async def memory_search_scored_impl(
                     JOIN memory_items_fts fts ON mi.rowid = fts.rowid
                     WHERE {where_sql} AND memory_items_fts MATCH ?
                     ORDER BY bm25_score ASC
-                    LIMIT 1000
+                    LIMIT {sql_row_limit}
                 """
                 is_exact_query = (query.startswith('"') and query.endswith('"')) or (query.startswith("'") and query.endswith("'"))
                 clean_query = query[1:-1] if is_exact_query else query
@@ -1874,7 +1882,11 @@ async def memory_search_scored_impl(
         return await _recurse_semantic()
 
     scored = []
-    if len(rows) > SEARCH_ROW_CAP:
+    # Under max-kind, trim AFTER dedup so SEARCH_ROW_CAP counts unique items,
+    # not kind-duplicated rows. Under default (pins to one kind) the dupes
+    # don't exist, so the cap already counts unique items and we trim up-front
+    # to avoid an unnecessary cosine batch.
+    if vector_kind_strategy != "max" and len(rows) > SEARCH_ROW_CAP:
         rows = rows[:SEARCH_ROW_CAP]
     page_matrix = [_unpack(r["embedding"]) for r in rows]
     page_scores = _batch_cosine(q_vec, page_matrix)
@@ -1893,6 +1905,10 @@ async def memory_search_scored_impl(
         keep_idx = sorted(best.values())
         rows = [rows[i] for i in keep_idx]
         page_scores = [page_scores[i] for i in keep_idx]
+        # Now trim to the cap — count unique items, not kind-duplicated rows.
+        if len(rows) > SEARCH_ROW_CAP:
+            rows = rows[:SEARCH_ROW_CAP]
+            page_scores = page_scores[:SEARCH_ROW_CAP]
 
     for i, row in enumerate(rows):
         item = dict(row)
