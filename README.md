@@ -32,7 +32,11 @@ Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agen
 
 ```bash
 pip install m3-memory
+mcp-memory install-m3
 ```
+
+The second command fetches the system payload into `~/.m3-memory/repo/`
+(pinned to the wheel version). Run `mcp-memory doctor` to verify.
 
 Add to your MCP config:
 
