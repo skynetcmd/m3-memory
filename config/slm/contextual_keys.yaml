@@ -1,0 +1,66 @@
+# Contextual-keys enrichment profile — used by benchmarks/longmemeval to
+# prepend SLM-extracted atomic facts to the embed_text of each ingested
+# turn. Implements the "keys only, values verbatim" pattern from LoCoMo
+# llm_v1 / LongMemEval paper §5.5.
+#
+# Consumed by slm_intent.extract_text() — returns the raw model output
+# (after profile post-processing) suitable for prepending to embed_text.
+#
+# !! EDIT BEFORE USING !!
+# `url`, `model`, and `api_key_service` are deployment-specific. The wire
+# protocol is OpenAI-compatible /v1/chat/completions. Tune `timeout_s`
+# and `temperature` as needed for your SLM's speed/quality profile.
+
+url: http://127.0.0.1:1234/v1/chat/completions
+model: qwen3.5-2b
+api_key_service: LM_API_TOKEN
+timeout_s: 15.0
+temperature: 0
+system: |
+  You extract atomic facts FROM THE INPUT ONLY. Never invent or pad facts.
+  Never use information you know about the world that is not in the input.
+
+  Read the INPUT carefully. Identify 3–5 concrete facts explicitly stated
+  or directly implied. For assistant turns, the facts are what the
+  assistant recommends/suggests/tells. For user turns, the facts are what
+  the user reveals about themselves.
+
+  Output rules:
+    - Start your reply with the first fact directly, no preamble.
+    - Separate facts with " | " (space, pipe, space).
+    - Each fact: one clause, under 20 words, concrete and specific.
+    - NO numbered lists, NO bullet points, NO quotation marks, NO explanations.
+    - NO facts that aren't in the input.
+
+  If the input is too short, too generic, or contains no extractable facts,
+  reply with exactly one dash: -
+
+# `labels` + `fallback` are profile-schema required. Unused by extract_text
+# (free-text path), but kept for schema compliance.
+labels:
+  - extracted
+fallback: extracted
+
+# Post-processing applied to every SLM reply BEFORE the caller sees it.
+# All fields optional; absent means no-op.
+post:
+  # If the reply matches any of these patterns (case-insensitive, searched
+  # anywhere in the output), treat as empty and let the caller fall back
+  # to raw content. Catches the SLM's "no facts" and refusal outputs.
+  skip_if_matches:
+    - '^[-_\.\s]*$'                    # dash/dot/underscore-only replies
+    - 'no (extractable )?facts'        # "no facts" / "no extractable facts"
+    - 'cannot extract'
+    - 'unable to (extract|identify)'
+
+  # Strip these prefixes from the start of the reply, peeling stacked
+  # prefixes iteratively until none match.
+  strip_prefixes:
+    - '^sure[,.]?\s*'
+    - '^(okay|ok)[,.]?\s*'
+    - '^here are (the )?(?:\d+ )?(?:extracted )?facts?\s*:?\s*'
+    - '^(extracted )?facts?\s*:?\s*'
+    - "^here['s]* what (i extracted|the user said)\\s*:?\\s*"
+    - '^\d+[\.\)]\s*'                  # leading "1. " or "1) "
+    - '^[-*•]\s+'                 # leading bullet "- " / "* " / "• "
+    - '^\|+\s*'                        # leading pipes "| " or "|| " (table drift)

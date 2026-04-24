@@ -7,6 +7,32 @@ All notable changes to M3 Memory are documented here.
 ## [Unreleased] — Phase 1 Ingestion Optimizations
 
 ### Added
+- **`embed_key_enricher` hook on `memory_write_bulk_impl`** — bulk-ingest callers can now supply an `async` callback that rewrites the `embed_text` of each prepared item before embedding. Content stays verbatim; only the vector-path key changes ("keys only, values verbatim" per the LoCoMo `llm_v1` / LongMemEval contextual-keys paper finding). New kwargs:
+  - `embed_key_enricher: Callable[[str, dict], Awaitable[str]] | None = None` — `None` is a no-op (unchanged baseline behavior).
+  - `embed_key_enricher_concurrency: int = 4` — semaphore cap on concurrent enricher calls.
+
+  Errors fall open: if the enricher raises, the item's `embed_text` reverts to its anchor-augmented baseline and the ingest continues. The kwarg is bulk-only (not exposed via MCP) — intended for benchmark and import drivers. Tests: `tests/test_embed_key_enricher.py`.
+
+- **`slm_intent.extract_text()`** — sibling of `extract_entities` that returns the raw model output unchanged (no comma-splitting, no length filter). Needed for callers that want the SLM's reply as a single string — the first consumer is the LongMemEval benchmark's `--contextual-keys` ingest flag, which prepends SLM-extracted atomic facts to each turn's `embed_text`. Signature: `async def extract_text(text, profile, client=None) -> Optional[str]`. `profile` is required (no sensible default for free-text extraction). Documented in `docs/SLM_INTENT.md` §5 alongside the new "Choosing the right extractor function" comparison table.
+
+- **SLM profile `post:` block for output post-processing** — profiles that drive `extract_text` / `extract_entities` now support a three-part optional cleanup pipeline applied to every reply before it's returned:
+  - `post.skip_if_matches` — regex list; if any matches the raw reply (case-insensitive search), the function returns `""` so callers fall back. Catches refusals like `"no extractable facts"` and dash-only outputs.
+  - `post.strip_prefixes` — regex list; stripped from the start of the reply, iterated until none match. Handles "Sure. Here are the facts: …" preambles.
+  - `post.format` — wrapper string containing the literal `{text}` placeholder (validated at load time).
+
+  Invalid regexes or malformed `format` strings raise `ValueError` during `load_profile()` so deploy errors surface loudly. `classify_intent` intentionally does NOT apply `post:` — its label-matcher handles prose cleanup inline. Tests: `tests/test_slm_intent.py` (8 new cases).
+
+- **New profile `config/slm/contextual_keys.yaml`** — atomic-fact extractor for ingest-time embed-key enrichment. Consumed by `slm_intent.extract_text()` from the LongMemEval bench when `--contextual-keys` is passed. Ships with a `post:` block that strips "Sure." / "Here are the facts:" preambles and skips dash-only / "no facts" refusals.
+
+- **Tunable elbow-trim on `memory_search_scored_impl`** — three new kwargs let callers tune adaptive-K behavior without patching the underlying utility:
+  - `elbow_sensitivity: float = 1.5` — previously hardcoded inside `_trim_by_elbow`. Lower values trim more aggressively (cut off sooner); higher values keep more results. The default reproduces prior shipped behavior exactly.
+  - `adaptive_k_min: int = 0` — floor on trimmed K. When set, undoes the trim if it leaves fewer than `adaptive_k_min` results. `0` (default) disables the floor.
+  - `adaptive_k_max: int = 0` — cap on trimmed K. When set, caps the trimmed list at `adaptive_k_max` results. `0` (default) disables the cap.
+
+  All three kwargs are back-compat defaults. `memory_search_impl` and the MCP `memory_search` tool are unchanged — they invoke with default values and see prior behavior. Tests: `tests/test_elbow_trim.py` (4 cases covering default, tunable sensitivity, edge conditions).
+
+  Motivation: the prior hardcoded `sensitivity=1.5` can over-trim temporal and multi-session retrieval pools in practice, making adaptive-K counterproductive for some workloads. Exposing the knob lets callers tune trim aggressiveness per use case without altering default-path behavior.
+
 - **Always-on: temporal-anchor prefix in `embed_text`.** When `metadata["temporal_anchors"]` contains resolved `YYYY-MM-DD` dates, they are prepended to the embed text as `[YYYY-MM-DD, ...] …` before embedding. No flag; free when anchors are absent. Lets vector / FTS queries hit absolute dates even when the source says "yesterday".
 - **New memory type `event_extraction`** added to `VALID_MEMORY_TYPES` (now 21 types) and the `type="auto"` classifier's local set.
 - **Opt-in ingestion enrichment** (off by default; fire only for `type="message"` rows with a `conversation_id`):
