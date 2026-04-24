@@ -116,11 +116,13 @@ to_be_deleted/
 # (run IDs, SHR numbers, endpoint URLs) that belongs in .scratch/, not
 # in the public repo. Published results live in README.md / docs/.
 benchmarks/longmemeval/RUN_CATALOG.md
-benchmarks/longmemeval/PLAN2.md
+benchmarks/longmemeval/PLAN*.md
 benchmarks/longmemeval/results.json
 benchmarks/longmemeval/LME-*.json
+benchmarks/longmemeval/refs/
 benchmarks/locomo/*_results.json
 benchmarks/locomo/RUN_CATALOG.md
+benchmarks/locomo/PLAN*.md
 docs/tools/probe_ingest_cost.md
 
 # Generated MCP config (machine-specific paths; run bin/generate_configs.py to create)
