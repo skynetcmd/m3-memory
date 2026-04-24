@@ -1,0 +1,57 @@
+# Gitleaks configuration for m3-memory.
+#
+# Extends the default ruleset (no rules re-declared). Adds a global
+# allowlist covering files that legitimately contain secret-shaped
+# strings: public test fixtures, benchmark dataset content, and
+# scanner self-output. Without these, gitleaks reports 20+ false
+# positives per scan.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public test/demo tokens + benchmark datasets + scanner self-output (not real secrets)"
+
+# File / path patterns that are known to contain non-secret strings
+# matching secret rules. Gitleaks regex-matches the file path against
+# each entry.
+paths = [
+    # Redaction test fixtures contain realistic-looking tokens as INPUT
+    # to the scrubber. The test proves redaction works.
+    '''tests/test_chatlog_redaction\.py''',
+
+    # LongMemEval + LoCoMo benchmark datasets contain conversational
+    # turns that may include JWT demo strings, example credentials, etc.
+    # As downloaded from their public sources.
+    '''data/(longmemeval|locomo)/.*\.json''',
+
+    # .env.example / placeholder deployment docs with illustrative
+    # USERNAME:REPLACE_WITH_YOUR_PASSWORD-style strings.
+    '''config/zshenv\.example''',
+    '''validate_env\.py''',
+    '''ENVIRONMENT_VARIABLES\.md''',
+    '''bin/pg_setup\.py''',
+    '''examples/sandbox-openclaw/\.env\.example''',
+
+    # Scanner self-output: scan reports and SARIFs contain the secrets
+    # they reported, creating a recursive finding loop on re-scan.
+    '''scan-reports/.*''',
+]
+
+# Regex / literal strings that are always false-positives across any
+# file. The jwt.io demo JWT is the canonical test fixture — it's a
+# literal public string used in every JWT tutorial on the internet.
+regexes = [
+    # jwt.io demo token — decodes to {"sub":"1234567890","name":"John Doe",...}.
+    # Ubiquitous as a test fixture; never a real credential.
+    '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIi[A-Za-z0-9_-]+''',
+
+    # Auth0 docs JWT payload (also a common tutorial fixture).
+    '''eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiJ1cm46YXBwOjdlMGQxODg5ODIyNjQzNzNhNWYwZDQxNWVhMGQyNmUwIiwi[A-Za-z0-9_-]+''',
+
+    # 40-char hex fingerprint embedded in the demo JWT payload's "jti"
+    # claim — gitleaks flags it as "Sourcegraph token" because the rule
+    # doesn't distinguish. It's ciphertext-inside-a-test-fixture,
+    # not a real Sourcegraph credential.
+    '''4fca3adbb671202800790582e6b9e308354fb777''',
+]
