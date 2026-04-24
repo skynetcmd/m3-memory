@@ -258,3 +258,113 @@ def test_doctor_reports_resolved_bridge(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "resolved bridge" in out.lower()
+
+
+# ── Auto-install tests (Option C behavior on `mcp-memory` bare invocation) ────
+
+def test_auto_install_opt_out_via_env(monkeypatch, tmp_path):
+    """M3_AUTO_INSTALL=0 is an absolute opt-out: _auto_install returns None
+    in both TTY and non-TTY modes, regardless of what install_m3 would do."""
+    import importlib
+    from m3_memory import cli, installer
+
+    monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
+    monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    monkeypatch.setenv("M3_AUTO_INSTALL", "0")
+
+    # If install_m3 got called despite the opt-out we'd blow up loudly.
+    def boom(*a, **kw):
+        raise AssertionError("install_m3 should not be called when M3_AUTO_INSTALL=0")
+    monkeypatch.setattr(installer, "install_m3", boom)
+
+    assert cli._auto_install(interactive=True) is None
+    assert cli._auto_install(interactive=False) is None
+
+
+def test_auto_install_interactive_prompt_declined(monkeypatch, tmp_path):
+    """Interactive mode with user answering 'n' to the prompt returns None
+    without calling install_m3."""
+    from m3_memory import cli, installer
+
+    monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
+    monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    monkeypatch.delenv("M3_AUTO_INSTALL", raising=False)
+
+    def boom(*a, **kw):
+        raise AssertionError("install_m3 should not be called when user declines")
+    monkeypatch.setattr(installer, "install_m3", boom)
+    monkeypatch.setattr("builtins.input", lambda: "n")
+
+    assert cli._auto_install(interactive=True) is None
+
+
+def test_auto_install_interactive_prompt_accepted(monkeypatch, tmp_path):
+    """Interactive mode with user answering 'y' calls install_m3 and returns
+    the resolved bridge path."""
+    from m3_memory import cli, installer
+
+    monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
+    monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    monkeypatch.delenv("M3_AUTO_INSTALL", raising=False)
+
+    fake_bridge = tmp_path / "repo" / "bin" / "memory_bridge.py"
+    called = []
+    def fake_install(*a, **kw):
+        called.append((a, kw))
+        fake_bridge.parent.mkdir(parents=True, exist_ok=True)
+        fake_bridge.write_text("# fetched")
+        return fake_bridge
+    monkeypatch.setattr(installer, "install_m3", fake_install)
+    monkeypatch.setattr("builtins.input", lambda: "y")
+
+    result = cli._auto_install(interactive=True)
+    assert result == fake_bridge
+    assert called, "install_m3 should have been invoked"
+
+
+def test_auto_install_non_interactive_auto_fetches(monkeypatch, tmp_path):
+    """Non-interactive mode (no TTY) auto-fetches without prompting. This is
+    the MCP-subprocess path: prompting would deadlock the parent."""
+    from m3_memory import cli, installer
+
+    monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
+    monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    monkeypatch.delenv("M3_AUTO_INSTALL", raising=False)
+
+    fake_bridge = tmp_path / "repo" / "bin" / "memory_bridge.py"
+    def fake_install(*a, **kw):
+        fake_bridge.parent.mkdir(parents=True, exist_ok=True)
+        fake_bridge.write_text("# fetched")
+        return fake_bridge
+    monkeypatch.setattr(installer, "install_m3", fake_install)
+
+    # input() would deadlock or raise EOFError in non-interactive; either way
+    # the prompt path shouldn't be reached. Rigging input() to blow up
+    # confirms we never call it under interactive=False.
+    def boom():
+        raise AssertionError("input() should not be called under interactive=False")
+    monkeypatch.setattr("builtins.input", boom)
+
+    result = cli._auto_install(interactive=False)
+    assert result == fake_bridge
+
+
+def test_auto_install_surfaces_install_m3_failure(monkeypatch, tmp_path, capsys):
+    """If install_m3 raises RuntimeError (bad tag, network blip, etc.),
+    _auto_install returns None and prints the error to stderr so the caller
+    can fall through to the actionable help message."""
+    from m3_memory import cli, installer
+
+    monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
+    monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    monkeypatch.delenv("M3_AUTO_INSTALL", raising=False)
+
+    def fail(*a, **kw):
+        raise RuntimeError("network unreachable")
+    monkeypatch.setattr(installer, "install_m3", fail)
+
+    result = cli._auto_install(interactive=False)
+    assert result is None
+    err = capsys.readouterr().err
+    assert "network unreachable" in err
+    assert "auto-install failed" in err
