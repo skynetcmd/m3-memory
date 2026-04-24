@@ -368,3 +368,41 @@ def test_auto_install_surfaces_install_m3_failure(monkeypatch, tmp_path, capsys)
     err = capsys.readouterr().err
     assert "network unreachable" in err
     assert "auto-install failed" in err
+
+
+def test_safe_tar_member_rejects_path_traversal(tmp_path):
+    """_safe_tar_member drops tarball entries whose paths escape dest_root
+    (classic tarslip CVE class). These are the inputs we'd see from a
+    maliciously-crafted tarball claiming to be a GitHub release."""
+    import tarfile
+    from m3_memory.installer import _safe_tar_member
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    dest_resolved = dest.resolve()
+
+    # Helper to fabricate a TarInfo with a given name/type.
+    def mk(name, type_byte=tarfile.REGTYPE, linkname=""):
+        ti = tarfile.TarInfo(name=name)
+        ti.type = type_byte
+        ti.linkname = linkname
+        return ti
+
+    # Rejections
+    assert _safe_tar_member(mk("../escape.txt"), dest_resolved) is None
+    assert _safe_tar_member(mk("/etc/passwd"), dest_resolved) is None
+    assert _safe_tar_member(mk("legit/../../../escape"), dest_resolved) is None
+    assert _safe_tar_member(mk("dev-node", tarfile.CHRTYPE), dest_resolved) is None
+    assert _safe_tar_member(mk("fifo", tarfile.FIFOTYPE), dest_resolved) is None
+    # Symlink pointing outside
+    assert _safe_tar_member(mk("link", tarfile.SYMTYPE, linkname="/etc/passwd"), dest_resolved) is None
+
+    # Accepted cases
+    assert _safe_tar_member(mk("m3-memory-x/README.md"), dest_resolved) is not None
+    assert _safe_tar_member(mk("m3-memory-x/", tarfile.DIRTYPE), dest_resolved) is not None
+    # Symlink that stays within dest_root
+    inside_link = _safe_tar_member(
+        mk("m3-memory-x/link", tarfile.SYMTYPE, linkname="README.md"),
+        dest_resolved,
+    )
+    assert inside_link is not None
