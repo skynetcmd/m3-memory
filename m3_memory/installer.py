@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import sqlite3
 import subprocess
@@ -201,12 +202,229 @@ def _download_tarball(tag: str, dest: Path) -> None:
         shutil.move(str(top_level[0]), str(dest))
 
 
-def install_m3(repo_path: Optional[Path] = None, tag: Optional[str] = None, force: bool = False) -> Path:
+# ───────── post-install helpers (tasks #8–#11 in plan memory 776d3729) ─────────
+
+def _register_gemini_mcp() -> Optional[str]:
+    """Write a `memory` MCP entry to ~/.gemini/settings.json if Gemini CLI exists.
+
+    Idempotent: leaves an existing `memory` entry untouched. Returns a short
+    status string for user-facing logging, or None if Gemini CLI isn't on PATH
+    (in which case we stay quiet — not every install has Gemini).
+    """
+    gemini_bin = shutil.which("gemini")
+    if not gemini_bin:
+        # Also check the common non-interactive npm-global path (which may not
+        # be on PATH yet — see _fix_npm_global_path below).
+        npm_candidate = Path.home() / ".npm-global" / "bin" / "gemini"
+        if not npm_candidate.exists():
+            return None
+
+    settings_dir = Path.home() / ".gemini"
+    settings_file = settings_dir / "settings.json"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+
+    existing: dict = {}
+    if settings_file.is_file():
+        try:
+            existing = json.loads(settings_file.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            # Refuse to clobber a file we can't parse — user may have hand-edited.
+            return f"[!] {settings_file} is unreadable; skipping Gemini MCP registration"
+
+    mcp_servers = existing.setdefault("mcpServers", {})
+    if "memory" in mcp_servers:
+        return f"[=] Gemini MCP 'memory' already registered in {settings_file}"
+
+    mcp_servers["memory"] = {"command": "mcp-memory"}
+    settings_file.write_text(
+        json.dumps(existing, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return f"[+] registered 'memory' MCP in {settings_file}"
+
+
+def _sqlite3_cli_hint() -> Optional[str]:
+    """Return a per-OS install instruction if the `sqlite3` CLI is missing.
+
+    Returns None if the CLI is already on PATH (no action needed).
+    Purely advisory — we don't run sudo commands on the user's behalf.
+    """
+    if shutil.which("sqlite3"):
+        return None
+
+    system = platform.system()
+    if system == "Linux":
+        # Try /etc/os-release for the package manager.
+        distro = ""
+        try:
+            for line in Path("/etc/os-release").read_text().splitlines():
+                if line.startswith("ID="):
+                    distro = line.split("=", 1)[1].strip().strip('"')
+                    break
+        except OSError:
+            pass
+        if distro in ("debian", "ubuntu", "linuxmint", "pop"):
+            cmd = "sudo apt install -y sqlite3"
+        elif distro in ("fedora", "rhel", "centos", "rocky", "almalinux"):
+            cmd = "sudo dnf install -y sqlite"
+        elif distro in ("arch", "manjaro"):
+            cmd = "sudo pacman -S sqlite"
+        else:
+            cmd = "install `sqlite3` with your package manager"
+        return f"[!] `sqlite3` CLI not found -{cmd}"
+    if system == "Darwin":
+        # macOS ships sqlite3 in /usr/bin; if absent something's unusual.
+        return "[!] `sqlite3` CLI not found (unexpected on macOS) — `brew install sqlite`"
+    if system == "Windows":
+        return "[!] `sqlite3` CLI not found -`winget install SQLite.SQLite` or download sqlite-tools from https://sqlite.org/download.html"
+    return "[!] `sqlite3` CLI not found; install it for ad-hoc DB inspection"
+
+
+def _fix_npm_global_path() -> Optional[str]:
+    """Append ~/.npm-global/bin to ~/.profile for non-interactive shells.
+
+    Interactive shells typically source ~/.bashrc; cron jobs, sshd non-login
+    shells, and most scripts read ~/.profile. Without this, `gemini` (and any
+    other npm-global binary) is missing from those contexts.
+
+    No-op on Windows (npm uses %APPDATA%\\npm which is added to user PATH by
+    the Node installer). Idempotent — checks for the exact export line first.
+    """
+    if platform.system() == "Windows":
+        return None
+    npm_bin = Path.home() / ".npm-global" / "bin"
+    if not npm_bin.exists():
+        return None
+
+    profile = Path.home() / ".profile"
+    marker = 'export PATH="$HOME/.npm-global/bin:$PATH"'
+    existing = ""
+    if profile.is_file():
+        try:
+            existing = profile.read_text(encoding="utf-8")
+        except OSError:
+            return f"[!] {profile} unreadable; add {marker!r} manually"
+    if marker in existing:
+        return f"[=] ~/.npm-global/bin already in {profile}"
+
+    suffix = "\n# Added by mcp-memory install-m3 (npm-global PATH for non-interactive shells)\n" + marker + "\n"
+    if existing and not existing.endswith("\n"):
+        suffix = "\n" + suffix
+    try:
+        with profile.open("a", encoding="utf-8") as f:
+            f.write(suffix)
+    except OSError as e:
+        return f"[!] could not write to {profile}: {e}"
+    return f"[+] appended npm-global PATH export to {profile}"
+
+
+def _prompt_endpoint_choice(interactive: bool, endpoint_flag: Optional[str]) -> Optional[str]:
+    """Ask which LLM endpoint to use; persist or return None to accept defaults.
+
+    Non-interactive + no flag: return None (caller stores nothing → llm_failover
+    probes both defaults). This mirrors the existing _auto_install ergonomics
+    in cli.py (quiet defaults when no TTY).
+    """
+    if endpoint_flag is not None:
+        return endpoint_flag
+    if not interactive:
+        return None
+    print("\nLLM endpoint to use for embedding + enrichment:")
+    print("  1) LM Studio (http://localhost:1234/v1)")
+    print("  2) Ollama    (http://localhost:11434/v1)")
+    print("  3) probe both at runtime (default)")
+    try:
+        reply = input("Choice [1/2/3]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    if reply == "1":
+        return "http://localhost:1234/v1"
+    if reply == "2":
+        return "http://localhost:11434/v1"
+    return None
+
+
+def _prompt_capture_mode(interactive: bool, capture_flag: Optional[str]) -> Optional[str]:
+    """Ask which Claude-Code capture hooks to enable.
+
+    Values: 'both' | 'stop' | 'precompact' | 'none' | None (defer to chatlog_init
+    defaults). Non-interactive returns None unless --capture-mode was passed.
+    """
+    if capture_flag is not None:
+        return capture_flag
+    if not interactive:
+        return None
+    print("\nChatlog capture hooks (Claude Code):")
+    print("  1) both Stop + PreCompact (recommended — lossless capture)")
+    print("  2) PreCompact only (lower overhead)")
+    print("  3) Stop only")
+    print("  4) neither (skip hook setup; configure later with `mcp-memory chatlog init`)")
+    try:
+        reply = input("Choice [1/2/3/4, default 1]: ").strip() or "1"
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    return {"1": "both", "2": "precompact", "3": "stop", "4": "none"}.get(reply)
+
+
+def _post_install(
+    bridge: Path,
+    interactive: bool,
+    endpoint_choice: Optional[str],
+    capture_choice: Optional[str],
+) -> None:
+    """Run the additive post-install steps. Each step prints its own status.
+
+    All steps are best-effort: a failure is reported but does not abort the
+    install. install-m3's core job (repo on disk + config written) is already
+    done by the time we get here.
+    """
+    print()
+    print("post-install:")
+
+    for msg in (
+        _register_gemini_mcp(),
+        _sqlite3_cli_hint(),
+        _fix_npm_global_path(),
+    ):
+        if msg:
+            print(f"  {msg}")
+
+    # Persist user choices (if any) so llm_failover + chatlog_init can honor
+    # them on subsequent invocations.
+    cfg = load_config()
+    changed = False
+    if endpoint_choice is not None:
+        cfg["llm_endpoints_csv"] = endpoint_choice
+        os.environ.setdefault("LLM_ENDPOINTS_CSV", endpoint_choice)
+        print(f"  [+] pinned LLM endpoint: {endpoint_choice}")
+        changed = True
+    if capture_choice is not None:
+        cfg["chatlog_capture_mode"] = capture_choice
+        print(f"  [+] pinned chatlog capture mode: {capture_choice}")
+        changed = True
+    if changed:
+        save_config(cfg)
+
+
+def install_m3(
+    repo_path: Optional[Path] = None,
+    tag: Optional[str] = None,
+    force: bool = False,
+    interactive: Optional[bool] = None,
+    endpoint: Optional[str] = None,
+    capture_mode: Optional[str] = None,
+) -> Path:
     """Clone or download the m3-memory repo and record the bridge path in config.
 
     ``repo_path`` defaults to ``~/.m3-memory/repo``. ``tag`` defaults to
     ``v<m3_memory.__version__>`` so the cloned payload always matches the
     installed wheel. ``force=True`` wipes an existing clone before re-fetching.
+
+    ``interactive`` controls the post-install prompts (endpoint, capture mode).
+    ``None`` auto-detects via ``sys.stdin.isatty()``. ``endpoint`` and
+    ``capture_mode`` are explicit overrides that skip their respective prompts.
 
     Returns the resolved path to ``bin/memory_bridge.py``. Raises RuntimeError
     if neither git nor the tarball fallback can fetch the repo.
@@ -219,6 +437,14 @@ def install_m3(repo_path: Optional[Path] = None, tag: Optional[str] = None, forc
 
     if tag is None:
         tag = f"v{__version__}"
+
+    if interactive is None:
+        interactive = sys.stdin.isatty()
+
+    # Collect user choices BEFORE any slow network work so the prompt appears
+    # promptly and the clone/download doesn't block on input below.
+    endpoint_choice = _prompt_endpoint_choice(interactive, endpoint)
+    capture_choice = _prompt_capture_mode(interactive, capture_mode)
 
     if repo_path.exists():
         if not force:
@@ -251,6 +477,8 @@ def install_m3(repo_path: Optional[Path] = None, tag: Optional[str] = None, forc
     })
     print(f"[OK] installed. bridge_path = {bridge}")
     print(f"  config written to {config_file()}")
+
+    _post_install(bridge, interactive, endpoint_choice, capture_choice)
     return bridge
 
 

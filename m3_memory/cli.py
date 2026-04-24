@@ -131,7 +131,13 @@ def _run_bridge() -> None:
 def _cmd_install_m3(args: argparse.Namespace) -> int:
     from m3_memory.installer import install_m3
     try:
-        install_m3(force=args.force, tag=args.tag)
+        install_m3(
+            force=args.force,
+            tag=args.tag,
+            interactive=(False if args.non_interactive else None),
+            endpoint=args.endpoint,
+            capture_mode=args.capture_mode,
+        )
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -297,6 +303,18 @@ Docs: https://github.com/skynetcmd/m3-memory
     p_install.add_argument(
         "--tag", default=None,
         help=f"Override the GitHub tag to fetch (default: v{__version__}).",
+    )
+    p_install.add_argument(
+        "--non-interactive", action="store_true",
+        help="Skip endpoint + capture-mode prompts; use defaults (probe both endpoints; both hooks).",
+    )
+    p_install.add_argument(
+        "--endpoint", default=None, metavar="URL",
+        help="Pin LLM_ENDPOINTS_CSV to this URL (skips the endpoint prompt).",
+    )
+    p_install.add_argument(
+        "--capture-mode", default=None, choices=("both", "stop", "precompact", "none"),
+        help="Chatlog capture hooks to enable (skips the capture-mode prompt).",
     )
     p_install.set_defaults(func=_cmd_install_m3)
 
