@@ -406,3 +406,18 @@ def test_safe_tar_member_rejects_path_traversal(tmp_path):
         dest_resolved,
     )
     assert inside_link is not None
+
+
+def test_download_tarball_rejects_non_github_url(tmp_path, monkeypatch):
+    """_download_tarball refuses any URL that doesn't start with the
+    hardcoded GitHub archive prefix. This is belt-and-suspenders vs the
+    existing TARBALL_URL_TEMPLATE pinning — protects against a malicious
+    `tag` that tries to inject a full URL (e.g., tag="http://evil.com/x")."""
+    from m3_memory import installer
+
+    # Monkeypatch the template so a bad `tag` WOULD produce a bad URL if
+    # the guard weren't in place.
+    monkeypatch.setattr(installer, "TARBALL_URL_TEMPLATE", "http://evil.example.com/{tag}")
+
+    with pytest.raises(RuntimeError, match="untrusted URL"):
+        installer._download_tarball("v1.2.3", tmp_path / "out")

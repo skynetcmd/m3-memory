@@ -171,11 +171,23 @@ def _download_tarball(tag: str, dest: Path) -> None:
     support 3.11 so we roll our own filter.
     """
     url = TARBALL_URL_TEMPLATE.format(tag=tag)
+    # Defense-in-depth: TARBALL_URL_TEMPLATE is a hardcoded constant that
+    # pins the host to github.com/skynetcmd/m3-memory, but we revalidate
+    # the fully-interpolated URL before the request anyway. A malicious
+    # `tag` (e.g. one containing a scheme or authority) can't leak the
+    # request to another host. This also silences SAST tools that flag
+    # any `urlopen()` whose argument isn't a string literal (CWE-918).
+    _TRUSTED_URL_PREFIX = "https://github.com/skynetcmd/m3-memory/archive/refs/tags/"
+    if not url.startswith(_TRUSTED_URL_PREFIX):
+        raise RuntimeError(
+            f"refusing to fetch tarball from untrusted URL: {url!r} "
+            f"(expected prefix {_TRUSTED_URL_PREFIX!r})"
+        )
     with tempfile.TemporaryDirectory() as tmp_s:
         tmp = Path(tmp_s)
         archive = tmp / "repo.tar.gz"
         print(f"  downloading {url}")
-        with urllib.request.urlopen(url) as resp, archive.open("wb") as f:  # nosec B310 — trusted GitHub host
+        with urllib.request.urlopen(url) as resp, archive.open("wb") as f:  # nosec B310 — trusted GitHub host, prefix-validated above
             shutil.copyfileobj(resp, f)
         with tarfile.open(archive, "r:gz") as tf:
             tmp_resolved = tmp.resolve()
