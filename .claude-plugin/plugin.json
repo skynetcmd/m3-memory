@@ -1,0 +1,50 @@
+{
+  "name": "m3-memory",
+  "version": "2026.4.24.11",
+  "description": "Local-first persistent memory for Claude Code — 66 MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
+  "keywords": [
+    "memory",
+    "mcp",
+    "rag",
+    "vector-search",
+    "sqlite",
+    "agentic",
+    "long-term-memory",
+    "chatlog",
+    "knowledge-graph",
+    "gdpr"
+  ],
+  "author": {
+    "name": "skynetcmd",
+    "url": "https://github.com/skynetcmd/m3-memory"
+  },
+  "homepage": "https://github.com/skynetcmd/m3-memory",
+  "repository": "https://github.com/skynetcmd/m3-memory",
+  "license": "Apache-2.0",
+
+  "userConfig": {
+    "endpoint": {
+      "type": "string",
+      "title": "LLM endpoint",
+      "description": "OpenAI-compatible endpoint for embeddings + enrichment. Leave empty to probe LM Studio :1234 and Ollama :11434.",
+      "default": ""
+    },
+    "capture_mode": {
+      "type": "string",
+      "title": "Chatlog capture mode",
+      "description": "Which Claude Code hooks fire chatlog ingest. 'both' = Stop + PreCompact (recommended).",
+      "enum": ["both", "stop", "precompact", "none"],
+      "default": "both"
+    }
+  },
+
+  "mcpServers": {
+    "m3-memory": {
+      "command": "mcp-memory",
+      "env": {
+        "LLM_ENDPOINTS_CSV": "${user_config.endpoint}",
+        "M3_AUTO_INSTALL": "1"
+      }
+    }
+  }
+}

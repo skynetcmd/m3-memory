@@ -164,6 +164,28 @@ def _cmd_doctor(_args: argparse.Namespace) -> int:
     return doctor()
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the bridge with the streamable-http transport for claude.ai connectors.
+
+    The default `mcp-memory` invocation is stdio (used by Claude Code, Gemini CLI,
+    etc.). This subcommand starts the same bridge in HTTP mode so remote MCP
+    clients (claude.ai web/desktop, Anthropic API mcp connector tool) can reach
+    it after the user exposes the port via cloudflared / tailscale / ngrok / a
+    reverse proxy.
+
+    Env vars override flags so the same config works under systemd / docker.
+    """
+    os.environ["M3_TRANSPORT"] = "http"
+    if args.host:
+        os.environ["M3_HTTP_HOST"] = args.host
+    if args.port:
+        os.environ["M3_HTTP_PORT"] = str(args.port)
+    if args.path:
+        os.environ["M3_HTTP_PATH"] = args.path
+    _run_bridge()
+    return 0
+
+
 def _resolve_bin_script(name: str) -> "Path | None":
     """Find bin/<name> relative to the resolved bridge (installed or dev).
 
@@ -226,6 +248,24 @@ def _cmd_chatlog(args: argparse.Namespace) -> int:
         return _run_bin_script("chatlog_init.py", args.rest)
     if sub == "status":
         return _run_bin_script("chatlog_status.py", args.rest)
+    if sub == "hook-path":
+        # Print the absolute path to the chatlog hook script for the current OS.
+        # Used by the Claude Code plugin's hooks/hooks.json so plugin hooks
+        # don't need to hardcode an install location.
+        from m3_memory.installer import find_bridge
+        bridge = find_bridge()
+        if bridge is None:
+            print("", file=sys.stdout)  # empty — caller should treat as no-op
+            return 1
+        if sys.platform == "win32":
+            script = bridge.parent / "hooks" / "chatlog" / "claude_code_precompact.ps1"
+        else:
+            script = bridge.parent / "hooks" / "chatlog" / "claude_code_precompact.sh"
+        if not script.is_file():
+            return 1
+        print(str(script))
+        return 0
+
     if sub == "doctor":
         # `doctor` = status + nonzero exit if the subsystem reports warnings.
         # Implemented inline so we can inspect the JSON output without forking.
@@ -342,6 +382,18 @@ Docs: https://github.com/skynetcmd/m3-memory
     )
     p_doctor.set_defaults(func=_cmd_doctor)
 
+    p_serve = subparsers.add_parser(
+        "serve",
+        help="Run the bridge as a streamable-HTTP MCP server (for claude.ai connectors).",
+    )
+    p_serve.add_argument("--host", default="127.0.0.1",
+                         help="Bind address (default: 127.0.0.1 — use 0.0.0.0 only behind a reverse proxy).")
+    p_serve.add_argument("--port", type=int, default=8080,
+                         help="TCP port (default: 8080).")
+    p_serve.add_argument("--path", default="/mcp",
+                         help="HTTP mount path for the streamable-http endpoint (default: /mcp).")
+    p_serve.set_defaults(func=_cmd_serve)
+
     p_chatlog = subparsers.add_parser(
         "chatlog",
         help="Manage the chatlog subsystem (init|status|doctor).",
@@ -350,9 +402,10 @@ Docs: https://github.com/skynetcmd/m3-memory
     # Declare the subcommands so help lists them, but accept no flags here —
     # we use parse_known_args below to collect everything after `chatlog <sub>`
     # and forward it verbatim to the underlying bin/ script.
-    chatlog_sub.add_parser("init",   help="Interactive setup — wire hooks, choose DB path, configure redaction.", add_help=False)
-    chatlog_sub.add_parser("status", help="Print a summary of chatlog state (row counts, queue, hooks).",         add_help=False)
-    chatlog_sub.add_parser("doctor", help="Same as status, but exits nonzero on warnings.",                       add_help=False)
+    chatlog_sub.add_parser("init",      help="Interactive setup — wire hooks, choose DB path, configure redaction.", add_help=False)
+    chatlog_sub.add_parser("status",    help="Print a summary of chatlog state (row counts, queue, hooks).",         add_help=False)
+    chatlog_sub.add_parser("doctor",    help="Same as status, but exits nonzero on warnings.",                       add_help=False)
+    chatlog_sub.add_parser("hook-path", help="Print absolute path to the chatlog hook script for plugin hooks.",      add_help=False)
     p_chatlog.set_defaults(func=_cmd_chatlog)
 
     # Use parse_known_args so flags after `chatlog <sub>` (e.g. --non-interactive,

@@ -196,6 +196,36 @@ for _spec in mcp_tool_catalog.TOOLS:
     globals()[_spec.name] = _build_typed_function(_spec)
 
 if __name__ == "__main__":
+    import os as _os
     logger.info("Memory Bridge (catalog-driven) starting...")
     logger.info(f"Registered {len(mcp_tool_catalog.TOOLS)} MCP tools from mcp_tool_catalog.")
-    mcp.run()
+
+    # Transport selection.
+    #   stdio (default): MCP client launches us as a subprocess and pipes JSON-RPC
+    #     over stdin/stdout. This is how Claude Code, Gemini CLI, Aider, etc. talk
+    #     to us out of the box.
+    #   streamable-http: FastMCP's HTTP+SSE transport. Lets remote clients like
+    #     claude.ai connect via the MCP Connector — they need a URL, not a local
+    #     process. Self-host on a box, expose via cloudflared / tailscale / ngrok,
+    #     paste the URL into claude.ai's connector settings.
+    #
+    # Env vars (mirror the `mcp-memory serve` CLI flags):
+    #   M3_TRANSPORT=stdio | http        (default: stdio)
+    #   M3_HTTP_HOST=127.0.0.1           (default: localhost-only — bind to 0.0.0.0
+    #                                     ONLY behind a reverse proxy / tunnel)
+    #   M3_HTTP_PORT=8080                (default: 8080)
+    #   M3_HTTP_PATH=/mcp                (default mount path)
+    transport = _os.environ.get("M3_TRANSPORT", "stdio").lower().strip()
+    if transport in ("http", "streamable-http", "streamable_http"):
+        host = _os.environ.get("M3_HTTP_HOST", "127.0.0.1")
+        port = int(_os.environ.get("M3_HTTP_PORT", "8080"))
+        path = _os.environ.get("M3_HTTP_PATH", "/mcp")
+        logger.info(f"Transport: streamable-http on http://{host}:{port}{path}")
+        # FastMCP exposes the host/port/path settings via its Settings object.
+        mcp.settings.host = host
+        mcp.settings.port = port
+        mcp.settings.streamable_http_path = path
+        mcp.run(transport="streamable-http")
+    else:
+        logger.info("Transport: stdio")
+        mcp.run()

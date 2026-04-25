@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v mcp-memory >/dev/null 2>&1 || echo '[m3-memory] mcp-memory CLI not on PATH. Run: pipx install m3-memory && pipx ensurepath' >&2",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v mcp-memory >/dev/null 2>&1 && /bin/sh \"$(mcp-memory chatlog hook-path 2>/dev/null || echo /dev/null)\" || true",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v mcp-memory >/dev/null 2>&1 && /bin/sh \"$(mcp-memory chatlog hook-path 2>/dev/null || echo /dev/null)\" || true",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
