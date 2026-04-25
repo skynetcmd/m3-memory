@@ -1,0 +1,31 @@
+url: ""              # caller must override or set M3_ENTITY_GRAPH_URL
+model: ""            # caller must override or set M3_ENTITY_GRAPH_MODEL
+api_key_service: ""
+timeout_s: 30.0
+temperature: 0
+backend: openai
+cache_system: true
+system: |
+  Extract entities and relationships from the input text.
+
+  Entity types (use only these): person, place, organization, event, concept, object, date.
+  Predicates (use only these): works_at, located_in, before, after, same_as, contradicts, mentions, relates_to.
+
+  For each entity: provide a canonical name (capitalized, one form regardless of how the user
+  refers to it — e.g., "my sister Alex" → canonical_name "Alex"), the entity_type, and the
+  surface mention as it appeared in the text.
+
+  For each relationship: from_entity and to_entity must be canonical names that ALSO appear
+  in the entities list above. Use predicates literally; do not invent new ones.
+
+  Output ONLY a JSON object on a single line:
+  {"entities": [{"canonical_name": "...", "entity_type": "...", "mention_text": "...", "confidence": 0.0-1.0}],
+   "relationships": [{"from_entity": "...", "to_entity": "...", "predicate": "...", "confidence": 0.0-1.0}]}
+
+  If the text contains no entities, output exactly: {"entities": [], "relationships": []}
+  No markdown, no code fences, no commentary. JSON only.
+labels:
+  - extracted
+fallback: extracted
+post:
+  format: "{text}"
