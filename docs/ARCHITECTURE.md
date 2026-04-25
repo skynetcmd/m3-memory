@@ -101,6 +101,12 @@ sequenceDiagram
 - **Auto-linking** — connects the new memory to the most related existing memory (cosine > 0.7) via a `related` relationship
 - **Content hash** — SHA-256 for tamper detection via `memory_verify`
 
+### Fact Enrichment (optional, gated off)
+
+When enabled via `M3_ENABLE_FACT_ENRICHED=true`, an optional post-write stage extracts atomic facts from stored memories using a configured small language model (SLM). Each fact becomes a separate `fact_enriched` row linked back to the source via a `references` edge. The enrichment is **semaphore-gated** (default concurrency: 2) and **non-blocking**: if the enricher semaphore is full, the source write returns immediately and the enrichment is enqueued in `fact_enrichment_queue` for later processing. The `enrich-pending` CLI command (or `enrich_pending` MCP tool) drains the queue with a dry-run / confirm flow and retries up to `M3_FACT_ENRICH_MAX_ATTEMPTS` times on failure (default 5). Verbatim rows are always persisted before enrichment is attempted, so enricher failures never corrupt the primary write.
+
+Items with a non-NULL `variant` (typically benchmark rows) are **skipped by default**; pass `fact_enricher_variant_allowlist={"variant-name", ...}` to opt specific variants in. See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md#fact-enrichment) for all gates and the [fact_enriched profile](../config/slm/fact_enriched.yaml) for SLM configuration.
+
 ---
 
 ## 🧠 Intelligence Features
