@@ -1,5 +1,5 @@
 ---
-name: doctor
+name: health
 description: Health check — package version, installed payload, chatlog DB row count, per-agent hook state.
 ---
 

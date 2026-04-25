@@ -26,7 +26,7 @@ Step 2 — branch on what step 1 printed.
   ```
   Link them to `https://github.com/skynetcmd/m3-memory/blob/main/docs/install_windows.md` for full instructions.
 
-After install completes, tell the user to re-run `/m3:doctor` in a NEW Claude Code session (PATH changes don't apply to the current one).
+After install completes, tell the user to re-run `/m3:health` in a NEW Claude Code session (PATH changes don't apply to the current one).
 
 **Already installed (a version printed):**
 - On Linux / macOS, run:
@@ -39,6 +39,6 @@ After install completes, tell the user to re-run `/m3:doctor` in a NEW Claude Co
   pip install --user --upgrade m3-memory
   python -m m3_memory.cli update
   ```
-- Then `/m3:doctor` to verify.
+- Then `/m3:health` to verify.
 
 Step 3 — print one-line summary of what action was taken or recommended.
