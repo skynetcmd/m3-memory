@@ -5,24 +5,40 @@ description: Install or upgrade the m3-memory CLI + system payload.
 
 # m3-memory install / upgrade
 
-Step 1 — check current state:
+Step 1 — detect current state. Try in order:
 
 ```
-!`command -v mcp-memory >/dev/null 2>&1 && mcp-memory --version || echo "not installed"`
+mcp-memory --version                       # plain CLI
+python -m m3_memory.cli --version           # module form (Windows --user)
 ```
 
-Step 2 — interpret:
+Step 2 — branch on what step 1 printed.
 
-- Output **"not installed"**: tell the user to run the one-line installer in their shell:
+**Not installed (both commands fail):**
+- On Linux / macOS, suggest:
   ```
   curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
   ```
-  After it completes, they should re-run `/m3:doctor` to verify.
-
-- Output a version like `m3-memory 2026.4.X.X`: it's already installed. Offer to upgrade:
+- On Windows, suggest:
+  ```powershell
+  pip install --user m3-memory
+  # then add %APPDATA%\Python\Python<NN>\Scripts to user PATH if needed
   ```
-  !`pipx upgrade m3-memory 2>&1`
-  !`mcp-memory update`
-  ```
+  Link them to `https://github.com/skynetcmd/m3-memory/blob/main/docs/install_windows.md` for full instructions.
 
-Step 3 — after either path, run `/m3:doctor` to confirm the result.
+After install completes, tell the user to re-run `/m3:doctor` in a NEW Claude Code session (PATH changes don't apply to the current one).
+
+**Already installed (a version printed):**
+- On Linux / macOS, run:
+  ```
+  pipx upgrade m3-memory
+  mcp-memory update
+  ```
+- On Windows, run:
+  ```powershell
+  pip install --user --upgrade m3-memory
+  python -m m3_memory.cli update
+  ```
+- Then `/m3:doctor` to verify.
+
+Step 3 — print one-line summary of what action was taken or recommended.
