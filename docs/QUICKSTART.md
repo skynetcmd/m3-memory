@@ -6,43 +6,71 @@ Get persistent memory running with your MCP agent in under five minutes.
 
 ## 1️⃣ Install M3 Memory
 
+### Easiest path — one-line installer (Linux + macOS)
+
 ```bash
-pip install m3-memory
+curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
 ```
 
-That's the whole install. On first `mcp-memory` run, the CLI fetches the
-system payload (the MCP server + its ~60 source files) from GitHub into
-`~/.m3-memory/repo/`, pinned to the wheel version, and records the path
-in `~/.m3-memory/config.json`.
+Detects your distro, installs prerequisites (`pipx`, `git`, `sqlite3`)
+via your package manager, runs `pipx install m3-memory` and
+`mcp-memory install-m3 --capture-mode both`, then prints a `mcp-memory
+doctor` summary. Refuses to run as root; sudo prompts only for OS
+package install.
 
-Two auto-install modes:
+### Claude Code users — install as a plugin
 
-- **Interactive TTY** (you running `mcp-memory` at a shell): prompts
-  `Fetch from GitHub? [Y/n]` before cloning.
-- **Non-interactive** (an MCP client launching the server): auto-fetches
-  silently with a log line to stderr.
+```
+/plugin marketplace add skynetcmd/m3-memory
+/plugin install m3@skynetcmd
+```
 
-Upgrade path: `pip install -U m3-memory && mcp-memory update`.
+15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`,
+`/m3:status`, …), the `memory-curator` subagent, and auto-wired Stop +
+PreCompact chatlog hooks. See [claude_code_plugin.md](./claude_code_plugin.md)
+for the full reference.
 
-Verify everything resolved:
+### Windows
 
-```bash
+```powershell
+winget install -e --id Python.Python.3.12 Git.Git SQLite.SQLite
+pip install m3-memory
+mcp-memory install-m3 --capture-mode both
 mcp-memory doctor
 ```
 
-If `mcp-memory` reports `command not found`, check that your Python scripts
-directory is on your PATH.
+If `pip install --user` puts the `mcp-memory.exe` shim somewhere not on
+PATH, see the [Windows install gotchas](./install_windows.md#common-gotchas).
 
-### Opt-out and manual setup
+### Manual / older Linux / pip route
 
-Set `M3_AUTO_INSTALL=0` to skip the first-run auto-fetch. You can then
-run `mcp-memory install-m3` explicitly, or set `M3_BRIDGE_PATH` to point
-at an existing clone.
+```bash
+pip install m3-memory
+mcp-memory install-m3 --capture-mode both
+mcp-memory doctor
+```
+
+On first `mcp-memory` run (without `install-m3`), the CLI auto-fetches
+the system payload from GitHub into `~/.m3-memory/repo/`, pinned to the
+wheel version. Set `M3_AUTO_INSTALL=0` to skip the auto-fetch and run
+`mcp-memory install-m3` explicitly. Upgrade path:
+`pip install -U m3-memory && mcp-memory update`.
+
+### claude.ai (web/desktop) integration
+
+```bash
+mcp-memory serve --host 127.0.0.1 --port 8080
+```
+
+Then expose `127.0.0.1:8080/mcp` via Cloudflare Tunnel / Tailscale Funnel /
+ngrok / a reverse proxy and paste the URL into claude.ai's connector
+settings. Full self-host walkthrough at
+[claude_ai_connector.md](./claude_ai_connector.md).
 
 ### Already have the repo cloned?
 
 If you cloned `m3-memory` and did `pip install -e .`, everything works
-without further action — the CLI automatically detects a sibling
+without further action — the CLI auto-detects a sibling
 `bin/memory_bridge.py` via its package path and uses that.
 
 ---
