@@ -7,7 +7,7 @@
   },
   "plugins": [
     {
-      "name": "m3-memory",
+      "name": "m3",
       "source": "./",
       "description": "Local-first persistent memory for Claude Code — 66 MCP tools, hybrid search, bitemporal contradictions, GDPR primitives, chatlog auto-capture.",
       "homepage": "https://github.com/skynetcmd/m3-memory",

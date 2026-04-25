@@ -1,10 +1,10 @@
 ---
-name: m3:get
+name: get
 description: Fetch one memory by UUID or short prefix.
 argument-hint: <id-or-prefix>
 ---
 
-Call `m3-memory:memory_get` with `id="$ARGUMENTS"`.
+Call `m3:memory_get` with `id="$ARGUMENTS"`.
 
 If the id is shorter than 36 chars (a UUID prefix), the tool will resolve it. If the prefix is ambiguous, surface the matches and ask the user to disambiguate.
 

@@ -1,10 +1,10 @@
 ---
-name: m3:tasks
+name: tasks
 description: List your tasks and their state. Pass an argument to filter by state.
 argument-hint: [pending|in_progress|completed|deleted]
 ---
 
-Call `m3-memory:task_list`. If `$ARGUMENTS` is one of `pending`, `in_progress`, `completed`, `deleted`, pass it as the `state` filter.
+Call `m3:task_list`. If `$ARGUMENTS` is one of `pending`, `in_progress`, `completed`, `deleted`, pass it as the `state` filter.
 
 Render as a table:
 ```

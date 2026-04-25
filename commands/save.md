@@ -1,6 +1,6 @@
 ---
-name: m3:save
-description: Suggested-best-for-context save — picks type/scope automatically, confirms before writing.
+name: save
+description: Auto-classified save — picks type/scope automatically, confirms before writing.
 argument-hint: <content>
 ---
 
@@ -22,7 +22,7 @@ You're about to write to m3-memory. **Do not call memory_write yet.** First prop
 3. Pick `scope` (default: `user`) — most personal facts/preferences are user-scoped; project knowledge often isn't.
 4. Suggest a 1-line `title` if missing.
 5. Show the user the proposed `{type, scope, title, content}` and ask for a single `y` to write, or any other key to abort.
-6. On `y`: call `m3-memory:memory_write` with those fields.
+6. On `y`: call `m3:memory_write` with those fields.
 7. On abort: say "skipped" and stop.
 
 Reasoning for the choices is fine to include but keep it short — the user wants speed, not a treatise.

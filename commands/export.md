@@ -1,9 +1,9 @@
 ---
-name: m3:export
+name: export
 description: GDPR Article 20 — export all memories you own as portable JSON.
 ---
 
-Call `m3-memory:gdpr_export`. The tool returns the full memory set as JSON.
+Call `m3:gdpr_export`. The tool returns the full memory set as JSON.
 
 Save it to `~/.m3-memory/export-$(date +%Y%m%d-%H%M%S).json` and tell the user:
 - where it landed

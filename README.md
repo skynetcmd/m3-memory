@@ -40,7 +40,7 @@ Installs on macOS or Linux with the single command above. Use this to [install o
 
 ```
 /plugin marketplace add skynetcmd/m3-memory
-/plugin install m3-memory@skynetcmd
+/plugin install m3@skynetcmd
 ```
 
 [Plugin reference](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_code_plugin.md) · [Claude.ai (web/desktop) connector](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_ai_connector.md)
