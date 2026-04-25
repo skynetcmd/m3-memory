@@ -2346,11 +2346,128 @@ def is_temporal_query(query: str) -> bool:
     return bool(_TEMPORAL_ROUTER_RE.search(query))
 
 
+def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
+    """Return the set of memory_item ids reachable within `depth` hops from any
+    item in `seed_ids` via memory_relationships, excluding the seeds themselves.
+
+    Used by memory_search_routed_impl when graph_depth > 0. Returns set[str].
+    """
+    if depth <= 0 or not seed_ids:
+        return set()
+    depth = min(int(depth), 3)
+    seen: set = set(seed_ids)
+    frontier: set = set(seed_ids)
+    with _db() as db:
+        for _ in range(depth):
+            if not frontier:
+                break
+            placeholders = ",".join(["?"] * len(frontier))
+            rows = db.execute(
+                f"SELECT from_id, to_id FROM memory_relationships "
+                f"WHERE from_id IN ({placeholders}) OR to_id IN ({placeholders})",
+                list(frontier) + list(frontier),
+            ).fetchall()
+            next_frontier: set = set()
+            for r in rows:
+                a, b = r["from_id"], r["to_id"]
+                for nid in (a, b):
+                    if nid not in seen:
+                        seen.add(nid)
+                        next_frontier.add(nid)
+            frontier = next_frontier
+    seen.difference_update(seed_ids)
+    return seen
+
+
+def _session_neighbor_ids(seed_ids: list, session_cap: int = 12) -> dict:
+    """For each conversation_id present in `seed_ids`' rows, return up to
+    session_cap turns from that conversation (excluding seeds themselves).
+
+    Returns dict[memory_id -> row_dict]. Used by memory_search_routed_impl
+    when expand_sessions=True. The session_cap is applied per session.
+    """
+    if not seed_ids:
+        return {}
+    out: dict = {}
+    with _db() as db:
+        placeholders = ",".join(["?"] * len(seed_ids))
+        seed_rows = db.execute(
+            f"SELECT id, conversation_id FROM memory_items WHERE id IN ({placeholders})",
+            seed_ids,
+        ).fetchall()
+        seed_set = set(seed_ids)
+        seen_conv: set = set()
+        for sr in seed_rows:
+            cid = sr["conversation_id"]
+            if not cid or cid in seen_conv:
+                continue
+            seen_conv.add(cid)
+            cap = max(1, int(session_cap))
+            rows = db.execute(
+                "SELECT id, type, title, content, metadata_json, conversation_id, "
+                "valid_from, user_id FROM memory_items "
+                "WHERE conversation_id = ? AND COALESCE(is_deleted, 0) = 0 "
+                "ORDER BY valid_from LIMIT ?",
+                (cid, cap),
+            ).fetchall()
+            for r in rows:
+                if r["id"] in seed_set or r["id"] in out:
+                    continue
+                out[r["id"]] = dict(r)
+    return out
+
+
+async def _score_extra_rows(query: str, rows_by_id: dict, base_score: float = 0.0) -> list:
+    """Score additional rows (from graph or session expansion) against the query.
+
+    Reuses the standard embedding path. Each returned tuple is (score, item_dict)
+    matching memory_search_scored_impl's shape. Items are scored by cosine vs
+    query embedding. If embedding lookup fails for a row, it gets `base_score`.
+    """
+    if not rows_by_id:
+        return []
+    out: list = []
+    qvec, _ = await _embed(query)
+    if qvec is None:
+        # No embedding model available — fall back to base_score for all
+        for rid, item in rows_by_id.items():
+            out.append((base_score, item))
+        return out
+    with _db() as db:
+        ids = list(rows_by_id.keys())
+        placeholders = ",".join(["?"] * len(ids))
+        emb_rows = db.execute(
+            f"SELECT memory_id, embedding FROM memory_embeddings "
+            f"WHERE memory_id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        emb_by_id: dict = {}
+        for er in emb_rows:
+            try:
+                emb_by_id[er["memory_id"]] = _unpack(er["embedding"])
+            except Exception:  # noqa: BLE001
+                continue
+    for rid, item in rows_by_id.items():
+        vec = emb_by_id.get(rid)
+        if vec is None:
+            out.append((base_score, item))
+            continue
+        try:
+            score = _cosine(qvec, vec)
+        except Exception:  # noqa: BLE001
+            score = base_score
+        out.append((float(score), item))
+    return out
+
+
 async def memory_search_routed_impl(
     query: str,
     k: int = 10,
     fact_variant: str = "",
     temporal_k_bump: int = 5,
+    graph_depth: int = 0,
+    expand_sessions: bool = False,
+    session_cap: int = 12,
     user_id: str = "",
     scope: str = "",
     type_filter: str = "",
@@ -2372,7 +2489,7 @@ async def memory_search_routed_impl(
     intent_hint: str = "",
     vector_kind_strategy: str = "default",
 ) -> list:
-    """Temporal-aware routed retrieval.
+    """Temporal-aware routed retrieval, with optional graph + session expansion.
 
     Rule:
       - if is_temporal_query(query): retrieve verbatim only at (k + temporal_k_bump)
@@ -2383,13 +2500,22 @@ async def memory_search_routed_impl(
         call at vector_kind_strategy='max' (so any pre-existing dual-embed rows
         on the base variant get used).
 
+    Optional post-retrieval expansions (both opt-in, default off):
+      - graph_depth > 0: traverse memory_relationships from each top-k hit up
+        to N hops (clamped to 3), score the new rows against the query, and
+        max-fuse them into the result before re-trimming to k.
+      - expand_sessions=True: pull all turns sharing each top-k hit's
+        conversation_id (capped at session_cap per conversation), score them
+        against the query, and max-fuse. Useful for supersession / context-
+        recovery questions.
+
     Returns the same shape as memory_search_scored_impl: list[tuple[score, dict]].
     """
     # Read env-var override for the bump
     bump = int(os.environ.get("M3_ROUTER_TEMPORAL_K_BUMP", str(temporal_k_bump)))
 
     if is_temporal_query(query):
-        return await memory_search_scored_impl(
+        primary = await memory_search_scored_impl(
             query, k=k + bump, user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
             search_mode=search_mode, variant=variant, as_of=as_of,
@@ -2400,6 +2526,11 @@ async def memory_search_routed_impl(
             adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
             smart_neighbor_sessions=smart_neighbor_sessions,
             intent_hint=intent_hint, vector_kind_strategy="default",
+        )
+        return await _maybe_expand_routed(
+            query, primary, k=k + bump,
+            graph_depth=graph_depth,
+            expand_sessions=expand_sessions, session_cap=session_cap,
         )
 
     # Non-temporal path
@@ -2417,7 +2548,11 @@ async def memory_search_routed_impl(
     )
 
     if not fact_variant:
-        return base_hits[:k]
+        return await _maybe_expand_routed(
+            query, base_hits[:k], k=k,
+            graph_depth=graph_depth,
+            expand_sessions=expand_sessions, session_cap=session_cap,
+        )
 
     # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
     fact_hits = await memory_search_scored_impl(
@@ -2436,6 +2571,67 @@ async def memory_search_routed_impl(
     # Both return list[tuple[score, dict]]. Dedupe by item id, keep highest score.
     best: dict = {}  # memory_id -> (score, item)
     for s, item in base_hits + fact_hits:
+        mid = item.get("id") if isinstance(item, dict) else None
+        if mid is None:
+            continue
+        if mid not in best or s > best[mid][0]:
+            best[mid] = (s, item)
+    fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
+    return await _maybe_expand_routed(
+        query, fused, k=k,
+        graph_depth=graph_depth,
+        expand_sessions=expand_sessions, session_cap=session_cap,
+    )
+
+
+async def _maybe_expand_routed(
+    query: str, primary: list, k: int,
+    graph_depth: int = 0,
+    expand_sessions: bool = False,
+    session_cap: int = 12,
+) -> list:
+    """Apply optional graph + session expansion to a routed retrieval result.
+
+    Both expansions take the primary top-k hits' ids as seeds, fetch new rows,
+    score them against the query, and max-fuse with the primary list. If both
+    are off (the default), returns primary unchanged.
+    """
+    if graph_depth <= 0 and not expand_sessions:
+        return primary
+    seed_ids = [item.get("id") for _, item in primary if isinstance(item, dict) and item.get("id")]
+    if not seed_ids:
+        return primary
+
+    # Build dict of new rows (memory_id -> row dict), avoiding duplicates of seeds.
+    extra_rows: dict = {}
+
+    if graph_depth > 0:
+        neighbor_ids = _graph_neighbor_ids(seed_ids, depth=int(graph_depth))
+        if neighbor_ids:
+            with _db() as db:
+                placeholders = ",".join(["?"] * len(neighbor_ids))
+                rows = db.execute(
+                    f"SELECT id, type, title, content, metadata_json, conversation_id, "
+                    f"valid_from, user_id FROM memory_items "
+                    f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted, 0) = 0",
+                    list(neighbor_ids),
+                ).fetchall()
+                for r in rows:
+                    extra_rows[r["id"]] = dict(r)
+
+    if expand_sessions:
+        session_rows = _session_neighbor_ids(seed_ids, session_cap=int(session_cap))
+        for rid, item in session_rows.items():
+            if rid not in extra_rows:
+                extra_rows[rid] = item
+
+    if not extra_rows:
+        return primary
+
+    scored_extras = await _score_extra_rows(query, extra_rows, base_score=0.0)
+
+    best: dict = {}
+    for s, item in primary + scored_extras:
         mid = item.get("id") if isinstance(item, dict) else None
         if mid is None:
             continue
