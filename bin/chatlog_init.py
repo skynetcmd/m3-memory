@@ -23,6 +23,8 @@ import logging
 import os
 import subprocess
 import sys
+from datetime import datetime
+from pathlib import Path
 
 # Import config module from same directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -266,6 +268,185 @@ def install_schedules() -> bool:
         return False
 
 
+def _build_claude_hook_command(config: ChatlogConfig) -> tuple[str, bool]:
+    """Return (command_string, stop_hook_enabled) for the current OS."""
+    ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
+                       "claude_code_precompact.ps1").replace("\\", "/")
+    sh = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
+                      "claude_code_precompact.sh").replace("\\", "/")
+    if sys.platform == "win32":
+        hook_cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
+    else:
+        hook_cmd = f"/bin/sh {sh}"
+    cc = config.host_agents.get("claude-code")
+    stop_enabled = bool(cc and cc.stop_hook)
+    return hook_cmd, stop_enabled
+
+
+def _build_claude_settings_patch(config: ChatlogConfig) -> dict:
+    """Construct just the hooks + statusLine fields we want to merge in."""
+    hook_cmd, stop_enabled = _build_claude_hook_command(config)
+    hooks_block: dict = {
+        "PreCompact": [{"hooks": [{"type": "command", "command": hook_cmd}]}],
+    }
+    if stop_enabled:
+        hooks_block["Stop"] = [{"hooks": [{"type": "command", "command": hook_cmd}]}]
+    status_script = os.path.join(BASE_DIR, "bin", "chatlog_status_line.py").replace("\\", "/")
+    return {
+        "hooks": hooks_block,
+        "statusLine": {"type": "command", "command": f"python {status_script}"},
+    }
+
+
+def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
+    """Merge chatlog hooks into ~/.claude/settings.json. Idempotent.
+
+    Creates the file if missing. If hooks.PreCompact / hooks.Stop / statusLine
+    already contain entries, we ONLY add our entry when no existing command
+    contains 'chatlog' — this preserves user-authored hooks and avoids
+    duplicate-firing on re-runs.
+
+    Writes a timestamped backup before the first modification so users can
+    revert. Returns (changed, message).
+    """
+    settings_path = Path.home() / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing: dict = {}
+    if settings_path.is_file():
+        try:
+            existing = json.loads(settings_path.read_text(encoding="utf-8")) or {}
+        except json.JSONDecodeError as e:
+            return False, f"refused to edit {settings_path}: unparseable JSON ({e}). Fix or remove and re-run."
+
+    patch = _build_claude_settings_patch(config)
+
+    def _chatlog_entry_present(hook_entries: list) -> bool:
+        return any(
+            "chatlog" in json.dumps(e).lower() for e in (hook_entries or [])
+        )
+
+    hooks = existing.setdefault("hooks", {})
+    changed = False
+
+    for event, patch_entry in patch["hooks"].items():
+        current = hooks.get(event) or []
+        if _chatlog_entry_present(current):
+            continue  # idempotent — our entry (or an equivalent) already there
+        current.extend(patch_entry)
+        hooks[event] = current
+        changed = True
+
+    # statusLine is a single object, not a list. Only overwrite if missing
+    # or currently chatlog-owned. Respect a user-set custom statusLine.
+    sl = existing.get("statusLine")
+    if not isinstance(sl, dict) or "chatlog" in json.dumps(sl).lower():
+        if existing.get("statusLine") != patch["statusLine"]:
+            existing["statusLine"] = patch["statusLine"]
+            changed = True
+
+    if not changed:
+        return False, f"no change — chatlog entries already present in {settings_path}"
+
+    # Backup before write.
+    if settings_path.is_file():
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
+        backup = settings_path.with_suffix(f".json.bak.{stamp}")
+        backup.write_text(settings_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    events = ", ".join(patch["hooks"].keys())
+    return True, f"merged chatlog hooks ({events}) + statusLine into {settings_path}"
+
+
+def apply_gemini_settings() -> tuple[bool, str]:
+    """Merge SessionEnd hook + memory MCP + auth method into ~/.gemini/settings.json.
+
+    Idempotent. Covers all three pieces a fresh Gemini install needs to
+    talk to m3-memory:
+      - mcpServers.memory: makes the m3-memory tool callable in-session
+      - security.auth.selectedType: 'oauth-personal' so headless flows
+        don't error with 'Please set an Auth method'
+      - hooks.SessionEnd: fires chatlog ingest on exit
+
+    Each piece is added only when missing, so re-running is safe and the
+    function correctly handles the Gemini-installed-after-m3 case where
+    install-m3's _register_gemini_mcp ran too early.
+
+    Refuses to touch an unparseable settings.json. Returns (changed, message).
+    """
+    settings_path = Path.home() / ".gemini" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing: dict = {}
+    if settings_path.is_file():
+        try:
+            existing = json.loads(settings_path.read_text(encoding="utf-8")) or {}
+        except json.JSONDecodeError as e:
+            return False, f"refused to edit {settings_path}: unparseable JSON ({e})"
+
+    sh = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
+                      "gemini_cli_onexit.sh").replace("\\", "/")
+    ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
+                       "gemini_cli_onexit.ps1").replace("\\", "/")
+    if sys.platform == "win32":
+        hook_cmd = f"powershell -NoProfile -ExecutionPolicy Bypass -File {ps1}"
+    else:
+        hook_cmd = f"/bin/sh {sh}"
+
+    actions: list[str] = []
+
+    # 0. Try to ensure ~/.npm-global/bin is on the non-login shell PATH.
+    #    Idempotent and safe even if already done by install-m3 (which
+    #    skips this when Gemini wasn't installed yet — common in the
+    #    Gemini-first install order).
+    try:
+        from m3_memory.installer import _fix_npm_global_path
+        path_msg = _fix_npm_global_path()
+        if path_msg and path_msg.startswith("[+]"):
+            actions.append("npm-global PATH")
+    except Exception:
+        pass  # best-effort; not blocking
+
+    # 1. mcpServers.memory — points Gemini at the mcp-memory CLI.
+    mcp_servers = existing.setdefault("mcpServers", {})
+    if "memory" not in mcp_servers:
+        mcp_servers["memory"] = {"command": "mcp-memory"}
+        actions.append("memory MCP")
+
+    # 2. security.auth.selectedType — required by Gemini >=0.39 for headless
+    #    invocation. Don't overwrite if user already chose a method.
+    security = existing.setdefault("security", {})
+    auth = security.setdefault("auth", {})
+    if "selectedType" not in auth:
+        # oauth-personal works once oauth_creds.json is present (e.g. after
+        # an interactive `gemini auth`). It doesn't authenticate by itself —
+        # it just tells Gemini which method to use. Users without creds will
+        # still be prompted on first run; this just unblocks the headless
+        # case once they've authed.
+        auth["selectedType"] = "oauth-personal"
+        actions.append("auth method")
+
+    # 3. hooks.SessionEnd — chatlog ingest on session exit.
+    hooks = existing.setdefault("hooks", {})
+    session_end = hooks.get("SessionEnd") or []
+    if not any("chatlog" in json.dumps(e).lower() for e in session_end):
+        session_end.append({"hooks": [{"type": "command", "command": hook_cmd}]})
+        hooks["SessionEnd"] = session_end
+        actions.append("SessionEnd hook")
+
+    if not actions:
+        return False, f"no change — Gemini already wired for m3-memory in {settings_path}"
+
+    if settings_path.is_file():
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
+        backup = settings_path.with_suffix(f".json.bak.{stamp}")
+        backup.write_text(settings_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    return True, f"added {', '.join(actions)} to {settings_path}"
+
+
 def show_claude_code_settings_snippet(config: ChatlogConfig) -> None:
     """Print the hooks + statusLine snippet for ~/.claude/settings.json.
 
@@ -419,6 +600,34 @@ def main() -> int:
         action="store_true",
         help="Disable the Stop hook (revert to PreCompact-only capture).",
     )
+    parser.add_argument(
+        "--apply-claude",
+        action="store_true",
+        help=(
+            "Merge chatlog hooks + statusLine into ~/.claude/settings.json "
+            "(creates the file if missing, backs up before writing, idempotent). "
+            "Without this flag, init prints the snippet for manual paste."
+        ),
+    )
+    parser.add_argument(
+        "--apply-gemini",
+        action="store_true",
+        help=(
+            "Add the SessionEnd chatlog hook to ~/.gemini/settings.json "
+            "(idempotent, backs up before writing). Requires Gemini CLI to be "
+            "installed first; the memory MCP entry is written by install-m3."
+        ),
+    )
+    parser.add_argument(
+        "--capture-mode",
+        default=None,
+        choices=("both", "stop", "precompact", "none"),
+        help=(
+            "Configure Claude Code Stop-hook policy in non-interactive mode. "
+            "'both' / 'stop' enable the Stop hook; 'precompact' / 'none' leave "
+            "it disabled. Without this flag, non-interactive uses PreCompact-only."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -427,6 +636,24 @@ def main() -> int:
         return apply_stop_hook_toggle(enable=True)
     if args.disable_stop_hook:
         return apply_stop_hook_toggle(enable=False)
+
+    # Standalone settings.json writers (no --non-interactive): useful when
+    # chatlog is already configured and the user just wants the hooks wired.
+    # Doesn't modify the chatlog config; reads it. If --non-interactive is
+    # ALSO set, fall through to the normal path so config + migrations + apply
+    # all happen in one command.
+    if (args.apply_claude or args.apply_gemini) and not args.non_interactive:
+        cfg = resolve_config() if os.path.exists(CONFIG_PATH) else ChatlogConfig(
+            db_path=DEFAULT_DB_PATH,
+            host_agents={a: HookSpec() for a in VALID_HOST_AGENTS},
+        )
+        if args.apply_claude:
+            changed, msg = apply_claude_settings(cfg)
+            print(("[+] " if changed else "[=] ") + msg)
+        if args.apply_gemini:
+            changed, msg = apply_gemini_settings()
+            print(("[+] " if changed else "[=] ") + msg)
+        return 0
 
     try:
         # Check if config exists
@@ -438,15 +665,49 @@ def main() -> int:
         if args.non_interactive:
             db_path = args.db_path or DEFAULT_DB_PATH
 
+            # Honor --capture-mode: 'both' or 'stop' turns on the Stop hook,
+            # everything else leaves it off. PreCompact is always implicit
+            # when the Claude hook is wired.
+            stop_hook = args.capture_mode in ("both", "stop")
+            host_agents = {a: HookSpec() for a in VALID_HOST_AGENTS}
+            host_agents["claude-code"] = HookSpec(stop_hook=stop_hook)
+
             config = ChatlogConfig(
                 db_path=db_path,
-                host_agents={a: HookSpec() for a in VALID_HOST_AGENTS},
+                host_agents=host_agents,
                 cost_tracking=CostTrackingSpec(enabled=True),
                 redaction=RedactionSpec(enabled=False),
                 embed_sweeper=EmbedSweeperSpec(),
             )
             save_config(config)
             print(f"Configuration saved to {CONFIG_PATH}")
+
+            # Run migrations even in non-interactive mode — without them the
+            # chatlog DB is an empty SQLite file and any hook fire will error
+            # with 'no such table: memory_items'. The prompt-skipping flag
+            # shouldn't mean a broken install.
+            migrate_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
+            try:
+                subprocess.run(
+                    [sys.executable, migrate_script, "up", "--target", "chatlog", "-y"],
+                    check=True,
+                )
+                print("Migrations applied.")
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: migrations failed ({e}). Run manually with:")
+                print(f"  python {migrate_script} up --target chatlog -y")
+                # Don't fail the install — migrations can be retried.
+
+            # Optional: write the hook entries directly into the agent's
+            # settings.json instead of just printing the snippet. Skip silently
+            # if --capture-mode is 'none' since the user explicitly opted out.
+            if args.capture_mode != "none":
+                if args.apply_claude:
+                    changed, msg = apply_claude_settings(config)
+                    print(("[+] " if changed else "[=] ") + msg)
+                if args.apply_gemini:
+                    changed, msg = apply_gemini_settings()
+                    print(("[+] " if changed else "[=] ") + msg)
             return 0
 
         # Interactive mode
