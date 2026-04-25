@@ -196,6 +196,11 @@ INGEST_WINDOW_SIZE     = int(os.environ.get("M3_INGEST_WINDOW_SIZE", "3"))
 INGEST_GIST_MIN_TURNS  = int(os.environ.get("M3_INGEST_GIST_MIN_TURNS", "8"))
 INGEST_GIST_STRIDE     = int(os.environ.get("M3_INGEST_GIST_STRIDE", "8"))
 
+# Fact enrichment pipeline (Phase 4-5). Gated off by default.
+ENABLE_FACT_ENRICHED   = os.environ.get("M3_ENABLE_FACT_ENRICHED", "false").lower() in ("1", "true", "yes")
+FACT_ENRICH_CONCURRENCY = int(os.environ.get("M3_FACT_ENRICH_CONCURRENCY", "2"))
+FACT_ENRICH_MAX_ATTEMPTS = int(os.environ.get("M3_FACT_ENRICH_MAX_ATTEMPTS", "5"))
+
 VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "grok", "manual", "system", "unknown", "legacy"}
 
 _FTS_OPERATORS = re.compile(r'\b(OR|AND|NOT|NEAR)\b|[*()\[\]{}]')
@@ -617,9 +622,11 @@ _local = threading.local()
 _init_lock = threading.RLock()
 _initialized = False
 _EMBED_SEM = asyncio.Semaphore(4)
+_FACT_ENRICH_SEM = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
 _EMBED_DIM_VALIDATED = False
 
 _COST_COUNTERS = {"embed_calls": 0, "embed_tokens_est": 0, "search_calls": 0, "write_calls": 0}
+_PENDING_FACT_TASKS: set[asyncio.Task] = set()
 _CLASSIFY_CACHE = {}
 
 async def _auto_classify(content: str, title: str) -> str:
@@ -1145,6 +1152,9 @@ async def memory_write_bulk_impl(
     embed_key_enricher: "Callable[[str, dict], Awaitable[str]] | None" = None,
     embed_key_enricher_concurrency: int = 4,
     dual_embed: bool = False,
+    fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None,
+    fact_enricher_concurrency: int = 2,
+    fact_enricher_variant_allowlist: set[str] | None = None,
 ) -> list[str]:
     """Bulk write that routes embeddings through `_embed_many`. Intended for
     benchmark / import paths where per-item contradiction detection would
@@ -1405,6 +1415,30 @@ async def memory_write_bulk_impl(
                     ),
                 )
 
+    # Phase 2.5: Fact enrichment (Phase 4 on-write hook).
+    # Non-blocking per-row dispatch: tries semaphore, enqueues on miss.
+    # Mirrors embed_key_enricher pattern at lines 1290-1327.
+    if fact_enricher is not None and ENABLE_FACT_ENRICHED:
+        for p in prepared:
+            # Skip variant rows unless explicitly allowed
+            item_variant = p.get("variant")
+            if item_variant is not None and (fact_enricher_variant_allowlist is None or item_variant not in fact_enricher_variant_allowlist):
+                continue
+
+            # Get a DB connection for the non-blocking dispatch
+            with _db() as db:
+                try:
+                    await _try_enrich_or_enqueue(
+                        p["id"],
+                        p.get("content") or "",
+                        fact_enricher,
+                        db,
+                        variant=item_variant,
+                        allowlist=fact_enricher_variant_allowlist
+                    )
+                except Exception as e:
+                    logger.debug(f"fact enrichment dispatch failed for {p['id']}: {e}")
+
     # Phase 3: Contradiction detection (if requested, with bounded concurrency).
     # Default is off in bulk (perf), must explicitly enable with check_contradictions=True.
     if check_contradictions is True:
@@ -1545,6 +1579,120 @@ async def _check_contradictions(item_id: str, content: str, title: str, vec: lis
     except Exception as e:
         logger.debug(f"Contradiction check failed: {e}")
     return superseded, related
+
+
+# ── Fact enrichment pipeline (Phase 4-5) ──────────────────────────────────────
+async def _try_enrich_or_enqueue(memory_id: str, content: str, fact_enricher, db, variant: str | None = None, allowlist: set[str] | None = None) -> None:
+    """Non-blocking: try enrichment under semaphore; on miss, enqueue.
+
+    Variant-skip rule: if variant is not None and (allowlist is None or variant not in allowlist),
+    return without doing anything.
+    """
+    if not ENABLE_FACT_ENRICHED or fact_enricher is None:
+        return
+
+    # Skip variant rows unless explicitly allowed
+    if variant is not None and (allowlist is None or variant not in allowlist):
+        return
+
+    # Try non-blocking acquire with very short timeout
+    try:
+        async with asyncio.timeout(0.001):  # try-acquire only
+            await _FACT_ENRICH_SEM.acquire()
+    except (asyncio.TimeoutError, Exception):
+        # Semaphore full or error — enqueue and return immediately
+        _enqueue_fact_enrichment(memory_id, db)
+        return
+
+    # Acquired semaphore — spawn task and track it
+    task = asyncio.create_task(_run_fact_enricher(memory_id, content, fact_enricher))
+    _PENDING_FACT_TASKS.add(task)
+    task.add_done_callback(lambda t: _PENDING_FACT_TASKS.discard(t))
+
+
+def _enqueue_fact_enrichment(memory_id: str, db) -> None:
+    """INSERT OR IGNORE into fact_enrichment_queue."""
+    try:
+        db.execute(
+            "INSERT OR IGNORE INTO fact_enrichment_queue(memory_id) VALUES (?)",
+            (memory_id,)
+        )
+    except Exception as e:
+        logger.debug(f"Failed to enqueue fact enrichment for {memory_id}: {e}")
+
+
+async def _run_fact_enricher(memory_id: str, content: str, fact_enricher) -> None:
+    """Run the actual fact extractor with error handling and retries."""
+    try:
+        facts = await fact_enricher(content)
+        if facts:
+            await _write_fact_rows(memory_id, facts)
+    except Exception as e:
+        # Record error and bump attempts in queue
+        try:
+            with _db() as db:
+                db.execute("""
+                    INSERT OR REPLACE INTO fact_enrichment_queue(memory_id, attempts, last_error, last_attempt_at)
+                    VALUES (?, COALESCE((SELECT attempts FROM fact_enrichment_queue WHERE memory_id=?),0)+1, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                """, (memory_id, memory_id, str(e)[:500]))
+        except Exception as db_err:
+            logger.debug(f"Failed to record enrichment error for {memory_id}: {db_err}")
+    finally:
+        _FACT_ENRICH_SEM.release()
+
+
+async def _write_fact_rows(memory_id: str, facts: list[dict]) -> None:
+    """Write one fact_enriched row per fact, with references edge and metadata."""
+    for fact_dict in facts:
+        fact_text = fact_dict.get("text", "").strip()
+        if not fact_text:
+            continue
+
+        confidence = float(fact_dict.get("confidence", 0.5))
+        fact_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Build metadata with source and confidence
+        metadata = {
+            "source_turn_id": memory_id,
+            "confidence": confidence,
+        }
+
+        try:
+            with _db() as db:
+                # Insert the fact row
+                db.execute(
+                    "INSERT INTO memory_items (id, type, title, content, metadata_json, change_agent, source, origin_device, scope, created_at, content_hash) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        fact_id,
+                        "fact_enriched",
+                        fact_text[:100],  # Use fact text as title (truncated)
+                        fact_text,
+                        json.dumps(metadata),
+                        "fact_enricher",
+                        "fact_enricher",
+                        ORIGIN_DEVICE,
+                        "agent",
+                        now,
+                        hashlib.sha256(fact_text.encode("utf-8")).hexdigest(),
+                    )
+                )
+                # Link via references edge: fact_id -> memory_id (from fact to source)
+                db.execute(
+                    "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+                    (
+                        str(uuid.uuid4()),
+                        fact_id,
+                        memory_id,
+                        "references",
+                        now,
+                    )
+                )
+                _record_history(fact_id, "create", None, fact_text, "content", "fact_enricher", db=db)
+        except Exception as e:
+            logger.debug(f"Failed to write fact row for {memory_id}: {e}")
+
 
 async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
     """Queries the remote ChromaDB instance for federated results."""
@@ -2637,7 +2785,7 @@ async def conversation_append_impl(conversation_id, role, content, agent_id="", 
 
 VALID_SCOPES = {"user", "session", "agent", "org"}
 
-async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None):
+async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: set[str] | None = None):
     """Internal implementation for memory_write. Contradiction detection is automatic.
 
     `variant` tags the item with a free-form ingestion-pipeline identifier so
@@ -2647,6 +2795,10 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
     `embed_text` overrides the default text fed to the embedder (which is
     `content or title`). Useful when callers want to enrich the embedding with
     titles/entities without polluting the displayed content.
+
+    `fact_enricher` is an optional async callable that extracts facts from content.
+    `fact_enricher_variant_allowlist` controls which variants get enriched (default:
+    None means skip all variants).
     """
     if isinstance(metadata, dict):
         metadata = json.dumps(metadata)
@@ -2732,6 +2884,14 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
                 )
 
     _record_history(item_id, "create", None, content, "content", agent_id or agent)
+
+    # Fact enrichment (Phase 4). Non-blocking: tries semaphore, enqueues on miss.
+    # Always succeeds — verbatim row is already persisted before enrichment.
+    try:
+        with _db() as db:
+            await _try_enrich_or_enqueue(item_id, content or "", fact_enricher, db, variant=variant, allowlist=fact_enricher_variant_allowlist)
+    except Exception as e:
+        logger.debug(f"fact enrichment dispatch failed: {e}")
 
     # Contradiction detection + auto-linking (runs after embedding is stored)
     superseded_ids = []
@@ -3320,3 +3480,95 @@ def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
         lines.append(f"{indent}[{row['id'][:8]}] {row['title']} ({row['state']}, owner={owner_str})")
 
     return "\n".join(lines)
+
+
+# ── Fact enrichment queue drain (Phase 5) ────────────────────────────────────
+def _select_pending_fact_enrichment(db, limit: int | None = None, allowed_variants: list[str] | None = None) -> list[tuple[str, str]]:
+    """Returns [(memory_id, content), ...] eligible for enrichment.
+
+    Eligibility: type != fact_enriched, variant IS NULL (or in allowed_variants),
+    no existing fact_enriched child via references edge, attempts < max_attempts.
+
+    When allowed_variants is provided, loosen the variant filter from strict NULL
+    to (variant IS NULL OR variant IN (...)).
+    """
+    # Build the variant clause
+    if allowed_variants:
+        variant_clause = f"AND (mi.variant IS NULL OR mi.variant IN ({','.join(['?'] * len(allowed_variants))}))"
+        variant_params = list(allowed_variants)
+    else:
+        variant_clause = "AND mi.variant IS NULL"
+        variant_params = []
+
+    sql = f"""
+    WITH eligible AS (
+        SELECT mi.id, mi.content
+        FROM memory_items mi
+        WHERE mi.type != 'fact_enriched'
+          AND COALESCE(mi.is_deleted, 0) = 0
+          {variant_clause}
+          AND NOT EXISTS (
+              SELECT 1 FROM memory_relationships mr
+              JOIN memory_items child ON child.id = mr.from_id
+              WHERE mr.to_id = mi.id
+                AND mr.relationship_type = 'references'
+                AND child.type = 'fact_enriched'
+          )
+    ),
+    queued AS (
+        SELECT mi.id, mi.content, q.attempts
+        FROM fact_enrichment_queue q
+        JOIN memory_items mi ON mi.id = q.memory_id
+        WHERE q.attempts < ?
+    )
+    SELECT id, content FROM queued
+    UNION
+    SELECT id, content FROM eligible
+    WHERE id NOT IN (SELECT memory_id FROM fact_enrichment_queue)
+    ORDER BY id
+    """
+    if limit is not None:
+        sql += f" LIMIT {int(limit)}"
+
+    params = variant_params + [FACT_ENRICH_MAX_ATTEMPTS]
+    return list(db.execute(sql, params).fetchall())
+
+
+async def enrich_pending_impl(dry_run: bool = True, limit: int = 0, allowed_variants: list[str] | None = None) -> dict:
+    """Enrich pending memory items. Dry-run reports count + ETA; execute drains queue.
+
+    Returns:
+    - dry_run=True: {"count": N, "est_wall_clock_seconds": F, "sample_ids": [...]}
+    - dry_run=False: {"processed": N, "succeeded": N, "failed": N, "errors_summary": str}
+    """
+    with _db() as db:
+        pending = _select_pending_fact_enrichment(db, limit=limit, allowed_variants=allowed_variants)
+
+    if not pending:
+        if dry_run:
+            return {"count": 0, "est_wall_clock_seconds": 0.0, "sample_ids": []}
+        else:
+            return {"processed": 0, "succeeded": 0, "failed": 0, "errors_summary": "No pending items"}
+
+    if dry_run:
+        # Dry run: report count + ETA estimate (2.0 sec/item conservative default)
+        est_secs = len(pending) * 2.0
+        sample_ids = [mid for mid, _ in pending[:3]]
+        return {
+            "count": len(pending),
+            "est_wall_clock_seconds": est_secs,
+            "sample_ids": sample_ids,
+        }
+
+    # Execute: drain the queue using the semaphore
+    # For execution, we'd need to have a fact_enricher available. Since this is the
+    # core implementation and the enricher is passed at write time, we can't execute
+    # here without the enricher. This function is typically called as an MCP tool
+    # with an enricher injected. For now, return a placeholder indicating execution mode.
+    # In Wave 3 (MCP tool), the caller will provide the enricher.
+    return {
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "errors_summary": "Execution requires enricher (Wave 3 MCP tool)",
+    }
