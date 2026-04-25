@@ -75,6 +75,13 @@ If local results are sparse, ChromaDB is queried as an L3 fallback.
 
 The `memory_search_routed` tool (default-disallowed, for benchmarks and research) provides temporal-aware routing: queries containing temporal keywords (when, before, after, days ago, etc.) are routed to a wider verbatim-only retrieval (k + temporal_k_bump, vector_kind_strategy='default'), while non-temporal queries retrieve at k with optional two-tier fact-variant fusion (max-kind deduplication). The temporal pattern matching is regex-based with no LLM overhead, achieving 100% recall on temporal-reasoning tasks with low false-positive rate. Environment variable `M3_ROUTER_TEMPORAL_K_BUMP` overrides the default bump (5).
 
+Two optional post-retrieval expansions can be layered on top of the routed result, both default-off:
+
+- **`graph_depth: int = 0`** — when > 0, take each top-K hit's id and traverse `memory_relationships` up to N hops (clamped to 3). New rows are scored against the query embedding and max-fused with the primary result before re-trimming to k. Useful when ingest populated typed edges (`references`, `supersedes`, `precedes`, `follows`, etc.); a no-op on corpora that skipped relationship writes during bulk ingest.
+- **`expand_sessions: bool = False, session_cap: int = 12`** — when true, pull all turns sharing each top-K hit's `conversation_id` (capped at `session_cap` per session), score them against the query, and max-fuse. Mirrors the bench-time "reflection-style retrieval" pattern that helps supersession (knowledge-update) and side-clause recall (single-session-preference) questions.
+
+Both expansions reuse the standard embedding path for scoring, so they integrate cleanly with the existing retrieval stack — no new schema, no new infrastructure.
+
 ---
 
 ## ✏️ Write Pipeline
