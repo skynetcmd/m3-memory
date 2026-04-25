@@ -238,6 +238,83 @@ def _run_bin_script(script_name: str, argv: list) -> int:
         sys.argv = saved_argv
 
 
+def _cmd_enrich_pending(args: argparse.Namespace) -> int:
+    """Execute the enrich-pending subcommand."""
+    import asyncio
+    import sys
+
+    # Import here to avoid dependency issues if memory_core is not yet installed
+    sys.path.insert(0, str(_resolve_bin_script("memory_core.py").parent))
+    import memory_core
+
+    limit = args.limit or 0
+    allowed_variants = args.allowed_variant or []
+
+    try:
+        # First call: dry-run to get count and ETA
+        result = asyncio.run(memory_core.enrich_pending_impl(
+            dry_run=True,
+            limit=limit,
+            allowed_variants=allowed_variants,
+        ))
+
+        if isinstance(result, dict):
+            count = result.get("count", 0)
+            eta_seconds = result.get("est_wall_clock_seconds", 0)
+            sample_ids = result.get("sample_ids", [])
+
+            # Format wall-clock time
+            minutes = int(eta_seconds // 60)
+            seconds = int(eta_seconds % 60)
+            eta_str = f"{minutes}m {seconds}s"
+
+            print(f"{count} items pending, ETA {eta_str}")
+            if sample_ids:
+                print(f"Sample IDs: {', '.join(sample_ids[:3])}")
+
+            # If --yes is set and not --no-confirm, ask for confirmation
+            if args.yes and not args.no_confirm:
+                prompt = f"About to enrich {count} items. Estimated wall-clock: {eta_str}. Proceed? [y/N] "
+                try:
+                    reply = input(prompt).strip().lower()
+                    if reply not in ("y", "yes"):
+                        print("Cancelled.")
+                        return 0
+                except (EOFError, KeyboardInterrupt):
+                    print("\nCancelled.")
+                    return 0
+            elif not args.yes:
+                return 0
+
+            # Execute enrichment
+            print(f"Enriching {count} items...")
+            result = asyncio.run(memory_core.enrich_pending_impl(
+                dry_run=False,
+                limit=limit,
+                allowed_variants=allowed_variants,
+            ))
+
+            if isinstance(result, dict):
+                processed = result.get("processed", 0)
+                succeeded = result.get("succeeded", 0)
+                failed = result.get("failed", 0)
+                errors = result.get("errors_summary", "")
+
+                print(f"Processed: {processed}, Succeeded: {succeeded}, Failed: {failed}")
+                if errors:
+                    print(f"Errors: {errors}")
+            else:
+                print(result)
+        else:
+            print(result)
+            return 1
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
 def _cmd_chatlog(args: argparse.Namespace) -> int:
     """Dispatch `mcp-memory chatlog <init|status|doctor>` to bin/ scripts."""
     sub = args.chatlog_cmd
@@ -393,6 +470,28 @@ Docs: https://github.com/skynetcmd/m3-memory
     p_serve.add_argument("--path", default="/mcp",
                          help="HTTP mount path for the streamable-http endpoint (default: /mcp).")
     p_serve.set_defaults(func=_cmd_serve)
+
+    p_enrich = subparsers.add_parser(
+        "enrich-pending",
+        help="Enrich pending memory items with SLM-distilled facts.",
+    )
+    p_enrich.add_argument(
+        "--yes", action="store_true",
+        help="Execute enrichment (default is dry-run).",
+    )
+    p_enrich.add_argument(
+        "--no-confirm", action="store_true",
+        help="Skip confirmation prompt (for cron/headless use).",
+    )
+    p_enrich.add_argument(
+        "--limit", type=int, default=0,
+        help="Max items to enrich (0 = no limit, default: 0).",
+    )
+    p_enrich.add_argument(
+        "--allowed-variant", action="append", default=[],
+        help="Variant name to include (can be used multiple times).",
+    )
+    p_enrich.set_defaults(func=_cmd_enrich_pending)
 
     p_chatlog = subparsers.add_parser(
         "chatlog",
