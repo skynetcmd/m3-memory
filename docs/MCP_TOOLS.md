@@ -174,6 +174,9 @@ Temporal-aware routed retrieval. Routes temporal queries (detected via regex) to
 | `k` | `integer` | No | Top-K results to return. | `10` |
 | `fact_variant` | `string` | No | Optional fact-tier variant to fuse with base. Empty = single-variant retrieval. | `` |
 | `temporal_k_bump` | `integer` | No | Extra slots added when query is temporal (env var M3_ROUTER_TEMPORAL_K_BUMP overrides). | `5` |
+| `graph_depth` | `integer` | No | If > 0, traverse memory_relationships up to N hops from each top-K hit and re-fuse new rows by score (max-fusion). Clamped to 3. Useful when ingest populated typed edges (references / supersedes / precedes / etc.); a no-op on bulk-ingested corpora that skipped relationship writes. | `0` |
+| `expand_sessions` | `boolean` | No | If true, pull up to session_cap turns sharing each top-K hit's conversation_id, score them against the query, and re-fuse. Useful for supersession/context-recovery questions (knowledge-update, single-session-preference). | `False` |
+| `session_cap` | `integer` | No | Per-session turn cap when expand_sessions is true. | `12` |
 | `user_id` | `string` | No | Filter by data subject. | `` |
 | `scope` | `string` | No | Filter by isolation scope. | `` |
 | `type_filter` | `string` | No | Restrict to a memory type. | `` |

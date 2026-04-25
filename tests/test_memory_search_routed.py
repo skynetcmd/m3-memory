@@ -182,3 +182,98 @@ async def test_env_var_temporal_k_bump_override(monkeypatch):
     assert len(recorded_calls) == 1
     call = recorded_calls[0]
     assert call["kwargs"]["k"] == 15, f"Expected k=15 (5+10 env override), got {call['kwargs']['k']}"
+
+
+@pytest.mark.asyncio
+async def test_no_expansion_returns_primary_unchanged():
+    """With graph_depth=0 and expand_sessions=False, _maybe_expand_routed is a no-op."""
+    import memory_core
+
+    primary = [(0.9, {"id": "a"}), (0.8, {"id": "b"})]
+    out = await memory_core._maybe_expand_routed(
+        "anything", primary, k=5, graph_depth=0, expand_sessions=False,
+    )
+    assert out == primary
+
+
+@pytest.mark.asyncio
+async def test_graph_depth_calls_neighbor_helper(monkeypatch):
+    """graph_depth>0 triggers _graph_neighbor_ids and fuses extras into result."""
+    import memory_core
+
+    captured = {"called": False, "seed_ids": None, "depth": None}
+
+    def stub_graph_neighbors(seed_ids, depth):
+        captured["called"] = True
+        captured["seed_ids"] = list(seed_ids)
+        captured["depth"] = depth
+        return {"neighbor_x"}
+
+    async def stub_score(query, rows_by_id, base_score=0.0):
+        return [(0.95, {"id": "neighbor_x", "title": "from graph"})]
+
+    class StubCursor:
+        def __init__(self, rows): self.rows = rows
+        def fetchall(self): return self.rows
+
+    class StubConn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None):
+            if "memory_items" in sql.lower() and "id in" in sql.lower():
+                return StubCursor([{"id": "neighbor_x", "type": "note", "title": "from graph",
+                                    "content": "neighbor content", "metadata_json": "{}",
+                                    "conversation_id": "", "valid_from": "", "user_id": ""}])
+            return StubCursor([])
+
+    monkeypatch.setattr(memory_core, "_graph_neighbor_ids", stub_graph_neighbors)
+    monkeypatch.setattr(memory_core, "_score_extra_rows", stub_score)
+    monkeypatch.setattr(memory_core, "_db", lambda: StubConn())
+
+    primary = [(0.9, {"id": "a"})]
+    out = await memory_core._maybe_expand_routed(
+        "anything", primary, k=5, graph_depth=2, expand_sessions=False,
+    )
+    assert captured["called"]
+    assert captured["seed_ids"] == ["a"]
+    assert captured["depth"] == 2
+    out_ids = [item["id"] for _, item in out]
+    assert "a" in out_ids
+    assert "neighbor_x" in out_ids
+    assert out[0][1]["id"] == "neighbor_x"  # higher score first
+
+
+@pytest.mark.asyncio
+async def test_expand_sessions_calls_session_helper(monkeypatch):
+    """expand_sessions=True triggers _session_neighbor_ids and fuses extras."""
+    import memory_core
+
+    captured = {"called": False, "cap": None}
+
+    def stub_session_neighbors(seed_ids, session_cap=12):
+        captured["called"] = True
+        captured["cap"] = session_cap
+        return {"sess_x": {"id": "sess_x", "title": "session-mate"}}
+
+    async def stub_score(query, rows_by_id, base_score=0.0):
+        return [(0.7, {"id": "sess_x", "title": "session-mate"})]
+
+    monkeypatch.setattr(memory_core, "_session_neighbor_ids", stub_session_neighbors)
+    monkeypatch.setattr(memory_core, "_score_extra_rows", stub_score)
+
+    primary = [(0.9, {"id": "a"})]
+    out = await memory_core._maybe_expand_routed(
+        "anything", primary, k=5, graph_depth=0, expand_sessions=True, session_cap=8,
+    )
+    assert captured["called"]
+    assert captured["cap"] == 8
+    out_ids = [item["id"] for _, item in out]
+    assert "a" in out_ids
+    assert "sess_x" in out_ids
+
+
+def test_graph_neighbor_ids_edge_cases():
+    """_graph_neighbor_ids returns empty set on empty seeds or zero depth."""
+    import memory_core
+    assert memory_core._graph_neighbor_ids([], depth=2) == set()
+    assert memory_core._graph_neighbor_ids(["x", "y"], depth=0) == set()
