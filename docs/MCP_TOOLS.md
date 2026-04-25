@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 68 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 71 MCP tools available in the M3 Memory system.
 
 ## Universal `database` parameter
 
@@ -28,7 +28,10 @@ Example — point a single `memory_search` call at a benchmark DB:
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
 | `memory_get` | Memory Operations | Retrieves a full MemoryItem by UUID. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
-| `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. |
+| `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. Optional `entity_graph` kwarg layers entity-relation graph traversal on top. |
+| `entity_search` | Memory Operations | Search the entity-relation graph by canonical_name and optional entity_type filter. Returns matching entities with optional neighbor counts. |
+| `entity_get` | Memory Operations | Fetch one entity with its neighborhood: predecessors and successors via entity_relationships, plus linked memory_items via memory_item_entities. |
+| `extract_pending` | Lifecycle & Maintenance | Drain the entity_extraction_queue using a configured SLM. Default `dry_run=true` reports count + ETA + sample_ids; pass `dry_run=false` to execute. `default_allowed=False` — must be added to `tools.allow` before use. |
 | `memory_suggest` | Memory Operations | Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected. |
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
 | `memory_verify` | Memory Operations | Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with. |
