@@ -11,13 +11,24 @@ M3 Memory is designed to be your agent's "long-term brain." It’s local, it’s
 The best way to understand M3 is to see it "wake up." Let’s skip the technical jargon and get straight to the payoff.
 
 ### 1. The Setup
-If you have `pip` and an MCP-compatible agent (like Claude Code, Gemini CLI, or Aider), run:
+**One-line installer (Linux + macOS):**
+
 ```bash
-pip install m3-memory
-mcp-memory --version  # Verify the command is available
+curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
 ```
 
-Then, add M3 Memory to your agent's configuration. See [Quick Start](./QUICKSTART.md) for the exact JSON to paste.
+**Claude Code users — install as a plugin instead:**
+
+```
+/plugin marketplace add skynetcmd/m3-memory
+/plugin install m3@skynetcmd
+```
+
+That gets you 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, …) plus auto-wired hooks. See [the plugin reference](./claude_code_plugin.md).
+
+**Windows or manual install:** see the [README](../README.md#-install) and [INSTALL.md](../INSTALL.md).
+
+If you didn't use the plugin path, add M3 Memory to your agent's MCP configuration manually. See [Quick Start](./QUICKSTART.md) for the exact JSON to paste.
 
 ### 2. The "Cat Test" (Our Favorite Ritual)
 Open your favorite agent and try this simple experiment:
