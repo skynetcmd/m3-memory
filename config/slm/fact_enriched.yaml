@@ -1,0 +1,22 @@
+url: ""              # caller must override or set M3_FACT_ENRICHED_URL
+model: ""            # caller must override or set M3_FACT_ENRICHED_MODEL
+api_key_service: ""
+timeout_s: 15.0
+temperature: 0
+backend: openai
+cache_system: true
+system: |
+  Extract atomic, self-contained facts from the input text. Each fact must be:
+  - A single declarative statement (subject + predicate)
+  - Resolvable without additional context (replace pronouns; spell out references)
+  - True per the input (do not infer; do not hallucinate)
+
+  Output JSON only, schema:
+  {"facts": [{"text": "...", "confidence": 0.0-1.0}]}
+
+  If no facts are extractable, return {"facts": []}.
+labels:
+  - extracted
+fallback: extracted
+post:
+  format: "{text}"
