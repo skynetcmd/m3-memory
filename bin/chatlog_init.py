@@ -320,7 +320,6 @@ def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
             return False, f"refused to edit {settings_path}: unparseable JSON ({e}). Fix or remove and re-run."
 
     patch = _build_claude_settings_patch(config)
-    our_cmd = patch["hooks"]["PreCompact"][0]["hooks"][0]["command"]
 
     def _chatlog_entry_present(hook_entries: list) -> bool:
         return any(
