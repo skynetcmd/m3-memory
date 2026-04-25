@@ -24,10 +24,16 @@ if [ -x "$BASE/.venv/bin/python" ]; then
 elif [ -x "$BASE/.venv/Scripts/python.exe" ]; then
     # Support Windows Git Bash / Cygwin paths
     PY="$BASE/.venv/Scripts/python.exe"
+elif [ -x "$HOME/.local/share/pipx/venvs/m3-memory/bin/python" ]; then
+    PY="$HOME/.local/share/pipx/venvs/m3-memory/bin/python"
+elif [ -x "$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
+    PY="$HOME/.local/share/pipx/venvs/m3-memory/Scripts/python.exe"
 elif [ -x "$HOME/.local/pipx/venvs/m3-memory/bin/python" ]; then
     PY="$HOME/.local/pipx/venvs/m3-memory/bin/python"
 elif [ -x "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
     PY="$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe"
+elif [ -n "$PIPX_HOME" ] && [ -x "$PIPX_HOME/venvs/m3-memory/bin/python" ]; then
+    PY="$PIPX_HOME/venvs/m3-memory/bin/python"
 elif [ -n "$M3_PYTHON" ] && [ -x "$M3_PYTHON" ]; then
     PY="$M3_PYTHON"
 else
