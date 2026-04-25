@@ -33,6 +33,12 @@ VALID_MEMORY_TYPES = frozenset({
     "knowledge", "event_extraction", "fact_enriched", "chat_log",
 })
 
+# Entity-graph enums — defined in memory_core to avoid circular import
+# (mcp_tool_catalog imports memory_core, not vice versa). Re-exported here
+# so callers see a single import surface.
+VALID_ENTITY_TYPES = memory_core.VALID_ENTITY_TYPES
+VALID_ENTITY_PREDICATES = memory_core.VALID_ENTITY_PREDICATES
+
 # ── Dataclass ────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class ToolSpec:
@@ -1337,6 +1343,60 @@ TOOLS: list[ToolSpec] = [
         is_async=True,
         validators=(),
         default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="entity_search",
+        description="Search entities by canonical_name and optionally by entity_type. Returns list of matching entities with optional neighbor counts.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query":         {"type": "string",  "default": "", "description": "Search term matched against canonical_name (LIKE %query%)."},
+                "entity_type":   {"type": "string",  "default": "", "description": "Filter by entity type (if provided)."},
+                "limit":         {"type": "integer", "default": 10,  "description": "Max results to return."},
+                "with_neighbors": {"type": "boolean", "default": False, "description": "If true, compute neighbor_count for each entity."},
+            },
+            "required": [],
+        },
+        impl=memory_core.entity_search_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="entity_get",
+        description="Load a single entity with its full neighborhood: predecessors, successors, and linked memory items.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "entity_id": {"type": "string", "description": "The entity ID to fetch."},
+                "depth":     {"type": "integer", "default": 1, "description": "Graph depth for neighborhood walk (currently unused; reserved for future multi-hop)."},
+            },
+            "required": ["entity_id"],
+        },
+        impl=memory_core.entity_get_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="extract_pending",
+        description="Extract pending entities from the queue. Default dry_run=true reports count + ETA; pass dry_run=false to execute.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "dry_run":           {"type": "boolean", "default": True, "description": "If true, report count + ETA without executing; if false, execute extraction."},
+                "limit":             {"type": "integer", "default": 0, "description": "Max items to extract (0 = no limit)."},
+                "allowed_variants":  {"type": "array", "default": [], "description": "Variant names to include in extraction (if empty, use default)."},
+            },
+            "required": [],
+        },
+        impl=memory_core.extract_pending_impl,
+        is_async=True,
+        validators=(),
+        default_allowed=False,
         inject_agent_id=False,
     ),
 ]
