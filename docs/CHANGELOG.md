@@ -4,6 +4,178 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [2026.4.24.12] — April 25, 2026 — Plugin commands self-resolve on Windows
+
+### Fixed
+
+- `/m3:*` plugin commands now show an explicit resolver chain (`mcp-memory`
+  → `python -m m3_memory.cli` → `.venv/Scripts/...`) so they work even
+  when `pip install --user` puts the script shim somewhere not on PATH —
+  the common Windows pain point.
+- `docs/install_windows.md` gained a complete PATH-fix section with the
+  correct `[Environment]::SetEnvironmentVariable` invocation that actually
+  expands `$env:APPDATA` before writing to user PATH.
+- `/m3:doctor` summary trimmed from a paragraph to one line.
+
+### Renamed (post-release)
+
+- `/m3:doctor` → `/m3:health` to avoid collision with Claude Code's
+  built-in `/doctor` command (autocomplete preferred the namespaced one).
+
+---
+
+## [2026.4.24.11] — April 25, 2026 — Claude Code plugin + claude.ai HTTP transport
+
+### Added
+
+- **First-class Claude Code plugin.** Install with
+  `/plugin marketplace add skynetcmd/m3-memory && /plugin install m3@skynetcmd`.
+  Auto-registers the memory MCP, wires up Stop + PreCompact chatlog hooks,
+  adds 15 `/m3:*` slash commands plus a `memory-curator` subagent.
+  Plugin manifest at `.claude-plugin/plugin.json`, marketplace manifest at
+  `.claude-plugin/marketplace.json`, commands flat under `commands/`,
+  hooks at `hooks/hooks.json`. Plugin name is `m3` so commands appear as
+  `/m3:health`, `/m3:search`, etc.
+- **`mcp-memory serve` subcommand.** Runs the same 66-tool bridge over
+  Streamable HTTP at `http://127.0.0.1:8080/mcp` for claude.ai web/desktop
+  and Anthropic API MCP Connector integration. Driven by env vars
+  (`M3_TRANSPORT=http`, `M3_HTTP_HOST`, `M3_HTTP_PORT`, `M3_HTTP_PATH`)
+  for systemd / docker. Default bind is `127.0.0.1` — public exposure
+  must go through a tunnel (cloudflared / tailscale / ngrok) or reverse
+  proxy with auth, since the endpoint includes destructive tools.
+- **`mcp-memory chatlog hook-path` subcommand.** Prints absolute path to
+  the chatlog hook script for the OS, used by plugin hooks.
+- **`docs/claude_code_plugin.md`** and **`docs/claude_ai_connector.md`** —
+  plugin reference + full self-host walkthrough for Cloudflare Tunnel /
+  Tailscale Funnel / ngrok / reverse proxy with systemd + launchd unit
+  files.
+
+### The 15 `/m3:*` slash commands
+
+`/m3:health` `/m3:status` `/m3:search` `/m3:save` `/m3:write` `/m3:get`
+`/m3:graph` `/m3:forget` `/m3:export` `/m3:tasks` `/m3:agents`
+`/m3:notify` `/m3:find-in-chat` `/m3:install` `/m3:help`
+
+The other 51 MCP tools remain callable directly via tool calls.
+
+---
+
+## [2026.4.24.10] — April 25, 2026 — One-line installer
+
+### Added
+
+- **`install.sh` at repo root** (~180 lines) — single curl|bash install
+  for Linux + macOS. Detects distro from `/etc/os-release` / `uname`,
+  installs prerequisites via `apt` / `dnf` / `pacman` / `zypper` / `apk` /
+  `brew`. Refuses to run as root; sudo only for OS package install.
+  Idempotent. Distro coverage: Debian/Ubuntu/Mint/Pop, Fedora/RHEL/Rocky/Alma,
+  Arch/Manjaro, openSUSE, Alpine, macOS via brew.
+- **`docs/install_linux.md`**, **`docs/install_macos.md`**,
+  **`docs/install_windows.md`** — new focused per-OS guides. Pre-existing
+  dense homelab walkthroughs moved to `*_homelab.md` siblings.
+- **README install section** is now one curl|bash command + three OS
+  links. Replaces the previous multi-step block per distro family.
+
+---
+
+## [2026.4.24.9] — April 25, 2026 — apply-claude reports PATH fix accurately
+
+### Fixed
+
+- When Claude Code is installed via `npm install -g` AFTER `mcp-memory
+  install-m3` and the user runs `mcp-memory chatlog init --apply-claude`:
+  the `~/.npm-global/bin` PATH gets added to `~/.profile` correctly, but
+  the status message read `[=] no change — chatlog entries already present`
+  even though the PATH was just fixed. Now reports both actions.
+
+---
+
+## [2026.4.24.8] — April 25, 2026 — Install docs + dependency bumps
+
+### Added
+
+- README + INSTALL.md lead with the apt one-liner for PEP 668 distros.
+  Earlier releases assumed pipx/git/sqlite3 were already on the system;
+  on a fresh Debian 13 minimal LXC, they aren't.
+- INSTALL.md gained a "Prerequisites — what needs admin (sudo) once" table.
+
+### Updated
+
+- `psycopg2-binary` 2.9.11 → 2.9.12, `chromadb-client` 1.5.7 → 1.5.8,
+  `sqlglot` 30.4.3 → 30.6.0, `fastapi` 0.135.3 → 0.136.1, `uvicorn`
+  0.44.0 → 0.46.0, `cryptography` upper bound widened to `<48`,
+  dev: `ruff` 0.15.10 → 0.15.12, `mypy` 1.20.1 → 1.20.2, `build` 1.4.2 → 1.4.4.
+- All changes minor / patch — no breaking changes. `pip-audit` clean.
+
+---
+
+## [2026.4.24.7] — April 25, 2026 — pipx XDG path + Claude PATH ordering hotfix
+
+### Fixed
+
+- **Hooks couldn't find pipx-installed Python on pipx >= 1.4.** pipx 1.4
+  moved venvs to `~/.local/share/pipx/venvs/` (XDG spec); chatlog hook
+  scripts only checked the legacy `~/.local/pipx/venvs/`. On Debian 13 /
+  Ubuntu 24.04+ / Fedora 40+ this caused every captured turn to spill
+  with `ModuleNotFoundError: httpx` while hooks reported "executed
+  successfully." Both paths are now probed (XDG-first), plus
+  `$PIPX_HOME/venvs/m3-memory`.
+- **`chatlog init --apply-claude` did not fix npm-global PATH.** When
+  Claude Code was installed via `npm install -g` AFTER `install-m3`,
+  `~/.npm-global/bin` wasn't on `~/.profile` so non-login shells (cron,
+  hooks, scripts) couldn't find `claude`.
+
+---
+
+## [2026.4.24.6] — April 24, 2026 — Install UX sprint
+
+### Added
+
+- **`mcp-memory doctor` reports chatlog health.** New section: DB path,
+  captured row count, last-capture timestamp, per-agent hook state for
+  Claude (Stop/PreCompact) and Gemini (SessionEnd). Uses stdlib sqlite3
+  in read-only URI mode.
+- **`LLM_ENDPOINTS_CSV` defaults probe Ollama + LM Studio.** Was
+  LM-Studio-only; Ollama users had to set the env var manually.
+- **`mcp-memory chatlog init|status|doctor` subcommand.** Wraps the
+  previously-undiscoverable bin scripts. `chatlog doctor` exits nonzero
+  on warnings.
+- **`install-m3` post-install phase.** Auto-registers memory MCP with
+  Gemini CLI when detected, prints sqlite3 install hints per OS, fixes
+  `~/.npm-global/bin` PATH for non-interactive shells, prompts for
+  endpoint + capture-mode (with `--non-interactive`, `--endpoint`,
+  `--capture-mode` flags for CI).
+- **`chatlog init --apply-claude` / `--apply-gemini`.** Idempotently merge
+  hook entries into `~/.claude/settings.json` and `~/.gemini/settings.json`
+  instead of printing snippets for paste. Timestamped backup before any
+  write; preserves user-authored hooks; refuses to clobber unparseable
+  JSON. `apply-gemini` also writes the `mcpServers.memory` and
+  `security.auth.selectedType` entries needed for headless `gemini --prompt`.
+- **`install-m3 --force` preserves user data.** Stashes
+  `*.db`/`*.json`/`*.jsonl` from `repo/memory/` before the rmtree,
+  restores onto the fresh tree.
+- **Top-level `INSTALL.md`** with OS matrix and audit-before-running
+  instructions for the bash installer.
+- **`.gitattributes`** — forces LF on `*.sh` and `*.py`, CRLF on `*.ps1`,
+  marks binary types. Prevents Windows checkouts from breaking Linux
+  hooks with CRLF.
+
+### Fixed
+
+- **Empty `post-install:` section** when all helpers returned None.
+- **Hook scripts now find pipx venv Python** — fallback chain prevents
+  the `ModuleNotFoundError: httpx` failure.
+- **`chatlog init --non-interactive` runs migrations.** Previously
+  exited leaving an empty schema-less DB; first hook fire then died
+  with `no such table: memory_items`.
+- **`chatlog_ingest` parses Gemini CLI 0.39+ JSONL transcripts.** Parser
+  assumed single-JSON `{sessionId, messages:[]}`; Gemini writes one
+  record per line. Both formats handled.
+- **Doctor reports Gemini SessionEnd hook state** (was a static note
+  that hid real wired-vs-unwired state).
+
+---
+
 ## [2026.4.24.5] — April 24, 2026 — Auto-install on first `mcp-memory` run
 
 ### Added
