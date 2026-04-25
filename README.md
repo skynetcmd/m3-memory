@@ -34,10 +34,7 @@ Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agen
 curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
 ```
 
-Detects your distro, installs prerequisites, sets up m3-memory. Works on Linux and macOS.
-Cautious? [Audit the script first.](INSTALL.md#audit-before-running)
-
-> [Install on Windows](docs/install_windows.md) · [Install on macOS](docs/install_macos.md) · [Manual install / what the script does](INSTALL.md)
+Installs on macOS or Linux with the single command above. Use this ([install on Windows](https://github.com/skynetcmd/m3-memory/blob/main/docs/install_windows.md)). Use this link to ([install manually](https://github.com/skynetcmd/m3-memory/blob/main/INSTALL.md#tldr--manual-path-per-os)) and this to ([examine the script](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh)) and what it does.
 
 Add to your MCP config:
 
