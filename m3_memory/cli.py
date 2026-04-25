@@ -20,7 +20,6 @@ import os
 import sys
 from pathlib import Path  # noqa: F401 - used in _auto_install return-type comment
 
-
 # On Windows the default console code page is cp1252, which can't encode
 # characters outside that 8-bit range (em-dashes, arrows, box-drawing,
 # checkmarks, most non-Latin scripts). Any accidental non-ASCII in a
@@ -92,7 +91,7 @@ def _run_bridge() -> None:
     giving up. See `_auto_install` for interactive vs non-interactive
     semantics.
     """
-    from m3_memory.installer import find_bridge, config_file
+    from m3_memory.installer import config_file, find_bridge
 
     bridge = find_bridge()
     if bridge is None:
@@ -131,7 +130,13 @@ def _run_bridge() -> None:
 def _cmd_install_m3(args: argparse.Namespace) -> int:
     from m3_memory.installer import install_m3
     try:
-        install_m3(force=args.force, tag=args.tag)
+        install_m3(
+            force=args.force,
+            tag=args.tag,
+            interactive=(False if args.non_interactive else None),
+            endpoint=args.endpoint,
+            capture_mode=args.capture_mode,
+        )
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -157,6 +162,95 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 def _cmd_doctor(_args: argparse.Namespace) -> int:
     from m3_memory.installer import doctor
     return doctor()
+
+
+def _resolve_bin_script(name: str) -> "Path | None":
+    """Find bin/<name> relative to the resolved bridge (installed or dev).
+
+    Returns an absolute Path or None if no bridge is resolvable (meaning
+    install-m3 hasn't run and we're not in a dev checkout either).
+    """
+    from m3_memory.installer import find_bridge
+    bridge = find_bridge()
+    if bridge is None:
+        return None
+    candidate = bridge.parent / name
+    return candidate if candidate.is_file() else None
+
+
+def _run_bin_script(script_name: str, argv: list) -> int:
+    """Execute bin/<script_name> as __main__ with the given argv.
+
+    Uses runpy so the script's own argparse handles its flags unchanged.
+    sys.argv is rewritten for the duration of the call so the script sees
+    its own name in argv[0] (what it would see when invoked directly).
+    """
+    import runpy
+
+    script = _resolve_bin_script(script_name)
+    if script is None:
+        print(
+            f"Error: {script_name} not found.\n"
+            "Run `mcp-memory install-m3` first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Put bin/ on sys.path so the script's sibling imports (chatlog_config,
+    # m3_sdk, ...) resolve the same way they do when invoked directly.
+    bin_dir = str(script.parent)
+    if bin_dir not in sys.path:
+        sys.path.insert(0, bin_dir)
+
+    saved_argv = sys.argv
+    sys.argv = [str(script)] + list(argv)
+    try:
+        try:
+            runpy.run_path(str(script), run_name="__main__")
+            return 0
+        except SystemExit as e:
+            # argparse / main() calls sys.exit — propagate the code.
+            code = e.code
+            return int(code) if isinstance(code, int) else (0 if code is None else 1)
+    finally:
+        sys.argv = saved_argv
+
+
+def _cmd_chatlog(args: argparse.Namespace) -> int:
+    """Dispatch `mcp-memory chatlog <init|status|doctor>` to bin/ scripts."""
+    sub = args.chatlog_cmd
+    if sub is None:
+        # No subcommand given → show status by default (matches `doctor` ergonomics).
+        return _run_bin_script("chatlog_status.py", [])
+    if sub == "init":
+        return _run_bin_script("chatlog_init.py", args.rest)
+    if sub == "status":
+        return _run_bin_script("chatlog_status.py", args.rest)
+    if sub == "doctor":
+        # `doctor` = status + nonzero exit if the subsystem reports warnings.
+        # Implemented inline so we can inspect the JSON output without forking.
+        script = _resolve_bin_script("chatlog_status.py")
+        if script is None:
+            print("Error: chatlog_status.py not found. Run `mcp-memory install-m3`.", file=sys.stderr)
+            return 1
+        import json as _json
+        import runpy
+        bin_dir = str(script.parent)
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        # Call the impl directly for clean JSON, bypassing the CLI formatter.
+        mod = runpy.run_path(str(script), run_name="_chatlog_status_mod")
+        data = _json.loads(mod["chatlog_status_impl"]())
+        warnings = data.get("warnings") or []
+        # Reuse the human-readable table formatter for output.
+        print(mod["_format_table"](data))
+        if warnings:
+            print(f"\n[X] {len(warnings)} warning(s) — see above.", file=sys.stderr)
+            return 1
+        print("\n[OK] chatlog healthy.")
+        return 0
+    print(f"Error: unknown chatlog subcommand {sub!r}", file=sys.stderr)
+    return 2
 
 
 def main() -> None:
@@ -208,6 +302,18 @@ Docs: https://github.com/skynetcmd/m3-memory
         "--tag", default=None,
         help=f"Override the GitHub tag to fetch (default: v{__version__}).",
     )
+    p_install.add_argument(
+        "--non-interactive", action="store_true",
+        help="Skip endpoint + capture-mode prompts; use defaults (probe both endpoints; both hooks).",
+    )
+    p_install.add_argument(
+        "--endpoint", default=None, metavar="URL",
+        help="Pin LLM_ENDPOINTS_CSV to this URL (skips the endpoint prompt).",
+    )
+    p_install.add_argument(
+        "--capture-mode", default=None, choices=("both", "stop", "precompact", "none"),
+        help="Chatlog capture hooks to enable (skips the capture-mode prompt).",
+    )
     p_install.set_defaults(func=_cmd_install_m3)
 
     p_update = subparsers.add_parser(
@@ -236,7 +342,28 @@ Docs: https://github.com/skynetcmd/m3-memory
     )
     p_doctor.set_defaults(func=_cmd_doctor)
 
-    args = parser.parse_args()
+    p_chatlog = subparsers.add_parser(
+        "chatlog",
+        help="Manage the chatlog subsystem (init|status|doctor).",
+    )
+    chatlog_sub = p_chatlog.add_subparsers(dest="chatlog_cmd", metavar="<subcommand>")
+    # Declare the subcommands so help lists them, but accept no flags here —
+    # we use parse_known_args below to collect everything after `chatlog <sub>`
+    # and forward it verbatim to the underlying bin/ script.
+    chatlog_sub.add_parser("init",   help="Interactive setup — wire hooks, choose DB path, configure redaction.", add_help=False)
+    chatlog_sub.add_parser("status", help="Print a summary of chatlog state (row counts, queue, hooks).",         add_help=False)
+    chatlog_sub.add_parser("doctor", help="Same as status, but exits nonzero on warnings.",                       add_help=False)
+    p_chatlog.set_defaults(func=_cmd_chatlog)
+
+    # Use parse_known_args so flags after `chatlog <sub>` (e.g. --non-interactive,
+    # --reconfigure, --json) aren't fought over by the outer parser — they're
+    # passed through to the child script. args.rest carries them.
+    args, extras = parser.parse_known_args()
+    if getattr(args, "command", None) == "chatlog":
+        args.rest = extras
+    elif extras:
+        # For any other subcommand, unknown flags are genuine errors.
+        parser.error(f"unrecognized arguments: {' '.join(extras)}")
 
     if args.command is None:
         # Bare `mcp-memory` → run the bridge (unchanged default behavior).

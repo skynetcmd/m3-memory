@@ -125,16 +125,20 @@ def _parse_claude_code(raw: str) -> tuple[list[dict], Optional[str]]:
 
 
 # ─── Gemini CLI parser ────────────────────────────────────────────────────────
-# Real on-disk schema at ~/.gemini/tmp/<projectHash>/chats/session-<ISO>-<id>.json:
-#   {"sessionId": "...", "projectHash": "...",
-#    "startTime": "...", "lastUpdated": "...",
-#    "messages": [
-#       {"id": "...", "timestamp": "...",
-#        "type": "user"|"gemini"|"info",
-#        "content": "str"  |  [{"text": "..."}, ...],
-#        "thoughts": [...], "tokens": {"input":N,"output":N,"cached":N},
-#        "model": "...", "toolCalls": [...]}]}
+# Real on-disk schema at ~/.gemini/tmp/<projectHash>/chats/session-<ISO>-<id>.jsonl:
+# JSONL — one JSON object per line, NOT a single object with a messages[] array.
+#
+# Line 1: session header
+#   {"sessionId":"...","projectHash":"...","startTime":"...","lastUpdated":"...","kind":"main"}
+#
+# Subsequent lines are either turn records or $set ops (which we ignore):
+#   {"id":"...","timestamp":"...","type":"user"|"gemini"|"info",
+#    "content":"str"|[{"text":"..."},...], "tokens":{...}, "model":"...", ...}
+#   {"$set":{"lastUpdated":"..."}}           — ignore
+#
 # "info" messages (CLI chrome) are skipped. "gemini" → assistant role.
+# Observed 2026-04-24 on Gemini CLI 0.39.1. The older .json format (single
+# object with messages[]) is still handled as a fallback for historical files.
 
 def _gemini_content_to_text(content: Any) -> str:
     """Flatten Gemini message.content to plain text.
@@ -156,18 +160,55 @@ def _gemini_content_to_text(content: Any) -> str:
 
 
 def _parse_gemini_cli(raw: str) -> tuple[list[dict], Optional[str]]:
-    """Parse Gemini CLI session JSON. Returns (items, sessionId)."""
+    """Parse a Gemini CLI session transcript. Returns (items, sessionId).
+
+    Handles both formats:
+      1. Current (Gemini CLI 0.39+): JSONL — one JSON object per line. Line 1
+         is the session header; subsequent lines are turn records or $set ops.
+      2. Historical: single JSON object with a messages[] array (kept as
+         fallback for any older transcripts that still exist).
+    """
     if not raw.strip():
         return [], None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        logger.warning(f"Malformed Gemini session JSON: {e}")
-        return [], None
-    session_id = data.get("sessionId")
-    messages = data.get("messages") or []
-    if not isinstance(messages, list):
-        return [], session_id
+
+    messages: list[dict] = []
+    session_id: Optional[str] = None
+
+    stripped = raw.lstrip()
+    if stripped.startswith("{") and "\n{" in stripped:
+        # Looks like JSONL (multiple top-level objects separated by newlines).
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Malformed Gemini JSONL line, skipping: {e}")
+                continue
+            if not isinstance(obj, dict):
+                continue
+            # Session header is the first non-$set object carrying sessionId.
+            if session_id is None and obj.get("sessionId"):
+                session_id = obj.get("sessionId")
+                continue
+            # $set ops are internal state updates — ignore.
+            if "$set" in obj:
+                continue
+            # Treat everything else as a candidate message record.
+            messages.append(obj)
+    else:
+        # Try the legacy single-object format.
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Malformed Gemini session JSON: {e}")
+            return [], None
+        session_id = data.get("sessionId")
+        messages_field = data.get("messages")
+        if isinstance(messages_field, list):
+            messages = messages_field
+
     items: list[dict] = []
     for msg in messages:
         if not isinstance(msg, dict):

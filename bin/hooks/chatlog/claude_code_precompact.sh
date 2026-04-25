@@ -17,11 +17,23 @@ if [ ! -f "$BASE/bin/chatlog_ingest.py" ]; then
     exit 1
 fi
 
+# Pick a python that has the chatlog_ingest deps (httpx, etc).
+# Priority:
+#   1. Repo-local venv at $BASE/.venv (dev checkouts)
+#   2. pipx venv for m3-memory (the pip-install path: ~/.local/pipx/venvs/m3-memory)
+#   3. Env override $M3_PYTHON (last resort for odd layouts)
+#   4. system python3 (works only if the host happens to have httpx installed)
 if [ -x "$BASE/.venv/bin/python" ]; then
     PY="$BASE/.venv/bin/python"
 elif [ -x "$BASE/.venv/Scripts/python.exe" ]; then
     # Support Windows Git Bash / Cygwin paths
     PY="$BASE/.venv/Scripts/python.exe"
+elif [ -x "$HOME/.local/pipx/venvs/m3-memory/bin/python" ]; then
+    PY="$HOME/.local/pipx/venvs/m3-memory/bin/python"
+elif [ -x "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
+    PY="$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe"
+elif [ -n "$M3_PYTHON" ] && [ -x "$M3_PYTHON" ]; then
+    PY="$M3_PYTHON"
 else
     PY="python3"
 fi

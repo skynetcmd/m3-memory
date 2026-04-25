@@ -18,11 +18,18 @@ if [ ! -f "$BASE/bin/chatlog_ingest.py" ]; then
     exit 1
 fi
 
+# See claude_code_precompact.sh for the rationale behind this fallback order.
 if [ -x "$BASE/.venv/bin/python" ]; then
     PY="$BASE/.venv/bin/python"
 elif [ -x "$BASE/.venv/Scripts/python.exe" ]; then
     # Support Windows Git Bash / Cygwin paths
     PY="$BASE/.venv/Scripts/python.exe"
+elif [ -x "$HOME/.local/pipx/venvs/m3-memory/bin/python" ]; then
+    PY="$HOME/.local/pipx/venvs/m3-memory/bin/python"
+elif [ -x "$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe" ]; then
+    PY="$HOME/.local/pipx/venvs/m3-memory/Scripts/python.exe"
+elif [ -n "$M3_PYTHON" ] && [ -x "$M3_PYTHON" ]; then
+    PY="$M3_PYTHON"
 else
     PY="python3"
 fi

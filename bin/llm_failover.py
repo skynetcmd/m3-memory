@@ -15,12 +15,18 @@ import httpx
 
 logger = logging.getLogger("llm_failover")
 
-# Failover order — LM Studio (OpenAI-compat on :1234), Ollama (:11434 via /v1 compat)
-# Default: single-machine setup (localhost only).
+# Failover order — LM Studio (OpenAI-compat on :1234), Ollama (:11434 via /v1 compat).
+# Both localhost endpoints are probed in order; unreachable ones are skipped
+# gracefully by get_best_llm / get_best_embed (they continue on ConnectError).
+# This keeps Ollama-only users working out of the box — the prior LM-Studio-only
+# default required LLM_ENDPOINTS_CSV to be set by hand before Ollama could be
+# reached (see plan memory 776d3729 task #6).
+#
 # For multi-machine LAN failover, set LLM_ENDPOINTS_CSV env var, e.g.:
 #   LLM_ENDPOINTS_CSV="http://localhost:1234/v1,http://laptop.local:1234/v1,http://desktop.local:1234/v1"
 _DEFAULT_LLM_ENDPOINTS = [
     "http://localhost:1234/v1",
+    "http://localhost:11434/v1",
 ]
 
 _endpoints_csv = os.environ.get("LLM_ENDPOINTS_CSV", "").strip()
@@ -34,7 +40,12 @@ EMBED_EXCLUSIONS = ("embed", "nomic", "jina", "bge", "minilm", "e5")
 LLM_EXCLUSIONS = ()  # nothing excluded for LLM selection — embedding models filtered
 
 # Timeouts
-CONNECT_TIMEOUT = 3.0    # fail fast on unreachable hosts
+# Connect timeout is deliberately short: the default endpoint list now includes
+# both LM Studio (:1234) and Ollama (:11434). Single-provider users pay the
+# connect timeout once per probe for the absent one, so fast-fail is important.
+# On a loopback connection refused comes back in <1ms anyway; this mainly
+# caps remote LAN endpoints set via LLM_ENDPOINTS_CSV.
+CONNECT_TIMEOUT = 1.0
 READ_TIMEOUT = 10.0      # for model list fetches only
 
 # Process-global cache for embed-endpoint discovery. Discovered once on first
