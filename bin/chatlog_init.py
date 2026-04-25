@@ -326,9 +326,12 @@ def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
     # AFTER install-m3 has run — at which point install-m3's PATH fix was
     # a no-op because the dir didn't exist yet. Same ordering issue as the
     # Gemini-installed-after-m3 case; same fix.
+    path_action: Optional[str] = None
     try:
         from m3_memory.installer import _fix_npm_global_path
-        _fix_npm_global_path()
+        path_msg = _fix_npm_global_path()
+        if path_msg and path_msg.startswith("[+]"):
+            path_action = "npm-global PATH"
     except Exception:
         pass  # best-effort; not blocking
 
@@ -357,6 +360,11 @@ def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
             changed = True
 
     if not changed:
+        # settings.json was already complete, but the PATH fix above may have
+        # done useful work (common when npm-global was created between runs).
+        # Surface that so the user sees what happened.
+        if path_action:
+            return True, f"added {path_action}; chatlog entries in {settings_path} already present"
         return False, f"no change — chatlog entries already present in {settings_path}"
 
     # Backup before write.
@@ -367,7 +375,10 @@ def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
 
     settings_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
     events = ", ".join(patch["hooks"].keys())
-    return True, f"merged chatlog hooks ({events}) + statusLine into {settings_path}"
+    msg = f"merged chatlog hooks ({events}) + statusLine into {settings_path}"
+    if path_action:
+        msg = f"added {path_action}; {msg}"
+    return True, msg
 
 
 def apply_gemini_settings() -> tuple[bool, str]:
