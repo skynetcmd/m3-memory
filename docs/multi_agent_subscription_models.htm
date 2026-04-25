@@ -1,0 +1,2263 @@
+<html xmlns:v="urn:schemas-microsoft-com:vml"
+xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns:m="http://schemas.microsoft.com/office/2004/12/omml"
+xmlns="http://www.w3.org/TR/REC-html40">
+
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=windows-1252">
+<meta name=ProgId content=Word.Document>
+<meta name=Generator content="Microsoft Word 15">
+<meta name=Originator content="Microsoft Word 15">
+<link rel=File-List
+href="multi_agent_subscription_models_files/filelist.xml">
+<link rel=Edit-Time-Data
+href="multi_agent_subscription_models_files/editdata.mso">
+<!--[if !mso]>
+<style>
+v\:* {behavior:url(#default#VML);}
+o\:* {behavior:url(#default#VML);}
+w\:* {behavior:url(#default#VML);}
+.shape {behavior:url(#default#VML);}
+</style>
+<![endif]-->
+<title>[Copy][Copy]Multi-Agent Integration with m3-Memory</title>
+<!--[if gte mso 9]><xml>
+ <o:DocumentProperties>
+  <o:Author>Microsoft Copilot</o:Author>
+  <o:LastAuthor>Bhaba Misra</o:LastAuthor>
+  <o:Revision>2</o:Revision>
+  <o:TotalTime>2</o:TotalTime>
+  <o:Created>2026-04-25T04:42:00Z</o:Created>
+  <o:LastSaved>2026-04-25T04:42:00Z</o:LastSaved>
+  <o:Pages>10</o:Pages>
+  <o:Words>2023</o:Words>
+  <o:Characters>11532</o:Characters>
+  <o:Lines>96</o:Lines>
+  <o:Paragraphs>27</o:Paragraphs>
+  <o:CharactersWithSpaces>13528</o:CharactersWithSpaces>
+  <o:Version>16.00</o:Version>
+ </o:DocumentProperties>
+</xml><![endif]-->
+<link rel=themeData
+href="multi_agent_subscription_models_files/themedata.thmx">
+<link rel=colorSchemeMapping
+href="multi_agent_subscription_models_files/colorschememapping.xml">
+<!--[if gte mso 9]><xml>
+ <w:WordDocument>
+  <w:HideSpellingErrors/>
+  <w:HideGrammaticalErrors/>
+  <w:SpellingState>Clean</w:SpellingState>
+  <w:GrammarState>Clean</w:GrammarState>
+  <w:TrackMoves>false</w:TrackMoves>
+  <w:TrackFormatting/>
+  <w:PunctuationKerning/>
+  <w:ValidateAgainstSchemas/>
+  <w:SaveIfXMLInvalid>false</w:SaveIfXMLInvalid>
+  <w:IgnoreMixedContent>false</w:IgnoreMixedContent>
+  <w:AlwaysShowPlaceholderText>false</w:AlwaysShowPlaceholderText>
+  <w:DoNotPromoteQF/>
+  <w:LidThemeOther>EN-US</w:LidThemeOther>
+  <w:LidThemeAsian>X-NONE</w:LidThemeAsian>
+  <w:LidThemeComplexScript>X-NONE</w:LidThemeComplexScript>
+  <w:Compatibility>
+   <w:BreakWrappedTables/>
+   <w:SnapToGridInCell/>
+   <w:WrapTextWithPunct/>
+   <w:UseAsianBreakRules/>
+   <w:UseWord2010TableStyleRules/>
+   <w:DontGrowAutofit/>
+   <w:SplitPgBreakAndParaMark/>
+  </w:Compatibility>
+  <w:DoNotOptimizeForBrowser/>
+  <m:mathPr>
+   <m:mathFont m:val="Cambria Math"/>
+   <m:brkBin m:val="before"/>
+   <m:brkBinSub m:val="&#45;-"/>
+   <m:smallFrac m:val="off"/>
+   <m:dispDef/>
+   <m:lMargin m:val="0"/>
+   <m:rMargin m:val="0"/>
+   <m:defJc m:val="centerGroup"/>
+   <m:wrapIndent m:val="1440"/>
+   <m:intLim m:val="subSup"/>
+   <m:naryLim m:val="undOvr"/>
+  </m:mathPr></w:WordDocument>
+</xml><![endif]--><!--[if gte mso 9]><xml>
+ <w:LatentStyles DefLockedState="false" DefUnhideWhenUsed="false"
+  DefSemiHidden="false" DefQFormat="false" DefPriority="99"
+  LatentStyleCount="376">
+  <w:LsdException Locked="false" Priority="0" QFormat="true" Name="Normal"/>
+  <w:LsdException Locked="false" Priority="9" QFormat="true" Name="heading 1"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 2"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 3"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 4"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 5"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 6"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 7"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 8"/>
+  <w:LsdException Locked="false" Priority="9" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="heading 9"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 5"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 6"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 7"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 8"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index 9"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 1"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 2"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 3"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 4"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 5"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 6"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 7"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 8"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" Name="toc 9"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Normal Indent"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="footnote text"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="annotation text"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="header"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="footer"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="index heading"/>
+  <w:LsdException Locked="false" Priority="35" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="caption"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="table of figures"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="envelope address"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="envelope return"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="footnote reference"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="annotation reference"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="line number"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="page number"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="endnote reference"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="endnote text"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="table of authorities"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="macro"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="toa heading"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Bullet"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Number"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List 5"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Bullet 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Bullet 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Bullet 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Bullet 5"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Number 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Number 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Number 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Number 5"/>
+  <w:LsdException Locked="false" Priority="10" QFormat="true" Name="Title"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Closing"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Signature"/>
+  <w:LsdException Locked="false" Priority="1" SemiHidden="true"
+   UnhideWhenUsed="true" Name="Default Paragraph Font"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text Indent"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Continue"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Continue 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Continue 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Continue 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="List Continue 5"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Message Header"/>
+  <w:LsdException Locked="false" Priority="11" QFormat="true" Name="Subtitle"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Salutation"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Date"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text First Indent"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text First Indent 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Note Heading"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text Indent 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Body Text Indent 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Block Text"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Hyperlink"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="FollowedHyperlink"/>
+  <w:LsdException Locked="false" Priority="22" QFormat="true" Name="Strong"/>
+  <w:LsdException Locked="false" Priority="20" QFormat="true" Name="Emphasis"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Document Map"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Plain Text"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="E-mail Signature"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Top of Form"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Bottom of Form"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Normal (Web)"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Acronym"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Address"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Cite"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Code"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Definition"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Keyboard"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Preformatted"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Sample"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Typewriter"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="HTML Variable"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Normal Table"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="annotation subject"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="No List"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Outline List 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Outline List 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Outline List 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Simple 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Simple 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Simple 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Classic 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Classic 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Classic 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Classic 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Colorful 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Colorful 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Colorful 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Columns 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Columns 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Columns 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Columns 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Columns 5"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 5"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 6"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 7"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Grid 8"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 4"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 5"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 6"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 7"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table List 8"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table 3D effects 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table 3D effects 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table 3D effects 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Contemporary"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Elegant"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Professional"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Subtle 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Subtle 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Web 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Web 2"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Web 3"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Balloon Text"/>
+  <w:LsdException Locked="false" Priority="39" Name="Table Grid"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Table Theme"/>
+  <w:LsdException Locked="false" SemiHidden="true" Name="Placeholder Text"/>
+  <w:LsdException Locked="false" Priority="1" QFormat="true" Name="No Spacing"/>
+  <w:LsdException Locked="false" Priority="60" Name="Light Shading"/>
+  <w:LsdException Locked="false" Priority="61" Name="Light List"/>
+  <w:LsdException Locked="false" Priority="62" Name="Light Grid"/>
+  <w:LsdException Locked="false" Priority="63" Name="Medium Shading 1"/>
+  <w:LsdException Locked="false" Priority="64" Name="Medium Shading 2"/>
+  <w:LsdException Locked="false" Priority="65" Name="Medium List 1"/>
+  <w:LsdException Locked="false" Priority="66" Name="Medium List 2"/>
+  <w:LsdException Locked="false" Priority="67" Name="Medium Grid 1"/>
+  <w:LsdException Locked="false" Priority="68" Name="Medium Grid 2"/>
+  <w:LsdException Locked="false" Priority="69" Name="Medium Grid 3"/>
+  <w:LsdException Locked="false" Priority="70" Name="Dark List"/>
+  <w:LsdException Locked="false" Priority="71" Name="Colorful Shading"/>
+  <w:LsdException Locked="false" Priority="72" Name="Colorful List"/>
+  <w:LsdException Locked="false" Priority="73" Name="Colorful Grid"/>
+  <w:LsdException Locked="false" Priority="60" Name="Light Shading Accent 1"/>
+  <w:LsdException Locked="false" Priority="61" Name="Light List Accent 1"/>
+  <w:LsdException Locked="false" Priority="62" Name="Light Grid Accent 1"/>
+  <w:LsdException Locked="false" Priority="63" Name="Medium Shading 1 Accent 1"/>
+  <w:LsdException Locked="false" Priority="64" Name="Medium Shading 2 Accent 1"/>
+  <w:LsdException Locked="false" Priority="65" Name="Medium List 1 Accent 1"/>
+  <w:LsdException Locked="false" SemiHidden="true" Name="Revision"/>
+  <w:LsdException Locked="false" Priority="34" QFormat="true"
+   Name="List Paragraph"/>
+  <w:LsdException Locked="false" Priority="29" QFormat="true" Name="Quote"/>
+  <w:LsdException Locked="false" Priority="30" QFormat="true"
+   Name="Intense Quote"/>
+  <w:LsdException Locked="false" Priority="66" Name="Medium List 2 Accent 1"/>
+  <w:LsdException Locked="false" Priority="67" Name="Medium Grid 1 Accent 1"/>
+  <w:LsdException Locked="false" Priority="68" Name="Medium Grid 2 Accent 1"/>
+  <w:LsdException Locked="false" Priority="69" Name="Medium Grid 3 Accent 1"/>
+  <w:LsdException Locked="false" Priority="70" Name="Dark List Accent 1"/>
+  <w:LsdException Locked="false" Priority="71" Name="Colorful Shading Accent 1"/>
+  <w:LsdException Locked="false" Priority="72" Name="Colorful List Accent 1"/>
+  <w:LsdException Locked="false" Priority="73" Name="Colorful Grid Accent 1"/>
+  <w:LsdException Locked="false" Priority="60" Name="Light Shading Accent 2"/>
+  <w:LsdException Locked="false" Priority="61" Name="Light List Accent 2"/>
+  <w:LsdException Locked="false" Priority="62" Name="Light Grid Accent 2"/>
+  <w:LsdException Locked="false" Priority="63" Name="Medium Shading 1 Accent 2"/>
+  <w:LsdException Locked="false" Priority="64" Name="Medium Shading 2 Accent 2"/>
+  <w:LsdException Locked="false" Priority="65" Name="Medium List 1 Accent 2"/>
+  <w:LsdException Locked="false" Priority="66" Name="Medium List 2 Accent 2"/>
+  <w:LsdException Locked="false" Priority="67" Name="Medium Grid 1 Accent 2"/>
+  <w:LsdException Locked="false" Priority="68" Name="Medium Grid 2 Accent 2"/>
+  <w:LsdException Locked="false" Priority="69" Name="Medium Grid 3 Accent 2"/>
+  <w:LsdException Locked="false" Priority="70" Name="Dark List Accent 2"/>
+  <w:LsdException Locked="false" Priority="71" Name="Colorful Shading Accent 2"/>
+  <w:LsdException Locked="false" Priority="72" Name="Colorful List Accent 2"/>
+  <w:LsdException Locked="false" Priority="73" Name="Colorful Grid Accent 2"/>
+  <w:LsdException Locked="false" Priority="60" Name="Light Shading Accent 3"/>
+  <w:LsdException Locked="false" Priority="61" Name="Light List Accent 3"/>
+  <w:LsdException Locked="false" Priority="62" Name="Light Grid Accent 3"/>
+  <w:LsdException Locked="false" Priority="63" Name="Medium Shading 1 Accent 3"/>
+  <w:LsdException Locked="false" Priority="64" Name="Medium Shading 2 Accent 3"/>
+  <w:LsdException Locked="false" Priority="65" Name="Medium List 1 Accent 3"/>
+  <w:LsdException Locked="false" Priority="66" Name="Medium List 2 Accent 3"/>
+  <w:LsdException Locked="false" Priority="67" Name="Medium Grid 1 Accent 3"/>
+  <w:LsdException Locked="false" Priority="68" Name="Medium Grid 2 Accent 3"/>
+  <w:LsdException Locked="false" Priority="69" Name="Medium Grid 3 Accent 3"/>
+  <w:LsdException Locked="false" Priority="70" Name="Dark List Accent 3"/>
+  <w:LsdException Locked="false" Priority="71" Name="Colorful Shading Accent 3"/>
+  <w:LsdException Locked="false" Priority="72" Name="Colorful List Accent 3"/>
+  <w:LsdException Locked="false" Priority="73" Name="Colorful Grid Accent 3"/>
+  <w:LsdException Locked="false" Priority="60" Name="Light Shading Accent 4"/>
+  <w:LsdException Locked="false" Priority="61" Name="Light List Accent 4"/>
+  <w:LsdException Locked="false" Priority="62" Name="Light Grid Accent 4"/>
+  <w:LsdException Locked="false" Priority="63" Name="Medium Shading 1 Accent 4"/>
+  <w:LsdException Locked="false" Priority="64" Name="Medium Shading 2 Accent 4"/>
+  <w:LsdException Locked="false" Priority="65" Name="Medium List 1 Accent 4"/>
+  <w:LsdException Locked="false" Priority="66" Name="Medium List 2 Accent 4"/>
+  <w:LsdException Locked="false" Priority="67" Name="Medium Grid 1 Accent 4"/>
+  <w:LsdException Locked="false" Priority="68" Name="Medium Grid 2 Accent 4"/>
+  <w:LsdException Locked="false" Priority="69" Name="Medium Grid 3 Accent 4"/>
+  <w:LsdException Locked="false" Priority="70" Name="Dark List Accent 4"/>
+  <w:LsdException Locked="false" Priority="71" Name="Colorful Shading Accent 4"/>
+  <w:LsdException Locked="false" Priority="72" Name="Colorful List Accent 4"/>
+  <w:LsdException Locked="false" Priority="73" Name="Colorful Grid Accent 4"/>
+  <w:LsdException Locked="false" Priority="60" Name="Light Shading Accent 5"/>
+  <w:LsdException Locked="false" Priority="61" Name="Light List Accent 5"/>
+  <w:LsdException Locked="false" Priority="62" Name="Light Grid Accent 5"/>
+  <w:LsdException Locked="false" Priority="63" Name="Medium Shading 1 Accent 5"/>
+  <w:LsdException Locked="false" Priority="64" Name="Medium Shading 2 Accent 5"/>
+  <w:LsdException Locked="false" Priority="65" Name="Medium List 1 Accent 5"/>
+  <w:LsdException Locked="false" Priority="66" Name="Medium List 2 Accent 5"/>
+  <w:LsdException Locked="false" Priority="67" Name="Medium Grid 1 Accent 5"/>
+  <w:LsdException Locked="false" Priority="68" Name="Medium Grid 2 Accent 5"/>
+  <w:LsdException Locked="false" Priority="69" Name="Medium Grid 3 Accent 5"/>
+  <w:LsdException Locked="false" Priority="70" Name="Dark List Accent 5"/>
+  <w:LsdException Locked="false" Priority="71" Name="Colorful Shading Accent 5"/>
+  <w:LsdException Locked="false" Priority="72" Name="Colorful List Accent 5"/>
+  <w:LsdException Locked="false" Priority="73" Name="Colorful Grid Accent 5"/>
+  <w:LsdException Locked="false" Priority="60" Name="Light Shading Accent 6"/>
+  <w:LsdException Locked="false" Priority="61" Name="Light List Accent 6"/>
+  <w:LsdException Locked="false" Priority="62" Name="Light Grid Accent 6"/>
+  <w:LsdException Locked="false" Priority="63" Name="Medium Shading 1 Accent 6"/>
+  <w:LsdException Locked="false" Priority="64" Name="Medium Shading 2 Accent 6"/>
+  <w:LsdException Locked="false" Priority="65" Name="Medium List 1 Accent 6"/>
+  <w:LsdException Locked="false" Priority="66" Name="Medium List 2 Accent 6"/>
+  <w:LsdException Locked="false" Priority="67" Name="Medium Grid 1 Accent 6"/>
+  <w:LsdException Locked="false" Priority="68" Name="Medium Grid 2 Accent 6"/>
+  <w:LsdException Locked="false" Priority="69" Name="Medium Grid 3 Accent 6"/>
+  <w:LsdException Locked="false" Priority="70" Name="Dark List Accent 6"/>
+  <w:LsdException Locked="false" Priority="71" Name="Colorful Shading Accent 6"/>
+  <w:LsdException Locked="false" Priority="72" Name="Colorful List Accent 6"/>
+  <w:LsdException Locked="false" Priority="73" Name="Colorful Grid Accent 6"/>
+  <w:LsdException Locked="false" Priority="19" QFormat="true"
+   Name="Subtle Emphasis"/>
+  <w:LsdException Locked="false" Priority="21" QFormat="true"
+   Name="Intense Emphasis"/>
+  <w:LsdException Locked="false" Priority="31" QFormat="true"
+   Name="Subtle Reference"/>
+  <w:LsdException Locked="false" Priority="32" QFormat="true"
+   Name="Intense Reference"/>
+  <w:LsdException Locked="false" Priority="33" QFormat="true" Name="Book Title"/>
+  <w:LsdException Locked="false" Priority="37" SemiHidden="true"
+   UnhideWhenUsed="true" Name="Bibliography"/>
+  <w:LsdException Locked="false" Priority="39" SemiHidden="true"
+   UnhideWhenUsed="true" QFormat="true" Name="TOC Heading"/>
+  <w:LsdException Locked="false" Priority="41" Name="Plain Table 1"/>
+  <w:LsdException Locked="false" Priority="42" Name="Plain Table 2"/>
+  <w:LsdException Locked="false" Priority="43" Name="Plain Table 3"/>
+  <w:LsdException Locked="false" Priority="44" Name="Plain Table 4"/>
+  <w:LsdException Locked="false" Priority="45" Name="Plain Table 5"/>
+  <w:LsdException Locked="false" Priority="40" Name="Grid Table Light"/>
+  <w:LsdException Locked="false" Priority="46" Name="Grid Table 1 Light"/>
+  <w:LsdException Locked="false" Priority="47" Name="Grid Table 2"/>
+  <w:LsdException Locked="false" Priority="48" Name="Grid Table 3"/>
+  <w:LsdException Locked="false" Priority="49" Name="Grid Table 4"/>
+  <w:LsdException Locked="false" Priority="50" Name="Grid Table 5 Dark"/>
+  <w:LsdException Locked="false" Priority="51" Name="Grid Table 6 Colorful"/>
+  <w:LsdException Locked="false" Priority="52" Name="Grid Table 7 Colorful"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="Grid Table 1 Light Accent 1"/>
+  <w:LsdException Locked="false" Priority="47" Name="Grid Table 2 Accent 1"/>
+  <w:LsdException Locked="false" Priority="48" Name="Grid Table 3 Accent 1"/>
+  <w:LsdException Locked="false" Priority="49" Name="Grid Table 4 Accent 1"/>
+  <w:LsdException Locked="false" Priority="50" Name="Grid Table 5 Dark Accent 1"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="Grid Table 6 Colorful Accent 1"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="Grid Table 7 Colorful Accent 1"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="Grid Table 1 Light Accent 2"/>
+  <w:LsdException Locked="false" Priority="47" Name="Grid Table 2 Accent 2"/>
+  <w:LsdException Locked="false" Priority="48" Name="Grid Table 3 Accent 2"/>
+  <w:LsdException Locked="false" Priority="49" Name="Grid Table 4 Accent 2"/>
+  <w:LsdException Locked="false" Priority="50" Name="Grid Table 5 Dark Accent 2"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="Grid Table 6 Colorful Accent 2"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="Grid Table 7 Colorful Accent 2"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="Grid Table 1 Light Accent 3"/>
+  <w:LsdException Locked="false" Priority="47" Name="Grid Table 2 Accent 3"/>
+  <w:LsdException Locked="false" Priority="48" Name="Grid Table 3 Accent 3"/>
+  <w:LsdException Locked="false" Priority="49" Name="Grid Table 4 Accent 3"/>
+  <w:LsdException Locked="false" Priority="50" Name="Grid Table 5 Dark Accent 3"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="Grid Table 6 Colorful Accent 3"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="Grid Table 7 Colorful Accent 3"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="Grid Table 1 Light Accent 4"/>
+  <w:LsdException Locked="false" Priority="47" Name="Grid Table 2 Accent 4"/>
+  <w:LsdException Locked="false" Priority="48" Name="Grid Table 3 Accent 4"/>
+  <w:LsdException Locked="false" Priority="49" Name="Grid Table 4 Accent 4"/>
+  <w:LsdException Locked="false" Priority="50" Name="Grid Table 5 Dark Accent 4"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="Grid Table 6 Colorful Accent 4"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="Grid Table 7 Colorful Accent 4"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="Grid Table 1 Light Accent 5"/>
+  <w:LsdException Locked="false" Priority="47" Name="Grid Table 2 Accent 5"/>
+  <w:LsdException Locked="false" Priority="48" Name="Grid Table 3 Accent 5"/>
+  <w:LsdException Locked="false" Priority="49" Name="Grid Table 4 Accent 5"/>
+  <w:LsdException Locked="false" Priority="50" Name="Grid Table 5 Dark Accent 5"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="Grid Table 6 Colorful Accent 5"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="Grid Table 7 Colorful Accent 5"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="Grid Table 1 Light Accent 6"/>
+  <w:LsdException Locked="false" Priority="47" Name="Grid Table 2 Accent 6"/>
+  <w:LsdException Locked="false" Priority="48" Name="Grid Table 3 Accent 6"/>
+  <w:LsdException Locked="false" Priority="49" Name="Grid Table 4 Accent 6"/>
+  <w:LsdException Locked="false" Priority="50" Name="Grid Table 5 Dark Accent 6"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="Grid Table 6 Colorful Accent 6"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="Grid Table 7 Colorful Accent 6"/>
+  <w:LsdException Locked="false" Priority="46" Name="List Table 1 Light"/>
+  <w:LsdException Locked="false" Priority="47" Name="List Table 2"/>
+  <w:LsdException Locked="false" Priority="48" Name="List Table 3"/>
+  <w:LsdException Locked="false" Priority="49" Name="List Table 4"/>
+  <w:LsdException Locked="false" Priority="50" Name="List Table 5 Dark"/>
+  <w:LsdException Locked="false" Priority="51" Name="List Table 6 Colorful"/>
+  <w:LsdException Locked="false" Priority="52" Name="List Table 7 Colorful"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="List Table 1 Light Accent 1"/>
+  <w:LsdException Locked="false" Priority="47" Name="List Table 2 Accent 1"/>
+  <w:LsdException Locked="false" Priority="48" Name="List Table 3 Accent 1"/>
+  <w:LsdException Locked="false" Priority="49" Name="List Table 4 Accent 1"/>
+  <w:LsdException Locked="false" Priority="50" Name="List Table 5 Dark Accent 1"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="List Table 6 Colorful Accent 1"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="List Table 7 Colorful Accent 1"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="List Table 1 Light Accent 2"/>
+  <w:LsdException Locked="false" Priority="47" Name="List Table 2 Accent 2"/>
+  <w:LsdException Locked="false" Priority="48" Name="List Table 3 Accent 2"/>
+  <w:LsdException Locked="false" Priority="49" Name="List Table 4 Accent 2"/>
+  <w:LsdException Locked="false" Priority="50" Name="List Table 5 Dark Accent 2"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="List Table 6 Colorful Accent 2"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="List Table 7 Colorful Accent 2"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="List Table 1 Light Accent 3"/>
+  <w:LsdException Locked="false" Priority="47" Name="List Table 2 Accent 3"/>
+  <w:LsdException Locked="false" Priority="48" Name="List Table 3 Accent 3"/>
+  <w:LsdException Locked="false" Priority="49" Name="List Table 4 Accent 3"/>
+  <w:LsdException Locked="false" Priority="50" Name="List Table 5 Dark Accent 3"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="List Table 6 Colorful Accent 3"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="List Table 7 Colorful Accent 3"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="List Table 1 Light Accent 4"/>
+  <w:LsdException Locked="false" Priority="47" Name="List Table 2 Accent 4"/>
+  <w:LsdException Locked="false" Priority="48" Name="List Table 3 Accent 4"/>
+  <w:LsdException Locked="false" Priority="49" Name="List Table 4 Accent 4"/>
+  <w:LsdException Locked="false" Priority="50" Name="List Table 5 Dark Accent 4"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="List Table 6 Colorful Accent 4"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="List Table 7 Colorful Accent 4"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="List Table 1 Light Accent 5"/>
+  <w:LsdException Locked="false" Priority="47" Name="List Table 2 Accent 5"/>
+  <w:LsdException Locked="false" Priority="48" Name="List Table 3 Accent 5"/>
+  <w:LsdException Locked="false" Priority="49" Name="List Table 4 Accent 5"/>
+  <w:LsdException Locked="false" Priority="50" Name="List Table 5 Dark Accent 5"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="List Table 6 Colorful Accent 5"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="List Table 7 Colorful Accent 5"/>
+  <w:LsdException Locked="false" Priority="46"
+   Name="List Table 1 Light Accent 6"/>
+  <w:LsdException Locked="false" Priority="47" Name="List Table 2 Accent 6"/>
+  <w:LsdException Locked="false" Priority="48" Name="List Table 3 Accent 6"/>
+  <w:LsdException Locked="false" Priority="49" Name="List Table 4 Accent 6"/>
+  <w:LsdException Locked="false" Priority="50" Name="List Table 5 Dark Accent 6"/>
+  <w:LsdException Locked="false" Priority="51"
+   Name="List Table 6 Colorful Accent 6"/>
+  <w:LsdException Locked="false" Priority="52"
+   Name="List Table 7 Colorful Accent 6"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Mention"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Smart Hyperlink"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Hashtag"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Unresolved Mention"/>
+  <w:LsdException Locked="false" SemiHidden="true" UnhideWhenUsed="true"
+   Name="Smart Link"/>
+ </w:LatentStyles>
+</xml><![endif]-->
+<style>
+<!--
+ /* Font Definitions */
+ @font-face
+	{font-family:Wingdings;
+	panose-1:5 0 0 0 0 0 0 0 0 0;
+	mso-font-charset:2;
+	mso-generic-font-family:auto;
+	mso-font-pitch:variable;
+	mso-font-signature:0 268435456 0 0 -2147483648 0;}
+@font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;
+	mso-font-charset:0;
+	mso-generic-font-family:roman;
+	mso-font-pitch:variable;
+	mso-font-signature:-536869121 1107305727 33554432 0 415 0;}
+@font-face
+	{font-family:Consolas;
+	panose-1:2 11 6 9 2 2 4 3 2 4;
+	mso-font-charset:0;
+	mso-generic-font-family:modern;
+	mso-font-pitch:fixed;
+	mso-font-signature:-536869121 64767 1 0 415 0;}
+ /* Style Definitions */
+ p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-parent:"";
+	margin-top:3.0pt;
+	margin-right:0in;
+	margin-bottom:3.0pt;
+	margin-left:0in;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-fareast-font-family:"Times New Roman";
+	mso-bidi-font-family:"Times New Roman";}
+h1
+	{mso-style-priority:9;
+	mso-style-unhide:no;
+	mso-style-qformat:yes;
+	margin-top:.25in;
+	margin-right:0in;
+	margin-bottom:3.0pt;
+	margin-left:0in;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	mso-outline-level:1;
+	font-size:14.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-bidi-font-family:"Times New Roman";
+	mso-font-kerning:0pt;
+	mso-bidi-font-weight:normal;}
+h2
+	{mso-style-priority:9;
+	mso-style-qformat:yes;
+	margin-top:.25in;
+	margin-right:0in;
+	margin-bottom:3.0pt;
+	margin-left:0in;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	mso-outline-level:2;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-bidi-font-family:"Times New Roman";
+	mso-bidi-font-weight:normal;}
+h3
+	{mso-style-priority:9;
+	mso-style-qformat:yes;
+	margin-top:.25in;
+	margin-right:0in;
+	margin-bottom:3.0pt;
+	margin-left:0in;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	mso-outline-level:3;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-bidi-font-family:"Times New Roman";
+	mso-bidi-font-weight:normal;}
+p.MsoTitle, li.MsoTitle, div.MsoTitle
+	{mso-style-priority:10;
+	mso-style-unhide:no;
+	mso-style-qformat:yes;
+	margin-top:12.0pt;
+	margin-right:0in;
+	margin-bottom:12.0pt;
+	margin-left:0in;
+	text-align:center;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:16.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-fareast-font-family:"Times New Roman";
+	mso-bidi-font-family:"Times New Roman";
+	font-weight:bold;
+	mso-bidi-font-weight:normal;}
+a:link, span.MsoHyperlink
+	{mso-style-unhide:no;
+	mso-style-parent:"";
+	color:#0563C1;
+	text-decoration:underline;
+	text-underline:single;}
+a:visited, span.MsoHyperlinkFollowed
+	{mso-style-noshow:yes;
+	mso-style-priority:99;
+	color:#96607D;
+	mso-themecolor:followedhyperlink;
+	text-decoration:underline;
+	text-underline:single;}
+p.MsoListParagraph, li.MsoListParagraph, div.MsoListParagraph
+	{mso-style-unhide:no;
+	mso-style-qformat:yes;
+	margin-top:3.0pt;
+	margin-right:0in;
+	margin-bottom:3.0pt;
+	margin-left:.25in;
+	mso-add-space:auto;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-fareast-font-family:"Times New Roman";
+	mso-bidi-font-family:"Times New Roman";}
+p.MsoListParagraphCxSpFirst, li.MsoListParagraphCxSpFirst, div.MsoListParagraphCxSpFirst
+	{mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-type:export-only;
+	margin-top:3.0pt;
+	margin-right:0in;
+	margin-bottom:0in;
+	margin-left:.25in;
+	mso-add-space:auto;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-fareast-font-family:"Times New Roman";
+	mso-bidi-font-family:"Times New Roman";}
+p.MsoListParagraphCxSpMiddle, li.MsoListParagraphCxSpMiddle, div.MsoListParagraphCxSpMiddle
+	{mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-type:export-only;
+	margin-top:0in;
+	margin-right:0in;
+	margin-bottom:0in;
+	margin-left:.25in;
+	mso-add-space:auto;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-fareast-font-family:"Times New Roman";
+	mso-bidi-font-family:"Times New Roman";}
+p.MsoListParagraphCxSpLast, li.MsoListParagraphCxSpLast, div.MsoListParagraphCxSpLast
+	{mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-type:export-only;
+	margin-top:0in;
+	margin-right:0in;
+	margin-bottom:3.0pt;
+	margin-left:.25in;
+	mso-add-space:auto;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-fareast-font-family:"Times New Roman";
+	mso-bidi-font-family:"Times New Roman";}
+span.Code
+	{mso-style-name:Code;
+	mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-parent:"";
+	font-family:Consolas;
+	mso-ascii-font-family:Consolas;
+	background:#E1E2E4;}
+.MsoChpDefault
+	{mso-style-type:export-only;
+	mso-default-props:yes;
+	font-size:12.0pt;
+	mso-ansi-font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-ascii-font-family:Arial;
+	mso-hansi-font-family:Arial;
+	mso-font-kerning:0pt;
+	mso-ligatures:none;}
+.MsoPapDefault
+	{mso-style-type:export-only;
+	margin-top:3.0pt;
+	margin-right:0in;
+	margin-bottom:3.0pt;
+	margin-left:0in;
+	line-height:150%;}
+ /* Page Definitions */
+ @page
+	{mso-footnote-separator:url("multi_agent_subscription_models_files/header.htm") fs;
+	mso-footnote-continuation-separator:url("multi_agent_subscription_models_files/header.htm") fcs;
+	mso-endnote-separator:url("multi_agent_subscription_models_files/header.htm") es;
+	mso-endnote-continuation-separator:url("multi_agent_subscription_models_files/header.htm") ecs;}
+@page WordSection1
+	{size:8.5in 11.0in;
+	margin:1.0in 1.0in 1.0in 1.0in;
+	mso-header-margin:27.0pt;
+	mso-footer-margin:27.0pt;
+	mso-footer:url("multi_agent_subscription_models_files/header.htm") f1;
+	mso-paper-source:0;}
+div.WordSection1
+	{page:WordSection1;}
+ /* List Definitions */
+ @list l0
+	{mso-list-id:1012536664;
+	mso-list-template-ids:235295672;}
+@list l0:level1
+	{mso-level-number-format:bullet;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l0:level2
+	{mso-level-number-format:bullet;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.25in;
+	text-indent:0in;}
+@list l0:level3
+	{mso-level-number-format:bullet;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.5in;
+	text-indent:0in;}
+@list l0:level4
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l0:level5
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l0:level6
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l0:level7
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l0:level8
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l0:level9
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l1
+	{mso-list-id:1775199825;
+	mso-list-template-ids:96776762;}
+@list l1:level1
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0B7;
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.25in;
+	text-indent:-.25in;
+	font-family:Symbol;}
+@list l1:level2
+	{mso-level-number-format:bullet;
+	mso-level-text:o;
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.5in;
+	text-indent:-.25in;
+	font-family:"Courier New";
+	mso-bidi-font-family:"Times New Roman";}
+@list l1:level3
+	{mso-level-number-format:bullet;
+	mso-level-text:\F0A7;
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.75in;
+	text-indent:-.25in;
+	font-family:Wingdings;}
+@list l1:level4
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l1:level5
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l1:level6
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l1:level7
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l1:level8
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l1:level9
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l2
+	{mso-list-id:1901090657;
+	mso-list-template-ids:-1988749596;}
+@list l2:level1
+	{mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.25in;
+	text-indent:-.25in;}
+@list l2:level2
+	{mso-level-number-format:alpha-lower;
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.5in;
+	text-indent:-.25in;}
+@list l2:level3
+	{mso-level-number-format:roman-lower;
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:.75in;
+	text-indent:-.25in;}
+@list l2:level4
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l2:level5
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l2:level6
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l2:level7
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l2:level8
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+@list l2:level9
+	{mso-level-start-at:0;
+	mso-level-text:"";
+	mso-level-tab-stop:none;
+	mso-level-number-position:left;
+	margin-left:0in;
+	text-indent:0in;}
+ol
+	{margin-bottom:0in;}
+ul
+	{margin-bottom:0in;}
+-->
+</style>
+<!--[if gte mso 10]>
+<style>
+ /* Style Definitions */
+ table.MsoNormalTable
+	{mso-style-name:"Table Normal";
+	mso-tstyle-rowband-size:0;
+	mso-tstyle-colband-size:0;
+	mso-style-noshow:yes;
+	mso-style-priority:99;
+	mso-style-parent:"";
+	mso-padding-alt:0in 5.4pt 0in 5.4pt;
+	mso-para-margin-top:3.0pt;
+	mso-para-margin-right:0in;
+	mso-para-margin-bottom:3.0pt;
+	mso-para-margin-left:0in;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:12.0pt;
+	mso-bidi-font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-bidi-font-family:"Times New Roman";}
+table.MsoTableGrid
+	{mso-style-name:"Table Grid";
+	mso-tstyle-rowband-size:0;
+	mso-tstyle-colband-size:0;
+	mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-parent:"";
+	border:solid #E8E0DC 1.0pt;
+	mso-border-alt:solid #E8E0DC .5pt;
+	mso-padding-alt:0in 0in 0in 0in;
+	mso-border-insideh:.5pt solid #E8E0DC;
+	mso-border-insidev:.5pt solid #E8E0DC;
+	mso-tstyle-vert-align:middle;
+	mso-tstyle-padding:4.5pt 6.0pt 0in 6.0pt;
+	mso-para-margin-top:3.0pt;
+	mso-para-margin-right:0in;
+	mso-para-margin-bottom:3.0pt;
+	mso-para-margin-left:0in;
+	line-height:150%;
+	mso-pagination:widow-orphan;
+	font-size:10.0pt;
+	font-family:"Arial",sans-serif;
+	mso-bidi-font-family:"Times New Roman";}
+table.MsoTableGridFirstRow
+	{mso-style-name:"Table Grid";
+	mso-table-condition:first-row;
+	mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-parent:"";
+	mso-tstyle-shading:#F4EFED;}
+table.CodeBlock
+	{mso-style-name:"Code Block";
+	mso-tstyle-rowband-size:0;
+	mso-tstyle-colband-size:0;
+	mso-style-unhide:no;
+	mso-style-qformat:yes;
+	mso-style-parent:"";
+	mso-padding-alt:0in 0in 0in 0in;
+	mso-tstyle-shading:#E1E2E4;
+	mso-tstyle-padding:3.0pt 7.5pt 3.0pt 7.5pt;
+	mso-para-margin-top:3.0pt;
+	mso-para-margin-right:0in;
+	mso-para-margin-bottom:3.0pt;
+	mso-para-margin-left:0in;
+	mso-pagination:widow-orphan;
+	font-size:10.0pt;
+	font-family:Consolas;
+	mso-hansi-font-family:Arial;}
+</style>
+<![endif]--><!--[if gte mso 9]><xml>
+ <o:shapedefaults v:ext="edit" spidmax="2050"/>
+</xml><![endif]--><!--[if gte mso 9]><xml>
+ <o:shapelayout v:ext="edit">
+  <o:idmap v:ext="edit" data="1"/>
+ </o:shapelayout></xml><![endif]-->
+</head>
+
+<body lang=EN-US link="#0563C1" vlink="#96607D" style='tab-interval:.5in;
+word-wrap:break-word'>
+
+<div class=WordSection1>
+
+<p class=MsoTitle>Multi-Agent Integration with m3-Memory</p>
+
+<p class=MsoTitle><i><span style='font-size:12.0pt;line-height:150%'>(subscription
+vs API token)<o:p></o:p></span></i></p>
+
+<h3><a name="high_level_architecture">High-level architecture</a></h3>
+
+<table class=MsoTableGrid border=1 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:6.0pt;border-collapse:collapse;border:none;
+ mso-border-alt:solid #E8E0DC .5pt;mso-yfti-tbllook:1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:-1;mso-yfti-firstrow:yes;mso-yfti-lastfirstrow:yes'>
+  <td style='border:solid #E8E0DC 1.0pt;mso-border-alt:solid #E8E0DC .5pt;
+  background:#F4EFED;padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal style='mso-yfti-cnfc:1'><span style='font-size:10.0pt;
+  line-height:150%;color:black;mso-color-alt:windowtext'>Layer</span><span
+  style='font-size:10.0pt;line-height:150%'><o:p></o:p></span></p>
+  </td>
+  <td style='border:solid #E8E0DC 1.0pt;border-left:none;mso-border-left-alt:
+  solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;background:#F4EFED;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal style='mso-yfti-cnfc:1'><span style='font-size:10.0pt;
+  line-height:150%;color:black;mso-color-alt:windowtext'>Component</span><span
+  style='font-size:10.0pt;line-height:150%'><o:p></o:p></span></p>
+  </td>
+  <td style='border:solid #E8E0DC 1.0pt;border-left:none;mso-border-left-alt:
+  solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;background:#F4EFED;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal style='mso-yfti-cnfc:1'><span style='font-size:10.0pt;
+  line-height:150%;color:black;mso-color-alt:windowtext'>Role</span><span
+  style='font-size:10.0pt;line-height:150%'><o:p></o:p></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:0'>
+  <td style='border:solid #E8E0DC 1.0pt;border-top:none;mso-border-top-alt:
+  solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span style='font-size:10.0pt;line-height:150%'>Agents<o:p></o:p></span></p>
+  </td>
+  <td style='border-top:none;border-left:none;border-bottom:solid #E8E0DC 1.0pt;
+  border-right:solid #E8E0DC 1.0pt;mso-border-top-alt:solid #E8E0DC .5pt;
+  mso-border-left-alt:solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span lang=IT style='font-size:10.0pt;line-height:150%;
+  mso-ansi-language:IT'>Claude Code, Gemini CLI, OpenCode<o:p></o:p></span></p>
+  </td>
+  <td style='border-top:none;border-left:none;border-bottom:solid #E8E0DC 1.0pt;
+  border-right:solid #E8E0DC 1.0pt;mso-border-top-alt:solid #E8E0DC .5pt;
+  mso-border-left-alt:solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span style='font-size:10.0pt;line-height:150%'>Do work,
+  call tools, run sub-agents<o:p></o:p></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:1'>
+  <td style='border:solid #E8E0DC 1.0pt;border-top:none;mso-border-top-alt:
+  solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span style='font-size:10.0pt;line-height:150%'>Memory<o:p></o:p></span></p>
+  </td>
+  <td style='border-top:none;border-left:none;border-bottom:solid #E8E0DC 1.0pt;
+  border-right:solid #E8E0DC 1.0pt;mso-border-top-alt:solid #E8E0DC .5pt;
+  mso-border-left-alt:solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><b style='mso-bidi-font-weight:normal'><span
+  style='font-size:10.0pt;line-height:150%'>m3-memory</span></b><span
+  style='font-size:10.0pt;line-height:150%'><o:p></o:p></span></p>
+  </td>
+  <td style='border-top:none;border-left:none;border-bottom:solid #E8E0DC 1.0pt;
+  border-right:solid #E8E0DC 1.0pt;mso-border-top-alt:solid #E8E0DC .5pt;
+  mso-border-left-alt:solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span style='font-size:10.0pt;line-height:150%'>Shared
+  long-term, cross-agent memory<o:p></o:p></span></p>
+  </td>
+ </tr>
+ <tr style='mso-yfti-irow:2;mso-yfti-lastrow:yes'>
+  <td style='border:solid #E8E0DC 1.0pt;border-top:none;mso-border-top-alt:
+  solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span style='font-size:10.0pt;line-height:150%'>Local
+  models<o:p></o:p></span></p>
+  </td>
+  <td style='border-top:none;border-left:none;border-bottom:solid #E8E0DC 1.0pt;
+  border-right:solid #E8E0DC 1.0pt;mso-border-top-alt:solid #E8E0DC .5pt;
+  mso-border-left-alt:solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span style='font-size:10.0pt;line-height:150%'>Ollama /
+  LM Studio embed + small LLM<o:p></o:p></span></p>
+  </td>
+  <td style='border-top:none;border-left:none;border-bottom:solid #E8E0DC 1.0pt;
+  border-right:solid #E8E0DC 1.0pt;mso-border-top-alt:solid #E8E0DC .5pt;
+  mso-border-left-alt:solid #E8E0DC .5pt;mso-border-alt:solid #E8E0DC .5pt;
+  padding:4.5pt 6.0pt 0in 6.0pt'>
+  <p class=MsoNormal><span style='font-size:10.0pt;line-height:150%'>Embeddings,
+  optional auto-summarization<o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>All three agents talk to <b style='mso-bidi-font-weight:
+normal'>m3-memory</b> via MCP or HTTP/WebSocket; they never call each other
+directly. [^1][^2]</p>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_1_prerequisites_and_base_install">1. Prerequisites and base
+install</a></h2>
+
+<h3><a name="h_1_1_install_m3_memory">1.1 Install m3-memory</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>pip install m3-memory</span><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>m3 exposes an MCP server entrypoint <span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>mcp-memory</span></span>
+and is tuned for <span class=Code><span style='mso-hansi-font-family:Arial;
+color:black;mso-color-alt:windowtext'>qwen3-embedding:0.6b</span></span> by
+default. [^1][^2]</p>
+
+<p class=MsoNormal>Set up an embedding model (pick one):</p>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'># Option A: Ollama<br>
+  ollama pull qwen3-embedding:0.6b<br>
+  ollama serve<br>
+  <br>
+  # Option B: LM Studio / llama.cpp<br>
+  # Start an embedding model and note its OpenAI-compatible endpoint</span><span
+  style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>Key env vars (examples):</p>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>export EMBED_MODEL=qwen3-embedding:0.6b<br>
+  export EMBED_ENDPOINT=http://localhost:11434/v1<br>
+  # Optional small chat model for auto-summarization/consolidation<br>
+  export SMALL_CHAT_MODEL=qwen2.5:0.5b</span><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>See <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>ENVIRONMENT_VARIABLES.md</span></span>
+for full list. [^3][^1]</p>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_2_unified_memory_schema_tags_conventio">2. Unified memory schema
+(tags + conventions)</a></h2>
+
+<p class=MsoNormal>Use m3’s built-in relationships and metadata, but
+standardize <b style='mso-bidi-font-weight:normal'>tags</b> and <b
+style='mso-bidi-font-weight:normal'>fields</b> across agents. See <span
+class=Code><span style='mso-hansi-font-family:Arial;color:black;mso-color-alt:
+windowtext'>CONVENTIONS.md</span></span>, <span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>AGENTS.md</span></span>,
+and <span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>AGENT_INSTRUCTIONS.md</span></span> for the official
+patterns. [^3]</p>
+
+<h3><a name="h_2_1_core_fields">2.1 Core fields</a></h3>
+
+<p class=MsoNormal>When writing via <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>memory_write</span></span> / <span
+class=Code><span style='mso-hansi-font-family:Arial;color:black;mso-color-alt:
+windowtext'>memory_write_bulk</span></span>:</p>
+
+<p class=MsoListParagraphCxSpFirst style='text-indent:-.25in;mso-list:l1 level1 lfo1'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>user_id</b>:
+<span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>&quot;bhaba&quot;</span></span> (or per-device/agent
+if you want separation)</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo1'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>source</b>:
+<span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>&quot;claude&quot; | &quot;gemini&quot; |
+&quot;opencode&quot;</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo1'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>kind</b>:
+<span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>&quot;plan&quot; | &quot;design&quot; |
+&quot;decision&quot; | &quot;doc&quot; | &quot;bug&quot; | &quot;test&quot; |
+&quot;note&quot;</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo1'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>tags</b>
+(array):</p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo1'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>&quot;feature:&lt;slug&gt;&quot;</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo1'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>&quot;agent:&lt;claude|gemini|opencode&gt;&quot;</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo1'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>&quot;status:&lt;draft|final&gt;&quot;</span></span></p>
+
+<p class=MsoListParagraphCxSpLast style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo1'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>&quot;needs:review&quot;</span></span>
+/ <span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>&quot;needs:gemini-review&quot;</span></span> / <span
+class=Code><span style='mso-hansi-font-family:Arial;color:black;mso-color-alt:
+windowtext'>&quot;needs:doc&quot;</span></span></p>
+
+<h3><a name="h_2_2_relationship_types">2.2 Relationship types</a></h3>
+
+<p class=MsoNormal>Use m3’s graph relationships (see <span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>CORE_FEATURES.md</span></span>
+/ <span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>TECHNICAL_DETAILS.md</span></span>): [^3][^2]</p>
+
+<p class=MsoListParagraphCxSpFirst style='text-indent:-.25in;mso-list:l1 level1 lfo2'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>supersedes</span></span> - newer
+fact replaces older</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo2'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>supports</span></span> - evidence /
+examples</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo2'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>contradicts</span></span> -
+explicit conflict</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo2'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>follows</span></span> / <span
+class=Code><span style='mso-hansi-font-family:Arial;color:black;mso-color-alt:
+windowtext'>precedes</span></span> - temporal sequence</p>
+
+<p class=MsoListParagraphCxSpLast style='text-indent:-.25in;mso-list:l1 level1 lfo2'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>relates_to</span></span> - loose
+association</p>
+
+<p class=MsoNormal>Agents should <b style='mso-bidi-font-weight:normal'>prefer</b>:</p>
+
+<p class=MsoListParagraphCxSpFirst style='text-indent:-.25in;mso-list:l1 level1 lfo3'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>supersedes</span></span> for
+updated decisions</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo3'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>supports</span></span> for
+tests/docs backing a decision</p>
+
+<p class=MsoListParagraphCxSpLast style='text-indent:-.25in;mso-list:l1 level1 lfo3'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>relates_to</span></span> for
+cross-feature links</p>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_3_claude_code_m3_memory">3. Claude Code + m3-memory</a></h2>
+
+<p class=MsoNormal>m3 already ships an MCP config example and a Claude-specific
+guide (<span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>CLAUDE.md</span></span>, <span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>mcp.json.example</span></span>,
+<span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>mcp-server.json</span></span>). [^3][^2]</p>
+
+<h3><a name="h_3_1_claude_mcp_config">3.1 Claude MCP config</a></h3>
+
+<p class=MsoNormal>In your Claude MCP config (location depends on platform;
+follow <span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>CLAUDE.md</span></span>):</p>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>{<br>
+  <span style='mso-spacerun:yes'>  </span>&quot;mcpServers&quot;: {<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;memory&quot;: {<br>
+  <span style='mso-spacerun:yes'>      </span>&quot;command&quot;:
+  &quot;mcp-memory&quot;,<br>
+  <span style='mso-spacerun:yes'>      </span>&quot;env&quot;: {<br>
+  <span style='mso-spacerun:yes'>        </span>&quot;EMBED_MODEL&quot;:
+  &quot;qwen3-embedding:0.6b&quot;,<br>
+  <span style='mso-spacerun:yes'>        </span>&quot;EMBED_ENDPOINT&quot;:
+  &quot;http://localhost:11434/v1&quot;<br>
+  <span style='mso-spacerun:yes'>      </span>}<br>
+  <span style='mso-spacerun:yes'>    </span>}<br>
+  <span style='mso-spacerun:yes'>  </span>}<br>
+  }</span><span style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:
+  Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>Restart Claude Desktop / Claude Code; run <span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>/mcp</span></span>
+(or equivalent) to verify <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>memory_*</span></span> tools are
+listed.</p>
+
+<h3><a name="h_3_2_claude_system_prompt_main_agent">3.2 Claude system prompt
+(main agent)</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>You are the primary orchestrator for my local development
+  environment.<br>
+  <br>
+  You have access to an MCP server called &quot;memory&quot; (m3-memory), which
+  provides over 60 tools<br>
+  for persistent, local, cross-session memory, including hybrid search,
+  knowledge graph,<br>
+  GDPR tools, and chat-log capture.<br>
+  <br>
+  Rules:<br>
+  - Before planning work, call `memory_suggest` or `memory_search` with
+  relevant tags<br>
+  <span style='mso-spacerun:yes'>  </span>(repo name, feature slug, agent name)
+  to retrieve prior context.<br>
+  - When you make decisions, finish a feature, or debug a tricky issue, call
+  `memory_write`<br>
+  <span style='mso-spacerun:yes'>  </span>(or `memory_write_bulk`) to store:<br>
+  <span style='mso-spacerun:yes'>  </span>- summary of the situation<br>
+  <span style='mso-spacerun:yes'>  </span>- key decisions and rationale<br>
+  <span style='mso-spacerun:yes'>  </span>- important commands, configs, and
+  file paths<br>
+  <span style='mso-spacerun:yes'>  </span>- tags: feature:&lt;slug&gt;,
+  agent:claude, kind:&lt;plan|decision|bug|test&gt;, status:final<br>
+  - When facts change, write a new memory and let m3-memory handle
+  contradictions and<br>
+  <span style='mso-spacerun:yes'>  </span>supersedes relationships
+  automatically.<br>
+  - Use `memory_graph` to explore related memories when you suspect prior work
+  exists.<br>
+  - Treat m3-memory as the shared brain across Claude, Gemini CLI, and
+  OpenCode.<br>
+  <span style='mso-spacerun:yes'>  </span>Do not assume you are the only agent
+  writing to it.<br>
+  <br>
+  When you think another agent (Gemini CLI or OpenCode) should contribute,
+  write a memory<br>
+  tagged `needs:gemini-review` or `needs:doc` with a concise brief.</span><span
+  style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<h3><a name="h_3_3_claude_sub_agents">3.3 Claude sub-agents</a></h3>
+
+<p class=MsoNormal>You can define sub-agents in Claude Code (or via <span
+class=Code><span style='mso-hansi-font-family:Arial;color:black;mso-color-alt:
+windowtext'>CLAUDE.md</span></span> patterns) that specialize:</p>
+
+<h3><a name="planner_agent_prompt"><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>planner-agent</span></span> prompt</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>You are planner-agent.<br>
+  <br>
+  Goal:<br>
+  - Turn high-level user goals into structured plans.<br>
+  - Use m3-memory to reuse prior work and avoid re-solving solved problems.<br>
+  <br>
+  Behavior:<br>
+  - Always call `memory_suggest` or `memory_search` before planning.<br>
+  - Emit a structured plan (YAML or JSON) and then call `memory_write` to store
+  it<br>
+  <span style='mso-spacerun:yes'>  </span>with tags: feature:&lt;slug&gt;,
+  kind:plan, agent:claude, status:draft.</span><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<h3><a name="review_agent_prompt"><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>review-agent</span></span> prompt</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>You are review-agent.<br>
+  <br>
+  Goal:<br>
+  - Review code changes and designs against prior decisions and patterns.<br>
+  <br>
+  Behavior:<br>
+  - Use `memory_search` and `memory_graph` to find related decisions, bugs, and
+  tests.<br>
+  - Highlight regressions, inconsistencies, or violations of prior decisions.<br>
+  - Write a review summary via `memory_write` with kind:decision,
+  tags:status:final.</span><span style='font-size:10.0pt;font-family:Consolas;
+  mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_4_gemini_cli_m3_memory">4. Gemini CLI + m3-memory</a></h2>
+
+<p class=MsoNormal>m3 has a dedicated <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>GEMINI.md</span></span> and <span
+class=Code><span style='mso-hansi-font-family:Arial;color:black;mso-color-alt:
+windowtext'>MULTI_AGENT.md</span></span> describing Gemini CLI integration and
+multi-agent orchestration. [^3][^4][^5]</p>
+
+<h3><a name="h_4_1_enable_mcp_server_in_gemini_cli">4.1 Enable MCP server in
+Gemini CLI</a></h3>
+
+<p class=MsoNormal>In Gemini CLI config (see “MCP servers” section in docs):
+[^6][^4]</p>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>{<br>
+  <span style='mso-spacerun:yes'>  </span>&quot;mcpServers&quot;: {<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;memory&quot;: {<br>
+  <span style='mso-spacerun:yes'>      </span>&quot;command&quot;:
+  &quot;mcp-memory&quot;,<br>
+  <span style='mso-spacerun:yes'>      </span>&quot;env&quot;: {<br>
+  <span style='mso-spacerun:yes'>        </span>&quot;EMBED_MODEL&quot;:
+  &quot;qwen3-embedding:0.6b&quot;,<br>
+  <span style='mso-spacerun:yes'>        </span>&quot;EMBED_ENDPOINT&quot;:
+  &quot;http://localhost:11434/v1&quot;<br>
+  <span style='mso-spacerun:yes'>      </span>}<br>
+  <span style='mso-spacerun:yes'>    </span>}<br>
+  <span style='mso-spacerun:yes'>  </span>}<br>
+  }</span><span style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:
+  Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>From Gemini CLI, verify:</p>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>/tools<br>
+  /tools desc</span><span style='font-size:10.0pt;font-family:Consolas;
+  mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>You should see <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>memory_*</span></span> tools listed
+under MCP.</p>
+
+<h3><a name="h_4_2_gemini_cli_design_agent_prompt">4.2 Gemini CLI
+“design-agent” prompt</a></h3>
+
+<p class=MsoNormal>Create a Gemini CLI skill / profile (or just use this as a
+starting prompt):</p>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>You are design-agent, a specialist that reads and writes to
+  m3-memory.<br>
+  <br>
+  - Before proposing designs, call `list_mcp_resources` and `read_mcp_resource`
+  if available,<br>
+  <span style='mso-spacerun:yes'>  </span>then `memory_suggest` or
+  `memory_search` to load prior plans and decisions.<br>
+  - Focus on:<br>
+  <span style='mso-spacerun:yes'>  </span>- architecture options<br>
+  <span style='mso-spacerun:yes'>  </span>- tradeoffs<br>
+  <span style='mso-spacerun:yes'>  </span>- migration paths<br>
+  - When you produce a design, call `memory_write` with:<br>
+  <span style='mso-spacerun:yes'>  </span>- kind: &quot;design&quot;<br>
+  <span style='mso-spacerun:yes'>  </span>- tags:
+  [&quot;feature:&lt;slug&gt;&quot;, &quot;agent:gemini&quot;,
+  &quot;status:draft&quot;]<br>
+  - If you see memories tagged `needs:gemini-review`, prioritize those.</span><span
+  style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_5_opencode_chatgpt_m3_memory">5. OpenCode (ChatGPT) + m3-memory</a></h2>
+
+<p class=MsoNormal>OpenCode supports custom tools and MCP servers; docs
+explicitly mention MCP integration. [^7][^8]</p>
+
+<h3><a name="h_5_1_add_m3_memory_as_an_mcp_server">5.1 Add m3-memory as an MCP
+server</a></h3>
+
+<p class=MsoNormal>In <span class=Code><span style='mso-hansi-font-family:Arial;
+color:black;mso-color-alt:windowtext'>opencode.json</span></span>:</p>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>{<br>
+  <span style='mso-spacerun:yes'>  </span>&quot;$schema&quot;:
+  &quot;https://opencode.ai/config.json&quot;,<br>
+  <span style='mso-spacerun:yes'>  </span>&quot;mcpServers&quot;: {<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;memory&quot;: {<br>
+  <span style='mso-spacerun:yes'>      </span>&quot;command&quot;:
+  &quot;mcp-memory&quot;,<br>
+  <span style='mso-spacerun:yes'>      </span>&quot;env&quot;: {<br>
+  <span style='mso-spacerun:yes'>        </span>&quot;EMBED_MODEL&quot;:
+  &quot;qwen3-embedding:0.6b&quot;,<br>
+  <span style='mso-spacerun:yes'>        </span>&quot;EMBED_ENDPOINT&quot;:
+  &quot;http://localhost:11434/v1&quot;<br>
+  <span style='mso-spacerun:yes'>      </span>}<br>
+  <span style='mso-spacerun:yes'>    </span>}<br>
+  <span style='mso-spacerun:yes'>  </span>},<br>
+  <span style='mso-spacerun:yes'>  </span>&quot;permission&quot;: {<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;memory_*&quot;:
+  &quot;allow&quot;,<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;edit&quot;:
+  &quot;allow&quot;,<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;bash&quot;: &quot;ask&quot;,<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;read&quot;:
+  &quot;allow&quot;,<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;grep&quot;:
+  &quot;allow&quot;,<br>
+  <span style='mso-spacerun:yes'>    </span>&quot;glob&quot;: &quot;allow&quot;<br>
+  <span style='mso-spacerun:yes'>  </span>}<br>
+  }</span><span style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:
+  Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>Restart OpenCode; use its <span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>/tools</span></span>
+or equivalent to confirm <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>memory_*</span></span> tools are
+available.</p>
+
+<h3><a name="h_5_2_opencode_doc_agent_prompt">5.2 OpenCode “doc-agent” prompt</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>You are doc-agent, running inside OpenCode with access to
+  m3-memory.<br>
+  <br>
+  - Your job is to turn code and decisions into clear documentation.<br>
+  - Use OpenCode tools (read, glob, grep) to inspect the repo.<br>
+  - Use `memory_search` to find:<br>
+  <span style='mso-spacerun:yes'>  </span>- plans<br>
+  <span style='mso-spacerun:yes'>  </span>- designs<br>
+  <span style='mso-spacerun:yes'>  </span>- decisions<br>
+  <span style='mso-spacerun:yes'>  </span>- bugs and fixes<br>
+  - Generate:<br>
+  <span style='mso-spacerun:yes'>  </span>- README sections<br>
+  <span style='mso-spacerun:yes'>  </span>- ADR-style decision records<br>
+  <span style='mso-spacerun:yes'>  </span>- inline docstrings and comments<br>
+  - After writing docs, call `memory_write` with:<br>
+  <span style='mso-spacerun:yes'>  </span>- kind: &quot;doc&quot;<br>
+  <span style='mso-spacerun:yes'>  </span>- tags:
+  [&quot;feature:&lt;slug&gt;&quot;, &quot;agent:opencode&quot;,
+  &quot;status:final&quot;]</span><span style='font-size:10.0pt;font-family:
+  Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_6_chat_log_subsystem_auto_install_self">6. Chat-log subsystem
+auto-install (self-install prompts)</a></h2>
+
+<p class=MsoNormal>m3’s PyPI page explicitly advertises a <b style='mso-bidi-font-weight:
+normal'>“one-line command”</b>: tell your agent to <i style='mso-bidi-font-style:
+normal'>install the chat log subsystem</i> and it will auto-wire hooks using <span
+class=Code><span style='mso-hansi-font-family:Arial;color:black;mso-color-alt:
+windowtext'>install_os.py</span></span> and the repo’s orchestration scripts.
+[^1][^3]</p>
+
+<h3><a name="h_6_1_prompt_for_claude_code">6.1 Prompt for Claude Code</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>Install the m3-memory chat log sub-system for this environment.<br>
+  <br>
+  Steps (you should perform them yourself, using MCP and local tools):<br>
+  <br>
+  1. Detect whether m3-memory is already installed (via `pip show m3-memory` or
+  similar).<br>
+  <span style='mso-spacerun:yes'>   </span>- If not installed, run the
+  appropriate command to install it.<br>
+  2. Ensure the `mcp-memory` entrypoint is available.<br>
+  3. Update your MCP configuration to include the &quot;memory&quot; server
+  using the recommended<br>
+  <span style='mso-spacerun:yes'>   </span>settings from m3-memory's
+  `mcp.json.example` and `CLAUDE.md`.<br>
+  4. Enable chat-log capture:<br>
+  <span style='mso-spacerun:yes'>   </span>- Use the scripts and instructions
+  in the m3-memory repo (e.g. `install_os.py`,<br>
+  <span style='mso-spacerun:yes'>     </span>`AGENT_INSTRUCTIONS.md`,
+  `MULTI_AGENT.md`) to:<br>
+  <span style='mso-spacerun:yes'>     </span>- register a chat-log resource<br>
+  <span style='mso-spacerun:yes'>     </span>- configure pre/post hooks if
+  supported<br>
+  <span style='mso-spacerun:yes'>     </span>- ensure each turn is written to
+  m3-memory before compaction<br>
+  5. Confirm:<br>
+  <span style='mso-spacerun:yes'>   </span>- Call a `memory_*` tool to verify
+  connectivity.<br>
+  <span style='mso-spacerun:yes'>   </span>- Write a test memory and retrieve
+  it.<br>
+  <br>
+  Explain what you did and where you wrote config files.</span><span
+  style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<h3><a name="h_6_2_prompt_for_gemini_cli">6.2 Prompt for Gemini CLI</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>Install and enable the m3-memory chat log subsystem for this
+  Gemini CLI environment.<br>
+  <br>
+  You should:<br>
+  - Ensure `m3-memory` is installed and `mcp-memory` is available.<br>
+  - Add the &quot;memory&quot; MCP server to your Gemini CLI config using the
+  guidance from<br>
+  <span style='mso-spacerun:yes'>  </span>m3-memory's `GEMINI.md` and
+  `mcp.json.example`.<br>
+  - Configure Gemini CLI so that:<br>
+  <span style='mso-spacerun:yes'>  </span>- each conversation turn is written
+  to m3-memory (using the recommended tools<br>
+  <span style='mso-spacerun:yes'>    </span>and hooks described in m3-memory's
+  multi-agent and chat-log docs),<br>
+  <span style='mso-spacerun:yes'>  </span>- chat logs are captured before any
+  summarization or compaction.<br>
+  - Verify by:<br>
+  <span style='mso-spacerun:yes'>  </span>- writing a test conversation,<br>
+  <span style='mso-spacerun:yes'>  </span>- calling `memory_suggest` or
+  `conversation_search` to confirm the log is stored.<br>
+  <br>
+  Describe the changes you made and how to disable them if needed.</span><span
+  style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<h3><a name="h_6_3_prompt_for_opencode">6.3 Prompt for OpenCode</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>Install and enable the m3-memory chat log subsystem for this
+  OpenCode project.<br>
+  <br>
+  You should:<br>
+  - Confirm `m3-memory` is installed and `mcp-memory` is available.<br>
+  - Add the &quot;memory&quot; MCP server to `opencode.json` with appropriate
+  env vars.<br>
+  - Configure a pattern where:<br>
+  <span style='mso-spacerun:yes'>  </span>- each significant interaction (task
+  start, plan, major edit, final summary)<br>
+  <span style='mso-spacerun:yes'>    </span>is written to m3-memory using
+  `memory_write` or `memory_write_bulk`,<br>
+  <span style='mso-spacerun:yes'>  </span>- logs are tagged with agent:opencode
+  and include file paths and commands used.<br>
+  - Follow the conventions and examples from m3-memory's `AGENTS.md`,<br>
+  <span style='mso-spacerun:yes'>  </span>`AGENT_INSTRUCTIONS.md`, and
+  `MULTI_AGENT.md`.<br>
+  <br>
+  After setup, run a small test session and confirm the memories exist via a<br>
+  `memory_search` call.</span><span style='font-size:10.0pt;font-family:Consolas;
+  mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_7_multi_agent_coordination_patterns_cl">7. Multi-agent
+coordination patterns (Claude, Gemini, OpenCode)</a></h2>
+
+<p class=MsoNormal>Use <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>MULTI_AGENT.md</span></span> as the
+conceptual backbone; it already describes multi-agent orchestration and
+handoffs using m3’s tools (agent registry, notifications, tasks, chat-log
+capture). [^3][^1]</p>
+
+<h3><a name="h_7_1_tagging_and_routing">7.1 Tagging and routing</a></h3>
+
+<p class=MsoListParagraphCxSpFirst style='text-indent:-.25in;mso-list:l1 level1 lfo4'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]>Claude:</p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo4'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>agent:claude</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo4'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>kind:plan|decision|bug|test</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo4'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]>Gemini:</p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo4'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>agent:gemini</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo4'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>kind:design|exploration</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo4'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]>OpenCode:</p>
+
+<p class=MsoListParagraphCxSpMiddle style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo4'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>agent:opencode</span></span></p>
+
+<p class=MsoListParagraphCxSpLast style='margin-left:.5in;mso-add-space:auto;
+text-indent:-.25in;mso-list:l1 level2 lfo4'><![if !supportLists]><span
+style='font-family:"Courier New";mso-fareast-font-family:"Courier New"'><span
+style='mso-list:Ignore'>o<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>kind:doc|explanation</span></span></p>
+
+<p class=MsoNormal>Use <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>needs:*</span></span> tags to
+signal handoffs:</p>
+
+<p class=MsoListParagraphCxSpFirst style='text-indent:-.25in;mso-list:l1 level1 lfo5'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>needs:gemini-review</span></span></p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l1 level1 lfo5'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>needs:doc</span></span></p>
+
+<p class=MsoListParagraphCxSpLast style='text-indent:-.25in;mso-list:l1 level1 lfo5'><![if !supportLists]><span
+style='font-family:Symbol;mso-fareast-font-family:Symbol;mso-bidi-font-family:
+Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>needs:refactor</span></span></p>
+
+<h3><a name="h_7_2_example_handoff_prompt_for_claude">7.2 Example “handoff”
+prompt for Claude</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>When you believe another agent should contribute:<br>
+  <br>
+  1. Write a memory via `memory_write` with:<br>
+  <span style='mso-spacerun:yes'>   </span>- a concise brief (3-7 sentences),<br>
+  <span style='mso-spacerun:yes'>   </span>- tags:
+  [&quot;feature:&lt;slug&gt;&quot;, &quot;agent:claude&quot;,
+  &quot;needs:gemini-review&quot;].<br>
+  2. Mention in your reply: &quot;I have created a memory for Gemini CLI to
+  review.&quot;<br>
+  <br>
+  Do not attempt to contact Gemini directly; rely on m3-memory as the shared
+  channel.</span><span style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:
+  Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<h3><a name="h_7_3_example_pickup_prompt_for_gemini">7.3 Example “pickup”
+prompt for Gemini</a></h3>
+
+<table class=CodeBlock border=0 cellspacing=0 cellpadding=0 width="100%"
+ style='width:100.0%;margin-left:7.5pt;border-collapse:collapse;mso-yfti-tbllook:
+ 1184;mso-padding-alt:0in 0in 0in 0in'>
+ <tr style='mso-yfti-irow:0;mso-yfti-firstrow:yes;mso-yfti-lastrow:yes'>
+  <td valign=top style='background:#E1E2E4;padding:3.0pt 7.5pt 3.0pt 7.5pt'>
+  <p class=MsoNormal style='line-height:normal'><span style='font-size:10.0pt;
+  font-family:Consolas;mso-hansi-font-family:Arial;color:black;mso-color-alt:
+  windowtext'>At the start of a session, search m3-memory for any memories
+  tagged `needs:gemini-review`<br>
+  or `agent:claude` with recent timestamps.<br>
+  <br>
+  For each such memory:<br>
+  - Read the brief.<br>
+  - Propose designs or alternatives.<br>
+  - Write your response back via `memory_write` with tags:<br>
+  <span style='mso-spacerun:yes'>  </span>- [&quot;feature:&lt;slug&gt;&quot;,
+  &quot;agent:gemini&quot;, &quot;kind:design&quot;, &quot;status:draft&quot;].</span><span
+  style='font-size:10.0pt;font-family:Consolas;mso-hansi-font-family:Arial'><o:p></o:p></span></p>
+  </td>
+ </tr>
+</table>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h2><a name="h_8_putting_it_all_together_quick_how_to">8. Putting it all
+together: quick HOW-TO checklist</a></h2>
+
+<p class=MsoListParagraphCxSpFirst style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>1.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Install
+m3-memory</b> and an embedding model (Ollama / LM Studio). [^1]</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>2.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Wire
+m3-memory into Claude Code</b> via MCP (<span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>CLAUDE.md</span></span>,
+<span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>mcp.json.example</span></span>). [^3][^2]</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>3.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Wire
+m3-memory into Gemini CLI</b> via MCP servers config (<span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>GEMINI.md</span></span>,
+Gemini CLI MCP docs). [^4][^5][^3]</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>4.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Wire
+m3-memory into OpenCode</b> via <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>opencode.json</span></span> MCP
+config. [^7][^8][^3]</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>5.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Adopt the
+unified schema</b> (fields + tags + relationships).</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>6.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Install
+chat-log subsystem</b> by prompting each agent with the self-install prompts
+above and letting them follow m3’s <span class=Code><span style='mso-hansi-font-family:
+Arial;color:black;mso-color-alt:windowtext'>AGENT_INSTRUCTIONS.md</span></span>
+/ <span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>MULTI_AGENT.md</span></span>. [^3][^1]</p>
+
+<p class=MsoListParagraphCxSpMiddle style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>7.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Create
+sub-agents</b> (planner, review, design, doc) using the prompt templates.</p>
+
+<p class=MsoListParagraphCxSpLast style='text-indent:-.25in;mso-list:l2 level1 lfo6'><![if !supportLists]><span
+style='mso-fareast-font-family:Arial;mso-bidi-font-family:Arial'><span
+style='mso-list:Ignore'>8.<span style='font:7.0pt "Times New Roman"'>&nbsp;&nbsp;&nbsp;
+</span></span></span><![endif]><b style='mso-bidi-font-weight:normal'>Start
+working normally</b>-then periodically inspect m3’s DB or use <span class=Code><span
+style='mso-hansi-font-family:Arial;color:black;mso-color-alt:windowtext'>memory_suggest</span></span>
+/ <span class=Code><span style='mso-hansi-font-family:Arial;color:black;
+mso-color-alt:windowtext'>memory_graph</span></span> to see the shared brain in
+action.</p>
+
+<p class=MsoNormal>If you’d like, next step I can do a <b style='mso-bidi-font-weight:
+normal'>repo-specific pass</b>: design concrete tag schemes and memory write
+patterns tailored to one of your actual projects (e.g., home automation stack,
+Proxmox/HA infra, or your AI orchestration repo).</p>
+
+<div class=MsoNormal align=center style='text-align:center'>
+
+<hr size=0 width="100%" align=center>
+
+</div>
+
+<h1><a name="references_8">References (8)</a></h1>
+
+<p class=MsoNormal>[^1]: <i style='mso-bidi-font-style:normal'>m3-memory · PyPI</i>.
+<a href="https://pypi.org/project/m3-memory/">https://pypi.org/project/m3-memory/</a></p>
+
+<p class=MsoNormal>[^2]: <i style='mso-bidi-font-style:normal'>m3-memory/README.md
+at main · skynetcmd/m3-memory · GitHub</i>. <a
+href="https://github.com/skynetcmd/m3-memory/blob/main/README.md">https://github.com/skynetcmd/m3-memory/blob/main/README.md</a></p>
+
+<p class=MsoNormal>[^3]: <i style='mso-bidi-font-style:normal'>GitHub -
+skynetcmd/m3-memory: Local-first Agentic Memory Layer for MCP ...</i>. <a
+href="https://github.com/skynetcmd/m3-memory"><span lang=IT style='mso-ansi-language:
+IT'>https://github.com/skynetcmd/m3-memory</span></a><span lang=IT
+style='mso-ansi-language:IT'><o:p></o:p></span></p>
+
+<p class=MsoNormal><span lang=IT style='mso-ansi-language:IT'>[^4]: <i
+style='mso-bidi-font-style:normal'>Welcome to Gemini CLI documentation</i>. </span><a
+href="https://google-gemini.github.io/gemini-cli/docs/"><span lang=IT
+style='mso-ansi-language:IT'>https://google-gemini.github.io/gemini-cli/docs/</span></a><span
+lang=IT style='mso-ansi-language:IT'><o:p></o:p></span></p>
+
+<p class=MsoNormal><span lang=IT style='mso-ansi-language:IT'>[^5]: <i
+style='mso-bidi-font-style:normal'>Gemini CLI </i>. </span><a
+href="https://docs.cloud.google.com/gemini/docs/codeassist/gemini-cli">https://docs.cloud.google.com/gemini/docs/codeassist/gemini-cli</a></p>
+
+<p class=MsoNormal>[^6]: <i style='mso-bidi-font-style:normal'>Tools reference </i>.
+<a href="https://geminicli.com/docs/reference/tools/">https://geminicli.com/docs/reference/tools/</a></p>
+
+<p class=MsoNormal>[^7]: <i style='mso-bidi-font-style:normal'>Tools </i>. <a
+href="https://opencode.ai/docs/tools">https://opencode.ai/docs/tools</a></p>
+
+<p class=MsoNormal>[^8]: <i style='mso-bidi-font-style:normal'>Built-in Tools
+Reference - OpenCode Docs</i>. <a href="https://open-code.ai/en/docs/tools">https://open-code.ai/en/docs/tools</a></p>
+
+</div>
+
+</body>
+
+</html>
