@@ -82,6 +82,16 @@ Two optional post-retrieval expansions can be layered on top of the routed resul
 
 Both expansions reuse the standard embedding path for scoring, so they integrate cleanly with the existing retrieval stack — no new schema, no new infrastructure.
 
+### Entity-Relation Graph (optional, gated off)
+
+When enabled via `M3_ENABLE_ENTITY_GRAPH=true`, an optional post-write stage extracts typed entities and relationships from stored memory items using a configured small language model (SLM). Each entity becomes a row in a separate `entities` table, with mention links in `memory_item_entities` and typed relationships in `entity_relationships`. The extraction is **semaphore-gated** (default concurrency: 2), **non-blocking** (queue-on-miss), and **resolution-on-write** (3-tier cascade: exact → token-Jaccard fuzzy → embedding cosine; no LLM tiebreaker).
+
+Entity types are constrained to a fixed enum: `{person, place, organization, event, concept, object, date}`. Predicates are constrained to: `{works_at, located_in, before, after, same_as, contradicts, mentions, relates_to}`. New types or predicates require a migration.
+
+A new `entity_graph: bool` kwarg on `memory_search_routed` walks `entity_relationships` from query-mentioned entities, fuses linked memory items into the result. Variant rows are skipped by default; bench paths opt in via `entity_extractor_variant_allowlist`.
+
+See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md#entity-relation-graph) for all gates.
+
 ---
 
 ## ✏️ Write Pipeline
