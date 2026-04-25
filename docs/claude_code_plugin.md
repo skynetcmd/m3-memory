@@ -40,7 +40,7 @@ Run `/m3:help` to see the full list. Highlights:
 
 | Command | What |
 |---|---|
-| `/m3:doctor` | Health check — package, payload, chatlog DB, hook state |
+| `/m3:health` | Health check — package, payload, chatlog DB, hook state |
 | `/m3:status` | Chatlog row counts, queue, last capture |
 | `/m3:search <q>` | Hybrid memory search |
 | `/m3:save <content>` | Auto-classified memory_write with confirmation |
