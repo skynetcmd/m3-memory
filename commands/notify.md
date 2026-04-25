@@ -1,15 +1,15 @@
 ---
-name: m3:notify
+name: notify
 description: Poll the inbox for new notifications addressed to you.
 ---
 
-Call `m3-memory:notifications_poll`.
+Call `m3:notifications_poll`.
 
 Render each notification as:
 ```
 [<severity>] <created_at>  from <sender>:
   <message>
-  ack: m3-memory:notifications_ack with id=<id>
+  ack: m3:notifications_ack with id=<id>
 ```
 
 After listing, ask if the user wants to ack any (call `notifications_ack`) or ack-all (`notifications_ack_all`).
