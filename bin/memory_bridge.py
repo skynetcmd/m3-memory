@@ -3,8 +3,8 @@ import logging
 import os
 import sys
 
-from mcp.server.fastmcp import FastMCP
 from m3_sdk import active_database
+from mcp.server.fastmcp import FastMCP
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
