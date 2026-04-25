@@ -1,5 +1,9 @@
 # M3 Memory System Changelog - 2026
 
+## April 25, 2026
+
+- Added optional `fact_enriched` memory type and SLM-distillation pipeline. Off by default. See ARCHITECTURE.md and ENVIRONMENT_VARIABLES.md.
+
 ## April 21, 2026
 
 ### 🔧 Database Parameter Refactor
