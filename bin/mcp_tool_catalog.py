@@ -335,7 +335,7 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="memory_search_routed",
-        description="Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion.",
+        description="Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. Optional graph_depth and expand_sessions add post-retrieval neighbor expansion.",
         parameters={
             "type": "object",
             "properties": {
@@ -343,6 +343,9 @@ TOOLS: list[ToolSpec] = [
                 "k":               {"type": "integer", "default": 10, "description": "Top-K to return."},
                 "fact_variant":    {"type": "string", "default": "", "description": "Optional fact-tier variant to fuse with base. Empty = single-variant."},
                 "temporal_k_bump": {"type": "integer", "default": 5, "description": "Extra slots added when query is temporal."},
+                "graph_depth":     {"type": "integer", "default": 0, "description": "If > 0, traverse memory_relationships up to N hops from each top-K hit and re-fuse. Clamped to 3."},
+                "expand_sessions": {"type": "boolean", "default": False, "description": "If true, pull all turns sharing each top-K hit's conversation_id (capped at session_cap) and re-fuse."},
+                "session_cap":     {"type": "integer", "default": 12, "description": "Per-session turn cap when expand_sessions=true."},
                 "user_id":         {"type": "string", "default": ""},
                 "scope":           {"type": "string", "default": ""},
                 "type_filter":     {"type": "string", "default": ""},
