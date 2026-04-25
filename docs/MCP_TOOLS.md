@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 67 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 68 MCP tools available in the M3 Memory system.
 
 ## Universal `database` parameter
 
@@ -28,6 +28,7 @@ Example — point a single `memory_search` call at a benchmark DB:
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
 | `memory_get` | Memory Operations | Retrieves a full MemoryItem by UUID. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
+| `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. |
 | `memory_suggest` | Memory Operations | Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected. |
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
 | `memory_verify` | Memory Operations | Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with. |
@@ -158,6 +159,30 @@ Search across memory items using semantic similarity or keyword matching. Filter
 | `adaptive_k` | `boolean` | No | Auto-trim results at the score drop-off point, returning only high-relevance items. | `False` |
 | `variant` | `string` | No | Ingest-pipeline filter. '' = real user data only (default, equivalent to IS NULL). Pass a specific variant name (e.g. 'heuristic_c1c4') to scope to that bench ingest. | `` |
 | `include_bench_data` | `boolean` | No | Opt in to LOCOMO / LongMemEval bench rows. Default False hides any row with a variant tag. | `False` |
+
+### `memory_search_routed`
+
+Temporal-aware routed retrieval. Routes temporal queries (detected via regex) to verbatim search at k+temporal_k_bump with vector_kind_strategy='default'. Non-temporal queries are retrieved at k with optional two-tier fact-variant fusion (max-kind deduplication). This is an advanced feature for benchmark and research use; it is **not** included in the default allowlist and must be explicitly enabled.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `query` | `string` | Yes | Search query. | `-` |
+| `k` | `integer` | No | Top-K results to return. | `10` |
+| `fact_variant` | `string` | No | Optional fact-tier variant to fuse with base. Empty = single-variant retrieval. | `` |
+| `temporal_k_bump` | `integer` | No | Extra slots added when query is temporal (env var M3_ROUTER_TEMPORAL_K_BUMP overrides). | `5` |
+| `user_id` | `string` | No | Filter by data subject. | `` |
+| `scope` | `string` | No | Filter by isolation scope. | `` |
+| `type_filter` | `string` | No | Restrict to a memory type. | `` |
+| `agent_filter` | `string` | No | Restrict to an agent id. | `` |
+| `search_mode` | `string` | No | Retrieval mode (hybrid/semantic/keyword). | `hybrid` |
+| `variant` | `string` | No | Ingest-pipeline filter for base retrieval. | `` |
+| `as_of` | `string` | No | ISO-8601 time-travel cutoff. | `` |
+| `conversation_id` | `string` | No | Restrict to a conversation / team session. | `` |
+| `explain` | `boolean` | No | Include score explanation in results. | `False` |
 
 ### `memory_suggest`
 

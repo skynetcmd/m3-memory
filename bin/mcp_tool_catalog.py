@@ -334,6 +334,33 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_search_routed",
+        description="Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query":           {"type": "string", "description": "Search query."},
+                "k":               {"type": "integer", "default": 10, "description": "Top-K to return."},
+                "fact_variant":    {"type": "string", "default": "", "description": "Optional fact-tier variant to fuse with base. Empty = single-variant."},
+                "temporal_k_bump": {"type": "integer", "default": 5, "description": "Extra slots added when query is temporal."},
+                "user_id":         {"type": "string", "default": ""},
+                "scope":           {"type": "string", "default": ""},
+                "type_filter":     {"type": "string", "default": ""},
+                "agent_filter":    {"type": "string", "default": ""},
+                "search_mode":     {"type": "string", "default": "hybrid"},
+                "variant":         {"type": "string", "default": ""},
+                "as_of":           {"type": "string", "default": ""},
+                "conversation_id": {"type": "string", "default": ""},
+                "explain":         {"type": "boolean", "default": False},
+            },
+            "required": ["query"],
+        },
+        impl=memory_core.memory_search_routed_impl,
+        is_async=True,
+        default_allowed=False,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="memory_get",
         description="Retrieves a full MemoryItem by UUID.",
         parameters={
