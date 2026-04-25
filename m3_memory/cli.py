@@ -20,7 +20,6 @@ import os
 import sys
 from pathlib import Path  # noqa: F401 - used in _auto_install return-type comment
 
-
 # On Windows the default console code page is cp1252, which can't encode
 # characters outside that 8-bit range (em-dashes, arrows, box-drawing,
 # checkmarks, most non-Latin scripts). Any accidental non-ASCII in a
@@ -92,7 +91,7 @@ def _run_bridge() -> None:
     giving up. See `_auto_install` for interactive vs non-interactive
     semantics.
     """
-    from m3_memory.installer import find_bridge, config_file
+    from m3_memory.installer import config_file, find_bridge
 
     bridge = find_bridge()
     if bridge is None:
@@ -236,7 +235,6 @@ def _cmd_chatlog(args: argparse.Namespace) -> int:
             return 1
         import json as _json
         import runpy
-        import io
         bin_dir = str(script.parent)
         if bin_dir not in sys.path:
             sys.path.insert(0, bin_dir)
