@@ -36,6 +36,15 @@ curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh
 
 Installs on macOS or Linux with the single command above. Use this to [install on Windows](https://github.com/skynetcmd/m3-memory/blob/main/docs/install_windows.md). Use this link to [install manually](https://github.com/skynetcmd/m3-memory/blob/main/INSTALL.md#tldr--manual-path-per-os) and this to [examine the script](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh) and what it does.
 
+**Claude Code users** can also install as a plugin instead — gets you 15 `/m3:*` slash commands, a `memory-curator` subagent, and auto-wired hooks:
+
+```
+/plugin marketplace add skynetcmd/m3-memory
+/plugin install m3-memory@skynetcmd
+```
+
+[Plugin reference](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_code_plugin.md) · [Claude.ai (web/desktop) connector](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_ai_connector.md)
+
 ---
 
 Add to your MCP config:
