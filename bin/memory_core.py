@@ -2324,6 +2324,127 @@ async def memory_search_scored_impl(
     return ranked
 
 
+# Module-level temporal regex - same patterns memory 2d1d5812 documented;
+# 100% recall on LongMemEval temporal-reasoning, low FPR on others.
+_TEMPORAL_ROUTER_PATTERNS = (
+    r"\bwhen\b", r"\bhow long\b", r"\bwhat\s+(?:date|day|month|year|time)\b",
+    r"\bbefore\b", r"\bafter\b", r"\bsince\b", r"\buntil\b",
+    r"\b(?:days?|weeks?|months?|years?)\s+ago\b",
+    r"\bfirst\b", r"\blast\b", r"\brecent(?:ly)?\b",
+    r"\bearliest\b", r"\blatest\b",
+    r"\bwhich\s+\w+\s+first\b", r"\bin\s+what\s+order\b",
+    r"\b(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\b",
+    r"\bvalentine'?s?\s+day\b", r"\bchristmas\b", r"\bthanksgiving\b", r"\bnew\s+year'?s?\b",
+)
+_TEMPORAL_ROUTER_RE = re.compile("|".join(_TEMPORAL_ROUTER_PATTERNS), re.IGNORECASE)
+
+
+def is_temporal_query(query: str) -> bool:
+    """Returns True if the query uses temporal vocabulary (regex-based, no LLM)."""
+    if not query:
+        return False
+    return bool(_TEMPORAL_ROUTER_RE.search(query))
+
+
+async def memory_search_routed_impl(
+    query: str,
+    k: int = 10,
+    fact_variant: str = "",
+    temporal_k_bump: int = 5,
+    user_id: str = "",
+    scope: str = "",
+    type_filter: str = "",
+    agent_filter: str = "",
+    search_mode: str = "hybrid",
+    variant: str = "",
+    as_of: str = "",
+    conversation_id: str = "",
+    explain: bool = False,
+    extra_columns=None,
+    recency_bias: float = 0.0,
+    vector_weight: float = 0.7,
+    adaptive_k: bool = False,
+    elbow_sensitivity: float = 1.5,
+    adaptive_k_min: int = 0,
+    adaptive_k_max: int = 0,
+    smart_time_boost: float = 0.0,
+    smart_neighbor_sessions: int = 0,
+    intent_hint: str = "",
+    vector_kind_strategy: str = "default",
+) -> list:
+    """Temporal-aware routed retrieval.
+
+    Rule:
+      - if is_temporal_query(query): retrieve verbatim only at (k + temporal_k_bump)
+        with vector_kind_strategy='default'
+      - else: retrieve at k. If fact_variant is non-empty, fuse base-variant hits
+        with fact-variant hits client-side (max-fusion by score per memory_id).
+        If fact_variant is empty, this collapses to a standard memory_search_scored_impl
+        call at vector_kind_strategy='max' (so any pre-existing dual-embed rows
+        on the base variant get used).
+
+    Returns the same shape as memory_search_scored_impl: list[tuple[score, dict]].
+    """
+    # Read env-var override for the bump
+    bump = int(os.environ.get("M3_ROUTER_TEMPORAL_K_BUMP", str(temporal_k_bump)))
+
+    if is_temporal_query(query):
+        return await memory_search_scored_impl(
+            query, k=k + bump, user_id=user_id, scope=scope,
+            type_filter=type_filter, agent_filter=agent_filter,
+            search_mode=search_mode, variant=variant, as_of=as_of,
+            conversation_id=conversation_id, explain=explain,
+            extra_columns=extra_columns, recency_bias=recency_bias,
+            vector_weight=vector_weight, adaptive_k=adaptive_k,
+            elbow_sensitivity=elbow_sensitivity, adaptive_k_min=adaptive_k_min,
+            adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
+            smart_neighbor_sessions=smart_neighbor_sessions,
+            intent_hint=intent_hint, vector_kind_strategy="default",
+        )
+
+    # Non-temporal path
+    base_hits = await memory_search_scored_impl(
+        query, k=k * 2 if fact_variant else k,
+        user_id=user_id, scope=scope, type_filter=type_filter,
+        agent_filter=agent_filter, search_mode=search_mode,
+        variant=variant, as_of=as_of, conversation_id=conversation_id,
+        explain=explain, extra_columns=extra_columns, recency_bias=recency_bias,
+        vector_weight=vector_weight, adaptive_k=adaptive_k,
+        elbow_sensitivity=elbow_sensitivity, adaptive_k_min=adaptive_k_min,
+        adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
+        smart_neighbor_sessions=smart_neighbor_sessions,
+        intent_hint=intent_hint, vector_kind_strategy="max",
+    )
+
+    if not fact_variant:
+        return base_hits[:k]
+
+    # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
+    fact_hits = await memory_search_scored_impl(
+        query, k=k * 2, user_id=user_id, scope=scope,
+        type_filter=type_filter, agent_filter=agent_filter,
+        search_mode=search_mode, variant=fact_variant, as_of=as_of,
+        conversation_id=conversation_id, explain=explain,
+        extra_columns=extra_columns, recency_bias=recency_bias,
+        vector_weight=vector_weight, adaptive_k=adaptive_k,
+        elbow_sensitivity=elbow_sensitivity, adaptive_k_min=adaptive_k_min,
+        adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
+        smart_neighbor_sessions=smart_neighbor_sessions,
+        intent_hint=intent_hint, vector_kind_strategy="default",
+    )
+
+    # Both return list[tuple[score, dict]]. Dedupe by item id, keep highest score.
+    best: dict = {}  # memory_id -> (score, item)
+    for s, item in base_hits + fact_hits:
+        mid = item.get("id") if isinstance(item, dict) else None
+        if mid is None:
+            continue
+        if mid not in best or s > best[mid][0]:
+            best[mid] = (s, item)
+    fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
+    return fused
+
+
 async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, variant="", intent_hint="", _depth=0):
     ranked = await memory_search_scored_impl(
         query, k=k, type_filter=type_filter, agent_filter=agent_filter,
