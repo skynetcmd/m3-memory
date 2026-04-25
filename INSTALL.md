@@ -1,16 +1,88 @@
 # INSTALL
 
-Platform-specific setup notes for `m3-memory`. The quick path is the same on
-every OS:
+Platform-specific setup notes for `m3-memory`.
 
-```
-pip install m3-memory     # or pipx install m3-memory
-mcp-memory install-m3     # fetches the system payload, runs post-install
-mcp-memory doctor         # verify
+## TL;DR — quickest path per OS
+
+### Debian 12+ / Ubuntu 24.04+ / Fedora 38+ (PEP 668 distros)
+
+System packages first (one sudo command), then the Python install as your normal user:
+
+```bash
+# As an admin user, install system prerequisites:
+sudo apt update && sudo apt install -y pipx python3-venv git sqlite3 curl
+# (Fedora/RHEL: sudo dnf install -y pipx python3-virtualenv git sqlite curl)
+# (Arch:        sudo pacman -S --needed python-pipx git sqlite curl)
+
+# As your normal user (or the same user, no sudo from here on):
+pipx ensurepath
+exec $SHELL -l                        # pick up ~/.local/bin in PATH
+pipx install m3-memory
+mcp-memory install-m3 --capture-mode both
+mcp-memory doctor                     # verify
 ```
 
-If that works, stop here. The rest of this file is the stuff that differs
-between operating systems and the reasons behind it.
+### macOS
+
+```bash
+brew install pipx git sqlite          # python3 ships; pipx isolates the install
+pipx ensurepath
+exec $SHELL -l
+pipx install m3-memory
+mcp-memory install-m3 --capture-mode both
+mcp-memory doctor
+```
+
+### Windows 11
+
+```powershell
+winget install Python.Python.3.12 Git.Git SQLite.SQLite
+pip install m3-memory
+mcp-memory install-m3 --capture-mode both
+mcp-memory doctor
+```
+
+### Older Linux (no PEP 668)
+
+```bash
+sudo yum install -y python3-pip git sqlite       # or apt on pre-Bookworm
+pip install --user m3-memory
+mcp-memory install-m3 --capture-mode both
+mcp-memory doctor
+```
+
+If the TL;DR worked, stop here. The rest of this file explains why and what
+gets installed.
+
+## Prerequisites — what needs admin (sudo) once
+
+`m3-memory` itself ships as a single Python package via PyPI and never asks
+for sudo. But on a minimal Linux install you'll be missing the OS-level tools
+the installer relies on. Install these once with admin rights, then everything
+afterward runs as your normal user:
+
+| Tool | Why we need it | Install (Debian 13 example) |
+|---|---|---|
+| `python3` ≥ 3.11 | runtime | `sudo apt install python3` (usually preinstalled) |
+| `pipx` | recommended installer for PEP 668 distros (Debian 12+, Ubuntu 24.04+, Fedora 38+, Arch) | `sudo apt install pipx` |
+| `python3-venv` | dependency of pipx on Debian/Ubuntu | `sudo apt install python3-venv` |
+| `git` | `mcp-memory install-m3` clones the system payload from GitHub (falls back to tarball if missing, but git is faster) | `sudo apt install git` |
+| `sqlite3` CLI | for ad-hoc DB inspection — Python's `sqlite3` stdlib still works without it | `sudo apt install sqlite3` |
+| `curl` | not strictly required, but the troubleshooting docs assume it | `sudo apt install curl` |
+
+**One-liner for Debian 13 / Ubuntu 24.04+:**
+
+```bash
+sudo apt update && sudo apt install -y pipx python3-venv git sqlite3 curl
+```
+
+If you also want Gemini CLI or Claude Code as an MCP client, add Node.js:
+
+```bash
+sudo apt install -y nodejs npm
+```
+
+Everything below this point runs as your normal user. No more sudo needed.
 
 ## OS matrix
 

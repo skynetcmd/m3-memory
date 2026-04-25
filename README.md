@@ -30,16 +30,26 @@ Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agen
 
 ## 📦 Install
 
+**Debian 12+ / Ubuntu 24.04+ / Fedora 38+ / Arch (one-time admin step):**
+
 ```bash
-pipx install m3-memory        # Debian 12+, Ubuntu 24.04+, Fedora 38+, Arch, macOS (brew python)
-pip install m3-memory         # Windows, older Linux, any venv
+sudo apt update && sudo apt install -y pipx python3-venv git sqlite3 curl
+# Fedora: sudo dnf install -y pipx python3-virtualenv git sqlite curl
+# Arch:   sudo pacman -S --needed python-pipx git sqlite curl
 ```
 
-On PEP 668 distros a plain `pip install` fails with
-`externally-managed-environment` — use `pipx` there. `pipx install`
-isolates the CLI and adds it to `~/.local/bin` (run `pipx ensurepath`
-and open a new terminal if `mcp-memory` isn't on PATH after install).
-Full OS matrix including `sqlite3` CLI and Gemini setup: [INSTALL.md](INSTALL.md).
+**Then as your normal user (no sudo from here):**
+
+```bash
+pipx ensurepath && exec $SHELL -l   # add ~/.local/bin to PATH
+pipx install m3-memory
+mcp-memory install-m3 --capture-mode both
+mcp-memory doctor
+```
+
+**Windows / macOS / older Linux:** see [INSTALL.md](INSTALL.md) for the
+per-OS quickstart. Common gotchas (PEP 668 errors, `~/.local/bin` not on
+PATH, missing `sqlite3` CLI) are all covered there.
 
 On first `mcp-memory` run, the CLI auto-fetches the system
 payload into `~/.m3-memory/repo/` (pinned to the wheel version) — with

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.4.24.7"
+version = "2026.4.24.8"
 description = "Local-first persistent memory for MCP agents — 66 tools, 89% LongMemEval, hybrid search, GDPR, zero cloud"
 readme = "README.md"
 license = "Apache-2.0"
@@ -51,9 +51,9 @@ dependencies = [
     "mcp>=1.27.0,<2",
     "httpx[http2]>=0.28.1,<1",
     "requests>=2.33.1,<3",
-    "psycopg2-binary>=2.9.11,<3",
-    "chromadb-client>=1.5.7,<2",
-    "cryptography>=46.0.7,<47",
+    "psycopg2-binary>=2.9.12,<3",
+    "chromadb-client>=1.5.8,<2",
+    "cryptography>=46.0.7,<48",
     "keyring>=25.7.0,<26",
     "numpy>=2.4.4,<3",
     "python-dotenv>=1.2.2,<2",
@@ -66,12 +66,12 @@ postgres = ["psycopg[binary]>=3.2.0,<4"]
 dev = [
     "pytest>=9.0.3,<10",
     "pytest-asyncio>=1.3.0,<2",
-    "ruff>=0.15.10,<1",
-    "mypy>=1.20.1,<2",
+    "ruff>=0.15.12,<1",
+    "mypy>=1.20.2,<2",
     "types-requests>=2.33.0.20260408",
     "types-setuptools>=82.0.0.20260408",
     "twine>=6.2.0,<7",
-    "build>=1.4.2,<2",
+    "build>=1.4.4,<2",
 ]
 
 [project.scripts]
