@@ -321,6 +321,17 @@ def apply_claude_settings(config: ChatlogConfig) -> tuple[bool, str]:
 
     patch = _build_claude_settings_patch(config)
 
+    # Ensure ~/.npm-global/bin is on the non-login shell PATH. Claude Code is
+    # commonly installed via `npm install -g @anthropic-ai/claude-code`
+    # AFTER install-m3 has run — at which point install-m3's PATH fix was
+    # a no-op because the dir didn't exist yet. Same ordering issue as the
+    # Gemini-installed-after-m3 case; same fix.
+    try:
+        from m3_memory.installer import _fix_npm_global_path
+        _fix_npm_global_path()
+    except Exception:
+        pass  # best-effort; not blocking
+
     def _chatlog_entry_present(hook_entries: list) -> bool:
         return any(
             "chatlog" in json.dumps(e).lower() for e in (hook_entries or [])
