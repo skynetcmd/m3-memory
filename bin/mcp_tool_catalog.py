@@ -30,7 +30,7 @@ VALID_MEMORY_TYPES = frozenset({
     "note", "fact", "decision", "preference", "conversation", "message",
     "task", "code", "config", "observation", "plan", "summary", "snippet",
     "reference", "log", "home", "user_fact", "scratchpad", "auto",
-    "knowledge", "event_extraction", "chat_log",
+    "knowledge", "event_extraction", "fact_enriched", "chat_log",
 })
 
 # ── Dataclass ────────────────────────────────────────────────────────────────
@@ -702,6 +702,24 @@ TOOLS: list[ToolSpec] = [
         impl=memory_maintenance.gdpr_forget_impl,
         is_async=False,
         validators=(_gdpr_user_id_validator,),
+        default_allowed=False,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="enrich_pending",
+        description="Enrich pending memory items with SLM-distilled facts. Default dry_run=true reports count + ETA; pass dry_run=false to execute.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "dry_run":           {"type": "boolean", "default": True, "description": "If true, report count + ETA without executing; if false, execute enrichment."},
+                "limit":             {"type": "integer", "default": 0, "description": "Max items to enrich (0 = no limit)."},
+                "allowed_variants":  {"type": "array", "default": [], "description": "Variant names to include in enrichment (if empty, use default)."},
+            },
+            "required": [],
+        },
+        impl=memory_core.enrich_pending_impl,
+        is_async=True,
+        validators=(),
         default_allowed=False,
         inject_agent_id=False,
     ),
