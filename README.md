@@ -30,33 +30,14 @@ Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agen
 
 ## 📦 Install
 
-**Debian 12+ / Ubuntu 24.04+ / Fedora 38+ / Arch (one-time admin step):**
-
 ```bash
-sudo apt update && sudo apt install -y pipx python3-venv git sqlite3 curl
-# Fedora: sudo dnf install -y pipx python3-virtualenv git sqlite curl
-# Arch:   sudo pacman -S --needed python-pipx git sqlite curl
+curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
 ```
 
-**Then as your normal user (no sudo from here):**
+Detects your distro, installs prerequisites, sets up m3-memory. Works on Linux and macOS.
+Cautious? [Audit the script first.](INSTALL.md#audit-before-running)
 
-```bash
-pipx ensurepath && exec $SHELL -l   # add ~/.local/bin to PATH
-pipx install m3-memory
-mcp-memory install-m3 --capture-mode both
-mcp-memory doctor
-```
-
-**Windows / macOS / older Linux:** see [INSTALL.md](INSTALL.md) for the
-per-OS quickstart. Common gotchas (PEP 668 errors, `~/.local/bin` not on
-PATH, missing `sqlite3` CLI) are all covered there.
-
-On first `mcp-memory` run, the CLI auto-fetches the system
-payload into `~/.m3-memory/repo/` (pinned to the wheel version) — with
-an interactive confirmation prompt if you run it in a terminal, silently
-if an MCP client is launching the server. Set `M3_AUTO_INSTALL=0` to
-skip the auto-fetch and run `mcp-memory install-m3` explicitly, or
-`mcp-memory doctor` to verify paths.
+> [Install on Windows](docs/install_windows.md) · [Install on macOS](docs/install_macos.md) · [Manual install / what the script does](INSTALL.md)
 
 Add to your MCP config:
 

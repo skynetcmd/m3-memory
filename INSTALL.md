@@ -1,8 +1,32 @@
 # INSTALL
 
-Platform-specific setup notes for `m3-memory`.
+Manual install path for `m3-memory`. Most users should just run the
+[one-line installer from the README](README.md#-install) — this file
+exists for users who want to know what the script does, audit it before
+running it, or run the steps by hand.
 
-## TL;DR — quickest path per OS
+## Audit before running
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh -o install.sh
+less install.sh                         # read it
+bash install.sh                         # run it
+```
+
+The script is ~180 lines, no obfuscation, refuses to run as root, uses
+your normal user's `pipx`, and only invokes `sudo` for OS package
+installs (one `apt`/`dnf`/`brew` call). Re-runs are idempotent.
+
+Flags:
+
+```
+--capture-mode {both|stop|precompact|none}   default: both
+--endpoint URL                               pin LLM_ENDPOINTS_CSV
+--skip-prereqs                               assume pipx/git/sqlite3 already present
+--no-install-m3                              stop after pipx install (don't fetch payload)
+```
+
+## TL;DR — manual path per OS
 
 ### Debian 12+ / Ubuntu 24.04+ / Fedora 38+ (PEP 668 distros)
 
