@@ -32,8 +32,7 @@
     "capture_mode": {
       "type": "string",
       "title": "Chatlog capture mode",
-      "description": "Which Claude Code hooks fire chatlog ingest. 'both' = Stop + PreCompact (recommended).",
-      "enum": ["both", "stop", "precompact", "none"],
+      "description": "Which Claude Code hooks fire chatlog ingest. One of: both | stop | precompact | none. 'both' = Stop + PreCompact (recommended). Validated by mcp-memory at runtime; invalid values fall back to 'both'.",
       "default": "both"
     }
   },
