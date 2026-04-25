@@ -620,7 +620,7 @@ def uninstall_m3(yes: bool = False) -> None:
         return
 
     if not yes:
-        print(f"will remove:")
+        print("will remove:")
         print(f"  {repo_path}")
         print(f"  {config_file()}")
         resp = input("proceed? [y/N] ").strip().lower()
