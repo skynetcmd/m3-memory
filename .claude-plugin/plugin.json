@@ -1,5 +1,5 @@
 {
-  "name": "m3-memory",
+  "name": "m3",
   "version": "2026.4.24.11",
   "description": "Local-first persistent memory for Claude Code — 66 MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
   "keywords": [
@@ -38,7 +38,7 @@
   },
 
   "mcpServers": {
-    "m3-memory": {
+    "m3": {
       "command": "mcp-memory",
       "env": {
         "LLM_ENDPOINTS_CSV": "${user_config.endpoint}",

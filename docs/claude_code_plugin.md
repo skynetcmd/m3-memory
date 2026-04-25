@@ -8,7 +8,7 @@ hooks, and adds 15 `/m3:*` slash commands plus a `memory-curator` subagent.
 
 ```
 /plugin marketplace add skynetcmd/m3-memory
-/plugin install m3-memory@skynetcmd
+/plugin install m3@skynetcmd
 ```
 
 Or directly from the repo without going through the marketplace:

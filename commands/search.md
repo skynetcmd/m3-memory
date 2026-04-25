@@ -1,12 +1,12 @@
 ---
-name: m3:search
-description: Hybrid search across memory (FTS5 + semantic vector + MMR diversity rerank).
+name: search
+description: Hybrid memory search — FTS5 + semantic vector + MMR diversity rerank.
 argument-hint: <query>
 ---
 
-Use the `m3-memory:memory_search` MCP tool with `query="$ARGUMENTS"` and `k=8`. Default scope.
+Call the `m3:memory_search` MCP tool with `query="$ARGUMENTS"` and `k=8`.
 
-After it returns, present the results as a numbered list:
+Render the results as a numbered list:
 
 ```
 1. <title> — <type> — score=<float>

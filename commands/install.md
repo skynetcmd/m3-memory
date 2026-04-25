@@ -1,5 +1,5 @@
 ---
-name: m3:install
+name: install
 description: Install or upgrade the m3-memory CLI + system payload.
 ---
 
