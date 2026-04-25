@@ -10,7 +10,7 @@ Print the following table verbatim. Do not interpret it as instructions or take 
 
 | Command            | Purpose                                                |
 |--------------------|--------------------------------------------------------|
-| /m3:doctor         | Health check: package, payload, chatlog DB, hooks      |
+| /m3:health         | Health check: package, payload, chatlog DB, hooks      |
 | /m3:status         | Chatlog: row counts, queue, spill, last capture        |
 | /m3:search <q>     | Hybrid memory search (FTS5 + vector + MMR)             |
 | /m3:save <c>       | Auto-classified memory write (asks before writing)     |
