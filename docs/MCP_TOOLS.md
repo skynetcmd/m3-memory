@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 66 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 67 MCP tools available in the M3 Memory system.
 
 ## Universal `database` parameter
 
@@ -84,6 +84,7 @@ Example — point a single `memory_search` call at a benchmark DB:
 | `memory_dedup` | Lifecycle & Maintenance | Find and merge near-duplicate memory items. |
 | `memory_maintenance` | Lifecycle & Maintenance | Runs maintenance tasks on the memory store. |
 | `memory_set_retention` | Lifecycle & Maintenance | Set or update per-agent memory retention policy. Controls max memory count, TTL expiry, and auto-archival. |
+| `enrich_pending` | Lifecycle & Maintenance | Drain the fact-enrichment queue. Default `dry_run=true` reports count + ETA; pass `dry_run=false` to execute. Default-disallowed; opt-in via tools.allow. |
 | `gdpr_export` | Data Governance | Export all memories for a data subject (GDPR data portability). Returns JSON with all memory items for the given user_id. |
 | `gdpr_forget` | Data Governance | Right to be forgotten — hard-deletes ALL data for a user_id including memories, embeddings, relationships, and history. |
 | `memory_export` | Data Governance | Export memories as portable JSON. Filter by agent, type, or date. |
@@ -993,6 +994,20 @@ Set or update per-agent memory retention policy. Controls max memory count, TTL 
 | `max_memories` | `integer` | No | Max items to retain. | `1000` |
 | `ttl_days` | `integer` | No | Time-to-live in days (0 = no limit). | `0` |
 | `auto_archive` | `integer` | No | Auto-archive threshold. | `1` |
+
+### `enrich_pending`
+
+Drain the fact-enrichment queue using a configured SLM. Default `dry_run=true` reports the pending count, sample IDs, and an ETA based on a 2 sec/item conservative estimate; pass `dry_run=false` to execute. **`default_allowed=False`** — must be added to `tools.allow` before use. Items with non-NULL `variant` are skipped unless their variant appears in `allowed_variants`.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `dry_run` | `boolean` | No | When true, returns count + ETA + sample_ids without writing. | `True` |
+| `limit` | `integer` | No | Cap batch size; 0 = no limit. | `0` |
+| `allowed_variants` | `array` | No | Variant names to opt in. Empty = production-safe (skip all variant rows). | `[]` |
 
 ---
 

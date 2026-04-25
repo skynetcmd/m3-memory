@@ -158,3 +158,12 @@ not the vectors.
   no-enricher no-op).
 - `tests/test_vector_kind_strategy.py` covers the retrieval kwarg
   (signature, invalid-value, SQL filter presence, max-kind dedupe).
+
+## Related: fact_enriched memory type
+
+Dual-embed and `fact_enriched` are **complementary, not competing** mechanisms:
+
+- **Dual-embed** rewrites the `embed_text` of an existing row so a single memory carries two vectors (verbatim + enriched). Same row count; better recall on the *same* content.
+- **fact_enriched** (see [ARCHITECTURE.md](ARCHITECTURE.md#-write-pipeline)) emits *new* short-text rows distilled by an SLM, linked back to the source via a `references` edge. More rows; first-class fact retrieval and cross-row synthesis.
+
+Both can be enabled together. See `tests/test_fact_enriched.py` for the fact-tier coverage.
