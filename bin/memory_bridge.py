@@ -32,6 +32,8 @@ _pack               = memory_core._pack
 # Re-export catalog validation constants — tests and external callers import
 # VALID_MEMORY_TYPES from memory_bridge directly.
 VALID_MEMORY_TYPES = mcp_tool_catalog.VALID_MEMORY_TYPES
+VALID_ENTITY_TYPES = mcp_tool_catalog.VALID_ENTITY_TYPES
+VALID_ENTITY_PREDICATES = mcp_tool_catalog.VALID_ENTITY_PREDICATES
 MAX_CONTENT_SIZE   = mcp_tool_catalog.MAX_CONTENT_SIZE
 MAX_QUERY_LENGTH   = mcp_tool_catalog.MAX_QUERY_LENGTH
 MAX_K              = mcp_tool_catalog.MAX_K

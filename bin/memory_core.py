@@ -201,6 +201,24 @@ ENABLE_FACT_ENRICHED   = os.environ.get("M3_ENABLE_FACT_ENRICHED", "false").lowe
 FACT_ENRICH_CONCURRENCY = int(os.environ.get("M3_FACT_ENRICH_CONCURRENCY", "2"))
 FACT_ENRICH_MAX_ATTEMPTS = int(os.environ.get("M3_FACT_ENRICH_MAX_ATTEMPTS", "5"))
 
+# Entity-relation graph pipeline (Phase 4-5). Gated off by default.
+ENABLE_ENTITY_GRAPH          = os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() in ("1", "true", "yes")
+ENTITY_EXTRACT_CONCURRENCY   = int(os.environ.get("M3_ENTITY_EXTRACT_CONCURRENCY", "2"))
+ENTITY_EXTRACT_MAX_ATTEMPTS  = int(os.environ.get("M3_ENTITY_EXTRACT_MAX_ATTEMPTS", "5"))
+ENTITY_RESOLVE_FUZZY_MIN     = float(os.environ.get("M3_ENTITY_RESOLVE_FUZZY_MIN", "0.8"))
+ENTITY_RESOLVE_COSINE_MIN    = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MIN", "0.85"))
+
+# Entity/predicate enums — kept local to avoid circular import
+# (mcp_tool_catalog imports memory_core; memory_core must not import mcp_tool_catalog).
+# Wave 3 will re-export these from mcp_tool_catalog.py and memory_bridge.py.
+VALID_ENTITY_TYPES = frozenset({
+    "person", "place", "organization", "event", "concept", "object", "date",
+})
+VALID_ENTITY_PREDICATES = frozenset({
+    "works_at", "located_in", "before", "after",
+    "same_as", "contradicts", "mentions", "relates_to",
+})
+
 VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "grok", "manual", "system", "unknown", "legacy"}
 
 _FTS_OPERATORS = re.compile(r'\b(OR|AND|NOT|NEAR)\b|[*()\[\]{}]')
@@ -623,10 +641,12 @@ _init_lock = threading.RLock()
 _initialized = False
 _EMBED_SEM = asyncio.Semaphore(4)
 _FACT_ENRICH_SEM = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
+_ENTITY_EXTRACT_SEM = asyncio.Semaphore(ENTITY_EXTRACT_CONCURRENCY)
 _EMBED_DIM_VALIDATED = False
 
 _COST_COUNTERS = {"embed_calls": 0, "embed_tokens_est": 0, "search_calls": 0, "write_calls": 0}
 _PENDING_FACT_TASKS: set[asyncio.Task] = set()
+_PENDING_ENTITY_TASKS: set[asyncio.Task] = set()
 _CLASSIFY_CACHE = {}
 
 async def _auto_classify(content: str, title: str) -> str:
@@ -1155,6 +1175,9 @@ async def memory_write_bulk_impl(
     fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None,
     fact_enricher_concurrency: int = 2,
     fact_enricher_variant_allowlist: set[str] | None = None,
+    entity_extractor: "Callable[[str], Awaitable[dict]] | None" = None,
+    entity_extractor_concurrency: int = 2,
+    entity_extractor_variant_allowlist: "set[str] | None" = None,
 ) -> list[str]:
     """Bulk write that routes embeddings through `_embed_many`. Intended for
     benchmark / import paths where per-item contradiction detection would
@@ -1439,6 +1462,28 @@ async def memory_write_bulk_impl(
                 except Exception as e:
                     logger.debug(f"fact enrichment dispatch failed for {p['id']}: {e}")
 
+    # Phase 2.6: Entity extraction (Phase 4 on-write hook).
+    # Non-blocking per-row dispatch: tries semaphore, enqueues on miss.
+    # Mirrors Phase 2.5 fact enrichment pattern above.
+    # fact_enriched rows are NOT extracted to prevent recursion.
+    if entity_extractor is not None:
+        for p in prepared:
+            if p.get("type") == "fact_enriched":
+                continue
+            item_variant = p.get("variant")
+            with _db() as db:
+                try:
+                    await _try_extract_or_enqueue(
+                        p["id"],
+                        p.get("content") or "",
+                        entity_extractor,
+                        db,
+                        variant=item_variant,
+                        allowlist=entity_extractor_variant_allowlist,
+                    )
+                except Exception as e:
+                    logger.debug(f"entity extraction dispatch failed for {p['id']}: {e}")
+
     # Phase 3: Contradiction detection (if requested, with bounded concurrency).
     # Default is off in bulk (perf), must explicitly enable with check_contradictions=True.
     if check_contradictions is True:
@@ -1692,6 +1737,264 @@ async def _write_fact_rows(memory_id: str, facts: list[dict]) -> None:
                 _record_history(fact_id, "create", None, fact_text, "content", "fact_enricher", db=db)
         except Exception as e:
             logger.debug(f"Failed to write fact row for {memory_id}: {e}")
+
+
+# ── Entity-relation graph pipeline (Phase 4-5) ───────────────────────────────
+
+_TOKEN_PUNCT_RE = re.compile(r"[^\w\s]")
+
+def _token_jaccard(a: str, b: str) -> float:
+    """Token-set Jaccard similarity, lowercased, punctuation-stripped, whitespace-tokenized.
+
+    Strips ASCII punctuation before tokenization so that "Alex Johnson," tokenizes
+    the same way as "Alex Johnson" — important when entity strings come out of an
+    SLM extractor that occasionally emits trailing commas/periods.
+    """
+    ta = {t for t in _TOKEN_PUNCT_RE.sub(" ", a.lower()).split() if t}
+    tb = {t for t in _TOKEN_PUNCT_RE.sub(" ", b.lower()).split() if t}
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
+    """3-tier resolution (sync, tiers 1+2 only). Returns existing entity_id if matched, else None.
+
+    Tier 1: exact (canonical_name, entity_type) match.
+    Tier 2: fuzzy token-Jaccard >= ENTITY_RESOLVE_FUZZY_MIN within same entity_type.
+    Tier 3 (embedding cosine) is handled by the async variant _resolve_entity_async.
+    """
+    # Tier 1: exact match
+    row = db.execute(
+        "SELECT id FROM entities WHERE canonical_name = ? AND entity_type = ? LIMIT 1",
+        (canonical_name, entity_type),
+    ).fetchone()
+    if row:
+        return row["id"]
+
+    # Tier 2: fuzzy token-Jaccard within same entity_type
+    candidates = db.execute(
+        "SELECT id, canonical_name FROM entities WHERE entity_type = ?",
+        (entity_type,),
+    ).fetchall()
+    best_score, best_id = 0.0, None
+    for c in candidates:
+        s = _token_jaccard(canonical_name, c["canonical_name"])
+        if s > best_score:
+            best_score, best_id = s, c["id"]
+    if best_score >= ENTITY_RESOLVE_FUZZY_MIN and best_id is not None:
+        return best_id
+
+    return None  # Tiers 1+2 only in sync path
+
+
+async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> str | None:
+    """Full 3-tier resolution including embedding cosine. Use from async context."""
+    sync_id = _resolve_entity(canonical_name, entity_type, db)
+    if sync_id is not None:
+        return sync_id
+
+    # Tier 3: embedding cosine within same entity_type.
+    # TODO: pre-embed and cache canonical_name embeddings to avoid per-candidate
+    #       embed calls when the entity table is large.
+    # Cap candidates to 100 most-recently created to bound embed cost.
+    candidates = db.execute(
+        "SELECT id, canonical_name FROM entities WHERE entity_type = ? ORDER BY created_at DESC LIMIT 100",
+        (entity_type,),
+    ).fetchall()
+    if not candidates:
+        return None
+
+    qvec, _ = await _embed(canonical_name)
+    if qvec is None:
+        return None
+
+    best_score, best_id = 0.0, None
+    for c in candidates:
+        cvec, _ = await _embed(c["canonical_name"])
+        if cvec is None:
+            continue
+        s = _cosine(qvec, cvec)
+        if s > best_score:
+            best_score, best_id = s, c["id"]
+
+    if best_score >= ENTITY_RESOLVE_COSINE_MIN and best_id is not None:
+        return best_id
+    return None
+
+
+def _create_entity(canonical_name: str, entity_type: str, attributes: dict, db) -> str:
+    """INSERT new row into entities; return new uuid id."""
+    entity_id = str(uuid.uuid4())
+    attrs_json = json.dumps(attributes or {})
+    content_hash = hashlib.sha256(
+        f"{canonical_name}|{entity_type}|{attrs_json}".encode("utf-8")
+    ).hexdigest()
+    db.execute(
+        "INSERT INTO entities (id, canonical_name, entity_type, attributes_json, content_hash) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (entity_id, canonical_name, entity_type, attrs_json, content_hash),
+    )
+    return entity_id
+
+
+def _link_memory_to_entity(
+    memory_id: str,
+    entity_id: str,
+    mention_text: str,
+    mention_offset: int,
+    confidence: float,
+    db,
+) -> None:
+    """INSERT OR IGNORE into memory_item_entities."""
+    db.execute(
+        "INSERT OR IGNORE INTO memory_item_entities "
+        "(memory_id, entity_id, mention_text, mention_offset, confidence) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (memory_id, entity_id, mention_text, mention_offset, confidence),
+    )
+
+
+def _link_entity_relationship(
+    from_entity_id: str,
+    to_entity_id: str,
+    predicate: str,
+    confidence: float,
+    source_memory_id: str,
+    db,
+) -> None:
+    """INSERT into entity_relationships. Raises ValueError for unknown predicates."""
+    if predicate not in VALID_ENTITY_PREDICATES:
+        raise ValueError(
+            f"Invalid predicate '{predicate}'. "
+            f"Valid predicates: {', '.join(sorted(VALID_ENTITY_PREDICATES))}"
+        )
+    db.execute(
+        "INSERT INTO entity_relationships "
+        "(from_entity, to_entity, predicate, confidence, source_memory_id) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (from_entity_id, to_entity_id, predicate, confidence, source_memory_id),
+    )
+
+
+def _enqueue_entity_extraction(memory_id: str, db) -> None:
+    """INSERT OR IGNORE into entity_extraction_queue."""
+    try:
+        db.execute(
+            "INSERT OR IGNORE INTO entity_extraction_queue(memory_id) VALUES (?)",
+            (memory_id,),
+        )
+    except Exception as e:
+        logger.debug(f"Failed to enqueue entity extraction for {memory_id}: {e}")
+
+
+async def _run_entity_extractor(memory_id: str, content: str, entity_extractor) -> None:
+    """Background task. Calls extractor, parses result, resolves+writes entities and
+    relationships. Releases _ENTITY_EXTRACT_SEM in finally block."""
+    try:
+        result = await entity_extractor(content)
+        entities_raw = result.get("entities", []) if isinstance(result, dict) else []
+        relationships_raw = result.get("relationships", []) if isinstance(result, dict) else []
+
+        # Resolve/create entities and record IDs by canonical_name for relationship linking.
+        canonical_to_id: dict[str, str] = {}
+        with _db() as db:
+            for ent in entities_raw:
+                cname = (ent.get("canonical_name") or "").strip()
+                etype = (ent.get("entity_type") or "").strip()
+                if not cname or etype not in VALID_ENTITY_TYPES:
+                    continue
+                entity_id = await _resolve_entity_async(cname, etype, db)
+                if entity_id is None:
+                    try:
+                        entity_id = _create_entity(cname, etype, {}, db)
+                    except Exception as e:
+                        logger.debug(f"Entity create failed for '{cname}': {e}")
+                        continue
+                canonical_to_id[cname] = entity_id
+                mention_text = ent.get("mention_text") or cname
+                confidence = float(ent.get("confidence", 0.85))
+                try:
+                    _link_memory_to_entity(memory_id, entity_id, mention_text, 0, confidence, db)
+                except Exception as e:
+                    logger.debug(f"Entity link failed for {memory_id}->{entity_id}: {e}")
+
+            # Write relationships — both ends must have been resolved above.
+            for rel in relationships_raw:
+                from_cname = (rel.get("from_entity") or "").strip()
+                to_cname = (rel.get("to_entity") or "").strip()
+                predicate = (rel.get("predicate") or "").strip()
+                confidence = float(rel.get("confidence", 0.85))
+                from_id = canonical_to_id.get(from_cname)
+                to_id = canonical_to_id.get(to_cname)
+                if not from_id or not to_id or predicate not in VALID_ENTITY_PREDICATES:
+                    continue
+                try:
+                    _link_entity_relationship(from_id, to_id, predicate, confidence, memory_id, db)
+                except ValueError as e:
+                    logger.debug(f"Relationship link failed: {e}")
+                except Exception as e:
+                    logger.debug(f"Relationship link error: {e}")
+
+    except Exception as e:
+        # Record error and bump attempts in queue
+        try:
+            with _db() as db:
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO entity_extraction_queue
+                        (memory_id, attempts, last_error, last_attempt_at)
+                    VALUES (
+                        ?,
+                        COALESCE((SELECT attempts FROM entity_extraction_queue WHERE memory_id=?), 0) + 1,
+                        ?,
+                        strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                    )
+                    """,
+                    (memory_id, memory_id, str(e)[:500]),
+                )
+        except Exception as db_err:
+            logger.debug(f"Failed to record entity extraction error for {memory_id}: {db_err}")
+    finally:
+        _ENTITY_EXTRACT_SEM.release()
+
+
+async def _try_extract_or_enqueue(
+    memory_id: str,
+    content: str,
+    entity_extractor,
+    db,
+    variant: str | None = None,
+    allowlist: set[str] | None = None,
+) -> None:
+    """Non-blocking: try entity extraction under semaphore; on miss, enqueue.
+
+    Read ENABLE_ENTITY_GRAPH at call time so tests can monkeypatch.
+    Variant-skip rule: if variant is not None and (allowlist is None or variant not in
+    allowlist), return without doing anything — mirrors fact_enricher pattern.
+    """
+    if os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() not in ("1", "true", "yes"):
+        return
+    if entity_extractor is None:
+        return
+
+    # Skip variant rows unless explicitly allowed
+    if variant is not None and (allowlist is None or variant not in allowlist):
+        return
+
+    # Try non-blocking acquire with very short timeout
+    try:
+        async with asyncio.timeout(0.001):
+            await _ENTITY_EXTRACT_SEM.acquire()
+    except (asyncio.TimeoutError, Exception):
+        # Semaphore full or error — enqueue and return immediately
+        _enqueue_entity_extraction(memory_id, db)
+        return
+
+    # Acquired semaphore — spawn task and track it
+    task = asyncio.create_task(_run_entity_extractor(memory_id, content, entity_extractor))
+    _PENDING_ENTITY_TASKS.add(task)
+    task.add_done_callback(lambda t: _PENDING_ENTITY_TASKS.discard(t))
 
 
 async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
@@ -2338,6 +2641,18 @@ _TEMPORAL_ROUTER_PATTERNS = (
 )
 _TEMPORAL_ROUTER_RE = re.compile("|".join(_TEMPORAL_ROUTER_PATTERNS), re.IGNORECASE)
 
+# Module-level entity mention patterns for question-time parsing (Phase 6).
+# Regex-only, no SLM — same compilation style as _TEMPORAL_ROUTER_PATTERNS.
+_ENTITY_MENTION_PATTERNS = (
+    r'"[^"]+"',                            # double-quoted strings
+    r"'[^']+'",                            # single-quoted strings
+    r"\b(?:19|20)\d{2}\b",                # 4-digit years (1900–2099)
+    r"\b(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+\d{1,2}\b",   # Month Day
+    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*",   # Capitalized noun phrases
+)
+_ENTITY_MENTION_RE = re.compile("|".join(_ENTITY_MENTION_PATTERNS))
+
 
 def is_temporal_query(query: str) -> bool:
     """Returns True if the query uses temporal vocabulary (regex-based, no LLM)."""
@@ -2417,6 +2732,113 @@ def _session_neighbor_ids(seed_ids: list, session_cap: int = 12) -> dict:
     return out
 
 
+async def _entity_graph_neighbor_ids(
+    query: str, depth: int, max_neighbors: int, db
+) -> set:
+    """Parse query for entity mentions, traverse entity_relationships up to `depth`
+    hops, and return a set of memory_id values linked to the discovered entities.
+
+    Algorithm (Phase 6, regex-only — no SLM):
+      1. Extract candidate mentions from query via _ENTITY_MENTION_RE.
+      2. Lookup each candidate in `entities` table (exact then LIKE, cap 5/candidate).
+      3. BFS over `entity_relationships` up to min(depth, 3) hops,
+         capped at min(max_neighbors, 100) total entity nodes.
+      4. Fetch memory_ids from `memory_item_entities` for all discovered entities.
+
+    Returns set[str] of memory_ids. Returns empty set on any early-exit condition.
+    """
+    if not query or not query.strip():
+        return set()
+
+    # Clamp to safe limits (mirrors memory_graph_impl clamp for depth)
+    depth = min(int(depth), 3)
+    max_neighbors = min(int(max_neighbors), 100)
+
+    # Step 1 — extract candidate mention strings
+    candidates: list[str] = []
+    seen_cands: set[str] = set()
+    for m in _ENTITY_MENTION_RE.finditer(query):
+        text = m.group(0).strip("\"'")
+        if text and text not in seen_cands:
+            seen_cands.add(text)
+            candidates.append(text)
+
+    if not candidates:
+        return set()
+
+    # Step 2 — entity lookup: collect matched entity_ids
+    try:
+        # Quick check: is the entities table populated at all?
+        count_row = db.execute("SELECT COUNT(*) AS cnt FROM entities").fetchone()
+        if count_row["cnt"] == 0:
+            return set()
+    except Exception:  # noqa: BLE001
+        return set()
+
+    matched_entity_ids: set[str] = set()
+    for candidate in candidates:
+        try:
+            # Tier 1: exact canonical_name match
+            rows = db.execute(
+                "SELECT id FROM entities WHERE canonical_name = ? LIMIT 5",
+                (candidate,),
+            ).fetchall()
+            if not rows:
+                # Tier 2: case-insensitive LIKE match
+                rows = db.execute(
+                    "SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?) LIMIT 5",
+                    (f"%{candidate}%",),
+                ).fetchall()
+            for r in rows:
+                matched_entity_ids.add(r["id"])
+        except Exception:  # noqa: BLE001
+            continue
+
+    if not matched_entity_ids:
+        return set()
+
+    # Step 3 — BFS over entity_relationships up to `depth` hops
+    seen_entities: set[str] = set(matched_entity_ids)
+    frontier: set[str] = set(matched_entity_ids)
+    for _ in range(depth):
+        if not frontier or len(seen_entities) >= max_neighbors:
+            break
+        placeholders = ",".join(["?"] * len(frontier))
+        try:
+            rel_rows = db.execute(
+                f"SELECT from_entity, to_entity FROM entity_relationships "
+                f"WHERE from_entity IN ({placeholders}) OR to_entity IN ({placeholders})",
+                list(frontier) + list(frontier),
+            ).fetchall()
+        except Exception:  # noqa: BLE001
+            break
+        next_frontier: set[str] = set()
+        for r in rel_rows:
+            for eid in (r["from_entity"], r["to_entity"]):
+                if eid not in seen_entities:
+                    seen_entities.add(eid)
+                    next_frontier.add(eid)
+                    if len(seen_entities) >= max_neighbors:
+                        break
+            if len(seen_entities) >= max_neighbors:
+                break
+        frontier = next_frontier
+
+    # Step 4 — memory_item lookup
+    if not seen_entities:
+        return set()
+    try:
+        placeholders = ",".join(["?"] * len(seen_entities))
+        mie_rows = db.execute(
+            f"SELECT DISTINCT memory_id FROM memory_item_entities "
+            f"WHERE entity_id IN ({placeholders})",
+            list(seen_entities),
+        ).fetchall()
+        return {r["memory_id"] for r in mie_rows}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
 async def _score_extra_rows(query: str, rows_by_id: dict, base_score: float = 0.0) -> list:
     """Score additional rows (from graph or session expansion) against the query.
 
@@ -2468,6 +2890,9 @@ async def memory_search_routed_impl(
     graph_depth: int = 0,
     expand_sessions: bool = False,
     session_cap: int = 12,
+    entity_graph: bool = False,
+    entity_graph_depth: int = 1,
+    entity_graph_max_neighbors: int = 20,
     user_id: str = "",
     scope: str = "",
     type_filter: str = "",
@@ -2531,6 +2956,9 @@ async def memory_search_routed_impl(
             query, primary, k=k + bump,
             graph_depth=graph_depth,
             expand_sessions=expand_sessions, session_cap=session_cap,
+            entity_graph=entity_graph,
+            entity_graph_depth=entity_graph_depth,
+            entity_graph_max_neighbors=entity_graph_max_neighbors,
         )
 
     # Non-temporal path
@@ -2552,6 +2980,9 @@ async def memory_search_routed_impl(
             query, base_hits[:k], k=k,
             graph_depth=graph_depth,
             expand_sessions=expand_sessions, session_cap=session_cap,
+            entity_graph=entity_graph,
+            entity_graph_depth=entity_graph_depth,
+            entity_graph_max_neighbors=entity_graph_max_neighbors,
         )
 
     # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
@@ -2581,6 +3012,9 @@ async def memory_search_routed_impl(
         query, fused, k=k,
         graph_depth=graph_depth,
         expand_sessions=expand_sessions, session_cap=session_cap,
+        entity_graph=entity_graph,
+        entity_graph_depth=entity_graph_depth,
+        entity_graph_max_neighbors=entity_graph_max_neighbors,
     )
 
 
@@ -2589,23 +3023,27 @@ async def _maybe_expand_routed(
     graph_depth: int = 0,
     expand_sessions: bool = False,
     session_cap: int = 12,
+    entity_graph: bool = False,
+    entity_graph_depth: int = 1,
+    entity_graph_max_neighbors: int = 20,
 ) -> list:
-    """Apply optional graph + session expansion to a routed retrieval result.
+    """Apply optional graph, session, and entity-graph expansion to a routed retrieval result.
 
-    Both expansions take the primary top-k hits' ids as seeds, fetch new rows,
-    score them against the query, and max-fuse with the primary list. If both
-    are off (the default), returns primary unchanged.
+    All three expansions take the primary top-k hits' ids (or the query, for entity_graph)
+    as seeds, fetch new rows, score them against the query, and max-fuse with the primary
+    list. If all are off (the default), returns primary unchanged.
     """
-    if graph_depth <= 0 and not expand_sessions:
+    if graph_depth <= 0 and not expand_sessions and not entity_graph:
         return primary
     seed_ids = [item.get("id") for _, item in primary if isinstance(item, dict) and item.get("id")]
-    if not seed_ids:
+    if not seed_ids and not entity_graph:
         return primary
 
-    # Build dict of new rows (memory_id -> row dict), avoiding duplicates of seeds.
+    # Build dict of new rows (memory_id -> row dict), avoiding duplicates of primary seeds.
+    primary_ids: set = {item.get("id") for _, item in primary if isinstance(item, dict) and item.get("id")}
     extra_rows: dict = {}
 
-    if graph_depth > 0:
+    if graph_depth > 0 and seed_ids:
         neighbor_ids = _graph_neighbor_ids(seed_ids, depth=int(graph_depth))
         if neighbor_ids:
             with _db() as db:
@@ -2619,11 +3057,36 @@ async def _maybe_expand_routed(
                 for r in rows:
                     extra_rows[r["id"]] = dict(r)
 
-    if expand_sessions:
+    if expand_sessions and seed_ids:
         session_rows = _session_neighbor_ids(seed_ids, session_cap=int(session_cap))
         for rid, item in session_rows.items():
             if rid not in extra_rows:
                 extra_rows[rid] = item
+
+    if entity_graph:
+        try:
+            with _db() as db:
+                eg_memory_ids = await _entity_graph_neighbor_ids(
+                    query,
+                    depth=int(entity_graph_depth),
+                    max_neighbors=int(entity_graph_max_neighbors),
+                    db=db,
+                )
+            new_ids = eg_memory_ids - primary_ids - set(extra_rows.keys())
+            if new_ids:
+                with _db() as db:
+                    placeholders = ",".join(["?"] * len(new_ids))
+                    eg_rows = db.execute(
+                        f"SELECT id, type, title, content, metadata_json, conversation_id, "
+                        f"valid_from, user_id FROM memory_items "
+                        f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted, 0) = 0",
+                        list(new_ids),
+                    ).fetchall()
+                    for r in eg_rows:
+                        if r["id"] not in extra_rows:
+                            extra_rows[r["id"]] = dict(r)
+        except Exception:  # noqa: BLE001
+            pass  # entity_graph expansion is best-effort; never crash the primary path
 
     if not extra_rows:
         return primary
@@ -3102,7 +3565,7 @@ async def conversation_append_impl(conversation_id, role, content, agent_id="", 
 
 VALID_SCOPES = {"user", "session", "agent", "org"}
 
-async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: set[str] | None = None):
+async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: "set[str] | None" = None, entity_extractor: "Callable[[str], Awaitable[dict]] | None" = None, entity_extractor_variant_allowlist: "set[str] | None" = None):
     """Internal implementation for memory_write. Contradiction detection is automatic.
 
     `variant` tags the item with a free-form ingestion-pipeline identifier so
@@ -3209,6 +3672,18 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
             await _try_enrich_or_enqueue(item_id, content or "", fact_enricher, db, variant=variant, allowlist=fact_enricher_variant_allowlist)
     except Exception as e:
         logger.debug(f"fact enrichment dispatch failed: {e}")
+
+    # Entity extraction (Phase 4). Non-blocking: tries semaphore, enqueues on miss.
+    # fact_enriched rows are NOT extracted to prevent recursion.
+    if type != "fact_enriched":
+        try:
+            with _db() as db:
+                await _try_extract_or_enqueue(
+                    item_id, content or "", entity_extractor, db,
+                    variant=variant, allowlist=entity_extractor_variant_allowlist,
+                )
+        except Exception as e:
+            logger.debug(f"entity extraction dispatch failed: {e}")
 
     # Contradiction detection + auto-linking (runs after embedding is stored)
     superseded_ids = []
@@ -3889,3 +4364,281 @@ async def enrich_pending_impl(dry_run: bool = True, limit: int = 0, allowed_vari
         "failed": 0,
         "errors_summary": "Execution requires enricher (Wave 3 MCP tool)",
     }
+
+
+# ── Entity extraction queue drain (Phase 5) ──────────────────────────────────
+def _select_pending_entity_extraction(
+    db,
+    limit: int | None = None,
+    allowed_variants: list[str] | None = None,
+) -> list[tuple[str, str]]:
+    """Returns [(memory_id, content), ...] eligible for entity extraction.
+
+    Eligibility:
+      - type != 'fact_enriched'  (don't extract from derived rows)
+      - COALESCE(is_deleted, 0) = 0  (NB: is_deleted, NOT deleted_at — avoids
+        the deleted_at-vs-is_deleted confusion that burned us in fact_enriched)
+      - variant IS NULL (or in allowed_variants when provided)
+      - id NOT IN (SELECT memory_id FROM memory_item_entities)  — not already extracted
+      - id NOT IN (SELECT memory_id FROM entity_extraction_queue
+                   WHERE attempts >= ENTITY_EXTRACT_MAX_ATTEMPTS)  — poisoned-item guard
+    """
+    if allowed_variants:
+        variant_clause = (
+            f"AND (mi.variant IS NULL OR mi.variant IN "
+            f"({','.join(['?'] * len(allowed_variants))}))"
+        )
+        variant_params = list(allowed_variants)
+    else:
+        variant_clause = "AND mi.variant IS NULL"
+        variant_params = []
+
+    sql = f"""
+    WITH eligible AS (
+        SELECT mi.id, mi.content
+        FROM memory_items mi
+        WHERE mi.type != 'fact_enriched'
+          AND COALESCE(mi.is_deleted, 0) = 0
+          {variant_clause}
+          AND mi.id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)
+    ),
+    queued AS (
+        SELECT mi.id, mi.content, q.attempts
+        FROM entity_extraction_queue q
+        JOIN memory_items mi ON mi.id = q.memory_id
+        WHERE q.attempts < ?
+    )
+    SELECT id, content FROM queued
+    UNION
+    SELECT id, content FROM eligible
+    WHERE id NOT IN (SELECT memory_id FROM entity_extraction_queue)
+    ORDER BY id
+    """
+    if limit is not None:
+        sql += f" LIMIT {int(limit)}"
+
+    params = variant_params + [ENTITY_EXTRACT_MAX_ATTEMPTS]
+    return list(db.execute(sql, params).fetchall())
+
+
+async def extract_pending_impl(
+    dry_run: bool = True,
+    limit: int = 0,
+    allowed_variants: list[str] | None = None,
+) -> dict:
+    """Entity extraction queue drain. Mirrors enrich_pending_impl shape.
+
+    Returns:
+    - dry_run=True: {"count": N, "est_wall_clock_seconds": F, "sample_ids": [...]}
+    - dry_run=False: {"processed": N, "succeeded": N, "failed": N,
+                      "errors_summary": str, "entities_created": N,
+                      "relationships_created": N}
+
+    ETA estimate uses 3.0 sec/item (higher than fact_enriched's 2.0 because
+    entity resolution adds DB lookups on top of SLM call).
+
+    Execute path: placeholder until Wave 3 injects entity_extractor via MCP tool.
+    """
+    with _db() as db:
+        pending = _select_pending_entity_extraction(
+            db,
+            limit=limit if limit else None,
+            allowed_variants=allowed_variants,
+        )
+
+    if not pending:
+        if dry_run:
+            return {"count": 0, "est_wall_clock_seconds": 0.0, "sample_ids": []}
+        else:
+            return {
+                "processed": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "errors_summary": "No pending items",
+                "entities_created": 0,
+                "relationships_created": 0,
+            }
+
+    if dry_run:
+        # Dry run: report count + ETA estimate (3.0 sec/item)
+        est_secs = len(pending) * 3.0
+        sample_ids = [mid for mid, _ in pending[:3]]
+        return {
+            "count": len(pending),
+            "est_wall_clock_seconds": est_secs,
+            "sample_ids": sample_ids,
+        }
+
+    # Execute: placeholder until Wave 3 wires entity_extractor injection.
+    # The entity_extractor is provided at write-time through memory_write_impl;
+    # a drain path that calls the extractor requires it to be injected by the
+    # MCP tool layer (same pattern as enrich_pending_impl).
+    return {
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "errors_summary": "Execution requires entity_extractor (Wave 3 MCP tool)",
+        "entities_created": 0,
+        "relationships_created": 0,
+    }
+
+# ── Entity search and retrieval (Phase 7) ─────────────────────────────────────
+def entity_search_impl(
+    query: str = "",
+    entity_type: str = "",
+    limit: int = 10,
+    with_neighbors: bool = False,
+) -> list[dict]:
+    """Search the entities table by canonical_name and optionally by entity_type.
+
+    Returns:
+        List of dicts: [{entity_id, canonical_name, entity_type, attributes_json, neighbor_count}]
+        neighbor_count only computed if with_neighbors=True.
+    """
+    with _db() as db:
+        # Build the WHERE clause
+        where_parts = []
+        params = []
+
+        if query:
+            # LIKE %query% on canonical_name (case-insensitive)
+            where_parts.append("canonical_name LIKE ?")
+            params.append(f"%{query}%")
+
+        if entity_type:
+            where_parts.append("entity_type = ?")
+            params.append(entity_type)
+
+        where_clause = " AND ".join(where_parts) if where_parts else "1=1"
+
+        sql = f"""
+        SELECT id, canonical_name, entity_type, attributes_json
+        FROM entities
+        WHERE {where_clause}
+        ORDER BY canonical_name
+        LIMIT ?
+        """
+        params.append(limit)
+
+        rows = list(db.execute(sql, params).fetchall())
+
+        result = []
+        for entity_id, canonical_name, entity_type_val, attributes_json in rows:
+            neighbor_count = 0
+            if with_neighbors:
+                # Count relationships where this entity is from_entity OR to_entity
+                neighbor_sql = """
+                SELECT COUNT(DISTINCT id)
+                FROM entity_relationships
+                WHERE from_entity = ? OR to_entity = ?
+                """
+                neighbor_count = db.execute(
+                    neighbor_sql, (entity_id, entity_id)
+                ).fetchone()[0]
+
+            result.append({
+                "entity_id": entity_id,
+                "canonical_name": canonical_name,
+                "entity_type": entity_type_val,
+                "attributes_json": attributes_json or "{}",
+                "neighbor_count": neighbor_count,
+            })
+
+        return result
+
+
+def entity_get_impl(entity_id: str, depth: int = 1) -> dict:
+    """Load single entity with neighborhood.
+
+    Returns:
+        {
+            entity: {entity_id, canonical_name, entity_type, attributes_json, created_at},
+            predecessors: [{from_entity_id, from_canonical_name, predicate, confidence}],
+            successors: [{to_entity_id, to_canonical_name, predicate, confidence}],
+            linked_memories: [{memory_id, title, type}]
+        }
+
+    Note: depth is accepted but unused beyond depth=1 (multi-hop is future work).
+    """
+    with _db() as db:
+        # Load the entity itself
+        entity_sql = """
+        SELECT id, canonical_name, entity_type, attributes_json, created_at
+        FROM entities
+        WHERE id = ?
+        """
+        entity_row = db.execute(entity_sql, (entity_id,)).fetchone()
+
+        if not entity_row:
+            return {
+                "entity": None,
+                "predecessors": [],
+                "successors": [],
+                "linked_memories": [],
+            }
+
+        entity_id_val, canonical_name, entity_type, attributes_json, created_at = entity_row
+        entity = {
+            "entity_id": entity_id_val,
+            "canonical_name": canonical_name,
+            "entity_type": entity_type,
+            "attributes_json": attributes_json or "{}",
+            "created_at": created_at,
+        }
+
+        # Load predecessors (relationships where to_entity = this entity)
+        predecessors_sql = """
+        SELECT er.from_entity, e.canonical_name, er.predicate, er.confidence
+        FROM entity_relationships er
+        JOIN entities e ON e.id = er.from_entity
+        WHERE er.to_entity = ?
+        """
+        predecessors = [
+            {
+                "from_entity_id": row[0],
+                "from_canonical_name": row[1],
+                "predicate": row[2],
+                "confidence": row[3],
+            }
+            for row in db.execute(predecessors_sql, (entity_id,)).fetchall()
+        ]
+
+        # Load successors (relationships where from_entity = this entity)
+        successors_sql = """
+        SELECT er.to_entity, e.canonical_name, er.predicate, er.confidence
+        FROM entity_relationships er
+        JOIN entities e ON e.id = er.to_entity
+        WHERE er.from_entity = ?
+        """
+        successors = [
+            {
+                "to_entity_id": row[0],
+                "to_canonical_name": row[1],
+                "predicate": row[2],
+                "confidence": row[3],
+            }
+            for row in db.execute(successors_sql, (entity_id,)).fetchall()
+        ]
+
+        # Load linked memories
+        memories_sql = """
+        SELECT DISTINCT mi.id, mi.title, mi.type
+        FROM memory_item_entities mie
+        JOIN memory_items mi ON mi.id = mie.memory_id
+        WHERE mie.entity_id = ?
+        """
+        linked_memories = [
+            {
+                "memory_id": row[0],
+                "title": row[1] or "",
+                "type": row[2],
+            }
+            for row in db.execute(memories_sql, (entity_id,)).fetchall()
+        ]
+
+        return {
+            "entity": entity,
+            "predecessors": predecessors,
+            "successors": successors,
+            "linked_memories": linked_memories,
+        }
