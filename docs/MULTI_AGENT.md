@@ -4,6 +4,8 @@ M3 Memory provides the persistent memory and coordination substrate for multi-ag
 
 M3 Memory is not an agent runtime — it does not schedule or execute agents. It is the memory layer underneath your orchestrator, whether that is the bundled `m3-team` CLI, a LangGraph pipeline, or your own polling loop.
 
+> **Looking for a wire-up guide for Claude Code + Gemini CLI + OpenCode sharing one m3-memory store?** See the practical setup notes — subscription vs API token tradeoffs, unified tag schema across agents, per-agent install steps — at [Multi-Agent Subscription Models with m3-Memory](./multi_agent_subscription_models.htm) (saved page; covers the day-to-day workflow underneath the primitives below).
+
 ## 🧩 Primitives
 
 ### 👤 Agent registry
