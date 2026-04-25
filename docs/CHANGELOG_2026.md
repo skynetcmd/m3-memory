@@ -2,6 +2,7 @@
 
 ## April 25, 2026
 
+- Added optional entity-relation knowledge graph: `entities`, `memory_item_entities`, `entity_relationships` tables; SLM-extraction pipeline with 3-tier resolution; `entity_graph` kwarg on `memory_search_routed`. Off by default. See ARCHITECTURE.md and ENVIRONMENT_VARIABLES.md.
 - Added optional `fact_enriched` memory type and SLM-distillation pipeline. Off by default. See ARCHITECTURE.md and ENVIRONMENT_VARIABLES.md.
 
 ## April 21, 2026

@@ -128,3 +128,17 @@ Optional SLM-distillation pipeline to extract atomic facts from stored memories.
 | `M3_FACT_ENRICH_MAX_ATTEMPTS` | `5` | Maximum retries for failed enrichment queue items before they are marked as poison (poisoned items remain visible in queue with `last_error` for manual inspection). |
 | `M3_FACT_ENRICHED_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `fact_enriched.yaml` profile `url` field. |
 | `M3_FACT_ENRICHED_MODEL` | (empty) | Override SLM model name. If unset, reads from the `fact_enriched.yaml` profile `model` field. Both URL and model must be non-empty when enrichment runs, or the extraction fails with a clear error. |
+
+## Entity-Relation Graph
+
+Optional SLM-extraction pipeline to build a typed knowledge graph of entities and relationships from stored memories. **Off by default.** See ARCHITECTURE.md for design overview.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_ENABLE_ENTITY_GRAPH` | `false` | Master gate. Off by default; nothing extracted unless set to `true`/`1`/`yes`. |
+| `M3_ENTITY_EXTRACT_CONCURRENCY` | `2` | Maximum concurrent SLM extraction tasks. Mirrors fact_enriched concurrency tuning. |
+| `M3_ENTITY_EXTRACT_MAX_ATTEMPTS` | `5` | Queue retry cap before poisoned-item exclusion. Failed items remain in extraction queue with `last_error` for manual inspection. |
+| `M3_ENTITY_RESOLVE_FUZZY_MIN` | `0.8` | Minimum token-Jaccard similarity score for fuzzy-match resolution tier. Entities with canonical names matching above this threshold within the same type are merged. |
+| `M3_ENTITY_RESOLVE_COSINE_MIN` | `0.85` | Minimum embedding cosine similarity for cosine-match resolution tier (final fallback before creating a new entity). |
+| `M3_ENTITY_GRAPH_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `entity_graph.yaml` profile `url` field. |
+| `M3_ENTITY_GRAPH_MODEL` | (empty) | Override SLM model name. If unset, reads from the `entity_graph.yaml` profile `model` field. Both URL and model must be non-empty when extraction runs, or the process fails with a clear error. |
