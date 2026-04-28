@@ -172,6 +172,14 @@ graph LR
 
 Use `memory_suggest` instead of `memory_search` when you need to explain WHY results were retrieved. Returns score breakdowns (vector, BM25, MMR penalty) per result.
 
+### Advanced: Retrieval Routing (auto_route)
+
+For **power users and benchmark operators**: `memory_search_routed` supports automatic parameter selection via `auto_route=True`. When enabled, the system examines query text and score curves to choose optimal retrieval parameters—higher `k` for multi-session queries, temporal-aware settings for "when" questions, and sharp filtering for high-confidence matches.
+
+See [RETRIEVAL_ROUTING.md](./RETRIEVAL_ROUTING.md) for full detail: signal-fusion logic, branch definitions, override precedence, tuning parameters, and when to use fixed knobs instead. The 14 `auto_*` parameters are all optional and overridable; default behavior is unchanged when `auto_route=False` (the standard).
+
+Recommended as a safer alternative to manual `adaptive_k` tuning.
+
 ### Retrieving and Modifying
 
 | Tool | When to Use |
@@ -326,7 +334,12 @@ vector/semantic retrieval across the fleet, leave `embed` at its default
 
 ## 💓 Health Check
 
+**System diagnostics:**
+
 ```bash
-python bin/test_memory_bridge.py    # 41 end-to-end tests
-python bin/benchmark_memory.py      # Retrieval quality benchmarks
+/m3:health                                    # Check m3-memory install, hooks, chatlog DB
+python bin/test_memory_bridge.py              # 41 end-to-end tests
+python bin/benchmark_memory.py                # Retrieval quality benchmarks
 ```
+
+See [M3_HEALTH_FAQ.md](M3_HEALTH_FAQ.md) for how to read and act on `/m3:health` output — quick reference for developers and general users.

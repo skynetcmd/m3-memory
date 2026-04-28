@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_sync.py
-sha1: 0c5e147c130f
-mtime_utc: 2026-04-21T20:02:02.936766+00:00
-generated_utc: 2026-04-21T21:26:01.920096+00:00
+sha1: 94c0b4677902
+mtime_utc: 2026-04-26T12:39:14.744295+00:00
+generated_utc: 2026-04-26T12:50:25.870177+00:00
 private: false
 ---
 
@@ -22,7 +22,9 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_CHROMA_SYNC_QUEUE_MAX`
+- `M3_CHROMA_SYNC_QUEUE_SKIP_AT`
+- `M3_CHROMA_SYNC_QUEUE_WARN`
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -33,7 +35,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 17)
+- `sqlite3.connect()  → `db_path`` (line 18)
 
 
 ## Notable external imports
