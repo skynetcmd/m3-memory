@@ -723,8 +723,8 @@ Profile picker:
                     help="Variant tag for emitted observations. Default: m3-observations-YYYYMMDD.")
     ap.add_argument("--source-variant", default=None,
                     help="Filter source rows by variant. '__none__' = true core memory only "
-                         "(variant IS NULL). A name string = single-variant scope (e.g. "
-                         "lme-strat60b-v3). Default: no filter (all rows).")
+                         "(variant IS NULL). A name string = single-variant scope. "
+                         "Default: no filter (all rows).")
     ap.add_argument("--limit", type=int, default=None,
                     help="Cap conversations enriched per DB (smoke testing).")
     ap.add_argument("--concurrency", type=int, default=4,
