@@ -127,6 +127,16 @@ class Profile:
     cache_system: bool = True
     # Anthropic-only: API version header sent with every request.
     anthropic_version: str = "2023-06-01"
+    # Output token budget per call. Defaults to 512 (fits short JSON outputs
+    # like classifier labels or compact fact lists). Bump to 1024-8192 for
+    # reasoning models (qwen3-8b, glm-4.6v) where the visible-answer slice
+    # is short but the model needs headroom to internally think.
+    max_tokens: int = 512
+    # Input character cap — caller-side truncation before sending to the
+    # SLM. None means no truncation; consumers like run_fact_enrichment.py
+    # can use this as their pre-call cap. Defaults to None so existing
+    # classify_intent / extract_text callers see no behavior change.
+    input_max_chars: Optional[int] = None
     # Post-processing for free-text output (extract_text / extract_entities).
     # All optional. Applied in order: skip_if_matches → strip_prefixes →
     # format. classify_intent does NOT apply these — its label-matching
@@ -215,6 +225,8 @@ def _parse_profile(name: str, path: Path) -> Profile:
         backend=backend,
         cache_system=cache_system,
         anthropic_version=anthropic_version,
+        max_tokens=int(raw.get("max_tokens", 512)),
+        input_max_chars=int(raw["input_max_chars"]) if raw.get("input_max_chars") is not None else None,
         post_strip_prefixes=post_strip_prefixes,
         post_skip_if_matches=post_skip_if_matches,
         post_format=post_format,
@@ -300,7 +312,7 @@ async def _call_model(
 
         payload = {
             "model": prof.model,
-            "max_tokens": 512,
+            "max_tokens": prof.max_tokens,
             "system": system_field,
             "messages": [{"role": "user", "content": user_text}],
             "temperature": prof.temperature,
@@ -323,6 +335,7 @@ async def _call_model(
             {"role": "user", "content": user_text},
         ],
         "temperature": prof.temperature,
+        "max_tokens": prof.max_tokens,
     }
     resp = await client.post(prof.url, headers=headers, json=payload, timeout=prof.timeout_s)
     resp.raise_for_status()
