@@ -1,0 +1,41 @@
+db: agent_bench_analysis.db
+description: Bench knowledge (variants/knobs/analyses/findings; corpus_rows skipped as bulk archive)
+# bench_corpus_rows is intentionally excluded — single-machine bulk archive
+# that should not be replicated across peers.
+sync_order:
+  - variants
+  - knobs
+  - analyses
+  - analysis_findings
+
+tables:
+  - name: variants
+    pk_columns: [variant]
+    timestamp_column: updated_at
+    tombstone_column: is_deleted
+    skip: false
+
+  - name: knobs
+    pk_columns: [knob]
+    timestamp_column: updated_at
+    tombstone_column: is_deleted
+    skip: false
+
+  - name: analyses
+    pk_columns: [analysis_id]
+    timestamp_column: updated_at
+    tombstone_column: is_deleted
+    skip: false
+
+  - name: analysis_findings
+    pk_columns: [finding_id]
+    timestamp_column: updated_at
+    tombstone_column: status       # special: tombstone_value indicates soft-delete
+    tombstone_value: retracted     # 'retracted' counts as soft-deleted
+    skip: false
+
+  - name: bench_corpus_rows
+    pk_columns: [row_id]
+    timestamp_column: created_at
+    tombstone_column: null
+    skip: true   # single-machine bulk archive, intentionally excluded

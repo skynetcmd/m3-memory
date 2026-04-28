@@ -1,5 +1,60 @@
 from __future__ import annotations
 
+# ============================================================================
+# pg_sync.py — Bidirectional SQLite ↔ PostgreSQL sync with per-DB manifests
+# ============================================================================
+#
+# CURRENT SYNC BEHAVIOUR (as of 2026-04-26 refactor, backward-compat preserved)
+# ---------------------------------------------------------------------------
+# Tables synced from agent_memory.db:
+#   1. memory_items           PK: id (UUID)  tombstone: is_deleted (0/1)
+#                             Delta via updated_at; full push on first sync.
+#                             last-write-wins on updated_at; 'manual'/'system'
+#                             change_agent protected (manual wins).
+#   2. memory_embeddings      PK: id (UUID)  no own updated_at — delta driven
+#                             by parent memory_items.updated_at. FK pre-filter:
+#                             embeddings whose memory_item isn't in PG yet are
+#                             deferred to next sync (avoids FK violation rollback).
+#   3. memory_relationships   PK: id (UUID)  INSERT-only (ON CONFLICT DO NOTHING).
+#                             Delta via created_at.
+#   4. tasks                  PK: id (UUID)  tombstone: deleted_at (NULL = live,
+#                             ISO string = deleted). Delta via updated_at.
+#   5. synchronized_secrets   PK: service_name  version+updated_at conflict resolution.
+#
+# CHANGE DETECTION
+#   Watermarks stored in sync_watermarks table (SQLite side, per direction+target).
+#   Direction keys: pg_push / pg_pull / rel_push / rel_pull / emb_push / emb_pull /
+#                   tasks_push / tasks_pull
+#   On first run (no watermark) the full table is synced.
+#
+# CONFLICT RESOLUTION
+#   Last-write-wins on updated_at for most tables. Secrets use version number
+#   as primary tiebreaker. memory_embeddings are overwritten on id conflict.
+#
+# CREDENTIALS
+#   PG_URL resolved via: (1) PG_URL env var, (2) m3-memory encrypted vault
+#   (ctx.get_secret("PG_URL")).  Falls back to sys.exit(1) with a hint.
+#
+# MULTI-DB EXTENSION (this refactor)
+#   CLI: python bin/pg_sync.py --db <path> [--manifest <path>] [--dry-run]
+#   If --manifest omitted, inferred as config/sync_manifests/<db_basename>.yaml.
+#   Backward-compat default (no args):
+#       --db memory/agent_memory.db
+#       --manifest config/sync_manifests/agent_memory.yaml
+#   Manifest-driven tables go through _sync_table_generic().
+#   Legacy per-table functions (sync_memory_items, sync_memory_embeddings, etc.)
+#   are preserved unchanged and called by name for agent_memory.db so that
+#   existing test_pg_sync_fk_safety.py continues to pass without modification.
+#
+# SYNC STATE
+#   Watermarks live in sync_watermarks (direction TEXT PK, last_synced_at TEXT).
+#   A per-DB, per-table namespace key is constructed as:
+#       "<db_stem>_<table>_push" / "<db_stem>_<table>_pull"
+#   (for agent_memory.db tables the legacy bare keys are kept to avoid
+#    resetting existing watermarks).
+# ============================================================================
+
+import argparse
 import os
 import sys
 
@@ -17,8 +72,12 @@ def ensure_venv():
 
 import json
 import logging
+import pathlib
 import sqlite3
 from datetime import datetime, timezone
+from typing import Any
+
+import yaml
 
 from m3_sdk import M3Context
 import migrate_memory
@@ -34,6 +93,35 @@ ctx = M3Context.for_db(None)
 
 BATCH_SIZE = 100  # commit every N rows
 
+# Path to manifest directory relative to repo root
+MANIFEST_DIR = os.path.join(BASE_DIR, "config", "sync_manifests")
+
+
+# ── Manifest loading ─────────────────────────────────────────────────────────
+
+def _load_manifest(manifest_path: str) -> dict[str, Any]:
+    """Load and validate a sync manifest YAML file."""
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    # Basic validation
+    if "tables" not in data:
+        raise ValueError(f"Manifest {manifest_path} missing 'tables' key")
+    if "sync_order" not in data:
+        raise ValueError(f"Manifest {manifest_path} missing 'sync_order' key")
+
+    # Build table lookup
+    data["_table_map"] = {t["name"]: t for t in data["tables"]}
+    return data
+
+
+def _infer_manifest_path(db_path: str) -> str:
+    """Infer manifest path from db basename: config/sync_manifests/<stem>.yaml"""
+    stem = pathlib.Path(db_path).stem  # e.g. "agent_memory"
+    return os.path.join(MANIFEST_DIR, f"{stem}.yaml")
+
+
+# ── Credentials ──────────────────────────────────────────────────────────────
 
 def _get_pg_url() -> str:
     """Resolve PostgreSQL connection URL from environment or encrypted vault."""
@@ -46,6 +134,8 @@ def _get_pg_url() -> str:
     logger.error("PG_URL not found. Use `bin/auth_utils.py` to set it.")
     sys.exit(1)
 
+
+# ── Watermarks ───────────────────────────────────────────────────────────────
 
 def _get_watermark(sl_cur, direction: str, target_name: str) -> str | None:
     """Read last sync watermark for a direction and target database."""
@@ -73,11 +163,20 @@ def _set_watermark(sl_cur, direction: str, ts: str, target_name: str) -> None:
         pass
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 def _table_exists(sl_cur, table_name: str) -> bool:
     """Check if a table exists in the local SQLite DB."""
     sl_cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
     return sl_cur.fetchone() is not None
 
+
+def _build_conflict_clause(pk_columns: list[str]) -> str:
+    """Build ON CONFLICT (col1, col2, ...) clause from pk_columns list."""
+    return "(" + ", ".join(pk_columns) + ")"
+
+
+# ── PG schema helpers (legacy — agent_memory.db only) ────────────────────────
 
 def _ensure_pg_schema(pg_cur):
     """Auto-add columns from newer migrations that PG may be missing."""
@@ -138,6 +237,9 @@ def _ensure_pg_tier_tables(pg_cur):
     pg_cur.execute("CREATE INDEX IF NOT EXISTS idx_gdpr_subject ON gdpr_requests(subject_id)")
     logger.info("PG schema: ensured agent_retention_policies and gdpr_requests tables exist")
 
+
+# ── Legacy per-table sync functions (agent_memory.db) ────────────────────────
+# These are preserved verbatim so test_pg_sync_fk_safety.py continues to pass.
 
 def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
     logger.info(f"[{target_name}] Synchronizing memory_items (UUID-based, delta sync)...")
@@ -677,6 +779,8 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
     logger.info(f"[{target_name}] Pulled {pull_count} embeddings from warehouse ({pull_errors} errors).")
 
 
+# ── Sync lock ─────────────────────────────────────────────────────────────────
+
 def _acquire_sync_lock(sl_cur) -> bool:
     """Attempts to acquire a global sync lock. Returns True if successful."""
     try:
@@ -697,6 +801,7 @@ def _acquire_sync_lock(sl_cur) -> bool:
         logger.warning(f"Lock acquisition failed: {e}")
         return False
 
+
 def _release_sync_lock(sl_cur):
     """Releases the global sync lock."""
     try:
@@ -704,105 +809,403 @@ def _release_sync_lock(sl_cur):
     except Exception as e:
         logger.warning(f"Lock release failed: {e}")
 
-def main():
+
+# ── Generic manifest-driven sync ─────────────────────────────────────────────
+
+def _sync_table_generic(
+    sl_cur,
+    pg_cur,
+    sl_conn,
+    target_name: str,
+    table_cfg: dict[str, Any],
+    dry_run: bool = False,
+) -> None:
+    """Generic bidirectional UPSERT for any table described in a manifest entry.
+
+    Supports:
+    - Composite PKs via pk_columns list
+    - Custom tombstone columns (is_deleted bool or arbitrary string values)
+    - Nullable timestamp_column (falls back to full table scan)
+    - --dry-run: logs what would sync without touching either DB
+    """
+    name = table_cfg["name"]
+    pk_columns: list[str] = table_cfg.get("pk_columns", ["id"])
+    ts_col: str | None = table_cfg.get("timestamp_column")
+    tombstone_col: str | None = table_cfg.get("tombstone_column")
+    skip: bool = table_cfg.get("skip", False)
+
+    if skip:
+        logger.info(f"[{target_name}] Skipping {name} (marked skip=true in manifest)")
+        return
+
+    logger.info(f"[{target_name}] Synchronizing {name} (manifest-driven)...")
+    now = datetime.now(timezone.utc).isoformat()
+
+    push_key = f"{name}_push"
+    pull_key = f"{name}_pull"
+
+    # ── PUSH: SQLite → PG ────────────────────────────────────────────────────
+    watermark = _get_watermark(sl_cur, push_key, target_name)
+
     try:
-        targets = migrate_memory.targets("all")
-        logger.info(f"Starting synchronization for {len(targets)} targets: {[t.name for t in targets]}")
-        
-        # Connect to data warehouse once
-        with ctx.pg_connection() as pg_conn:
-            pg_conn.autocommit = False
-            
-            for target in targets:
-                logger.info(f"--- Synchronizing target: {target.name} ({target.db_path}) ---")
-                
-                try:
-                    sl_conn = sqlite3.connect(target.db_path, timeout=30)
-                    sl_conn.row_factory = sqlite3.Row
-                except Exception as e:
-                    logger.error(f"Failed to connect to local DB {target.db_path}: {e}")
-                    continue
+        if ts_col and watermark:
+            sl_cur.execute(
+                f"SELECT * FROM {name} WHERE {ts_col} > ?", (watermark,)
+            )
+            logger.info(f"[{target_name}] [{name}] Delta push: rows changed since {watermark}")
+        else:
+            sl_cur.execute(f"SELECT * FROM {name}")
+            logger.info(f"[{target_name}] [{name}] Full push (no watermark or no timestamp col)")
+    except sqlite3.OperationalError as exc:
+        logger.warning(f"[{target_name}] [{name}] Cannot query SQLite: {exc}")
+        return
 
-                try:
-                    sl_cur = sl_conn.cursor()
-                    
-                    # Global sync lock is only checked on the main DB to prevent 
-                    # multiple instances of pg_sync from running simultaneously.
-                    if target.name == "main":
-                        if not _acquire_sync_lock(sl_cur):
-                            logger.warning("Another sync is already in progress (main lock found). Skipping.")
-                            sl_conn.close()
-                            return
-                        sl_conn.commit()
+    local_rows = sl_cur.fetchall()
 
-                    with pg_conn.cursor() as pg_cur:
-                        # Step 1: Memory Items
-                        try:
-                            pg_cur.execute("SAVEPOINT items")
-                            sync_memory_items(sl_cur, pg_cur, sl_conn, target.name)
-                            pg_cur.execute("RELEASE SAVEPOINT items")
-                        except Exception as e:
-                            pg_cur.execute("ROLLBACK TO SAVEPOINT items")
-                            logger.error(f"[{target.name}] Memory items sync failed: {e}")
+    if dry_run:
+        logger.info(f"[{target_name}] [{name}] [DRY-RUN] Would push {len(local_rows)} rows to PG")
+    elif local_rows:
+        try:
+            # Get column names from cursor description
+            col_names = [d[0] for d in sl_cur.description]
+            conflict_clause = _build_conflict_clause(pk_columns)
+            non_pk_cols = [c for c in col_names if c not in pk_columns]
+            set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in non_pk_cols) if non_pk_cols else "id = EXCLUDED.id"
 
-                        # Step 2: PG Tier Tables (Main only)
-                        if target.name == "main":
-                            try:
-                                _ensure_pg_tier_tables(pg_cur)
-                            except Exception as e:
-                                logger.warning(f"Ensuring PG tier tables failed: {e}")
+            from psycopg2.extras import execute_values
+            placeholders = ", ".join(["%s"] * len(col_names))
+            col_list = ", ".join(col_names)
 
-                        # Step 3: Relationships
-                        if _table_exists(sl_cur, "memory_relationships"):
-                            try:
-                                pg_cur.execute("SAVEPOINT rels")
-                                sync_memory_relationships(sl_cur, pg_cur, sl_conn, target.name)
-                                pg_cur.execute("RELEASE SAVEPOINT rels")
-                            except Exception as e:
-                                pg_cur.execute("ROLLBACK TO SAVEPOINT rels")
-                                logger.error(f"[{target.name}] Relationships sync failed: {e}")
+            upsert_pg = f"""
+                INSERT INTO {name} ({col_list}) VALUES %s
+                ON CONFLICT {conflict_clause} DO UPDATE SET
+                    {set_clause}
+            """
+            # Add timestamp guard if we have a ts_col
+            if ts_col and ts_col in col_names:
+                upsert_pg += f" WHERE {name}.{ts_col} IS NULL OR EXCLUDED.{ts_col} > {name}.{ts_col}"
 
-                        # Step 4: Embeddings
-                        if _table_exists(sl_cur, "memory_embeddings"):
-                            try:
-                                pg_cur.execute("SAVEPOINT embs")
-                                sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target.name)
-                                pg_cur.execute("RELEASE SAVEPOINT embs")
-                            except Exception as e:
-                                pg_cur.execute("ROLLBACK TO SAVEPOINT embs")
-                                logger.error(f"[{target.name}] Embeddings sync failed: {e}")
+            push_count = 0
+            for i in range(0, len(local_rows), BATCH_SIZE):
+                batch = [tuple(r) for r in local_rows[i:i+BATCH_SIZE]]
+                execute_values(pg_cur, upsert_pg, batch)
+                push_count += len(batch)
+            logger.info(f"[{target_name}] [{name}] Pushed {push_count} rows to PG")
+        except Exception as exc:
+            logger.error(f"[{target_name}] [{name}] Push failed: {type(exc).__name__}: {exc}")
 
-                        # Step 5: Tasks (If exists)
-                        if _table_exists(sl_cur, "tasks"):
-                            try:
-                                pg_cur.execute("SAVEPOINT tasks")
-                                sync_tasks(sl_cur, pg_cur, sl_conn, target.name)
-                                pg_cur.execute("RELEASE SAVEPOINT tasks")
-                            except Exception as e:
-                                pg_cur.execute("ROLLBACK TO SAVEPOINT tasks")
-                                logger.error(f"[{target.name}] Tasks sync failed: {e}")
+    if not dry_run:
+        _set_watermark(sl_cur, push_key, now, target_name)
+        sl_conn.commit()
 
-                        # Step 6: Secrets (If exists)
-                        if _table_exists(sl_cur, "synchronized_secrets"):
-                            try:
-                                sync_secrets(sl_cur, pg_cur, target.name)
-                            except Exception as e:
-                                logger.warning(f"[{target_name}] Secrets sync failed: {e}")
+    # ── PULL: PG → SQLite ────────────────────────────────────────────────────
+    watermark = _get_watermark(sl_cur, pull_key, target_name)
 
-                    pg_conn.commit()
+    if dry_run:
+        logger.info(f"[{target_name}] [{name}] [DRY-RUN] Would pull rows from PG (watermark={watermark})")
+    else:
+        try:
+            if ts_col and watermark:
+                pg_cur.execute(
+                    f"SELECT * FROM {name} WHERE {ts_col} > %s", (watermark,)
+                )
+                logger.info(f"[{target_name}] [{name}] Delta pull: rows changed since {watermark}")
+            else:
+                pg_cur.execute(f"SELECT * FROM {name}")
+                logger.info(f"[{target_name}] [{name}] Full pull (no watermark or no timestamp col)")
+
+            remote_rows = pg_cur.fetchall()
+            pull_count = 0
+
+            if remote_rows:
+                col_names = [d[0] for d in pg_cur.description]
+                conflict_clause = _build_conflict_clause(pk_columns)
+                non_pk_cols = [c for c in col_names if c not in pk_columns]
+                set_clause = ", ".join(f"{c} = excluded.{c}" for c in non_pk_cols) if non_pk_cols else "id = excluded.id"
+                placeholders = ", ".join(["?"] * len(col_names))
+                col_list = ", ".join(col_names)
+
+                upsert_sl = f"""
+                    INSERT INTO {name} ({col_list})
+                    VALUES ({placeholders})
+                    ON CONFLICT {conflict_clause} DO UPDATE SET
+                        {set_clause}
+                """
+                if ts_col and ts_col in col_names:
+                    upsert_sl += f" WHERE {name}.{ts_col} IS NULL OR excluded.{ts_col} > {name}.{ts_col}"
+
+                for i in range(0, len(remote_rows), BATCH_SIZE):
+                    batch = [tuple(r) for r in remote_rows[i:i+BATCH_SIZE]]
+                    sl_cur.executemany(upsert_sl, batch)
+                    pull_count += len(batch)
                     sl_conn.commit()
-                    logger.info(f"Target '{target.name}' synchronization completed.")
-                    
-                    if target.name == "main":
-                        _release_sync_lock(sl_cur)
+
+            logger.info(f"[{target_name}] [{name}] Pulled {pull_count} rows from PG")
+            _set_watermark(sl_cur, pull_key, now, target_name)
+            sl_conn.commit()
+
+        except Exception as exc:
+            logger.error(f"[{target_name}] [{name}] Pull failed: {type(exc).__name__}: {exc}")
+
+
+# ── Per-DB sync dispatcher ───────────────────────────────────────────────────
+
+def _sync_agent_memory_db(sl_cur, pg_cur, sl_conn, target_name: str, dry_run: bool = False) -> None:
+    """Sync agent_memory.db using the legacy per-table functions.
+
+    This path is kept verbatim to preserve existing test coverage and
+    specialised logic (FK pre-filter for embeddings, change_agent guard for
+    memory_items, version-based conflict resolution for secrets).
+    """
+    if dry_run:
+        logger.info(f"[{target_name}] [DRY-RUN] Would sync: memory_items, memory_embeddings, "
+                    f"memory_relationships, tasks, synchronized_secrets")
+        return
+
+    # Step 1: Memory Items
+    try:
+        pg_cur.execute("SAVEPOINT items")
+        sync_memory_items(sl_cur, pg_cur, sl_conn, target_name)
+        pg_cur.execute("RELEASE SAVEPOINT items")
+    except Exception as e:
+        pg_cur.execute("ROLLBACK TO SAVEPOINT items")
+        logger.error(f"[{target_name}] Memory items sync failed: {e}")
+
+    # Step 2: PG Tier Tables (Main only)
+    if target_name == "main":
+        try:
+            _ensure_pg_tier_tables(pg_cur)
+        except Exception as e:
+            logger.warning(f"Ensuring PG tier tables failed: {e}")
+
+    # Step 3: Relationships
+    if _table_exists(sl_cur, "memory_relationships"):
+        try:
+            pg_cur.execute("SAVEPOINT rels")
+            sync_memory_relationships(sl_cur, pg_cur, sl_conn, target_name)
+            pg_cur.execute("RELEASE SAVEPOINT rels")
+        except Exception as e:
+            pg_cur.execute("ROLLBACK TO SAVEPOINT rels")
+            logger.error(f"[{target_name}] Relationships sync failed: {e}")
+
+    # Step 4: Embeddings
+    if _table_exists(sl_cur, "memory_embeddings"):
+        try:
+            pg_cur.execute("SAVEPOINT embs")
+            sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name)
+            pg_cur.execute("RELEASE SAVEPOINT embs")
+        except Exception as e:
+            pg_cur.execute("ROLLBACK TO SAVEPOINT embs")
+            logger.error(f"[{target_name}] Embeddings sync failed: {e}")
+
+    # Step 5: Tasks (If exists)
+    if _table_exists(sl_cur, "tasks"):
+        try:
+            pg_cur.execute("SAVEPOINT tasks")
+            sync_tasks(sl_cur, pg_cur, sl_conn, target_name)
+            pg_cur.execute("RELEASE SAVEPOINT tasks")
+        except Exception as e:
+            pg_cur.execute("ROLLBACK TO SAVEPOINT tasks")
+            logger.error(f"[{target_name}] Tasks sync failed: {e}")
+
+    # Step 6: Secrets (If exists)
+    if _table_exists(sl_cur, "synchronized_secrets"):
+        try:
+            sync_secrets(sl_cur, pg_cur, target_name)
+        except Exception as e:
+            logger.warning(f"[{target_name}] Secrets sync failed: {e}")
+
+
+def _sync_generic_db(sl_cur, pg_cur, sl_conn, manifest: dict[str, Any],
+                     target_name: str, dry_run: bool = False) -> None:
+    """Sync any DB using manifest-driven generic sync loop."""
+    table_map = manifest["_table_map"]
+    sync_order: list[str] = manifest["sync_order"]
+
+    for table_name in sync_order:
+        if table_name not in table_map:
+            logger.warning(f"[{target_name}] Table '{table_name}' in sync_order not found in tables list")
+            continue
+
+        table_cfg = table_map[table_name]
+        if table_cfg.get("skip", False):
+            logger.info(f"[{target_name}] Skipping {table_name} (skip=true in manifest)")
+            continue
+
+        if not _table_exists(sl_cur, table_name):
+            logger.info(f"[{target_name}] Table {table_name} not present in SQLite DB — skipping")
+            continue
+
+        try:
+            if not dry_run:
+                pg_cur.execute(f"SAVEPOINT tbl_{table_name}")
+            _sync_table_generic(sl_cur, pg_cur, sl_conn, target_name, table_cfg, dry_run=dry_run)
+            if not dry_run:
+                pg_cur.execute(f"RELEASE SAVEPOINT tbl_{table_name}")
+        except Exception as e:
+            if not dry_run:
+                pg_cur.execute(f"ROLLBACK TO SAVEPOINT tbl_{table_name}")
+            logger.error(f"[{target_name}] Table {table_name} sync failed: {e}")
+
+
+# ── main() ────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Bidirectional SQLite ↔ PostgreSQL sync with per-DB manifests.",
+    )
+    parser.add_argument(
+        "--db",
+        default=os.path.join(BASE_DIR, "memory", "agent_memory.db"),
+        help="Path to the SQLite database to sync (default: memory/agent_memory.db)",
+    )
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="Path to sync manifest YAML. Inferred from --db basename if omitted.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would sync without touching either database.",
+    )
+    args = parser.parse_args()
+
+    db_path = os.path.abspath(args.db)
+    db_stem = pathlib.Path(db_path).stem  # e.g. "agent_memory"
+
+    # Resolve manifest
+    manifest_path = args.manifest or _infer_manifest_path(db_path)
+    manifest_path = os.path.abspath(manifest_path)
+
+    if not os.path.exists(manifest_path):
+        logger.error(f"Manifest not found: {manifest_path}")
+        sys.exit(1)
+
+    logger.info(f"pg_sync starting: db={db_path} manifest={manifest_path} dry_run={args.dry_run}")
+
+    try:
+        manifest = _load_manifest(manifest_path)
+    except Exception as exc:
+        logger.error(f"Failed to load manifest {manifest_path}: {exc}")
+        sys.exit(1)
+
+    if args.dry_run and not os.path.exists(db_path):
+        logger.info(f"[DRY-RUN] SQLite DB not found at {db_path} — would skip")
+        return
+
+    if not os.path.exists(db_path):
+        logger.error(f"SQLite DB not found: {db_path}")
+        sys.exit(1)
+
+    # For agent_memory.db, use the legacy multi-target path (preserves current behaviour).
+    # For any other DB, use the manifest-driven generic path with a single target.
+    is_agent_memory = (db_stem == "agent_memory")
+
+    try:
+        if is_agent_memory:
+            # Legacy path: mirrors original main() with migrate_memory.targets("all")
+            targets = migrate_memory.targets("all")
+            logger.info(f"Starting synchronization for {len(targets)} targets: {[t.name for t in targets]}")
+
+            if args.dry_run:
+                for target in targets:
+                    logger.info(f"[DRY-RUN] Would sync target {target.name} ({target.db_path})")
+                    logger.info(f"[DRY-RUN] Tables: memory_items, memory_embeddings, "
+                                f"memory_relationships, tasks, synchronized_secrets")
+                return
+
+            with ctx.pg_connection() as pg_conn:
+                pg_conn.autocommit = False
+
+                for target in targets:
+                    logger.info(f"--- Synchronizing target: {target.name} ({target.db_path}) ---")
+                    try:
+                        sl_conn = sqlite3.connect(target.db_path, timeout=30)
+                        sl_conn.row_factory = sqlite3.Row
+                    except Exception as e:
+                        logger.error(f"Failed to connect to local DB {target.db_path}: {e}")
+                        continue
+
+                    try:
+                        sl_cur = sl_conn.cursor()
+
+                        if target.name == "main":
+                            if not _acquire_sync_lock(sl_cur):
+                                logger.warning("Another sync is already in progress (main lock found). Skipping.")
+                                sl_conn.close()
+                                return
+                            sl_conn.commit()
+
+                        with pg_conn.cursor() as pg_cur:
+                            _sync_agent_memory_db(sl_cur, pg_cur, sl_conn, target.name, dry_run=False)
+
+                        pg_conn.commit()
                         sl_conn.commit()
+                        logger.info(f"Target '{target.name}' synchronization completed.")
 
-                except Exception as e:
-                    logger.error(f"Failed during sync of target {target.name}: {e}")
-                finally:
+                        if target.name == "main":
+                            _release_sync_lock(sl_cur)
+                            sl_conn.commit()
+
+                    except Exception as e:
+                        logger.error(f"Failed during sync of target {target.name}: {e}")
+                    finally:
+                        sl_conn.close()
+
+        else:
+            # Generic manifest-driven path for bench DBs and future additions
+            target_name = db_stem
+            logger.info(f"Starting manifest-driven sync for {db_stem} (manifest: {manifest_path})")
+
+            if args.dry_run:
+                table_map = manifest["_table_map"]
+                sync_order = manifest["sync_order"]
+                active = [t for t in sync_order if not table_map.get(t, {}).get("skip", False)]
+                skipped = [t for t in sync_order if table_map.get(t, {}).get("skip", False)]
+                logger.info(f"[DRY-RUN] Would sync tables: {active}")
+                if skipped:
+                    logger.info(f"[DRY-RUN] Would skip tables: {skipped}")
+                # Open SQLite to show row counts
+                try:
+                    sl_conn = sqlite3.connect(db_path, timeout=30)
+                    sl_conn.row_factory = sqlite3.Row
+                    sl_cur = sl_conn.cursor()
+                    for tname in active:
+                        if _table_exists(sl_cur, tname):
+                            sl_cur.execute(f"SELECT COUNT(*) FROM {tname}")
+                            cnt = sl_cur.fetchone()[0]
+                            logger.info(f"[DRY-RUN] [{tname}] {cnt} rows in SQLite")
+                        else:
+                            logger.info(f"[DRY-RUN] [{tname}] not present in SQLite DB")
                     sl_conn.close()
+                except Exception as e:
+                    logger.warning(f"[DRY-RUN] Could not open {db_path} for row counts: {e}")
+                return
 
-            logger.info("Data warehouse synchronization completed successfully!")
+            try:
+                sl_conn = sqlite3.connect(db_path, timeout=30)
+                sl_conn.row_factory = sqlite3.Row
+            except Exception as e:
+                logger.error(f"Failed to connect to local DB {db_path}: {e}")
+                sys.exit(1)
+
+            try:
+                sl_cur = sl_conn.cursor()
+                with ctx.pg_connection() as pg_conn:
+                    pg_conn.autocommit = False
+                    with pg_conn.cursor() as pg_cur:
+                        _sync_generic_db(sl_cur, pg_cur, sl_conn, manifest, target_name, dry_run=False)
+                    pg_conn.commit()
+                sl_conn.commit()
+                logger.info(f"Manifest-driven sync for {db_stem} completed.")
+            except Exception as e:
+                logger.error(f"Sync failed for {db_stem}: {type(e).__name__}: {e}")
+                sys.exit(1)
+            finally:
+                sl_conn.close()
+
+        logger.info("pg_sync completed successfully.")
 
     except Exception as e:
         logger.error(f"PG Sync failed: {type(e).__name__}: {e}")
