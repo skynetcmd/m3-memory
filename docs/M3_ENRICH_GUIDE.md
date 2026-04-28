@@ -495,6 +495,19 @@ relationships) to your DBs, but the default `memory_search` path will NOT
 consult them unless three env vars are set. Without these flags, the
 hours of enrichment you just ran sit in tables that retrieval ignores.
 
+> ⚡ **Phase L auto-activation (since 2026-04-28):** the three gates below
+> now auto-flip ON when the underlying tables have meaningful population —
+> `>=100` observation rows for `M3_PREFER_OBSERVATIONS` /
+> `M3_TWO_STAGE_OBSERVATIONS`, and `>0` rows in `entities` for
+> `M3_ENABLE_ENTITY_GRAPH`. Counts are checked once per ~5 minutes per
+> process (cached). You still SHOULD set the env vars explicitly for
+> ingest paths and for clarity, but a working enriched DB will start
+> serving observation- and entity-aware retrieval without a config edit
+> + restart. **Escape hatch:** set `M3_DISABLE_AUTO_ACTIVATION=1` to
+> require the explicit env vars — recommended for benchmark
+> reproducibility, ablation studies, and any scenario where you want
+> retrieval behavior to depend only on declared config.
+
 ### The three env vars
 
 | Variable | What it does | Default |
