@@ -1,0 +1,40 @@
+db: agent_memory.db
+description: Production user memories — primary m3-memory store
+# Sync order: parents before children (FK safety).
+sync_order:
+  - memory_items
+  - memory_embeddings
+  - memory_relationships
+  - tasks
+  - synchronized_secrets
+
+tables:
+  - name: memory_items
+    pk_columns: [id]
+    timestamp_column: updated_at
+    tombstone_column: is_deleted   # 0 = live, 1 = soft-deleted
+    skip: false
+
+  - name: memory_embeddings
+    pk_columns: [id]
+    timestamp_column: null         # no own updated_at; delta via parent memory_items
+    tombstone_column: null         # cascades from memory_items
+    skip: false
+
+  - name: memory_relationships
+    pk_columns: [id]
+    timestamp_column: created_at   # immutable — created_at doubles as updated_at
+    tombstone_column: null
+    skip: false
+
+  - name: tasks
+    pk_columns: [id]
+    timestamp_column: updated_at
+    tombstone_column: deleted_at   # NULL = live, non-NULL ISO timestamp = deleted
+    skip: false
+
+  - name: synchronized_secrets
+    pk_columns: [service_name]
+    timestamp_column: updated_at
+    tombstone_column: null
+    skip: false
