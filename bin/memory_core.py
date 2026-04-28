@@ -4073,15 +4073,46 @@ async def memory_suggest_impl(query: str, k: int = 5, variant: str = "__none__")
     return await memory_search_impl(query, k=k, explain=True, variant=variant)
 
 def memory_get_impl(id):
-    with _db() as db:
-        row = db.execute("SELECT * FROM memory_items WHERE id = ?", (id,)).fetchone()
-        if not row:
-            # Fall back to chroma_mirror for items pulled from remote
-            mirror = db.execute("SELECT * FROM chroma_mirror WHERE id = ?", (id,)).fetchone()
-            if mirror:
-                return json.dumps(dict(mirror), indent=2, default=str)
-            return "Error: not found"
-    return json.dumps(dict(row), indent=2, default=str)
+    # Accept either a 36-char UUID (existing path) or an 8-char prefix
+    # (resume-guides and conversations routinely cite memories by their
+    # first 8 hex chars). Anything else is a length error — we don't try
+    # to be clever about other prefix lengths because the index only
+    # covers SUBSTR(id,1,8).
+    ident = (id or "").strip()
+    if len(ident) == 36:
+        with _db() as db:
+            row = db.execute("SELECT * FROM memory_items WHERE id = ?", (ident,)).fetchone()
+            if not row:
+                # Fall back to chroma_mirror for items pulled from remote
+                mirror = db.execute("SELECT * FROM chroma_mirror WHERE id = ?", (ident,)).fetchone()
+                if mirror:
+                    return json.dumps(dict(mirror), indent=2, default=str)
+                return "Error: not found"
+        return json.dumps(dict(row), indent=2, default=str)
+    if len(ident) == 8:
+        with _db() as db:
+            rows = db.execute(
+                "SELECT * FROM memory_items WHERE SUBSTR(id,1,8) = ?",
+                (ident,),
+            ).fetchall()
+            if not rows:
+                # Fall back to chroma_mirror by prefix as well, for symmetry
+                # with the full-UUID path above.
+                mirror_rows = db.execute(
+                    "SELECT * FROM chroma_mirror WHERE SUBSTR(id,1,8) = ?",
+                    (ident,),
+                ).fetchall()
+                if len(mirror_rows) == 1:
+                    return json.dumps(dict(mirror_rows[0]), indent=2, default=str)
+                if len(mirror_rows) > 1:
+                    ids = ", ".join(r["id"] for r in mirror_rows)
+                    return f"Error: ambiguous prefix '{ident}': matches {ids}"
+                return "Error: not found"
+            if len(rows) > 1:
+                ids = ", ".join(r["id"] for r in rows)
+                return f"Error: ambiguous prefix '{ident}': matches {ids}"
+        return json.dumps(dict(rows[0]), indent=2, default=str)
+    return "Error: id must be 36-char UUID or 8-char prefix"
 
 def memory_verify_impl(memory_id: str) -> str:
     """Verify content integrity by comparing stored hash with computed hash."""
