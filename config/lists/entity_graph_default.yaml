@@ -1,0 +1,27 @@
+# Default entity-graph vocabulary for m3-memory.
+# Loaded by memory_core.load_entity_vocab() when no override path is given.
+# Matches the historical hardcoded VALID_ENTITY_TYPES and VALID_ENTITY_PREDICATES
+# constants exactly — backward-compat invariant.
+
+entity_types:
+  - person
+  - place
+  - organization
+  - event
+  - concept
+  - object
+  - date
+
+entity_predicates:
+  - works_at
+  - located_in
+  - before
+  - after
+  - same_as
+  - contradicts
+  - mentions
+  - relates_to
+
+metadata:
+  description: "Default vocabulary for entity-graph extraction and traversal"
+  source: "Mirror of memory_core.py VALID_ENTITY_* constants as of 2026-04-26"
