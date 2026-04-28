@@ -79,7 +79,8 @@ def test_build_type_allowlist_default():
     import m3_enrich
     import argparse
     args = argparse.Namespace(
-        include_summaries=False, include_notes=False, include_types=None,
+        include_summaries=False, include_notes=False,
+        include_types=None, only_use_types=None,
     )
     out = m3_enrich._build_type_allowlist(args)
     assert out == ("message", "conversation", "chat_log")
@@ -89,7 +90,8 @@ def test_build_type_allowlist_with_summaries_and_notes():
     import m3_enrich
     import argparse
     args = argparse.Namespace(
-        include_summaries=True, include_notes=True, include_types=None,
+        include_summaries=True, include_notes=True,
+        include_types=None, only_use_types=None,
     )
     out = m3_enrich._build_type_allowlist(args)
     assert "summary" in out
@@ -98,29 +100,115 @@ def test_build_type_allowlist_with_summaries_and_notes():
 
 
 def test_build_type_allowlist_extra_types():
+    """--include-types ADDS to the active default (extends, not replaces)."""
     import m3_enrich
     import argparse
     args = argparse.Namespace(
         include_summaries=False, include_notes=False,
-        include_types="decision,plan,fact",
+        include_types="decision,plan,fact", only_use_types=None,
     )
     out = m3_enrich._build_type_allowlist(args)
+    # Adds the requested types ...
     assert "decision" in out
     assert "plan" in out
     assert "fact" in out
+    # ... AND keeps the legacy default (no DB scope set → DEFAULT_TYPES).
+    assert "message" in out
+    assert "conversation" in out
+
+
+def test_resolve_default_types_per_db():
+    """--core picks broad core types; --chatlog stays message-shaped;
+    neither flag falls back to legacy chatlog default."""
+    import m3_enrich
+    import argparse
+    core_args = argparse.Namespace(core_only=True, chatlog_only=False)
+    chat_args = argparse.Namespace(core_only=False, chatlog_only=True)
+    none_args = argparse.Namespace(core_only=False, chatlog_only=False)
+    assert m3_enrich._resolve_default_types(core_args) == m3_enrich.DEFAULT_CORE_TYPES
+    assert "decision" in m3_enrich._resolve_default_types(core_args)
+    assert "plan" in m3_enrich._resolve_default_types(core_args)
+    assert m3_enrich._resolve_default_types(chat_args) == m3_enrich.DEFAULT_CHATLOG_TYPES
+    assert m3_enrich._resolve_default_types(none_args) == m3_enrich.DEFAULT_TYPES
+
+
+def test_build_type_allowlist_core_default_includes_decision_plan():
+    """--core with no other flags broadens the default to include decision/plan/fact."""
+    import m3_enrich
+    import argparse
+    args = argparse.Namespace(
+        core_only=True, chatlog_only=False,
+        include_summaries=False, include_notes=False,
+        include_types=None, only_use_types=None,
+    )
+    out = m3_enrich._build_type_allowlist(args)
+    for t in ("summary", "note", "decision", "plan", "knowledge", "fact", "preference"):
+        assert t in out, f"{t} missing from --core default"
+
+
+def test_build_type_allowlist_include_types_extends_core_default():
+    """--include-types is additive: keeps the --core default AND adds the new types."""
+    import m3_enrich
+    import argparse
+    args = argparse.Namespace(
+        core_only=True, chatlog_only=False,
+        include_summaries=False, include_notes=False,
+        include_types="reference,project", only_use_types=None,
+    )
+    out = m3_enrich._build_type_allowlist(args)
+    # Added types present.
+    assert "reference" in out
+    assert "project" in out
+    # Core default still present (extension, not replacement).
+    for t in ("summary", "note", "decision", "plan", "knowledge", "fact", "preference"):
+        assert t in out
+
+
+def test_build_type_allowlist_only_use_types_replaces_default():
+    """--only-use-types fully replaces the default. Escape hatch for narrow lists."""
+    import m3_enrich
+    import argparse
+    args = argparse.Namespace(
+        core_only=True, chatlog_only=False,
+        include_summaries=False, include_notes=False,
+        include_types=None, only_use_types="decision,plan",
+    )
+    out = m3_enrich._build_type_allowlist(args)
+    assert set(out) == {"decision", "plan"}
+
+
+def test_build_type_allowlist_only_use_types_with_include_summaries():
+    """--only-use-types replaces default, but --include-summaries still extends after."""
+    import m3_enrich
+    import argparse
+    args = argparse.Namespace(
+        core_only=False, chatlog_only=False,
+        include_summaries=True, include_notes=False,
+        include_types=None, only_use_types="decision",
+    )
+    out = m3_enrich._build_type_allowlist(args)
+    assert set(out) == {"decision", "summary"}
 
 
 def test_build_type_allowlist_skips_observation_in_extra_types():
-    """ALWAYS_SKIP_TYPES (observation) cannot be re-added via --include-types."""
+    """ALWAYS_SKIP_TYPES (observation) cannot be re-added via either flag."""
     import m3_enrich
     import argparse
     args = argparse.Namespace(
         include_summaries=False, include_notes=False,
-        include_types="observation,decision",
+        include_types="observation,decision", only_use_types=None,
     )
     out = m3_enrich._build_type_allowlist(args)
     assert "observation" not in out
     assert "decision" in out
+    # And via --only-use-types.
+    args2 = argparse.Namespace(
+        include_summaries=False, include_notes=False,
+        include_types=None, only_use_types="observation,decision",
+    )
+    out2 = m3_enrich._build_type_allowlist(args2)
+    assert "observation" not in out2
+    assert "decision" in out2
 
 
 def test_load_profile_with_path_resolves_explicit_yaml(tmp_path, monkeypatch):
@@ -367,6 +455,7 @@ def test_drain_queue_mode_handles_empty_queue(stub_db, monkeypatch, capsys):
         include_summaries=False,
         include_notes=False,
         include_types=None,
+        only_use_types=None,
     )
 
     # _main_async dispatches drain_queue_mode early when args.drain_queue=True.

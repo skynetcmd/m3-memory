@@ -19,7 +19,8 @@ Scope:
     --chatlog           # only enrich agent_chatlog.db
     --include-summaries # add type='summary' rows to allowlist
     --include-notes     # add type='note' rows
-    --include-types t,t # extend allowlist with custom types
+    --include-types t,t # extend allowlist with custom types (additive)
+    --only-use-types t,t # replace allowlist entirely (no defaults merged in)
 
 Output:
     Observations are written as type='observation' rows under variant
@@ -66,7 +67,18 @@ import run_reflector as reflector  # noqa: E402
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
-DEFAULT_TYPES = ("message", "conversation", "chat_log")
+# Chatlog DBs are message-shaped, so the message/conversation/chat_log
+# default catches everything substantive. Core memory mostly lives under
+# summary/note/decision/plan/knowledge/fact/preference — filtering it
+# through the chatlog default leaves ~90% of rows unenriched. Resolve
+# the right default per-DB via _resolve_default_types().
+DEFAULT_TYPES = ("message", "conversation", "chat_log")  # chatlog default; also no-flag back-compat
+DEFAULT_CHATLOG_TYPES = DEFAULT_TYPES
+DEFAULT_CORE_TYPES = (
+    "summary", "note", "decision", "plan",
+    "knowledge", "fact", "preference",
+    "message", "conversation",
+)
 ALWAYS_SKIP_TYPES = ("observation",)  # already enriched; idempotency
 BACKUP_DIR = Path.home() / ".m3-memory" / "backups"
 
@@ -288,10 +300,11 @@ def _query_eligible_groups(
 
 def _print_dry_run(plan: dict) -> None:
     """Print a friendly summary of what would happen, without doing it."""
+    bar = "=" * 62
     print()
-    print("══════════════════════════════════════════════════════════════")
-    print("  m3-enrich DRY RUN — no writes will happen")
-    print("══════════════════════════════════════════════════════════════")
+    print(bar)
+    print("  m3-enrich DRY RUN -- no writes will happen")
+    print(bar)
     print()
     print(f"  Profile:             {plan['profile_name']}")
     print(f"  Model:               {plan['model']}")
@@ -305,7 +318,7 @@ def _print_dry_run(plan: dict) -> None:
     print(f"  Type allowlist:      {plan['types']}")
     print()
     for db_label, db_info in plan["dbs"].items():
-        print(f"  ── {db_label} ─────────────")
+        print(f"  -- {db_label} " + "-" * 13)
         print(f"     path:          {db_info['path']}")
         print(f"     conversations: {db_info['n_groups']}")
         print(f"     turns total:   {db_info['n_turns']}")
@@ -315,7 +328,7 @@ def _print_dry_run(plan: dict) -> None:
             print(f"     est wall:      {db_info['wall_estimate']}")
         print()
     print("To run for real, drop --dry-run.")
-    print("══════════════════════════════════════════════════════════════")
+    print(bar)
 
 
 def _estimate_cost_wall(profile: Profile, n_groups: int) -> tuple[Optional[str], Optional[str]]:
@@ -433,12 +446,43 @@ async def _run_reflector_pass(
     return counters
 
 
+def _resolve_default_types(args) -> tuple[str, ...]:
+    """Pick the default type allowlist based on which DB(s) are scoped.
+
+    --core (core_only) → DEFAULT_CORE_TYPES (broad: summary/note/decision/...).
+    --chatlog (chatlog_only) → DEFAULT_CHATLOG_TYPES (message/conversation/chat_log).
+    Both flags set is rejected by argparse-level guard, so not handled here.
+    Neither flag → DEFAULT_TYPES (back-compat with pre-refactor invocations
+    that ran both DBs through the chatlog-shaped default).
+    """
+    if getattr(args, "core_only", False):
+        return DEFAULT_CORE_TYPES
+    if getattr(args, "chatlog_only", False):
+        return DEFAULT_CHATLOG_TYPES
+    return DEFAULT_TYPES
+
+
 def _build_type_allowlist(args) -> tuple[str, ...]:
-    """Build the final type allowlist from defaults + opt-in flags."""
-    types = list(DEFAULT_TYPES)
-    if args.include_summaries:
+    """Build the final type allowlist from defaults + opt-in flags.
+
+    Resolution order:
+      1. If --only-use-types is set, that CSV REPLACES the default entirely
+         (the escape hatch for power users who want a precise, narrow list).
+      2. Otherwise start from the per-DB default (--core vs --chatlog).
+      3. --include-summaries, --include-notes, and --include-types all
+         EXTEND the active list (additive). Names match their semantics.
+    """
+    if getattr(args, "only_use_types", None):
+        types: list[str] = []
+        for t in args.only_use_types.split(","):
+            t = t.strip()
+            if t and t not in types and t not in ALWAYS_SKIP_TYPES:
+                types.append(t)
+    else:
+        types = list(_resolve_default_types(args))
+    if args.include_summaries and "summary" not in types:
         types.append("summary")
-    if args.include_notes:
+    if args.include_notes and "note" not in types:
         types.append("note")
     if args.include_types:
         for t in args.include_types.split(","):
@@ -494,7 +538,7 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
             except sqlite3.OperationalError:
                 pending = 0
         if pending == 0:
-            print(f"[m3-enrich] {db_path.name}: queue empty — skipping", flush=True)
+            print(f"[m3-enrich] {db_path.name}: queue empty -- skipping", flush=True)
             continue
         print(f"[m3-enrich] {db_path.name}: {pending} pending rows", flush=True)
         await observer.drain_queue_mode(drainer_args, profile, token)
@@ -503,9 +547,9 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
         # needed for tests.
 
     print()
-    print("══════════════════════════════════════════════════════════════")
+    print("=" * 62)
     print("  m3-enrich --drain-queue COMPLETE")
-    print("══════════════════════════════════════════════════════════════")
+    print("=" * 62)
     return 0
 
 
@@ -591,7 +635,7 @@ async def _main_async(args) -> int:
         await _smoke_profile(profile)
         for label, db_path in db_targets:
             backup = _backup_db(db_path)
-            print(f"[m3-enrich] backup: {db_path.name} → {backup}", flush=True)
+            print(f"[m3-enrich] backup: {db_path.name} -> {backup}", flush=True)
 
     # Observer pass per DB.
     counters_total = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
@@ -621,9 +665,9 @@ async def _main_async(args) -> int:
                   f"{r_counters['sup_written']} supersedes edges written", flush=True)
 
     print()
-    print("══════════════════════════════════════════════════════════════")
+    print("=" * 62)
     print("  m3-enrich COMPLETE")
-    print("══════════════════════════════════════════════════════════════")
+    print("=" * 62)
     print(f"  observations written: {counters_total['written']}")
     print(f"  conversations processed: {counters_total['processed']}")
     print(f"  empty (no extractable user-facts): {counters_total['empty_groups']}")
@@ -637,7 +681,7 @@ async def _main_async(args) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="m3_enrich — build observation memories from your core/chatlog DBs.",
+        description="m3_enrich -- build observation memories from your core/chatlog DBs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
@@ -664,9 +708,13 @@ Profile picker:
                     help="Override the Reflector stage with a different profile. "
                          "Defaults to --profile (same model for both stages).")
     ap.add_argument("--core", action="store_true", dest="core_only",
-                    help="Only enrich the core memory DB (skip chatlog).")
+                    help="Only enrich the core memory DB (skip chatlog). "
+                         "Auto-broadens default type allowlist to: "
+                         f"{','.join(DEFAULT_CORE_TYPES)}.")
     ap.add_argument("--chatlog", action="store_true", dest="chatlog_only",
-                    help="Only enrich the chatlog DB (skip core).")
+                    help="Only enrich the chatlog DB (skip core). "
+                         "Default type allowlist stays message-shaped: "
+                         f"{','.join(DEFAULT_CHATLOG_TYPES)}.")
     ap.add_argument("--core-db", default=None,
                     help="Explicit path to the core memory DB.")
     ap.add_argument("--chatlog-db", default=None,
@@ -682,11 +730,23 @@ Profile picker:
     ap.add_argument("--concurrency", type=int, default=4,
                     help="Concurrent SLM calls. Default 4.")
     ap.add_argument("--include-summaries", action="store_true",
-                    help="Add type='summary' rows to the allowlist.")
+                    help="Add type='summary' rows to the active allowlist "
+                         "(extends whichever default applies; redundant under --core).")
     ap.add_argument("--include-notes", action="store_true",
-                    help="Add type='note' rows to the allowlist.")
+                    help="Add type='note' rows to the active allowlist "
+                         "(extends whichever default applies; redundant under --core).")
     ap.add_argument("--include-types", default=None,
-                    help="Comma-separated types to add (e.g. 'decision,plan').")
+                    help="Comma-separated types to ADD to the active allowlist "
+                         "(extends whichever default applies). E.g. "
+                         "'--include-types reference,project' adds those alongside "
+                         "the per-DB default.")
+    ap.add_argument("--only-use-types", default=None,
+                    help="Comma-separated types -- REPLACES the default allowlist "
+                         "entirely (e.g. '--only-use-types decision,plan' selects "
+                         "ONLY those, no defaults merged in). Use this when you "
+                         "want a precise narrow list. --include-summaries / "
+                         "--include-notes / --include-types still extend after "
+                         "replacement.")
     ap.add_argument("--drain-queue", action="store_true",
                     help="Phase E2: drain pending observation_queue rows that "
                          "were enqueued by the chatlog auto-enrich hook "

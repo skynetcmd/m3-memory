@@ -89,7 +89,15 @@ async def _push_to_chroma(client, col_id, col_path, max_items, target):
             logger.debug(f"[{target.name}] Skipping push: chroma_sync_queue table not found.")
             return 0, 0, ""
 
-        queue = db.execute("SELECT id, memory_id, operation FROM chroma_sync_queue WHERE attempts < 3 ORDER BY queued_at ASC LIMIT ?", (max_items,)).fetchall()
+        queue = db.execute(
+            "SELECT q.id, q.memory_id, q.operation "
+            "FROM chroma_sync_queue q "
+            "LEFT JOIN memory_embeddings e ON e.memory_id = q.memory_id "
+            "WHERE q.attempts < 3 "
+            "ORDER BY (e.memory_id IS NULL), q.queued_at ASC "
+            "LIMIT ?",
+            (max_items,)
+        ).fetchall()
         if not queue: return 0, 0, ""
 
         # Detect collection dimension to filter mismatched embeddings
@@ -121,7 +129,9 @@ async def _push_to_chroma(client, col_id, col_path, max_items, target):
                         "target_db": target.name
                     })
                     batch_qids.append(qid)
-                else: skip_qids.append(qid)
+                else:
+                    logger.info(f"[{target.name}] skip qid={qid} mid={mid} reason={'no_item' if not item else 'no_embedding'}")
+                    skip_qids.append(qid)
             elif op == "delete":
                 delete_ids.append(mid); delete_qids.append(qid)
 
@@ -148,6 +158,7 @@ async def _push_to_chroma(client, col_id, col_path, max_items, target):
 
         if skip_qids:
             db.execute(f"DELETE FROM chroma_sync_queue WHERE id IN ({','.join(['?']*len(skip_qids))})", skip_qids)
+            logger.warning(f"[{target.name}] dropped {len(skip_qids)} orphan queue rows (no item or embedding)")
         return synced, failed, ""
 
 async def _pull_from_chroma(client, col_id, col_path, max_items, target):

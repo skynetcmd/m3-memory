@@ -444,11 +444,15 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="memory_get",
-        description="Retrieves a full MemoryItem by UUID.",
+        description="Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error.",
         parameters={
             "type": "object",
             "properties": {
-                "id": {"type": "string", "description": "Memory item UUID."},
+                "id": {
+                    "type": "string",
+                    "description": "Memory item id — 36-char UUID or 8-char prefix. "
+                                   "Ambiguous prefixes return an error listing the matching ids.",
+                },
             },
             "required": ["id"],
         },
