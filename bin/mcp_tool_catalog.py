@@ -292,6 +292,52 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=True,
     ),
     ToolSpec(
+        name="memory_write_from_file",
+        description=(
+            "Write a memory whose content is read from a file on disk. Use this "
+            "when the memory body is large (>1k chars) to avoid the autoregressive "
+            "decode latency of streaming a multi-thousand-token JSON `input` field "
+            "through tool_use — write the body with the Write tool first (off the "
+            "streaming path, fast), then call this tool with just the path + tiny "
+            "metadata. The MCP server reads the file, writes the row through the "
+            "same path as memory_write (all gates apply), and by default deletes "
+            "the source file on success. Path must be absolute on the host running "
+            "this MCP server. Files >200000 bytes are rejected; underlying content "
+            "is still capped at 50000 chars by memory_write_impl."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path":          {"type": "string", "description": "Absolute path to a UTF-8 text file on the MCP server host. The file's contents become the memory `content`."},
+                "type":          {"type": "string", "description": f"Memory type. One of: {', '.join(sorted(VALID_MEMORY_TYPES))}."},
+                "title":         {"type": "string", "description": "Short title.", "default": ""},
+                "metadata":      {"type": "string", "description": "JSON-encoded metadata object.", "default": "{}"},
+                "agent_id":      {"type": "string", "description": "Owning agent id. Injected by the orchestrator.", "default": ""},
+                "model_id":      {"type": "string", "description": "Originating model id.", "default": ""},
+                "change_agent":  {"type": "string", "description": "Agent causing the write (audit).", "default": ""},
+                "importance":    {"type": "number", "description": "0.0-1.0 relevance.", "default": 0.5},
+                "source":        {"type": "string", "description": "Provenance tag.", "default": "agent"},
+                "embed":         {"type": "boolean", "description": "Embed for semantic search.", "default": True},
+                "user_id":       {"type": "string", "description": "Data subject id.", "default": ""},
+                "scope":         {"type": "string", "description": "Isolation scope.", "default": "agent"},
+                "valid_from":    {"type": "string", "description": "ISO-8601 validity start.", "default": ""},
+                "valid_to":      {"type": "string", "description": "ISO-8601 validity end.", "default": ""},
+                "auto_classify": {"type": "boolean", "description": "Let the LLM pick the type (forced true if type='auto').", "default": False},
+                "conversation_id": {"type": "string", "description": "Groups this memory with a conversation / team session.", "default": ""},
+                "refresh_on":    {"type": "string", "description": "ISO-8601 timestamp when this memory should be flagged for review.", "default": ""},
+                "refresh_reason": {"type": "string", "description": "Why this memory needs refreshing.", "default": ""},
+                "variant":       {"type": "string", "description": "Pipeline identifier for A/B variant tracking.", "default": ""},
+                "delete_after_read": {"type": "boolean", "description": "Delete the source file after successful write. Default true (signals contents are now authoritative in m3-memory).", "default": True},
+            },
+            "required": ["path", "type"],
+        },
+        impl=memory_core.memory_write_from_file_impl,
+        is_async=True,
+        validators=(_memory_write_validator,),
+        default_allowed=True,
+        inject_agent_id=True,
+    ),
+    ToolSpec(
         name="memory_search",
         description="Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation.",
         parameters={
@@ -308,7 +354,7 @@ TOOLS: list[ToolSpec] = [
                 "as_of":              {"type": "string", "description": "ISO-8601 time-travel cutoff.", "default": ""},
                 "conversation_id":    {"type": "string", "description": "Restrict to a conversation / team session.", "default": ""},
                 "recency_bias":       {"type": "number", "description": "Boost newer items (0.0=off, 0.1-0.2=moderate, higher=aggressive). Useful for 'current' or 'latest' queries.", "default": 0.0},
-                "adaptive_k":         {"type": "boolean", "description": "Auto-trim results at the score drop-off point, returning only high-relevance items.", "default": False},
+                "adaptive_k":         {"type": "boolean", "description": "Auto-trim results at the score drop-off point. WARNING: regresses heavily on temporal-reasoning, knowledge-update, and multi-session queries (measured 0/10 on temporal in 2026-04-26 LongMemEval-S sweep); safe only for sharp-curve queries where most retrievals would be noise. See memory 4b19f42b. Prefer `auto_route=True` on memory_search_routed for safer multi-signal routing.", "default": False},
                 "variant":            {"type": "string", "description": "Ingest-pipeline filter. '' = real user data only (default, equivalent to IS NULL). Pass a specific variant name (e.g. 'heuristic_c1c4') to scope to that bench ingest.", "default": ""},
                 "include_bench_data": {"type": "boolean", "description": "Opt in to LOCOMO / LongMemEval bench rows. Default False hides any row with a variant tag.", "default": False},
             },
@@ -361,6 +407,33 @@ TOOLS: list[ToolSpec] = [
                 "as_of":           {"type": "string", "default": ""},
                 "conversation_id": {"type": "string", "default": ""},
                 "explain":         {"type": "boolean", "default": False},
+                "entity_graph":    {"type": "boolean", "description": "Direct lever for entity-graph expansion. Default False = OFF (production default; matches memory_search behavior). True = parse query for named entities, traverse entity_relationships up to entity_graph_depth hops, fold matched memory_ids into the result set tagged expanded_via='entity_graph'. The AUTO layer can also flip this on for the entity_anchored branch (see auto_entity_graph_enabled), but caller-explicit entity_graph=True works without auto_route. Use for benchmarking + production opt-in once empirically validated. See decision memory `c98817ca` and `931774b0` for context.", "default": False},
+                "rerank":          {"type": "boolean", "description": "Cross-encoder reranking. Default False = OFF (production behavior unchanged). True = re-score top (rerank_pool_k or 3*k) hits with sentence-transformers CrossEncoder, blend with hybrid score per rerank_blend, re-sort. Adds ~12MB-560MB model download (cached at ~/.cache/torch) + ~50ms/pair on GPU, ~200ms/pair on CPU. Used in benchmarking; opt-in for production retrieval. Memory `1e8f565c` cites ~+2-3pp lift on LongMemEval-S.", "default": False},
+                "rerank_model":    {"type": "string", "description": "Cross-encoder model id. Default empty = DEFAULT_RERANK_MODEL (cross-encoder/ms-marco-MiniLM-L-6-v2 — small, fast, English-tuned). Higher-accuracy alternative: BAAI/bge-reranker-v2-m3 (multilingual, larger, slower). Override via M3_RERANK_MODEL env var.", "default": ""},
+                "rerank_pool_k":   {"type": "integer", "description": "Pool size before rerank. Default 0 = 3*k. Higher pool = more candidates rescored = slower but potentially higher recall. Never truncates below final k. Only used when rerank=True.", "default": 0},
+                "rerank_blend":    {"type": "number", "description": "Blend factor: final_score = rerank_blend * ce_score + (1 - rerank_blend) * hybrid_score. Default 1.0 = pure CE replacement (most aggressive). 0.5 = average. 0.3 = CE as tiebreaker over hybrid. 0.0 = no-op (skip rerank — same effect as rerank=False). Only used when rerank=True.", "default": 1.0},
+                "entity_graph_depth":         {"type": "integer", "description": "BFS hop count over entity_relationships when entity_graph=True. Default 1 = direct neighbors only. Clamped to [1,3] core-side. Higher depth pulls more neighbors but adds noise; depth=2 typically helps multi-hop questions but regresses sharp single-fact lookups.", "default": 1},
+                "entity_graph_max_neighbors": {"type": "integer", "description": "Cap on entity nodes discovered during BFS traversal when entity_graph=True. Default 20. Clamped to [1,100] core-side. Lower = fewer rows folded in but tighter relevance; higher = broader recall at cost of precision.", "default": 20},
+                "auto_route":      {"type": "boolean", "description": "Multi-signal retrieval routing. Default False = no auto-routing (existing behavior). True = router picks branch (temporal/multi_session/sharp/default) and fills in unset parameters with branch-specific values; caller-explicit values still win.", "default": False},
+                "auto_top1_sharp_min": {"type": "number", "description": "Top-1 score above which query is marked sharp. Default 0.89. Used by sharp branch to detect high-confidence queries (grounded in strat60 p75).", "default": 0.89},
+                "auto_slope_at_3_sharp_min": {"type": "number", "description": "Slope-at-3 (score drop per rank) above which query is marked sharp. Default 0.08. Steeper curves = more relevance discrimination.", "default": 0.08},
+                "auto_conv_id_diversity_threshold": {"type": "integer", "description": "Number of distinct conversation IDs in top-10 hits above which query is routed to multi_session. Default 5. Higher threshold = only very scattered results trigger expansion.", "default": 5},
+                "auto_top1_low_threshold": {"type": "number", "description": "Score floor for sharp detection (OOD guard). Default 0.50. Below this, query is not marked sharp even if other signals fire (prevents misclassifying low-confidence matches).", "default": 0.50},
+                "auto_temporal_k": {"type": "integer", "description": "k for temporal branch when auto_route=True. Default 15. Branch fires when query has temporal cues (when/since/before/after/dates).", "default": 15},
+                "auto_temporal_recency_bias": {"type": "number", "description": "recency_bias for temporal branch. Default 0.05. Boosts recent memories over older ones (useful for 'recently'/'today' questions).", "default": 0.05},
+                "auto_temporal_expand_sessions": {"type": "boolean", "description": "expand_sessions for temporal branch. Default True. Pulls full conversation context when a temporal hit is found (important for 'what happened after X' questions).", "default": True},
+                "auto_temporal_graph_depth": {"type": "integer", "description": "graph_depth for temporal branch (AUTO_v2 fix). Default 1. Traverses memory relationships to find cross-temporal references (e.g., follow-up discussions on an earlier event).", "default": 1},
+                "auto_multi_k": {"type": "integer", "description": "k for multi_session branch when auto_route=True. Default 20. Branch fires on comparison queries (how many/count/total) or when hits scatter across multiple conversations.", "default": 20},
+                "auto_multi_expand_sessions": {"type": "boolean", "description": "expand_sessions for multi_session branch. Default True. Pulls all turns from detected conversation IDs for aggregate comparisons ('list all X across conversations').", "default": True},
+                "auto_sharp_threshold_ratio": {"type": "number", "description": "Trim hits below (top_score * ratio) in sharp branch. Default 0.85. Removes tail noise when there's a clear high-confidence cluster.", "default": 0.85},
+                "auto_sharp_k_min": {"type": "integer", "description": "Floor for hit count after sharp threshold trim. Default 3. Ensures at least this many hits even if threshold trim is aggressive.", "default": 3},
+                "auto_sharp_k_max": {"type": "integer", "description": "Ceiling for hit count after sharp threshold trim. Default 10. Caps result set when sharp curve is very steep.", "default": 10},
+                "auto_entity_graph_enabled": {"type": "boolean", "description": "AUTO entity-anchored branch enable. Default True = branch fires when query has named entities AND auto_route=True. Caller can pass False to disable AUTO from enabling entity_graph (still works if caller passes entity_graph=True explicitly).", "default": True},
+                "auto_entity_graph_depth": {"type": "integer", "description": "Entity-graph traversal depth when AUTO entity_anchored branch fires. Default 1 = single-hop neighbors. Higher (2-3) traverses further but adds noise.", "default": 1},
+                "auto_entity_graph_max_neighbors": {"type": "integer", "description": "Cap on entities expanded during AUTO entity-anchored traversal. Default 20.", "default": 20},
+                "auto_entity_graph_named_entity_threshold": {"type": "integer", "description": "Minimum named-entity count in query for AUTO entity_anchored branch to fire. Default 1 = fire on any proper noun phrase (two+ capitalized words). Higher (2-3) is more conservative.", "default": 1},
+                "entity_graph_valid_types": {"type": "array", "items": {"type": "string"}, "description": "Override list of allowed entity_type values for graph traversal. Default empty = use core defaults (person, place, organization, event, concept, object, date). Pass a list to filter traversal to specific types.", "default": []},
+                "entity_graph_valid_predicates": {"type": "array", "items": {"type": "string"}, "description": "Override list of allowed predicate values for graph traversal. Default empty = use core defaults (works_at, located_in, before, after, same_as, contradicts, mentions, relates_to). Pass a list to filter traversal to specific predicates.", "default": []},
             },
             "required": ["query"],
         },
