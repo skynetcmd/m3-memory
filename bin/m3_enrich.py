@@ -298,14 +298,8 @@ def _query_eligible_groups(
     return out
 
 
-def _print_dry_run(plan: dict) -> None:
-    """Print a friendly summary of what would happen, without doing it."""
-    bar = "=" * 62
-    print()
-    print(bar)
-    print("  m3-enrich DRY RUN -- no writes will happen")
-    print(bar)
-    print()
+def _print_plan_body(plan: dict) -> None:
+    """Shared plan summary used by both dry-run and real-run banners."""
     print(f"  Profile:             {plan['profile_name']}")
     print(f"  Model:               {plan['model']}")
     print(f"  Endpoint:            {plan['url']}")
@@ -327,7 +321,30 @@ def _print_dry_run(plan: dict) -> None:
         if db_info.get('wall_estimate'):
             print(f"     est wall:      {db_info['wall_estimate']}")
         print()
+
+
+def _print_dry_run(plan: dict) -> None:
+    """Friendly summary of what would happen, without doing it."""
+    bar = "=" * 62
+    print()
+    print(bar)
+    print("  m3-enrich DRY RUN -- no writes will happen")
+    print(bar)
+    print()
+    _print_plan_body(plan)
     print("To run for real, drop --dry-run.")
+    print(bar)
+
+
+def _print_run_summary(plan: dict) -> None:
+    """Banner for an actual enrichment run (writes will happen)."""
+    bar = "=" * 62
+    print()
+    print(bar)
+    print("  m3-enrich RUN -- writing observations")
+    print(bar)
+    print()
+    _print_plan_body(plan)
     print(bar)
 
 
@@ -619,7 +636,7 @@ async def _main_async(args) -> int:
         _print_dry_run(plan)
         return 0
 
-    _print_dry_run(plan)
+    _print_run_summary(plan)
     print()
     if not args.yes:
         try:
