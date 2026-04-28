@@ -59,6 +59,82 @@ class MigrationTarget:
     migrations_dir: str
 
 
+# Tables that uniquely identify the *main* schema. `agents` has been present
+# since v001 of the main migrations stack and is never created by chatlog
+# migrations or by memory_core lazy-init. Several other main-only tables
+# (memory_history, tasks, gdpr_requests, agent_retention_policies) reinforce
+# the signal; we accept any one of them as proof.
+#
+# The chatlog schema is a deliberate subset of main — same memory_items /
+# memory_embeddings / FTS — so there is NO chatlog-only marker we can detect
+# positively. Classification is "main if any of these markers exist, chatlog
+# if none of them do AND the file has the storage tables". This asymmetry is
+# why we cannot just symmetrically check both signatures.
+_MAIN_SIGNATURE_TABLES: frozenset[str] = frozenset({
+    "agents",
+    "memory_history",
+    "tasks",
+    "gdpr_requests",
+    "agent_retention_policies",
+    "activity_logs",
+})
+
+# Tables present on any post-bootstrap chatlog DB. Used to distinguish
+# "chatlog" from "unknown" when the main signatures are absent.
+_CHATLOG_STORAGE_TABLES: frozenset[str] = frozenset({
+    "memory_items",
+    "memory_embeddings",
+    "memory_relationships",
+})
+
+
+def _classify_db(db_path: str) -> str:
+    """Identify a SQLite file's schema kind from its tables.
+
+    Returns one of:
+        "empty"   — file does not exist OR has no user tables (fresh DB)
+        "main"    — has main-only tables (agents / memory_history / tasks)
+        "chatlog" — has chatlog storage tables but no main-only tables
+        "unknown" — has tables but matches neither signature
+
+    Path-equality alone is unreliable: a user can set CHATLOG_DB_PATH to a
+    path that happens to also match M3_DATABASE, or the chatlog DB can be
+    pointed at by M3_DATABASE accidentally. Looking at actual schema makes
+    the runner robust to whatever path-resolution surprises arise.
+
+    Note: a chatlog DB that has been *lazy-touched* by memory_core picks up
+    memory_items + memory_embeddings + chroma_sync_queue, but never the
+    main-only tables in _MAIN_SIGNATURE_TABLES. So presence-of-storage
+    plus absence-of-main-signatures is a reliable "this is chatlog".
+    """
+    if not os.path.exists(db_path):
+        return "empty"
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        # Locked/missing/corrupt — be conservative: callers should treat
+        # "unknown" as "do not auto-migrate".
+        return "unknown"
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+    except sqlite3.Error:
+        return "unknown"
+    finally:
+        conn.close()
+    tables = {r[0] for r in rows}
+    if not tables:
+        return "empty"
+    has_main = bool(tables & _MAIN_SIGNATURE_TABLES)
+    has_storage = bool(tables & _CHATLOG_STORAGE_TABLES)
+    if has_main:
+        return "main"
+    if has_storage:
+        return "chatlog"
+    return "unknown"
+
+
 def targets(selected: str = "all") -> List[MigrationTarget]:
     """
     Returns a list of MigrationTarget objects based on selection.
@@ -69,6 +145,14 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
     Returns:
         List of MigrationTarget objects configured for the selection.
         If chatlog_config import fails, returns only main.
+
+    Hardening: when the resolved "main" path actually points at a chatlog DB
+    (M3_DATABASE misconfigured, or a user pointing the runner at the wrong
+    file), the main target is *removed* from the result and an error is
+    logged. Applying main-stack DDL to a chatlog DB is never the right call
+    — schema_versions rows will be wrong, and most main migrations will
+    fail with "no such column" / "no such table" errors after partial
+    application leaves the chatlog DB in a half-migrated state.
     """
     # Honor M3_DATABASE for the main target so migrations land on the DB the
     # caller is targeting, not always agent_memory.db.
@@ -77,13 +161,38 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
         main_path = _resolve_main(None)
     except ImportError:
         main_path = DB_PATH
-    main_target = MigrationTarget(name="main", db_path=main_path, migrations_dir=MIGRATIONS_DIR)
+
+    main_kind = _classify_db(main_path)
+    main_target_valid = main_kind in ("main", "empty")
+    if not main_target_valid:
+        # Defensive: refuse to attach main migrations dir to a chatlog DB.
+        # When --target main is explicit, this is a hard error (return []).
+        # When --target all is in effect, we drop main but still try chatlog.
+        if main_kind == "chatlog":
+            logger.error(
+                "Refusing to apply main migrations to %s — schema fingerprint says "
+                "this is a chatlog DB. Set M3_DATABASE to your main agent_memory.db, "
+                "or use --target chatlog.", main_path,
+            )
+        else:  # unknown
+            logger.error(
+                "Refusing to apply main migrations to %s — schema fingerprint is "
+                "unrecognised (kind=%s). Inspect the file or restore from backup.",
+                main_path, main_kind,
+            )
+
+    main_target = (
+        MigrationTarget(name="main", db_path=main_path, migrations_dir=MIGRATIONS_DIR)
+        if main_target_valid else None
+    )
 
     if selected == "main":
-        return [main_target]
+        return [main_target] if main_target else []
 
     if selected == "all" or selected == "chatlog":
-        result = [main_target]
+        result: List[MigrationTarget] = []
+        if main_target:
+            result.append(main_target)
 
         # Chatlog migrations only run when chatlog lives in a different file
         # than the main DB. With path-equality unification, same-file means
@@ -92,11 +201,39 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
         try:
             from chatlog_config import CHATLOG_MIGRATIONS_DIR, chatlog_db_path
             chatlog_path = os.path.abspath(chatlog_db_path())
-            if chatlog_path != os.path.abspath(main_target.db_path):
+            if chatlog_path != os.path.abspath(main_path):
+                chatlog_kind = _classify_db(chatlog_path)
+                if chatlog_kind in ("chatlog", "empty"):
+                    chatlog_target = MigrationTarget(
+                        name="chatlog",
+                        db_path=chatlog_path,
+                        migrations_dir=CHATLOG_MIGRATIONS_DIR,
+                    )
+                    if selected == "chatlog":
+                        return [chatlog_target]
+                    result.append(chatlog_target)
+                else:  # main / unknown
+                    logger.error(
+                        "Refusing to apply chatlog migrations to %s — schema "
+                        "fingerprint says kind=%s. Set CHATLOG_DB_PATH to a "
+                        "real chatlog DB or omit it.", chatlog_path, chatlog_kind,
+                    )
+                    if selected == "chatlog":
+                        return []
+            elif main_kind == "chatlog" and selected in ("chatlog", "all"):
+                # Recovery path: M3_DATABASE was misdirected at the chatlog DB,
+                # so chatlog_db_path() also resolves to it and main was refused
+                # above. Run chatlog migrations against this path so the user's
+                # data still gets schema fixes instead of being stranded.
+                logger.warning(
+                    "Main path resolves to a chatlog DB; routing chatlog migrations "
+                    "to %s. Set M3_DATABASE to your main agent_memory.db to avoid "
+                    "this fallback.", chatlog_path,
+                )
                 chatlog_target = MigrationTarget(
                     name="chatlog",
                     db_path=chatlog_path,
-                    migrations_dir=CHATLOG_MIGRATIONS_DIR
+                    migrations_dir=CHATLOG_MIGRATIONS_DIR,
                 )
                 if selected == "chatlog":
                     return [chatlog_target]
@@ -113,7 +250,7 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
         return result
 
     logger.error(f"Unknown target selection: {selected}")
-    return [main_target]
+    return [main_target] if main_target else []
 
 # ── Config (backup dir persistence) ─────────────────────────────────────────
 
