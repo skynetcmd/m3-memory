@@ -43,17 +43,22 @@ def get_category_map():
         # Memory Operations
         "memory_write": "Memory Operations",
         "memory_search": "Memory Operations",
+        "memory_search_routed": "Memory Operations",
         "memory_suggest": "Memory Operations",
         "memory_get": "Memory Operations",
         "memory_update": "Memory Operations",
         "memory_delete": "Memory Operations",
         "memory_verify": "Memory Operations",
         "memory_feedback": "Memory Operations",
-        
+
         # Knowledge Graph
         "memory_link": "Knowledge Graph",
         "memory_graph": "Knowledge Graph",
         "memory_history": "Knowledge Graph",
+        "entity_search": "Knowledge Graph",
+        "entity_get": "Knowledge Graph",
+        "extract_pending": "Knowledge Graph",
+        "enrich_pending": "Knowledge Graph",
         
         # Conversations
         "conversation_start": "Conversations",
@@ -235,8 +240,14 @@ def main():
             "source": "mcp_proxy.py (DEBUG_TOOLS)"
         })
     
-    if len(all_tools) != 66:
-        print(f"Warning: Expected 66 tools, found {len(all_tools)}")
+    # Sanity check — alerts if a tool was added/removed without updating the
+    # category map (would land in "Uncategorized" otherwise). Update this
+    # number when adding/removing tools as part of the regular tool-inventory
+    # workflow. Per memory `feedback_tool_inventory`: every flag needs a default;
+    # similarly every tool needs a category.
+    EXPECTED_TOOL_COUNT = 71
+    if len(all_tools) != EXPECTED_TOOL_COUNT:
+        print(f"Warning: Expected {EXPECTED_TOOL_COUNT} tools, found {len(all_tools)} — update EXPECTED_TOOL_COUNT in gen_mcp_inventory.py if a tool was added/removed.")
     
     # 3. Render
     markdown = generate_markdown(all_tools)

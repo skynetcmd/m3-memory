@@ -61,6 +61,17 @@ PRIVATE = {
     "macbook_status_server.py",
 }
 
+# Path-prefix-based privacy. Any tracked source whose path-relative-to-repo
+# starts with one of these prefixes is marked private regardless of basename.
+# This keeps benchmark-side internals (knob configs, harness specifics, run
+# orchestration details that reveal current bench targets) from leaking into
+# a public publish. Per memory `22c5aa8b`: bench-only fixes never land on
+# origin/main without an explicit publish commit.
+PRIVATE_PATH_PREFIXES = (
+    "benchmarks/longmemeval/",
+    "benchmarks/locomo/",
+)
+
 # Core library modules worth auditing even though they lack a CLI surface —
 # central enough that other tools import them, so they belong in the graph.
 CORE_LIBRARIES = {
@@ -72,6 +83,10 @@ CORE_LIBRARIES = {
     "chatlog_config.py", "chatlog_core.py", "chatlog_redaction.py",
     "chatlog_status.py", "memory_maintenance.py", "memory_sync.py",
     "llm_failover.py",
+    # auto_route is a pure-helper module (signal extractors + branch decider)
+    # imported by memory_core.memory_search_routed_impl when auto_route=True.
+    # No CLI surface but load-bearing for the AUTO retrieval layer.
+    "auto_route.py",
 }
 
 _ENV_RE = re.compile(r"""os\.(?:environ\.get|getenv)\(\s*['"]([A-Z0-9_]+)['"]""")
@@ -575,6 +590,42 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
 
 
 def main() -> None:
+    # CLI: --root REPATHS the worktree (so the same script can inventory the
+    # bench worktree without copying). --extra-root-file adds files to scan
+    # at the repo root (use repeatedly). Defaults preserve existing behavior.
+    import argparse as _argparse
+    ap = _argparse.ArgumentParser(description="Generate per-tool inventory under docs/tools/.")
+    ap.add_argument("--root", default=None,
+                    help="Repo root override. Defaults to the parent of the script's bin/ "
+                         "dir. Use this from a separate worktree (e.g. m3-memory-bench) "
+                         "without copying the script — pass --root <worktree-path>.")
+    ap.add_argument("--extra-root-file", action="append", default=[],
+                    help="Extra root-level python file to inventory (relative to --root). "
+                         "Repeat for multiple files. Use for worktree-specific helpers "
+                         "(e.g. bench_db.py) that live at the repo root.")
+    args = ap.parse_args()
+
+    if args.root:
+        global BASE_DIR, BIN_DIR, SCRIPTS_DIR, BENCHMARKS_DIR, SOURCE_DIRS, RECURSIVE_SOURCE_DIRS, ROOT_FILES, OUT_DIR
+        BASE_DIR = Path(args.root).resolve()
+        BIN_DIR = BASE_DIR / "bin"
+        SCRIPTS_DIR = BASE_DIR / "scripts"
+        BENCHMARKS_DIR = BASE_DIR / "benchmarks"
+        SOURCE_DIRS = [BIN_DIR, SCRIPTS_DIR]
+        RECURSIVE_SOURCE_DIRS = [BENCHMARKS_DIR]
+        # When --root is given, only the explicit --extra-root-file entries
+        # count as ROOT_FILES (the default list is m3-memory-specific). The
+        # bench worktree should pass its own helpers.
+        ROOT_FILES = [BASE_DIR / r for r in args.extra_root_file]
+        OUT_DIR = BASE_DIR / "docs" / "tools"
+    elif args.extra_root_file:
+        # No --root, but caller wants additional root files. Append to defaults.
+        for r in args.extra_root_file:
+            ROOT_FILES.append(BASE_DIR / r)
+
+    print(f"[gen_tool_inventory] root={BASE_DIR}", flush=True)
+    print(f"[gen_tool_inventory] root files: {[r.name for r in ROOT_FILES]}", flush=True)
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     repo_mods = _repo_module_set()
     index_entries: list[tuple[str, str, bool]] = []
@@ -631,14 +682,16 @@ def main() -> None:
         file_deps = extract_file_deps(source)
         sha1 = file_sha1(src)
         mtime = datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc).isoformat()
-        private = src.name in PRIVATE
-
         # Relative path rooted at repo root, with forward slashes for portability
         # in markdown links.
         try:
             rel = src.relative_to(BASE_DIR).as_posix()
         except ValueError:
             rel = f"{src.parent.name}/{src.name}"
+        private = (
+            src.name in PRIVATE
+            or any(rel.startswith(p) for p in PRIVATE_PATH_PREFIXES)
+        )
         out_path = OUT_DIR / (src.stem + ".md")
 
         # Preserve hand-curated flag columns from the prior file.
