@@ -573,7 +573,7 @@ def main() -> None:
     ap.add_argument("--concurrency", type=int, default=4,
                     help="Concurrent Observer SLM calls.")
     ap.add_argument("--qids-file", default=None,
-                    help="JSON dataset; scope variant-mode work to its question_ids.")
+                    help="Optional JSON file with a list of ids; scopes variant-mode work to those ids only.")
     ap.add_argument("--batch", type=int, default=100,
                     help="Queue-mode batch size per invocation. Default 100.")
     args = ap.parse_args()

@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: 50ea1c9e7633
-mtime_utc: 2026-04-25T00:09:43.010303+00:00
-generated_utc: 2026-04-26T10:12:31.931751+00:00
+sha1: 0fbe6fc02bed
+mtime_utc: 2026-04-28T03:05:32.881224+00:00
+generated_utc: 2026-04-28T15:48:17.235168+00:00
 private: false
 ---
 
@@ -46,6 +46,8 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 ## Environment variables read
 
+- `M3_AUTO_ENRICH`
+- `M3_AUTO_ENRICH_MIN_TURNS`
 - `USER`
 - `USERNAME`
 
@@ -54,6 +56,7 @@ message ids / indices have been ingested so re-invoking on the same transcript
 - `chatlog_config`
 - `chatlog_core`
 - `m3_sdk (add_database_arg)`
+- `memory_core`
 
 ## Calls OUT (external side-channels)
 

@@ -1,27 +1,28 @@
 # Tool inventory index
 
-_Generated 2026-04-22T02:12:39.440550+00:00._
+_Generated 2026-04-28T15:49:05.503730+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
 
 | Tool | Summary | Private |
 |---|---|---|
-| [benchmarks/locomo/analyze_handoff.py](analyze_handoff.md) | Phase 1 analysis: what does retrieval hand off to the answerer? |  |
-| [benchmarks/locomo/analyze_prompt.py](analyze_prompt.md) | Phase 1: answerer-prompt anatomy and waste analysis. |  |
-| [benchmarks/locomo/bench_locomo.py](bench_locomo.md) | Dialog-QA benchmark runner for m3-memory. |  |
-| [benchmarks/locomo/compare_runs.py](compare_runs.md) | Compare two Phase 1 runs side-by-side. |  |
-| [benchmarks/locomo/join_variant_reports.py](join_variant_reports.md) | Join multiple retrieval_audit summary.json files into one comparison report. |  |
-| [benchmarks/locomo/probe_ingest_cost.py](probe_ingest_cost.md) | Measure ingestion cost per variant for 1 and 10 LOCOMO turns. |  |
-| [benchmarks/locomo/probe_issues.py](probe_issues.md) | Probe specific issues identified in handoff analysis: |  |
-| [benchmarks/locomo/reingest.py](reingest.md) | Re-ingest LOCOMO samples with explicit variant tags. |  |
-| [benchmarks/locomo/retrieval_audit.py](retrieval_audit.md) | Phase 1: LOCOMO retrieval audit. |  |
-| [benchmarks/locomo/stamp_variants_from_chainlog.py](stamp_variants_from_chainlog.md) | Retrofit `variant` field into summary.json files based on a chain.log. |  |
-| [benchmarks/longmemeval/bench_longmemeval.py](bench_longmemeval.md) | Long-session QA benchmark runner for m3-memory. |  |
+| [benchmarks/locomo/analyze_handoff.py](analyze_handoff.md) | Phase 1 analysis: what does retrieval hand off to the answerer? | yes |
+| [benchmarks/locomo/analyze_prompt.py](analyze_prompt.md) | Phase 1: answerer-prompt anatomy and waste analysis. | yes |
+| [benchmarks/locomo/bench_locomo.py](bench_locomo.md) | Dialog-QA benchmark runner for m3-memory. | yes |
+| [benchmarks/locomo/compare_runs.py](compare_runs.md) | Compare two Phase 1 runs side-by-side. | yes |
+| [benchmarks/locomo/join_variant_reports.py](join_variant_reports.md) | Join multiple retrieval_audit summary.json files into one comparison report. | yes |
+| [benchmarks/locomo/probe_ingest_cost.py](probe_ingest_cost.md) | Measure ingestion cost per variant for 1 and 10 LOCOMO turns. | yes |
+| [benchmarks/locomo/probe_issues.py](probe_issues.md) | Probe specific issues identified in handoff analysis: | yes |
+| [benchmarks/locomo/reingest.py](reingest.md) | Re-ingest LOCOMO samples with explicit variant tags. | yes |
+| [benchmarks/locomo/retrieval_audit.py](retrieval_audit.md) | Phase 1: LOCOMO retrieval audit. | yes |
+| [benchmarks/locomo/stamp_variants_from_chainlog.py](stamp_variants_from_chainlog.md) | Retrofit `variant` field into summary.json files based on a chain.log. | yes |
+| [benchmarks/longmemeval/bench_longmemeval.py](bench_longmemeval.md) | Long-session QA benchmark runner for m3-memory. | yes |
 | [bin/agent_protocol.py](agent_protocol.md) | (no docstring) |  |
 | [bin/ai_mechanic.py](ai_mechanic.md) | (no docstring) |  |
 | [bin/augment_memory.py](augment_memory.md) | Offline post-ingest augmentation utilities for memory_items. |  |
 | [bin/auth_utils.py](auth_utils.md) | (no docstring) |  |
+| [bin/auto_route.py](auto_route.md) | auto_route — multi-signal retrieval branch decider. |  |
 | [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. |  |
 | [bin/benchmark_memory.py](benchmark_memory.md) | Retrieval Quality Benchmark for M3 Memory System. |  |
 | [bin/build_kg_variant.py](build_kg_variant.md) | Build a KG-enriched variant from an existing source variant. |  |
@@ -33,6 +34,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/chatlog_redaction.py](chatlog_redaction.md) | Optional secret-scrubbing for chat log entries. |  |
 | [bin/chatlog_status.py](chatlog_status.md) | chatlog_status.py — single-call summary of the chat log subsystem state. |  |
 | [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
+| [bin/chroma_health.py](chroma_health.md) | CLI script to report ChromaDB sync health metrics. |  |
 | [bin/chroma_sync_cli.py](chroma_sync_cli.md) | CLI wrapper for ChromaDB bi-directional sync. |  |
 | [bin/cli_kb_browse.py](cli_kb_browse.md) | cli_kb_browse.py — Browse knowledge base entries in rank (importance) order. |  |
 | [bin/cli_knowledge.py](cli_knowledge.md) | (no docstring) |  |
@@ -48,6 +50,10 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
 | [bin/install_schedules.py](install_schedules.md) | M3 Memory: Cross-Platform Schedule Installer. |  |
 | [bin/llm_failover.py](llm_failover.md) | LLM Failover Module |  |
+| [bin/m3_chatlog_backfill_embed.py](m3_chatlog_backfill_embed.md) | m3_chatlog_backfill_embed — Embed unembedded rows in core memory + chatlog. |  |
+| [bin/m3_chatlog_backfill_title.py](m3_chatlog_backfill_title.md) | m3_chatlog_backfill_title — Backfill missing/useless titles from content. |  |
+| [bin/m3_enrich.py](m3_enrich.md) | m3_enrich — User-facing enrichment CLI for core memory + chatlogs. |  |
+| [bin/m3_entities.py](m3_entities.md) | m3_entities — build entity-graph rows from your core/chatlog DBs. |  |
 | [bin/m3_sdk.py](m3_sdk.md) | (no docstring) |  |
 | [bin/macbook_status_server.py](macbook_status_server.md) | MacBook network & LM Studio status server for Homepage dashboard. | yes |
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
@@ -64,6 +70,8 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/pg_setup.py](pg_setup.md) | (no docstring) |  |
 | [bin/pg_sync.py](pg_sync.md) | (no docstring) |  |
 | [bin/re_embed_all.py](re_embed_all.md) | (no docstring) |  |
+| [bin/run_observer.py](run_observer.md) | Phase D Mastra-style Observer drainer. |  |
+| [bin/run_reflector.py](run_reflector.md) | Phase D Mastra-style Reflector drainer. |  |
 | [bin/secret_rotator.py](secret_rotator.md) | (no docstring) |  |
 | [bin/session_handoff.py](session_handoff.md) | (no docstring) |  |
 | [bin/setup_secret.py](setup_secret.md) | Interactive CLI for adding API keys to the m3-memory encrypted vault. |  |
@@ -78,6 +86,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
 | [bin/test_mcp_proxy_unit.py](test_mcp_proxy_unit.md) | test_mcp_proxy_unit.py - In-process unit tests for mcp_proxy. |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |
+| [bin/test_rerank_quick.py](test_rerank_quick.md) | Quick-feedback rerank smoke. Designed to fail in <30 seconds when broken. |  |
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
 | [bin/web_research_bridge.py](web_research_bridge.md) | (no docstring) |  |
 | [bin/weekly_auditor.py](weekly_auditor.md) | Weekly Audit Report -- M3 Memory |  |

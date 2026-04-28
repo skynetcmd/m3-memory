@@ -4,6 +4,101 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## [Unreleased] — Phase D Mastra Observer + Reflector ingest pipeline (2026-04-28)
+
+Two-stage LLM ingest pipeline on top of m3's existing primitives.
+Stage 1 (Observer) extracts atomic three-dated observations from
+multi-turn conversation blocks. Stage 2 (Reflector) merges,
+deduplicates, and supersede-flags observations across sessions.
+Both stages run on user-provided LLMs via YAML profiles in
+`config/slm/`; local-SLM profiles are included for zero-spend setups.
+
+### Added
+
+- **`type='observation'` memory rows** with three-date semantics:
+  - `observation_date` (when assistant logged it) → `metadata_json`
+  - `referenced_date` (when fact is about) → `valid_from`
+  - `relative_date` (verbatim user phrasing) → `metadata_json`
+  - `confidence` + `supersedes_hint` → `metadata_json`
+
+- **Migration 025** (`memory/migrations/025_observation_queue.up.sql`):
+  - `observation_queue` table — drained by `bin/run_observer.py`
+  - `reflector_queue` table — drained by `bin/run_reflector.py` when
+    per-(user, conversation) observation count exceeds
+    `M3_REFLECTOR_THRESHOLD` (default 50)
+  - `idx_mi_type_user_obs` partial index for fast obs-vs-raw partition
+
+- **Observer + Reflector SLM profiles** (`config/slm/observer_local.yaml`,
+  `config/slm/reflector_local.yaml`). Observer prompt enforces atomic-fact
+  decomposition with three-date metadata. Reflector prompt performs
+  merge / supersede / preserve over `{existing, new}` observation lists.
+
+- **`bin/run_observer.py`** — drainer with two modes:
+  - Variant mode (`--source-variant ... --target-variant ...`): bulk
+    enrichment over a corpus snapshot.
+  - Queue mode (default): pop rows from `observation_queue` with
+    backoff/retry. Production drainer.
+
+- **`bin/run_reflector.py`** — drainer with two modes:
+  - Queue mode (default): pop rows from `reflector_queue`.
+  - Force mode (`--force-conversation CID --force-user UID`): bypass
+    queue for tests and one-off triggers.
+
+- **`memory_core.observation_enqueue_impl()`** and
+  **`memory_core.reflector_enqueue_impl()`** — explicit conversation-close
+  triggers. UNIQUE-on-key dedup means re-enqueue is a no-op.
+
+- **Retrieval preference for observations** in
+  `memory_search_scored_impl`: env-gated by `M3_PREFER_OBSERVATIONS=1`.
+  Partition top-k results into obs-hits and raw-hits; if obs-hits supply
+  enough context (sum of token estimates above
+  `M3_OBSERVATION_BUDGET_TOKENS`, default 4000), return obs-only. Else
+  interleave obs first, raw to fill remaining slots.
+
+- **YAML `max_tokens` / `input_max_chars` knobs** on SLM profiles
+  (`bin/slm_intent.py`). Replaces hardcoded 512 / 4000 with per-profile
+  tunables. Default `max_tokens=512` preserves existing classifier
+  callers; Observer + Reflector profiles override as needed. Default
+  `input_max_chars=None` (no truncation) for classifier callers; longer
+  contexts (Observer / Reflector) opt in to explicit caps.
+
+- **Tests** (`tests/test_observer.py`, `tests/test_reflector.py`):
+  21 unit tests covering JSON parsing edge cases, code-fence stripping,
+  date normalization, string-"null" coercion, low-confidence filtering,
+  three-date metadata population, supersedes no-op filtering, Anthropic +
+  OpenAI dispatch, and prefix-match fallback for find-by-text.
+
+### Changed
+
+- **`bin/slm_intent.py`**: `Profile` dataclass adds `max_tokens` (int=512)
+  and `input_max_chars` (Optional[int]=None) fields. Both
+  `_call_model` Anthropic + OpenAI paths use `prof.max_tokens`.
+
+---
+
+## [Unreleased] — Cross-encoder rerank in core retrieval (2026-04-28)
+
+Adds an opt-in cross-encoder rerank stage to `memory_search_routed`.
+
+### Added
+
+- **Cross-encoder rerank** in `bin/memory_core.py`, exposed through
+  the MCP `memory_search_routed` tool. Default off — `rerank=False`
+  is byte-identical to pre-feature output. When on, re-scores
+  the top `rerank_pool_k or 3*k` hits with sentence-transformers
+  `CrossEncoder` (default `cross-encoder/ms-marco-MiniLM-L-6-v2`),
+  blends with hybrid score per `rerank_blend`, re-sorts. Lazy-loaded
+  — no `sentence_transformers` import at module-import time.
+  Capture metadata records `rerank_applied`, `rerank_model`,
+  `rerank_pre_count`, `rerank_post_count` for AUTO-routing diagnostics.
+
+### Changed
+
+- `memory_search_routed` MCP schema gained four properties
+  (`rerank`, `rerank_model`, `rerank_pool_k`, `rerank_blend`).
+
+---
+
 ## [2026.4.24.12] — April 25, 2026 — Plugin commands self-resolve on Windows
 
 ### Fixed
