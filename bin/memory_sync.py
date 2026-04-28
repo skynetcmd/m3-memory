@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from memory_core import (
@@ -29,6 +30,45 @@ def _table_exists(db, table_name: str) -> bool:
     """Check if a table exists in the SQLite DB."""
     res = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)).fetchone()
     return res is not None
+
+def _check_queue_health(db) -> tuple[bool, int, str]:
+    """Check ChromaDB sync queue health and enforce size caps.
+
+    Returns (should_proceed, queue_size, message) where:
+    - should_proceed=False if skip threshold exceeded
+    - message is empty string if no action needed, otherwise contains warning/info
+    """
+    queue_size = db.execute("SELECT COUNT(*) FROM chroma_sync_queue").fetchone()[0]
+
+    skip_at = int(os.environ.get("M3_CHROMA_SYNC_QUEUE_SKIP_AT", "0"))
+    cap_max = int(os.environ.get("M3_CHROMA_SYNC_QUEUE_MAX", "500000"))
+    warn_at = int(os.environ.get("M3_CHROMA_SYNC_QUEUE_WARN", "100000"))
+
+    # Check skip-cycle threshold first (hard stop)
+    if skip_at > 0 and queue_size > skip_at:
+        msg = f"Queue size {queue_size} exceeds M3_CHROMA_SYNC_QUEUE_SKIP_AT={skip_at}; skipping ChromaDB sync this cycle"
+        return False, queue_size, msg
+
+    # Check hard cap (drops oldest entries)
+    if queue_size > cap_max:
+        dropped = queue_size - cap_max
+        db.execute("""
+            DELETE FROM chroma_sync_queue
+            WHERE rowid IN (
+                SELECT rowid FROM chroma_sync_queue
+                ORDER BY rowid ASC LIMIT ?
+            )
+        """, (dropped,))
+        db.commit()
+        msg = f"WARNING: Queue size {queue_size} exceeded M3_CHROMA_SYNC_QUEUE_MAX={cap_max}; dropped {dropped} oldest entries"
+        return True, cap_max, msg
+
+    # Check soft warning threshold
+    if queue_size > warn_at:
+        msg = f"Queue size {queue_size} exceeds warning threshold M3_CHROMA_SYNC_QUEUE_WARN={warn_at}"
+        return True, queue_size, msg
+
+    return True, queue_size, ""
 
 async def _get_collection_dim(client, col_path) -> int | None:
     """Query ChromaDB collection to determine its expected embedding dimension."""
@@ -198,9 +238,9 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
 async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
     if direction not in ("push", "pull", "both"):
         return f"Error: invalid direction '{direction}'."
-        
+
     targets = migrate_memory.targets("all")
-    
+
     if reset_stalled:
         for target in targets:
             try:
@@ -209,7 +249,25 @@ async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
                         db.execute("UPDATE chroma_sync_queue SET attempts = 0, stalled_since = NULL WHERE attempts >= 3")
             except Exception:
                 pass
-    
+
+    # Check queue health before proceeding with sync
+    skip_reason = ""
+    for target in targets:
+        try:
+            with _get_db(target.db_path) as db:
+                if _table_exists(db, "chroma_sync_queue"):
+                    should_proceed, queue_size, msg = _check_queue_health(db)
+                    if msg:
+                        if "WARNING" in msg:
+                            logger.warning(f"[{target.name}] {msg}")
+                        else:
+                            logger.info(f"[{target.name}] {msg}")
+                    if not should_proceed:
+                        skip_reason = f" (target {target.name}: {msg})"
+                        return f"ChromaDB sync skipped{skip_reason}"
+        except Exception as e:
+            logger.debug(f"Queue health check failed for {target.name}: {e}")
+
     if not CHROMA_BASE_URL:
         return "ChromaDB sync skipped: CHROMA_BASE_URL not set."
 
