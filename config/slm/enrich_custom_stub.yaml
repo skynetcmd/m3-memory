@@ -1,0 +1,109 @@
+# enrich_custom_stub.yaml — Template for users who want to wire their own LLM
+#
+# Copy this file as e.g. `enrich_my_setup.yaml`, fill in the values for your
+# inference endpoint, and use it via:
+#
+#     python bin/m3_enrich.py --profile-path /path/to/enrich_my_setup.yaml
+#
+# Required fields:
+#   url, model, system, labels (any non-empty list)
+#
+# Optional fields (sensible defaults applied):
+#   api_key_service, backend, anthropic_version, cache_system,
+#   temperature, timeout_s, max_tokens, input_max_chars, fallback, post
+
+# ── ENDPOINT (required) ─────────────────────────────────────────────────────
+# Full URL to the chat endpoint. Two shapes are supported via `backend`:
+#
+#   backend: openai     → POST {url} with OpenAI /v1/chat/completions body
+#                          {messages: [{role,content}, ...]} → reads
+#                          choices[0].message.content
+#                          Works with: OpenAI, LM Studio (default), Ollama,
+#                          llama-server, vLLM, Google Gemini OAI-compat,
+#                          Cohere, OpenRouter, etc.
+#
+#   backend: anthropic  → POST {url} with Anthropic /v1/messages body
+#                          {system, messages: [{role,content}]} → reads
+#                          content[0].text
+#                          Works with: Anthropic API, LM Studio's Anthropic
+#                          adapter (port 1234, /v1/messages path).
+#
+# url: https://YOUR-ENDPOINT/v1/chat/completions   # or /v1/messages
+url: <REPLACE>
+backend: openai     # or "anthropic"
+
+# ── MODEL (required) ────────────────────────────────────────────────────────
+# Model id as your endpoint expects it.
+model: <REPLACE>
+
+# ── AUTH (optional but usually required) ────────────────────────────────────
+# api_key_service is the env var name your token lives in. The CLI will
+# look it up at runtime (via os.environ[api_key_service]) and inject it
+# as the appropriate auth header (Authorization: Bearer for openai;
+# x-api-key for anthropic).
+#
+# Set to "" or omit if your endpoint doesn't need auth (rare; some local
+# proxies are open).
+api_key_service: <REPLACE_e.g._OPENAI_API_KEY>
+
+# ── ANTHROPIC-ONLY KNOBS (ignored when backend: openai) ─────────────────────
+anthropic_version: "2023-06-01"
+cache_system: false       # set true on the real Anthropic API for cost savings
+
+# ── INFERENCE PARAMETERS (defaults work for most use cases) ─────────────────
+temperature: 0            # deterministic
+timeout_s: 60.0           # per-call timeout
+max_tokens: 1024          # output budget; bump to 4096 for long reasoning models
+input_max_chars: 6000     # input truncation cap; covers full LongMemEval-S corpus
+
+# ── SLM-INTENT BOOKKEEPING (required-non-empty-list, otherwise informational) ─
+# These exist for slm_intent.py compatibility. The enrichment harness
+# doesn't actually use the labels — it parses the JSON `observations`
+# field directly. Just put SOMETHING in here.
+labels:
+  - observed
+fallback: observed
+post:
+  format: "{text}"
+
+# ── SYSTEM PROMPT (required) ────────────────────────────────────────────────
+# This prompt is shipped to the model on every call and defines the
+# Observer contract. Copy verbatim from one of the bundled profiles
+# (enrich_local_qwen.yaml is the canonical reference) unless you have a
+# specific reason to customize. If you DO modify, keep the JSON schema
+# identical or the harness's parse step will fail.
+system: |
+  You are an Observer. You read a chat session between a user and an assistant
+  and emit a JSON list of atomic observations about the user. Each observation
+  records WHAT was said, WHEN the assistant logged it, and WHEN it actually
+  happened.
+
+  Output ONLY a JSON object — no preamble, no code fences, no commentary:
+
+    {"observations": [
+      {
+        "text": "User's son Jack started kindergarten.",
+        "observation_date": "2024-09-12",
+        "referenced_date": "2024-09-04",
+        "relative_date": "last Wednesday",
+        "confidence": 0.95,
+        "supersedes_hint": null
+      }
+    ]}
+
+  Field rules:
+  1. text — single declarative statement about the USER. Skip assistant
+     utterances, questions, hypotheticals, jokes, acknowledgments.
+     ALSO skip low-value chat noise: status queries ("where are you?",
+     "what's the status?"), pleasantries ("hi", "thanks"), process talk
+     ("running it now"), tool self-reports, repeated phrasings.
+     Extract EVERY substantive atomic fact from each user turn (events,
+     durations, counts, entities, preferences, state-changes — separately).
+  2. observation_date — session_date from input. ISO-8601.
+  3. referenced_date — calendar date the fact is ABOUT, resolved from
+     session_date + relative phrasing. ISO-8601. NULL when timeless.
+  4. relative_date — verbatim user phrasing or NULL.
+  5. confidence — 0.95 for explicit, 0.7 for inferences, < 0.6 = drop.
+  6. supersedes_hint — earlier-statement-text or null.
+
+  Output JSON ONLY. No markdown. No prose.
