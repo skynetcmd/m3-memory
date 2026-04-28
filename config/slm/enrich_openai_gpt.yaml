@@ -1,0 +1,93 @@
+# enrich_openai_gpt.yaml — OpenAI gpt-4o-mini cloud profile
+#
+# Use when: you already have an OpenAI account and want a familiar cloud
+#   model. gpt-4o-mini is OpenAI's cheapest current option and handles
+#   structured-JSON extraction reliably.
+# Cost:     ~$0.0002 per conversation
+#           ~$0.20 per 1000 conversations
+#           Total per 25k-conv corpus: ~$5
+#           (validated: $0.15/M input, $0.60/M output for gpt-4o-mini;
+#            ~700 in + 400 out per call)
+# Wall:     ~1.5s per call
+# Quality:  excellent JSON adherence (tested as judge in m3 bench harness).
+#           Strong baseline for fact extraction.
+#
+# Required env vars:
+#   OPENAI_API_KEY     — your OpenAI API key
+#                        (get one at https://platform.openai.com/api-keys)
+#
+# Required setup:
+#   export OPENAI_API_KEY=sk-...
+#   python bin/m3_enrich.py --profile enrich_openai_gpt
+#
+# Switch cheaper: see enrich_google_gemini.yaml (2x cheaper, similar quality)
+# Switch frontier: see enrich_anthropic_haiku.yaml (15x cost, marginal lift)
+# Switch no-cost: see enrich_local_qwen.yaml ($0, requires LM Studio)
+
+url: https://api.openai.com/v1/chat/completions
+model: gpt-4o-mini
+api_key_service: OPENAI_API_KEY
+backend: openai
+cache_system: false             # OpenAI prompt caching is automatic on
+                                # repeated long prompts; explicit caching
+                                # flag isn't needed here.
+temperature: 0
+timeout_s: 30.0
+max_tokens: 1024
+input_max_chars: 6000
+labels:
+  - observed
+fallback: observed
+post:
+  format: "{text}"
+system: |
+  You are an Observer. You read a chat session between a user and an assistant
+  and emit a JSON list of atomic observations about the user. Each observation
+  records WHAT was said, WHEN the assistant logged it, and WHEN it actually
+  happened.
+
+  Output ONLY a JSON object — no preamble, no code fences, no commentary:
+
+    {"observations": [
+      {
+        "text": "User's son Jack started kindergarten.",
+        "observation_date": "2024-09-12",
+        "referenced_date": "2024-09-04",
+        "relative_date": "last Wednesday",
+        "confidence": 0.95,
+        "supersedes_hint": null
+      }
+    ]}
+
+  Field rules:
+  1. text — a single declarative statement about the USER, with pronouns
+     resolved ("user", not "I"). One fact per observation. Skip assistant
+     utterances, questions, hypotheticals, jokes, and acknowledgments.
+
+     SKIP low-value chat noise. Do NOT emit observations for status /
+     location queries ("what's the status?", "where are you?"),
+     acknowledgments ("ok", "thanks", "got it"), pleasantries, process
+     talk ("let me run that", "give me a sec"), tool self-reports
+     ("build succeeded"), or repeated phrasings of the same fact within
+     the session. If a turn contains ONLY this kind of content, return
+     {"observations": []} for that turn.
+
+     EXTRACT EVERY ATOMIC FACT that IS substantive. Process each user
+     turn independently and emit one observation for EACH fact, including
+     each event, duration, count, entity, preference, and state-change
+     separately.
+  2. observation_date — copy the session_date from the input. ISO-8601.
+  3. referenced_date — the calendar date the fact is ABOUT, resolved from
+     session_date + any relative phrasing. ISO-8601. NULL when timeless.
+  4. relative_date — verbatim user phrasing ("yesterday", "last Thursday").
+     NULL when no relative phrasing was used.
+  5. confidence — 0.95 for explicit user statements, 0.7 for inferences,
+     < 0.6 means do not emit.
+  6. supersedes_hint — short string of any contradicted earlier statement
+     in the SAME session, otherwise null.
+
+  Edge cases: empty list when no user-facts; null referenced_date for
+  ambiguous phrases; future dates resolved; same-session contradictions
+  emit both with supersedes_hint on the later.
+
+  Output JSON ONLY. No markdown. No prose.
