@@ -1,0 +1,97 @@
+# Entity-graph vocabulary tuned for m3-memory's curated knowledge corpus.
+#
+# Derived 2026-04-28 from a 50-row sample of variant-IS-NULL core memory
+# entries (.scratch/vocab_proposal.md). The default vocab
+# (config/lists/entity_graph_default.yaml) is too coarse for this corpus —
+# it forces heterogeneous content (homelab IPs, code identifiers, bench
+# variants, decision provenance) into 7 generic types and produces
+# low-signal `concept` / `object` extractions that don't help retrieval.
+#
+# Three macro-domains drive the type list:
+#   1. Homelab infrastructure inventory (host / container / service /
+#      device / ip_address / vlan / port / mac_address / endpoint_url /
+#      firewall_rule)
+#   2. Code + memory-engineering (file_path / function / class_or_table /
+#      cli_flag / env_var / module / commit_or_branch / migration /
+#      memory_id / memory_type / task_id)
+#   3. Benchmark + ML (benchmark / model / variant / metric /
+#      dataset_field / bench_artifact / task_category / bench_run_id)
+#
+# Use via:
+#   M3_ENTITY_VOCAB_YAML=config/lists/entity_graph_m3.yaml python ...
+# OR pass --entity-vocab-yaml to the bin/m3_entities.py driver.
+
+entity_types:
+  # Homelab infrastructure
+  - host
+  - container
+  - service
+  - device
+  - ip_address
+  - vlan
+  - port
+  - mac_address
+  - endpoint_url
+  - firewall_rule
+  # Code + software engineering
+  - file_path
+  - function
+  - class_or_table
+  - cli_flag
+  - env_var
+  - module
+  - commit_or_branch
+  - migration
+  # Benchmark + ML engineering
+  - benchmark
+  - model
+  - variant
+  - metric
+  - dataset_field
+  - bench_artifact
+  - task_category
+  - bench_run_id
+  # Memory-system primitives
+  - memory_id
+  - memory_type
+  - task_id
+  # Generic but corpus-relevant
+  - person
+  - organization
+  - protocol
+  - datetime
+
+entity_predicates:
+  # Infra topology
+  - runs_on            # service|container -> host
+  - hosts              # host -> container
+  - listens_on         # service -> port
+  - assigned_ip        # host|device|container -> ip_address
+  - on_vlan            # host|device|ip_address -> vlan
+  - fails_over_to      # service|endpoint_url -> endpoint_url
+  # Code structure
+  - defined_in         # function|class|cli_flag -> file_path
+  - imports            # file_path -> module
+  - calls              # function -> function
+  # Memory provenance
+  - references         # any -> memory_id (8-hex citation)
+  - supersedes         # decision|plan -> decision|plan
+  - contradicts        # any -> any
+  - introduced_in      # function|cli_flag|migration -> commit_or_branch
+  - deprecates         # memory_type|function -> memory_type|function
+  # Bench / ML
+  - measured_on        # metric|variant -> benchmark
+  - uses_model         # benchmark|bench_run_id|variant -> model
+  - judged_by          # benchmark|bench_run_id -> model (judge specifically)
+  - produced_artifact  # bench_run_id|variant -> bench_artifact
+  - affects_category   # variant|function -> task_category
+  # Decisions / human signals
+  - authorizes_budget  # person -> decision
+  # Generic
+  - same_as            # any <-> any (cross-alias linker)
+  - mentions           # any -> any (last-resort fallback)
+
+metadata:
+  description: "m3-memory domain-tuned vocab for entity-graph enrichment"
+  source: "Derived 2026-04-28 from 50-row sample (.scratch/vocab_proposal.md)"
+  tuning_corpus: "agent_memory.db core (variant IS NULL)"
