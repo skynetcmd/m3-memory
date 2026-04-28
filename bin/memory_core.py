@@ -55,7 +55,10 @@ import threading
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
+
+import yaml
 
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
@@ -162,7 +165,29 @@ ORIGIN_DEVICE       = os.environ.get("ORIGIN_DEVICE", platform.node())
 # Task 1: Configurable Dedup/Search Limits (#46)
 DEDUP_LIMIT            = int(os.environ.get("DEDUP_LIMIT", "1000"))
 DEDUP_THRESHOLD        = float(os.environ.get("DEDUP_THRESHOLD", "0.92"))
-CONTRADICTION_THRESHOLD = float(os.environ.get("CONTRADICTION_THRESHOLD", "0.85"))
+CONTRADICTION_THRESHOLD = float(os.environ.get("CONTRADICTION_THRESHOLD", "0.92"))
+# SUPERSEDES_PENALTY: at retrieval time, hits that appear as the to_id of a
+# 'supersedes' edge (i.e., their newer version exists) get score multiplied
+# by this factor. 0.5 = visible but ranked below newer fact. 0.0 = hide.
+# 1.0 = disable demotion (legacy pre-2026-04-27 behavior).
+SUPERSEDES_PENALTY = float(os.environ.get("SUPERSEDES_PENALTY", "0.5"))
+# CONTRADICTION_TITLE_GATE: 'strict' = require title substring match (legacy
+# 2026-04 and earlier behavior); 'loose' = use cosine ≥ threshold + same type
+# + content-differs only (default since 2026-04-27, after KU-50% diagnostic
+# revealed the title gate blocked 98% of would-be supersedences on bench
+# corpora with empty/generic titles); 'off' = treat ALL high-cosine same-type
+# pairs as supersedence regardless of title or content (research mode only).
+CONTRADICTION_TITLE_GATE = os.environ.get("CONTRADICTION_TITLE_GATE", "loose").lower()
+# CONTRADICTION_TYPE_EXCLUSIONS: comma-separated memory types skipped during
+# contradiction-check (Phase 20 fix 2026-04-27). Default skips 'conversation'
+# (whole-thread containers should never supersede each other) but ALLOWS
+# 'message' so chat turns can contradict each other when contradiction-check
+# is explicitly enabled. Set to 'conversation,message' to restore the
+# legacy pre-2026-04-27 behavior. Empty string = check all types.
+CONTRADICTION_TYPE_EXCLUSIONS = frozenset(
+    t.strip() for t in os.environ.get("CONTRADICTION_TYPE_EXCLUSIONS", "conversation").split(",")
+    if t.strip()
+)
 SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "500"))
 LLM_TIMEOUT            = float(os.environ.get("LLM_TIMEOUT", "120.0"))
 
@@ -204,20 +229,188 @@ FACT_ENRICH_MAX_ATTEMPTS = int(os.environ.get("M3_FACT_ENRICH_MAX_ATTEMPTS", "5"
 # Entity-relation graph pipeline (Phase 4-5). Gated off by default.
 ENABLE_ENTITY_GRAPH          = os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() in ("1", "true", "yes")
 ENTITY_EXTRACT_CONCURRENCY   = int(os.environ.get("M3_ENTITY_EXTRACT_CONCURRENCY", "2"))
-ENTITY_EXTRACT_MAX_ATTEMPTS  = int(os.environ.get("M3_ENTITY_EXTRACT_MAX_ATTEMPTS", "5"))
+ENTITY_EXTRACT_MAX_ATTEMPTS  = int(os.environ.get("M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS",
+                                   os.environ.get("M3_ENTITY_EXTRACT_MAX_ATTEMPTS", "3")))
 ENTITY_RESOLVE_FUZZY_MIN     = float(os.environ.get("M3_ENTITY_RESOLVE_FUZZY_MIN", "0.8"))
 ENTITY_RESOLVE_COSINE_MIN    = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MIN", "0.85"))
 
 # Entity/predicate enums — kept local to avoid circular import
 # (mcp_tool_catalog imports memory_core; memory_core must not import mcp_tool_catalog).
 # Wave 3 will re-export these from mcp_tool_catalog.py and memory_bridge.py.
-VALID_ENTITY_TYPES = frozenset({
+
+# Bootstrap hardcoded defaults for when YAML is unavailable or malformed.
+# These are mirrored exactly in config/lists/entity_graph_default.yaml for backward-compat.
+_DEFAULT_VALID_ENTITY_TYPES = frozenset({
     "person", "place", "organization", "event", "concept", "object", "date",
 })
-VALID_ENTITY_PREDICATES = frozenset({
+_DEFAULT_VALID_ENTITY_PREDICATES = frozenset({
     "works_at", "located_in", "before", "after",
     "same_as", "contradicts", "mentions", "relates_to",
 })
+
+DEFAULT_ENTITY_VOCAB_YAML = Path(__file__).parent.parent / "config" / "lists" / "entity_graph_default.yaml"
+# Env override: when set, load_entity_vocab(None) reads this YAML instead of
+# DEFAULT_ENTITY_VOCAB_YAML. Production callers that import VALID_ENTITY_TYPES /
+# VALID_ENTITY_PREDICATES at module load (e.g., _link_entity_relationship's
+# validation) pick up the override automatically. Use config/lists/entity_graph_lme.yaml
+# for LME-tuned vocab (adds 'attended' and 'purchased' predicates).
+_ENV_ENTITY_VOCAB_YAML = os.environ.get("M3_ENTITY_VOCAB_YAML", "").strip() or None
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Cross-encoder reranker (lazy-loaded)
+# ──────────────────────────────────────────────────────────────────────────────
+# Module-level singleton — pays the model-load cost only when rerank=True is
+# first hit. Default model is the canonical ms-marco distilled cross-encoder
+# (~120MB on disk, ~12MB resident weights), small + fast enough for per-query
+# reranking at bench scale (~50ms / pair on GPU, ~200ms / pair on CPU).
+#
+# Alternative model: BAAI/bge-reranker-v2-m3 (~568MB, higher accuracy on
+# multilingual; slower). Pass via rerank_model kwarg or M3_RERANK_MODEL env.
+#
+# CONTRACT: importing memory_core does NOT import sentence_transformers —
+# only the first call to _get_reranker(...) does. This keeps cold-start fast
+# for all callers that don't use rerank.
+_RERANKER_MODEL = None  # CrossEncoder | None — lazy-init
+_RERANKER_MODEL_NAME = ""
+DEFAULT_RERANK_MODEL = os.environ.get(
+    "M3_RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+).strip()
+
+
+def _get_reranker(model_name: str):
+    """Lazy-load + cache cross-encoder reranker.
+
+    Reuses the cached instance if model_name matches the previously-loaded one;
+    otherwise loads the new model (and discards the prior). GPU is used if
+    available; falls back to CPU silently.
+
+    Raises RuntimeError with a clear install hint if sentence-transformers is
+    not importable (it is a hard dep in requirements.txt; missing import means
+    the user has a broken install).
+    """
+    global _RERANKER_MODEL, _RERANKER_MODEL_NAME
+    if _RERANKER_MODEL is not None and _RERANKER_MODEL_NAME == model_name:
+        return _RERANKER_MODEL
+    try:
+        from sentence_transformers import CrossEncoder
+    except ImportError as e:
+        raise RuntimeError(
+            f"rerank=True requires sentence-transformers (declared in "
+            f"requirements.txt). Install/repair via: "
+            f"pip install -r requirements.txt. Original error: {e}"
+        ) from e
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    except ImportError:
+        device = "cpu"
+    _RERANKER_MODEL = CrossEncoder(model_name, device=device)
+    _RERANKER_MODEL_NAME = model_name
+    return _RERANKER_MODEL
+
+
+def _apply_rerank(
+    hits: list,
+    query: str,
+    *,
+    pool_k: int,
+    final_k: int,
+    model_name: str,
+    blend: float,
+) -> list:
+    """Re-score top-pool_k hits with cross-encoder; blend with hybrid score.
+
+    Args:
+        hits: list[tuple[float, dict]] — output shape of memory_search_*_impl
+        query: user query string
+        pool_k: how many top hits to rescore (rest are dropped if pool_k < len)
+        final_k: how many top hits to return after rerank+blend
+        model_name: cross-encoder model id (e.g. "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        blend: blend factor — final = blend * ce_score + (1 - blend) * hybrid_score
+               1.0 = pure CE replacement (default), 0.5 = average, 0.0 = no-op
+
+    Returns hits in same shape as input, sorted by blended score descending,
+    truncated to final_k.
+
+    CONTRACT: when blend=0.0, this is a no-op — returns input hits[:final_k]
+    unmodified. Callers that pass rerank=True with blend=0.0 get the same
+    behavior as rerank=False (no CE call made).
+    """
+    if not hits or final_k <= 0 or blend <= 0.0:
+        return hits[:final_k]
+    pool = hits[:max(pool_k, final_k)]  # never truncate below final_k
+    if not pool:
+        return []
+    reranker = _get_reranker(model_name)
+    # Build (query, content) pairs. Skip rows with empty content (rerank can't
+    # score them; they fall back to hybrid score via blend).
+    pairs = []
+    pair_indices = []  # indices into pool that have content
+    for i, (_, item) in enumerate(pool):
+        content = (item.get("content") or "") if isinstance(item, dict) else ""
+        if content:
+            pairs.append([query, content])
+            pair_indices.append(i)
+    if not pairs:
+        return pool[:final_k]
+    ce_scores = reranker.predict(pairs, show_progress_bar=False)
+    # Map ce_scores back to pool indices; rows with no content keep ce_score=0.
+    pool_ce: list = [0.0] * len(pool)
+    for idx, ce in zip(pair_indices, ce_scores):
+        pool_ce[idx] = float(ce)
+    # Blend
+    blended: list = []
+    for (hybrid_score, item), ce in zip(pool, pool_ce):
+        new_score = blend * ce + (1.0 - blend) * hybrid_score
+        blended.append((new_score, item))
+    blended.sort(key=lambda t: t[0], reverse=True)
+    return blended[:final_k]
+
+
+def load_entity_vocab(yaml_path: str | Path | None = None) -> tuple[frozenset[str], frozenset[str]]:
+    """Load entity-graph vocabulary (types + predicates) from YAML.
+
+    Args:
+        yaml_path: Path to YAML file. If None, loads default vocabulary.
+                   If file's entity_types or entity_predicates is empty list, falls back to defaults.
+
+    Returns:
+        (entity_types, entity_predicates) — both frozensets.
+    """
+    # Resolution order: explicit yaml_path > M3_ENTITY_VOCAB_YAML env > default.
+    # Env hook lets bench harnesses override the production VALID_ENTITY_PREDICATES
+    # at import-time without code changes. See decision memory (this turn).
+    if yaml_path is not None:
+        path = Path(yaml_path)
+    elif _ENV_ENTITY_VOCAB_YAML:
+        path = Path(_ENV_ENTITY_VOCAB_YAML)
+    else:
+        path = DEFAULT_ENTITY_VOCAB_YAML
+    if not path.exists():
+        # Hard fallback to in-memory defaults if the file is missing
+        return _DEFAULT_VALID_ENTITY_TYPES, _DEFAULT_VALID_ENTITY_PREDICATES
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        # Hard fallback if YAML is malformed
+        return _DEFAULT_VALID_ENTITY_TYPES, _DEFAULT_VALID_ENTITY_PREDICATES
+
+    types = data.get("entity_types") or []
+    preds = data.get("entity_predicates") or []
+
+    # Empty lists fall back to defaults (e.g., placeholder LME YAML before Task A populates it)
+    if not types:
+        types = list(_DEFAULT_VALID_ENTITY_TYPES)
+    if not preds:
+        preds = list(_DEFAULT_VALID_ENTITY_PREDICATES)
+
+    return frozenset(types), frozenset(preds)
+
+
+# Module-level: load defaults at import. Existing callers see same contents as before.
+VALID_ENTITY_TYPES, VALID_ENTITY_PREDICATES = load_entity_vocab(None)
 
 VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "grok", "manual", "system", "unknown", "legacy"}
 
@@ -635,6 +828,10 @@ CHROMA_CONNECT_T    = 3.0
 CHROMA_READ_T       = 10.0
 CHROMA_PULL_PAGE_SIZE = 100
 CHROMA_CONTENT_MAX    = 10_000
+# Federation fires when the best local hit scores below this threshold.
+# Lower = less federation; higher = more aggressive cross-peer supplementation.
+# Override via M3_FEDERATION_LOW_SCORE_THRESHOLD env var (float, default 0.65).
+FEDERATION_LOW_SCORE_THRESHOLD = float(os.environ.get("M3_FEDERATION_LOW_SCORE_THRESHOLD", "0.65"))
 
 _local = threading.local()
 _init_lock = threading.RLock()
@@ -842,20 +1039,51 @@ def _track_cost(operation: str, tokens_est: int = 0):
     if tokens_est:
         _COST_COUNTERS["embed_tokens_est"] += tokens_est
 
-def _ensure_sync_tables() -> None:
+def _ensure_sync_tables(db_path: str | None = None) -> None:
+    """Run pending migrations against the active DB.
+
+    Belt-and-braces: when the active DB is a chatlog DB (path matches the
+    chatlog config OR schema fingerprint says so), pass --target chatlog
+    so the runner doesn't try to apply main-stack migrations to it. The
+    runner now also refuses such mismatches in F1 hardening, but invoking
+    the right --target up-front avoids a noisy refusal log line on every
+    chatlog-context call.
+    """
     import subprocess
     try:
         migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
+
+        # Detect chatlog context via schema fingerprint. Path equality with
+        # chatlog_config.chatlog_db_path() is unreliable here because
+        # chatlog_config inherits from M3_DATABASE, so a misdirected
+        # M3_DATABASE makes both paths agree without telling us anything
+        # about the file's actual schema. The classifier reads the file.
+        active = db_path or resolve_db_path(None)
+        target_flag: list[str] = []
+        try:
+            sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
+            from migrate_memory import _classify_db
+            if _classify_db(active) == "chatlog":
+                target_flag = ["--target", "chatlog"]
+        except Exception:
+            pass
+
         # "up --yes" + stdin=DEVNULL are both required: without --yes the prompt
         # would EOF-read an empty string and silently skip migrations, leaving
         # the DB missing tasks/chatlog tables. DEVNULL belt-and-braces in case
         # any future code path still reaches input(). Timeout 300s handles
         # backups of multi-GB databases (#46).
+        env = os.environ.copy()
+        if target_flag:
+            # Pin the runner at the chatlog file we resolved, so a misdirected
+            # M3_DATABASE in the parent env doesn't repoint it elsewhere.
+            env["M3_DATABASE"] = active
         subprocess.run(
-            [sys.executable, migration_script, "up", "--yes"],
+            [sys.executable, migration_script, "up", "--yes", *target_flag],
             check=True,
             timeout=300,
             stdin=subprocess.DEVNULL,
+            env=env,
         )
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
@@ -887,7 +1115,7 @@ def _lazy_init(db_path: str | None = None) -> None:
         _initialized_dbs.add(key)
         _initialized = True  # legacy flag — once true, stays true
         try:
-            _ensure_sync_tables()
+            _ensure_sync_tables(key)
             _backfill_change_agent()
         except Exception:
             # Do not trap init in a permanently-failed state — let the next
@@ -1250,6 +1478,29 @@ async def memory_write_bulk_impl(
         if it.get("auto_classify") and (not item_type or item_type == "auto"):
             item_type = await _auto_classify(content, title)
 
+        # Resolve effective variant once so the leak gate below can check it.
+        eff_variant = (it.get("variant") or variant) or None
+
+        # Leak gate: reject `window:*` summary rows when the variant is NULL
+        # (i.e. would land in real core memory). The bench harness emits
+        # session-window summaries with title like 'window:<sessionhash>::<i>:<j>'
+        # for retrieval debugging — those are valid when stamped under a
+        # bench variant, but historically leaked into core memory via
+        # bulk writes that didn't pass --variant. 644 such rows had to be
+        # cleaned manually on 2026-04-28 (memory 372f49b0).
+        # See task #189, decision b5abb7cc.
+        if (
+            item_type == "summary"
+            and isinstance(title, str)
+            and title.startswith("window:")
+            and eff_variant is None
+        ):
+            logger.warning(
+                f"memory_write_bulk_impl: rejecting window:* summary leak "
+                f"(title={title[:60]!r}) — provide an explicit variant if intentional."
+            )
+            continue
+
         prepared.append(
             {
                 "id": mid,
@@ -1272,7 +1523,7 @@ async def memory_write_bulk_impl(
                 "refresh_reason": it.get("refresh_reason") or None,
                 "embed": it.get("embed", True),
                 "embed_text": None,  # Will be set after enrichment
-                "variant": (it.get("variant") or variant) or None,
+                "variant": eff_variant,
             }
         )
 
@@ -1502,12 +1753,13 @@ async def memory_write_bulk_impl(
                     if r:
                         vec_row = r
 
-                if not vec_row or p["type"] in ("conversation", "message"):
+                if not vec_row or p["type"] in CONTRADICTION_TYPE_EXCLUSIONS:
                     return p["id"], []
 
                 vec = _unpack(vec_row["embedding"])
                 superseded_ids, _ = await _check_contradictions(
-                    p["id"], p["content"], p["title"], vec, p["type"], p["agent_id"]
+                    p["id"], p["content"], p["title"], vec, p["type"], p["agent_id"],
+                    new_valid_from=p.get("valid_from"),
                 )
                 return p["id"], superseded_ids
 
@@ -1568,7 +1820,15 @@ def _queue_chroma(memory_id: str, operation: str) -> None:
     except Exception as e:
         logger.debug(f"ChromaDB queue insert failed: {e}")
 
-async def _check_contradictions(item_id: str, content: str, title: str, vec: list[float], type_: str, agent_id: str) -> tuple[list[str], list[tuple[str, float]]]:
+async def _check_contradictions(
+    item_id: str,
+    content: str,
+    title: str,
+    vec: list[float],
+    type_: str,
+    agent_id: str,
+    new_valid_from: str | None = None,
+) -> tuple[list[str], list[tuple[str, float]]]:
     """
     Detects contradictions with existing memories of the same type.
     Returns (superseded_ids, related_candidates) where related_candidates
@@ -1599,7 +1859,11 @@ async def _check_contradictions(item_id: str, content: str, title: str, vec: lis
         for i, row in enumerate(rows):
             score = scores[i]
             if score > CONTRADICTION_THRESHOLD:
-                # High similarity — check if it's a contradiction (same topic, different content)
+                # High similarity — check if it's a contradiction (same topic, different content).
+                # Title-match gate is configurable via CONTRADICTION_TITLE_GATE env var:
+                #   'strict' = legacy substring match required
+                #   'loose'  = cosine + content-differs is enough (default since 2026-04-27)
+                #   'off'    = bypass content check too (research mode)
                 old_title = (row["title"] or "").strip().lower()
                 new_title = (title or "").strip().lower()
                 titles_match = old_title == new_title or (old_title and new_title and (
@@ -1607,18 +1871,36 @@ async def _check_contradictions(item_id: str, content: str, title: str, vec: lis
                 ))
                 content_differs = (row["content"] or "").strip() != (content or "").strip()
 
-                if titles_match and content_differs:
-                    # Contradiction detected — supersede old memory
+                if CONTRADICTION_TITLE_GATE == "strict":
+                    fires = titles_match and content_differs
+                elif CONTRADICTION_TITLE_GATE == "loose":
+                    fires = content_differs
+                else:  # 'off'
+                    fires = True
+
+                if fires:
+                    # Contradiction detected — supersede old memory.
+                    # Bi-temporal validity (Zep/Graphiti pattern, 2026-04-27):
+                    # close the older memory's validity interval at new memory's
+                    # valid_from. Falls back to now() when caller didn't supply
+                    # a valid_from. Lets retrieval that filters by `as_of` see
+                    # the older fact as still-valid before the supersession point.
+                    _now_iso = datetime.now(timezone.utc).isoformat()
+                    _close_at = new_valid_from or _now_iso
                     with _db() as db:
-                        db.execute("UPDATE memory_items SET is_deleted = 1, updated_at = ? WHERE id = ?",
-                                   (datetime.now(timezone.utc).isoformat(), row["id"]))
+                        db.execute(
+                            "UPDATE memory_items SET is_deleted = 1, "
+                            "valid_to = COALESCE(valid_to, ?), updated_at = ? "
+                            "WHERE id = ?",
+                            (_close_at, _now_iso, row["id"]),
+                        )
                         db.execute(
                             "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
-                            (str(uuid.uuid4()), item_id, row["id"], "supersedes", datetime.now(timezone.utc).isoformat())
+                            (str(uuid.uuid4()), item_id, row["id"], "supersedes", _now_iso)
                         )
                     _record_history(row["id"], "supersede", row["content"], item_id, "content")
                     superseded.append(row["id"])
-                    logger.info(f"Memory {item_id} supersedes {row['id']} (contradiction detected)")
+                    logger.info(f"Memory {item_id} supersedes {row['id']} (contradiction detected, valid_to={_close_at})")
             elif score > 0.7:
                 related.append((row["id"], score))
     except Exception as e:
@@ -1888,13 +2170,48 @@ def _enqueue_entity_extraction(memory_id: str, db) -> None:
         logger.debug(f"Failed to enqueue entity extraction for {memory_id}: {e}")
 
 
-async def _run_entity_extractor(memory_id: str, content: str, entity_extractor) -> None:
+async def _run_entity_extractor(
+    memory_id: str,
+    content: str,
+    entity_extractor,
+    *,
+    valid_types: frozenset | None = None,       # None = use VALID_ENTITY_TYPES
+    valid_predicates: frozenset | None = None,  # None = use VALID_ENTITY_PREDICATES
+) -> None:
     """Background task. Calls extractor, parses result, resolves+writes entities and
-    relationships. Releases _ENTITY_EXTRACT_SEM in finally block."""
+    relationships. Releases _ENTITY_EXTRACT_SEM in finally block.
+
+    Reliability hardening (Phase E1):
+    - Vocabulary validation is centralized here against active_types/active_predicates.
+      Callers may pass override frozensets; None means use module-level constants.
+    - Bitemporal valid_from is inherited from the source memory (not extraction-time now()).
+    - entity_relationships idempotency: DELETE old rows with the same
+      (from_entity, to_entity, predicate, source_memory_id) before re-inserting, so
+      re-extraction of a memory doesn't create duplicate relationship rows.
+      We use delete-then-insert rather than a content-hash UNIQUE index so the schema
+      stays unchanged (migration 024 is already applied).
+    - Failure handling: on any exception, increment attempts in the queue. Items with
+      attempts >= ENTITY_EXTRACT_MAX_ATTEMPTS are excluded from the eligible set by
+      _select_pending_entity_extraction (poisoned-item guard).
+    """
+    # Resolve active vocabularies — callers may pass custom lists for bench/experiments.
+    active_types: frozenset = valid_types if valid_types is not None else VALID_ENTITY_TYPES
+    active_predicates: frozenset = valid_predicates if valid_predicates is not None else VALID_ENTITY_PREDICATES
+
     try:
         result = await entity_extractor(content)
         entities_raw = result.get("entities", []) if isinstance(result, dict) else []
         relationships_raw = result.get("relationships", []) if isinstance(result, dict) else []
+
+        # Inherit valid_from from the source memory so bitemporal validity is correct.
+        # e.g. an entity extracted from a 2024 memory should have valid_from='2024-...',
+        # not the extraction-time timestamp.
+        with _db() as db:
+            src_row = db.execute(
+                "SELECT valid_from FROM memory_items WHERE id = ? LIMIT 1",
+                (memory_id,),
+            ).fetchone()
+        source_valid_from: str | None = src_row["valid_from"] if src_row else None
 
         # Resolve/create entities and record IDs by canonical_name for relationship linking.
         canonical_to_id: dict[str, str] = {}
@@ -1902,12 +2219,24 @@ async def _run_entity_extractor(memory_id: str, content: str, entity_extractor) 
             for ent in entities_raw:
                 cname = (ent.get("canonical_name") or "").strip()
                 etype = (ent.get("entity_type") or "").strip()
-                if not cname or etype not in VALID_ENTITY_TYPES:
+                # Centralized vocabulary validation — reject unknown entity types.
+                if not cname or etype not in active_types:
+                    if not cname or etype:
+                        logger.debug(
+                            f"Entity extractor: rejected entity_type='{etype}' "
+                            f"(not in active vocabulary) for memory {memory_id}"
+                        )
                     continue
                 entity_id = await _resolve_entity_async(cname, etype, db)
                 if entity_id is None:
                     try:
                         entity_id = _create_entity(cname, etype, {}, db)
+                        # Set valid_from on the newly created entity to inherit from source.
+                        if source_valid_from:
+                            db.execute(
+                                "UPDATE entities SET valid_from = ? WHERE id = ? AND valid_from IS NULL",
+                                (source_valid_from, entity_id),
+                            )
                     except Exception as e:
                         logger.debug(f"Entity create failed for '{cname}': {e}")
                         continue
@@ -1915,6 +2244,7 @@ async def _run_entity_extractor(memory_id: str, content: str, entity_extractor) 
                 mention_text = ent.get("mention_text") or cname
                 confidence = float(ent.get("confidence", 0.85))
                 try:
+                    # _link_memory_to_entity uses INSERT OR IGNORE — idempotent.
                     _link_memory_to_entity(memory_id, entity_id, mention_text, 0, confidence, db)
                 except Exception as e:
                     logger.debug(f"Entity link failed for {memory_id}->{entity_id}: {e}")
@@ -1927,17 +2257,51 @@ async def _run_entity_extractor(memory_id: str, content: str, entity_extractor) 
                 confidence = float(rel.get("confidence", 0.85))
                 from_id = canonical_to_id.get(from_cname)
                 to_id = canonical_to_id.get(to_cname)
-                if not from_id or not to_id or predicate not in VALID_ENTITY_PREDICATES:
+                # Centralized vocabulary validation — reject unknown predicates.
+                if not from_id or not to_id:
+                    continue
+                if predicate not in active_predicates:
+                    logger.debug(
+                        f"Entity extractor: rejected predicate='{predicate}' "
+                        f"(not in active vocabulary) for memory {memory_id}"
+                    )
                     continue
                 try:
-                    _link_entity_relationship(from_id, to_id, predicate, confidence, memory_id, db)
-                except ValueError as e:
-                    logger.debug(f"Relationship link failed: {e}")
+                    # Idempotency for entity_relationships: entity_relationships.id is
+                    # AUTOINCREMENT so INSERT OR IGNORE would silently skip on PK conflict
+                    # (there is none — autoincrement always inserts a new row). Instead we
+                    # use delete-then-insert to ensure re-extraction of the same memory
+                    # doesn't accumulate duplicate relationship rows.
+                    db.execute(
+                        "DELETE FROM entity_relationships "
+                        "WHERE from_entity = ? AND to_entity = ? AND predicate = ? "
+                        "AND source_memory_id = ?",
+                        (from_id, to_id, predicate, memory_id),
+                    )
+                    rel_valid_from = rel.get("valid_from") or source_valid_from
+                    db.execute(
+                        "INSERT INTO entity_relationships "
+                        "(from_entity, to_entity, predicate, confidence, source_memory_id, valid_from) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (from_id, to_id, predicate, confidence, memory_id, rel_valid_from),
+                    )
                 except Exception as e:
-                    logger.debug(f"Relationship link error: {e}")
+                    logger.debug(f"Relationship link error for {from_cname}->{to_cname} ({predicate}): {e}")
+
+        # On success, remove any queue entry so the item isn't re-processed.
+        try:
+            with _db() as db:
+                db.execute(
+                    "DELETE FROM entity_extraction_queue WHERE memory_id = ?",
+                    (memory_id,),
+                )
+        except Exception as db_err:
+            logger.debug(f"Failed to remove queue entry for {memory_id} after success: {db_err}")
 
     except Exception as e:
-        # Record error and bump attempts in queue
+        # Record error and bump attempts in queue so the item is retried on next pass.
+        # Items with attempts >= ENTITY_EXTRACT_MAX_ATTEMPTS are excluded from the
+        # eligible set by _select_pending_entity_extraction (poisoned-item guard).
         try:
             with _db() as db:
                 db.execute(
@@ -1966,12 +2330,20 @@ async def _try_extract_or_enqueue(
     db,
     variant: str | None = None,
     allowlist: set[str] | None = None,
+    *,
+    valid_types: frozenset | None = None,       # None = use VALID_ENTITY_TYPES
+    valid_predicates: frozenset | None = None,  # None = use VALID_ENTITY_PREDICATES
 ) -> None:
     """Non-blocking: try entity extraction under semaphore; on miss, enqueue.
 
     Read ENABLE_ENTITY_GRAPH at call time so tests can monkeypatch.
     Variant-skip rule: if variant is not None and (allowlist is None or variant not in
     allowlist), return without doing anything — mirrors fact_enricher pattern.
+
+    valid_types / valid_predicates are forwarded to _run_entity_extractor unchanged.
+    None means use the module-level VALID_ENTITY_TYPES / VALID_ENTITY_PREDICATES constants.
+    Bench harnesses and production callers may pass custom frozensets; default keeps
+    existing behavior.
     """
     if os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() not in ("1", "true", "yes"):
         return
@@ -1992,13 +2364,31 @@ async def _try_extract_or_enqueue(
         return
 
     # Acquired semaphore — spawn task and track it
-    task = asyncio.create_task(_run_entity_extractor(memory_id, content, entity_extractor))
+    task = asyncio.create_task(
+        _run_entity_extractor(
+            memory_id, content, entity_extractor,
+            valid_types=valid_types,
+            valid_predicates=valid_predicates,
+        )
+    )
     _PENDING_ENTITY_TASKS.add(task)
     task.add_done_callback(lambda t: _PENDING_ENTITY_TASKS.discard(t))
 
 
-async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
-    """Queries the remote ChromaDB instance for federated results."""
+async def _query_chroma(
+    query_vec: list[float],
+    k: int = 5,
+    scope_filter: dict | None = None,
+) -> list[dict]:
+    """Queries the remote ChromaDB instance for federated results.
+
+    Args:
+        query_vec: Embedding vector for the query.
+        k: Maximum number of results to return.
+        scope_filter: Optional dict of {field: value} pairs to filter results
+            by metadata (e.g. {'user_id': ..., 'scope': ..., 'agent_id': ...}).
+            Empty/None values are skipped. Translated to ChromaDB v2 where syntax.
+    """
     if not CHROMA_BASE_URL or not CHROMA_BASE_URL.startswith("http"):
         return []
     try:
@@ -2012,13 +2402,31 @@ async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
             logger.warning("ChromaDB collection response missing 'id' field")
             return []
 
-        # 2. Perform query
+        # 2. Build query payload
         col_path = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{col_id}"
-        query_resp = await client.post(f"{col_path}/query", json={
+        payload: dict = {
             "query_embeddings": [query_vec],
             "n_results": k,
-            "include": ["documents", "metadatas", "distances"]
-        }, timeout=CHROMA_READ_T)
+            "include": ["documents", "metadatas", "distances"],
+        }
+
+        # Translate scope_filter to ChromaDB v2 where-clause syntax
+        source_tag = "federated_chroma_unscoped"
+        if scope_filter:
+            where_clauses = []
+            for field, value in scope_filter.items():
+                if value:  # skip empty strings / None
+                    where_clauses.append({field: {"$eq": value}})
+            if where_clauses:
+                payload["where"] = (
+                    where_clauses[0]
+                    if len(where_clauses) == 1
+                    else {"$and": where_clauses}
+                )
+                source_tag = "federated_chroma_scoped"
+
+        # 3. Perform query
+        query_resp = await client.post(f"{col_path}/query", json=payload, timeout=CHROMA_READ_T)
         query_resp.raise_for_status()
 
         data = query_resp.json()
@@ -2032,7 +2440,8 @@ async def _query_chroma(query_vec: list[float], k: int = 5) -> list[dict]:
                     "content": data["documents"][0][i],
                     "title": data["metadatas"][0][i].get("title", ""),
                     "type": data["metadatas"][0][i].get("type", "federated"),
-                    "score": score
+                    "score": score,
+                    "_explanation": {"source": source_tag},
                 })
         return results
     except Exception as e:
@@ -2488,13 +2897,27 @@ async def memory_search_scored_impl(
     else:
         ranked = pre_ranked
 
-    _skip_federated = bool(type_filter or conversation_id or agent_filter or user_id or scope)
-    if len(ranked) < 3 and not _skip_federated:
-        fed_results = await _query_chroma(q_vec, k=3)
+    # Hard skip: conversation_id is a strict scope boundary we never cross-peer;
+    # type_filter should stay local to avoid type pollution from remote stores.
+    _skip_federated_hard = bool(conversation_id or type_filter)
+
+    # Soft condition: fire federation when local results are weak (too few or low confidence).
+    local_top_score = ranked[0][0] if ranked else 0.0
+    _local_weak = (
+        len(ranked) < 3
+        or local_top_score < FEDERATION_LOW_SCORE_THRESHOLD
+    )
+
+    if _local_weak and not _skip_federated_hard:
+        fed_results = await _query_chroma(
+            q_vec, k=3,
+            scope_filter={"user_id": user_id, "scope": scope, "agent_id": agent_filter},
+        )
         for fr in fed_results:
             if not any(r[1]["id"] == fr["id"] for r in ranked):
-                if explain:
-                    fr["_explanation"] = {"source": "federated_chroma"}
+                if not explain:
+                    # Still tag so audit tooling can identify federation hits
+                    fr.setdefault("_explanation", {"source": fr.get("_explanation", {}).get("source", "federated_chroma_scoped")})
                 ranked.append((fr["score"], fr))
 
     if ranked:
@@ -2624,6 +3047,148 @@ async def memory_search_scored_impl(
                     except Exception as e:
                         logger.debug(f"smart_neighbor_sessions expansion failed: {e}")
 
+    # Phase 11 architectural fix: supersedence-aware demotion. Memories that
+    # have been superseded (i.e., they appear as `to_id` on a 'supersedes'
+    # edge) get their score multiplied by SUPERSEDES_PENALTY (default 0.5x).
+    # Default penalty is "demote, not delete" so the older fact stays
+    # retrievable for "what did I previously say about X?" questions, but
+    # ranks below the newer version for "what's my current X?" Set
+    # SUPERSEDES_PENALTY=0 to hide superseded items entirely; 1.0 to disable
+    # demotion (no-op).
+    if ranked and SUPERSEDES_PENALTY < 1.0:
+        ranked_ids = [item.get("id") for _, item in ranked if isinstance(item, dict) and item.get("id")]
+        if ranked_ids:
+            try:
+                with _db() as db:
+                    placeholders = ",".join("?" * len(ranked_ids))
+                    sup_rows = db.execute(
+                        f"SELECT to_id FROM memory_relationships "
+                        f"WHERE relationship_type = 'supersedes' "
+                        f"AND to_id IN ({placeholders})",
+                        ranked_ids,
+                    ).fetchall()
+                    superseded_ids: set = {r["to_id"] for r in sup_rows}
+                if superseded_ids:
+                    ranked = [
+                        (
+                            (s * SUPERSEDES_PENALTY) if isinstance(item, dict) and item.get("id") in superseded_ids else s,
+                            item,
+                        )
+                        for s, item in ranked
+                    ]
+                    # Re-sort once after demotion so ordering reflects new scores.
+                    ranked.sort(key=lambda t: t[0], reverse=True)
+            except Exception as e:
+                logger.debug(f"supersedence-aware demotion failed: {e}")
+
+    # Phase D Mastra: post-rank preference for type='observation' rows.
+    # When M3_PREFER_OBSERVATIONS=1, partition the ranked list into
+    # obs_hits (type='observation') and raw_hits (everything else). If the
+    # observations alone supply enough context (sum of token estimates above
+    # M3_OBSERVATION_BUDGET_TOKENS, default 4000), return only obs_hits[:k].
+    # Otherwise interleave: obs first, then raw to fill k slots. The point
+    # is to favor synthesized atomic facts over raw turns when both are
+    # retrieved for the same query.
+    #
+    # Off by default; bench harness opts in via --observer-variant flag
+    # (Phase D Task 8) or callers set M3_PREFER_OBSERVATIONS=1 directly.
+    if ranked and _ingest_llm_enabled("M3_PREFER_OBSERVATIONS"):
+        try:
+            obs_budget = int(os.environ.get("M3_OBSERVATION_BUDGET_TOKENS", "4000"))
+        except ValueError:
+            obs_budget = 4000
+        obs_hits = [(s, it) for s, it in ranked
+                    if isinstance(it, dict) and it.get("type") == "observation"]
+        raw_hits = [(s, it) for s, it in ranked
+                    if not (isinstance(it, dict) and it.get("type") == "observation")]
+        if obs_hits:
+            # Cheap token estimate: 1 token per 4 chars. The Mastra paper's
+            # rationale is that an observation log displaces equivalent raw
+            # turns when its summary is dense enough; we don't need precise
+            # tokenization for the gate, just an order-of-magnitude check.
+            obs_tokens = sum(len((it.get("content") or "")) // 4 for _, it in obs_hits)
+            if obs_tokens >= obs_budget:
+                # Observation-only return — observations supply enough.
+                ranked = obs_hits[:k]
+            else:
+                # Interleave: observations first, then raw to fill remaining slots.
+                slots = max(0, k - len(obs_hits))
+                ranked = obs_hits + raw_hits[:slots]
+
+    # Phase B3 (chatlog-recall plan, 2026-04-26): two-stage retrieval —
+    # expand top-k observations to include their source turns. The
+    # Observer's write_observation stores source_turn_ids in metadata_json;
+    # when M3_TWO_STAGE_OBSERVATIONS=1 fires, we look up those rows and
+    # append them to the ranked list at a small score discount so the
+    # observation still ranks highest but the answerer sees the underlying
+    # turns when it needs verbatim quotes.
+    #
+    # Off by default. The discount factor is M3_TWO_STAGE_TURN_PENALTY
+    # (default 0.7 — turns rank just below their observation but ahead of
+    # other raw hits).
+    if ranked and _ingest_llm_enabled("M3_TWO_STAGE_OBSERVATIONS"):
+        try:
+            turn_penalty = float(os.environ.get("M3_TWO_STAGE_TURN_PENALTY", "0.7"))
+        except ValueError:
+            turn_penalty = 0.7
+        try:
+            max_turns_per_obs = int(os.environ.get("M3_TWO_STAGE_MAX_TURNS_PER_OBS", "3"))
+        except ValueError:
+            max_turns_per_obs = 3
+        # Collect source_turn_ids from observation hits (top-N only — no
+        # point expanding tail-rank observations the user won't see).
+        # Scope to top-k since obs_hits / raw_hits may have already been
+        # collapsed back into `ranked` above.
+        topk = ranked[: k]
+        source_turn_ids: list[str] = []
+        existing_ids = {it.get("id") for _, it in topk if isinstance(it, dict) and it.get("id")}
+        for s, it in topk:
+            if not isinstance(it, dict) or it.get("type") != "observation":
+                continue
+            # Inline meta lookup — _meta_for is scoped to a different block
+            # earlier in this function. Same logic: prefer the parsed
+            # metadata dict if attached, else parse metadata_json on demand.
+            md = it.get("metadata") if isinstance(it.get("metadata"), dict) else None
+            if md is None:
+                raw = it.get("metadata_json") or "{}"
+                try:
+                    md = json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, dict) else {})
+                except (json.JSONDecodeError, TypeError):
+                    md = {}
+            stids = md.get("source_turn_ids") or []
+            if isinstance(stids, list):
+                # Cap how many turns we pull per observation.
+                for tid in stids[:max_turns_per_obs]:
+                    if isinstance(tid, str) and tid not in existing_ids:
+                        source_turn_ids.append(tid)
+                        existing_ids.add(tid)
+        if source_turn_ids:
+            try:
+                with _db() as db:
+                    placeholders = ",".join("?" * len(source_turn_ids))
+                    turn_rows = db.execute(
+                        f"SELECT id, content, title, type, importance "
+                        f"FROM memory_items "
+                        f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted,0)=0",
+                        source_turn_ids,
+                    ).fetchall()
+                # Find the lowest score among existing top-k as the floor,
+                # then place expanded turns at floor * turn_penalty so they
+                # rank below existing hits but get included in formatted output.
+                base_score = min((s for s, _ in topk), default=0.5)
+                floor = max(0.01, base_score * turn_penalty)
+                for r in turn_rows:
+                    expanded_item = dict(r) if hasattr(r, "keys") else {
+                        "id": r[0], "content": r[1], "title": r[2],
+                        "type": r[3], "importance": r[4] or 0.0,
+                    }
+                    expanded_item["_two_stage_expanded"] = True
+                    ranked.append((floor, expanded_item))
+                # Re-sort once so the expanded turns settle in correctly.
+                ranked.sort(key=lambda t: t[0], reverse=True)
+            except Exception as e:
+                logger.debug(f"two-stage observation expansion failed: {e}")
+
     return ranked
 
 
@@ -2652,6 +3217,92 @@ _ENTITY_MENTION_PATTERNS = (
     r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*",   # Capitalized noun phrases
 )
 _ENTITY_MENTION_RE = re.compile("|".join(_ENTITY_MENTION_PATTERNS))
+
+
+# ---------------------------------------------------------------------------
+# AUTO routing helpers — Phase 1 refactor.  auto_route=False (default) is a
+# strict no-op; the helpers below are only invoked when auto_route=True.
+# ---------------------------------------------------------------------------
+
+_UNSET = object()  # module-level sentinel distinguishing "not passed" from "passed default"
+
+
+def _extract_caller_overrides(local_args: dict, sig_defaults: dict) -> dict:
+    """Return only params the caller actually changed from function-signature defaults.
+
+    local_args: the dict of param names → values actually in use (e.g. a subset of locals())
+    sig_defaults: dict of param_name -> default_value from the function's signature
+
+    A value is considered an override when it differs from the signature default by
+    identity or equality.  String/numeric/bool comparisons use ==; object sentinels
+    use `is not`.
+    """
+    overrides = {}
+    for k, v in local_args.items():
+        if k not in sig_defaults:
+            continue
+        default = sig_defaults[k]
+        # Use identity check first (catches sentinel objects), then equality.
+        if v is not default and v != default:
+            overrides[k] = v
+    return overrides
+
+
+def _apply_auto_layer(
+    query: str,
+    primary_candidates: list,
+    current_params: dict,
+    sig_defaults: dict,
+) -> tuple:
+    """Apply AUTO branch values to params. Caller overrides are always preserved.
+
+    current_params: the kwargs dict reflecting what the caller actually passed
+    sig_defaults: function-signature defaults (for override detection)
+
+    Resolution order (lowest → highest priority):
+      1. sig_defaults         — function-signature concrete defaults
+      2. branch_vals          — AUTO branch values for the chosen branch
+      3. caller_overrides     — what the caller explicitly changed from defaults
+
+    Returns:
+        (resolved_params: dict, auto_metadata: dict)
+
+    auto_metadata contains: auto_branch, auto_branch_values, caller_overrides, auto_signals
+    """
+    import auto_route  # local import avoids circular; auto_route has no memory_core deps
+
+    branch = auto_route.decide_branch(query, primary_candidates, current_params)
+    branch_vals = auto_route.branch_values(branch, current_params)
+    caller_overrides = _extract_caller_overrides(current_params, sig_defaults)
+
+    # Merge layers: defaults → AUTO branch values → caller overrides
+    resolved = {**sig_defaults, **branch_vals, **caller_overrides}
+
+    return resolved, {
+        "auto_branch": branch,
+        "auto_branch_values": branch_vals,
+        "caller_overrides": caller_overrides,
+        "auto_signals": auto_route.signals_summary(query, primary_candidates),
+    }
+
+
+def _apply_sharp_trim(hits, *, threshold_ratio, k_min, k_max):
+    """Sharp-branch post-process: keep hits within threshold_ratio of top score, bounded [k_min, k_max].
+
+    hits: list of (score, item_dict) tuples (the canonical routed_impl output shape)
+    """
+    if not hits:
+        return hits
+    if k_max and len(hits) > k_max:
+        hits = hits[:k_max]
+    top_score = hits[0][0] if hits else 0.0
+    if top_score <= 0:
+        return hits[:max(k_min, 1)]
+    threshold = top_score * threshold_ratio
+    kept = [h for h in hits if h[0] >= threshold]
+    if k_min and len(kept) < k_min:
+        kept = hits[:k_min]
+    return kept
 
 
 def is_temporal_query(query: str) -> bool:
@@ -2733,7 +3384,9 @@ def _session_neighbor_ids(seed_ids: list, session_cap: int = 12) -> dict:
 
 
 async def _entity_graph_neighbor_ids(
-    query: str, depth: int, max_neighbors: int, db
+    query: str, depth: int, max_neighbors: int, db,
+    valid_types: list = None,
+    valid_predicates: list = None,
 ) -> set:
     """Parse query for entity mentions, traverse entity_relationships up to `depth`
     hops, and return a set of memory_id values linked to the discovered entities.
@@ -2741,9 +3394,14 @@ async def _entity_graph_neighbor_ids(
     Algorithm (Phase 6, regex-only — no SLM):
       1. Extract candidate mentions from query via _ENTITY_MENTION_RE.
       2. Lookup each candidate in `entities` table (exact then LIKE, cap 5/candidate).
+         If valid_types is given, restrict entity lookup to those entity_type values.
       3. BFS over `entity_relationships` up to min(depth, 3) hops,
          capped at min(max_neighbors, 100) total entity nodes.
+         If valid_predicates is given, only traverse edges with matching predicate.
       4. Fetch memory_ids from `memory_item_entities` for all discovered entities.
+
+    valid_types: list of allowed entity_type strings; None = use VALID_ENTITY_TYPES defaults.
+    valid_predicates: list of allowed predicate strings; None = use VALID_ENTITY_PREDICATES defaults.
 
     Returns set[str] of memory_ids. Returns empty set on any early-exit condition.
     """
@@ -2775,19 +3433,27 @@ async def _entity_graph_neighbor_ids(
     except Exception:  # noqa: BLE001
         return set()
 
+    # Build optional entity_type filter clause (caller-provided list overrides core defaults)
+    _type_clause = ""
+    _type_params: list = []
+    if valid_types:
+        _type_ph = ",".join(["?"] * len(valid_types))
+        _type_clause = f" AND entity_type IN ({_type_ph})"
+        _type_params = list(valid_types)
+
     matched_entity_ids: set[str] = set()
     for candidate in candidates:
         try:
             # Tier 1: exact canonical_name match
             rows = db.execute(
-                "SELECT id FROM entities WHERE canonical_name = ? LIMIT 5",
-                (candidate,),
+                f"SELECT id FROM entities WHERE canonical_name = ?{_type_clause} LIMIT 5",
+                [candidate] + _type_params,
             ).fetchall()
             if not rows:
                 # Tier 2: case-insensitive LIKE match
                 rows = db.execute(
-                    "SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?) LIMIT 5",
-                    (f"%{candidate}%",),
+                    f"SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?){_type_clause} LIMIT 5",
+                    [f"%{candidate}%"] + _type_params,
                 ).fetchall()
             for r in rows:
                 matched_entity_ids.add(r["id"])
@@ -2797,6 +3463,14 @@ async def _entity_graph_neighbor_ids(
     if not matched_entity_ids:
         return set()
 
+    # Build optional predicate filter clause for BFS (caller-provided list overrides core defaults)
+    _pred_clause = ""
+    _pred_params: list = []
+    if valid_predicates:
+        _pred_ph = ",".join(["?"] * len(valid_predicates))
+        _pred_clause = f" AND predicate IN ({_pred_ph})"
+        _pred_params = list(valid_predicates)
+
     # Step 3 — BFS over entity_relationships up to `depth` hops
     seen_entities: set[str] = set(matched_entity_ids)
     frontier: set[str] = set(matched_entity_ids)
@@ -2805,10 +3479,12 @@ async def _entity_graph_neighbor_ids(
             break
         placeholders = ",".join(["?"] * len(frontier))
         try:
+            frontier_list = list(frontier)
             rel_rows = db.execute(
                 f"SELECT from_entity, to_entity FROM entity_relationships "
-                f"WHERE from_entity IN ({placeholders}) OR to_entity IN ({placeholders})",
-                list(frontier) + list(frontier),
+                f"WHERE (from_entity IN ({placeholders}) OR to_entity IN ({placeholders}))"
+                f"{_pred_clause}",
+                frontier_list + frontier_list + _pred_params,
             ).fetchall()
         except Exception:  # noqa: BLE001
             break
@@ -2893,6 +3569,16 @@ async def memory_search_routed_impl(
     entity_graph: bool = False,
     entity_graph_depth: int = 1,
     entity_graph_max_neighbors: int = 20,
+    entity_graph_valid_types: list = None,          # None = use VALID_ENTITY_TYPES; [] from MCP treated as None
+    entity_graph_valid_predicates: list = None,     # None = use VALID_ENTITY_PREDICATES; [] from MCP treated as None
+    # Cross-encoder rerank — default off; production behavior unchanged when False.
+    # When True: rescores top (rerank_pool_k or 3*k) hits with sentence-transformers
+    # CrossEncoder, blends with hybrid score, re-sorts. See _apply_rerank() docstring
+    # and decision memory for the resolution chain.
+    rerank: bool = False,
+    rerank_model: str = "",                         # empty = DEFAULT_RERANK_MODEL
+    rerank_pool_k: int = 0,                         # 0 = 3*k (sensible default; never below k)
+    rerank_blend: float = 1.0,                      # 1.0 = pure CE replacement, 0.5 = avg, 0.0 = no-op
     user_id: str = "",
     scope: str = "",
     type_filter: str = "",
@@ -2913,6 +3599,33 @@ async def memory_search_routed_impl(
     smart_neighbor_sessions: int = 0,
     intent_hint: str = "",
     vector_kind_strategy: str = "default",
+    # --- AUTO routing layer (opt-in, default off) ---
+    # Invariant: auto_route=False produces byte-identical output to pre-refactor.
+    auto_route: bool = False,
+    # Signal-detection thresholds (overridable)
+    auto_top1_sharp_min: float = 0.89,                     # top-1 score above which query is "sharp"
+    auto_slope_at_3_sharp_min: float = 0.08,               # slope-at-3 above which query is "sharp"
+    auto_conv_id_diversity_threshold: int = 5,             # conv_id diversity above which → multi_session
+    auto_top1_low_threshold: float = 0.50,                 # OOD guard — below this, not sharp
+    # Branch values: temporal
+    auto_temporal_k: int = 15,                             # k for temporal branch
+    auto_temporal_recency_bias: float = 0.05,              # recency_bias for temporal branch
+    auto_temporal_expand_sessions: bool = True,            # expand_sessions for temporal branch
+    auto_temporal_graph_depth: int = 1,                    # graph_depth for temporal branch (AUTO_v2 fix)
+    # Branch values: multi_session
+    auto_multi_k: int = 20,                                # k for multi_session branch
+    auto_multi_expand_sessions: bool = True,               # expand_sessions for multi_session branch
+    # Branch values: sharp (post-process trim)
+    auto_sharp_threshold_ratio: float = 0.85,              # trim hits below top_score * ratio
+    auto_sharp_k_min: int = 3,                             # floor after threshold trim
+    auto_sharp_k_max: int = 10,                            # ceiling after threshold trim
+    # Branch values: entity_anchored (AUTO entity-graph expansion)
+    auto_entity_graph_enabled: bool = True,                # AUTO fires entity branch when query has named entities
+    auto_entity_graph_depth: int = 1,                      # entity_graph_depth for entity_anchored branch
+    auto_entity_graph_max_neighbors: int = 20,             # entity_graph_max_neighbors for entity_anchored branch
+    auto_entity_graph_named_entity_threshold: int = 1,     # min named entities to fire entity_anchored branch
+    # Capture mechanism (option b): caller passes a dict, function populates it
+    _capture_dict: dict = None,
 ) -> list:
     """Temporal-aware routed retrieval, with optional graph + session expansion.
 
@@ -2934,8 +3647,144 @@ async def memory_search_routed_impl(
         against the query, and max-fuse. Useful for supersession / context-
         recovery questions.
 
+    AUTO routing layer (opt-in via auto_route=True):
+      When auto_route=True, a two-pass strategy is used. First an overshoot
+      retrieval at k=20 is run to obtain post-retrieval signals (score curve,
+      conv_id diversity). The branch decision then sets unset retrieval
+      parameters before the main retrieval proceeds. Caller-explicit values
+      always win over AUTO branch values. When auto_route=False (the default),
+      none of this runs and behaviour is byte-identical to pre-refactor.
+
+      If _capture_dict is passed (a mutable dict), it is populated with:
+        auto_branch, auto_branch_values, caller_overrides, auto_signals.
+
     Returns the same shape as memory_search_scored_impl: list[tuple[score, dict]].
     """
+    # AUTO routing layer (opt-in, default off — invariant: off = byte-identical to today)
+    auto_metadata = None
+    resolved = None
+    if auto_route:
+        # Run a quick overshoot to obtain post-retrieval signals for branch decision.
+        # Pre-retrieval signals (temporal cue regex) may short-circuit this — but we
+        # always run the overshoot to keep the code path simple and branch_values
+        # consistent across all branches.
+        overshoot_candidates = await memory_search_scored_impl(
+            query, k=20, user_id=user_id, scope=scope,
+            type_filter=type_filter, agent_filter=agent_filter,
+            search_mode=search_mode, variant=variant, as_of=as_of,
+            conversation_id=conversation_id, extra_columns=extra_columns,
+            vector_kind_strategy=vector_kind_strategy,
+        )
+
+        # Signature defaults for all overridable retrieval knobs.
+        # These must match the function signature defaults above exactly.
+        _sig_defaults = {
+            "k": 10,
+            "temporal_k_bump": 5,
+            "graph_depth": 0,
+            "expand_sessions": False,
+            "session_cap": 12,
+            "recency_bias": 0.0,
+            "vector_weight": 0.7,
+            # Entity-graph knobs (for override detection)
+            "entity_graph": False,
+            "entity_graph_depth": 1,
+            "entity_graph_max_neighbors": 20,
+            # AUTO threshold defaults (for override detection only)
+            "auto_top1_sharp_min": 0.89,
+            "auto_slope_at_3_sharp_min": 0.08,
+            "auto_conv_id_diversity_threshold": 5,
+            "auto_top1_low_threshold": 0.50,
+            # AUTO branch value defaults
+            "auto_temporal_k": 15,
+            "auto_temporal_recency_bias": 0.05,
+            "auto_temporal_expand_sessions": True,
+            "auto_temporal_graph_depth": 1,
+            "auto_multi_k": 20,
+            "auto_multi_expand_sessions": True,
+            "auto_sharp_threshold_ratio": 0.85,
+            "auto_sharp_k_min": 3,
+            "auto_sharp_k_max": 10,
+            # AUTO entity_anchored branch defaults
+            "auto_entity_graph_enabled": True,
+            "auto_entity_graph_depth": 1,
+            "auto_entity_graph_max_neighbors": 20,
+            "auto_entity_graph_named_entity_threshold": 1,
+        }
+
+        # Current param values (what the caller actually passed or defaulted to).
+        _current_params = {
+            "k": k,
+            "temporal_k_bump": temporal_k_bump,
+            "graph_depth": graph_depth,
+            "expand_sessions": expand_sessions,
+            "session_cap": session_cap,
+            "recency_bias": recency_bias,
+            "vector_weight": vector_weight,
+            # Entity-graph knobs (pass-through so AUTO layer can detect caller overrides)
+            "entity_graph": entity_graph,
+            "entity_graph_depth": entity_graph_depth,
+            "entity_graph_max_neighbors": entity_graph_max_neighbors,
+            # Threshold overrides (pass-through so decide_branch can read them)
+            "auto_top1_sharp_min": auto_top1_sharp_min,
+            "auto_slope_at_3_sharp_min": auto_slope_at_3_sharp_min,
+            "auto_conv_id_diversity_threshold": auto_conv_id_diversity_threshold,
+            "auto_top1_low_threshold": auto_top1_low_threshold,
+            # Branch value overrides (pass-through so branch_values can read them)
+            "auto_temporal_k": auto_temporal_k,
+            "auto_temporal_recency_bias": auto_temporal_recency_bias,
+            "auto_temporal_expand_sessions": auto_temporal_expand_sessions,
+            "auto_temporal_graph_depth": auto_temporal_graph_depth,
+            "auto_multi_k": auto_multi_k,
+            "auto_multi_expand_sessions": auto_multi_expand_sessions,
+            "auto_sharp_threshold_ratio": auto_sharp_threshold_ratio,
+            "auto_sharp_k_min": auto_sharp_k_min,
+            "auto_sharp_k_max": auto_sharp_k_max,
+            # AUTO entity_anchored branch values (pass-through for decide_branch)
+            "auto_entity_graph_enabled": auto_entity_graph_enabled,
+            "auto_entity_graph_depth": auto_entity_graph_depth,
+            "auto_entity_graph_max_neighbors": auto_entity_graph_max_neighbors,
+            "auto_entity_graph_named_entity_threshold": auto_entity_graph_named_entity_threshold,
+        }
+
+        resolved, auto_metadata = _apply_auto_layer(
+            query, overshoot_candidates, _current_params, _sig_defaults
+        )
+
+        # Apply resolved values back to local variables so the rest of the
+        # function (which is unchanged) uses the AUTO-adjusted parameters.
+        k = resolved["k"]
+        temporal_k_bump = resolved["temporal_k_bump"]
+        graph_depth = resolved["graph_depth"]
+        expand_sessions = resolved["expand_sessions"]
+        session_cap = resolved["session_cap"]
+        recency_bias = resolved["recency_bias"]
+        vector_weight = resolved["vector_weight"]
+        # Apply AUTO entity-graph values.
+        # Precedence rule: if auto_entity_graph_enabled=False, AUTO must NOT enable entity_graph.
+        # Also: if caller explicitly passed entity_graph=False (recorded in caller_overrides),
+        # that beats the entity_anchored branch value.
+        _eg_caller_overrides = auto_metadata.get("caller_overrides", {})
+        _eg_auto_blocked = (
+            not auto_entity_graph_enabled
+            or ("entity_graph" in _eg_caller_overrides and not _eg_caller_overrides["entity_graph"])
+        )
+        if _eg_auto_blocked and auto_metadata.get("auto_branch") == "entity_anchored":
+            # Suppress AUTO's entity_graph=True — use the original entity_graph value
+            resolved["entity_graph"] = entity_graph
+        entity_graph = resolved.get("entity_graph", entity_graph)
+        entity_graph_depth = resolved.get("entity_graph_depth", entity_graph_depth)
+        entity_graph_max_neighbors = resolved.get("entity_graph_max_neighbors", entity_graph_max_neighbors)
+
+        # Populate caller-supplied capture dict if present.
+        if _capture_dict is not None:
+            _capture_dict.update(auto_metadata)
+
+    # Normalize MCP empty-list sentinel → None for entity vocab overrides.
+    # This happens unconditionally (covers both auto_route=True and False paths).
+    _egt = entity_graph_valid_types if entity_graph_valid_types else None
+    _egp = entity_graph_valid_predicates if entity_graph_valid_predicates else None
+
     # Read env-var override for the bump
     bump = int(os.environ.get("M3_ROUTER_TEMPORAL_K_BUMP", str(temporal_k_bump)))
 
@@ -2952,70 +3801,121 @@ async def memory_search_routed_impl(
             smart_neighbor_sessions=smart_neighbor_sessions,
             intent_hint=intent_hint, vector_kind_strategy="default",
         )
-        return await _maybe_expand_routed(
+        final_hits = await _maybe_expand_routed(
             query, primary, k=k + bump,
             graph_depth=graph_depth,
             expand_sessions=expand_sessions, session_cap=session_cap,
             entity_graph=entity_graph,
             entity_graph_depth=entity_graph_depth,
             entity_graph_max_neighbors=entity_graph_max_neighbors,
+            entity_graph_valid_types=_egt,
+            entity_graph_valid_predicates=_egp,
+        )
+    else:
+        # Non-temporal path
+        base_hits = await memory_search_scored_impl(
+            query, k=k * 2 if fact_variant else k,
+            user_id=user_id, scope=scope, type_filter=type_filter,
+            agent_filter=agent_filter, search_mode=search_mode,
+            variant=variant, as_of=as_of, conversation_id=conversation_id,
+            explain=explain, extra_columns=extra_columns, recency_bias=recency_bias,
+            vector_weight=vector_weight, adaptive_k=adaptive_k,
+            elbow_sensitivity=elbow_sensitivity, adaptive_k_min=adaptive_k_min,
+            adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
+            smart_neighbor_sessions=smart_neighbor_sessions,
+            intent_hint=intent_hint, vector_kind_strategy="max",
         )
 
-    # Non-temporal path
-    base_hits = await memory_search_scored_impl(
-        query, k=k * 2 if fact_variant else k,
-        user_id=user_id, scope=scope, type_filter=type_filter,
-        agent_filter=agent_filter, search_mode=search_mode,
-        variant=variant, as_of=as_of, conversation_id=conversation_id,
-        explain=explain, extra_columns=extra_columns, recency_bias=recency_bias,
-        vector_weight=vector_weight, adaptive_k=adaptive_k,
-        elbow_sensitivity=elbow_sensitivity, adaptive_k_min=adaptive_k_min,
-        adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
-        smart_neighbor_sessions=smart_neighbor_sessions,
-        intent_hint=intent_hint, vector_kind_strategy="max",
-    )
+        if not fact_variant:
+            final_hits = await _maybe_expand_routed(
+                query, base_hits[:k], k=k,
+                graph_depth=graph_depth,
+                expand_sessions=expand_sessions, session_cap=session_cap,
+                entity_graph=entity_graph,
+                entity_graph_depth=entity_graph_depth,
+                entity_graph_max_neighbors=entity_graph_max_neighbors,
+                entity_graph_valid_types=_egt,
+                entity_graph_valid_predicates=_egp,
+            )
+        else:
+            # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
+            fact_hits = await memory_search_scored_impl(
+                query, k=k * 2, user_id=user_id, scope=scope,
+                type_filter=type_filter, agent_filter=agent_filter,
+                search_mode=search_mode, variant=fact_variant, as_of=as_of,
+                conversation_id=conversation_id, explain=explain,
+                extra_columns=extra_columns, recency_bias=recency_bias,
+                vector_weight=vector_weight, adaptive_k=adaptive_k,
+                elbow_sensitivity=elbow_sensitivity, adaptive_k_min=adaptive_k_min,
+                adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
+                smart_neighbor_sessions=smart_neighbor_sessions,
+                intent_hint=intent_hint, vector_kind_strategy="default",
+            )
 
-    if not fact_variant:
-        return await _maybe_expand_routed(
-            query, base_hits[:k], k=k,
-            graph_depth=graph_depth,
-            expand_sessions=expand_sessions, session_cap=session_cap,
-            entity_graph=entity_graph,
-            entity_graph_depth=entity_graph_depth,
-            entity_graph_max_neighbors=entity_graph_max_neighbors,
+            # Both return list[tuple[score, dict]]. Dedupe by item id, keep highest score.
+            best: dict = {}  # memory_id -> (score, item)
+            for s, item in base_hits + fact_hits:
+                mid = item.get("id") if isinstance(item, dict) else None
+                if mid is None:
+                    continue
+                if mid not in best or s > best[mid][0]:
+                    best[mid] = (s, item)
+            fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
+            final_hits = await _maybe_expand_routed(
+                query, fused, k=k,
+                graph_depth=graph_depth,
+                expand_sessions=expand_sessions, session_cap=session_cap,
+                entity_graph=entity_graph,
+                entity_graph_depth=entity_graph_depth,
+                entity_graph_max_neighbors=entity_graph_max_neighbors,
+                entity_graph_valid_types=_egt,
+                entity_graph_valid_predicates=_egp,
+            )
+
+    # Sharp-branch post-process trim (only when AUTO routing is active and sharp branch fired)
+    if auto_route and auto_metadata and auto_metadata.get("auto_branch") == "sharp":
+        final_hits = _apply_sharp_trim(
+            final_hits,
+            threshold_ratio=resolved["auto_sharp_threshold_ratio"],
+            k_min=resolved["auto_sharp_k_min"],
+            k_max=resolved["auto_sharp_k_max"],
         )
+        if _capture_dict is not None:
+            _capture_dict["sharp_post_trim_count"] = len(final_hits)
 
-    # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
-    fact_hits = await memory_search_scored_impl(
-        query, k=k * 2, user_id=user_id, scope=scope,
-        type_filter=type_filter, agent_filter=agent_filter,
-        search_mode=search_mode, variant=fact_variant, as_of=as_of,
-        conversation_id=conversation_id, explain=explain,
-        extra_columns=extra_columns, recency_bias=recency_bias,
-        vector_weight=vector_weight, adaptive_k=adaptive_k,
-        elbow_sensitivity=elbow_sensitivity, adaptive_k_min=adaptive_k_min,
-        adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
-        smart_neighbor_sessions=smart_neighbor_sessions,
-        intent_hint=intent_hint, vector_kind_strategy="default",
-    )
+    # Entity-anchored capture: count entity-graph neighbors added to final hits.
+    if auto_route and auto_metadata and auto_metadata.get("auto_branch") == "entity_anchored":
+        if _capture_dict is not None:
+            eg_count = sum(
+                1 for _, item in final_hits
+                if isinstance(item, dict) and item.get("_expanded_via") == "entity_graph"
+            )
+            _capture_dict["entity_graph_neighbors_added"] = eg_count
 
-    # Both return list[tuple[score, dict]]. Dedupe by item id, keep highest score.
-    best: dict = {}  # memory_id -> (score, item)
-    for s, item in base_hits + fact_hits:
-        mid = item.get("id") if isinstance(item, dict) else None
-        if mid is None:
-            continue
-        if mid not in best or s > best[mid][0]:
-            best[mid] = (s, item)
-    fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
-    return await _maybe_expand_routed(
-        query, fused, k=k,
-        graph_depth=graph_depth,
-        expand_sessions=expand_sessions, session_cap=session_cap,
-        entity_graph=entity_graph,
-        entity_graph_depth=entity_graph_depth,
-        entity_graph_max_neighbors=entity_graph_max_neighbors,
-    )
+    # Cross-encoder rerank pass (default off). Runs LAST so it sees the fully
+    # expanded + sharp-trimmed result set, including entity-graph neighbors.
+    # CONTRACT: rerank=False → byte-identical to pre-feature behavior.
+    if rerank:
+        _model = rerank_model or DEFAULT_RERANK_MODEL
+        _pool = rerank_pool_k if rerank_pool_k > 0 else (3 * k)
+        _final_n = len(final_hits)
+        final_hits = _apply_rerank(
+            final_hits,
+            query,
+            pool_k=_pool,
+            final_k=k,
+            model_name=_model,
+            blend=rerank_blend,
+        )
+        if _capture_dict is not None:
+            _capture_dict["rerank_applied"] = True
+            _capture_dict["rerank_model"] = _model
+            _capture_dict["rerank_pool_k"] = _pool
+            _capture_dict["rerank_blend"] = rerank_blend
+            _capture_dict["rerank_pre_count"] = _final_n
+            _capture_dict["rerank_post_count"] = len(final_hits)
+
+    return final_hits
 
 
 async def _maybe_expand_routed(
@@ -3026,6 +3926,8 @@ async def _maybe_expand_routed(
     entity_graph: bool = False,
     entity_graph_depth: int = 1,
     entity_graph_max_neighbors: int = 20,
+    entity_graph_valid_types: list = None,
+    entity_graph_valid_predicates: list = None,
 ) -> list:
     """Apply optional graph, session, and entity-graph expansion to a routed retrieval result.
 
@@ -3042,6 +3944,8 @@ async def _maybe_expand_routed(
     # Build dict of new rows (memory_id -> row dict), avoiding duplicates of primary seeds.
     primary_ids: set = {item.get("id") for _, item in primary if isinstance(item, dict) and item.get("id")}
     extra_rows: dict = {}
+    # Track which expansion source each extra row came from for _expanded_via tagging.
+    extra_row_source: dict = {}  # memory_id -> "graph" | "session" | "entity_graph"
 
     if graph_depth > 0 and seed_ids:
         neighbor_ids = _graph_neighbor_ids(seed_ids, depth=int(graph_depth))
@@ -3056,12 +3960,14 @@ async def _maybe_expand_routed(
                 ).fetchall()
                 for r in rows:
                     extra_rows[r["id"]] = dict(r)
+                    extra_row_source[r["id"]] = "graph"
 
     if expand_sessions and seed_ids:
         session_rows = _session_neighbor_ids(seed_ids, session_cap=int(session_cap))
         for rid, item in session_rows.items():
             if rid not in extra_rows:
                 extra_rows[rid] = item
+                extra_row_source[rid] = "session"
 
     if entity_graph:
         try:
@@ -3071,6 +3977,8 @@ async def _maybe_expand_routed(
                     depth=int(entity_graph_depth),
                     max_neighbors=int(entity_graph_max_neighbors),
                     db=db,
+                    valid_types=entity_graph_valid_types,
+                    valid_predicates=entity_graph_valid_predicates,
                 )
             new_ids = eg_memory_ids - primary_ids - set(extra_rows.keys())
             if new_ids:
@@ -3085,11 +3993,25 @@ async def _maybe_expand_routed(
                     for r in eg_rows:
                         if r["id"] not in extra_rows:
                             extra_rows[r["id"]] = dict(r)
+                            extra_row_source[r["id"]] = "entity_graph"
         except Exception:  # noqa: BLE001
             pass  # entity_graph expansion is best-effort; never crash the primary path
 
     if not extra_rows:
+        # Tag primary hits as "primary" and return unchanged.
+        for _, item in primary:
+            if isinstance(item, dict) and "_expanded_via" not in item:
+                item["_expanded_via"] = "primary"
         return primary
+
+    # Tag each extra row with its expansion source before scoring.
+    for mid, item in extra_rows.items():
+        item["_expanded_via"] = extra_row_source.get(mid, "graph")
+
+    # Tag primary items as "primary" before fusion.
+    for _, item in primary:
+        if isinstance(item, dict) and "_expanded_via" not in item:
+            item["_expanded_via"] = "primary"
 
     scored_extras = await _score_extra_rows(query, extra_rows, base_score=0.0)
 
@@ -3099,6 +4021,9 @@ async def _maybe_expand_routed(
         if mid is None:
             continue
         if mid not in best or s > best[mid][0]:
+            best[mid] = (s, item)
+        elif s == best[mid][0] and item.get("_expanded_via", "primary") != "primary":
+            # On exact score tie, prefer the non-primary tag to preserve cross-peer evidence.
             best[mid] = (s, item)
     fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
     return fused
@@ -3563,6 +4488,77 @@ async def conversation_append_impl(conversation_id, role, content, agent_id="", 
                           (str(uuid.uuid4()), mid, _pack(vec), m, len(vec), now))
     return f"Appended: {mid}"
 
+
+def observation_enqueue_impl(
+    conversation_id: str,
+    user_id: str = "",
+) -> str:
+    """Phase D Mastra Observer enqueue.
+
+    Inserts a row into observation_queue keyed on conversation_id. The
+    drainer (bin/run_observer.py) pops these rows, builds the multi-turn
+    JSON block from memory_items rows belonging to the conversation, calls
+    the Observer SLM, and writes type='observation' rows back.
+
+    UNIQUE on conversation_id means re-enqueue is a no-op — useful for
+    idempotent close-of-conversation triggers.
+
+    Returns "Enqueued" / "Already queued" / error string.
+    """
+    if not conversation_id:
+        return "Error: conversation_id required"
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO observation_queue (conversation_id, user_id) "
+                "VALUES (?, ?)",
+                (conversation_id, user_id or None),
+            )
+            db.commit()
+            row = db.execute(
+                "SELECT id, attempts FROM observation_queue WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()
+        if row:
+            return f"Enqueued (queue_id={row[0]}, attempts={row[1]})"
+        return "Error: enqueue failed silently"
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+
+def reflector_enqueue_impl(
+    conversation_id: str,
+    user_id: str = "",
+    obs_count: int | None = None,
+) -> str:
+    """Phase D Reflector enqueue.
+
+    Triggered when the per-(user_id, conversation_id) observation count
+    exceeds M3_REFLECTOR_THRESHOLD (default 50, env-tunable). Drained by
+    bin/run_reflector.py.
+    """
+    if not conversation_id:
+        return "Error: conversation_id required"
+    try:
+        with _db() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO reflector_queue "
+                "(conversation_id, user_id, obs_count_at_enqueue) VALUES (?, ?, ?)",
+                (conversation_id, user_id or None, obs_count),
+            )
+            db.commit()
+            row = db.execute(
+                "SELECT id, attempts FROM reflector_queue "
+                "WHERE conversation_id=? AND COALESCE(user_id,'')=COALESCE(?,'')",
+                (conversation_id, user_id or None),
+            ).fetchone()
+        if row:
+            return f"Enqueued (queue_id={row[0]}, attempts={row[1]})"
+        return "Error: enqueue failed silently"
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+
 VALID_SCOPES = {"user", "session", "agent", "org"}
 
 async def memory_write_impl(type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: "set[str] | None" = None, entity_extractor: "Callable[[str], Awaitable[dict]] | None" = None, entity_extractor_variant_allowlist: "set[str] | None" = None):
@@ -3588,6 +4584,21 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
 
     if auto_classify and (not type or type == "auto"):
         type = await _auto_classify(content, title)
+
+    # Leak gate: reject `window:*` summary rows when the variant is NULL.
+    # See bulk-write impl for the same gate + history (task #189, memory
+    # 372f49b0). Mirrored here for the singleton path so misconfigured
+    # bench callers who write items individually don't slip through.
+    if (
+        type == "summary"
+        and isinstance(title, str)
+        and title.startswith("window:")
+        and not variant
+    ):
+        return (
+            "Error: window:* summary rows require an explicit variant "
+            "(rejected to prevent core-memory leak; see task #189)."
+        )
 
     # Defense-in-depth content size check (primary validation is in memory_bridge.py)
     if content and len(content) > 50_000:
@@ -3719,6 +4730,114 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
     if superseded_ids:
         result += f" (superseded {len(superseded_ids)} conflicting memories: {', '.join(superseded_ids[:3])})"
     return result
+
+
+async def memory_write_from_file_impl(
+    path: str,
+    type: str,
+    title: str = "",
+    metadata: str = "{}",
+    agent_id: str = "",
+    model_id: str = "",
+    change_agent: str = "",
+    importance: float = 0.5,
+    source: str = "agent",
+    embed: bool = True,
+    user_id: str = "",
+    scope: str = "agent",
+    valid_from: str = "",
+    valid_to: str = "",
+    auto_classify: bool = False,
+    conversation_id: str = "",
+    refresh_on: str = "",
+    refresh_reason: str = "",
+    variant: str | None = None,
+    delete_after_read: bool = True,
+):
+    """Write a memory whose `content` is read from a file on disk.
+
+    Bypasses the LLM-streaming bottleneck for large memory writes: when the
+    LLM authors a multi-thousand-token markdown body inline in a tool_use,
+    the autoregressive decode time of streaming the JSON `input` field
+    dominates the wall-clock (24-90s typical). Writing to a file with the
+    Write tool is off the streaming path; the resulting tool_use here only
+    needs to stream a path string + a few short metadata fields.
+
+    `path` must be an absolute path on the host where this MCP server
+    runs. The file is read once, contents become the memory `content`,
+    and (by default) the file is deleted on success — keeping the temp
+    directory clean and signalling that the contents are now authoritative
+    in m3-memory, not on disk.
+
+    Read errors / missing files return a string "Error: ..." mirroring
+    the singleton path's contract. The underlying memory_write_impl is
+    called unchanged with the read content, so all existing gates
+    (content-safety, leak-gate, scope, contradiction detection,
+    auto-classify, etc.) apply identically.
+
+    Reference: bench / diagnostic data in
+    `.scratch/memory_latency_diagnostic.md` — Phase K rationale.
+    """
+    if not path:
+        return "Error: path is required"
+    p = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(p):
+        return f"Error: file not found: {p}"
+    if not os.path.isfile(p):
+        return f"Error: not a file: {p}"
+    try:
+        size = os.path.getsize(p)
+    except OSError as e:
+        return f"Error: cannot stat file: {type(e).__name__}: {e}"
+    # Defense-in-depth size check — memory_write_impl will also enforce
+    # 50_000-char limit on content, but we should fail fast before reading
+    # a multi-megabyte file off disk.
+    if size > 200_000:
+        return f"Error: file too large ({size} bytes; max 200000 for memory_write_from_file)"
+
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        return f"Error: cannot read file: {type(e).__name__}: {e}"
+
+    # Delegate to the canonical singleton path. Every gate applies to the
+    # disk-read content the same way it applies to inline content.
+    result = await memory_write_impl(
+        type=type,
+        content=content,
+        title=title,
+        metadata=metadata,
+        agent_id=agent_id,
+        model_id=model_id,
+        change_agent=change_agent,
+        importance=importance,
+        source=source,
+        embed=embed,
+        user_id=user_id,
+        scope=scope,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        auto_classify=auto_classify,
+        conversation_id=conversation_id,
+        refresh_on=refresh_on,
+        refresh_reason=refresh_reason,
+        variant=variant,
+    )
+
+    # Only delete the source file if memory_write_impl actually wrote a
+    # row (success messages start with "Created:"). On error, leave the
+    # file in place so the caller can inspect it.
+    if delete_after_read and isinstance(result, str) and result.startswith("Created:"):
+        try:
+            os.unlink(p)
+        except OSError as e:
+            # Non-fatal — the row landed; we just couldn't clean up the temp.
+            logger.warning(f"memory_write_from_file: row written but file unlink failed: {e}")
+            return result + f" (warning: could not delete source file {p}: {e})"
+
+    return result
+
 
 async def memory_write_batch_impl(items: list[dict]):
     """
@@ -4371,8 +5490,8 @@ def _select_pending_entity_extraction(
     db,
     limit: int | None = None,
     allowed_variants: list[str] | None = None,
-) -> list[tuple[str, str]]:
-    """Returns [(memory_id, content), ...] eligible for entity extraction.
+) -> list[tuple[str, str, str | None]]:
+    """Returns [(memory_id, content, valid_from), ...] eligible for entity extraction.
 
     Eligibility:
       - type != 'fact_enriched'  (don't extract from derived rows)
@@ -4382,6 +5501,9 @@ def _select_pending_entity_extraction(
       - id NOT IN (SELECT memory_id FROM memory_item_entities)  — not already extracted
       - id NOT IN (SELECT memory_id FROM entity_extraction_queue
                    WHERE attempts >= ENTITY_EXTRACT_MAX_ATTEMPTS)  — poisoned-item guard
+
+    valid_from is included so callers can inherit bitemporal validity from the source
+    memory when creating entities and relationships during extraction.
     """
     if allowed_variants:
         variant_clause = (
@@ -4395,7 +5517,7 @@ def _select_pending_entity_extraction(
 
     sql = f"""
     WITH eligible AS (
-        SELECT mi.id, mi.content
+        SELECT mi.id, mi.content, mi.valid_from
         FROM memory_items mi
         WHERE mi.type != 'fact_enriched'
           AND COALESCE(mi.is_deleted, 0) = 0
@@ -4403,14 +5525,14 @@ def _select_pending_entity_extraction(
           AND mi.id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)
     ),
     queued AS (
-        SELECT mi.id, mi.content, q.attempts
+        SELECT mi.id, mi.content, mi.valid_from, q.attempts
         FROM entity_extraction_queue q
         JOIN memory_items mi ON mi.id = q.memory_id
         WHERE q.attempts < ?
     )
-    SELECT id, content FROM queued
+    SELECT id, content, valid_from FROM queued
     UNION
-    SELECT id, content FROM eligible
+    SELECT id, content, valid_from FROM eligible
     WHERE id NOT IN (SELECT memory_id FROM entity_extraction_queue)
     ORDER BY id
     """
@@ -4425,6 +5547,9 @@ async def extract_pending_impl(
     dry_run: bool = True,
     limit: int = 0,
     allowed_variants: list[str] | None = None,
+    *,
+    valid_types: frozenset | None = None,       # None = use VALID_ENTITY_TYPES
+    valid_predicates: frozenset | None = None,  # None = use VALID_ENTITY_PREDICATES
 ) -> dict:
     """Entity extraction queue drain. Mirrors enrich_pending_impl shape.
 
@@ -4436,6 +5561,10 @@ async def extract_pending_impl(
 
     ETA estimate uses 3.0 sec/item (higher than fact_enriched's 2.0 because
     entity resolution adds DB lookups on top of SLM call).
+
+    valid_types / valid_predicates are forwarded to _run_entity_extractor.
+    None means use the module-level VALID_ENTITY_TYPES / VALID_ENTITY_PREDICATES constants.
+    Bench harnesses can pass custom frozensets; production callers pass None (default behavior).
 
     Execute path: placeholder until Wave 3 injects entity_extractor via MCP tool.
     """
@@ -4462,7 +5591,7 @@ async def extract_pending_impl(
     if dry_run:
         # Dry run: report count + ETA estimate (3.0 sec/item)
         est_secs = len(pending) * 3.0
-        sample_ids = [mid for mid, _ in pending[:3]]
+        sample_ids = [row[0] for row in pending[:3]]
         return {
             "count": len(pending),
             "est_wall_clock_seconds": est_secs,
@@ -4473,6 +5602,8 @@ async def extract_pending_impl(
     # The entity_extractor is provided at write-time through memory_write_impl;
     # a drain path that calls the extractor requires it to be injected by the
     # MCP tool layer (same pattern as enrich_pending_impl).
+    # valid_types/valid_predicates are accepted here now so callers can pass them
+    # when Wave 3 wires the real execution path.
     return {
         "processed": 0,
         "succeeded": 0,
@@ -4481,6 +5612,59 @@ async def extract_pending_impl(
         "entities_created": 0,
         "relationships_created": 0,
     }
+
+# ── Entity extractor health (Phase E1) ───────────────────────────────────────
+def entity_extractor_health() -> dict:
+    """Read-only diagnostic for the entity extraction pipeline.
+
+    Returns a dict with 6 keys:
+      queue_depth          — COUNT(*) from entity_extraction_queue where
+                             attempts < ENTITY_EXTRACT_MAX_ATTEMPTS (eligible to retry)
+      poisoned             — COUNT(*) where attempts >= ENTITY_EXTRACT_MAX_ATTEMPTS
+                             (excluded from eligible set; kept for diagnostic visibility)
+      last_extracted_at    — ISO-8601 string of the most recent entities.created_at,
+                             or None if the entities table is empty
+      entities_total       — total rows in entities table
+      relationships_total  — total rows in entity_relationships table
+      memory_item_entities_total — total rows in memory_item_entities table
+    """
+    with _db() as db:
+        q_depth = db.execute(
+            "SELECT COUNT(*) FROM entity_extraction_queue WHERE attempts < ?",
+            (ENTITY_EXTRACT_MAX_ATTEMPTS,),
+        ).fetchone()[0]
+
+        poisoned = db.execute(
+            "SELECT COUNT(*) FROM entity_extraction_queue WHERE attempts >= ?",
+            (ENTITY_EXTRACT_MAX_ATTEMPTS,),
+        ).fetchone()[0]
+
+        last_row = db.execute(
+            "SELECT MAX(created_at) AS last_at FROM entities"
+        ).fetchone()
+        last_extracted_at: str | None = last_row["last_at"] if last_row else None
+
+        entities_total = db.execute(
+            "SELECT COUNT(*) FROM entities"
+        ).fetchone()[0]
+
+        relationships_total = db.execute(
+            "SELECT COUNT(*) FROM entity_relationships"
+        ).fetchone()[0]
+
+        mie_total = db.execute(
+            "SELECT COUNT(*) FROM memory_item_entities"
+        ).fetchone()[0]
+
+    return {
+        "queue_depth": q_depth,
+        "poisoned": poisoned,
+        "last_extracted_at": last_extracted_at,
+        "entities_total": entities_total,
+        "relationships_total": relationships_total,
+        "memory_item_entities_total": mie_total,
+    }
+
 
 # ── Entity search and retrieval (Phase 7) ─────────────────────────────────────
 def entity_search_impl(
