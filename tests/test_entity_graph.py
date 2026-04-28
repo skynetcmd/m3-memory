@@ -181,16 +181,18 @@ def _create_entity_graph_schema(db_path):
 
 
 def _insert_memory(db_path, *, mid=None, type_="note", content="test content",
-                   variant=None, is_deleted=0):
+                   variant=None, is_deleted=0, valid_from=None):
     """Helper to insert a minimal memory_items row."""
     mid = mid or str(uuid.uuid4())
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             """INSERT INTO memory_items
-            (id, type, title, content, variant, is_deleted, created_at, source, origin_device, scope, change_agent)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (id, type, title, content, variant, is_deleted, created_at, valid_from,
+             source, origin_device, scope, change_agent)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mid, type_, "test title", content, variant, is_deleted,
-             "2026-04-25T00:00:00Z", "agent", "test", "agent", "test_agent"),
+             "2026-04-25T00:00:00Z", valid_from,
+             "agent", "test", "agent", "test_agent"),
         )
     return mid
 
@@ -992,7 +994,9 @@ async def test_routed_with_entity_graph_kwarg(monkeypatch):
 
     async def stub_maybe_expand(query, primary, k, graph_depth=0, expand_sessions=False,
                                 session_cap=12, entity_graph=False, entity_graph_depth=1,
-                                entity_graph_max_neighbors=20):
+                                entity_graph_max_neighbors=20,
+                                entity_graph_valid_types=None,
+                                entity_graph_valid_predicates=None):
         if entity_graph:
             # Simulate calling _entity_graph_neighbor_ids
             entity_graph_expand_called["value"] = True
@@ -1124,4 +1128,554 @@ async def test_locomo_audit_extractor_none(monkeypatch, tmp_path):
     )
     assert queue_count == 0, (
         f"No entity_extraction_queue rows with entity_extractor=None; got {queue_count}"
+    )
+
+
+# ===========================================================================
+# Phase E1 hardening tests (new — 8 tests)
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# E1 Test 1 — Retry: transient SLM failure on first call, success on second
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extractor_retries_transient_failure(monkeypatch, tmp_path):
+    """SLM fails on first call (raises), succeeds on second.
+    After two extract calls, entity is created and queue entry is removed."""
+    import memory_core
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+
+    call_count = [0]
+
+    async def flaky_extractor(content: str) -> dict:
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise RuntimeError("Transient SLM error")
+        return {
+            "entities": [{"canonical_name": "RetryPerson", "entity_type": "person",
+                           "mention_text": "RetryPerson", "confidence": 0.9}],
+            "relationships": [],
+        }
+
+    mid = _insert_memory(db_path, content="RetryPerson did something")
+
+    # First call: extractor fails → increments attempts to 1
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        await memory_core._try_extract_or_enqueue(mid, "RetryPerson did something", flaky_extractor, conn)
+        await asyncio.sleep(0.15)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        q_row = conn.execute(
+            "SELECT attempts, last_error FROM entity_extraction_queue WHERE memory_id=?", (mid,)
+        ).fetchone()
+    assert q_row is not None, "Queue row must exist after first failure"
+    assert q_row[0] == 1, f"attempts should be 1 after first failure, got {q_row[0]}"
+    assert q_row[1] is not None and "Transient" in q_row[1], (
+        f"last_error should mention the exception, got: {q_row[1]}"
+    )
+
+    # Second call: extractor succeeds → entity created, queue row removed
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        await memory_core._try_extract_or_enqueue(mid, "RetryPerson did something", flaky_extractor, conn)
+        await asyncio.sleep(0.15)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        entity_count = conn.execute(
+            "SELECT COUNT(*) FROM entities WHERE canonical_name='RetryPerson'"
+        ).fetchone()[0]
+        q_count = conn.execute(
+            "SELECT COUNT(*) FROM entity_extraction_queue WHERE memory_id=?", (mid,)
+        ).fetchone()[0]
+
+    assert entity_count == 1, f"Entity should be created on successful retry, got {entity_count}"
+    assert q_count == 0, f"Queue entry should be removed after successful extraction, got {q_count}"
+    assert call_count[0] == 2, f"Extractor should have been called exactly twice, got {call_count[0]}"
+
+
+# ---------------------------------------------------------------------------
+# E1 Test 2 — Idempotency: re-extraction doesn't double-insert
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extractor_idempotent_on_reextraction(monkeypatch, tmp_path):
+    """Extract a memory, then delete the queue entry and extract again.
+    Entity count and relationship count must not increase on second run."""
+    import memory_core
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+
+    async def stub_extractor(content: str) -> dict:
+        return {
+            "entities": [
+                {"canonical_name": "IdempotentPerson", "entity_type": "person",
+                 "mention_text": "IdempotentPerson", "confidence": 0.9},
+                {"canonical_name": "IdempotentOrg", "entity_type": "organization",
+                 "mention_text": "IdempotentOrg", "confidence": 0.9},
+            ],
+            "relationships": [
+                {"from_entity": "IdempotentPerson", "to_entity": "IdempotentOrg",
+                 "predicate": "works_at", "confidence": 0.85},
+            ],
+        }
+
+    mid = _insert_memory(db_path, content="IdempotentPerson works at IdempotentOrg")
+
+    # First extraction
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        await memory_core._try_extract_or_enqueue(mid, "IdempotentPerson works at IdempotentOrg", stub_extractor, conn)
+        await asyncio.sleep(0.2)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        entity_count_1 = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        rel_count_1 = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0]
+        mie_count_1 = conn.execute("SELECT COUNT(*) FROM memory_item_entities").fetchone()[0]
+
+    assert entity_count_1 == 2, f"Expected 2 entities after first extraction, got {entity_count_1}"
+    assert rel_count_1 == 1, f"Expected 1 relationship after first extraction, got {rel_count_1}"
+    assert mie_count_1 == 2, f"Expected 2 mie rows after first extraction, got {mie_count_1}"
+
+    # Re-extraction: delete mie rows to simulate a "re-extract" scenario
+    # and call _run_entity_extractor directly (bypasses the queue skip logic)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DELETE FROM memory_item_entities WHERE memory_id=?", (mid,))
+        conn.commit()
+
+    await memory_core._run_entity_extractor(mid, "IdempotentPerson works at IdempotentOrg", stub_extractor)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        entity_count_2 = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        rel_count_2 = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0]
+        mie_count_2 = conn.execute("SELECT COUNT(*) FROM memory_item_entities").fetchone()[0]
+
+    assert entity_count_2 == 2, (
+        f"Entity count must not increase on re-extraction; got {entity_count_2} (was {entity_count_1})"
+    )
+    assert rel_count_2 == 1, (
+        f"Relationship count must not increase on re-extraction (delete-then-insert); "
+        f"got {rel_count_2} (was {rel_count_1})"
+    )
+    assert mie_count_2 == 2, (
+        f"mie rows should be re-created by INSERT OR IGNORE; got {mie_count_2}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 Test 3 — Vocabulary: invalid entity_type is rejected
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extractor_validates_invalid_entity_type(monkeypatch, tmp_path, caplog):
+    """SLM returns entity with entity_type='invalid_thing'; it is rejected.
+    No entity row is created; a debug log is emitted."""
+    import memory_core
+    import logging
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+
+    async def bad_type_extractor(content: str) -> dict:
+        return {
+            "entities": [
+                {"canonical_name": "SomeEntity", "entity_type": "invalid_thing",
+                 "mention_text": "SomeEntity", "confidence": 0.9},
+            ],
+            "relationships": [],
+        }
+
+    mid = _insert_memory(db_path, content="SomeEntity is here")
+
+    with caplog.at_level(logging.DEBUG, logger="memory_core"):
+        await memory_core._run_entity_extractor(mid, "SomeEntity is here", bad_type_extractor)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+
+    assert entity_count == 0, (
+        f"Entity with invalid_type should be rejected; got {entity_count} entity rows"
+    )
+    # A debug log mentioning the rejection should have been emitted
+    log_text = caplog.text.lower()
+    assert "invalid_thing" in log_text or "rejected" in log_text or "vocabulary" in log_text, (
+        f"Expected a debug log about the rejected entity_type, caplog: {caplog.text}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 Test 4 — Vocabulary: invalid predicate is rejected
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extractor_validates_invalid_predicate(monkeypatch, tmp_path, caplog):
+    """SLM returns relationship with predicate='invented_predicate'; it is rejected.
+    Entities are created normally; only the relationship is dropped."""
+    import memory_core
+    import logging
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+
+    async def bad_predicate_extractor(content: str) -> dict:
+        return {
+            "entities": [
+                {"canonical_name": "Alice", "entity_type": "person",
+                 "mention_text": "Alice", "confidence": 0.9},
+                {"canonical_name": "Bob", "entity_type": "person",
+                 "mention_text": "Bob", "confidence": 0.9},
+            ],
+            "relationships": [
+                {"from_entity": "Alice", "to_entity": "Bob",
+                 "predicate": "invented_predicate", "confidence": 0.8},
+            ],
+        }
+
+    mid = _insert_memory(db_path, content="Alice and Bob are connected")
+
+    with caplog.at_level(logging.DEBUG, logger="memory_core"):
+        await memory_core._run_entity_extractor(mid, "Alice and Bob are connected", bad_predicate_extractor)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        entity_count = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+        rel_count = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0]
+
+    assert entity_count == 2, (
+        f"Both entities should be created even when predicate is invalid; got {entity_count}"
+    )
+    assert rel_count == 0, (
+        f"Relationship with invalid predicate must be rejected; got {rel_count} relationship rows"
+    )
+    log_text = caplog.text.lower()
+    assert "invented_predicate" in log_text or "rejected" in log_text or "vocabulary" in log_text, (
+        f"Expected a debug log about the rejected predicate, caplog: {caplog.text}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 Test 5 — Bitemporal: valid_from inherits from source memory
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_bitemporal_valid_from_inherits_from_source(monkeypatch, tmp_path):
+    """Extract a memory with valid_from='2024-01-01'.
+    The resulting entity must have valid_from='2024-01-01', not now()."""
+    import memory_core
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+
+    source_valid_from = "2024-01-01T00:00:00Z"
+
+    async def stub_extractor(content: str) -> dict:
+        return {
+            "entities": [
+                {"canonical_name": "HistoricalPerson", "entity_type": "person",
+                 "mention_text": "HistoricalPerson", "confidence": 0.9},
+            ],
+            "relationships": [],
+        }
+
+    mid = _insert_memory(db_path, content="HistoricalPerson existed", valid_from=source_valid_from)
+
+    await memory_core._run_entity_extractor(mid, "HistoricalPerson existed", stub_extractor)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT valid_from FROM entities WHERE canonical_name='HistoricalPerson'"
+        ).fetchone()
+
+    assert row is not None, "Entity must have been created"
+    assert row[0] == source_valid_from, (
+        f"Entity valid_from should inherit from source memory ({source_valid_from!r}), "
+        f"not extraction time; got {row[0]!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 Test 6 — Vocabulary override: custom valid_types accepted/rejected
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_extractor_respects_vocabulary_override(monkeypatch, tmp_path):
+    """Pass valid_types=frozenset({'thing'}) override.
+    SLM returns entity_type='thing' (accepted) and entity_type='person' (rejected).
+    Only the 'thing' entity is created."""
+    import memory_core
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+
+    async def custom_extractor(content: str) -> dict:
+        return {
+            "entities": [
+                {"canonical_name": "MyThing", "entity_type": "thing",
+                 "mention_text": "MyThing", "confidence": 0.9},
+                {"canonical_name": "MyPerson", "entity_type": "person",
+                 "mention_text": "MyPerson", "confidence": 0.9},
+            ],
+            "relationships": [],
+        }
+
+    mid = _insert_memory(db_path, content="MyThing and MyPerson are here")
+
+    custom_types = frozenset({"thing"})  # 'person' is NOT in this custom set
+    await memory_core._run_entity_extractor(
+        mid, "MyThing and MyPerson are here", custom_extractor,
+        valid_types=custom_types,
+    )
+
+    with sqlite3.connect(str(db_path)) as conn:
+        thing_count = conn.execute(
+            "SELECT COUNT(*) FROM entities WHERE entity_type='thing'"
+        ).fetchone()[0]
+        person_count = conn.execute(
+            "SELECT COUNT(*) FROM entities WHERE entity_type='person'"
+        ).fetchone()[0]
+
+    assert thing_count == 1, (
+        f"'thing' is in custom vocabulary; entity must be created. Got {thing_count}"
+    )
+    assert person_count == 0, (
+        f"'person' is NOT in custom vocabulary; entity must be rejected. Got {person_count}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 Test 7 — MAX_ATTEMPTS: poisoned items excluded from eligible set
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_max_attempts_excludes_poisoned_items(monkeypatch, tmp_path):
+    """Set ENTITY_EXTRACT_MAX_ATTEMPTS=2 via env, extract an item twice with a
+    failing extractor, then verify _select_pending_entity_extraction excludes it."""
+    import memory_core
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_ENABLE_ENTITY_GRAPH", "true")
+    # Override MAX_ATTEMPTS to 2 for this test
+    monkeypatch.setenv("M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS", "2")
+    monkeypatch.setattr(memory_core, "ENTITY_EXTRACT_MAX_ATTEMPTS", 2)
+
+    async def always_fail_extractor(content: str) -> dict:
+        raise RuntimeError("Permanent SLM failure")
+
+    mid = _insert_memory(db_path, content="poisoned content")
+
+    # Two failures — attempts reaches 2 = MAX_ATTEMPTS
+    for _ in range(2):
+        await memory_core._run_entity_extractor(mid, "poisoned content", always_fail_extractor)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        q_row = conn.execute(
+            "SELECT attempts FROM entity_extraction_queue WHERE memory_id=?", (mid,)
+        ).fetchone()
+    assert q_row is not None, "Queue row must still exist (kept for diagnostic visibility)"
+    assert q_row[0] >= 2, f"attempts should be >= 2, got {q_row[0]}"
+
+    # Item is in queue but excluded from eligible set
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        pending = memory_core._select_pending_entity_extraction(conn)
+
+    pending_ids = [row[0] for row in pending]
+    assert mid not in pending_ids, (
+        "Poisoned item (attempts >= MAX_ATTEMPTS) must be excluded from eligible set"
+    )
+
+
+# ---------------------------------------------------------------------------
+# E1 Test 8 — entity_extractor_health reports correct state
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_entity_extractor_health_reports_state(monkeypatch, tmp_path):
+    """Populate entities, relationships, mie rows, and queue rows.
+    Call entity_extractor_health(); verify all 6 keys match expected counts."""
+    import memory_core
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setattr(memory_core, "ENTITY_EXTRACT_MAX_ATTEMPTS", 3)
+
+    class _FakeConn:
+        def __init__(self):
+            self._conn = sqlite3.connect(str(db_path))
+            self._conn.row_factory = sqlite3.Row
+
+        def __enter__(self):
+            return self._conn
+
+        def __exit__(self, *a):
+            self._conn.close()
+
+    monkeypatch.setattr(memory_core, "_db", _FakeConn)
+
+    mid1 = _insert_memory(db_path, content="content 1")
+    mid2 = _insert_memory(db_path, content="content 2")
+
+    # Insert 2 entities + 1 relationship + 2 mie rows
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        eid1 = memory_core._create_entity("HealthPerson", "person", {}, conn)
+        eid2 = memory_core._create_entity("HealthOrg", "organization", {}, conn)
+        memory_core._link_entity_relationship(eid1, eid2, "works_at", 0.9, mid1, conn)
+        memory_core._link_memory_to_entity(mid1, eid1, "HealthPerson", 0, 0.9, conn)
+        memory_core._link_memory_to_entity(mid2, eid2, "HealthOrg", 0, 0.9, conn)
+        conn.commit()
+
+    # Create a third memory for the poisoned queue entry (must be outside any open conn)
+    mid3 = _insert_memory(db_path, content="content 3")
+
+    # Insert 1 eligible queue row (attempts=1 < MAX_ATTEMPTS=3)
+    # and 1 poisoned queue row (attempts=3 >= MAX_ATTEMPTS=3)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO entity_extraction_queue (memory_id, attempts) VALUES (?, ?)",
+            (mid1, 1),  # eligible
+        )
+        conn.execute(
+            "INSERT INTO entity_extraction_queue (memory_id, attempts) VALUES (?, ?)",
+            (mid3, 3),  # poisoned (attempts >= MAX_ATTEMPTS=3)
+        )
+        conn.commit()
+
+    health = memory_core.entity_extractor_health()
+
+    assert health["queue_depth"] == 1, (
+        f"queue_depth should be 1 (attempts < 3); got {health['queue_depth']}"
+    )
+    assert health["poisoned"] == 1, (
+        f"poisoned should be 1 (attempts >= 3); got {health['poisoned']}"
+    )
+    assert health["entities_total"] == 2, (
+        f"entities_total should be 2; got {health['entities_total']}"
+    )
+    assert health["relationships_total"] == 1, (
+        f"relationships_total should be 1; got {health['relationships_total']}"
+    )
+    assert health["memory_item_entities_total"] == 2, (
+        f"memory_item_entities_total should be 2; got {health['memory_item_entities_total']}"
+    )
+    assert health["last_extracted_at"] is not None, (
+        "last_extracted_at should not be None when entities exist"
+    )
+    # All 6 expected keys must be present
+    for key in ("queue_depth", "poisoned", "last_extracted_at",
+                "entities_total", "relationships_total", "memory_item_entities_total"):
+        assert key in health, f"Missing key '{key}' in entity_extractor_health() result"
+
+
+# ---------------------------------------------------------------------------
+# YAML-driven entity vocabulary loading tests
+# ---------------------------------------------------------------------------
+
+def test_load_entity_vocab_defaults():
+    """load_entity_vocab(None) returns same content as VALID_ENTITY_TYPES/VALID_ENTITY_PREDICATES."""
+    import memory_core
+
+    types, preds = memory_core.load_entity_vocab(None)
+    
+    # Verify content is identical to module constants
+    assert types == memory_core.VALID_ENTITY_TYPES, (
+        f"Loaded types {types} != module constant {memory_core.VALID_ENTITY_TYPES}"
+    )
+    assert preds == memory_core.VALID_ENTITY_PREDICATES, (
+        f"Loaded predicates {preds} != module constant {memory_core.VALID_ENTITY_PREDICATES}"
+    )
+    
+    # Verify they match the bootstrap defaults
+    assert types == memory_core._DEFAULT_VALID_ENTITY_TYPES, (
+        f"Types {types} != bootstrap default {memory_core._DEFAULT_VALID_ENTITY_TYPES}"
+    )
+    assert preds == memory_core._DEFAULT_VALID_ENTITY_PREDICATES, (
+        f"Predicates {preds} != bootstrap default {memory_core._DEFAULT_VALID_ENTITY_PREDICATES}"
+    )
+
+
+def test_load_entity_vocab_custom_yaml(tmp_path):
+    """load_entity_vocab with custom YAML loads only specified types/predicates."""
+    import memory_core
+    from pathlib import Path
+    
+    # Create a custom YAML with a subset
+    custom_yaml = tmp_path / "custom.yaml"
+    custom_yaml.write_text("""
+entity_types:
+  - thing
+  - artifact
+entity_predicates:
+  - created_by
+  - modified_on
+metadata:
+  description: "Custom test vocabulary"
+""")
+    
+    types, preds = memory_core.load_entity_vocab(str(custom_yaml))
+    
+    # Verify only the custom content is loaded
+    assert types == frozenset({"thing", "artifact"}), f"Expected {{'thing', 'artifact'}}, got {types}"
+    assert preds == frozenset({"created_by", "modified_on"}), f"Expected {{'created_by', 'modified_on'}}, got {preds}"
+
+
+def test_load_entity_vocab_empty_yaml_falls_back_to_defaults(tmp_path):
+    """load_entity_vocab with empty lists falls back to defaults."""
+    import memory_core
+    
+    # Create a YAML with empty lists
+    placeholder_yaml = tmp_path / "placeholder.yaml"
+    placeholder_yaml.write_text("""
+entity_types: []
+entity_predicates: []
+metadata:
+  description: "Empty placeholder"
+  status: "tbd"
+""")
+    
+    types, preds = memory_core.load_entity_vocab(str(placeholder_yaml))
+    
+    # Should fall back to defaults
+    assert types == memory_core._DEFAULT_VALID_ENTITY_TYPES, (
+        f"Empty types should fall back to defaults; got {types}"
+    )
+    assert preds == memory_core._DEFAULT_VALID_ENTITY_PREDICATES, (
+        f"Empty predicates should fall back to defaults; got {preds}"
+    )
+
+
+def test_module_constants_match_default_yaml():
+    """Regression test: VALID_ENTITY_TYPES and VALID_ENTITY_PREDICATES equal what's in entity_graph_default.yaml."""
+    import memory_core
+    from pathlib import Path
+    
+    yaml_path = Path(__file__).parent.parent / "config" / "lists" / "entity_graph_default.yaml"
+    assert yaml_path.exists(), f"Default YAML not found at {yaml_path}"
+    
+    types, preds = memory_core.load_entity_vocab(str(yaml_path))
+    
+    # The byte-identity invariant: module constants must equal what the YAML loads
+    assert types == memory_core.VALID_ENTITY_TYPES, (
+        f"Types from YAML {types} != module constant {memory_core.VALID_ENTITY_TYPES}"
+    )
+    assert preds == memory_core.VALID_ENTITY_PREDICATES, (
+        f"Predicates from YAML {preds} != module constant {memory_core.VALID_ENTITY_PREDICATES}"
     )
