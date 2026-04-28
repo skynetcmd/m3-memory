@@ -152,6 +152,7 @@ async def test_1_structural_parity() -> bool:
                     "metadata": json.dumps({}),
                     "importance": 0.8,
                     "embed": False,
+                    "variant": "__test__",
                 },
             ]
 
@@ -436,6 +437,7 @@ async def test_5_conversation_emitters() -> bool:
                     "conversation_id": conv_id,
                     "valid_from": now,
                     "embed": False,
+                    "variant": "__test__",
                 },
                 {
                     "type": "message",
@@ -444,6 +446,7 @@ async def test_5_conversation_emitters() -> bool:
                     "conversation_id": conv_id,
                     "valid_from": now,
                     "embed": False,
+                    "variant": "__test__",
                 },
                 {
                     "type": "message",
@@ -452,6 +455,7 @@ async def test_5_conversation_emitters() -> bool:
                     "conversation_id": conv_id,
                     "valid_from": now,
                     "embed": False,
+                    "variant": "__test__",
                 },
             ]
 
@@ -497,6 +501,7 @@ async def test_5_conversation_emitters() -> bool:
                     "conversation_id": "conv-2",
                     "valid_from": now,
                     "embed": False,
+                    "variant": "__test__",
                 },
             ]
 
