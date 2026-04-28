@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: 1a8d9897929b
-mtime_utc: 2026-04-21T20:43:55.949210+00:00
-generated_utc: 2026-04-21T21:26:01.963752+00:00
+sha1: 249d41971297
+mtime_utc: 2026-04-26T08:11:07.730162+00:00
+generated_utc: 2026-04-26T10:12:32.195531+00:00
 private: false
 ---
 
@@ -11,16 +11,25 @@ private: false
 ## Purpose
 
 sync_all.py — Hourly sync runner (SQLite <-> PostgreSQL + ChromaDB).
-Runs both pg_sync.py and chroma_sync, offline-tolerant.
-Safe to call on any platform; skips gracefully if target unreachable.
+Runs pg_sync.py once per configured DB, then chroma_sync. Offline-tolerant.
+Safe to call on any platform; skips gracefully if target unreachable or DB absent.
 
 Usage:
     python bin/sync_all.py
     python bin/sync_all.py --dry-run   (connectivity check only)
 
+DB list:
+    Repo default: `memory/agent_memory.db`. The agent_memory manifest sweeps
+    both `main` and `chatlog` targets internally, so chatlog data gets synced
+    in the same pass without listing it separately. Bench DBs and other
+    custom databases are NOT auto-detected — set M3_SYNC_DBS to include them.
+
+    Example self-host override:
+        M3_SYNC_DBS=memory/agent_memory.db:../m3-memory-bench/data/agent_bench.db
+
 ## Entry points
 
-- `def main()` (line 112)
+- `def main()` (line 182)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -32,6 +41,7 @@ Usage:
 
 ## Environment variables read
 
+- `M3_SYNC_DBS`
 - `POSTGRES_SERVER`
 - `SYNC_TARGET_IP`
 
@@ -43,8 +53,8 @@ Usage:
 
 **subprocess**
 
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 91)
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py')]`` (line 61)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 159)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 116)
 
 
 ## Notable external imports
@@ -53,7 +63,7 @@ Usage:
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `memory/agent_memory.db`
 
 ## Re-validation
 

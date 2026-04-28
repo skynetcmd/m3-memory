@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_bridge.py
-sha1: 268bb7ea82d8
-mtime_utc: 2026-04-21T20:54:48.405420+00:00
-generated_utc: 2026-04-21T21:22:27.111638+00:00
+sha1: 1392cd9de855
+mtime_utc: 2026-04-25T20:53:17.400731+00:00
+generated_utc: 2026-04-26T10:12:32.029055+00:00
 private: false
 ---
 
@@ -22,7 +22,10 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_HTTP_HOST`
+- `M3_HTTP_PATH`
+- `M3_HTTP_PORT`
+- `M3_TRANSPORT`
 
 ## Calls INTO this repo (intra-repo imports)
 
