@@ -1099,13 +1099,24 @@ def _track_cost(operation: str, tokens_est: int = 0):
 def _ensure_sync_tables(db_path: str | None = None) -> None:
     """Run pending migrations against the active DB.
 
-    Belt-and-braces: when the active DB is a chatlog DB (path matches the
-    chatlog config OR schema fingerprint says so), pass --target chatlog
-    so the runner doesn't try to apply main-stack migrations to it. The
-    runner now also refuses such mismatches in F1 hardening, but invoking
-    the right --target up-front avoids a noisy refusal log line on every
-    chatlog-context call.
+    Fast path: if the schema is already at the latest version on disk
+    (compared against the migration files in memory/migrations/ or
+    memory/chatlog_migrations/), skip the subprocess entirely. The
+    `migrate_memory.py up` invocation triggers a backup-then-apply
+    cycle that takes a noticeable amount of time on multi-GB DBs
+    (#46) and timed out at 300s on the 41 GB agent_test_bench.db.
+    A cheap `SELECT MAX(version) FROM schema_versions` against the
+    target file lets us skip when there's nothing to apply.
+
+    Belt-and-braces: when the active DB is a chatlog DB (path matches
+    the chatlog config OR schema fingerprint says so), pass --target
+    chatlog so the runner doesn't try to apply main-stack migrations
+    to it. The runner now also refuses such mismatches in F1 hardening,
+    but invoking the right --target up-front avoids a noisy refusal
+    log line on every chatlog-context call.
     """
+    import re
+    import sqlite3
     import subprocess
     try:
         migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
@@ -1117,12 +1128,58 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
         # about the file's actual schema. The classifier reads the file.
         active = db_path or resolve_db_path(None)
         target_flag: list[str] = []
+        target_kind = "main"
         try:
             sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
             from migrate_memory import _classify_db
             if _classify_db(active) == "chatlog":
                 target_flag = ["--target", "chatlog"]
+                target_kind = "chatlog"
         except Exception:
+            pass
+
+        # Fast path: compare DB's applied version vs. the highest .up.sql file
+        # number for the resolved target. If equal, no migrations to apply,
+        # skip the subprocess + backup + load entirely. Failure to read either
+        # side falls through to the subprocess (which is what we'd do anyway).
+        try:
+            mig_dir = os.path.join(
+                BASE_DIR, "memory",
+                "chatlog_migrations" if target_kind == "chatlog" else "migrations",
+            )
+            file_versions = []
+            pattern = re.compile(r"^(\d+)_.*\.up\.sql$")
+            for fn in os.listdir(mig_dir):
+                m = pattern.match(fn)
+                if m:
+                    file_versions.append(int(m.group(1)))
+            latest_on_disk = max(file_versions) if file_versions else -1
+
+            db_latest = -1
+            conn = sqlite3.connect(f"file:{active}?mode=ro", uri=True, timeout=2.0)
+            try:
+                cur = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name IN ('schema_versions','schema_migrations')"
+                ).fetchall()
+                tables = {r[0] for r in cur}
+                if "schema_versions" in tables:
+                    row = conn.execute("SELECT MAX(version) FROM schema_versions").fetchone()
+                    db_latest = int(row[0]) if row and row[0] is not None else -1
+                elif "schema_migrations" in tables:
+                    row = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+                    db_latest = int(row[0]) if row and row[0] is not None else -1
+            finally:
+                conn.close()
+
+            if latest_on_disk >= 0 and db_latest >= latest_on_disk:
+                # Already at latest — nothing to do. Avoids the multi-GB
+                # backup-then-noop subprocess.
+                return
+        except Exception:
+            # Any failure here just means we fall through to the full
+            # subprocess path; never block the caller because the
+            # fast-path check tripped.
             pass
 
         # "up --yes" + stdin=DEVNULL are both required: without --yes the prompt
