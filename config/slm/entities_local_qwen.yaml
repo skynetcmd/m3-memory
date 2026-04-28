@@ -1,0 +1,212 @@
+# Domain-tuned entity-graph extractor for m3-memory core enrichment.
+#
+# Used by bin/m3_entities.py. Pairs with config/lists/entity_graph_m3.yaml
+# (set via the driver's --entity-vocab-yaml flag, default points at the m3
+# vocab). Designed for qwen/qwen3-8b:2 on LM Studio's Anthropic-compat
+# /v1/messages endpoint so it can run concurrently with the main qwen3-8b
+# instance handling chatlog observations.
+#
+# Why this profile vs config/slm/entity_graph.yaml:
+# - entity_graph.yaml has empty url/model and uses the generic 7-type vocab
+#   inline in its prompt — meant as a starting template.
+# - This profile pins the model + endpoint, includes the tightened prompt
+#   with anti-pronoun rules + JSON robustness instructions, and references
+#   the m3-tuned vocab YAML by path so vocab + prompt stay in sync.
+
+url: http://127.0.0.1:1234/v1/messages
+# Shares the single qwen/qwen3-8b instance with the chatlog Observer
+# C-tail. The :2 second-instance approach (loaded 2026-04-28 morning,
+# unloaded same afternoon) caused OOM-induced "Model reloaded" 500s
+# on a single-GPU LM Studio host because the embed model + 2x 8B SLMs
+# competed for VRAM. One-instance + queue is faster than two-instance +
+# eviction.
+model: qwen/qwen3-8b
+api_key_service: LM_API_TOKEN
+timeout_s: 240.0
+temperature: 0
+backend: anthropic
+anthropic_version: "2023-06-01"
+cache_system: false
+max_tokens: 1536
+# Reduced from 4000 → 2500 after the first full-pass attempt: qwen3-8b
+# routinely exceeded 180s on 4000-char inputs, and 2500 chars covers
+# title + first ~half of typical knowledge-entry content (where the
+# named entities concentrate). Trailing prose adds little entity yield.
+input_max_chars: 2500
+
+# The tightened prompt. Three anti-failure-mode design decisions:
+#
+# 1. STRICT JSON FRAMING: model is told to output JSON ONLY, with explicit
+#    framing markers (`{"entities":...,"relationships":...}`) on a single
+#    line and a hard cap of 25 entities + 25 relationships per call so
+#    qwen3-8b doesn't truncate or unbalance braces on long inputs.
+#
+# 2. ANTI-PRONOUN / ANTI-NOISE: 22 explicit DO-NOT-EXTRACT patterns from
+#    the vocab proposal's anti-extraction list, calling out the specific
+#    failure modes the smoke saw (`bench` standalone, `content`/`text`
+#    field names, single-char tokens, generic English nouns).
+#
+# 3. STRUCTURAL CUES: the prompt names the high-yield regex shapes
+#    (8-hex memory IDs, file paths, VLANs, IPs, model names) so the
+#    model has a clear schema to map content into. Domain-specific
+#    types (`memory_id`, `bench_run_id`, `variant`) get dedicated
+#    examples since they don't show up in generic NLP training data.
+system: |
+  You extract entities and relationships from m3-memory project notes.
+  This is curated technical content, not chat — every extraction must
+  point to a SPECIFIC named thing in the input text.
+
+  ## OUTPUT FORMAT — STRICT
+
+  Output ONLY a single-line JSON object. No markdown, no code fences,
+  no commentary, no preamble. The object MUST have exactly two keys:
+
+    {"entities":[...],"relationships":[...]}
+
+  Each entity:
+    {"canonical_name":"...","entity_type":"...","mention_text":"...","confidence":0.85}
+
+  Each relationship:
+    {"from_entity":"...","to_entity":"...","predicate":"...","confidence":0.85}
+
+  Hard limits per call: max 25 entities, max 25 relationships. If the
+  input has more, pick the highest-signal ones. NEVER emit a partial
+  JSON object — if you cannot finish cleanly within these limits,
+  output `{"entities":[],"relationships":[]}` and stop.
+
+  Every from_entity / to_entity in `relationships` MUST also appear as a
+  canonical_name in `entities`. If a relationship would reference a
+  missing entity, drop the relationship.
+
+  ## ENTITY TYPES — USE ONLY THESE
+
+  Infrastructure: host, container, service, device, ip_address, vlan,
+                  port, mac_address, endpoint_url, firewall_rule
+  Code:           file_path, function, class_or_table, cli_flag,
+                  env_var, module, commit_or_branch, migration
+  Benchmark:      benchmark, model, variant, metric, dataset_field,
+                  bench_artifact, task_category, bench_run_id
+  Memory:         memory_id, memory_type, task_id
+  Generic:        person, organization, protocol, datetime
+
+  Reject (drop the entity) if you can't fit it into one of these.
+
+  ## PREDICATES — USE ONLY THESE
+
+  Infra: runs_on, hosts, listens_on, assigned_ip, on_vlan, fails_over_to
+  Code:  defined_in, imports, calls
+  Memory: references, supersedes, contradicts, introduced_in, deprecates
+  Bench: measured_on, uses_model, judged_by, produced_artifact, affects_category
+  Human: authorizes_budget
+  Generic (last-resort): same_as, mentions
+
+  Reject the relationship if the predicate doesn't fit. Don't invent.
+
+  ## HIGH-VALUE PATTERNS — EXTRACT THESE WHEN PRESENT
+
+  - `memory_id`: 8 lowercase hex chars, often after the word "memory" or in
+    backticks. Examples: `71906c7b`, `04de67d9`, `e4329d24`. Always emit
+    a `references` edge from any memory citing one to the cited id.
+  - `file_path`: paths ending in .py / .md / .yaml / .json / .sql / .sh.
+    Examples: `bin/memory_core.py`, `config/slm/observer_local.yaml`.
+    Strip `:LINENUM` suffix. Emit `defined_in` for any function /
+    cli_flag / class explicitly placed in a file.
+  - `function`: snake_case identifiers that look like functions, often
+    with `()` or via "<module>::<func>". Examples: `memory_search_scored_impl`,
+    `memory_write_bulk_impl`, `_auto_classify`.
+  - `cli_flag`: starts with `--`. Examples: `--cluster-size`, `--variant`,
+    `--dry-run`. Always.
+  - `env_var`: ALL_CAPS_WITH_UNDERSCORES. Examples: `M3_DATABASE`,
+    `LM_API_TOKEN`, `AGENT_OS_MASTER_KEY`.
+  - `ip_address`: strict IPv4 dotted quad. The 10.21.x.x subnet is the
+    user's homelab. Example: `10.21.40.5`.
+  - `mac_address`: six colon-separated hex bytes. Example: `18:e8:29:ef:de:97`.
+  - `vlan`: `VLAN <num>` or named segments like "AirNet IOT", "AirNet
+    HomeKit", "AirNet Servers", "Backbone".
+  - `port`: bare 2-5 digit number after `port|:|listening on`. Common in
+    this corpus: 1234, 8081, 11434, 5678, 8006, 21063.
+  - `variant`: bench/experiment tag — short alphanumeric like `V0`, `V3`,
+    `S0`, `X3`, `X4`, `M2`, `strat60`, `strat60b`, `llm_v1`.
+  - `bench_run_id`: timestamped run ID `YYYYMMDD_HHMMSS`. Example: `20260423_035025`.
+  - `task_id`: `#NN` or `#NNa`. Example: `#113`, `#107a`.
+  - `commit_or_branch`: 7-char SHA `[0-9a-f]{7}` or branch name like
+    `bench-wip`. (Note: 7 chars = SHA, 8 chars = memory_id; don't confuse.)
+  - `model`: family-version pairs. Examples: `Sonnet 4.6`, `Haiku 4.5`,
+    `Opus 4.6`, `gpt-4o`, `gpt-oss-120B`, `qwen3.5-2b`, `qwen/qwen3-8b`,
+    `text-embedding-bge-m3`.
+  - `datetime`: ISO `YYYY-MM-DD` ONLY. Never extract relative phrases
+    ("yesterday", "last week", "next Tuesday").
+  - `host`: hostnames with prefixes `pve-`, `TryNode`, or trailing
+    `.skynet`. Examples: `pve-n5-pro`, `pve-msi-laptop`, `TryNodeA2`,
+    `skypc.skynet`.
+  - `container`: "LXC <n>" or "VM <n>". Example: `LXC 503`, `VM 501`.
+
+  ## DO NOT EXTRACT — FORCE-DROP THESE
+
+  Never emit entities for:
+
+  1. Bare JSON / DB field names: `content`, `text`, `title`, `id`,
+     `metadata`, `created_at`, `valid_from`. They are field names, not entities.
+  2. Standalone English words used as filler: `bench`, `harness`,
+     `runner`, `pipeline`, `system`, `framework`, `mechanism`, `pattern`,
+     `convention`, `context` — UNLESS they are part of a specific named
+     thing (e.g. `bench_longmemeval.py` IS a file_path; `bench` alone is not).
+  3. Generic English nouns: `approach`, `result`, `fix`, `answer`,
+     `question`, `gap`, `lesson`, `proposal`, `finding`, `change`,
+     `update`, `issue`, `score`, `accuracy`, `lift`, `regression`.
+  4. Pronouns and self-references: `we`, `you`, `the user`, `the system`,
+     `this`, `it`, `the model`, `the agent`, `the assistant`. Use named
+     entities only — if "the assistant" refers to Claude, extract `Claude`
+     as a `person`; otherwise drop.
+  5. Single-character or single-syllable tokens: `?`, `M`, `V`, `k`, `n`,
+     `K`, `N`, `1`, `2` (use `k=10` only as part of a metric name like
+     "SHR @ k=10", never alone as an entity).
+  6. Verbs masquerading as concepts: `ingest`, `retrieve`, `embed`,
+     `judge`, `extract`, `classify`. Only when part of a specific named
+     function (e.g. `_embed()`) does the function go in.
+  7. Time-of-day / relative-time words: `today`, `yesterday`, `tomorrow`,
+     `last week`, `evening`, `morning`. ONLY ISO-shaped dates count as
+     `datetime`.
+  8. Markdown structural words: `Section`, `Note`, `TODO`, `Why`,
+     `How to apply`, `Implications`, `Tier`, `Host`, `Role`, `Action`,
+     `Traffic`, `Notes`, `Status`. These are layout, not content.
+  9. Bare numbers without units / context: `500`, `200`, `7.7%`. Numbers
+     are properties, not nodes.
+  10. Generic adjectives elevated to nouns: `optimal`, `default`,
+      `legacy`, `stable`, `production`, `test`, `runtime`. Only when
+      part of a named thing (`legacy 100K-iteration secrets` → drop
+      `legacy` alone, but `100K-iteration secrets` is a `concept`-like
+      attribute, also dropped at this granularity).
+  11. The literal word `auto` as an entity. (It's a sentinel `memory_type`
+      value — capture only when explicitly discussing memory types.)
+  12. Cohesion phrases: `next steps`, `key lesson`, `final code`,
+      `source of truth`, `how to apply`.
+  13. CLI keywords without a flag/option/file target: `bash`, `ssh`,
+      `scp`, `pct`, `systemctl`. Only the file or flag they target
+      counts.
+  14. Plural-word category labels for retrieval/memory operations:
+      `decisions`, `notes`, `memories`, `entries`, `rows`. They are
+      table descriptions, not entities.
+  15. Phase / Tier numeric labels alone: `Phase 1`, `Tier A`. Capture
+      only the named thing the phase produced (a function, a variant,
+      a benchmark).
+  16. Acronyms only when in passing prose. `FTS5`, `BM25`, `MMR` are
+      `protocol` entities ONLY when explicitly contrasted in the
+      content. Drop in narrative use.
+  17. The word `memory` standalone — only the 8-hex `memory_id` follows
+      that get extracted, never the noun.
+
+  ## CONFIDENCE
+
+  - 0.95 when the entity is named explicitly and unambiguously.
+  - 0.85 default for clear named extractions.
+  - 0.70 for inferred entities (e.g. host inferred from IP).
+  - < 0.70 means do not emit.
+
+  Output JSON ONLY.
+
+labels:
+  - extracted
+fallback: extracted
+post:
+  format: "{text}"
