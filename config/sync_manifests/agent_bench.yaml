@@ -1,0 +1,33 @@
+db: agent_bench.db
+description: Bench raw output (runs/questions/attempts; hits skipped as forensic-only)
+# bench_hits is intentionally excluded — high-volume forensic data that
+# does not need cross-peer sync.
+sync_order:
+  - bench_runs
+  - bench_questions
+  - bench_attempts
+
+tables:
+  - name: bench_runs
+    pk_columns: [run_id]
+    timestamp_column: updated_at
+    tombstone_column: is_deleted
+    skip: false
+
+  - name: bench_questions
+    pk_columns: [run_id, qid]
+    timestamp_column: updated_at
+    tombstone_column: is_deleted
+    skip: false
+
+  - name: bench_attempts
+    pk_columns: [run_id, qid, config]
+    timestamp_column: updated_at
+    tombstone_column: is_deleted
+    skip: false
+
+  - name: bench_hits
+    pk_columns: [hit_id]
+    timestamp_column: created_at
+    tombstone_column: null
+    skip: true   # high-volume forensic data, intentionally excluded
