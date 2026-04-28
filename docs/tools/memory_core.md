@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: a9d788278734
-mtime_utc: 2026-04-27T02:05:36.228483+00:00
-generated_utc: 2026-04-27T10:34:41.296801+00:00
+sha1: 5855cfcbe1df
+mtime_utc: 2026-04-28T14:47:12.731031+00:00
+generated_utc: 2026-04-28T15:48:17.458297+00:00
 private: false
 ---
 
@@ -64,6 +64,8 @@ _(no argparse arguments detected)_
 
 - `CHROMA_BASE_URL`
 - `CONTRADICTION_THRESHOLD`
+- `CONTRADICTION_TITLE_GATE`
+- `CONTRADICTION_TYPE_EXCLUSIONS`
 - `DEDUP_LIMIT`
 - `DEDUP_THRESHOLD`
 - `EMBED_BULK_CHUNK`
@@ -91,14 +93,18 @@ _(no argparse arguments detected)_
 - `M3_INGEST_WINDOW_SIZE`
 - `M3_INTENT_ROUTING`
 - `M3_INTENT_USER_FACT_BOOST`
+- `M3_OBSERVATION_BUDGET_TOKENS`
 - `M3_QUERY_TYPE_ROUTING`
 - `M3_RERANK_MODEL`
 - `M3_ROUTER_TEMPORAL_K_BUMP`
 - `M3_SHORT_TURN_THRESHOLD`
 - `M3_SPEAKER_IN_TITLE`
 - `M3_TITLE_MATCH_BOOST`
+- `M3_TWO_STAGE_MAX_TURNS_PER_OBS`
+- `M3_TWO_STAGE_TURN_PENALTY`
 - `ORIGIN_DEVICE`
 - `SEARCH_ROW_CAP`
+- `SUPERSEDES_PENALTY`
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -111,13 +117,14 @@ _(no argparse arguments detected)_
 - `llm_failover (clear_embed_cache)`
 - `llm_failover (get_best_embed, get_best_llm, get_smallest_llm)`
 - `m3_sdk (M3Context, resolve_db_path)`
+- `migrate_memory (_classify_db)`
 - `temporal_utils (extract_referenced_dates, has_temporal_cues)`
 
 ## Calls OUT (external side-channels)
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes']`` (line 1029)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1081)
 
 
 ## Notable external imports
