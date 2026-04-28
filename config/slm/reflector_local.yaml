@@ -1,0 +1,72 @@
+# Local qwen/qwen3-8b Reflector for Phase D Mastra-style ingest pipeline.
+# Pairs with bin/run_reflector.py (drains reflector_queue).
+#
+# Per-(user_id, conversation_id) call when observation count exceeds
+# M3_REFLECTOR_THRESHOLD (default 50). Receives the existing observation
+# list + N new observations, emits a clean, deduplicated, contradiction-
+# aware replacement list with a `supersedes` array of (new_text, old_text)
+# pairs. The drainer translates supersedes into memory_link_impl rows.
+#
+# Endpoint shape: LM Studio Anthropic /v1/messages (same reasoning model
+# considerations as the Observer).
+#
+# Per-call shape (Reflector):
+#   - input: ~3-7k tokens (existing + new observation lists serialized)
+#   - output: ~1500-4000 tokens (cleaned list + supersedes pairs)
+#   - reasoning headroom: 1-2k internal
+#   - max_tokens=8192 covers the merge/supersede output even on dense
+#     long-running conversations.
+
+url: http://127.0.0.1:1234/v1/messages
+model: qwen/qwen3-8b
+api_key_service: LM_API_TOKEN
+timeout_s: 180.0
+temperature: 0
+backend: anthropic
+anthropic_version: "2023-06-01"
+cache_system: false
+max_tokens: 8192
+input_max_chars: 40000
+system: |
+  You are a Reflector. You receive an existing list of dated observations and
+  N new observations from a recent session. Produce a clean, deduplicated,
+  contradiction-aware replacement list.
+
+  Input JSON:
+    {"existing": [<observation>...], "new": [<observation>...]}
+
+  Output JSON ONLY — no preamble, no code fences, no commentary:
+    {"observations": [<observation>...],
+     "supersedes": [{"new_text": "...", "old_text": "..."}]}
+
+  Each observation keeps its original three dates (observation_date,
+  referenced_date, relative_date) and confidence. The supersedes list
+  records which old observations were closed out by which new ones —
+  the caller will translate those into m3 memory_relationships rows.
+
+  Rules:
+  1. MERGE when two observations state the same fact with the same
+     referenced_date. Keep the one with higher confidence; if tied, keep
+     the earlier observation_date. Drop the other.
+  2. SUPERSEDE when a new observation contradicts an old one (different
+     value for the same attribute, e.g. "User lives in Seattle" then
+     "User moved to Austin"). Keep BOTH in the output list (immutable
+     history), add a {"new_text", "old_text"} entry to supersedes. Do NOT
+     delete the old observation.
+  3. PRESERVE all temporal observations even when seemingly redundant if
+     their referenced_date differs — they describe different points in
+     time.
+  4. DROP observations whose text is verbatim duplicate of another and
+     whose three dates all match.
+  5. Do NOT invent new observations. Do NOT modify text fields except to
+     pick the higher-confidence wording among merge candidates.
+  6. Do NOT change observation_date or referenced_date. They are immutable.
+  7. If `existing` is empty and `new` has no contradictions, simply echo
+     `new` back into `observations` and return supersedes:[].
+
+  Output JSON ONLY. No markdown. No prose.
+labels:
+  - reflected
+fallback: reflected
+post:
+  format: "{text}"
