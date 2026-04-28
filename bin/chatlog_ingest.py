@@ -432,6 +432,39 @@ async def main() -> int:
 
     result = await _ingest(args.format, args.transcript_path, args.session_id, args.variant)
 
+    # Phase E1: Auto-enqueue this conversation for Mastra Observer enrichment
+    # if M3_AUTO_ENRICH=1. The drainer (m3_enrich --drain-queue) consumes
+    # observation_queue rows independently — this hook just signals "this
+    # conversation has new content, consider enriching it."
+    #
+    # Debounce: only enqueue when this ingest wrote >= M3_AUTO_ENRICH_MIN_TURNS
+    # turns (default 10). Single-turn pings, status checks, and short
+    # acks shouldn't keep the drainer busy.
+    if os.environ.get("M3_AUTO_ENRICH", "0").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            min_turns = int(os.environ.get("M3_AUTO_ENRICH_MIN_TURNS", "10"))
+        except ValueError:
+            min_turns = 10
+        written = result.get("written", 0)
+        sid = result.get("session_id") or args.session_id
+        if sid and written >= min_turns:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            try:
+                import memory_core as _mc
+                # observation_enqueue_impl is idempotent: INSERT OR IGNORE on
+                # conversation_id, so re-enqueuing the same conversation is a
+                # no-op. user_id may be empty for some chatlog flows; that's
+                # fine — the drainer scopes by conversation_id alone for
+                # chatlog rows.
+                enqueue_result = _mc.observation_enqueue_impl(
+                    conversation_id=sid, user_id="",
+                )
+                logger.info(f"M3_AUTO_ENRICH: {enqueue_result} for {sid[:12]} "
+                            f"({written} new turns)")
+            except Exception as e:
+                logger.warning(f"M3_AUTO_ENRICH enqueue failed (non-fatal): "
+                               f"{type(e).__name__}: {e}")
+
     # Shutdown drain: chatlog_write_bulk_impl enqueues rows on an async
     # Queue drained by the _flush_loop background task. asyncio.run()
     # cancels tasks without awaiting their drain, so rows in flight when
