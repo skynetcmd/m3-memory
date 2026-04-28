@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 3affdf175914
-mtime_utc: 2026-04-22T01:03:02.045652+00:00
-generated_utc: 2026-04-22T01:22:54.613901+00:00
+sha1: a9d788278734
+mtime_utc: 2026-04-27T02:05:36.228483+00:00
+generated_utc: 2026-04-27T10:34:41.296801+00:00
 private: false
 ---
 
@@ -71,6 +71,17 @@ _(no argparse arguments detected)_
 - `EMBED_DIM`
 - `EMBED_MODEL`
 - `LLM_TIMEOUT`
+- `M3_ENABLE_ENTITY_GRAPH`
+- `M3_ENABLE_FACT_ENRICHED`
+- `M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS`
+- `M3_ENTITY_EXTRACT_CONCURRENCY`
+- `M3_ENTITY_EXTRACT_MAX_ATTEMPTS`
+- `M3_ENTITY_RESOLVE_COSINE_MIN`
+- `M3_ENTITY_RESOLVE_FUZZY_MIN`
+- `M3_ENTITY_VOCAB_YAML`
+- `M3_FACT_ENRICH_CONCURRENCY`
+- `M3_FACT_ENRICH_MAX_ATTEMPTS`
+- `M3_FEDERATION_LOW_SCORE_THRESHOLD`
 - `M3_IMPORTANCE_WEIGHT`
 - `M3_INGEST_EVENT_ROWS`
 - `M3_INGEST_GIST_MIN_TURNS`
@@ -81,6 +92,8 @@ _(no argparse arguments detected)_
 - `M3_INTENT_ROUTING`
 - `M3_INTENT_USER_FACT_BOOST`
 - `M3_QUERY_TYPE_ROUTING`
+- `M3_RERANK_MODEL`
+- `M3_ROUTER_TEMPORAL_K_BUMP`
 - `M3_SHORT_TURN_THRESHOLD`
 - `M3_SPEAKER_IN_TITLE`
 - `M3_TITLE_MATCH_BOOST`
@@ -89,11 +102,13 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `auto_route`
 - `embedding_utils (batch_cosine)`
 - `embedding_utils (cosine)`
 - `embedding_utils (infer_change_agent)`
 - `embedding_utils (pack)`
 - `embedding_utils (unpack)`
+- `llm_failover (clear_embed_cache)`
 - `llm_failover (get_best_embed, get_best_llm, get_smallest_llm)`
 - `m3_sdk (M3Context, resolve_db_path)`
 - `temporal_utils (extract_referenced_dates, has_temporal_cues)`
@@ -102,18 +117,22 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes']`` (line 827)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes']`` (line 1029)
 
 
 ## Notable external imports
 
 - `httpx`
 - `platform`
+- `sentence_transformers (CrossEncoder)`
+- `torch`
+- `yaml`
 
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
 - `agent_memory_archive.db`
+- `entity_graph_default.yaml`
 
 ## Re-validation
 
