@@ -908,6 +908,63 @@ async def _auto_classify(content: str, title: str) -> str:
 def _ingest_llm_enabled(flag: str) -> bool:
     return os.environ.get(flag, "0").strip().lower() in ("1", "true", "yes", "on")
 
+# ── Phase L: auto-activation of retrieval gates by data presence ───────────
+# Phase J added M3_PREFER_OBSERVATIONS / M3_TWO_STAGE_OBSERVATIONS /
+# M3_ENABLE_ENTITY_GRAPH as default-off env gates for back-compat. Phase L
+# auto-flips them ON when the underlying tables have meaningful population,
+# so users don't have to remember to flip env vars + restart after enrichment
+# data lands. Escape hatch: M3_DISABLE_AUTO_ACTIVATION=1 falls back to
+# explicit-env-only (used by bench harnesses for reproducibility).
+_GATE_CACHE: dict[str, tuple[bool, float]] = {}
+_GATE_CACHE_TTL = 300  # seconds; counts can change as drains run
+
+def _gate_count_query(query: str) -> int:
+    """Run a COUNT(*) query against the active SQLite DB. Returns 0 on error."""
+    try:
+        with _db() as db:
+            row = db.execute(query).fetchone()
+            if row is None:
+                return 0
+            return int(row[0] if not hasattr(row, "keys") else list(row)[0])
+    except Exception:
+        return 0
+
+def _gate_active(env_var: str, count_query: str, threshold: int = 1) -> bool:
+    """True if env var is explicitly on, or auto-activated by data presence.
+
+    Cached per (env_var, count_query) for ~5 min; the cache is invalidated by
+    process restart or natural TTL expiry. Single-process; no thread lock —
+    a stampede on first miss would just run COUNT(*) twice, harmless.
+    """
+    if os.environ.get(env_var, "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if os.environ.get("M3_DISABLE_AUTO_ACTIVATION", "").strip().lower() in ("1", "true", "yes", "on"):
+        return False
+    import time as _time
+    cache_key = f"{env_var}::{count_query}"
+    cached = _GATE_CACHE.get(cache_key)
+    now = _time.monotonic()
+    if cached is not None and (now - cached[1]) < _GATE_CACHE_TTL:
+        return cached[0]
+    count = _gate_count_query(count_query)
+    active = count >= threshold
+    _GATE_CACHE[cache_key] = (active, now)
+    return active
+
+_OBS_COUNT_QUERY = "SELECT COUNT(*) FROM memory_items WHERE type='observation' AND COALESCE(is_deleted,0)=0"
+_ENTITY_COUNT_QUERY = "SELECT COUNT(*) FROM entities"
+
+def _prefer_observations_gate() -> bool:
+    return _gate_active("M3_PREFER_OBSERVATIONS", _OBS_COUNT_QUERY, threshold=100)
+
+def _two_stage_observations_gate() -> bool:
+    # Paired with PREFER_OBSERVATIONS: same trigger.
+    return _gate_active("M3_TWO_STAGE_OBSERVATIONS", _OBS_COUNT_QUERY, threshold=100)
+
+def _enable_entity_graph_gate() -> bool:
+    return _gate_active("M3_ENABLE_ENTITY_GRAPH", _ENTITY_COUNT_QUERY, threshold=1)
+
+
 _AUTO_TITLE_CACHE: dict[str, str] = {}
 _AUTO_ENTITIES_CACHE: dict[str, list[str]] = {}
 
@@ -1628,11 +1685,8 @@ async def memory_write_bulk_impl(
                     p["variant"],
                 ),
             )
-            if p["embed"]:
-                db.execute(
-                    "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
-                    (p["id"], "upsert"),
-                )
+            # NOTE: chroma_sync_queue insert moved to Phase 2 (post-embed) so
+            # we don't enqueue rows whose embedding fails (orphan accumulation).
             _record_history(
                 p["id"], "create", None, p["content"], "content",
                 p["agent_id"] or p["change_agent"], db=db,
@@ -1671,10 +1725,15 @@ async def memory_write_bulk_impl(
                 _schedule(p, "default", p["embed_text"])
 
         unique_vecs = await _embed_many(unique_texts)
+        # Track per-item default-kind embed success so we only enqueue once.
+        default_ok: set[str] = set()
+        default_fail: set[str] = set()
         with _db() as db:
             for p, kind, idx in emit_plan:
                 vec, m = unique_vecs[idx]
                 if not vec:
+                    if kind == "default":
+                        default_fail.add(p["id"])
                     continue
                 text_for_hash = (
                     p["_dual_default_embed_text"] if kind == "default" and p.get("_dual_default_embed_text")
@@ -1688,6 +1747,23 @@ async def memory_write_bulk_impl(
                         _content_hash(text_for_hash), kind,
                     ),
                 )
+                if kind == "default":
+                    default_ok.add(p["id"])
+            # Only enqueue chroma sync for items whose canonical default-kind
+            # vector landed. This prevents orphan queue rows when the embed
+            # server fails (e.g. context-size 400) — see chroma_sync_queue
+            # orphan accumulation 2026-04-22.
+            for p in to_embed:
+                if p["id"] in default_ok:
+                    db.execute(
+                        "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
+                        (p["id"], "upsert"),
+                    )
+        for mid in default_fail - default_ok:
+            logger.warning(
+                f"memory_write_bulk_impl: embed failed for {mid}; "
+                f"skipping memory_embeddings + chroma_sync_queue insert"
+            )
 
     # Phase 2.5: Fact enrichment (Phase 4 on-write hook).
     # Non-blocking per-row dispatch: tries semaphore, enqueues on miss.
@@ -2345,7 +2421,7 @@ async def _try_extract_or_enqueue(
     Bench harnesses and production callers may pass custom frozensets; default keeps
     existing behavior.
     """
-    if os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() not in ("1", "true", "yes"):
+    if not _enable_entity_graph_gate():
         return
     if entity_extractor is None:
         return
@@ -3092,7 +3168,7 @@ async def memory_search_scored_impl(
     #
     # Off by default; bench harness opts in via --observer-variant flag
     # (Phase D Task 8) or callers set M3_PREFER_OBSERVATIONS=1 directly.
-    if ranked and _ingest_llm_enabled("M3_PREFER_OBSERVATIONS"):
+    if ranked and _prefer_observations_gate():
         try:
             obs_budget = int(os.environ.get("M3_OBSERVATION_BUDGET_TOKENS", "4000"))
         except ValueError:
@@ -3126,7 +3202,7 @@ async def memory_search_scored_impl(
     # Off by default. The discount factor is M3_TWO_STAGE_TURN_PENALTY
     # (default 0.7 — turns rank just below their observation but ahead of
     # other raw hits).
-    if ranked and _ingest_llm_enabled("M3_TWO_STAGE_OBSERVATIONS"):
+    if ranked and _two_stage_observations_gate():
         try:
             turn_penalty = float(os.environ.get("M3_TWO_STAGE_TURN_PENALTY", "0.7"))
         except ValueError:
@@ -4202,6 +4278,13 @@ def memory_delete_impl(id, hard=False):
         else:
             db.execute("UPDATE memory_items SET is_deleted = 1, updated_at = ? WHERE id = ?",
                        (datetime.now(timezone.utc).isoformat(), id))
+            # Drop any pending upsert in chroma_sync_queue — the row is no
+            # longer eligible for sync. The tombstone enqueue (if the caller
+            # uses _queue_chroma(..., 'delete') downstream) is unaffected.
+            db.execute(
+                "DELETE FROM chroma_sync_queue WHERE memory_id = ? AND operation = 'upsert'",
+                (id,),
+            )
     return f"{'Hard' if hard else 'Soft'}-deleted: {id}"
 
 VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff", "precedes", "follows"}
@@ -4686,8 +4769,8 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason, _variant)
         )
-        if embed:
-            db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (item_id, "upsert"))
+        # NOTE: chroma_sync_queue insert moved below into the `if vec:` block
+        # so embed failures don't leave orphan queue rows.
         db.execute("UPDATE memory_items SET content_hash = ? WHERE id = ?",
                    (hashlib.sha256((content or "").encode("utf-8")).hexdigest(), item_id))
 
@@ -4704,6 +4787,15 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
                     "VALUES (?,?,?,?,?,?,?)",
                     (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(_et))
                 )
+                db.execute(
+                    "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
+                    (item_id, "upsert"),
+                )
+        else:
+            logger.warning(
+                f"memory_write_impl: embed failed for {item_id}; "
+                f"skipping memory_embeddings + chroma_sync_queue insert"
+            )
 
     _record_history(item_id, "create", None, content, "content", agent_id or agent)
 
@@ -4892,8 +4984,8 @@ async def memory_write_batch_impl(items: list[dict]):
                  item.get("agent_id", ""), item.get("model_id", ""), agent, item.get("importance", 0.5),
                  item.get("source", "agent"), ORIGIN_DEVICE, now)
             )
-            if item.get("embed", True):
-                db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (mid, "upsert"))
+            # NOTE: chroma_sync_queue insert moved to Phase 2 below so embed
+            # failures don't leave orphan queue rows.
 
         if item.get("embed", True):
             # Queue for parallel embedding (gather)
@@ -4920,9 +5012,10 @@ async def memory_write_batch_impl(items: list[dict]):
         with _db() as db:
             for (mid, text), result in zip(write_tasks, embeddings):
                 if isinstance(result, Exception):
-                    logger.warning(f"Batch embed failed for {mid}: {result}")
+                    logger.warning(f"Batch embed failed for {mid}: {result}; skipping chroma_sync_queue insert")
                     continue
                 if result is None:
+                    logger.warning(f"Batch embed returned None for {mid}; skipping chroma_sync_queue insert")
                     continue
                 vec, m = result
                 if vec:
@@ -4931,6 +5024,12 @@ async def memory_write_batch_impl(items: list[dict]):
                         "VALUES (?,?,?,?,?,?,?)",
                         (str(uuid.uuid4()), mid, _pack(vec), m, len(vec), now, _content_hash(text))
                     )
+                    db.execute(
+                        "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
+                        (mid, "upsert"),
+                    )
+                else:
+                    logger.warning(f"Batch embed empty vec for {mid}; skipping chroma_sync_queue insert")
 
     return f"Batch created: {len(results)} items"
 

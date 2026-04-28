@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-04-28T15:49:05.503730+00:00._
+_Generated 2026-04-28T15:56:38.899498+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -86,7 +86,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
 | [bin/test_mcp_proxy_unit.py](test_mcp_proxy_unit.md) | test_mcp_proxy_unit.py - In-process unit tests for mcp_proxy. |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |
-| [bin/test_rerank_quick.py](test_rerank_quick.md) | Quick-feedback rerank smoke. Designed to fail in <30 seconds when broken. |  |
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
 | [bin/web_research_bridge.py](web_research_bridge.md) | (no docstring) |  |
 | [bin/weekly_auditor.py](weekly_auditor.md) | Weekly Audit Report -- M3 Memory |  |
