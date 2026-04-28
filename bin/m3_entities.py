@@ -84,6 +84,44 @@ ALWAYS_SKIP_TYPES = ("auto", "scratchpad", "summary")  # summary excluded; delet
 
 JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
+# Names the model habitually emits with a misclassified type. Filtered
+# regardless of etype; one entry is the spec, expand only on recurrence.
+ANTI_EXTRACTION_NAMES: frozenset[str] = frozenset({
+    "Windows 11 Pro",  # OS, typed as 'host' by qwen3-8b smoke
+})
+
+# Module-name shape: dotted or bare Python identifier, no slashes, no extension.
+_MODULE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
+def _strip_etype_prefix(etype: str, cname: str) -> str:
+    """If cname starts with '<etype>_', strip it. Models sometimes prefix
+    the type name onto the value (e.g., 'memory_id_abc123' instead of
+    'abc123', 'file_path_bin_memory_core.py' instead of 'bin_memory_core.py').
+    Generic over all etypes."""
+    prefix = f"{etype}_"
+    if cname.startswith(prefix):
+        return cname[len(prefix):]
+    return cname
+
+
+_FILE_EXTENSIONS = (".py", ".js", ".ts", ".yaml", ".yml", ".json", ".md", ".txt", ".sql")
+
+
+def _maybe_reclassify_module(etype: str, cname: str) -> str:
+    """Reclassify bare module-style identifiers misfiled as 'file_path' to
+    'module'. e.g., 'memory_core' (no slash, no extension) → 'module'.
+    Dotted modules like 'pkg.sub' qualify; 'foo.py' (file extension) does not."""
+    if etype != "file_path":
+        return etype
+    if "/" in cname or "\\" in cname:
+        return etype
+    if cname.endswith(_FILE_EXTENSIONS):
+        return etype
+    if _MODULE_NAME_RE.match(cname):
+        return "module"
+    return etype
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -193,12 +231,21 @@ def _build_extractor(
             etype = str(ent.get("entity_type", "")).strip()
             mention = str(ent.get("mention_text", "")).strip() or cname
 
-            # Post-process: smoke surfaced the model emitting 'memory_id_<hex>'
-            # canonicals when type=memory_id. Strip the prefix so we end up
-            # with the bare 8-hex which downstream `references` edges expect.
-            if etype == "memory_id" and cname.startswith("memory_id_"):
-                cname = cname[len("memory_id_"):]
+            # Post-process: smoke surfaced the model emitting '<etype>_<value>'
+            # canonicals (e.g. 'memory_id_<hex>', 'file_path_bin_memory_core.py').
+            # Strip the type-prefix generically.
+            stripped = _strip_etype_prefix(etype, cname)
+            if stripped != cname:
+                cname = stripped
                 mention = cname
+
+            # Reclassify bare module-style identifiers misfiled as file_path.
+            etype = _maybe_reclassify_module(etype, cname)
+
+            # Anti-extraction filter: drop names the model habitually
+            # misclassifies (e.g. 'Windows 11 Pro' typed as 'host').
+            if cname in ANTI_EXTRACTION_NAMES:
+                continue
 
             if not cname or etype not in valid_types:
                 continue
@@ -227,12 +274,13 @@ def _build_extractor(
                 continue
             if p not in valid_predicates:
                 continue
-            # Mirror the memory_id_ stripping done on entities so cross-refs
-            # match emitted_canonicals.
-            if f.startswith("memory_id_"):
-                f = f[len("memory_id_"):]
-            if t.startswith("memory_id_"):
-                t = t[len("memory_id_"):]
+            # Mirror the etype-prefix stripping done on entities so cross-refs
+            # match emitted_canonicals. Try common prefixes the model emits.
+            for _pfx in ("memory_id_", "file_path_"):
+                if f.startswith(_pfx):
+                    f = f[len(_pfx):]
+                if t.startswith(_pfx):
+                    t = t[len(_pfx):]
             # Both endpoints must have appeared in entities_clean.
             if f not in emitted_canonicals or t not in emitted_canonicals:
                 continue
