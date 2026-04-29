@@ -78,6 +78,17 @@ def compute_source_content_hash(turns: Sequence[tuple]) -> str:
     return h.hexdigest()
 
 
+def compute_content_size_k(turns: Sequence[tuple]) -> int:
+    """Total source content size, rounded UP to KB. 1 KB minimum even
+    for tiny groups so the column is never 0 (zero is reserved for
+    "not yet computed / legacy row").
+    """
+    total = sum(len((t[1] or "").encode("utf-8")) for t in turns)
+    if total <= 0:
+        return 1
+    return max(1, (total + 1023) // 1024)
+
+
 # ── Schema verification ────────────────────────────────────────────────────
 def has_state_tables(conn: sqlite3.Connection) -> bool:
     """True iff migration 028 has been applied to this DB."""
@@ -200,6 +211,7 @@ def enroll_group(
     profile: Optional[str] = None,
     model: Optional[str] = None,
     enrich_run_id: Optional[str] = None,
+    content_size_k: Optional[int] = None,
 ) -> tuple[int, str]:
     """Idempotent enroll. Returns (group_id, action) where action is one of
     'inserted' (new row) | 'unchanged' (existing match) | 'superseded' (old
@@ -232,12 +244,14 @@ def enroll_group(
                 """
                 UPDATE enrichment_groups
                 SET source_content_hash=?, turn_count=?,
+                    content_size_k=COALESCE(?, content_size_k),
                     profile=COALESCE(?, profile),
                     model=COALESCE(?, model),
                     enrich_run_id=COALESCE(?, enrich_run_id)
                 WHERE id = ?
                 """,
-                (source_content_hash, turn_count, profile, model, enrich_run_id, old_id),
+                (source_content_hash, turn_count, content_size_k,
+                 profile, model, enrich_run_id, old_id),
             )
             return (old_id, "unchanged")
         # Real hash mismatch = source content actually drifted. Reset the
@@ -250,6 +264,7 @@ def enroll_group(
             """
             UPDATE enrichment_groups
             SET status='pending', source_content_hash=?, turn_count=?,
+                content_size_k=?,
                 obs_emitted=0, attempts=0, last_error=NULL, error_class=NULL,
                 enrichment_ms=NULL, tokens_in=NULL, tokens_out=NULL, cost_usd=NULL,
                 claim_token=NULL, claimed_at=NULL, next_eligible_at=NULL,
@@ -257,19 +272,22 @@ def enroll_group(
                 profile=?, model=?, enrich_run_id=?
             WHERE id = ?
             """,
-            (source_content_hash, turn_count, profile, model, enrich_run_id, old_id),
+            (source_content_hash, turn_count, content_size_k,
+             profile, model, enrich_run_id, old_id),
         )
         return (old_id, "superseded")
     cur = conn.execute(
         """
         INSERT INTO enrichment_groups (
             source_variant, target_variant, group_key, user_id, db_path,
-            turn_count, source_content_hash, profile, model, enrich_run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            turn_count, source_content_hash, content_size_k,
+            profile, model, enrich_run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             source_variant, target_variant, group_key, user_id, db_path,
-            turn_count, source_content_hash, profile, model, enrich_run_id,
+            turn_count, source_content_hash, content_size_k,
+            profile, model, enrich_run_id,
         ),
     )
     return (cur.lastrowid, "inserted")
@@ -300,6 +318,7 @@ def enroll_groups_bulk(
             db_path=db_path,
             turn_count=g["turn_count"],
             source_content_hash=g["source_content_hash"],
+            content_size_k=g.get("content_size_k"),
             profile=profile,
             model=model,
             enrich_run_id=enrich_run_id,
@@ -460,11 +479,19 @@ def eligible_for_resume(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     include_dead_letter: bool = False,
     limit: Optional[int] = None,
+    min_size_k: Optional[int] = None,
+    max_size_k: Optional[int] = None,
 ) -> list[tuple[int, str, str]]:
     """Return [(id, group_key, user_id)] for groups that resume should pick up.
 
     Picks pending OR failed-with-retries-left (and optionally dead_letter).
-    Honors next_eligible_at backoff. Caller filters further as needed.
+    Honors next_eligible_at backoff.
+
+    Optional size bounds: min_size_k / max_size_k filter on the
+    content_size_k column. NULLs (legacy rows whose size wasn't recorded
+    at enrollment) are EXCLUDED when either bound is set, since we can't
+    safely place them in a size band. Run a one-off backfill to populate
+    content_size_k on legacy rows, or omit the size bounds.
     """
     statuses = ["pending", "failed"]
     if include_dead_letter:
@@ -477,9 +504,15 @@ def eligible_for_resume(
           AND status IN ({placeholders})
           AND attempts < ?
           AND (next_eligible_at IS NULL OR next_eligible_at <= ?)
-        ORDER BY attempts ASC, turn_count DESC
     """
     params: list = [source_variant, target_variant, *statuses, max_attempts, _utcnow_iso()]
+    if min_size_k is not None:
+        sql += " AND content_size_k >= ?"
+        params.append(min_size_k)
+    if max_size_k is not None:
+        sql += " AND content_size_k <= ?"
+        params.append(max_size_k)
+    sql += " ORDER BY attempts ASC, turn_count DESC"
     if limit:
         sql += " LIMIT ?"
         params.append(limit)
