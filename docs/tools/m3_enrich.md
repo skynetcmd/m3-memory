@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: 070d61162975
-mtime_utc: 2026-04-29T13:58:07.396720+00:00
-generated_utc: 2026-04-29T14:00:01.591331+00:00
+sha1: 56814362e5d3
+mtime_utc: 2026-04-29T17:55:21.096572+00:00
+generated_utc: 2026-04-29T17:56:17.021728+00:00
 private: false
 ---
 
@@ -43,7 +43,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 1049)
+- `def main()` (line 1090)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -67,6 +67,9 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 | `--budget-usd` | Hard ceiling on cumulative cost_usd across this run. When tripped, drains inflight calls and exits cleanly with status='aborted'. Implies --track-state. Env: M3_ENRICH_BUDGET_USD. | `float(os.environ['M3_ENRICH_BUDGET_USD']) if os.environ.get('M3_ENRICH_BUDGET_USD') else None` |  | float |  |
 | `--sample` | Process at most N groups, selected via --sample-strategy. Independent of --limit (which caps the SQL pull). | None |  | int |  |
 | `--sample-strategy` | How --sample picks groups. 'first' = top-N by turn-count desc (cheapest). 'random' = uniform random. 'stratified' = balanced by turn-count quartile. Default 'first'. | `first` |  | str |  |
+| `--input-max-k` | Override the per-call input cap for the SLM, in KB. Caps the total chars sent to the model at N*1024. Use to fit a smaller per-slot ctx budget when raising concurrency in the model server. Falls back to profile.input_max_chars when unset. Env: M3_ENRICH_INPUT_MAX_K. | `int(os.environ['M3_ENRICH_INPUT_MAX_K']) if os.environ.get('M3_ENRICH_INPUT_MAX_K') else None` |  | int |  |
+| `--min-size-k` | --resume only: pick groups whose total source content is at least N KB. Use with --max-attempts to retry the big groups at lower concurrency. Excludes legacy rows where content_size_k is NULL. Env: M3_ENRICH_MIN_SIZE_K. | `int(os.environ['M3_ENRICH_MIN_SIZE_K']) if os.environ.get('M3_ENRICH_MIN_SIZE_K') else None` |  | int |  |
+| `--max-size-k` | --resume only: pick groups whose total source content is at most N KB. Pair with --concurrency to fit per-slot ctx budget. Excludes legacy rows where content_size_k is NULL. Env: M3_ENRICH_MAX_SIZE_K. | `int(os.environ['M3_ENRICH_MAX_SIZE_K']) if os.environ.get('M3_ENRICH_MAX_SIZE_K') else None` |  | int |  |
 | `--limit` | Cap conversations enriched per DB (smoke testing). | None |  | int |  |
 | `--concurrency` | Concurrent SLM calls. Default 4. | `4` |  | int |  |
 | `--include-summaries` | Add type='summary' rows to the active allowlist (extends whichever default applies; redundant under --core). | `False` |  | store_true |  |
@@ -85,7 +88,10 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 - `M3_ENRICH_BUDGET_USD`
 - `M3_ENRICH_CONV_LIST`
+- `M3_ENRICH_INPUT_MAX_K`
 - `M3_ENRICH_MAX_ATTEMPTS`
+- `M3_ENRICH_MAX_SIZE_K`
+- `M3_ENRICH_MIN_SIZE_K`
 - `M3_ENRICH_PROFILE`
 - `M3_ENRICH_TRACK_STATE`
 
@@ -103,16 +109,16 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 **http**
 
 - `httpx.AsyncClient()` (line 214)
-- `httpx.AsyncClient()` (line 590)
-- `httpx.AsyncClient()` (line 729)
+- `httpx.AsyncClient()` (line 603)
+- `httpx.AsyncClient()` (line 755)
 
 **sqlite**
 
 - `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 285)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 706)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 821)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 732)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 847)
 - `sqlite3.connect()  → `str(db_path)`` (line 144)
-- `sqlite3.connect()  → `str(db_path)`` (line 516)
+- `sqlite3.connect()  → `str(db_path)`` (line 518)
 
 
 ## Notable external imports
