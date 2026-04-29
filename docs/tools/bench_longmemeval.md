@@ -1,9 +1,9 @@
 ---
 tool: benchmarks/longmemeval/bench_longmemeval.py
-sha1: 838b08a01527
-mtime_utc: 2026-04-21T20:43:37.932243+00:00
-generated_utc: 2026-04-21T21:26:02.062719+00:00
-private: false
+sha1: 6979866f19db
+mtime_utc: 2026-04-28T15:30:52.402881+00:00
+generated_utc: 2026-04-29T13:47:47.284080+00:00
+private: true
 ---
 
 # benchmarks/longmemeval/bench_longmemeval.py
@@ -43,7 +43,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 ## Entry points
 
 - `async def run()` (line 629)
-- `def main()` (line 878)
+- `def main()` (line 883)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -62,7 +62,7 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 | `--generator-model` |  | `os.environ.get('EVAL_GENERATOR_MODEL')` | Reads EVAL_GENERATOR_MODEL env var | str | Model ID for answer generation |
 | `--judge-model` |  | `os.environ.get('EVAL_JUDGE_MODEL')` | Reads EVAL_JUDGE_MODEL env var | str | Model ID for answer scoring |
 | `--ingest-concurrency` | number of instances to ingest in parallel | `4` | Ingests 4 instances in parallel | int | Ingests N instances in parallel with asyncio.Semaphore |
-| `--per-item` | use memory_write_impl per-turn (enables Phase 1 enrichers). Much slower than bulk path; default off. | `False` | Uses memory_write_bulk_impl (fast) | store_true | Uses memory_write_impl per-turn (enables enrichers, slower) |
+| `--per-item` | ingest one turn per transaction via memory_write_impl. Contradiction-check and emitters see prior turns in the same instance (bulk path writes the whole instance as a set and can't). Enrichment runs on both paths — this flag only changes transaction granularity and ordering semantics. Roughly 10x slower. Default off (bulk matches production MCP clients; per-item is an ablation knob). | `False` | Uses memory_write_bulk_impl (fast) | store_true | Uses memory_write_impl per-turn (enables enrichers, slower) |
 | `--variant` | tag every ingested row with this variant label | `` | No variant label | str | Tags all ingested items with variant ID |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
