@@ -230,6 +230,7 @@ async def write_observation(
     user_id: str,
     conversation_id: str,
     source_turn_ids: list[str],
+    source_group_id: int | None = None,
 ) -> str | None:
     """Write a single observation as a type='observation' memory_items row.
 
@@ -266,7 +267,28 @@ async def write_observation(
         embed=embed,
     )
     m = re.search(r"[0-9a-f-]{36}", result)
-    return m.group(0) if m else None
+    obs_id = m.group(0) if m else None
+    # Link the observation back to its source enrichment_groups row (when
+    # provided). The column is nullable; absence means "this run wasn't
+    # using the state machine" — backwards-compatible.
+    if obs_id and source_group_id is not None:
+        try:
+            db_path = os.environ.get("M3_DATABASE")
+            if db_path:
+                import sqlite3 as _sqlite3
+                conn = _sqlite3.connect(db_path, timeout=10.0)
+                try:
+                    conn.execute(
+                        "UPDATE memory_items SET source_group_id = ? WHERE id = ?",
+                        (source_group_id, obs_id),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+        except Exception:
+            # Don't break a successful write on a metadata-only failure.
+            pass
+    return obs_id
 
 
 def _chunk_turns(turns: list[tuple], max_chunk_chars: int) -> list[list[tuple]]:
@@ -310,6 +332,7 @@ async def process_conversation(
     client: httpx.AsyncClient,
     token: str,
     counters: dict,
+    source_group_id: int | None = None,
 ) -> None:
     """Build the session block, call Observer (possibly N chunks for long
     conversations), write all observations.
@@ -372,7 +395,8 @@ async def process_conversation(
     source_turn_ids = [t[0] for t in turns]
     for obs in observations:
         obs_id = await write_observation(
-            obs, target_variant, user_id, conversation_id, source_turn_ids
+            obs, target_variant, user_id, conversation_id, source_turn_ids,
+            source_group_id=source_group_id,
         )
         if obs_id:
             counters["written"] += 1
