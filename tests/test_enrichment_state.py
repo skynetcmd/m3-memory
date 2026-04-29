@@ -22,7 +22,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BIN_DIR = REPO_ROOT / "bin"
-MIGRATION_028 = REPO_ROOT / "memory" / "migrations" / "028_enrichment_groups.up.sql"
+MIGRATIONS = [
+    REPO_ROOT / "memory" / "migrations" / "028_enrichment_groups.up.sql",
+    REPO_ROOT / "memory" / "migrations" / "029_enrichment_content_size.up.sql",
+]
 
 if str(BIN_DIR) not in sys.path:
     sys.path.insert(0, str(BIN_DIR))
@@ -32,7 +35,8 @@ import enrichment_state as estate
 
 @pytest.fixture
 def db_conn(tmp_path):
-    """Sqlite connection with the minimal schema needed for migration 028."""
+    """Sqlite connection with the minimal schema needed for the state-machine
+    tables (migrations 028 + 029 applied directly)."""
     db_path = tmp_path / "state_test.db"
     conn = sqlite3.connect(str(db_path))
     conn.executescript("""
@@ -41,7 +45,8 @@ def db_conn(tmp_path):
             metadata_json TEXT, variant TEXT, is_deleted INTEGER DEFAULT 0
         );
     """)
-    conn.executescript(MIGRATION_028.read_text(encoding="utf-8"))
+    for m in MIGRATIONS:
+        conn.executescript(m.read_text(encoding="utf-8"))
     yield conn
     conn.close()
 
@@ -425,6 +430,70 @@ def test_enroll_groups_bulk_counts(db_conn):
 
 
 # ── Status counts ───────────────────────────────────────────────────────
+
+
+def test_compute_content_size_k():
+    # Empty
+    assert estate.compute_content_size_k([]) == 1
+    # Single small turn
+    turns = [("t1", "x" * 100, "user", 0, "now", None)]
+    assert estate.compute_content_size_k(turns) == 1
+    # Multiple turns under 1 KB each, total > 1 KB
+    turns = [("t" + str(i), "y" * 600, "user", i, "now", None) for i in range(3)]
+    # 3 * 600 = 1800 bytes -> 2 KB rounded up
+    assert estate.compute_content_size_k(turns) == 2
+    # Big single turn
+    turns = [("t1", "z" * 5000, "user", 0, "now", None)]
+    # 5000 / 1024 = 4.88 -> 5 KB
+    assert estate.compute_content_size_k(turns) == 5
+
+
+def test_enroll_records_content_size_k(db_conn):
+    gid, _ = estate.enroll_group(
+        db_conn, source_variant="v", target_variant="t",
+        group_key="g", user_id="u", db_path="/", turn_count=3,
+        source_content_hash="h", content_size_k=7,
+    )
+    db_conn.commit()
+    row = db_conn.execute(
+        "SELECT content_size_k FROM enrichment_groups WHERE id=?", (gid,)
+    ).fetchone()
+    assert row[0] == 7
+
+
+def test_eligible_for_resume_size_filters(db_conn):
+    base = dict(source_variant="v", target_variant="t",
+                user_id="u", db_path="/", turn_count=1,
+                source_content_hash="h")
+    estate.enroll_group(db_conn, group_key="small", content_size_k=1, **base)
+    estate.enroll_group(db_conn, group_key="mid",   content_size_k=4, **base)
+    estate.enroll_group(db_conn, group_key="big",   content_size_k=10, **base)
+    estate.enroll_group(db_conn, group_key="huge",  content_size_k=50, **base)
+    estate.enroll_group(db_conn, group_key="legacy", content_size_k=None, **{**base, "source_content_hash": "h2"})
+    db_conn.commit()
+
+    # No bounds → everything eligible (5 rows including legacy)
+    e = estate.eligible_for_resume(db_conn, source_variant="v", target_variant="t")
+    assert {gkey for _gid, gkey, _uid in e} == {"small", "mid", "big", "huge", "legacy"}
+
+    # max=4 → keeps small + mid; excludes legacy (NULL)
+    e = estate.eligible_for_resume(
+        db_conn, source_variant="v", target_variant="t", max_size_k=4,
+    )
+    assert {gkey for _gid, gkey, _uid in e} == {"small", "mid"}
+
+    # min=10 → big + huge
+    e = estate.eligible_for_resume(
+        db_conn, source_variant="v", target_variant="t", min_size_k=10,
+    )
+    assert {gkey for _gid, gkey, _uid in e} == {"big", "huge"}
+
+    # min=4, max=10 → mid + big
+    e = estate.eligible_for_resume(
+        db_conn, source_variant="v", target_variant="t",
+        min_size_k=4, max_size_k=10,
+    )
+    assert {gkey for _gid, gkey, _uid in e} == {"mid", "big"}
 
 
 def test_status_counts(db_conn):
