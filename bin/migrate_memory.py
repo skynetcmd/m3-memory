@@ -638,7 +638,19 @@ def cmd_up(args):
                 logger.info(f"{target.name}: Dry run — no changes made.")
                 continue
 
-            if not _confirm(f"\nApply {len(pending)} migration(s) to {target.name}?", args.yes):
+            # `target.name` is "main" or "chatlog" — the memory FAMILY this
+            # migration touches (core memories vs chatlog memories). It is NOT
+            # a git branch. The actual file path was set by --database (or
+            # M3_DATABASE / default) earlier in this run. Print both so the
+            # user knows exactly which DB file is about to be modified.
+            if not _confirm(
+                f"\nApply {len(pending)} migration(s) to '{target.name}' "
+                f"(family: core memories) DB at {target.db_path}?"
+                if target.name == "main" else
+                f"\nApply {len(pending)} migration(s) to '{target.name}' "
+                f"(family: chatlog memories) DB at {target.db_path}?",
+                args.yes,
+            ):
                 logger.info("Aborted by user.")
                 continue
 
@@ -794,20 +806,33 @@ def build_parser():
         "--database",
         default=None,
         metavar="PATH",
-        help="SQLite main-DB path override. Sets M3_DATABASE for this run. "
-             "Default: memory/agent_memory.db.",
+        help="Override the file path for the 'main' (core memories) target. "
+             "Sets M3_DATABASE for this run; targets() resolves the main DB "
+             "via that env. The 'chatlog' target is unaffected — to override "
+             "the chatlog DB path, set M3_CHATLOG_DATABASE in the environment "
+             "before running. Default main DB: memory/agent_memory.db.",
     )
     sub = p.add_subparsers(dest="command")
 
     sp = sub.add_parser("status", help="Show current version and pending migrations")
     sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
-                    help="Which DB target to operate on (default: all configured)")
+                    help="Memory FAMILY to migrate (NOT a git branch): "
+                         "'main' = core memories DB (default agent_memory.db, "
+                         "overridable via --database / M3_DATABASE); "
+                         "'chatlog' = chatlog memories DB (default "
+                         "agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); "
+                         "'all' = both. Default: all configured.")
     sp.set_defaults(func=cmd_status)
 
     sp = sub.add_parser("up", help="Apply pending migrations")
     sp.add_argument("--to", type=int, default=None, help="Apply up to this version (default: latest)")
     sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
-                    help="Which DB target to operate on (default: all configured)")
+                    help="Memory FAMILY to migrate (NOT a git branch): "
+                         "'main' = core memories DB (default agent_memory.db, "
+                         "overridable via --database / M3_DATABASE); "
+                         "'chatlog' = chatlog memories DB (default "
+                         "agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); "
+                         "'all' = both. Default: all configured.")
     sp.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
     sp.add_argument("--dry-run", action="store_true", help="Print the plan + DDL without applying anything")
     sp.set_defaults(func=cmd_up)
@@ -815,7 +840,12 @@ def build_parser():
     sp = sub.add_parser("down", help="Roll back migrations")
     sp.add_argument("--to", type=int, required=True, help="Roll back to this version")
     sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
-                    help="Which DB target to operate on (default: all configured)")
+                    help="Memory FAMILY to migrate (NOT a git branch): "
+                         "'main' = core memories DB (default agent_memory.db, "
+                         "overridable via --database / M3_DATABASE); "
+                         "'chatlog' = chatlog memories DB (default "
+                         "agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); "
+                         "'all' = both. Default: all configured.")
     sp.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
     sp.add_argument("--dry-run", action="store_true", help="Print the plan + DDL without reverting anything")
     sp.set_defaults(func=cmd_down)
@@ -823,13 +853,23 @@ def build_parser():
     sp = sub.add_parser("plan", help="Preview DDL that pending migrations would run (no changes)")
     sp.add_argument("--to", type=int, default=None, help="Plan up to this version (default: latest)")
     sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
-                    help="Which DB target to operate on (default: all configured)")
+                    help="Memory FAMILY to migrate (NOT a git branch): "
+                         "'main' = core memories DB (default agent_memory.db, "
+                         "overridable via --database / M3_DATABASE); "
+                         "'chatlog' = chatlog memories DB (default "
+                         "agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); "
+                         "'all' = both. Default: all configured.")
     sp.set_defaults(func=cmd_plan)
 
     sp = sub.add_parser("backup", help="Take a standalone backup of the database")
     sp.add_argument("--out", type=str, default=None, help="Backup directory (overrides saved default)")
     sp.add_argument("--target", choices=["main", "chatlog", "all"], default="all",
-                    help="Which DB target to operate on (default: all configured)")
+                    help="Memory FAMILY to migrate (NOT a git branch): "
+                         "'main' = core memories DB (default agent_memory.db, "
+                         "overridable via --database / M3_DATABASE); "
+                         "'chatlog' = chatlog memories DB (default "
+                         "agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); "
+                         "'all' = both. Default: all configured.")
     sp.add_argument("-y", "--yes", action="store_true", help="Skip interactive prompts")
     sp.set_defaults(func=cmd_backup)
 
