@@ -223,11 +223,43 @@ async def _smoke_profile(profile: Profile) -> None:
         )
 
 
+def _load_conv_list(path: Path) -> set[str]:
+    """Read a list of group_keys from FILE. Accepts either:
+      • newline-delimited text (one group_key per line, blank lines + #-comments ignored)
+      • a JSON array of strings
+
+    Returns a deduplicated set; raises SystemExit on malformed input.
+    """
+    if not path.exists():
+        sys.exit(f"ERROR: --source-conv-list path not found: {path}")
+    raw = path.read_text(encoding="utf-8").strip()
+    if not raw:
+        sys.exit(f"ERROR: --source-conv-list is empty: {path}")
+    if raw.lstrip().startswith("["):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            sys.exit(f"ERROR: --source-conv-list JSON parse failed: {e}")
+        if not isinstance(data, list) or not all(isinstance(x, str) for x in data):
+            sys.exit("ERROR: --source-conv-list JSON must be an array of strings.")
+        return {x for x in data if x}
+    out: set[str] = set()
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        out.add(line)
+    if not out:
+        sys.exit(f"ERROR: --source-conv-list contained no usable entries: {path}")
+    return out
+
+
 def _query_eligible_groups(
     db_path: Path,
     type_allowlist: tuple[str, ...],
     limit: Optional[int],
     source_variant: Optional[str] = None,
+    conv_filter: Optional[set[str]] = None,
 ) -> list[tuple[str, str, list[tuple]]]:
     """Group eligible memory_items rows into (user_id, conversation_id, [turns]).
 
@@ -289,6 +321,8 @@ def _query_eligible_groups(
         groups[(r[7], r[6])].append((r[0], r[1], r[2], r[3], r[4], r[5]))
 
     out = [(uid, cid, turns) for (uid, cid), turns in groups.items()]
+    if conv_filter is not None:
+        out = [g for g in out if g[1] in conv_filter]
     # Sort by group size descending so --limit picks the BIGGEST conversations
     # first — most likely to contain extractable facts. Single-turn groups
     # (acks, status checks) sort to the bottom and only hit the cap last.
@@ -378,13 +412,16 @@ async def _run_db(
     limit: Optional[int],
     counters: dict,
     source_variant: Optional[str] = None,
+    conv_filter: Optional[set[str]] = None,
 ) -> None:
     """Drive Observer over one DB. Apply migration, set M3_DATABASE so
     memory_core writes land here, then call run_observer.process_conversation
     for each grouped conversation."""
     os.environ["M3_DATABASE"] = str(db_path)
     _ensure_migration_025(db_path)
-    groups = _query_eligible_groups(db_path, type_allowlist, limit, source_variant)
+    groups = _query_eligible_groups(
+        db_path, type_allowlist, limit, source_variant, conv_filter,
+    )
     n_groups = len(groups)
     print(f"[m3-enrich] {db_path.name}: {n_groups} eligible conversations", flush=True)
     if n_groups == 0:
@@ -592,6 +629,14 @@ async def _main_async(args) -> int:
     )
     type_allowlist = _build_type_allowlist(args)
 
+    # Optional --source-conv-list narrowing: load once, apply to every DB.
+    # Keeps existing default behavior (no filter) when the flag is unset.
+    conv_filter: Optional[set[str]] = None
+    if getattr(args, "source_conv_list", None):
+        conv_filter = _load_conv_list(Path(args.source_conv_list).expanduser().resolve())
+        print(f"[m3-enrich] --source-conv-list: {len(conv_filter)} group_keys "
+              f"loaded from {args.source_conv_list}", flush=True)
+
     # Pick which DBs to enrich.
     db_targets: list[tuple[str, Path]] = []
     if not args.chatlog_only:
@@ -621,7 +666,9 @@ async def _main_async(args) -> int:
         "dbs": {},
     }
     for label, db_path in db_targets:
-        groups = _query_eligible_groups(db_path, type_allowlist, args.limit, args.source_variant)
+        groups = _query_eligible_groups(
+            db_path, type_allowlist, args.limit, args.source_variant, conv_filter,
+        )
         n_turns = sum(len(g[2]) for g in groups)
         cost, wall = _estimate_cost_wall(profile, len(groups))
         plan["dbs"][label] = {
@@ -662,6 +709,7 @@ async def _main_async(args) -> int:
             db_path, profile, args.target_variant, type_allowlist,
             args.concurrency, args.limit, counters,
             source_variant=args.source_variant,
+            conv_filter=conv_filter,
         )
         for k in counters_total:
             counters_total[k] += counters[k]
@@ -742,6 +790,14 @@ Profile picker:
                     help="Filter source rows by variant. '__none__' = true core memory only "
                          "(variant IS NULL). A name string = single-variant scope. "
                          "Default: no filter (all rows).")
+    ap.add_argument("--source-conv-list",
+                    default=os.environ.get("M3_ENRICH_CONV_LIST"),
+                    help="Path to a file listing group_keys (conversation_ids) to "
+                         "process. Format: newline-delimited text (with optional "
+                         "# comments) OR a JSON array of strings. Narrows the "
+                         "eligible-groups set AFTER --source-variant + type "
+                         "filtering — opt-in lever, no effect on default "
+                         "behavior. Env: M3_ENRICH_CONV_LIST.")
     ap.add_argument("--limit", type=int, default=None,
                     help="Cap conversations enriched per DB (smoke testing).")
     ap.add_argument("--concurrency", type=int, default=4,
