@@ -640,9 +640,22 @@ async def _run_db(
                     empty_delta = counters["empty_groups"] - pre_empty
                     if failed_delta > 0 and written_delta == 0:
                         # Some chunks failed and nothing was written — count as failed.
+                        # process_conversation stashes the last exception's repr in
+                        # counters["last_error"]; classify and persist that.
+                        raw_err = counters.get("last_error") or "chunk(s) failed"
+                        # Extract a class-like prefix for error_class — repr starts
+                        # with the exception type name, e.g. "ReadTimeout: ReadTimeout('')"
+                        ec = "other"
+                        low = raw_err.lower()
+                        if "timeout" in low: ec = "http_timeout"
+                        elif "connect" in low: ec = "http_connect"
+                        elif "json" in low and "decode" in low: ec = "json_decode"
+                        elif "httpstatus" in low or " http " in low: ec = "http_status"
+                        elif "tokeniz" in low: ec = "tokenizer_error"
+                        elif "too large" in low or "context" in low: ec = "content_too_large"
                         estate.mark_failed(
                             state_conn, gid,
-                            error_class="other", last_error="chunk(s) failed",
+                            error_class=ec, last_error=raw_err,
                             max_attempts=max_attempts, enrichment_ms=elapsed_ms,
                         )
                     elif written_delta > 0:
