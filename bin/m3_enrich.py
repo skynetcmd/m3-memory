@@ -545,13 +545,14 @@ async def _run_db(
                 enrich_run_id=enrich_run_id,
             )
             print(f"[m3-enrich] enrolled groups: {actions}", flush=True)
-            # Build (uid, cid) → id map for the claim path.
-            placeholders = ",".join("?" * len(groups))
+            # Build (uid, cid) → id map for the claim path. SELECT ALL rows
+            # for the (source_variant, target_variant) pair — the index on
+            # those two columns makes this fast, and avoids hitting SQLite's
+            # SQLITE_MAX_VARIABLE_NUMBER (32,766) on large corpora.
             cur = state_conn.execute(
-                f"""SELECT id, user_id, group_key FROM enrichment_groups
-                    WHERE source_variant=? AND target_variant=?
-                      AND group_key IN ({placeholders})""",
-                [source_variant, target_variant] + [g[1] for g in groups],
+                """SELECT id, user_id, group_key FROM enrichment_groups
+                   WHERE source_variant=? AND target_variant=?""",
+                (source_variant, target_variant),
             )
             for gid, uid, gkey in cur.fetchall():
                 group_id_by_key[(uid, gkey)] = gid

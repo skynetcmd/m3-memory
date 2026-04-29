@@ -81,6 +81,47 @@ def test_enroll_group_idempotent(db_conn):
     assert gid1 == gid2
 
 
+def test_enroll_does_not_wipe_status_on_backfill_placeholder_hash(db_conn):
+    """Regression: backfill rows store a placeholder hash like
+    'backfill::<variant>::<key>'. The first real run computing the actual
+    SHA-256 must NOT supersede those rows (which would reset
+    status='success' to 'pending' and lose all backfilled progress).
+    """
+    base = dict(
+        source_variant="v1", target_variant="v1-out",
+        group_key="conv-A", user_id="u1", db_path="/tmp/x",
+        turn_count=0,
+    )
+    # Backfill seeds a placeholder hash + status='success'
+    placeholder_hash = "backfill::v1::conv-A"
+    gid, _ = estate.enroll_group(db_conn, source_content_hash=placeholder_hash, **base)
+    db_conn.commit()
+    db_conn.execute(
+        "UPDATE enrichment_groups SET status='success', obs_emitted=7 WHERE id=?",
+        (gid,),
+    )
+    db_conn.commit()
+    # Real run computes a real hash.
+    real_hash = "a" * 64
+    gid2, action = estate.enroll_group(
+        db_conn, source_content_hash=real_hash,
+        **{**base, "turn_count": 12, "user_id": "u1"},
+    )
+    db_conn.commit()
+    assert gid2 == gid
+    # 'unchanged' because we updated the hash in-place without resetting status.
+    assert action == "unchanged"
+    row = db_conn.execute(
+        "SELECT status, source_content_hash, obs_emitted, turn_count "
+        "FROM enrichment_groups WHERE id=?",
+        (gid,),
+    ).fetchone()
+    assert row[0] == "success"          # status preserved
+    assert row[1] == real_hash          # hash upgraded
+    assert row[2] == 7                  # obs_emitted preserved
+    assert row[3] == 12                 # turn_count refreshed
+
+
 def test_enroll_group_supersedes_on_content_drift(db_conn):
     base = dict(
         source_variant="v1", target_variant="v1-out",

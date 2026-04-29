@@ -217,16 +217,35 @@ def enroll_group(
     )
     existing = cur.fetchone()
     if existing:
-        old_id, old_hash, _old_status = existing
+        old_id, old_hash, old_status = existing
         if old_hash == source_content_hash:
             return (old_id, "unchanged")
-        # Content drifted: reset the row to pending with the new hash.
-        # Updating in-place keeps the (source_variant, target_variant,
-        # group_key) UNIQUE constraint happy and preserves the row id for
-        # any FK references (memory_items.source_group_id). Old observations
-        # that were emitted under the prior hash remain in memory_items
-        # but become orphaned from the run-level state — Reflector or a
-        # separate cleanup pass owns that gardening.
+        # Backfill rows store a placeholder hash ("backfill::" or
+        # "backfill-pending::") because the script doesn't have access to
+        # the full source content. The first real run that touches such a
+        # row should UPDATE the hash without resetting status — otherwise
+        # we wipe legitimate prior progress (success/empty/dead_letter).
+        is_placeholder = (old_hash or "").startswith("backfill::") or \
+                         (old_hash or "").startswith("backfill-pending::")
+        if is_placeholder:
+            conn.execute(
+                """
+                UPDATE enrichment_groups
+                SET source_content_hash=?, turn_count=?,
+                    profile=COALESCE(?, profile),
+                    model=COALESCE(?, model),
+                    enrich_run_id=COALESCE(?, enrich_run_id)
+                WHERE id = ?
+                """,
+                (source_content_hash, turn_count, profile, model, enrich_run_id, old_id),
+            )
+            return (old_id, "unchanged")
+        # Real hash mismatch = source content actually drifted. Reset the
+        # row to pending with the new hash. Updating in-place keeps the
+        # UNIQUE constraint happy and preserves the row id for FK refs
+        # (memory_items.source_group_id). Old observations from the prior
+        # hash remain in memory_items but become orphaned from run-level
+        # state — Reflector or a separate cleanup pass owns that gardening.
         conn.execute(
             """
             UPDATE enrichment_groups
