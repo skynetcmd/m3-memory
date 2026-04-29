@@ -2,8 +2,8 @@
 tool: benchmarks/locomo/analyze_prompt.py
 sha1: 8e143feb913a
 mtime_utc: 2026-04-21T20:02:02.907203+00:00
-generated_utc: 2026-04-22T01:29:51.701314+00:00
-private: false
+generated_utc: 2026-04-29T13:47:47.161467+00:00
+private: true
 ---
 
 # benchmarks/locomo/analyze_prompt.py

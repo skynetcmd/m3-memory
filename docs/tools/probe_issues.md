@@ -2,8 +2,8 @@
 tool: benchmarks/locomo/probe_issues.py
 sha1: fc40ff64e6b4
 mtime_utc: 2026-04-22T01:01:09.578756+00:00
-generated_utc: 2026-04-22T01:32:11.769864+00:00
-private: false
+generated_utc: 2026-04-29T13:47:47.226882+00:00
+private: true
 ---
 
 # benchmarks/locomo/probe_issues.py

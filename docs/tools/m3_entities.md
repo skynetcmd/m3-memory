@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: 9e7d6054e35e
-mtime_utc: 2026-04-28T05:29:23.127603+00:00
-generated_utc: 2026-04-28T15:48:17.335800+00:00
+sha1: d997b4dd1090
+mtime_utc: 2026-04-28T16:02:20.951897+00:00
+generated_utc: 2026-04-29T13:47:46.682844+00:00
 private: false
 ---
 
@@ -49,7 +49,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 ## Entry points
 
-- `def main()` (line 612)
+- `def main()` (line 660)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -85,12 +85,12 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 **http**
 
-- `httpx.AsyncClient()` (line 326)
-- `httpx.AsyncClient()` (line 373)
+- `httpx.AsyncClient()` (line 374)
+- `httpx.AsyncClient()` (line 421)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 284)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 332)
 
 
 ## Notable external imports
@@ -99,6 +99,12 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 ## File dependencies (repo paths referenced)
 
+- `.json`
+- `.md`
+- `.sql`
+- `.txt`
+- `.yaml`
+- `.yml`
 - `agent_chatlog.db`
 - `agent_memory.db`
 - `entity_graph_m3.yaml`

@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: def543d0d91f
-mtime_utc: 2026-04-28T15:56:36.033353+00:00
-generated_utc: 2026-04-28T15:56:38.683190+00:00
+sha1: 7370e0712a41
+mtime_utc: 2026-04-28T17:18:08.904219+00:00
+generated_utc: 2026-04-29T13:47:46.832780+00:00
 private: false
 ---
 
@@ -73,6 +73,7 @@ _(no argparse arguments detected)_
 - `EMBED_DIM`
 - `EMBED_MODEL`
 - `LLM_TIMEOUT`
+- `M3_DISABLE_AUTO_ACTIVATION`
 - `M3_ENABLE_ENTITY_GRAPH`
 - `M3_ENABLE_FACT_ENRICHED`
 - `M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS`
@@ -124,7 +125,11 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1081)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1195)
+
+**sqlite**
+
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1159)
 
 
 ## Notable external imports
