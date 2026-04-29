@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: 5394feadb954
-mtime_utc: 2026-04-28T15:49:02.670270+00:00
-generated_utc: 2026-04-28T15:49:05.318422+00:00
+sha1: 418afb5f62ed
+mtime_utc: 2026-04-29T13:57:55.872229+00:00
+generated_utc: 2026-04-29T14:00:01.797809+00:00
 private: false
 ---
 
@@ -37,7 +37,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 564)
+- `def main()` (line 588)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -53,6 +53,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Environment variables read
 
+- `M3_DATABASE`
 - `OBSERVER_PROFILE`
 
 ## Calls INTO this repo (intra-repo imports)
@@ -65,8 +66,8 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 **http**
 
-- `httpx.AsyncClient()` (line 443)
-- `httpx.AsyncClient()` (line 484)
+- `httpx.AsyncClient()` (line 467)
+- `httpx.AsyncClient()` (line 508)
 
 
 ## Notable external imports

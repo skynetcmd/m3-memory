@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: aca53be7181c
-mtime_utc: 2026-04-29T13:46:56.539328+00:00
-generated_utc: 2026-04-29T13:47:46.669562+00:00
+sha1: 070d61162975
+mtime_utc: 2026-04-29T13:58:07.396720+00:00
+generated_utc: 2026-04-29T14:00:01.591331+00:00
 private: false
 ---
 
@@ -43,7 +43,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 747)
+- `def main()` (line 1049)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -60,6 +60,13 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 | `--target-variant` | Variant tag for emitted observations. Default: m3-observations-YYYYMMDD. | `f'm3-observations-{_today()}'` |  | str |  |
 | `--source-variant` | Filter source rows by variant. '__none__' = true core memory only (variant IS NULL). A name string = single-variant scope. Default: no filter (all rows). | None |  | str |  |
 | `--source-conv-list` | Path to a file listing group_keys (conversation_ids) to process. Format: newline-delimited text (with optional # comments) OR a JSON array of strings. Narrows the eligible-groups set AFTER --source-variant + type filtering — opt-in lever, no effect on default behavior. Env: M3_ENRICH_CONV_LIST. | `os.environ.get('M3_ENRICH_CONV_LIST')` |  | str |  |
+| `--track-state` | Record per-group enrichment state in the enrichment_groups table (migration 028). Required for --resume / --budget-usd. Requires --source-variant. Env: M3_ENRICH_TRACK_STATE. | `os.environ.get('M3_ENRICH_TRACK_STATE', '0').lower() in ('1', 'true', 'yes')` |  | store_true |  |
+| `--resume` | Skip groups already at status='success' or 'empty' for the current (source_variant, target_variant) pair. Implies --track-state. Picks up pending + failed-with-retries-left. | `False` |  | store_true |  |
+| `--include-dead-letter` | Also retry groups currently at status='dead_letter'. Manual override; implies --resume. Use after fixing the underlying issue (prompt change, model upgrade, etc.). | `False` |  | store_true |  |
+| `--max-attempts` | f'Per-group retry cap before promotion to dead_letter. Default {estate.DEFAULT_MAX_ATTEMPTS}. Env: M3_ENRICH_MAX_ATTEMPTS.' | `int(os.environ.get('M3_ENRICH_MAX_ATTEMPTS', estate.DEFAULT_MAX_ATTEMPTS))` |  | int |  |
+| `--budget-usd` | Hard ceiling on cumulative cost_usd across this run. When tripped, drains inflight calls and exits cleanly with status='aborted'. Implies --track-state. Env: M3_ENRICH_BUDGET_USD. | `float(os.environ['M3_ENRICH_BUDGET_USD']) if os.environ.get('M3_ENRICH_BUDGET_USD') else None` |  | float |  |
+| `--sample` | Process at most N groups, selected via --sample-strategy. Independent of --limit (which caps the SQL pull). | None |  | int |  |
+| `--sample-strategy` | How --sample picks groups. 'first' = top-N by turn-count desc (cheapest). 'random' = uniform random. 'stratified' = balanced by turn-count quartile. Default 'first'. | `first` |  | str |  |
 | `--limit` | Cap conversations enriched per DB (smoke testing). | None |  | int |  |
 | `--concurrency` | Concurrent SLM calls. Default 4. | `4` |  | int |  |
 | `--include-summaries` | Add type='summary' rows to the active allowlist (extends whichever default applies; redundant under --core). | `False` |  | store_true |  |
@@ -76,12 +83,16 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Environment variables read
 
+- `M3_ENRICH_BUDGET_USD`
 - `M3_ENRICH_CONV_LIST`
+- `M3_ENRICH_MAX_ATTEMPTS`
 - `M3_ENRICH_PROFILE`
+- `M3_ENRICH_TRACK_STATE`
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
+- `enrichment_state`
 - `memory_core`
 - `run_observer`
 - `run_reflector`
@@ -91,16 +102,17 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 **http**
 
-- `httpx.AsyncClient()` (line 210)
-- `httpx.AsyncClient()` (line 434)
-- `httpx.AsyncClient()` (line 495)
+- `httpx.AsyncClient()` (line 214)
+- `httpx.AsyncClient()` (line 590)
+- `httpx.AsyncClient()` (line 729)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 281)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 472)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 587)
-- `sqlite3.connect()  → `str(db_path)`` (line 140)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 285)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 706)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 821)
+- `sqlite3.connect()  → `str(db_path)`` (line 144)
+- `sqlite3.connect()  → `str(db_path)`` (line 516)
 
 
 ## Notable external imports
