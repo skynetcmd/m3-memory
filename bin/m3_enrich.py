@@ -64,6 +64,10 @@ from slm_intent import (  # noqa: E402
 import run_observer as observer  # noqa: E402
 import run_reflector as reflector  # noqa: E402
 
+# Optional durable state machine (migration 028). Imported lazily-friendly:
+# m3_enrich works without the tables present unless --track-state / --resume.
+import enrichment_state as estate  # noqa: E402
+
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
@@ -403,6 +407,29 @@ def _estimate_cost_wall(profile: Profile, n_groups: int) -> tuple[Optional[str],
     return (f"~${cost:.2f}", f"~{wall:.1f} min")
 
 
+def _classify_observer_error(exc: BaseException) -> str:
+    """Map an Observer exception to a stable error_class for the state table.
+
+    Deterministic classes (json_decode/tokenizer/oversize/schema) skip retries;
+    everything else gets exponential backoff. See estate.DETERMINISTIC_ERROR_CLASSES.
+    """
+    name = type(exc).__name__
+    msg = str(exc)
+    if "JSONDecode" in name or "json" in msg.lower() and "decode" in msg.lower():
+        return "json_decode"
+    if "tokenizer" in msg.lower() or "tokeniz" in msg.lower():
+        return "tokenizer_error"
+    if "too large" in msg.lower() or "context length" in msg.lower() or "max_tokens" in msg.lower():
+        return "content_too_large"
+    if "TimeoutException" in name or "ReadTimeout" in name or "timeout" in msg.lower():
+        return "http_timeout"
+    if "ConnectError" in name or "ConnectTimeout" in name:
+        return "http_connect"
+    if "HTTPStatusError" in name or "status_code" in msg.lower():
+        return "http_status"
+    return "other"
+
+
 async def _run_db(
     db_path: Path,
     profile: Profile,
@@ -413,33 +440,220 @@ async def _run_db(
     counters: dict,
     source_variant: Optional[str] = None,
     conv_filter: Optional[set[str]] = None,
-) -> None:
+    track_state: bool = False,
+    resume: bool = False,
+    enrich_run_id: Optional[str] = None,
+    max_attempts: int = estate.DEFAULT_MAX_ATTEMPTS,
+    include_dead_letter: bool = False,
+    budget_usd: Optional[float] = None,
+    sample: Optional[int] = None,
+    sample_strategy: str = "first",
+) -> Optional[str]:
     """Drive Observer over one DB. Apply migration, set M3_DATABASE so
     memory_core writes land here, then call run_observer.process_conversation
-    for each grouped conversation."""
+    for each grouped conversation.
+
+    Returns an abort_reason string if budget tripped, else None.
+    """
+    import sqlite3
+    import random as _random
     os.environ["M3_DATABASE"] = str(db_path)
     _ensure_migration_025(db_path)
     groups = _query_eligible_groups(
         db_path, type_allowlist, limit, source_variant, conv_filter,
     )
+
+    # ── Sample (post-query, pre-state) ───────────────────────────────────
+    # `--sample` is independent of `--limit`. limit caps the SQL pull
+    # (cheap, deterministic); sample picks N from those groups via the
+    # chosen strategy. Both can be combined.
+    if sample and sample > 0 and len(groups) > sample:
+        if sample_strategy == "random":
+            groups = _random.sample(groups, sample)
+        elif sample_strategy == "stratified":
+            # Bucket by turn-count quartile; pull ~equal share from each.
+            sorted_by_size = sorted(groups, key=lambda g: len(g[2]))
+            n = len(sorted_by_size)
+            buckets = [
+                sorted_by_size[0 : n // 4],
+                sorted_by_size[n // 4 : n // 2],
+                sorted_by_size[n // 2 : 3 * n // 4],
+                sorted_by_size[3 * n // 4 :],
+            ]
+            per = max(1, sample // 4)
+            picked: list = []
+            for b in buckets:
+                if b:
+                    picked.extend(_random.sample(b, min(per, len(b))))
+            # Top up to exactly `sample` if integer division left us short.
+            if len(picked) < sample:
+                rest = [g for g in groups if g not in picked]
+                short = sample - len(picked)
+                if rest:
+                    picked.extend(_random.sample(rest, min(short, len(rest))))
+            groups = picked[:sample]
+        else:  # "first"
+            # _query_eligible_groups already sorts by size desc — so 'first'
+            # = N largest groups.
+            groups = groups[:sample]
+        print(f"[m3-enrich] --sample {sample} ({sample_strategy}): "
+              f"{len(groups)} groups selected", flush=True)
+
+    # ── State-tracking wiring (opt-in) ──────────────────────────────────
+    # When --track-state is set we open a writer connection on db_path,
+    # verify migration 028 has been applied (caller's job to migrate up),
+    # recover stale claims, enroll all eligible groups, and (if --resume)
+    # narrow `groups` to only those still pending/failed-with-retries.
+    state_conn: Optional[sqlite3.Connection] = None
+    group_id_by_key: dict[tuple[str, str], int] = {}
+    abort_reason: Optional[str] = None
+
+    if track_state:
+        if not source_variant:
+            print("[m3-enrich] --track-state requires --source-variant; skipping state.", flush=True)
+            track_state = False
+        else:
+            state_conn = sqlite3.connect(str(db_path), timeout=30.0)
+            state_conn.execute("PRAGMA journal_mode=WAL")
+            if not estate.has_state_tables(state_conn):
+                state_conn.close()
+                sys.exit(
+                    "ERROR: --track-state requires migration 028 applied to "
+                    f"{db_path}. Run: python bin/migrate_memory.py --db "
+                    f"{db_path} up"
+                )
+            n_recovered = estate.recover_stale_claims(state_conn)
+            if n_recovered:
+                print(f"[m3-enrich] recovered {n_recovered} stale claim(s)", flush=True)
+            # Enroll every eligible group at status='pending' (idempotent;
+            # content-hash drift triggers a supersede).
+            enroll_input = []
+            for uid, cid, turns in groups:
+                enroll_input.append({
+                    "group_key": cid,
+                    "user_id": uid,
+                    "turn_count": len(turns),
+                    "source_content_hash": estate.compute_source_content_hash(turns),
+                })
+            actions = estate.enroll_groups_bulk(
+                state_conn, enroll_input,
+                source_variant=source_variant,
+                target_variant=target_variant,
+                db_path=str(db_path),
+                profile=profile.name,
+                model=profile.model,
+                enrich_run_id=enrich_run_id,
+            )
+            print(f"[m3-enrich] enrolled groups: {actions}", flush=True)
+            # Build (uid, cid) → id map for the claim path.
+            placeholders = ",".join("?" * len(groups))
+            cur = state_conn.execute(
+                f"""SELECT id, user_id, group_key FROM enrichment_groups
+                    WHERE source_variant=? AND target_variant=?
+                      AND group_key IN ({placeholders})""",
+                [source_variant, target_variant] + [g[1] for g in groups],
+            )
+            for gid, uid, gkey in cur.fetchall():
+                group_id_by_key[(uid, gkey)] = gid
+
+            if resume:
+                eligible = estate.eligible_for_resume(
+                    state_conn,
+                    source_variant=source_variant,
+                    target_variant=target_variant,
+                    max_attempts=max_attempts,
+                    include_dead_letter=include_dead_letter,
+                )
+                eligible_keys = {(uid, gkey) for _gid, gkey, uid in eligible}
+                before = len(groups)
+                groups = [(u, c, t) for (u, c, t) in groups if (u, c) in eligible_keys]
+                print(
+                    f"[m3-enrich] --resume: {len(groups)}/{before} groups pending "
+                    f"(skipped {before - len(groups)} already-done/dead-letter)",
+                    flush=True,
+                )
+
     n_groups = len(groups)
-    print(f"[m3-enrich] {db_path.name}: {n_groups} eligible conversations", flush=True)
+    print(f"[m3-enrich] {db_path.name}: {n_groups} conversations to process", flush=True)
     if n_groups == 0:
-        return
+        if state_conn is not None:
+            state_conn.close()
+        return None
 
     token = get_api_key(profile.api_key_service) or ""
     sem = asyncio.Semaphore(concurrency)
     started = time.monotonic()
 
+    # Budget watchdog: every K groups we re-sum cost on the run; abort cleanly.
+    budget_check_interval = 25
+
     async with httpx.AsyncClient() as client:
         async def gated(uid: str, cid: str, turns: list[tuple]) -> None:
+            nonlocal abort_reason
+            if abort_reason is not None:
+                return
             async with sem:
-                # process_conversation expects the same tuple shape as our
-                # _query_eligible_groups returns.
-                await observer.process_conversation(
-                    cid, uid, turns, target_variant,
-                    profile, client, token, counters,
-                )
+                if abort_reason is not None:
+                    return
+                pre_processed = counters["processed"]
+                pre_written = counters["written"]
+                pre_empty = counters["empty_groups"]
+                pre_failed = counters["failed"]
+
+                claim_token: Optional[str] = None
+                gid: Optional[int] = None
+                if track_state and state_conn is not None:
+                    gid = group_id_by_key.get((uid, cid))
+                    if gid is not None:
+                        claim_token = estate.claim_group(
+                            state_conn, gid, enrich_run_id=enrich_run_id or "",
+                        )
+                        if claim_token is None:
+                            # Raced or already terminal — skip silently.
+                            return
+
+                t0 = time.monotonic()
+                try:
+                    await observer.process_conversation(
+                        cid, uid, turns, target_variant,
+                        profile, client, token, counters,
+                        source_group_id=gid,
+                    )
+                except BaseException as exc:  # noqa: BLE001
+                    elapsed_ms = int((time.monotonic() - t0) * 1000)
+                    if track_state and gid is not None and state_conn is not None:
+                        ec = _classify_observer_error(exc)
+                        new_status = estate.mark_failed(
+                            state_conn, gid,
+                            error_class=ec, last_error=repr(exc),
+                            max_attempts=max_attempts, enrichment_ms=elapsed_ms,
+                        )
+                        if new_status == "dead_letter":
+                            print(f"[m3-enrich] DEAD_LETTER conv={cid[:8]} class={ec}", flush=True)
+                    raise
+
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                if track_state and gid is not None and state_conn is not None:
+                    written_delta = counters["written"] - pre_written
+                    failed_delta = counters["failed"] - pre_failed
+                    empty_delta = counters["empty_groups"] - pre_empty
+                    if failed_delta > 0 and written_delta == 0:
+                        # Some chunks failed and nothing was written — count as failed.
+                        estate.mark_failed(
+                            state_conn, gid,
+                            error_class="other", last_error="chunk(s) failed",
+                            max_attempts=max_attempts, enrichment_ms=elapsed_ms,
+                        )
+                    elif written_delta > 0:
+                        estate.mark_success(
+                            state_conn, gid,
+                            obs_emitted=written_delta, enrichment_ms=elapsed_ms,
+                        )
+                    elif empty_delta > 0 or counters["processed"] - pre_processed > 0:
+                        estate.mark_empty(state_conn, gid, enrichment_ms=elapsed_ms)
+                    # else: process_conversation early-returned (empty turns)
+                    #       — leave row as-is; claim already updated attempts.
+
                 done = counters["processed"] + counters["empty_groups"] + counters["failed"]
                 if done > 0 and done % 25 == 0:
                     elapsed = time.monotonic() - started
@@ -454,9 +668,29 @@ async def _run_db(
                         flush=True,
                     )
 
+                # Budget watchdog (post-call). Cheap query — runs every N groups.
+                if (
+                    budget_usd is not None
+                    and track_state and state_conn is not None
+                    and enrich_run_id
+                    and done > 0 and done % budget_check_interval == 0
+                ):
+                    spent = estate.run_total_cost_usd(state_conn, enrich_run_id)
+                    if spent >= budget_usd:
+                        abort_reason = "budget_exceeded"
+                        print(
+                            f"[m3-enrich] BUDGET TRIPPED: spent ${spent:.2f} "
+                            f">= ${budget_usd:.2f}; draining inflight then stopping.",
+                            flush=True,
+                        )
+
         await asyncio.gather(*(
             gated(uid, cid, turns) for uid, cid, turns in groups
-        ))
+        ), return_exceptions=True)
+
+    if state_conn is not None:
+        state_conn.close()
+    return abort_reason
 
 
 async def _run_reflector_pass(
@@ -637,6 +871,19 @@ async def _main_async(args) -> int:
         print(f"[m3-enrich] --source-conv-list: {len(conv_filter)} group_keys "
               f"loaded from {args.source_conv_list}", flush=True)
 
+    # Implication: --resume / --include-dead-letter / --budget-usd all require
+    # the state machine. Auto-enable --track-state rather than error out, so
+    # users don't have to remember the dependency.
+    if (args.resume or args.include_dead_letter or args.budget_usd is not None) \
+            and not args.track_state:
+        args.track_state = True
+    if args.include_dead_letter:
+        args.resume = True
+    if args.track_state and not args.source_variant:
+        sys.exit(
+            "ERROR: --track-state / --resume / --budget-usd require --source-variant "
+            "(state rows are keyed by (source_variant, target_variant, group_key)).")
+
     # Pick which DBs to enrich.
     db_targets: list[tuple[str, Path]] = []
     if not args.chatlog_only:
@@ -703,21 +950,76 @@ async def _main_async(args) -> int:
 
     # Observer pass per DB.
     counters_total = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
+    abort_reasons: dict[str, str] = {}
     for label, db_path in db_targets:
         counters = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
-        await _run_db(
+
+        # Open a state run record per DB if state-tracking is on. Distinct
+        # run_id per DB simplifies aggregation and budget reporting.
+        per_db_run_id: Optional[str] = None
+        if args.track_state:
+            import sqlite3 as _sqlite3
+            _sc = _sqlite3.connect(str(db_path), timeout=30.0)
+            _sc.execute("PRAGMA journal_mode=WAL")
+            if not estate.has_state_tables(_sc):
+                _sc.close()
+                sys.exit(
+                    f"ERROR: --track-state requires migration 028 applied to "
+                    f"{db_path}. Run: python bin/migrate_memory.py --db "
+                    f"{db_path} up"
+                )
+            per_db_run_id = estate.start_run(
+                _sc,
+                profile=profile.name, model=profile.model,
+                source_variant=args.source_variant,
+                target_variant=args.target_variant,
+                db_path=str(db_path),
+                concurrency=args.concurrency,
+                launch_argv=sys.argv,
+            )
+            _sc.close()
+            print(f"[m3-enrich] {label} run_id={per_db_run_id}", flush=True)
+
+        abort_reason = await _run_db(
             db_path, profile, args.target_variant, type_allowlist,
             args.concurrency, args.limit, counters,
             source_variant=args.source_variant,
             conv_filter=conv_filter,
+            track_state=args.track_state,
+            resume=args.resume,
+            enrich_run_id=per_db_run_id,
+            max_attempts=args.max_attempts,
+            include_dead_letter=args.include_dead_letter,
+            budget_usd=args.budget_usd,
+            sample=args.sample,
+            sample_strategy=args.sample_strategy,
         )
+        if abort_reason:
+            abort_reasons[label] = abort_reason
+
+        # Close out the run record with final counts.
+        if args.track_state and per_db_run_id:
+            import sqlite3 as _sqlite3
+            _sc = _sqlite3.connect(str(db_path), timeout=30.0)
+            run_status = "aborted" if abort_reason else "completed"
+            estate.end_run(
+                _sc, per_db_run_id,
+                status=run_status, abort_reason=abort_reason,
+            )
+            _sc.close()
+
         for k in counters_total:
             counters_total[k] += counters[k]
         print(f"[m3-enrich] {label} done: "
               f"{counters['processed']} groups processed, "
               f"{counters['written']} observations written, "
               f"{counters['empty_groups']} empty, "
-              f"{counters['failed']} failed", flush=True)
+              f"{counters['failed']} failed"
+              + (f" [ABORTED: {abort_reason}]" if abort_reason else ""),
+              flush=True)
+        if abort_reason:
+            # Skip the reflector pass + remaining DBs when budget tripped.
+            break
 
     # Optional Reflector pass.
     if not args.no_reflect:
@@ -798,6 +1100,40 @@ Profile picker:
                          "eligible-groups set AFTER --source-variant + type "
                          "filtering — opt-in lever, no effect on default "
                          "behavior. Env: M3_ENRICH_CONV_LIST.")
+    ap.add_argument("--track-state", action="store_true",
+                    default=os.environ.get("M3_ENRICH_TRACK_STATE", "0").lower() in ("1", "true", "yes"),
+                    help="Record per-group enrichment state in the enrichment_groups "
+                         "table (migration 028). Required for --resume / --budget-usd. "
+                         "Requires --source-variant. Env: M3_ENRICH_TRACK_STATE.")
+    ap.add_argument("--resume", action="store_true",
+                    help="Skip groups already at status='success' or 'empty' for the "
+                         "current (source_variant, target_variant) pair. Implies "
+                         "--track-state. Picks up pending + failed-with-retries-left.")
+    ap.add_argument("--include-dead-letter", action="store_true",
+                    help="Also retry groups currently at status='dead_letter'. Manual "
+                         "override; implies --resume. Use after fixing the underlying "
+                         "issue (prompt change, model upgrade, etc.).")
+    ap.add_argument("--max-attempts", type=int,
+                    default=int(os.environ.get("M3_ENRICH_MAX_ATTEMPTS",
+                                               estate.DEFAULT_MAX_ATTEMPTS)),
+                    help=f"Per-group retry cap before promotion to dead_letter. "
+                         f"Default {estate.DEFAULT_MAX_ATTEMPTS}. "
+                         f"Env: M3_ENRICH_MAX_ATTEMPTS.")
+    ap.add_argument("--budget-usd", type=float,
+                    default=(float(os.environ["M3_ENRICH_BUDGET_USD"])
+                             if os.environ.get("M3_ENRICH_BUDGET_USD") else None),
+                    help="Hard ceiling on cumulative cost_usd across this run. When "
+                         "tripped, drains inflight calls and exits cleanly with "
+                         "status='aborted'. Implies --track-state. "
+                         "Env: M3_ENRICH_BUDGET_USD.")
+    ap.add_argument("--sample", type=int, default=None,
+                    help="Process at most N groups, selected via --sample-strategy. "
+                         "Independent of --limit (which caps the SQL pull).")
+    ap.add_argument("--sample-strategy", default="first",
+                    choices=("first", "random", "stratified"),
+                    help="How --sample picks groups. 'first' = top-N by turn-count "
+                         "desc (cheapest). 'random' = uniform random. 'stratified' = "
+                         "balanced by turn-count quartile. Default 'first'.")
     ap.add_argument("--limit", type=int, default=None,
                     help="Cap conversations enriched per DB (smoke testing).")
     ap.add_argument("--concurrency", type=int, default=4,
