@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: c30dfd6881ad
-mtime_utc: 2026-04-28T03:34:42.696048+00:00
-generated_utc: 2026-04-28T15:48:17.492204+00:00
+sha1: 547fdef10dc1
+mtime_utc: 2026-04-29T14:18:07.393359+00:00
+generated_utc: 2026-04-29T14:18:46.247212+00:00
 private: false
 ---
 
@@ -39,27 +39,27 @@ transaction already committed.
 
 ## Entry points
 
-- `def main()` (line 845)
+- `def main()` (line 885)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--database` | SQLite main-DB path override. Sets M3_DATABASE for this run. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
-| `--target` | Which DB target to operate on (default: all configured) | `all` | Displays status for all configured targets (main + chatlog if available). | str | Shows status for only specified target. |
+| `--database` | Override the file path for the 'main' (core memories) target. Sets M3_DATABASE for this run; targets() resolves the main DB via that env. The 'chatlog' target is unaffected — to override the chatlog DB path, set M3_CHATLOG_DATABASE in the environment before running. Default main DB: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
+| `--target` | Memory FAMILY to migrate (NOT a git branch): 'main' = core memories DB (default agent_memory.db, overridable via --database / M3_DATABASE); 'chatlog' = chatlog memories DB (default agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); 'all' = both. Default: all configured. | `all` | Displays status for all configured targets (main + chatlog if available). | str | Shows status for only specified target. |
 | `--to` | Apply up to this version (default: latest) | None | Applies all pending migrations up to latest available version. | int | Applies migrations up to specified version; stops before newer ones. |
-| `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; applies migrations to all configured targets. | str | Applies migrations to only specified target. |
+| `--target` | Memory FAMILY to migrate (NOT a git branch): 'main' = core memories DB (default agent_memory.db, overridable via --database / M3_DATABASE); 'chatlog' = chatlog memories DB (default agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); 'all' = both. Default: all configured. | `all` | Prompts for backup dir; applies migrations to all configured targets. | str | Applies migrations to only specified target. |
 | `-y`, `--yes` | Skip confirmation prompts | `False` | Prompts user to confirm backup dir and migration execution. | store_true | Auto-selects default backup dir (~/.m3-memory/backups) and confirms migration. |
 | `--dry-run` | Print the plan + DDL without applying anything | `False` | Applies changes. | store_true | Prints the plan without mutating any DB. |
 | `--to` | Roll back to this version | — | Requires explicit version (no default). | int | Reverts migrations above specified version; checks for down files first. |
-| `--target` | Which DB target to operate on (default: all configured) | `all` | Prompts for backup dir; rolls back all configured targets. | str | Rolls back only specified target. |
+| `--target` | Memory FAMILY to migrate (NOT a git branch): 'main' = core memories DB (default agent_memory.db, overridable via --database / M3_DATABASE); 'chatlog' = chatlog memories DB (default agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); 'all' = both. Default: all configured. | `all` | Prompts for backup dir; rolls back all configured targets. | str | Rolls back only specified target. |
 | `-y`, `--yes` | Skip confirmation prompts | `False` | Prompts user to confirm backup dir and rollback execution. | store_true | Auto-selects default backup dir and confirms rollback. |
 | `--dry-run` | Print the plan + DDL without reverting anything | `False` | Reverts migrations. | store_true | Prints the plan without mutating any DB. |
 | `--to` | Plan up to this version (default: latest) | None | Plans all pending migrations up to latest available version. | int | Plans migrations up to specified version; stops before newer ones. |
-| `--target` | Which DB target to operate on (default: all configured) | `all` | Creates backup for all configured targets in backup_dir/<target>/ subdirs. | str | Creates backup for only specified target. |
+| `--target` | Memory FAMILY to migrate (NOT a git branch): 'main' = core memories DB (default agent_memory.db, overridable via --database / M3_DATABASE); 'chatlog' = chatlog memories DB (default agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); 'all' = both. Default: all configured. | `all` | Creates backup for all configured targets in backup_dir/<target>/ subdirs. | str | Creates backup for only specified target. |
 | `--out` | Backup directory (overrides saved default) | None | Uses saved backup dir from .migrate_config.json; prompts if missing. | str | Uses specified directory instead of saved config; still requires confirmation if not -y. |
-| `--target` | Which DB target to operate on (default: all configured) | `all` | Restores main database; warns if --target all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
+| `--target` | Memory FAMILY to migrate (NOT a git branch): 'main' = core memories DB (default agent_memory.db, overridable via --database / M3_DATABASE); 'chatlog' = chatlog memories DB (default agent_chatlog.db, overridable via M3_CHATLOG_DATABASE); 'all' = both. Default: all configured. | `all` | Restores main database; warns if --target all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
 | `-y`, `--yes` | Skip interactive prompts | `False` | Prompts user for confirmation before creating backup. | store_true | Skips confirmation; creates backup immediately. |
 | `path` | Path to the backup .db file | — | Required positional argument; no default. | str | Restores from specified backup file path. |
 | `--target` | Which DB target to restore (default: main; use chatlog for chat log DB) | `main` | Restores main database; warns if all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
@@ -84,9 +84,9 @@ _(none detected)_
 - `sqlite3.connect()  → `target.db_path`` (line 361)
 - `sqlite3.connect()  → `target.db_path`` (line 546)
 - `sqlite3.connect()  → `target.db_path`` (line 614)
-- `sqlite3.connect()  → `target.db_path`` (line 674)
-- `sqlite3.connect()  → `target.db_path`` (line 731)
-- `sqlite3.connect()  → `target.db_path`` (line 771)
+- `sqlite3.connect()  → `target.db_path`` (line 686)
+- `sqlite3.connect()  → `target.db_path`` (line 743)
+- `sqlite3.connect()  → `target.db_path`` (line 783)
 
 
 ## Notable external imports
