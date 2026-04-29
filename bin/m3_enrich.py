@@ -448,6 +448,8 @@ async def _run_db(
     budget_usd: Optional[float] = None,
     sample: Optional[int] = None,
     sample_strategy: str = "first",
+    min_size_k: Optional[int] = None,
+    max_size_k: Optional[int] = None,
 ) -> Optional[str]:
     """Drive Observer over one DB. Apply migration, set M3_DATABASE so
     memory_core writes land here, then call run_observer.process_conversation
@@ -526,7 +528,9 @@ async def _run_db(
             if n_recovered:
                 print(f"[m3-enrich] recovered {n_recovered} stale claim(s)", flush=True)
             # Enroll every eligible group at status='pending' (idempotent;
-            # content-hash drift triggers a supersede).
+            # content-hash drift triggers a supersede). Tag each row with
+            # content_size_k so size-bucketed re-runs (--min-size-k /
+            # --max-size-k) can pick the right concurrency for the bucket.
             enroll_input = []
             for uid, cid, turns in groups:
                 enroll_input.append({
@@ -534,6 +538,7 @@ async def _run_db(
                     "user_id": uid,
                     "turn_count": len(turns),
                     "source_content_hash": estate.compute_source_content_hash(turns),
+                    "content_size_k": estate.compute_content_size_k(turns),
                 })
             actions = estate.enroll_groups_bulk(
                 state_conn, enroll_input,
@@ -564,13 +569,20 @@ async def _run_db(
                     target_variant=target_variant,
                     max_attempts=max_attempts,
                     include_dead_letter=include_dead_letter,
+                    min_size_k=min_size_k,
+                    max_size_k=max_size_k,
                 )
                 eligible_keys = {(uid, gkey) for _gid, gkey, uid in eligible}
                 before = len(groups)
                 groups = [(u, c, t) for (u, c, t) in groups if (u, c) in eligible_keys]
+                size_label = ""
+                if min_size_k is not None or max_size_k is not None:
+                    lo = min_size_k if min_size_k is not None else 0
+                    hi = max_size_k if max_size_k is not None else "∞"
+                    size_label = f" [size {lo}-{hi} KB]"
                 print(
-                    f"[m3-enrich] --resume: {len(groups)}/{before} groups pending "
-                    f"(skipped {before - len(groups)} already-done/dead-letter)",
+                    f"[m3-enrich] --resume{size_label}: {len(groups)}/{before} groups pending "
+                    f"(skipped {before - len(groups)} already-done/dead-letter/out-of-band)",
                     flush=True,
                 )
 
@@ -857,6 +869,19 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
 
 async def _main_async(args) -> int:
     profile = _load_profile_with_path(args.profile, args.profile_path)
+    # --input-max-k overrides the profile's per-call input cap. Used to fit
+    # a smaller per-slot ctx budget when raising server-side concurrency.
+    if getattr(args, "input_max_k", None):
+        new_cap = args.input_max_k * 1024
+        old_cap = getattr(profile, "input_max_chars", None)
+        try:
+            profile.input_max_chars = new_cap
+        except Exception:
+            # Frozen dataclass (some Profile flavors) — can't set attrs.
+            pass
+        print(f"[m3-enrich] --input-max-k: input cap "
+              f"{old_cap or '(profile default)'} -> {new_cap} chars "
+              f"({args.input_max_k} KB)", flush=True)
     token = get_api_key(profile.api_key_service) or ""
     if not token and profile.api_key_service:
         sys.exit(
@@ -1007,6 +1032,8 @@ async def _main_async(args) -> int:
             budget_usd=args.budget_usd,
             sample=args.sample,
             sample_strategy=args.sample_strategy,
+            min_size_k=args.min_size_k,
+            max_size_k=args.max_size_k,
         )
         if abort_reason:
             abort_reasons[label] = abort_reason
@@ -1148,6 +1175,29 @@ Profile picker:
                     help="How --sample picks groups. 'first' = top-N by turn-count "
                          "desc (cheapest). 'random' = uniform random. 'stratified' = "
                          "balanced by turn-count quartile. Default 'first'.")
+    ap.add_argument("--input-max-k", type=int,
+                    default=(int(os.environ["M3_ENRICH_INPUT_MAX_K"])
+                             if os.environ.get("M3_ENRICH_INPUT_MAX_K") else None),
+                    help="Override the per-call input cap for the SLM, in KB. "
+                         "Caps the total chars sent to the model at N*1024. "
+                         "Use to fit a smaller per-slot ctx budget when raising "
+                         "concurrency in the model server. Falls back to "
+                         "profile.input_max_chars when unset. "
+                         "Env: M3_ENRICH_INPUT_MAX_K.")
+    ap.add_argument("--min-size-k", type=int,
+                    default=(int(os.environ["M3_ENRICH_MIN_SIZE_K"])
+                             if os.environ.get("M3_ENRICH_MIN_SIZE_K") else None),
+                    help="--resume only: pick groups whose total source content "
+                         "is at least N KB. Use with --max-attempts to retry the "
+                         "big groups at lower concurrency. Excludes legacy rows "
+                         "where content_size_k is NULL. Env: M3_ENRICH_MIN_SIZE_K.")
+    ap.add_argument("--max-size-k", type=int,
+                    default=(int(os.environ["M3_ENRICH_MAX_SIZE_K"])
+                             if os.environ.get("M3_ENRICH_MAX_SIZE_K") else None),
+                    help="--resume only: pick groups whose total source content "
+                         "is at most N KB. Pair with --concurrency to fit per-slot "
+                         "ctx budget. Excludes legacy rows where content_size_k "
+                         "is NULL. Env: M3_ENRICH_MAX_SIZE_K.")
     ap.add_argument("--limit", type=int, default=None,
                     help="Cap conversations enriched per DB (smoke testing).")
     ap.add_argument("--concurrency", type=int, default=4,
