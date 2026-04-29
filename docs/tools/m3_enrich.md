@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: 2ce683204df9
-mtime_utc: 2026-04-28T15:49:00.735734+00:00
-generated_utc: 2026-04-28T15:49:05.103898+00:00
+sha1: aca53be7181c
+mtime_utc: 2026-04-29T13:46:56.539328+00:00
+generated_utc: 2026-04-29T13:47:46.669562+00:00
 private: false
 ---
 
@@ -43,7 +43,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 682)
+- `def main()` (line 747)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -59,6 +59,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 | `--chatlog-db` | Explicit path to the chatlog DB. | None |  | str |  |
 | `--target-variant` | Variant tag for emitted observations. Default: m3-observations-YYYYMMDD. | `f'm3-observations-{_today()}'` |  | str |  |
 | `--source-variant` | Filter source rows by variant. '__none__' = true core memory only (variant IS NULL). A name string = single-variant scope. Default: no filter (all rows). | None |  | str |  |
+| `--source-conv-list` | Path to a file listing group_keys (conversation_ids) to process. Format: newline-delimited text (with optional # comments) OR a JSON array of strings. Narrows the eligible-groups set AFTER --source-variant + type filtering — opt-in lever, no effect on default behavior. Env: M3_ENRICH_CONV_LIST. | `os.environ.get('M3_ENRICH_CONV_LIST')` |  | str |  |
 | `--limit` | Cap conversations enriched per DB (smoke testing). | None |  | int |  |
 | `--concurrency` | Concurrent SLM calls. Default 4. | `4` |  | int |  |
 | `--include-summaries` | Add type='summary' rows to the active allowlist (extends whichever default applies; redundant under --core). | `False` |  | store_true |  |
@@ -75,6 +76,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Environment variables read
 
+- `M3_ENRICH_CONV_LIST`
 - `M3_ENRICH_PROFILE`
 
 ## Calls INTO this repo (intra-repo imports)
@@ -90,14 +92,14 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 **http**
 
 - `httpx.AsyncClient()` (line 210)
-- `httpx.AsyncClient()` (line 380)
-- `httpx.AsyncClient()` (line 441)
+- `httpx.AsyncClient()` (line 434)
+- `httpx.AsyncClient()` (line 495)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 249)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 418)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 533)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 281)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 472)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 587)
 - `sqlite3.connect()  → `str(db_path)`` (line 140)
 
 

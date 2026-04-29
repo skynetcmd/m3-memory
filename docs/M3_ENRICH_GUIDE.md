@@ -368,6 +368,7 @@ Flag-by-flag:
 | `--core` | Run only on the core DB (skip chatlog) |
 | `--source-variant __none__` | Filter to true core rows (`variant IS NULL`); skips any bench/test variants you may have ingested |
 | `--target-variant m3-observations-core-YYYYMMDD` | Tag the produced observations so you can search them by date |
+| `--source-conv-list FILE` | Process only the listed `group_keys` (conversation_ids). Newline-delimited text or JSON array. Applied AFTER `--source-variant` + type filtering. Use it to retry a subset that previously failed/was skipped. Env: `M3_ENRICH_CONV_LIST`. |
 
 **Why `--source-variant __none__` matters:** if you've ever run a
 benchmark or test that wrote `variant='something'` rows into your core
