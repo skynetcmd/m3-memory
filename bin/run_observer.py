@@ -381,9 +381,16 @@ async def process_conversation(
             observations.extend(chunk_obs)
         except Exception as e:  # noqa: BLE001
             counters["failed"] += 1
+            # Stash the most recent error so wrappers (e.g. m3_enrich's
+            # state machine) can record a real message instead of a
+            # generic "chunk(s) failed" placeholder. repr() preserves the
+            # exception class even when str() is empty (httpx
+            # ConnectError frequently has empty str).
+            counters["last_error"] = f"{type(e).__name__}: {e!r}"
             if counters["failed"] <= 5:
                 print(f"[observer] FAIL conv={conversation_id[:8]} "
-                      f"chunk={ci}/{len(chunks)}: {e}", flush=True)
+                      f"chunk={ci}/{len(chunks)}: {type(e).__name__}: {e!r}",
+                      flush=True)
             # Continue to next chunk rather than aborting the whole conversation.
             continue
 
