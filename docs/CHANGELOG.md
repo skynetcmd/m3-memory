@@ -4,6 +4,21 @@ All notable changes to M3 Memory are documented here.
 
 ---
 
+## Repo policy notes
+
+**Commit message hygiene (forward-going from 2026-04-29):** commit messages
+on `main` and any branch that pushes to `origin` describe features in
+generic terms. Internal experiment names, private branch names, and
+specific corpus/variant tags stay on the private development branches
+(`private/lme`, `private/lme-runs`, `private/locomo` worktrees) and in
+the run-catalog artifact on those branches. References that already
+appeared in published commit history (README/CHANGELOG/registry
+descriptions are openly discussing benchmark results — that is intentional
+public positioning) are not retroactively rewritten; the policy is
+forward-going only.
+
+---
+
 ## [Unreleased] — Phase D Mastra Observer + Reflector ingest pipeline (2026-04-28)
 
 Two-stage LLM ingest pipeline on top of m3's existing primitives.
