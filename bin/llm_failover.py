@@ -48,18 +48,27 @@ LLM_EXCLUSIONS = ()  # nothing excluded for LLM selection — embedding models f
 CONNECT_TIMEOUT = 1.0
 READ_TIMEOUT = 10.0      # for model list fetches only
 
-# Process-global cache for embed-endpoint discovery. Discovered once on first
-# call; reused for all subsequent calls in the same process. Reset by calling
-# clear_embed_cache() explicitly (e.g. on repeated failure) or by process exit.
-# Avoids a GET /v1/models roundtrip before every POST /v1/embeddings call,
-# which otherwise dominates per-embed wall time on a warm LM Studio (~9s with
-# discovery vs ~50ms direct).
+# Process-global caches for discovery. Discovered once on first call; reused
+# for all subsequent calls in the same process. Reset by process exit or by
+# calling clear_failover_caches().
+# Avoids a GET /v1/models roundtrip before every LLM/embed call, which
+# otherwise dominates per-call wall time and generates excessive log noise.
+_LLM_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
+_SMALL_LLM_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
 _EMBED_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
 
 
+def clear_failover_caches() -> None:
+    """Forget all cached endpoints. Call after a persistent failure
+    so the next discovery attempt probes the network."""
+    global _LLM_ENDPOINT_CACHE, _SMALL_LLM_ENDPOINT_CACHE, _EMBED_ENDPOINT_CACHE
+    _LLM_ENDPOINT_CACHE = None
+    _SMALL_LLM_ENDPOINT_CACHE = None
+    _EMBED_ENDPOINT_CACHE = None
+
+
 def clear_embed_cache() -> None:
-    """Forget the cached embed endpoint. Call after a persistent failure
-    so the next get_best_embed() re-discovers."""
+    """Legacy helper for forgetting only the embed cache."""
     global _EMBED_ENDPOINT_CACHE
     _EMBED_ENDPOINT_CACHE = None
 
@@ -106,6 +115,7 @@ async def get_best_llm(client: httpx.AsyncClient, token: str) -> Optional[tuple[
 
     Iterates LLM_ENDPOINTS in failover order. Filters out embedding models.
     Returns first endpoint with a usable model, selecting the largest by parse_model_size().
+    Result is cached process-globally.
 
     Args:
         client: httpx.AsyncClient for making requests
@@ -114,6 +124,10 @@ async def get_best_llm(client: httpx.AsyncClient, token: str) -> Optional[tuple[
     Returns:
         Tuple of (base_url, model_id) or None if no usable models found
     """
+    global _LLM_ENDPOINT_CACHE
+    if _LLM_ENDPOINT_CACHE is not None:
+        return _LLM_ENDPOINT_CACHE
+
     for endpoint in LLM_ENDPOINTS:
         try:
             response = await client.get(
@@ -166,7 +180,8 @@ async def get_best_llm(client: httpx.AsyncClient, token: str) -> Optional[tuple[
 
         # Find largest model by size
         best_model = max(usable_models, key=lambda m: parse_model_size(m))
-        return (endpoint, best_model)
+        _LLM_ENDPOINT_CACHE = (endpoint, best_model)
+        return _LLM_ENDPOINT_CACHE
 
     return None
 
@@ -181,11 +196,7 @@ async def get_smallest_llm(
 
     Mirrors `get_best_llm` but selects the smallest model by `parse_model_size`,
     ignoring models whose parsed size is below ``min_size_b`` (default 0.5B).
-    The floor avoids picking tiny/broken models (e.g. unparseable 0.0) and keeps
-    enrichment quality usable. Models with unparseable size (0.0) are skipped.
-
-    Intended for cheap ingest-time enrichment: auto-titling, entity tagging,
-    session gists. Callers should be prepared for None if no endpoint is reachable.
+    Result is cached process-globally.
 
     Args:
         client: httpx.AsyncClient for making requests
@@ -195,6 +206,10 @@ async def get_smallest_llm(
     Returns:
         Tuple of (base_url, model_id) or None if no usable models found
     """
+    global _SMALL_LLM_ENDPOINT_CACHE
+    if _SMALL_LLM_ENDPOINT_CACHE is not None:
+        return _SMALL_LLM_ENDPOINT_CACHE
+
     for endpoint in LLM_ENDPOINTS:
         try:
             response = await client.get(
@@ -239,7 +254,8 @@ async def get_smallest_llm(
             continue
 
         smallest = min(sized_models, key=lambda t: t[0])[1]
-        return (endpoint, smallest)
+        _SMALL_LLM_ENDPOINT_CACHE = (endpoint, smallest)
+        return _SMALL_LLM_ENDPOINT_CACHE
 
     return None
 
