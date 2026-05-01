@@ -75,13 +75,22 @@
         .table-container {
             max-width: 1200px;
             margin: 0 auto;
-            overflow-y: auto; overflow-x: scroll;
-            max-height: 82vh;
+            /* Always show horizontal scrollbar (not "auto") so users see
+               immediately that the table extends right. Cap vertical
+               height shorter than 82vh so the bottom-edge horizontal
+               scrollbar stays visible inside the user's viewport while
+               they're reading the top rows of the table. */
+            overflow-x: scroll;
+            overflow-y: auto;
+            max-height: min(70vh, 720px);
             background: #ffffff;
             border-radius: 16px;
             box-shadow: 0 10px 30px -5px rgb(15 23 42 / 0.1);
             border: 1px solid #e2e8f0;
-            padding-bottom: 20px;
+            padding-bottom: 4px;
+            /* Reserve scrollbar gutter so the layout doesn't shift when
+               the bar appears/disappears. */
+            scrollbar-gutter: stable;
         }
 
         table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.95rem; }
@@ -107,7 +116,12 @@
         .main-row td:first-child { font-size: 1.05rem; font-weight: 600; }
         .sub-row td:first-child { padding-left: 52px !important; font-size: 0.93rem; color: #374151; }
 
-        /* Section divider rows for honest grouping */
+        /* Section divider rows for honest grouping.
+           The label cell uses colspan=2 and is sticky-positioned within
+           the first two columns so it stays visible during horizontal
+           scroll (matching the behavior of the column 1 + column 2
+           sticky cells in normal rows). The remainder cell (colspan=7)
+           is just dark filler, not sticky. */
         .group-row td {
             background: #1e293b !important;
             color: #f1f5f9 !important;
@@ -117,7 +131,19 @@
             letter-spacing: 0.06em;
             white-space: normal;
         }
-        .group-row td:first-child, .group-row td:nth-child(2) { background: #1e293b !important; }
+        .group-row td.group-label {
+            position: sticky;
+            left: 0;
+            z-index: 50;
+            /* colspan=2 sizes the cell to col1+col2's combined natural
+               width. No explicit min-width — let the table layout
+               compute it so the section labels always fit and never
+               clip column 2's normal sizing on data rows. */
+        }
+        .group-row td.group-rest {
+            /* Padding zero — the label cell carries the visual content */
+            padding: 0;
+        }
 
         /* Acronym Tooltips */
         .acronym {
@@ -221,7 +247,7 @@
             </thead>
             <tbody>
                 <!-- ▸ Group 1: Sovereignty & Integrity — M3 strengths -->
-                <tr class="group-row"><td colspan="9">▸ Sovereignty &amp; Integrity (M3 strengths)</td></tr>
+                <tr class="group-row"><td class="group-label" colspan="2">▸ Sovereignty &amp; Integrity (M3 strengths)</td><td class="group-rest" colspan="7"></td></tr>
 
                 <tr class="main-row"><td><a href="#sovereignty-main"><strong>Sovereignty (Main)</strong></a></td><td>🛡️ <strong>Full Sovereign</strong></td><td>🛡️ <strong>Full Sovereign</strong></td><td>⚖️ <strong>On-Prem</strong></td><td>⚖️ <strong>High Local</strong></td><td>⚖️ <strong>Hybrid</strong></td><td>🔻 <strong>Cloud-Tied</strong></td><td>⚖️ <strong>Config-Local</strong></td><td>🛡️ <strong>Full Verbatim</strong></td></tr>
                 <tr class="sub-row"><td>└ <em>Data Residency</em></td><td>🏆 <strong>Local SQLite</strong></td><td>✅ <strong>Local SQLite</strong></td><td>✅ <strong>Local Files</strong></td><td>✅ <strong>Local Files</strong></td><td>⚖️ <strong>Postgres / Container</strong></td><td>🔻 <strong>Cloud DB</strong></td><td>✅ <strong>Local SQLite</strong></td><td>✅ <strong>Local SQLite</strong></td></tr>
@@ -236,7 +262,7 @@
                 <tr class="main-row"><td><a href="#privacy-built-in"><strong>Privacy / GDPR</strong></a></td><td>🏆 <strong>Native <span class="acronym" title="General Data Protection Regulation — Articles 17 and 20 shipped as MCP tools">GDPR</span> tools</strong></td><td>✅ <strong>Local-only</strong></td><td>✅ <strong>On-Prem</strong></td><td>✅ <strong>Local-only</strong></td><td>⚖️ <strong>Hybrid</strong></td><td>🔻 <strong>No native</strong></td><td>✅ <strong>Local-only</strong></td><td>🛡️ <strong>Total sovereignty</strong></td></tr>
 
                 <!-- ▸ Group 2: Multi-agent & concurrency primitives -->
-                <tr class="group-row"><td colspan="9">▸ Multi-Agent &amp; Concurrency</td></tr>
+                <tr class="group-row"><td class="group-label" colspan="2">▸ Multi-Agent &amp; Concurrency</td><td class="group-rest" colspan="7"></td></tr>
 
                 <tr class="main-row"><td><a href="#multi-agent-writes"><strong>Multi-agent Writes</strong></a></td><td>🏆 <strong>Atomic (<span class="acronym" title="Write-Ahead Logging — SQLite mechanism for safe concurrent writes">WAL</span>)</strong></td><td>🏆 <strong>Durable Objects</strong></td><td>✅ <strong>Turn-based</strong></td><td>🏆 <strong>Shared Banks</strong></td><td>⚖️ <strong>Adapter-based</strong></td><td>✅ <strong>ID-Scoped</strong></td><td>✅ <strong>Transactional</strong></td><td>🔻 <strong>Silent failures</strong></td></tr>
                 <tr class="main-row"><td><a href="#multi-agent-orchestration"><strong>Multi-agent Orchestration</strong></a></td><td>🏆 <strong>Native <span class="acronym" title="Model Context Protocol — Anthropic's open spec used by Claude Code, Gemini CLI, etc.">MCP</span> handoffs</strong></td><td>🏆 <strong>Orchestrated</strong></td><td>✅ <strong>Sequential</strong></td><td>🏆 <strong>Bank-Scoped</strong></td><td>🏆 <strong>Supervisor</strong></td><td>✅ <strong>ID-Scoped</strong></td><td>🏆 <strong>Native (<span class="acronym" title="Model Context Protocol">MCP</span>)</strong></td><td>✅ <strong>Agent Diaries</strong></td></tr>
@@ -245,7 +271,7 @@
                 <tr class="main-row"><td><a href="#multi-computer"><strong>Multi-Computer Sync</strong></a></td><td>🏆 <strong>Bi-dir Delta Sync</strong></td><td>✅ <strong>Managed API</strong></td><td>✅ <strong>Web Server</strong></td><td>🏆 <strong>Local Server</strong></td><td>🏆 <strong>Cloud / EKS</strong></td><td>🏆 <strong>Cloud Native</strong></td><td>⚖️ <strong>Local Sync</strong></td><td>🔻 <strong>Manual Sync</strong></td></tr>
 
                 <!-- ▸ Group 3: Retrieval — M3 is solid but not best-in-class -->
-                <tr class="group-row"><td colspan="9">▸ Retrieval &amp; Extraction (M3 is solid; not the recall leader)</td></tr>
+                <tr class="group-row"><td class="group-label" colspan="2">▸ Retrieval &amp; Extraction (M3 is solid; not the recall leader)</td><td class="group-rest" colspan="7"></td></tr>
 
                 <tr class="main-row"><td><a href="#lme-s-score"><strong><span class="acronym" title="LongMemEval-S — single-question benchmark for long-horizon conversational memory">LME-S Score</span></strong></a></td><td><strong>89.0%</strong></td><td><strong>96.2%</strong> (🏆 #1)</td><td><strong>95.6%</strong></td><td><strong>91.4%</strong></td><td><strong>94.9%</strong></td><td><strong>89.1%</strong></td><td><strong>90.8%</strong></td><td><strong>96.6%</strong> (R@5)</td></tr>
                 <tr class="main-row"><td><a href="#search-strategy"><strong>Search Strategy</strong></a></td><td>✅ <strong>3-Pillar Hybrid</strong></td><td>🏆 <strong>6-Signal Hybrid</strong></td><td>⚖️ <strong>Dual-Index</strong></td><td>🏆 <strong>4-Stream Neural</strong></td><td>✅ <strong>Reflective</strong></td><td>✅ <strong>Vector-only</strong></td><td>✅ <strong>Compositional</strong></td><td>⚖️ <strong>Spatial / AAAK</strong></td></tr>
@@ -253,7 +279,7 @@
                 <tr class="main-row"><td><a href="#token-efficiency"><strong>Token Efficiency</strong></a></td><td>🏆 <strong>Working Memory</strong></td><td>✅ <strong>Signal Filter</strong></td><td>✅ <strong>Event-Pruned</strong></td><td>🔻 <strong>Heavy Rerank</strong></td><td>✅ <strong>Cache-Stable</strong></td><td>🏆 <strong>~90% Savings</strong></td><td>✅ <strong>Verbatim Fall.</strong></td><td>⚖️ <strong>AAAK Dialect</strong></td></tr>
 
                 <!-- ▸ Group 4: Architecture, for context -->
-                <tr class="group-row"><td colspan="9">▸ Architecture (for context)</td></tr>
+                <tr class="group-row"><td class="group-label" colspan="2">▸ Architecture (for context)</td><td class="group-rest" colspan="7"></td></tr>
                 <tr class="main-row"><td><a href="#architecture"><strong>Architecture</strong></a></td><td><strong>3-Tier</strong> (Short / Working / Long-Term)</td><td><strong>6-Signal Hybrid</strong></td><td><strong>Event Calendar</strong></td><td><strong>4-Stream</strong></td><td><strong>3-Tier</strong> (Obs / Ref)</td><td><strong>Dual-Store</strong></td><td><strong>Bitemporal KG</strong></td><td><strong>Loci Hierarchy</strong></td></tr>
             </tbody>
         </table>
