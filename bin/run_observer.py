@@ -374,30 +374,47 @@ async def process_conversation(
               f"{len(chunks)} chunks", flush=True)
 
     observations: list[dict] = []
+    chunk_fail_count = 0
     for ci, chunk in enumerate(chunks):
         block = _build_session_block(chunk, session_date)
         try:
             chunk_obs = await call_observer(block, profile, client, token)
             observations.extend(chunk_obs)
         except Exception as e:  # noqa: BLE001
-            counters["failed"] += 1
+            chunk_fail_count += 1
             # Stash the most recent error so wrappers (e.g. m3_enrich's
             # state machine) can record a real message instead of a
             # generic "chunk(s) failed" placeholder. repr() preserves the
             # exception class even when str() is empty (httpx
             # ConnectError frequently has empty str).
             counters["last_error"] = f"{type(e).__name__}: {e!r}"
-            if counters["failed"] <= 5:
+            if counters["failed"] + chunk_fail_count <= 5:
                 print(f"[observer] FAIL conv={conversation_id[:8]} "
                       f"chunk={ci}/{len(chunks)}: {type(e).__name__}: {e!r}",
                       flush=True)
             # Continue to next chunk rather than aborting the whole conversation.
             continue
 
-    counters["processed"] += 1
     if not observations:
-        counters["empty_groups"] += 1
+        # Group produced nothing. If any chunk failed, classify as failed;
+        # otherwise it's an empty group. Counters are group-scoped (one bump
+        # per group, never per chunk) so `done = processed + empty + failed`
+        # in the caller doesn't double-count.
+        if chunk_fail_count > 0:
+            counters["failed"] += 1
+        else:
+            counters["empty_groups"] += 1
         return
+    counters["processed"] += 1
+    # Surface partial-failure count to the caller (m3_enrich) so it can
+    # record it on the success row. Multi-chunk groups where some chunks
+    # failed but others succeeded land here with chunk_fail_count > 0 —
+    # the partial observations are valid and worth keeping, but the row
+    # gets flagged for later audit/re-extraction.
+    if chunk_fail_count > 0:
+        counters["last_partial_failure_chunks"] = chunk_fail_count
+    else:
+        counters["last_partial_failure_chunks"] = 0
 
     source_turn_ids = [t[0] for t in turns]
     for obs in observations:

@@ -671,10 +671,19 @@ async def _run_db(
                             max_attempts=max_attempts, enrichment_ms=elapsed_ms,
                         )
                     elif written_delta > 0:
+                        # run_observer stashes per-call partial-failure count
+                        # in counters["last_partial_failure_chunks"]. Pull and
+                        # zero it so it doesn't leak into the next group.
+                        pfc = counters.pop("last_partial_failure_chunks", 0) or 0
                         estate.mark_success(
                             state_conn, gid,
                             obs_emitted=written_delta, enrichment_ms=elapsed_ms,
+                            partial_failure_chunks=pfc,
                         )
+                        if pfc > 0:
+                            print(f"[m3-enrich] PARTIAL conv={cid[:8]} "
+                                  f"{pfc} chunk(s) failed, {written_delta} obs kept",
+                                  flush=True)
                     elif empty_delta > 0 or counters["processed"] - pre_processed > 0:
                         estate.mark_empty(state_conn, gid, enrichment_ms=elapsed_ms)
                     # else: process_conversation early-returned (empty turns)
