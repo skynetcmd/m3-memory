@@ -21,17 +21,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import socket
-import subprocess
 import sqlite3
+import subprocess
 import sys
-import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Iterable, Optional, Sequence
-
 
 # ── Tunables ───────────────────────────────────────────────────────────────
 DEFAULT_MAX_ATTEMPTS = 3

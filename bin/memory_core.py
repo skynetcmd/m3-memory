@@ -59,7 +59,6 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
 import yaml
-
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
 
