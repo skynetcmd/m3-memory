@@ -199,7 +199,7 @@ After contradiction check, if no contradiction was found and related candidates 
 ### LLM Auto-Classification
 
 When `type="auto"` is passed to `memory_write`:
-1. Local LLM is called via `llm_failover.get_best_llm()` with a prompt listing all 18 valid types
+1. Local LLM is called via `llm_failover.get_best_llm()` with a prompt listing all 32 classifier-eligible types (canonical `VALID_MEMORY_TYPES` minus the `auto` sentinel)
 2. Response is parsed, stripped, lowercased
 3. If result matches a valid type, it's used; otherwise falls back to `"note"`
 4. Results cached in `_CLASSIFY_CACHE` keyed by content hash
