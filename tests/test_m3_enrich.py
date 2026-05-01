@@ -430,6 +430,11 @@ def test_drain_queue_mode_handles_empty_queue(stub_db, monkeypatch, capsys):
     import argparse
 
     monkeypatch.setenv("M3_DATABASE", str(stub_db))
+    # The local-SLM profile resolves LM_API_TOKEN via get_api_key; on CI
+    # there's no credential vault and no env, so the call sys.exits before
+    # we ever reach the empty-queue check. Stamp a dummy token — the real
+    # SLM call never fires because the queue is empty.
+    monkeypatch.setenv("LM_API_TOKEN", "test-stub-token")
     import m3_enrich
     m3_enrich._ensure_migration_025(stub_db)
 
