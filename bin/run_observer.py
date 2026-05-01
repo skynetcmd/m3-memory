@@ -50,6 +50,7 @@ import httpx  # noqa: E402
 import memory_core as mc  # noqa: E402
 from slm_intent import load_profile  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
+from agent_protocol import strip_code_fences  # noqa: E402
 
 PROFILE_NAME = os.environ.get("OBSERVER_PROFILE", "observer_local")
 
@@ -66,6 +67,10 @@ JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 # ISO-8601 date validator. Accepts both "2023-05-22" and "2023/05/22"
 # (LM-S session_date format) — the latter is normalized in _normalize_date.
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# memory_write_impl returns a free-form result string; we extract the
+# new memory's UUID from it. Hot path — fires per observation written
+# (hundreds of thousands of times during a corpus enrichment run).
+UUID_RE = re.compile(r"[0-9a-f-]{36}")
 
 
 def _normalize_date(s: str | None) -> str | None:
@@ -90,7 +95,7 @@ def parse_observations(text: str) -> list[dict]:
     to ISO-8601. Drops malformed entries silently — the drainer logs the
     miss count separately.
     """
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    text = strip_code_fences(text)
     m = JSON_RE.search(text)
     if not m:
         return []
@@ -271,7 +276,7 @@ async def write_observation(
         valid_from=valid_from,
         embed=embed,
     )
-    m = re.search(r"[0-9a-f-]{36}", result)
+    m = UUID_RE.search(result)
     obs_id = m.group(0) if m else None
     # Link the observation back to its source enrichment_groups row (when
     # provided). The column is nullable; absence means "this run wasn't
