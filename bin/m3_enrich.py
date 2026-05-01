@@ -210,8 +210,9 @@ async def _smoke_profile(profile: Profile) -> None:
         )
     # Use a trivially-empty turns block; expect {observations:[]} back.
     test_block = {"session_date": "2025-01-01", "turns": []}
+    from unified_ai import async_client_for_profile
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with async_client_for_profile(profile, timeout=30.0) as client:
             obs = await observer.call_observer(test_block, profile, client, token)
         # Empty list is a clean pass; non-empty also fine (model just made stuff up).
         print(f"[m3-enrich] profile smoke OK: model={profile.model} backend={profile.backend} "
@@ -600,7 +601,8 @@ async def _run_db(
     # Budget watchdog: every K groups we re-sum cost on the run; abort cleanly.
     budget_check_interval = 25
 
-    async with httpx.AsyncClient() as client:
+    from unified_ai import async_client_for_profile
+    async with async_client_for_profile(profile) as client:
         async def gated(uid: str, cid: str, turns: list[tuple]) -> None:
             nonlocal abort_reason
             if abort_reason is not None:
@@ -761,7 +763,8 @@ async def _run_reflector_pass(
           flush=True)
     token = get_api_key(profile.api_key_service) or ""
     sem = asyncio.Semaphore(concurrency)
-    async with httpx.AsyncClient() as client:
+    from unified_ai import async_client_for_profile
+    async with async_client_for_profile(profile) as client:
         async def gated(uid: str, cid: str) -> None:
             async with sem:
                 await reflector.reflect_conversation(uid, cid, profile, client, token, counters)
