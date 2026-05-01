@@ -46,11 +46,10 @@ if _BENCH_BIN.exists() and str(_BENCH_BIN) not in sys.path:
     sys.path.append(str(_BENCH_BIN))
 
 import httpx  # noqa: E402
-
 import memory_core as mc  # noqa: E402
-from slm_intent import load_profile  # noqa: E402
-from auth_utils import get_api_key  # noqa: E402
 from agent_protocol import strip_code_fences  # noqa: E402
+from auth_utils import get_api_key  # noqa: E402
+from slm_intent import load_profile  # noqa: E402
 
 PROFILE_NAME = os.environ.get("OBSERVER_PROFILE", "observer_local")
 

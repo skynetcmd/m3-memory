@@ -21,6 +21,7 @@ from memory_bridge import memory_delete, memory_write
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 from m3_sdk import resolve_db_path
 
+
 def _db_path() -> str:
     """Resolve DB path lazily so M3_DATABASE / --database win over the default."""
     return resolve_db_path(None)
