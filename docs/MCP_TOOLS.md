@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 71 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 72 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
@@ -8,13 +8,14 @@ This document provides a comprehensive inventory of all 71 MCP tools available i
 | --- | --- | --- |
 | `memory_delete` | Memory Operations | Deletes a MemoryItem (soft or hard). |
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
-| `memory_get` | Memory Operations | Retrieves a full MemoryItem by UUID. |
+| `memory_get` | Memory Operations | Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
 | `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. Optional graph_depth and expand_sessions add post-retrieval neighbor expansion. |
 | `memory_suggest` | Memory Operations | Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected. |
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
 | `memory_verify` | Memory Operations | Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with. |
 | `memory_write` | Memory Operations | Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing memory of the same type/title, the old one is superseded. Use type='auto' to let the LLM decide the best category. |
+| `memory_write_from_file` | Memory Operations | Write a memory whose content is read from a file on disk. Use this when the memory body is large (>1k chars) to avoid the autoregressive decode latency of streaming a multi-thousand-token JSON `input` field through tool_use — write the body with the Write tool first (off the streaming path, fast), then call this tool with just the path + tiny metadata. The MCP server reads the file, writes the row through the same path as memory_write (all gates apply), and by default deletes the source file on success. Path must be absolute on the host running this MCP server. Files >200000 bytes are rejected; underlying content is still capped at 50000 chars by memory_write_impl. |
 | `enrich_pending` | Knowledge Graph | Enrich pending memory items with SLM-distilled facts. Default dry_run=true reports count + ETA; pass dry_run=false to execute. |
 | `entity_get` | Knowledge Graph | Load a single entity with its full neighborhood: predecessors, successors, and linked memory items. |
 | `entity_search` | Knowledge Graph | Search entities by canonical_name and optionally by entity_type. Returns list of matching entities with optional neighbor counts. |
@@ -112,7 +113,7 @@ Provide feedback on a memory item to improve quality.
 
 ### `memory_get`
 
-Retrieves a full MemoryItem by UUID.
+Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error.
 
 **Source:** mcp_tool_catalog.py
 
@@ -120,7 +121,7 @@ Retrieves a full MemoryItem by UUID.
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
-| `id` | `string` | Yes | Memory item UUID. | `-` |
+| `id` | `string` | Yes | Memory item id — 36-char UUID or 8-char prefix. Ambiguous prefixes return an error listing the matching ids. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ### `memory_search`
@@ -144,7 +145,7 @@ Search across memory items using semantic similarity or keyword matching. Filter
 | `as_of` | `string` | No | ISO-8601 time-travel cutoff. | `` |
 | `conversation_id` | `string` | No | Restrict to a conversation / team session. | `` |
 | `recency_bias` | `number` | No | Boost newer items (0.0=off, 0.1-0.2=moderate, higher=aggressive). Useful for 'current' or 'latest' queries. | `0.0` |
-| `adaptive_k` | `boolean` | No | Auto-trim results at the score drop-off point. WARNING: can regress on temporal, knowledge-update, and multi-session queries; safe only for sharp-curve queries where most retrievals would be noise. Prefer `auto_route=True` on memory_search_routed for safer multi-signal routing. | `False` |
+| `adaptive_k` | `boolean` | No | Auto-trim results at the score drop-off point. WARNING: regresses on temporal-reasoning, knowledge-update, and multi-session queries; safe only for sharp-curve queries where most retrievals would be noise. Prefer `auto_route=True` on memory_search_routed for safer multi-signal routing. | `False` |
 | `variant` | `string` | No | Ingest-pipeline filter. '' = real user data only (default, equivalent to IS NULL). Pass a specific variant name (e.g. 'heuristic_c1c4') to scope to that bench ingest. | `` |
 | `include_bench_data` | `boolean` | No | Opt in to LOCOMO / LongMemEval bench rows. Default False hides any row with a variant tag. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
@@ -175,8 +176,8 @@ Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k
 | `as_of` | `string` | No |  | `` |
 | `conversation_id` | `string` | No |  | `` |
 | `explain` | `boolean` | No |  | `False` |
-| `entity_graph` | `boolean` | No | Direct lever for entity-graph expansion. Default False = OFF (production default; matches memory_search behavior). True = parse query for named entities, traverse entity_relationships up to entity_graph_depth hops, fold matched memory_ids into the result set tagged expanded_via='entity_graph'. The AUTO layer can also flip this on for the entity_anchored branch (see auto_entity_graph_enabled), but caller-explicit entity_graph=True works without auto_route. Use for benchmarking + production opt-in once empirically validated. See decision memory `c98817ca` and `931774b0` for context. | `False` |
-| `rerank` | `boolean` | No | Cross-encoder reranking. Default False = OFF (production behavior unchanged). True = re-score top (rerank_pool_k or 3*k) hits with sentence-transformers CrossEncoder, blend with hybrid score per rerank_blend, re-sort. Adds ~12MB-560MB model download (cached at ~/.cache/torch) + ~50ms/pair on GPU, ~200ms/pair on CPU. Opt-in for production retrieval. | `False` |
+| `entity_graph` | `boolean` | No | Direct lever for entity-graph expansion. Default False = OFF (production default; matches memory_search behavior). True = parse query for named entities, traverse entity_relationships up to entity_graph_depth hops, fold matched memory_ids into the result set tagged expanded_via='entity_graph'. The AUTO layer can also flip this on for the entity_anchored branch (see auto_entity_graph_enabled), but caller-explicit entity_graph=True works without auto_route. Use for benchmarking + production opt-in once empirically validated. | `False` |
+| `rerank` | `boolean` | No | Cross-encoder reranking. Default False = OFF (production behavior unchanged). True = re-score top (rerank_pool_k or 3*k) hits with sentence-transformers CrossEncoder, blend with hybrid score per rerank_blend, re-sort. Adds ~12MB-560MB model download (cached at ~/.cache/torch) + ~50ms/pair on GPU, ~200ms/pair on CPU. Used in benchmarking; opt-in for production retrieval. | `False` |
 | `rerank_model` | `string` | No | Cross-encoder model id. Default empty = DEFAULT_RERANK_MODEL (cross-encoder/ms-marco-MiniLM-L-6-v2 — small, fast, English-tuned). Higher-accuracy alternative: BAAI/bge-reranker-v2-m3 (multilingual, larger, slower). Override via M3_RERANK_MODEL env var. | `` |
 | `rerank_pool_k` | `integer` | No | Pool size before rerank. Default 0 = 3*k. Higher pool = more candidates rescored = slower but potentially higher recall. Never truncates below final k. Only used when rerank=True. | `0` |
 | `rerank_blend` | `number` | No | Blend factor: final_score = rerank_blend * ce_score + (1 - rerank_blend) * hybrid_score. Default 1.0 = pure CE replacement (most aggressive). 0.5 = average. 0.3 = CE as tiebreaker over hybrid. 0.0 = no-op (skip rerank — same effect as rerank=False). Only used when rerank=True. | `1.0` |
@@ -264,7 +265,7 @@ Creates a MemoryItem and optionally embeds it for semantic search. Contradiction
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
-| `type` | `string` | Yes | Memory type. One of: auto, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, knowledge, log, message, note, observation, plan, preference, reference, scratchpad, snippet, summary, task, user_fact. | `-` |
+| `type` | `string` | Yes | Memory type. One of: auto, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
 | `content` | `string` | Yes | Memory body (max 50000 chars). | `-` |
 | `title` | `string` | No | Short title. | `` |
 | `metadata` | `string` | No | JSON-encoded metadata object. | `{}` |
@@ -284,6 +285,38 @@ Creates a MemoryItem and optionally embeds it for semantic search. Contradiction
 | `refresh_reason` | `string` | No | Why this memory needs refreshing (e.g., 'quarterly policy review'). | `` |
 | `variant` | `string` | No | Pipeline identifier for A/B variant tracking. | `` |
 | `embed_text` | `string` | No | Override text used for embedding; falls back to content when empty. | `` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+### `memory_write_from_file`
+
+Write a memory whose content is read from a file on disk. Use this when the memory body is large (>1k chars) to avoid the autoregressive decode latency of streaming a multi-thousand-token JSON `input` field through tool_use — write the body with the Write tool first (off the streaming path, fast), then call this tool with just the path + tiny metadata. The MCP server reads the file, writes the row through the same path as memory_write (all gates apply), and by default deletes the source file on success. Path must be absolute on the host running this MCP server. Files >200000 bytes are rejected; underlying content is still capped at 50000 chars by memory_write_impl.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `path` | `string` | Yes | Absolute path to a UTF-8 text file on the MCP server host. The file's contents become the memory `content`. | `-` |
+| `type` | `string` | Yes | Memory type. One of: auto, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
+| `title` | `string` | No | Short title. | `` |
+| `metadata` | `string` | No | JSON-encoded metadata object. | `{}` |
+| `agent_id` | `string` | No | Owning agent id. Injected by the orchestrator. | `` |
+| `model_id` | `string` | No | Originating model id. | `` |
+| `change_agent` | `string` | No | Agent causing the write (audit). | `` |
+| `importance` | `number` | No | 0.0-1.0 relevance. | `0.5` |
+| `source` | `string` | No | Provenance tag. | `agent` |
+| `embed` | `boolean` | No | Embed for semantic search. | `True` |
+| `user_id` | `string` | No | Data subject id. | `` |
+| `scope` | `string` | No | Isolation scope. | `agent` |
+| `valid_from` | `string` | No | ISO-8601 validity start. | `` |
+| `valid_to` | `string` | No | ISO-8601 validity end. | `` |
+| `auto_classify` | `boolean` | No | Let the LLM pick the type (forced true if type='auto'). | `False` |
+| `conversation_id` | `string` | No | Groups this memory with a conversation / team session. | `` |
+| `refresh_on` | `string` | No | ISO-8601 timestamp when this memory should be flagged for review. | `` |
+| `refresh_reason` | `string` | No | Why this memory needs refreshing. | `` |
+| `variant` | `string` | No | Pipeline identifier for A/B variant tracking. | `` |
+| `delete_after_read` | `boolean` | No | Delete the source file after successful write. Default true (signals contents are now authoritative in m3-memory). | `True` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ---

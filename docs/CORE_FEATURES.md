@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 66 MCP tools. 193 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
+> 72 MCP tools. 193 end-to-end tests. Hybrid search with diversity ranking. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -163,7 +163,7 @@ Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local L
 
 ---
 
-## 🧰 66 MCP Tools at a Glance
+## 🧰 72 MCP Tools at a Glance
 
 | Category | Tools |
 |----------|-------|
