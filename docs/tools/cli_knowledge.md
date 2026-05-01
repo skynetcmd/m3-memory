@@ -2,7 +2,7 @@
 tool: bin/cli_knowledge.py
 sha1: a90253ea9ab4
 mtime_utc: 2026-04-21T20:44:20.430808+00:00
-generated_utc: 2026-04-21T21:26:01.802917+00:00
+generated_utc: 2026-05-01T13:05:26.772517+00:00
 private: false
 ---
 
@@ -12,10 +12,14 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 - `def main()` (line 32)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -38,25 +42,37 @@ _(no module docstring — update the source file.)_
 | `--hard` | Permanently delete from database (requires exact string 'WIPE') | None | Soft-delete only (tombstone); data recoverable | str | Hard-delete (permanent) only if value is exactly "WIPE"; any other value errors |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg, resolve_venv_python)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `memory.knowledge_helpers (add_knowledge, delete_knowledge, get_all_types, list_knowledge, search_knowledge, update_knowledge)`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

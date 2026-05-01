@@ -1,8 +1,8 @@
 ---
 tool: bin/gen_mcp_inventory.py
-sha1: 6aa5826e4e97
-mtime_utc: 2026-05-01T08:52:14.017128+00:00
-generated_utc: 2026-05-01T08:55:43.182358+00:00
+sha1: 0eb72846eb47
+mtime_utc: 2026-05-01T09:13:26.347423+00:00
+generated_utc: 2026-05-01T13:05:26.797564+00:00
 private: false
 ---
 
@@ -12,34 +12,50 @@ private: false
 
 gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy.
 
+---
+
 ## Entry points
 
 - `def main()` (line 212)
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
 _(none detected)_
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `mcp_tool_catalog`
+
+---
 
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `MCP_TOOLS.md`
+
+---
 
 ## Re-validation
 

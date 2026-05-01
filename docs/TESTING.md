@@ -17,6 +17,8 @@ for the change you just made.
 
 Full test inventory and what each exercises follows.
 
+---
+
 ## Layout
 
 Three distinct test surfaces, each with different run semantics:
@@ -44,6 +46,8 @@ hypotheses, judge scores, and CSV/JSONL artifacts for offline analysis.
 
 Neither the `bin/test_*.py` harnesses nor the benchmarks run in CI (they
 need LM Studio, a populated DB, or a real embedding endpoint).
+
+---
 
 ## 1. pytest suite (`tests/`)
 
@@ -88,6 +92,8 @@ python bin/setup_test_db.py --database memory/_test.db --force
 M3_DATABASE=memory/_test.db python -m pytest tests/
 ```
 
+---
+
 ## 2. End-to-end harnesses (`bin/test_*.py`)
 
 These are self-contained scripts that print a `✅/❌` summary. They exist
@@ -130,6 +136,8 @@ M3_DATABASE=memory/_test.db python bin/test_debug_agent.py
 See [CLI_REFERENCE.md](CLI_REFERENCE.md#running-tests-against-an-isolated-db)
 for details.
 
+---
+
 ## 3. Benchmark harnesses (`benchmarks/`)
 
 These measure retrieval quality and ingest cost against real datasets. They
@@ -167,6 +175,8 @@ the resulting `retrieval_trace.jsonl` or `summary.json`.
 | `benchmarks/locomo/stamp_variants_from_chainlog.py` | Retrofit the `variant` field into existing `summary.json` files by matching audit timestamps to a chain-runner log. | `.chain.log`; `benchmarks/locomo/runs/` |
 | `benchmarks/locomo/join_variant_reports.py` | Aggregate latest runs across multiple variants into a markdown comparison report: hit rate, recall@K, per-category. | Multiple `benchmarks/locomo/runs/` directories |
 
+---
+
 ## 4. Running the full test ladder
 
 When merging a large change and you want maximum coverage:
@@ -186,6 +196,8 @@ python -m unittest bin.test_mcp_proxy_unit
 # 3. Benchmark smoke (small sample so it finishes in minutes, not hours)
 python benchmarks/longmemeval/bench_longmemeval.py --limit 5 --no-judge
 ```
+
+---
 
 ## 5. Writing new tests
 
@@ -229,6 +241,8 @@ def test_feature_runs_when_gate_on(monkeypatch, tmp_path):
 ```
 
 The `test_slm_intent.py` module demonstrates this end-to-end.
+
+---
 
 ## 6. Related docs
 

@@ -35,6 +35,8 @@ mcp-memory install-m3 --capture-mode both
 mcp-memory doctor
 ```
 
+---
+
 ## Adding to an MCP client
 
 ```bash
@@ -47,6 +49,8 @@ claude mcp add memory mcp-memory
 mcp-memory chatlog init --apply-gemini
 ```
 
+---
+
 ## Common gotchas
 
 - **`mcp-memory: command not found` after `pipx install`** — pipx adds
@@ -56,12 +60,16 @@ mcp-memory chatlog init --apply-gemini
 - **macOS-shipped Python (`/usr/bin/python3`) is old and externally managed** —
   don't try to `pip install` against it. Always use brew Python via pipx.
 
+---
+
 ## Advanced setup
 
 The full homelab walkthrough — Postgres sync, ChromaDB, LM Studio embedding
 server, multi-machine federation — lives at
 [install_macos_homelab.md](install_macos_homelab.md). Most users don't need
 any of that; the one-liner above is enough for a working local install.
+
+---
 
 ## Verifying
 

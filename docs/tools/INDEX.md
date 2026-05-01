@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-01T08:55:47.787982+00:00._
+_Generated 2026-05-01T13:07:18.871069+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -53,6 +53,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_chatlog_backfill_embed.py](m3_chatlog_backfill_embed.md) | m3_chatlog_backfill_embed — Embed unembedded rows in core memory + chatlog. |  |
 | [bin/m3_chatlog_backfill_title.py](m3_chatlog_backfill_title.md) | m3_chatlog_backfill_title — Backfill missing/useless titles from content. |  |
 | [bin/m3_enrich.py](m3_enrich.md) | m3_enrich — User-facing enrichment CLI for core memory + chatlogs. |  |
+| [bin/m3_enrich_report.py](m3_enrich_report.md) | Summarize an m3_enrich run from enrichment_groups + enrichment_runs. |  |
 | [bin/m3_entities.py](m3_entities.md) | m3_entities — build entity-graph rows from your core/chatlog DBs. |  |
 | [bin/m3_sdk.py](m3_sdk.md) | (no docstring) |  |
 | [bin/macbook_status_server.py](macbook_status_server.md) | MacBook network & LM Studio status server for Homepage dashboard. | yes |

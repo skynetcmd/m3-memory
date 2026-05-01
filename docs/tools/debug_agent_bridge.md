@@ -1,8 +1,8 @@
 ---
 tool: bin/debug_agent_bridge.py
-sha1: 68652d4557d2
-mtime_utc: 2026-04-22T01:03:02.028133+00:00
-generated_utc: 2026-04-22T01:22:54.517535+00:00
+sha1: 3bcb9dc58afe
+mtime_utc: 2026-05-01T09:15:53.148020+00:00
+generated_utc: 2026-05-01T13:05:26.782292+00:00
 private: false
 ---
 
@@ -22,18 +22,26 @@ Registration (settings.json):
 
 All internal paths are relative to BASE_DIR (auto-detected or AI_WORKSPACE_DIR env var).
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 - `AI_WORKSPACE_DIR`
 - `ORIGIN_DEVICE`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -42,18 +50,26 @@ _(no argparse arguments detected)_
 - `m3_sdk (LM_STUDIO_BASE, M3Context)`
 - `thermal_utils (get_thermal_status)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `mcp.server.fastmcp (FastMCP)`
 - `platform`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/analyze_prompt.py
 sha1: 8e143feb913a
 mtime_utc: 2026-04-21T20:02:02.907203+00:00
-generated_utc: 2026-04-29T13:47:47.161467+00:00
+generated_utc: 2026-05-01T13:05:27.145526+00:00
 private: true
 ---
 
@@ -23,10 +23,14 @@ Outputs:
   - prompt_analysis.jsonl  — one record per question
   - prompt_summary.json    — aggregate per-category and overall
 
+---
+
 ## Entry points
 
 - `def main()` (line 368)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -36,27 +40,39 @@ Outputs:
 | `--dataset` | Path to LOCOMO dataset JSON file. | `str(BASE_DIR / 'data' / 'locomo' / 'locomo10.json')` | Uses hardcoded dataset path. | str | Loads dataset from PATH. |
 | `--limit` | Process only first N questions from trace (0 = all). | `0` | Processes all questions in trace. | int | Limits processing to first N questions. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `bench_locomo`
 - `memory_core`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `locomo10.json`
 - `prompt_summary.json`
+
+---
 
 ## Re-validation
 

@@ -2,7 +2,7 @@
 tool: bin/test_mcp_proxy_unit.py
 sha1: 994a5ba6d42c
 mtime_utc: 2026-04-22T01:03:02.054983+00:00
-generated_utc: 2026-04-22T01:32:11.703491+00:00
+generated_utc: 2026-05-01T13:05:27.094874+00:00
 private: false
 ---
 
@@ -22,34 +22,50 @@ provider keys), this suite imports mcp_proxy as a module and verifies:
   - _execute_tool refuses unknown tools and gives a helpful error for disabled destructive tools
   - inject_agent_id is honored on memory_write
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `mcp_proxy`
 - `mcp_tool_catalog`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `unittest`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 
