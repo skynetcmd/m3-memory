@@ -51,7 +51,7 @@ No SDEs, no manifolds. Just rule-based maintenance running on a SQLite database.
 
 ### ❌ Myth: "M3 has an EU AI Act compliance module"
 
-**Fact:** M3 has **GDPR primitives** — `gdpr_forget` (Article 17 right to erasure) and `gdpr_export` (Article 20 data portability) — exposed as MCP tools. We also publish [FISMA / NIST 800-53](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html) and [CMMC 2.0 / NIST 800-171](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html) alignment notes. There is no EU AI Act module. If/when one exists, it'll be documented in [COMPLIANCE.md](COMPLIANCE.md).
+**Fact:** M3 has **GDPR primitives** — `gdpr_forget` (Article 17 right to erasure) and `gdpr_export` (Article 20 data portability) — exposed as MCP tools. We also publish [FISMA / NIST 800-53](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html) and [CMMC 2.0 / NIST 800-171](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html) alignment notes. There is no EU AI Act module. If/when one exists, it'll be documented in [COMPLIANCE.md](COMPLIANCE.md).
 
 ### ❌ Myth: "M3 verified 89.0% on LongMemEval-S by Berkeley RDI / on the official leaderboard"
 
@@ -90,7 +90,7 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 ### ❌ Myth: "M3 beats Mnemis / agentmemory / MemPalace on LongMemEval"
 
-**Fact:** No. M3's 89.0% on LME-S is **mid-pack**, not state-of-the-art. agentmemory (96.2%), MemPalace (96.6% R@5), Chronos (95.6%), and Mastra OM (94.9%) lead on raw recall. M3 trades that gap for sovereignty, bitemporal correctness, and a small auditable codebase. See the [Sovereign Substrates Comparison Table](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) for the honest cohort view.
+**Fact:** No. M3's 89.0% on LME-S is **mid-pack**, not state-of-the-art. agentmemory (96.2%), MemPalace (96.6% R@5), Chronos (95.6%), and Mastra OM (94.9%) lead on raw recall. M3 trades that gap for sovereignty, bitemporal correctness, and a small auditable codebase. See the [Sovereign Substrates Comparison Table](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) for the honest cohort view.
 
 ---
 
@@ -137,5 +137,5 @@ If you find a claim in our own documentation that turns out to be wrong, [open a
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system design
 - [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) — implementation specifics
 - [COMPARISON.md](COMPARISON.md) — honest comparison vs Mem0, Letta, Zep, LangChain
-- [Sovereign Substrates Table](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) — comparison vs agentmemory, Chronos, Hindsight, Mastra, Memento, MemPalace
+- [Sovereign Substrates Table](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) — comparison vs agentmemory, Chronos, Hindsight, Mastra, Memento, MemPalace
 - [COMPLIANCE.md](COMPLIANCE.md) — FISMA / CMMC / GDPR alignment
