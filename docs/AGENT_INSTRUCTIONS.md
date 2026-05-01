@@ -5,6 +5,8 @@
 
 > For technical implementation details, see [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md).
 
+> **Looking for the pocket-card version?** Drop [`examples/AGENT_RULES.md`](../examples/AGENT_RULES.md) into a project root for a ~50-line distillation of the most important rules. This file is the canonical reference; AGENT_RULES is the short version intended to live in the agent's system-prompt context on every session.
+
 ---
 
 ## 🚨 Memory Protocol Override
@@ -68,10 +70,20 @@ release"). When their date arrives they should be reviewed, not silently forgott
 `refresh_on` date or `refresh_on="clear"` to remove the flag. The old value is
 preserved in `memory_history`; you are not creating a duplicate row.
 
+### 7. Look Up Entities Directly
+When the user's question is about a specific named thing — a person, place,
+project, organization, device — try `entity_search` (or `entity_get` if you
+already know the entity ID) before reaching for a free-text `memory_search`.
+Entity lookups return cleaner, more focused results because they hit the
+extracted entity graph directly rather than scoring text similarity over
+every memory. Free-text `memory_search` is still right for thematic or
+fuzzy queries; entity tools are right for "who/what/where" lookups.
+
 ### Quick Reference Flow
 | Situation | Action |
 |-----------|--------|
 | Non-trivial or context-dependent question | `memory_search` first |
+| Question is about a specific named entity (person, place, project) | `entity_search` (or `entity_get` if ID is known) |
 | New important information | `memory_write` |
 | Information has changed | `memory_update` |
 | Need deeper understanding of connections | `memory_graph` |
