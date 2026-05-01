@@ -887,7 +887,7 @@ async def _main_async(args) -> int:
         new_cap = args.input_max_k * 1024
         old_cap = getattr(profile, "input_max_chars", None)
         try:
-            profile.input_max_chars = new_cap
+            profile.input_max_chars = new_cap  # type: ignore[misc]
         except Exception:
             # Frozen dataclass (some Profile flavors) — can't set attrs.
             pass
