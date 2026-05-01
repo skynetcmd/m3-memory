@@ -69,7 +69,12 @@ jobs:
       run: |
         python -m venv /tmp/m3-core
         /tmp/m3-core/bin/pip install --upgrade pip
+        # Install M3 to pull its core dependencies, then uninstall the
+        # package itself. pip-audit -l would otherwise try to look up
+        # m3-memory on PyPI and fail with "not found" before each release
+        # tag is published (chicken-and-egg in pre-release CI).
         /tmp/m3-core/bin/pip install .
+        /tmp/m3-core/bin/pip uninstall -y m3-memory
         /tmp/m3-core/bin/pip install pip-audit
     - name: pip-audit (core deps, locally installed)
       # CVE-2026-3219: pip itself — present because pip is in every venv,
