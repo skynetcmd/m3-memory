@@ -31,6 +31,19 @@ VALID_MEMORY_TYPES = frozenset({
     "task", "code", "config", "observation", "plan", "summary", "snippet",
     "reference", "log", "home", "user_fact", "scratchpad", "auto",
     "knowledge", "event_extraction", "fact_enriched", "chat_log",
+    # Home-network / infrastructure inventory categories. Pre-existing rows
+    # in the store predate the strict catalog (restored 2026-04-17 from the
+    # pre-hard-delete archive); widening lets new writes round-trip cleanly.
+    "local_device", "network_config", "infrastructure", "home_automation",
+    "migration-log",
+    # Security: SSH endpoints, credentials references, firewall rules,
+    # auth-related facts. Distinct from generic 'fact' for browsing.
+    "security",
+    # Platform-scoped notes — for guidance/snippets that only apply on one OS.
+    "windows_only", "macos_only", "linux_only",
+    # User-facing reminder / pending action. Lighter than 'task' which carries
+    # the full task-state machine; 'to_do' is just "remember to do this".
+    "to_do",
 })
 
 # Entity-graph enums — defined in memory_core to avoid circular import
