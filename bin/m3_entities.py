@@ -63,6 +63,7 @@ import httpx  # noqa: E402
 import memory_core as mc  # noqa: E402
 from slm_intent import load_profile, Profile  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
+from agent_protocol import strip_code_fences  # noqa: E402
 
 DEFAULT_PROFILE = "entities_local_qwen"
 DEFAULT_VOCAB_YAML = REPO_ROOT / "config" / "lists" / "entity_graph_m3.yaml"
@@ -203,7 +204,7 @@ def _build_extractor(
         for blk in data.get("content") or []:
             if isinstance(blk, dict) and blk.get("type") == "text":
                 text += blk.get("text", "")
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+        text = strip_code_fences(text)
         m = JSON_RE.search(text)
         if not m:
             return {"entities": [], "relationships": []}
