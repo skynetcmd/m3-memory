@@ -108,6 +108,9 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
         resp.raise_for_status()
         summary_text = resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
+        logger.error(f"Summarization failed: {e}")
+        from llm_failover import clear_failover_caches
+        clear_failover_caches()
         return f"Error during LLM summarization: {type(e).__name__}: {e}"
 
     # 5. Store the summary as a new memory item
@@ -898,6 +901,8 @@ async def _auto_classify(content: str, title: str) -> str:
             return m_type
     except Exception as e:
         logger.debug(f"Auto-classification failed: {e}")
+        from llm_failover import clear_failover_caches
+        clear_failover_caches()
 
     return "note"
 

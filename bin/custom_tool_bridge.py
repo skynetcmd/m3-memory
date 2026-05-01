@@ -390,6 +390,8 @@ async def query_local_model(prompt: str):
             json=payload,
         )
     except httpx.ConnectError:
+        from llm_failover import clear_failover_caches
+        clear_failover_caches()
         return f"Error: Lost connection to {base_url} during request."
     except httpx.ReadTimeout:
         return f"Error: {base_url} did not respond within {LM_READ_TIMEOUT}s."
@@ -397,6 +399,8 @@ async def query_local_model(prompt: str):
         return f"Error: {base_url} returned HTTP {exc.response.status_code}."
     except Exception as exc:
         logger.error(f"Unexpected error: {type(exc).__name__}: {exc}")
+        from llm_failover import clear_failover_caches
+        clear_failover_caches()
         return f"Error: Unexpected failure ({type(exc).__name__}). Check stderr logs."
 
     data          = response.json()
