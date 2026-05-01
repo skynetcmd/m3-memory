@@ -59,11 +59,10 @@ if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
 import httpx  # noqa: E402
-
 import memory_core as mc  # noqa: E402
-from slm_intent import load_profile, Profile  # noqa: E402
-from auth_utils import get_api_key  # noqa: E402
 from agent_protocol import strip_code_fences  # noqa: E402
+from auth_utils import get_api_key  # noqa: E402
+from slm_intent import Profile, load_profile  # noqa: E402
 
 DEFAULT_PROFILE = "entities_local_qwen"
 DEFAULT_VOCAB_YAML = REPO_ROOT / "config" / "lists" / "entity_graph_m3.yaml"
@@ -511,7 +510,7 @@ def _print_dry_run(plan: dict) -> None:
         print(f"     path:        {info['path']}")
         print(f"     eligible:    {info['n_rows']} rows")
         print(f"     est wall:    ~{info['n_rows'] * 3 / 60:.1f} min @ concurrency=4 (local model)")
-        print(f"     est cost:    $0 (local)")
+        print("     est cost:    $0 (local)")
         print()
     print("To run for real, drop --dry-run.")
     print("══════════════════════════════════════════════════════════════")

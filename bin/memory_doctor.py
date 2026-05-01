@@ -14,6 +14,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 from m3_sdk import add_database_arg, resolve_db_path
 
+
 def fix_missing_timestamps(conn):
     """Ensures all items have at least a created_at timestamp."""
     logger.info("Checking for missing timestamps...")
