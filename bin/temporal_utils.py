@@ -203,19 +203,11 @@ def resolve_temporal_expressions(text: str, anchor_date: datetime | str) -> list
     return results
 
 
-def has_temporal_cues(text: str) -> bool:
-    """Fast check: does ``text`` contain any common temporal expression?
-
-    Used by intent-routing and retrieval-side date boosts to decide whether
-    a query needs date-aware handling at all. Returns True on the first
-    match; no full enumeration.
-    """
-    return any(cue.search(text) for cue in _TEMPORAL_CUE_RES)
-
-
-def extract_referenced_dates(text: str) -> list[str]:
-    """Return ISO-8601 date substrings (YYYY-MM-DD) referenced in ``text``."""
-    return _ISO_DATE_RE.findall(text)
+# Note: has_temporal_cues and extract_referenced_dates are defined further
+# below with richer pattern matching. Earlier minimal versions were removed
+# in 2026-05-01 cleanup — they were shadowed by the later definitions and
+# unreachable. The richer versions cover the same use cases plus inferred
+# month-name + day-of-month dates with default year handling.
 
 
 # ── Time-aware retrieval helpers ─────────────────────────────────────────────
