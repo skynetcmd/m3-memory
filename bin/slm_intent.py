@@ -571,11 +571,11 @@ def _selftest() -> None:
     gate = "on" if _gate_on() else "off"
     print(f"M3_SLM_CLASSIFIER: {gate}")
     print(f"M3_SLM_PROFILE:    {_default_profile_name()}")
-    print(f"search dirs:")
+    print("search dirs:")
     for d in _profile_search_dirs():
         exists = "[OK]  " if d.is_dir() else "[none]"
         print(f"  {exists} {d}")
-    print(f"profiles found:")
+    print("profiles found:")
     profs = list_profiles()
     if not profs:
         print("  (none)")

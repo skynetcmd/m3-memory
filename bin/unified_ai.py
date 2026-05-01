@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-
 _DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=40.0, write=10.0, pool=10.0)
 
 
