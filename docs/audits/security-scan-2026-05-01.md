@@ -12,6 +12,8 @@
 | Secrets in tree | `git ls-files` + regex | Anthropic / OpenAI / Google / GitHub / Slack / AWS keys + private-key headers |
 | Dependency CVEs | pip-audit | Active Python virtualenv |
 
+---
+
 ## Results
 
 | Layer | Status |
@@ -42,6 +44,8 @@ To reproduce:
 python -m bandit -c pyproject.toml -r bin/ m3_memory/
 ```
 
+---
+
 ## Secrets scan
 
 Two files contained pattern matches; both are intentional:
@@ -55,6 +59,8 @@ To reproduce:
 ```bash
 git ls-files | xargs grep -lE "AIza[0-9A-Za-z_-]{30,}|sk-ant-api[0-9]{2}-[A-Za-z0-9_-]{30,}|sk-[A-Za-z0-9]{32,}|gho_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{50,}|xoxb-[0-9]{10,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY-----"
 ```
+
+---
 
 ## pip-audit (dependency CVEs)
 
