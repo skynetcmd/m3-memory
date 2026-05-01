@@ -86,6 +86,22 @@ def _create_fact_enriched_schema(db_path):
             FOREIGN KEY(memory_id) REFERENCES memory_items(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_feq_attempts ON fact_enrichment_queue(attempts, enqueued_at);
+
+        -- chroma_sync_queue is touched by memory_write_bulk_impl whenever
+        -- it inserts a memory_items row. Added to this minimal-schema
+        -- fixture after a 2026-05-01 audit found the test was relying on
+        -- migrate_memory.py to create the table at runtime, which fails on
+        -- chatlog-fingerprinted DBs. Canonical shape mirrors migration 027.
+        CREATE TABLE IF NOT EXISTS chroma_sync_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            attempts INTEGER DEFAULT 0,
+            stalled_since TEXT,
+            queued_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_csq_attempts  ON chroma_sync_queue(attempts);
+        CREATE INDEX IF NOT EXISTS idx_csq_queued_at ON chroma_sync_queue(queued_at);
     """)
     conn.commit()
     conn.close()
