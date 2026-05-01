@@ -1,8 +1,8 @@
 ---
 tool: bin/custom_tool_bridge.py
-sha1: 70e42ebeb9d8
-mtime_utc: 2026-04-22T01:03:02.027620+00:00
-generated_utc: 2026-04-22T01:22:54.513282+00:00
+sha1: 2233763ac460
+mtime_utc: 2026-05-01T03:38:23.432806+00:00
+generated_utc: 2026-05-01T08:48:37.399237+00:00
 private: false
 ---
 
@@ -27,6 +27,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `agent_protocol (_THINK_TAG_RE)`
+- `llm_failover (clear_failover_caches)`
 - `llm_failover (get_best_llm)`
 - `m3_sdk (M3Context, StructuredLogger)`
 - `thermal_utils (get_thermal_status)`
