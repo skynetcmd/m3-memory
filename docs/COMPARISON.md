@@ -38,7 +38,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. It's exc
 | Feature | M3-Memory | Mem0 |
 |---------|-----------|------|
 | **Primary deployment** | Local SQLite — works fully offline | Cloud API (self-host is possible but not the happy path) |
-| **MCP support** | Native — 66 tools, zero config in Claude Code / Gemini CLI | No native MCP; requires a custom wrapper |
+| **MCP support** | Native — 72 tools, zero config in Claude Code / Gemini CLI | No native MCP; requires a custom wrapper |
 | **Search algorithm** | FTS5 (BM25) + vector cosine + MMR diversity re-ranking | Vector search + knowledge graph traversal |
 | **Contradiction detection** | Automatic on write — old memory soft-deleted, `supersedes` relationship recorded | Basic deduplication; no strong conflict resolution |
 | **Bitemporal history** | `valid_from` / `valid_to` on every memory — query state as of any past date | No |
@@ -77,13 +77,13 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. It's exc
 
 Letta (formerly MemGPT) is a **full stateful agent runtime** with memory built in — not just a memory layer. It uses hierarchical memory blocks (core / recall / archival) that the agent itself edits via tool calls. Letta Code adds git-backed agent state. It's a powerful platform for long-lived, self-improving agents.
 
-M3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for agents you already have. It does one thing: give your agent persistent, private, consistent memory via 66 MCP tools.
+M3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for agents you already have. It does one thing: give your agent persistent, private, consistent memory via 72 MCP tools.
 
 | Feature | M3-Memory | Letta |
 |---------|-----------|-------|
 | **Type** | Dedicated memory layer | Full agent runtime + memory |
 | **Adoption** | Drop-in — one line in mcp.json | Full runtime adoption required |
-| **MCP support** | Native — 66 tools, zero config | Custom SDKs / REST API |
+| **MCP support** | Native — 72 tools, zero config | Custom SDKs / REST API |
 | **Memory model** | Semantic store + knowledge graph | Tiered blocks (core / recall / archival) |
 | **Search** | FTS5 + vector + MMR | Tiered recall with embeddings |
 | **Contradiction handling** | Automatic on write — bitemporal supersede | Agent-driven — the agent must decide to update its own memory |
@@ -140,7 +140,7 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 | Feature | M3-Memory | LangChain Memory / LangMem |
 |---------|-----------|---------------------------|
 | **Ecosystem** | Any MCP agent | LangChain / LangGraph only |
-| **MCP support** | Native — 66 tools | No |
+| **MCP support** | Native — 72 tools | No |
 | **Memory types** | 21 types + auto-classification | Thread, store, episodic, semantic, procedural |
 | **Contradiction handling** | Automatic — bitemporal superseding | Manual / LLM-driven via procedural memory |
 | **GDPR tooling** | Built-in `gdpr_forget` + `gdpr_export` | Custom implementation required |

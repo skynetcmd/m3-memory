@@ -154,7 +154,7 @@ Restart your agent after saving the config.
 
 ### Agents without native MCP support
 
-Some agents can't speak MCP directly — Aider and Openclaw are the two we support today. For them, route chat completions through the bundled [`mcp_proxy`](../bin/mcp_proxy.py), an OpenAI-compatible server on `localhost:9000` that injects m3-memory tools (and the rest of the catalog — 66 tools total) into every request and executes `tool_calls` by calling bridge functions directly.
+Some agents can't speak MCP directly — Aider and Openclaw are the two we support today. For them, route chat completions through the bundled [`mcp_proxy`](../bin/mcp_proxy.py), an OpenAI-compatible server on `localhost:9000` that injects m3-memory tools (and the rest of the catalog — 72 tools total) into every request and executes `tool_calls` by calling bridge functions directly.
 
 **High-level flow:** agent → `localhost:9000/v1` (OpenAI-compatible) → proxy injects tools → real model provider (Anthropic / Google / xAI / LM Studio) → model may emit `tool_calls` → proxy executes them against m3-memory → results fed back → final answer returned to agent.
 
@@ -304,6 +304,6 @@ See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL` and `CHR
 ## ▶️ Next steps
 
 - [CORE_FEATURES.md](./CORE_FEATURES.md) — what M3 Memory can do
-- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 66 MCP tools and agent behavioral rules
+- [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md) — all 72 MCP tools and agent behavioral rules
 - [TECHNICAL_DETAILS.md](./TECHNICAL_DETAILS.md) — search internals, schema, sync, security
 - [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) — credentials and runtime config

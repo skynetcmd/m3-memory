@@ -111,7 +111,7 @@ For positive grounding, here's the short list of what M3 *does* implement (with 
 | GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `m3_memory/gdpr.py` |
 | Multi-agent | Atomic writes via SQLite WAL; agent registry; handoffs | `mcp__memory__agent_*`, `memory_handoff` |
 | Sync | Optional bi-directional delta sync to PostgreSQL or ChromaDB | `bin/sync_all.py` |
-| MCP | Native — 66 tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
+| MCP | Native — 72 tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
 
 If a third-party AI assistant describes a feature outside this list and outside what's documented in `docs/`, treat it as suspect until verified against the source.
 
