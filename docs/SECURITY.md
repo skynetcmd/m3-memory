@@ -41,3 +41,13 @@ Out of scope:
 - Issues requiring physical access to the machine
 - Social engineering attacks
 - Vulnerabilities in third-party dependencies (report to the upstream project)
+
+## Audit history
+
+We periodically run `bandit` (static analysis), regex-based secrets scans, and `pip-audit` (dependency CVEs) against the tree and publish the results. Each scan is dated and reproducible — every report includes the exact commands so you can verify on your own machine.
+
+| Date | Report | Headline |
+|---|---|---|
+| 2026-05-01 | [security-scan-2026-05-01.md](audits/security-scan-2026-05-01.md) | Clean shipped library; 14 CVEs all in opt-in / bench-only deps |
+
+CI runs `pip-audit` scoped to core dependencies on every push, so new CVEs in shipped-library deps surface immediately. See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
