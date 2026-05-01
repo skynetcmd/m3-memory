@@ -194,6 +194,11 @@ async def call_observer(
             ],
             "max_tokens": max_tokens,
         }
+        # Profile may pass additional OpenAI-shape params (e.g.
+        # reasoning_effort: "none" for Gemini 2.5 Flash to suppress thinking).
+        extras = getattr(profile, "extra_params", None) or {}
+        if extras:
+            payload.update(extras)
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
@@ -370,7 +375,7 @@ async def process_conversation(
     input_max = getattr(profile, "input_max_chars", 20000) or 20000
     chunks = _chunk_turns(turns, input_max)
     if len(chunks) > 1:
-        print(f"[observer] conv={conversation_id[:8]}: {len(turns)} turns → "
+        print(f"[observer] conv={conversation_id[:8]}: {len(turns)} turns -> "
               f"{len(chunks)} chunks", flush=True)
 
     observations: list[dict] = []
@@ -488,7 +493,8 @@ async def drain_variant_mode(args, profile, token: str) -> None:
     counters = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
     started = time.monotonic()
 
-    async with httpx.AsyncClient() as client:
+    from unified_ai import async_client_for_profile
+    async with async_client_for_profile(profile) as client:
         async def gated(uid: str, cid: str, turns: list[tuple]) -> None:
             async with sem:
                 await process_conversation(
@@ -529,7 +535,8 @@ async def drain_queue_mode(args, profile, token: str) -> None:
     counters = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
     started = time.monotonic()
 
-    async with httpx.AsyncClient() as client:
+    from unified_ai import async_client_for_profile
+    async with async_client_for_profile(profile) as client:
         # Single-shot drain: pull up to --batch rows from the queue. Caller
         # invokes us repeatedly via the CLI (or cron) for ongoing drain.
         with mc._db() as db:

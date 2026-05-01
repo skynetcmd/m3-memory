@@ -18,7 +18,7 @@ Persistent, local memory for MCP agents.
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
   <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-66_tools-orange?style=flat-square"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-71_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
@@ -99,11 +99,13 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 **Contradiction handling** — conflicting facts are automatically superseded. Bitemporal versioning preserves the full history.
 
-**Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal.
+**Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal. Entity extraction (`entity_search`, `entity_get`) supplements the graph with first-class people / places / things resolution.
 
-**Zero-config local install** — `pip install m3-memory`, one line in your MCP config, done. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
+**Local SLM enrichment pipeline** — optional Observer + Reflector workers extract atomic facts from raw conversation turns and resolve contradictions across sessions. Runs entirely on a local SLM (qwen3-8b via LM Studio, Anthropic Haiku, Gemini Flash — your choice via [`config/slm/`](config/slm/) profiles). See [`docs/M3_ENRICH_GUIDE.md`](docs/M3_ENRICH_GUIDE.md).
 
-**Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB. Set one environment variable and your memories follow you across machines.
+**Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `mcp-memory install-m3` for a one-command setup that wires settings.json, hooks, and the chatlog subsystem in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
+
+**Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB, with manifest-driven multi-DB support for fleet deployments. Set one environment variable and your memories follow you across machines.
 
 ---
 
@@ -113,9 +115,11 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 |---|---|
 | 🚀 **[Getting started](docs/GETTING_STARTED.md)** | 👥 **[Multi-agent orchestration](docs/MULTI_AGENT.md)** |
 | ✨ **[Core features](docs/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](examples/multi-agent-team/README.md)** |
-| 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](docs/COMPARISON.md)** |
+| 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](docs/COMPARISON.md)** ([sovereign substrates table](docs/M3_Comparison_Table.html)) |
 | 🔧 **[Implementation details](docs/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](docs/ENVIRONMENT_VARIABLES.md)** |
-| 🤖 **[Agent rules + all 66 tools](docs/AGENT_INSTRUCTIONS.md)** | 🗺️ **[Roadmap](docs/ROADMAP.md)** |
+| 🤖 **[Agent rules + all 71 tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
+| 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
+| 🗺️ **[Roadmap](docs/ROADMAP.md)** | |
 
 ---
 
@@ -134,13 +138,15 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| **66 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, and chat-log capture for multi-agent orchestration |
+| **71 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, entity graph, fact enrichment, and chat-log capture for multi-agent orchestration |
 | **193 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, and orchestration paths |
 | **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
-| **GDPR compliance** | `gdpr_forget` (Article 17) and `gdpr_export` (Article 20) as built-in tools |
+| **GDPR compliance** | `gdpr_forget` (Article 17) and `gdpr_export` (Article 20) as built-in tools — see [compliance & assurance](docs/COMPLIANCE.md) for FISMA / CMMC alignment too |
 | **Self-maintaining** | Automatic decay, dedup, orphan pruning, retention enforcement |
 | **Apache 2.0 licensed** | Free. No SaaS tier, no usage limits, no lock-in |
+
+> 🧭 **Maturity, honestly.** The core (storage, retrieval, GDPR, MCP tools, sync) is stable and covered by the test suite. The newer enrichment + reflector pipeline matured rapidly through 2026-Q2 and has live-fire experience behind it but is still iterating. **Production-ready for personal, homelab, and multi-agent developer workflows today.** For regulated workloads, do your own evaluation against your specific use case — and we recommend that against any memory tool, not just M3. See [docs/MYTHS_AND_FACTS.md](docs/MYTHS_AND_FACTS.md) for what we *don't* claim.
 
 ---
 
@@ -160,6 +166,8 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](benchmarks/longmemeval/README.md).
 
+> 🔍 **Verifying claims about M3.** If a third-party AI assistant has described M3 with features or scores that don't match what's documented here, it's almost certainly hallucinating. See [`docs/MYTHS_AND_FACTS.md`](docs/MYTHS_AND_FACTS.md) for the source-of-truth list of what M3 actually implements (and what it doesn't).
+
 ---
 
 ## 🧰 Core tools
@@ -174,13 +182,13 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 66 tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md).
+All 71 tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md) and the full inventory lives in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 
 ---
 
 ## 🤖 For AI agents
 
-M3 Memory exposes 66 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, and chat-log capture for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
+M3 Memory exposes 71 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, entity-graph extraction, fact enrichment, and chat-log capture for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
 
 To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
 

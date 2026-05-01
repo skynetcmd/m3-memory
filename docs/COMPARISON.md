@@ -4,6 +4,31 @@
 
 Several tools address agentic memory. This document explains where M3 Memory fits relative to each, and when a different tool is the better choice.
 
+> 💡 Looking for a head-to-head against other **sovereign / local-first memory substrates** (agentmemory, Chronos, Hindsight, Mastra OM, Memento, MemPalace)? See the [Sovereign Memory Systems comparison table](M3_Comparison_Table.html) — different cohort, different decision.
+
+---
+
+## 🧭 Where the cognition lives
+
+The cleanest way to compare agentic memory tools is to ask **where in your stack does cognition belong**. Different products answer this differently:
+
+- **Memory layer owns cognition** — the memory tool itself runs LLM-driven extraction, builds belief states, infers temporal relationships, and decides what to update. Mem0 takes this approach. The benefit: less to build. The cost: opinionated, harder to swap parts, every retrieval implicitly involves an LLM call.
+- **Memory layer is infrastructure; cognition lives in the agent** — the memory tool gives you durable storage, deterministic retrieval, and graph primitives. Anything cognitive (extraction, conflict resolution, belief updates) is a separable layer you compose, swap, or skip. M3 takes this approach.
+
+M3 is unusual in that **it ships both modes**. Out of the box, M3 includes a local-SLM extraction pipeline (`m3_enrich`), a reflector for conflict resolution (`run_reflector`), bitemporal valid-time / transaction-time, supersedes relationships, and 3-hop graph traversal. You can run M3 with all of that on, or run M3 as raw substrate and bring your own extraction stack. **The choice is yours, not the tool's.**
+
+This composability is the actual differentiator — not "M3 has no cognition" (it does) and not "Mem0 is opinionated" (that's a feature for some teams). The split that matters: do you want cognition welded to the memory layer, or factored as an exchangeable component?
+
+| Concern | M3 (composable) | Mem0 (welded-in) |
+|---|---|---|
+| Run as deterministic substrate, no LLM in retrieval path | ✅ Disable enrichment, use deterministic CRUD + graph walks | ❌ LLM is in the loop by design |
+| Use M3's built-in local SLM extraction | ✅ `m3_enrich --profile enrich_local_qwen` (or Anthropic/Gemini) | n/a — Mem0 ships its own |
+| Bring your own extraction pipeline | ✅ Ignore `m3_enrich`, write entities directly via MCP | ⚖️ Possible but cuts against the grain |
+| Multiple agents writing simultaneously | ✅ SQLite WAL, atomic | ⚖️ Cloud version handles via API queueing; local less emphasized |
+| Memory works fully offline / air-gapped | ✅ No external dependency in any mode | 🔻 Cloud version requires internet; self-host possible but not the happy path |
+
+If "the LLM should decide what's worth remembering" matches your worldview, Mem0's tighter integration is a genuine win. If "extraction policy should be inspectable, swappable, and testable independent of storage" matches yours, M3's split is the right shape.
+
 ---
 
 ## ⚔️ M3-Memory vs Mem0
@@ -22,7 +47,9 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. It's exc
 | **API keys required** | None | Yes (cloud version) |
 | **Offline operation** | Full — SQLite + local embeddings | No (cloud version) |
 | **Cross-device sync** | SQLite ↔ PostgreSQL ↔ ChromaDB, bi-directional delta sync | Managed by Mem0 cloud |
-| **Knowledge graph** | Yes — 7 relationship types, 3-hop traversal | Yes — strong point |
+| **Knowledge graph** | Yes — 9 relationship types, 3-hop traversal | Yes — strong point |
+| **Multi-agent concurrent writes** | Atomic via SQLite WAL — multiple agents writing simultaneously without races | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |
+| **Cognition placement** | Composable — disable, replace, or use built-in SLM extraction | LLM-driven extraction is welded into the memory layer |
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
 | **LangChain integration** | Not the focus | Excellent |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
@@ -168,3 +195,13 @@ M3 Memory targets a specific intersection that other tools don't fully cover:
 - **Drop-in** — one config line to add memory to an existing agent; no runtime migration
 
 If you need LangChain pipeline memory, a full agent runtime, or enterprise-scale temporal graphs, the tools above are better suited. If you need persistent, private memory for MCP agents, M3 is built for that.
+
+---
+
+## 🔍 Verifying claims (about M3 or any tool here)
+
+Third-party AI assistants — Copilot, Gemini, ChatGPT, others — sometimes describe memory tools with features they don't have or scores they haven't earned. This isn't malicious; pattern-matching on a project name is what assistants do when they don't have ground truth.
+
+For M3 specifically, the source of truth is this repo. If you've seen a feature attributed to M3 elsewhere that we don't document here, in [`README.md`](../README.md), or in [`docs/MYTHS_AND_FACTS.md`](MYTHS_AND_FACTS.md), assume it's hallucinated until verified against the source.
+
+Same skepticism should apply to claims about Mem0, Letta, Zep, LangChain Memory, or any other tool in this guide. We've tried to cite each tool's own docs and benchmarks where possible. Where we couldn't, we've said so. If you find a comparison row in this document that misrepresents another tool, [open an issue](https://github.com/skynetcmd/m3-memory/issues) — accuracy matters more than position, and we'll fix it.
