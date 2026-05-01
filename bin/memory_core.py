@@ -866,7 +866,7 @@ async def _auto_classify(content: str, title: str) -> str:
         "note", "fact", "decision", "preference", "conversation", "message",
         "task", "code", "config", "observation", "plan", "summary", "snippet",
         "reference", "log", "home", "user_fact", "scratchpad", "knowledge",
-        "event_extraction", "chat_log",
+        "event_extraction", "fact_enriched", "chat_log",
         "local_device", "network_config", "infrastructure", "home_automation",
         "migration-log", "security",
         "windows_only", "macos_only", "linux_only", "to_do",
