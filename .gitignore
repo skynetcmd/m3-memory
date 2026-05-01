@@ -51,6 +51,9 @@ x.xxx*
 *.tmp
 *.log
 *.jsonl
+# Test fixtures: chatlog ingest format tests need a sample transcript.
+# The * .jsonl rule above would ignore it; explicitly negate that here.
+!tests/fixtures/*.jsonl
 # Ad-hoc diagnostic scripts at repo root (throwaway queries, one-off checks)
 /get_*.py
 /check_*.py
