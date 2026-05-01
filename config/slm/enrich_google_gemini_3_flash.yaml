@@ -1,43 +1,31 @@
-# enrich_google_gemini.yaml — Google Gemini via OpenAI-compat endpoint
+# enrich_google_gemini_3_flash.yaml — Gemini 3 Flash (2026-04 release)
 #
-# Google now exposes an OpenAI-compatible endpoint for Gemini models, so
-# we use backend: openai (not a separate google backend). This avoids
-# a custom shape adapter and works through the existing slm_intent path.
-#
-# Use when: you want frontier-quality cloud at the lowest cost we ship.
-# Cost:     ~$0.0001 per conversation (gemini-2.5-flash list prices)
-#           ~$0.10 per 1000 conversations
-#           Total per 25k-conv corpus: ~$2.50
-#           (validated: $0.075/M input, $0.30/M output for flash;
-#            ~700 in + 400 out per call)
-# Wall:     ~2s per call (Gemini OAI-compat doesn't support prompt caching
-#           the way Anthropic does, so first call has full system overhead)
-# Quality:  competitive with Haiku on JSON-shaped extraction. Gemini
-#           occasionally drifts to verbose prose; the parser strips code
-#           fences which catches most cases.
+# Use when: you want a 2026 frontier model at a price point still well
+#   under Haiku, with reportedly stronger reasoning than 2.5 Pro.
+# Cost:     $0.50/M input, $3.00/M output (list prices, 2026-04)
+#           ~$0.0016 per call (700 in + 400 out)
+#           ~$1.55 per 1000 conversations
+#           Per 221k-conv full run: ~$343
+# Wall:     ~2s per call serial; with concurrency=50, ~1 hour for 100k calls.
+# Quality:  Google says outperforms 2.5 Pro at 3× the speed. Validate on
+#           a 50-row sample before a full run — extraction prompts can
+#           behave differently across model families.
 #
 # Required env vars:
-#   GEMINI_API_KEY     — your Google AI Studio API key
-#                        (get one at https://aistudio.google.com/apikey)
+#   GEMINI_API_KEY     — Google AI Studio key
 #
-# Required setup:
-#   export GEMINI_API_KEY=AIza...
-#   python bin/m3_enrich.py --profile enrich_google_gemini
-#
-# Switch to higher quality: see enrich_anthropic_haiku.yaml (30x cost, ~equal quality)
-# Switch to no-cost: see enrich_local_qwen.yaml ($0, requires LM Studio)
+# Switch to cheaper: enrich_google_gemini_3_flash_lite.yaml ($0.25/M in)
+# Switch to no-cost: enrich_local_qwen.yaml (requires LM Studio)
 
 url: https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
-model: gemini-2.5-flash
+model: gemini-3-flash-preview
 api_key_service: GEMINI_API_KEY
-backend: openai                 # Google's OAI-compat shape
-cache_system: false             # not supported on Gemini OAI endpoint
+backend: openai
+cache_system: false
 temperature: 0
-timeout_s: 60.0                 # Some calls hit ~40s tail; give buffer.
+timeout_s: 30.0
 max_tokens: 1024
 input_max_chars: 6000
-extra_params:
-  reasoning_effort: none        # Gemini 2.5 Flash thinking off — ~3x faster.
 labels:
   - observed
 fallback: observed
