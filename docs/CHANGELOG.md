@@ -19,7 +19,143 @@ forward-going only.
 
 ---
 
-## [Unreleased] — Phase D Mastra Observer + Reflector ingest pipeline (2026-04-28)
+## [2026.5.1.1] — May 1, 2026 — Enrichment pipeline matures + doc/security hardening
+
+This release rolls up roughly five weeks of ingest-pipeline work plus a
+documentation, hygiene, and security pass. The two prior `[Unreleased]`
+sections (Phase D Observer/Reflector pipeline and cross-encoder rerank)
+are part of this release; their detail is preserved below.
+
+### Added
+
+- **Tool count: 66 → 72.** Six new MCP tools landed during this wave,
+  spanning entity-graph, fact enrichment, routed retrieval, and bulk
+  ingest. Inventory regenerated; `docs/MCP_TOOLS.md` is the canonical
+  list.
+  - `entity_search`, `entity_get`, `extract_pending` — entity-graph
+    extraction + retrieval
+  - `enrich_pending` — drains the fact-enrichment queue
+  - `memory_search_routed` — temporal-aware multi-signal routing
+    with optional graph expansion and cross-encoder rerank (default
+    off; matches `memory_search` byte-for-byte when both are off)
+  - `memory_write_from_file` — bulk-import path that bypasses
+    autoregressive decode latency for large memory bodies
+- **`bin/m3_enrich.py` CLI** — first-class user-facing enrichment
+  tool over the Observer/Reflector pipeline. Durable per-group state
+  machine (`enrichment_groups`, `enrichment_runs` tables, migrations
+  028–030); `--resume` / `--budget-usd` / `--sample` knobs;
+  size-bounded resume via `--min-size-k` / `--max-size-k`;
+  `--source-conv-list` for opt-in conversation slicing.
+  See [`docs/M3_ENRICH_GUIDE.md`](M3_ENRICH_GUIDE.md).
+- **Cloud SLM profiles** — `enrich_anthropic_haiku.yaml`,
+  `enrich_google_gemini.yaml` (Gemini 2.5 Flash with
+  `reasoning_effort=none` for ~3× latency reduction) plus preview
+  profiles for Gemini 3 Flash / 3.1 Flash-Lite. Local profiles
+  (`enrich_local_qwen.yaml`, `enrich_local_gemma.yaml`) remain the
+  default; no spend unless you pick a cloud profile.
+- **`bin/unified_ai.py`** — multi-provider chat client + hardened
+  httpx helper. Auto-selected for Gemini's OAI-compat endpoint
+  (HTTP/1.1 + keepalive disabled, the configuration Google support
+  recommended to avoid a keep-alive hang we observed at high
+  concurrency). LM Studio and Anthropic paths continue to use stock
+  httpx so connection reuse benefits them.
+- **One-command install.** `mcp-memory install-m3` wires
+  `settings.json`, MCP config, hooks, and the chatlog subsystem in
+  one shot. Auto-install on first `mcp-memory` run is also available
+  for the truly hands-off path. Existing `pip install m3-memory` +
+  manual MCP-config edit continues to work.
+- **Multi-DB sync.** `bin/sync_all.py` is now manifest-driven, with
+  `bin/pg_sync.py` refactored for multi-DB. Postgres warehouse
+  migrations included for fleet deployments.
+- **Documentation pass:**
+  - [`docs/COMPARISON.md`](COMPARISON.md) — new "Where the cognition
+    lives" framing section; honest table additions for
+    multi-agent concurrent writes and cognition placement.
+  - [`docs/M3_Comparison_Table.html`](M3_Comparison_Table.html) —
+    rebranded sovereign-substrates comparison table; honest
+    reordering, accurate MCP expansion, candor block on the LME-S
+    accuracy gap.
+  - [`docs/COMPLIANCE.md`](COMPLIANCE.md) +
+    [`docs/M3_Compliance_FISMA.html`](M3_Compliance_FISMA.html) +
+    [`docs/M3_Compliance_CMMC.html`](M3_Compliance_CMMC.html) —
+    framework alignment notes (FISMA / NIST 800-53, CMMC 2.0 /
+    NIST 800-171).
+  - [`docs/HOMELAB_PATTERNS.md`](HOMELAB_PATTERNS.md) — three
+    deployment patterns + hardware sizing + multi-agent guidance.
+  - [`docs/MYTHS_AND_FACTS.md`](MYTHS_AND_FACTS.md) — Anti-FAQ that
+    answers AI-hallucinated claims about M3 with the truth, anchored
+    to source code.
+  - [`docs/audits/`](audits/) — dated security-scan reports;
+    [`security-scan-2026-05-01.md`](audits/security-scan-2026-05-01.md)
+    is the first.
+
+### Changed
+
+- **CI: new `security` job.** Runs Bandit on every push + `pip-audit
+  --strict` against M3 installed from `pyproject.toml` into a clean
+  venv (core deps only — no `[dev]`, no opt-in rerank path). Gates
+  merges on shipped-library CVEs without false-alarming on bench/dev
+  transitives.
+- **Process-global LLM endpoint caching** in `bin/llm_failover.py`.
+  Both `get_best_llm` and `get_smallest_llm` cache their first
+  successful discovery; `clear_failover_caches()` invalidates on
+  persistent failure. Saves the GET /v1/models roundtrip on every
+  call (~9s with discovery vs ~50ms direct on warm LM Studio).
+- **Pre-compiled regex** for two per-LLM-response hot paths: the
+  markdown code-fence stripper (de-duplicated across `run_observer`,
+  `run_reflector`, and `m3_entities` — single source of truth in
+  `agent_protocol.strip_code_fences`) and the UUID extractor in
+  `run_observer.write_observation`. Follows the 2026-04-17 regex
+  precompile decision criteria (per-item-loop = compile, cold path =
+  leave inline).
+- **`memory_get` accepts an 8-char ID prefix** in addition to the
+  full UUID; ambiguous prefixes return an error listing matches.
+- **Memory-type vocabulary widened** with 10 inventory + scoping
+  types (`home_automation`, `infrastructure`, `linux_only`,
+  `local_device`, `macos_only`, `migration-log`, `network_config`,
+  `security`, `to_do`, `windows_only`). Existing types unchanged.
+
+### Fixed
+
+- **Windows Unicode in `print()` was crashing multi-chunk
+  enrichment runs silently.** A `→` arrow in
+  `bin/run_observer.py`'s chunking message raised `UnicodeEncodeError`
+  on cp1252-default Windows stdout; the exception got swallowed by
+  `asyncio.gather(return_exceptions=True)`, and runs reported
+  `0 processed / 0 written / 0 failed` with no diagnostic. Replaced
+  with ASCII; bug only surfaced on conversations that chunked into
+  more than one piece (intermittent and easily missed).
+- Internal references (memory IDs, sweep dates, experiment names)
+  scrubbed from public MCP tool descriptions in
+  `bin/mcp_tool_catalog.py`. Substantive guidance preserved.
+- Several `m3_enrich` bugs found by the first large-corpus run:
+  group-scoped counters, partial-failure tracking via
+  `enrichment_groups.partial_failure_chunks`, real exception
+  messages preserved on chunk failures (instead of generic placeholder).
+
+### Security
+
+- 2026-05-01 scan results: 0 HIGH, 0 MEDIUM Bandit findings; no
+  secrets in tree; 14 CVEs flagged by pip-audit, all in
+  bench/dev-only transitive deps (none in shipped library
+  dependencies). Full report:
+  [`docs/audits/security-scan-2026-05-01.md`](audits/security-scan-2026-05-01.md).
+
+### Honest acknowledgment
+
+This release wave shipped fast (≈58 commits since v2026.4.24.12) and
+the enrichment pipeline matured rapidly under live-fire conditions.
+The core (storage, retrieval, GDPR, MCP tools, sync) is stable and
+covered by the test suite. The newer enrichment + reflector pipeline
+is production-ready for personal, homelab, and multi-agent developer
+workflows; for regulated workloads, do your own evaluation against
+your specific use case. See
+[`docs/MYTHS_AND_FACTS.md`](MYTHS_AND_FACTS.md) for what we *don't*
+claim.
+
+---
+
+## Phase D Mastra Observer + Reflector ingest pipeline (2026-04-28, included in 2026.5.1.1)
 
 Two-stage LLM ingest pipeline on top of m3's existing primitives.
 Stage 1 (Observer) extracts atomic three-dated observations from
@@ -91,7 +227,7 @@ Both stages run on user-provided LLMs via YAML profiles in
 
 ---
 
-## [Unreleased] — Cross-encoder rerank in core retrieval (2026-04-28)
+## Cross-encoder rerank in core retrieval (2026-04-28, included in 2026.5.1.1)
 
 Adds an opt-in cross-encoder rerank stage to `memory_search_routed`.
 
