@@ -24,6 +24,8 @@ Answer model: Claude Opus 4.6. Judge: the upstream LongMemEval gpt-4o judge, unm
 
 Raw artifact: [`results.json`](./results.json).
 
+---
+
 ## Retrieval contribution
 
 To measure the effect of retrieval, we run the same evaluation with retrieval disabled. Two no-retrieval baselines account for prompt effects: a neutral prompt and a RAG-aware empty-context prompt.
@@ -41,6 +43,8 @@ To measure the effect of retrieval, we run the same evaluation with retrieval di
 Together these bound the no-retrieval floor. Retrieval supplies the evidence; the answer model reads and reasons over it.
 
 The ss-assistant baseline jumps from 0.0% to 19.6% under the RAG-aware prompt due to a gpt-4o judge artifact: the judge credits natural-phrasing abstentions as correct on 11 non-abstention questions. This adds ~2.2pp to the baseline but does not change the overall conclusion — the no-retrieval floor remains under 10%.
+
+---
 
 ## Category-aware ablation
 
@@ -82,6 +86,8 @@ Smart retrieval — combining adaptive k with time-aware expansion (date-proximi
 | No retrieval (RAG-aware) | N/A | N/A | N/A | 8.4% |
 | No retrieval (neutral) | N/A | N/A | N/A | 6.4% |
 
+---
+
 ## Method
 
 - **Dataset**: `longmemeval_s_cleaned.json`, 500 instances. Each instance is an isolated conversational history and one question with a known answer.
@@ -91,6 +97,8 @@ Smart retrieval — combining adaptive k with time-aware expansion (date-proximi
 - **Judge**: the upstream LongMemEval gpt-4o judge, unmodified.
 
 Retrieval uses the same `memory_search_scored_impl` that every M3 Memory agent uses. The benchmark script is a thin driver; there is no shadow retrieval stack.
+
+---
 
 ## Reproduce
 
@@ -111,6 +119,8 @@ python benchmarks/longmemeval/bench_longmemeval.py --rag-aware-empty  # RAG-awar
 
 Wall-clock on a single RTX 5080: ~50 min ingest, ~75 min judged answer phase. Baselines and `--skip-ingest` runs reuse an existing DB.
 
+---
+
 ## Caveats
 
 - **Reproducibility**: Claude Opus 4.6 and gpt-4o are non-deterministic at temperature 0. Re-runs produce ≈89.0% ± 0.7pp. Differences under 1pp are noise.
@@ -119,6 +129,8 @@ Wall-clock on a single RTX 5080: ~50 min ingest, ~75 min judged answer phase. Ba
 - **Oracle metadata**: the stock 89.0% uses dataset category labels. Without them, accuracy drops to 68–75%. A production system would need to infer task signals at runtime.
 - **Bundled ablation**: the `--no-category-knobs` flag disables multiple policies simultaneously. Per-knob isolation is not yet available.
 - **Cross-system comparisons are uncontrolled**: different systems use different answer models, prompts, judges, and configurations. Scores below are not directly comparable.
+
+---
 
 ## Design space
 

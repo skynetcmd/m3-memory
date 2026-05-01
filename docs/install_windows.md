@@ -23,6 +23,8 @@ mcp-memory doctor
 That's it. Windows pip doesn't have the PEP 668 issue Linux does, so plain
 `pip install` works.
 
+---
+
 ## Adding to an MCP client
 
 ```powershell
@@ -34,6 +36,8 @@ claude mcp add memory mcp-memory
 # %USERPROFILE%\.gemini\settings.json — re-run mcp-memory install-m3 if you
 # install Gemini CLI later.
 ```
+
+---
 
 ## Common gotchas
 
@@ -77,6 +81,8 @@ claude mcp add memory mcp-memory
 - **Hooks shipping LF endings on a Windows checkout** — `.gitattributes`
   pins `*.sh` to LF and `*.ps1` to CRLF to keep both platforms working.
 
+---
+
 ## Advanced setup
 
 The full homelab walkthrough — Postgres sync, ChromaDB, LM Studio embedding
@@ -84,6 +90,8 @@ server, multi-machine federation — lives at
 [install_windows_homelab.md](install_windows_homelab.md). Most users
 don't need any of that; the quickstart above is enough for a working local
 install.
+
+---
 
 ## Verifying
 

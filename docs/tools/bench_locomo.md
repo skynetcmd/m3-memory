@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/bench_locomo.py
 sha1: 30509385e060
 mtime_utc: 2026-04-21T20:02:02.907203+00:00
-generated_utc: 2026-04-29T13:47:47.181501+00:00
+generated_utc: 2026-05-01T13:05:27.155458+00:00
 private: true
 ---
 
@@ -24,10 +24,14 @@ Includes:
 - Graph Expansion (1-hop traversal of retrieved hits)
 - Temporal Resolution (relative dates -> absolute)
 
+---
+
 ## Entry points
 
 - `async def run()` (line 517)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -48,11 +52,15 @@ Includes:
 | `--smart-retrieval` | Enable smart_time_boost + neighbor-session expansion for time-aware retrieval. | `False` | Uses fixed K and standard graph/cluster expansion | store_true | Enables time-aware boost and neighbor-session expansion for temporal questions |
 | `--verbose` | Dump full msg objects per question into run.log | `False` | Logs only status/errors | store_true | Logs full OpenAI message objects |
 
+---
+
 ## Environment variables read
 
 - `EVAL_GENERATOR_MODEL`
 - `EVAL_JUDGE_MODEL`
 - `OPENAI_API_KEY`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -61,18 +69,26 @@ Includes:
 - `memory_core (memory_search_scored_impl)`
 - `temporal_utils`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `openai (OpenAI)`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `locomo10.json`
 - `results.json`
+
+---
 
 ## Re-validation
 

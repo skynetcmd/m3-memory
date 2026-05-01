@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_flat_memory.py
-sha1: 943ef6d47ced
-mtime_utc: 2026-04-21T20:45:50.811588+00:00
-generated_utc: 2026-04-21T21:26:01.928047+00:00
+sha1: 85cee9716707
+mtime_utc: 2026-05-01T09:15:02.504896+00:00
+generated_utc: 2026-05-01T13:05:27.003517+00:00
 private: false
 ---
 
@@ -34,11 +34,15 @@ Usage:
     python bin/migrate_flat_memory.py --include-rules
     python bin/migrate_flat_memory.py --claude-project-slug C--Users-bhaba-m3-memory
 
+---
+
 ## Entry points
 
-- `async def run()` (line 470)
-- `def main()` (line 611)
+- `async def run()` (line 471)
+- `def main()` (line 612)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -52,9 +56,13 @@ Usage:
 | `-v`, `--verbose` | DEBUG logging. | `False` | INFO-level logs to stderr. | store_true | Sets log level to DEBUG; verbose output for development/debugging. |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -62,16 +70,22 @@ _(none detected)_
 - `memory_core`
 - `memory_core (_db)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `uri`` (line 308)
+- `sqlite3.connect()  → `uri`` (line 309)
 
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
@@ -81,6 +95,8 @@ _(only stdlib)_
 - `CONVENTIONS.md`
 - `GEMINI.md`
 - `MEMORY.md`
+
+---
 
 ## Re-validation
 

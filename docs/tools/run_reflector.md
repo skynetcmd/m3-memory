@@ -1,8 +1,8 @@
 ---
 tool: bin/run_reflector.py
-sha1: 8ffebb974f27
-mtime_utc: 2026-04-28T01:32:25.748225+00:00
-generated_utc: 2026-04-28T15:48:17.530891+00:00
+sha1: fb5ef73251bf
+mtime_utc: 2026-05-01T09:13:26.346138+00:00
+generated_utc: 2026-05-01T13:05:27.053604+00:00
 private: false
 ---
 
@@ -31,10 +31,14 @@ Modes:
 
 Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 
+---
+
 ## Entry points
 
 - `def main()` (line 335)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -45,15 +49,22 @@ Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 | `--force-conversation` | Bypass queue: run Reflector on this conversation_id right now. Useful for tests. | None |  | str |  |
 | `--force-user` | Required when --force-conversation is set: the user_id to scope the observation lookup. | None |  | str |  |
 
+---
+
 ## Environment variables read
 
 - `REFLECTOR_PROFILE`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
+- `agent_protocol (strip_code_fences)`
 - `auth_utils (get_api_key)`
 - `memory_core`
 - `slm_intent (load_profile)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -63,13 +74,19 @@ Status: Phase D Task 4. Pairs with config/slm/reflector_local.yaml.
 - `httpx.AsyncClient()` (line 322)
 
 
+---
+
 ## Notable external imports
 
 - `httpx`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

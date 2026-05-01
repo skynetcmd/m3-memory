@@ -1,8 +1,8 @@
 ---
 tool: bin/augment_memory.py
-sha1: 905e2ea3dd23
-mtime_utc: 2026-04-22T01:03:02.022007+00:00
-generated_utc: 2026-04-22T01:22:54.449851+00:00
+sha1: 1a6af83f7f3d
+mtime_utc: 2026-05-01T09:15:53.146020+00:00
+generated_utc: 2026-05-01T13:05:26.700406+00:00
 private: false
 ---
 
@@ -38,9 +38,13 @@ Usage:
     python bin/augment_memory.py enrich-titles --database memory/x.db --limit 500
     python bin/augment_memory.py all --database memory/x.db  # both in sequence
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -54,9 +58,13 @@ Usage:
 | `--limit` | Limit for the enrich-titles phase | `200` | Enriches up to 200 user turns | int | Limits enrichment to first N user turns |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -64,17 +72,25 @@ _(none detected)_
 - `memory_core (_db, memory_link_impl)`
 - `slm_intent (extract_entities)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

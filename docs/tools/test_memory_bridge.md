@@ -2,7 +2,7 @@
 tool: bin/test_memory_bridge.py
 sha1: 5eb51e5dfca1
 mtime_utc: 2026-04-21T20:59:33.529255+00:00
-generated_utc: 2026-04-21T21:22:27.240852+00:00
+generated_utc: 2026-05-01T13:05:27.113300+00:00
 private: false
 ---
 
@@ -18,19 +18,27 @@ gdpr_export, gdpr_forget, memory_cost_report, memory_handoff, memory_inbox, memo
 Embedding-dependent tests are attempted and gracefully skipped when an
 embedding model is not loaded in LM Studio.
 
+---
+
 ## Entry points
 
 - `async def run()` (line 134)
 - `async def main()` (line 1346)
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 - `ORIGIN_DEVICE`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -38,6 +46,8 @@ _(no argparse arguments detected)_
 - `m3_sdk (resolve_db_path)`
 - `memory_bridge (VALID_MEMORY_TYPES, _content_hash, _ensure_sync_tables, _pack, agent_get, agent_heartbeat, agent_list, agent_offline, agent_register, chroma_sync, conversation_append, conversation_messages, conversation_search, conversation_start, conversation_summarize, gdpr_export, gdpr_forget, memory_consolidate, memory_cost_report, memory_delete, memory_export, memory_get, memory_graph, memory_handoff, memory_history, memory_import, memory_inbox, memory_inbox_ack, memory_link, memory_maintenance, memory_search, memory_set_retention, memory_suggest, memory_update, memory_verify, memory_write, notifications_ack, notifications_ack_all, notifications_poll, notify, sync_status, task_assign, task_create, task_get, task_list, task_set_result, task_tree, task_update)`
 - `memory_core`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -81,15 +91,21 @@ _(no argparse arguments detected)_
 - `sqlite3.connect()  → `DB_PATH`` (line 986)
 
 
+---
+
 ## Notable external imports
 
 - `httpx`
 - `importlib`
 - `platform`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

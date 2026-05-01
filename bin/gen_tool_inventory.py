@@ -495,6 +495,8 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
           "",
           doc if doc else "_(no module docstring — update the source file.)_",
           "",
+          "---",
+          "",
           "## Entry points",
           ""]
     if entry_points:
@@ -502,7 +504,7 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
             L.append(f"- {ep}")
     else:
         L.append("_(no conventional entry point detected)_")
-    L += ["", "## CLI flags / arguments", ""]
+    L += ["", "---", "", "## CLI flags / arguments", ""]
     if not args:
         L.append("_(no argparse arguments detected)_")
     else:
@@ -538,19 +540,19 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
             if not help_ and prior_help:
                 help_ = prior_help
             L.append(f"| {names} | {help_} | {default_s} | {default_behavior} | {ta} | {impact} |")
-    L += ["", "## Environment variables read", ""]
+    L += ["", "---", "", "## Environment variables read", ""]
     if not env_vars:
         L.append("_(none detected)_")
     else:
         for v in env_vars:
             L.append(f"- `{v}`")
-    L += ["", "## Calls INTO this repo (intra-repo imports)", ""]
+    L += ["", "---", "", "## Calls INTO this repo (intra-repo imports)", ""]
     if intra_imports:
         for imp in intra_imports:
             L.append(f"- `{imp}`")
     else:
         L.append("_(none detected)_")
-    L += ["", "## Calls OUT (external side-channels)", ""]
+    L += ["", "---", "", "## Calls OUT (external side-channels)", ""]
     if external_calls:
         for bucket, calls in external_calls.items():
             L.append(f"**{bucket}**")
@@ -560,7 +562,7 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
             L.append("")
     else:
         L.append("_(no subprocess / http / sqlite calls detected)_")
-    L += ["", "## Notable external imports", ""]
+    L += ["", "---", "", "## Notable external imports", ""]
     if external_imports:
         interesting = [i for i in external_imports
                        if i.split(" ", 1)[0].split(".", 1)[0] not in {
@@ -580,13 +582,13 @@ def render_entry(relpath: str, sha1: str, mtime: str, doc: str,
             L.append("_(only stdlib)_")
     else:
         L.append("_(only stdlib)_")
-    L += ["", "## File dependencies (repo paths referenced)", ""]
+    L += ["", "---", "", "## File dependencies (repo paths referenced)", ""]
     if file_deps:
         for f in file_deps:
             L.append(f"- `{f}`")
     else:
         L.append("_(none detected)_")
-    L += ["", "## Re-validation", "",
+    L += ["", "---", "", "## Re-validation", "",
           "If the `sha1` above differs from the current file's sha1, the inventory "
           "is stale — re-read the tool, confirm flags/env vars/entry-points/calls "
           "still match, and regenerate via `python bin/gen_tool_inventory.py`.",
