@@ -25,6 +25,7 @@ BIN_DIR = REPO_ROOT / "bin"
 MIGRATIONS = [
     REPO_ROOT / "memory" / "migrations" / "028_enrichment_groups.up.sql",
     REPO_ROOT / "memory" / "migrations" / "029_enrichment_content_size.up.sql",
+    REPO_ROOT / "memory" / "migrations" / "030_enrichment_partial_failure.up.sql",
 ]
 
 if str(BIN_DIR) not in sys.path:
