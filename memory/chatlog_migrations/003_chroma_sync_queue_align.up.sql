@@ -41,6 +41,16 @@
 -- against this schema. New chatlog DBs ship the canonical shape via
 -- bin/m3_enrich.py lazy-create which DOES use the strftime default.
 
+-- On a fresh chatlog DB, chroma_sync_queue won't exist yet — the lazy
+-- create fires only when memory_core writes through. Create it here in
+-- the canonical shape so the ALTERs below have something to alter.
+CREATE TABLE IF NOT EXISTS chroma_sync_queue (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_id     TEXT NOT NULL,
+    operation     TEXT NOT NULL,
+    enqueued_at   TEXT
+);
+
 ALTER TABLE chroma_sync_queue ADD COLUMN attempts INTEGER DEFAULT 0;
 ALTER TABLE chroma_sync_queue ADD COLUMN stalled_since TEXT;
 ALTER TABLE chroma_sync_queue ADD COLUMN queued_at TEXT;

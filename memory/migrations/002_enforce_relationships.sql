@@ -2,9 +2,12 @@
 -- Recreates memory_relationships to add ON DELETE CASCADE so orphaned relationships are cleaned up automatically.
 -- Enables PRAGMA foreign_keys = ON safety in the DB.
 
+-- Removed top-level BEGIN/COMMIT pair: migrate_memory.py wraps each
+-- migration in its own SAVEPOINT, so a literal BEGIN here is a syntax
+-- error inside that wrapper. SQLite's auto-commit mode plus the
+-- migration runner's implicit transaction cover this migration's
+-- atomicity needs.
 PRAGMA foreign_keys = OFF;
-
-BEGIN TRANSACTION;
 
 CREATE TABLE IF NOT EXISTS memory_relationships_new (
     id                TEXT PRIMARY KEY,
@@ -26,7 +29,5 @@ ALTER TABLE memory_relationships_new RENAME TO memory_relationships;
 
 CREATE INDEX idx_mr_from ON memory_relationships(from_id);
 CREATE INDEX idx_mr_to   ON memory_relationships(to_id);
-
-COMMIT;
 
 PRAGMA foreign_keys = ON;
