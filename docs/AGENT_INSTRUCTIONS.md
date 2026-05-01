@@ -105,7 +105,7 @@ Call `memory_write` to persist any fact, decision, preference, observation, or k
 
 | Parameter | Required | Notes |
 |-----------|----------|-------|
-| `type` | Yes | One of: `note`, `fact`, `decision`, `preference`, `task`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `home`, `user_fact`, `scratchpad`, `auto`, `conversation`, `message`, `knowledge`, `event_extraction`, `chat_log` |
+| `type` | Yes | One of (33 canonical, alphabetical): `auto`, `chat_log`, `code`, `config`, `conversation`, `decision`, `event_extraction`, `fact`, `fact_enriched`, `home`, `home_automation`, `infrastructure`, `knowledge`, `linux_only`, `local_device`, `log`, `macos_only`, `message`, `migration-log`, `network_config`, `note`, `observation`, `plan`, `preference`, `reference`, `scratchpad`, `security`, `snippet`, `summary`, `task`, `to_do`, `user_fact`, `windows_only`. Live source of truth: `bin/mcp_tool_catalog.py:VALID_MEMORY_TYPES`. |
 | `content` | Yes | The memory content (max 50,000 chars) |
 | `title` | No | Short descriptive title — used for contradiction matching |
 | `importance` | No | 0.0–1.0 (default 0.5). Higher = slower decay, higher search ranking |
