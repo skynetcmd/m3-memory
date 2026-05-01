@@ -125,12 +125,24 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ## 🎯 Who this is for
 
-| Good fit | Not the right tool |
+### M3 is a good fit if…
+
+| | |
 |---|---|
-| You use Claude Code, Gemini CLI, Aider, or any MCP agent — plus non-MCP clients via the built-in HTTP proxy server | You need LangChain/CrewAI pipeline memory — see [Mem0](https://mem0.ai) |
-| You're coordinating multiple agents on a shared local store | You need a hosted agent runtime with managed scaling — see [Letta](https://letta.ai) |
-| You need GDPR primitives, bitemporal state, or pure SQLite | You want state-of-the-art retrieval benchmarks today — see [Hindsight](https://github.com/vectorize-io/hindsight) |
-| You want memory that persists across sessions and devices | You only need in-session chat context |
+| 🤖 **You use coding agents** | Claude Code, Gemini CLI, Aider, OpenCode, or any MCP-compatible agent. Non-MCP clients work too via the built-in HTTP proxy. |
+| 👥 **You run multiple agents** | Coordinating Claude + Gemini + a background worker on a shared local store, with handoffs and per-agent scoping. |
+| 🛡️ **You need compliance primitives** | `gdpr_forget` / `gdpr_export` as MCP tools, bitemporal valid-time / transaction-time, audit trail, no telemetry. |
+| 💾 **You want pure local-first** | Single-file SQLite. Works offline. No external database, no cloud calls, no API costs by default. |
+| 🌐 **You want memory across devices** | Optional bi-directional delta sync via PostgreSQL or ChromaDB — your data, your hardware. |
+
+### M3 is **not** the right tool if…
+
+| | Try instead |
+|---|---|
+| You're building LangChain / LangGraph / CrewAI pipelines and want framework-native memory | [Mem0](https://mem0.ai), [LangChain Memory / LangMem](https://python.langchain.com/docs/modules/memory/) |
+| You want a hosted agent runtime with managed scaling, dashboards, and SLAs | [Letta](https://letta.ai), [Mem0 Pro](https://mem0.ai) |
+| Pure retrieval-accuracy is your only criterion (M3 is mid-pack at 89.0% LME-S) | [agentmemory](https://github.com/agentmemory) (96.2%), [Hindsight](https://github.com/vectorize-io/hindsight) |
+| You only need in-session chat context that's discarded after the conversation | Your agent's built-in conversation buffer; M3 is overkill |
 
 ---
 
