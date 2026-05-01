@@ -115,7 +115,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 |---|---|
 | 🚀 **[Getting started](docs/GETTING_STARTED.md)** | 👥 **[Multi-agent orchestration](docs/MULTI_AGENT.md)** |
 | ✨ **[Core features](docs/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](examples/multi-agent-team/README.md)** |
-| 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](docs/COMPARISON.md)** ([sovereign substrates table](docs/M3_Comparison_Table.html)) |
+| 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[M3 vs alternatives](docs/COMPARISON.md)** ([sovereign substrates table](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html)) |
 | 🔧 **[Implementation details](docs/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](docs/ENVIRONMENT_VARIABLES.md)** |
 | 🤖 **[Agent rules + all 72 tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
 | 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
