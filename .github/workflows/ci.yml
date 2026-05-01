@@ -61,16 +61,21 @@ jobs:
     # path). Bench/dev transitive CVEs (e.g. transformers, lxml) shouldn't
     # gate merges since they don't reach end users; but a CVE in a real
     # shipped dep should fail the build immediately. We install the
-    # package itself (which pulls only [project.dependencies]) into a
-    # clean venv, then audit.
+    # package itself (core deps only — no extras) into a clean venv, then
+    # audit only the locally-installed transitive tree (-l). The local
+    # flag also skips m3-memory itself, which would otherwise fail audit
+    # before its release lands on PyPI (chicken-and-egg in pre-release CI).
     - name: Install M3 (core deps only) into a clean venv
       run: |
         python -m venv /tmp/m3-core
         /tmp/m3-core/bin/pip install --upgrade pip
         /tmp/m3-core/bin/pip install .
         /tmp/m3-core/bin/pip install pip-audit
-    - name: pip-audit (core deps)
-      run: /tmp/m3-core/bin/pip-audit --strict
+    - name: pip-audit (core deps, locally installed)
+      # CVE-2026-3219: pip itself — present because pip is in every venv,
+      # but pip is not a shipped runtime dependency of m3-memory. Ignored
+      # so the audit signal stays focused on actual shipped-library CVEs.
+      run: /tmp/m3-core/bin/pip-audit --strict -l --ignore-vuln CVE-2026-3219
 
   test:
     name: Test on ${{ matrix.os }}
