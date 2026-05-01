@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_init.py
-sha1: dc2b4c088c10
-mtime_utc: 2026-04-25T02:34:14.236342+00:00
-generated_utc: 2026-04-26T10:12:31.940809+00:00
+sha1: 8eb26c7df507
+mtime_utc: 2026-05-01T09:14:47.217939+00:00
+generated_utc: 2026-05-01T13:05:26.752279+00:00
 private: false
 ---
 
@@ -25,10 +25,14 @@ same behaviors are now selected by setting the chatlog DB path equal to (or
 different from) the main DB. Promote semantics switch automatically based on
 path equality.
 
+---
+
 ## Entry points
 
-- `def main()` (line 589)
+- `def main()` (line 590)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -43,27 +47,37 @@ path equality.
 | `--apply-gemini` | Add the SessionEnd chatlog hook to ~/.gemini/settings.json (idempotent, backs up before writing). Requires Gemini CLI to be installed first; the memory MCP entry is written by install-m3. | `False` |  | store_true |  |
 | `--capture-mode` | Configure Claude Code Stop-hook policy in non-interactive mode. 'both' / 'stop' enable the Stop hook; 'precompact' / 'none' leave it disabled. Without this flag, non-interactive uses PreCompact-only. | None |  | str |  |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config (CONFIG_PATH, DEFAULT_DB_PATH, MAIN_DB_PATH, VALID_HOST_AGENTS, ChatlogConfig, CostTrackingSpec, EmbedSweeperSpec, HookSpec, RedactionSpec, resolve_config, save_config)`
 - `m3_memory.installer (_fix_npm_global_path)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 260)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 235)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 713)
+- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 261)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 236)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 714)
 
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
@@ -71,6 +85,8 @@ _(only stdlib)_
 - `claude_code_precompact.sh`
 - `gemini_cli_onexit.sh`
 - `settings.json`
+
+---
 
 ## Re-validation
 

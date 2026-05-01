@@ -2,7 +2,7 @@
 tool: bin/cli_kb_browse.py
 sha1: 115ed862cb4e
 mtime_utc: 2026-04-21T20:41:27.549196+00:00
-generated_utc: 2026-04-21T21:26:01.799753+00:00
+generated_utc: 2026-05-01T13:05:26.769644+00:00
 private: false
 ---
 
@@ -20,10 +20,14 @@ Usage:
     python bin/cli_kb_browse.py -s proxmox   # search title/content
     python bin/cli_kb_browse.py --no-pager   # dump all, no paging
 
+---
+
 ## Entry points
 
 - `def main()` (line 200)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -36,15 +40,21 @@ Usage:
 | `--db` | Deprecated alias for --database. Kept for backward compatibility. | None | Uses hardcoded DB_PATH (REPO_ROOT / "memory" / "agent_memory.db") | str | Connects to specified SQLite DB file instead of default |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
+---
+
 ## Environment variables read
 
 - `ANSICON`
 - `FORCE_COLOR`
 - `WT_SESSION`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg, resolve_db_path, resolve_venv_python)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -53,13 +63,19 @@ Usage:
 - `sqlite3.connect()  → `str(db_path)`` (line 93)
 
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/agent_protocol.py
-sha1: 6b7790d7301b
-mtime_utc: 2026-04-22T01:03:02.020008+00:00
-generated_utc: 2026-04-22T01:22:54.436982+00:00
+sha1: 6b6729e37879
+mtime_utc: 2026-05-01T09:00:08.315209+00:00
+generated_utc: 2026-05-01T13:05:26.694025+00:00
 private: false
 ---
 
@@ -12,33 +12,49 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

@@ -5,6 +5,8 @@
 - Added optional entity-relation knowledge graph: `entities`, `memory_item_entities`, `entity_relationships` tables; SLM-extraction pipeline with 3-tier resolution; `entity_graph` kwarg on `memory_search_routed`. Off by default. See ARCHITECTURE.md and ENVIRONMENT_VARIABLES.md.
 - Added optional `fact_enriched` memory type and SLM-distillation pipeline. Off by default. See ARCHITECTURE.md and ENVIRONMENT_VARIABLES.md.
 
+---
+
 ## April 21, 2026
 
 ### 🔧 Database Parameter Refactor
@@ -42,6 +44,8 @@
 
 #### ⚠️ Operational note — restart your MCP clients
 - Claude Code, Gemini CLI, and other MCP clients cache tool schemas at connection time. Adding the `database` parameter to every tool schema requires a **one-time client restart** before the clients can actually pass the argument. Existing tool calls that don't set `database` continue to work unchanged.
+
+---
 
 ## April 21, 2026 (late) — intent routing + SLM classifier plumbing
 
@@ -120,6 +124,8 @@ Two subcommands:
 Bridge tests 193/0/0, pytest 163/0/0 (152 prior + 11 new). Everything
 ported to main is dormant until its gate is enabled, so behavior with
 no env changes is byte-identical to the pre-port tree.
+
+---
 
 ## April 12, 2026
 

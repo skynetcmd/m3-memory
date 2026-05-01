@@ -2,7 +2,7 @@
 tool: bin/install_schedules.py
 sha1: d71c76954a77
 mtime_utc: 2026-04-18T22:29:11.437747+00:00
-generated_utc: 2026-04-19T00:39:15.999188+00:00
+generated_utc: 2026-05-01T13:05:26.805784+00:00
 private: false
 ---
 
@@ -14,10 +14,14 @@ M3 Memory: Cross-Platform Schedule Installer.
 Automatically configures crontab (macOS/Linux) or schtasks (Windows).
 Uses project virtual environment paths and ensures log directories exist.
 
+---
+
 ## Entry points
 
 - `def main()` (line 207)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -27,13 +31,19 @@ Uses project virtual environment paths and ensures log directories exist.
 | `--add` | Install one schedule by name (e.g. chatlog-embed-sweep) or 'all'. | — | Prints "Nothing to do" message and exits. | str | Installs Windows Task(s) or crontab entries matching NAME; 'all' installs all 5. |
 | `--remove` | Remove one schedule by name, or 'all'. | — | Prints "Nothing to do" message and exits. | str | Removes Windows Task(s) matching NAME; 'all' removes all; Unix users edit crontab. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -46,13 +56,19 @@ _(none detected)_
 - `subprocess.run()  → `schtasks_cmd`` (line 169)
 
 
+---
+
 ## Notable external imports
 
 - `platform`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `crontab.template`
+
+---
 
 ## Re-validation
 

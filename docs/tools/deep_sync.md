@@ -2,7 +2,7 @@
 tool: bin/deep_sync.py
 sha1: a4db0b124814
 mtime_utc: 2026-04-22T01:03:02.028648+00:00
-generated_utc: 2026-04-22T01:32:11.516094+00:00
+generated_utc: 2026-05-01T13:05:26.784275+00:00
 private: false
 ---
 
@@ -12,21 +12,31 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -36,13 +46,19 @@ _(none detected)_
 - `subprocess.run()  → `[cleanup_script]`` (line 29)
 
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `cleanup_logs.sh`
+
+---
 
 ## Re-validation
 

@@ -2,6 +2,8 @@
 
 Not a CLI — imported by MCP server, bench drivers, and import scripts.
 
+---
+
 ## Public async API (relevant to ingest)
 
 `memory_write_impl(...)` — single-item insert with full enrichment chain.
@@ -23,6 +25,8 @@ honored. Kwargs:
 Of these, only `variant` is exposed on the MCP `memory_write` schema and via
 `--variant` on bench CLIs. `enrich` / `check_contradictions` /
 `emit_conversation` are kwarg-only perf knobs for bulk ingest drivers.
+
+---
 
 ## Env-var gates read
 

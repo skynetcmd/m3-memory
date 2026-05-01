@@ -45,6 +45,8 @@ Conclusions:
 3. `llm_only` (keys replaced entirely by LLM summary, losing raw text) regresses — matches LongMemEval paper finding that fact-only values regress single-session categories.
 4. Multi-hop improves modestly across variants (6.0→10.3%) but stays the weakest category; key-expansion alone doesn't solve needle-in-haystack.
 
+---
+
 ## 2. Code placement contract
 
 | Kind of change | Goes in | Visibility |
@@ -52,6 +54,8 @@ Conclusions:
 | LoCoMo-specific ingest (C1-C4 heuristics, session anchoring, dia_id mapping) | `benchmarks/locomo/bench_locomo.py` | benchmark-only |
 | Shared ingest/retrieval levers (contextual key-expansion, smart-time-boost, neighbor-session, rerank) | `bin/memory_core.py` / `bin/temporal_utils.py` with gated flags default-off | shared, both benches |
 | Dataset anchor-date parser (LOCOMO's `"1:56 pm on 8 May, 2023"`) | `benchmarks/locomo/bench_locomo.py`, registered via `temporal_utils.register_anchor_parser()` | benchmark-only |
+
+---
 
 ## 3. Current state on main
 
@@ -87,6 +91,8 @@ These need summary regeneration (can be done from `retrieval_trace.jsonl` alone)
 - `analyze_handoff.py`, `analyze_prompt.py`, `probe_issues.py` — Phase 2/3 analysis tools
 - `VARIANT_PRESETS` with `llm_v1_title_ctx` entry — not needed under this plan
 
+---
+
 ## 4. Regression-detection contract
 
 Every retrieval change must produce a Phase1 retrieval audit on the canonical 500q before merging to `main`. Gates:
@@ -99,6 +105,8 @@ Every retrieval change must produce a Phase1 retrieval audit on the canonical 50
    - `zero_hit_count` increases by ≥3.
 4. **Noise**: Phase1 runs are retrieval-deterministic given the same DB and seed. Any numerical difference under identical config is a bug to investigate.
 5. **Cross-benchmark gate**: any change that modifies `memory_core.py` or `temporal_utils.py` must also pass the LongMemEval smart-retrieval 500q audit (see `benchmarks/longmemeval/PLAN.md`) before merging.
+
+---
 
 ## 5. Staged plan
 
@@ -177,6 +185,8 @@ Current audit is 500q of 1974 available. After Stages 0-3:
 2. Only after full-audit confirms: cascade to the LoCoMo QA pipeline (`benchmarks/locomo/bench_locomo.py` end-to-end, not retrieval-only).
 3. Phase 2 + Phase 3 (prompt analysis + judge verification) are separate initiatives.
 
+---
+
 ## 6. Test procedures (how-to)
 
 ### A — Phase1 retrieval audit (canonical 500q)
@@ -234,6 +244,8 @@ python benchmarks/locomo/retrieval_audit.py \
 
 Wall time: ~5-10 min.
 
+---
+
 ## 7. Risks and mitigations
 
 | Risk | Mitigation |
@@ -246,6 +258,8 @@ Wall time: ~5-10 min.
 | Shared `memory_core.py` changes break LongMemEval | Cross-benchmark gate: any main-side change requires both LoCoMo Phase1 + LongMemEval smart-retrieval audits pass |
 | Port of `llm_v1` pulls in `llm_v1_title_ctx` prompt surgery by mistake | Plan target is `llm_v1` only; use existing `_maybe_auto_title` / `_maybe_auto_entities` on main — do not touch their prompts |
 
+---
+
 ## 8. Timeline
 
 | Stage | Wall time | Gating |
@@ -255,6 +269,8 @@ Wall time: ~5-10 min.
 | 2 — measure smart-retrieval on LoCoMo | 0.5 day | independent |
 | 3 — multi-hop levers | 1 day | blocked on LongMemEval PLAN Stage 2 (rerank_utils) |
 | 4 — full-1974 expansion | 0.5 day | after Stage 1-3 |
+
+---
 
 ## 9. References
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/build_kg_variant.py
-sha1: 45cfd28fff87
-mtime_utc: 2026-04-22T01:03:02.023346+00:00
-generated_utc: 2026-04-22T01:22:54.461362+00:00
+sha1: b9dad9004217
+mtime_utc: 2026-05-01T09:15:53.144020+00:00
+generated_utc: 2026-05-01T13:05:26.718070+00:00
 private: false
 ---
 
@@ -21,10 +21,14 @@ Usage:
 
     python bin/build_kg_variant.py         --source-variant LME-ingestion         --target-variant LME-kg-dense         --top-n 8 --sim-threshold 0.70
 
+---
+
 ## Entry points
 
-- `def main()` (line 185)
+- `def main()` (line 184)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -37,28 +41,40 @@ Usage:
 | `--wipe-target` | Delete any existing items/edges under target variant before building | `False` | Fails if target variant has existing items | store_true | Deletes all items/edges in target before duplicating source |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
+---
+
 ## Environment variables read
 
 - `AGENT_DB`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg, resolve_db_path)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 197)
+- `sqlite3.connect()  → `db_path`` (line 196)
 
+
+---
 
 ## Notable external imports
 
 - `numpy`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

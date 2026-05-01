@@ -2,7 +2,7 @@
 tool: bin/auth_utils.py
 sha1: 490f56e0d8c6
 mtime_utc: 2026-04-21T20:40:58.965721+00:00
-generated_utc: 2026-04-21T21:22:27.006327+00:00
+generated_utc: 2026-05-01T13:05:26.704636+00:00
 private: false
 ---
 
@@ -12,13 +12,19 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
@@ -26,9 +32,13 @@ _(no argparse arguments detected)_
 - `LM_STUDIO_API_KEY`
 - `ORIGIN_DEVICE`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (resolve_db_path)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -45,6 +55,8 @@ _(no argparse arguments detected)_
 - `sqlite3.connect()  → `vault_path`` (line 199)
 
 
+---
+
 ## Notable external imports
 
 - `base64`
@@ -55,9 +67,13 @@ _(no argparse arguments detected)_
 - `platform`
 - `unicodedata`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

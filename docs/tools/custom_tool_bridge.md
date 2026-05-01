@@ -1,8 +1,8 @@
 ---
 tool: bin/custom_tool_bridge.py
-sha1: 2233763ac460
-mtime_utc: 2026-05-01T03:38:23.432806+00:00
-generated_utc: 2026-05-01T08:48:37.399237+00:00
+sha1: 7c5b0246391c
+mtime_utc: 2026-05-01T09:13:26.346877+00:00
+generated_utc: 2026-05-01T13:05:26.778005+00:00
 private: false
 ---
 
@@ -12,17 +12,25 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -32,18 +40,26 @@ _(none detected)_
 - `m3_sdk (M3Context, StructuredLogger)`
 - `thermal_utils (get_thermal_status)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `httpx`
 - `mcp.server.fastmcp (FastMCP)`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

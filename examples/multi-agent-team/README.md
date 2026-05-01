@@ -31,6 +31,8 @@ full MCP host that brokers between the LLM and the in-process catalog of
 The orchestrator never knows or cares how many agents you have or which
 providers they use — that's all in `team.yaml`.
 
+---
+
 ## Quickstart (zero API keys, local LM Studio)
 
 ```bash
@@ -52,6 +54,8 @@ task_assign(<task_id>, "local-agent")
 The local agent picks it up on the next tick, reads the file via
 m3-memory tools, writes a summary back to memory, and marks the task
 complete.
+
+---
 
 ## Run with the full multi-provider team
 
@@ -77,6 +81,8 @@ m3-team run examples/multi-agent-team/team.yaml
 cd examples/multi-agent-team
 python orchestrator.py team.yaml
 ```
+
+---
 
 ## Add an agent
 
@@ -104,6 +110,8 @@ allowlist** — every m3-memory tool except destructive ones
 `memory_import`, `agent_offline`). Use `tools.deny` to subtract
 individual tools after `allow`.
 
+---
+
 ## Add a provider
 
 If the new provider speaks the OpenAI chat completions format (Grok,
@@ -126,6 +134,8 @@ a new `format` value here and a matching branch in
 lives in `bin/agent_protocol.py` — extend `AgentProtocol` if you need a
 brand-new request/response shape.
 
+---
+
 ## How dispatch composes with m3-memory
 
 The orchestrator and dispatch loop only use these m3-memory entry
@@ -146,6 +156,8 @@ enforcement, agent_id injection) is driven by the agents themselves
 through their MCP tool calls — but those calls are now executed
 in-process by the orchestrator instead of being just suggestions in
 returned text.
+
+---
 
 ## Resilience knobs
 
@@ -179,6 +191,8 @@ Bounded failures (`max_turns`, `tool_call_budget`, `timeout`,
 the terminal name in metadata. Transient `provider_error_5xx_exhausted`
 leaves the task untouched and the notification on the queue, so the
 next tick retries.
+
+---
 
 ## Knobs in team.yaml
 

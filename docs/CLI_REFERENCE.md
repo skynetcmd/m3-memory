@@ -28,6 +28,8 @@ python benchmarks/longmemeval/bench_longmemeval.py --database memory/bench_longm
 CHATLOG_DB_PATH=memory/my_chatlog.db python bin/chatlog_ingest.py --format claude-code --transcript-path foo.jsonl
 ```
 
+---
+
 ## Running tests against an isolated DB
 
 The test suites (`test_memory_bridge.py`, `test_debug_agent.py`, `test_mcp_proxy.py`) read their `DB_PATH` via `resolve_db_path(None)` at import time, so they honor `M3_DATABASE` set in the environment.
@@ -43,6 +45,8 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 ```
 
 `setup_test_db.py` applies every forward migration in `memory/migrations/` (skipping `.down.sql` rollbacks). Pass `--force` to wipe the target before seeding.
+
+---
 
 ## DB-aware scripts
 
@@ -72,6 +76,8 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 | `bin/weekly_auditor.py` | PDF weekly audit report | — |
 | `benchmarks/longmemeval/bench_longmemeval.py` | LongMemEval harness | Sets `M3_DATABASE` early so all ingest/search routes to the benchmark DB |
 
+---
+
 ## Chatlog-specific overrides
 
 The chatlog subsystem has its own resolver (see `bin/chatlog_config.py`):
@@ -83,6 +89,8 @@ The chatlog subsystem has its own resolver (see `bin/chatlog_config.py`):
 | `CHATLOG_MODE` | **Deprecated** — ignored with a one-time warning. The three-mode system (integrated/separate/hybrid) has collapsed into path equality: same file = integrated behavior, different file = separate behavior, promote semantics switch automatically. |
 
 See [CHATLOG.md](CHATLOG.md) for the full chatlog architecture.
+
+---
 
 ## SLM intent classifier (dormant by default)
 
@@ -100,6 +108,8 @@ wiring can consume:
 Profiles are YAML, one file per name. See [SLM_INTENT.md](SLM_INTENT.md) for
 the full format reference, the three useful gate combinations, and
 walkthroughs for Ollama / LM Studio / OpenAI / bench-harness setups.
+
+---
 
 ## Scripts that don't need the flag
 

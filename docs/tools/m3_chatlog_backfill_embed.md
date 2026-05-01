@@ -2,7 +2,7 @@
 tool: bin/m3_chatlog_backfill_embed.py
 sha1: 57735152a3b3
 mtime_utc: 2026-04-28T02:30:35.391295+00:00
-generated_utc: 2026-04-28T15:48:17.309612+00:00
+generated_utc: 2026-05-01T13:05:26.814340+00:00
 private: false
 ---
 
@@ -36,10 +36,14 @@ Defaults:
     --include-types)
   - chunked batches of --batch (default 32) per embed call
 
+---
+
 ## Entry points
 
 - `def main()` (line 339)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -58,14 +62,20 @@ Defaults:
 | `--skip-backup` | Don't create a pre-run DB backup. | `False` |  | store_true |  |
 | `--yes`, `-y` | Skip the confirm prompt. | `False` |  | store_true |  |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `embedding_utils (pack)`
 - `memory_core`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -76,14 +86,20 @@ _(none detected)_
 - `sqlite3.connect()  → `str(db_path)`` (line 139)
 
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
 - `agent_chatlog.db`
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

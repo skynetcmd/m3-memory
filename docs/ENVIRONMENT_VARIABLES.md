@@ -31,6 +31,8 @@ All user-specific variables MUST be loaded into your shell's environment from a 
 
 We provide example `zshenv.example` and `zshrc.example` files in the `config/` directory. These scripts automatically detect your OS and load secrets from the appropriate backend, making them available as environment variables.
 
+---
+
 ## 🚀 Quick Setup
 
 1.  **Copy the examples**:
@@ -42,6 +44,8 @@ We provide example `zshenv.example` and `zshrc.example` files in the `config/` d
     *   Set the `M3_MEMORY_ROOT` variable to the absolute path of your `m3-memory` directory.
     *   Follow the commented-out instructions to store your secrets (API keys, IPs, etc.) in your OS's keychain for the first time.
 3.  **Restart your shell** (`zsh`). The scripts will now automatically and securely load your configuration on every new terminal session.
+
+---
 
 ## 📋 Core Environment Variables
 
@@ -117,6 +121,8 @@ M3 does not pin a specific chat model. `bin/llm_failover.py` discovers whatever 
 
 If only the small model is loaded, `get_best_llm` picks it automatically — no env var needed. If you also load a larger generation model on the same endpoint, it will currently be preferred for every feature (per-feature routing to prefer small-for-enrichment is on the roadmap). See [QUICKSTART → Optional: load a small chat model](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
+---
+
 ## Fact Enrichment
 
 Optional SLM-distillation pipeline to extract atomic facts from stored memories. **Off by default.** See ARCHITECTURE.md for design overview.
@@ -128,6 +134,8 @@ Optional SLM-distillation pipeline to extract atomic facts from stored memories.
 | `M3_FACT_ENRICH_MAX_ATTEMPTS` | `5` | Maximum retries for failed enrichment queue items before they are marked as poison (poisoned items remain visible in queue with `last_error` for manual inspection). |
 | `M3_FACT_ENRICHED_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `fact_enriched.yaml` profile `url` field. |
 | `M3_FACT_ENRICHED_MODEL` | (empty) | Override SLM model name. If unset, reads from the `fact_enriched.yaml` profile `model` field. Both URL and model must be non-empty when enrichment runs, or the extraction fails with a clear error. |
+
+---
 
 ## Entity-Relation Graph
 

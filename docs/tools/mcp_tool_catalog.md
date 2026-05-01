@@ -2,7 +2,7 @@
 tool: bin/mcp_tool_catalog.py
 sha1: edd0fbc51730
 mtime_utc: 2026-05-01T08:55:29.492726+00:00
-generated_utc: 2026-05-01T08:55:43.260662+00:00
+generated_utc: 2026-05-01T13:05:26.886428+00:00
 private: false
 ---
 
@@ -19,17 +19,25 @@ Imported by:
 Zero FastMCP dependency. Pure Python + memory_core + memory_sync + memory_maintenance.
 Never import this module from those modules — that would create a cycle.
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -40,17 +48,25 @@ _(none detected)_
 - `memory_maintenance`
 - `memory_sync`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

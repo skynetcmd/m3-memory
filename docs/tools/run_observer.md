@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: d568ebe84ade
-mtime_utc: 2026-05-01T07:13:07.615386+00:00
-generated_utc: 2026-05-01T08:48:37.678123+00:00
+sha1: df6583a4ca7a
+mtime_utc: 2026-05-01T09:13:26.346877+00:00
+generated_utc: 2026-05-01T13:05:27.048815+00:00
 private: false
 ---
 
@@ -35,10 +35,14 @@ Usage modes:
 
 Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
+---
+
 ## Entry points
 
-- `def main()` (line 619)
+- `def main()` (line 623)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -51,29 +55,42 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 | `--qids-file` | Optional JSON file with a list of ids; scopes variant-mode work to those ids only. | None |  | str |  |
 | `--batch` | Queue-mode batch size per invocation. Default 100. | `100` |  | int |  |
 
+---
+
 ## Environment variables read
 
 - `M3_DATABASE`
 - `OBSERVER_PROFILE`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
+- `agent_protocol (strip_code_fences)`
 - `auth_utils (get_api_key)`
 - `memory_core`
 - `slm_intent (load_profile)`
 - `unified_ai (async_client_for_profile)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `httpx`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

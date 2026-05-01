@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/stamp_variants_from_chainlog.py
 sha1: 7d44ee6527f9
 mtime_utc: 2026-04-21T20:02:02.919062+00:00
-generated_utc: 2026-04-29T13:47:47.262632+00:00
+generated_utc: 2026-05-01T13:05:27.183424+00:00
 private: true
 ---
 
@@ -21,9 +21,13 @@ For each bracket, find the audit run_dir whose run.log starts at a
 timestamp between START and DONE, and stamp the variant into
 summary.json (under key "variant") unless already present.
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -31,25 +35,37 @@ summary.json (under key "variant") unless already present.
 |---|---|---|---|---|---|
 | `--chain-log` | Path to chain.log with START/DONE brackets. | — | Argument is required. | Path | Parses chain log and stamps variants into matching audit run summaries. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `summary.json`
+
+---
 
 ## Re-validation
 

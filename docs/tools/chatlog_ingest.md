@@ -2,7 +2,7 @@
 tool: bin/chatlog_ingest.py
 sha1: 0fbe6fc02bed
 mtime_utc: 2026-04-28T03:05:32.881224+00:00
-generated_utc: 2026-04-28T15:48:17.235168+00:00
+generated_utc: 2026-05-01T13:05:26.743823+00:00
 private: false
 ---
 
@@ -27,10 +27,14 @@ A per-session cursor at memory/.chatlog_ingest_cursor.json records which
 message ids / indices have been ingested so re-invoking on the same transcript
 (e.g. Stop hook every turn) stays idempotent.
 
+---
+
 ## Entry points
 
 - `async def main()` (line 396)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -44,12 +48,16 @@ message ids / indices have been ingested so re-invoking on the same transcript
 | `--spill-dir` | Override spill directory for this run (dev smoke tests). Prevents stale spill files from polluting production. | None | Uses configured spill directory | str | Routes spill writes to PATH instead of configured dir (dev smoke tests only) |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db | str | Routes this run against PATH for all DB reads/writes |
 
+---
+
 ## Environment variables read
 
 - `M3_AUTO_ENRICH`
 - `M3_AUTO_ENRICH_MIN_TURNS`
 - `USER`
 - `USERNAME`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -58,17 +66,25 @@ message ids / indices have been ingested so re-invoking on the same transcript
 - `m3_sdk (add_database_arg)`
 - `memory_core`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `platform`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `.chatlog_ingest_cursor.json`
+
+---
 
 ## Re-validation
 

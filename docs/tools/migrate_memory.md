@@ -2,7 +2,7 @@
 tool: bin/migrate_memory.py
 sha1: 547fdef10dc1
 mtime_utc: 2026-04-29T14:18:07.393359+00:00
-generated_utc: 2026-04-29T14:18:46.247212+00:00
+generated_utc: 2026-05-01T13:05:27.014439+00:00
 private: false
 ---
 
@@ -37,10 +37,14 @@ takes a filesystem-level backup of the database (including -wal/-shm) before
 running, so operations are reversible at the file level even if the in-DB
 transaction already committed.
 
+---
+
 ## Entry points
 
 - `def main()` (line 885)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -65,14 +69,20 @@ transaction already committed.
 | `--target` | Which DB target to restore (default: main; use chatlog for chat log DB) | `main` | Restores main database; warns if all is used (ambiguous). | str | Restores only specified target; chatlog for chat log DB. |
 | `-y`, `--yes` | Skip confirmation | `False` | Prompts user to confirm before overwriting current DB. | store_true | Skips confirmation; proceeds directly to restore. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config (CHATLOG_MIGRATIONS_DIR, chatlog_db_path)`
 - `m3_sdk (resolve_db_path)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -89,15 +99,21 @@ _(none detected)_
 - `sqlite3.connect()  → `target.db_path`` (line 783)
 
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
 - `.db`
 - `.migrate_config.json`
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

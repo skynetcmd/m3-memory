@@ -2,7 +2,7 @@
 tool: scripts/inventory_graph.py
 sha1: 26d4c212fef1
 mtime_utc: 2026-04-22T01:22:46.234843+00:00
-generated_utc: 2026-04-22T01:22:54.722158+00:00
+generated_utc: 2026-05-01T13:05:27.132394+00:00
 private: false
 ---
 
@@ -15,35 +15,51 @@ Build a mermaid call-graph from tool-inventory markdown files.
 Edges come from each tool's "Calls INTO this repo" section (intra-repo imports)
 and "Calls OUT" subprocess invocations of sibling `bin/*.py` scripts.
 
+---
+
 ## Entry points
 
 - `def main()` (line 39)
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
 _(none detected)_
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
+
+---
 
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
 - `CALL_GRAPH.md`
 - `INDEX.md`
+
+---
 
 ## Re-validation
 

@@ -2,7 +2,7 @@
 tool: scan_repo_v7.py
 sha1: 748ccf7325a2
 mtime_utc: 2026-04-22T01:03:02.092891+00:00
-generated_utc: 2026-04-22T02:11:24.935928+00:00
+generated_utc: 2026-05-01T13:05:27.202649+00:00
 private: false
 ---
 
@@ -38,10 +38,14 @@ warn but still load (operator may have relaxed for a service account).
 No hardcoded fallback. If no source yields a token the script exits 2
 with a setup hint covering both input shapes.
 
+---
+
 ## Entry points
 
 - `def main()` (line 228)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -50,6 +54,8 @@ with a setup hint covering both input shapes.
 | `repo` |  | — | Positional — required; script exits with argparse error if omitted. | str | Resolves PATH to an absolute repo root and scans every file under it. |
 | `--engagement-name` |  | None | Auto-names the DefectDojo engagement `scan <UTC-timestamp>`. | str | Uses NAME as the DefectDojo engagement title; lets you group related runs. |
 
+---
+
 ## Environment variables read
 
 - `DD_PASSWORD`
@@ -57,9 +63,13 @@ with a setup hint covering both input shapes.
 - `DD_URL`
 - `DD_USERNAME`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -72,10 +82,14 @@ _(none detected)_
 - `requests.post()  → `url`` (line 219)
 
 
+---
+
 ## Notable external imports
 
 - `requests`
 - `stat`
+
+---
 
 ## File dependencies (repo paths referenced)
 
@@ -96,6 +110,8 @@ _(none detected)_
 - `{out}/trivy.json`
 - `{repo}/pyproject.toml`
 - `{repo}/requirements.txt`
+
+---
 
 ## Re-validation
 

@@ -2,7 +2,7 @@
 tool: bin/pg_setup.py
 sha1: b200c2a3ebdb
 mtime_utc: 2026-04-18T22:28:14.294952+00:00
-generated_utc: 2026-04-19T00:39:16.096519+00:00
+generated_utc: 2026-05-01T13:05:27.025587+00:00
 private: false
 ---
 
@@ -12,34 +12,50 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 - `def main()` (line 99)
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
 - `PG_URL`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
+
+---
 
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
 
+---
+
 ## Notable external imports
 
 - `psycopg2`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

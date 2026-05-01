@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/retrieval_audit.py
 sha1: 1bec395aa1eb
 mtime_utc: 2026-04-21T20:02:02.909000+00:00
-generated_utc: 2026-04-29T13:47:47.251796+00:00
+generated_utc: 2026-05-01T13:05:27.181376+00:00
 private: true
 ---
 
@@ -19,10 +19,14 @@ evidence. No answerer, no judge. Output is a JSONL trace that Phase 2 consumes.
 This script imports from bin/ read-only — it does not modify any main-branch
 retrieval, ingest, or generation logic.
 
+---
+
 ## Entry points
 
 - `async def run()` (line 141)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -37,9 +41,13 @@ retrieval, ingest, or generation logic.
 | `--enable-smart-retrieval` | Opt into smart_time_boost + neighbor-session expansion. Off by default on LOCOMO (relative-date dialog). Env var: M3_ENABLE_SMART_RETRIEVAL=1. | `os.environ.get('M3_ENABLE_SMART_RETRIEVAL', '').lower() in ('1', 'true', 'yes')` | Uses standard retrieval without smart features. | store_true | Enables temporal boosting and session-neighbor expansion. |
 | `--variant` | Filter retrieval to rows with this variant tag. Use '__none__' for untagged rows. Empty (default) returns all rows regardless of variant. | `` | Returns all rows regardless of variant tag. | str | Filters results to variant tag; '__none__' for untagged. |
 
+---
+
 ## Environment variables read
 
 - `M3_ENABLE_SMART_RETRIEVAL`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -47,19 +55,27 @@ retrieval, ingest, or generation logic.
 - `bench_locomo (CATEGORIES, classify_question, ingest_sample_with_graph, retrieve_for_question)`
 - `memory_core`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
 - `locomo10.json`
 - `summary.json`
 - `zero_hit_questions.json`
+
+---
 
 ## Re-validation
 

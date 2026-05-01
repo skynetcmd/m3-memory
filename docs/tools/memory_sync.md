@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_sync.py
-sha1: 39f35e44ad08
-mtime_utc: 2026-04-28T15:21:54.074361+00:00
-generated_utc: 2026-04-28T15:48:17.472837+00:00
+sha1: a8828e3c1ee4
+mtime_utc: 2026-05-01T09:16:01.584274+00:00
+generated_utc: 2026-05-01T13:05:26.995706+00:00
 private: false
 ---
 
@@ -12,13 +12,19 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
@@ -26,25 +32,35 @@ _(no argparse arguments detected)_
 - `M3_CHROMA_SYNC_QUEUE_SKIP_AT`
 - `M3_CHROMA_SYNC_QUEUE_WARN`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
-- `memory_core (ctx, _pack, _unpack, CHROMA_BASE_URL, CHROMA_COLLECTION, CHROMA_V2_PREFIX, CHROMA_CONTENT_MAX, EMBED_DIM)`
+- `memory_core (CHROMA_BASE_URL, CHROMA_COLLECTION, CHROMA_CONTENT_MAX, CHROMA_V2_PREFIX, EMBED_DIM, _pack, _unpack, ctx)`
 - `migrate_memory`
+
+---
 
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 18)
+- `sqlite3.connect()  → `db_path`` (line 26)
 
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

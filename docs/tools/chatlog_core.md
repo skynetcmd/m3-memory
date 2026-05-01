@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_core.py
-sha1: 73d810f1ae7f
-mtime_utc: 2026-04-22T01:03:02.023999+00:00
-generated_utc: 2026-04-22T01:22:54.476894+00:00
+sha1: 3a1f33b010a1
+mtime_utc: 2026-05-01T09:15:53.156020+00:00
+generated_utc: 2026-05-01T13:05:26.733502+00:00
 private: false
 ---
 
@@ -27,39 +27,55 @@ Provides:
 All paths route through M3Context.get_chatlog_conn() so integrated/separate/hybrid
 modes are handled transparently.
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
 - `chatlog_redaction`
 - `m3_sdk (M3Context)`
+- `m3_sdk (M3Context, active_database)`
 - `m3_sdk (M3Context, resolve_db_path)`
-- `m3_sdk (active_database, M3Context)`
 - `m3_sdk (resolve_db_path)`
 - `memory_core`
+
+---
 
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
 
+---
+
 ## Notable external imports
 
 - `atexit`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

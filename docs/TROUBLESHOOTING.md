@@ -13,6 +13,8 @@
 - **Check**: Confirm the PostgreSQL server is reachable from this machine.
 - **Note**: Sync is optional. M3 Memory works fully without PostgreSQL.
 
+---
+
 ## Embedding Issues
 
 ### "Embedding failed" or "Connection refused"
@@ -23,6 +25,8 @@
 - **Solution**: Run `memory_maintenance` to decay importance of stale items.
 - **Solution**: Verify the correct embedding model is loaded (e.g., `nomic-embed-text` for Ollama, or check your LM Studio model list).
 - **Solution**: Ensure all devices use the same embedding model and dimension (`EMBED_DIM`, default 1024). Mismatched dimensions break cosine similarity.
+
+---
 
 ## Installation Issues
 
@@ -42,6 +46,8 @@
 ### Agent can't find previous memories
 - Memories are stored in `memory/agent_memory.db` relative to where `mcp-memory` runs.
 - Check that you're running from the same directory, or set `M3_MEMORY_ROOT`.
+
+---
 
 ## ChromaDB Issues
 

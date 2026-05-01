@@ -1,8 +1,8 @@
 ---
 tool: bin/slm_intent.py
-sha1: c626fc255c3a
-mtime_utc: 2026-04-28T00:28:26.603595+00:00
-generated_utc: 2026-04-28T15:48:17.547194+00:00
+sha1: b1b0cad11d75
+mtime_utc: 2026-05-01T09:23:22.376774+00:00
+generated_utc: 2026-05-01T13:05:27.069128+00:00
 private: false
 ---
 
@@ -59,13 +59,19 @@ Profiles are cached by name once loaded; call ``invalidate_cache()``
 after editing a YAML for the change to take effect in a long-running
 process.
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
@@ -74,9 +80,13 @@ _(no argparse arguments detected)_
 - `M3_SLM_PROFILE`
 - `M3_SLM_PROFILES_DIR`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -87,14 +97,20 @@ _(no argparse arguments detected)_
 - `httpx.AsyncClient()` (line 539)
 
 
+---
+
 ## Notable external imports
 
 - `httpx`
 - `yaml`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

@@ -2,7 +2,7 @@
 tool: benchmarks/locomo/analyze_handoff.py
 sha1: 22796a5ef7ea
 mtime_utc: 2026-04-21T20:02:02.907203+00:00
-generated_utc: 2026-04-29T13:47:47.146678+00:00
+generated_utc: 2026-05-01T13:05:27.139529+00:00
 private: true
 ---
 
@@ -23,10 +23,14 @@ Questions answered:
   - For temporal Qs: is the session_date visible in the snippets?
   - Top-K content: how much is role=user vs assistant, within-session clustering
 
+---
+
 ## Entry points
 
 - `def main()` (line 231)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -35,25 +39,37 @@ Questions answered:
 | `--trace` | Path to retrieval_trace.jsonl file. | — | Argument is required. | Path | Loads and analyzes the trace file at PATH. |
 | `--out` | Optional path to write JSON analysis results. | None | Analysis printed to stdout only. | Path | Writes analysis JSON to PATH; also prints to stdout. |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `statistics`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

@@ -17,6 +17,8 @@ expects).
 You then need to make `127.0.0.1:8080` reachable by Claude's servers.
 Pick **one** of the tunnel options below.
 
+---
+
 ## Tunnel options (pick one)
 
 ### Cloudflare Tunnel (free, no public DNS needed)
@@ -62,6 +64,8 @@ forward `/mcp` (or any path) to `127.0.0.1:8080`. Lock it down with
 mTLS, an auth-header filter, or a IP-allowlist — see the security
 section below.
 
+---
+
 ## Adding the connector to Claude.ai
 
 1. Open Claude.ai → Settings → Connectors → Add custom connector.
@@ -69,6 +73,8 @@ section below.
 3. **Auth**: configure if your tunnel requires it (Cloudflare Access /
    ngrok-auth / mTLS — claude.ai supports OAuth and bearer-token).
 4. Save. Claude.ai will probe the endpoint and list the 72 tools.
+
+---
 
 ## Anthropic API (MCP Connector beta)
 
@@ -93,6 +99,8 @@ msg = client.messages.create(
 
 The connector path is **tool-only** — MCP resources / prompts are not
 exposed. All 66 m3-memory tools are tools, so this is fine for our case.
+
+---
 
 ## Running serve as a service
 
@@ -153,6 +161,8 @@ journalctl -u mcp-memory -f
 launchctl load ~/Library/LaunchAgents/dev.m3-memory.serve.plist
 ```
 
+---
+
 ## Security
 
 **Default bind is `127.0.0.1`.** The HTTP server is only reachable from
@@ -175,6 +185,8 @@ connections by default) and processes requests sequentially. For
 single-user / Claude.ai use, that's plenty. If you front a team-sized
 deployment, you may want to run multiple instances behind a load
 balancer with shared storage.
+
+---
 
 ## Troubleshooting
 

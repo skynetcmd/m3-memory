@@ -26,6 +26,8 @@ Flags:
 --no-install-m3                              stop after pipx install (don't fetch payload)
 ```
 
+---
+
 ## TL;DR — manual path per OS
 
 ### Debian 12+ / Ubuntu 24.04+ / Fedora 38+ (PEP 668 distros)
@@ -78,6 +80,8 @@ mcp-memory doctor
 If the TL;DR worked, stop here. The rest of this file explains why and what
 gets installed.
 
+---
+
 ## Prerequisites — what needs admin (sudo) once
 
 `m3-memory` itself ships as a single Python package via PyPI and never asks
@@ -108,6 +112,8 @@ sudo apt install -y nodejs npm
 
 Everything below this point runs as your normal user. No more sudo needed.
 
+---
+
 ## OS matrix
 
 | Capability | Windows 11 | macOS (Apple Silicon / Intel) | Debian 12 / Ubuntu 24.04 / Fedora 38+ (PEP 668) | Older Linux (no PEP 668) |
@@ -121,6 +127,8 @@ Everything below this point runs as your normal user. No more sudo needed.
 | npm-global PATH (if using Gemini CLI) | handled by Node installer | `~/.npm-global/bin` — added to `.zshrc` by npm | `~/.npm-global/bin` — `install-m3` appends to `~/.profile` for non-interactive shells | same as Debian |
 | Gemini CLI auto-register | `install-m3` writes `%USERPROFILE%\.gemini\settings.json` | `install-m3` writes `~/.gemini/settings.json` | same | same |
 | Claude Code hooks | `install-m3` expects `~/.claude/settings.json` | same | same | same |
+
+---
 
 ## What `install-m3` does for you
 
@@ -148,6 +156,8 @@ mcp-memory install-m3 --endpoint http://localhost:11434/v1
 mcp-memory install-m3 --capture-mode precompact
 ```
 
+---
+
 ## Why pipx on PEP 668 distros
 
 Debian 12+, Ubuntu 24.04+, Fedora 38+, and recent Arch mark their system
@@ -164,6 +174,8 @@ upgrades (`pipx upgrade m3-memory`) a one-liner.
 
 On macOS the Homebrew Python is also PEP 668-managed, so `pipx` is the
 clean path there too. System Python on macOS is even older; don't use it.
+
+---
 
 ## Diagnosing a broken install
 
@@ -182,6 +194,8 @@ spill files, per-agent capture timestamps).
 
 `mcp-memory chatlog doctor` is the same but exits nonzero on any warning —
 suitable for CI / health checks.
+
+---
 
 ## Gemini CLI gotchas
 
@@ -204,6 +218,8 @@ The `memory` MCP entry in `~/.gemini/settings.json` is written automatically
 by `mcp-memory install-m3` post-install. The `SessionEnd` chatlog hook is
 written by `mcp-memory chatlog init --apply-gemini` (or automatically when
 you pass `--capture-mode both` to `install-m3`).
+
+---
 
 ## Per-OS walkthroughs
 

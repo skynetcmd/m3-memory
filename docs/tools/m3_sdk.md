@@ -2,7 +2,7 @@
 tool: bin/m3_sdk.py
 sha1: e1c1803db371
 mtime_utc: 2026-04-22T01:03:02.042549+00:00
-generated_utc: 2026-04-22T01:22:54.542906+00:00
+generated_utc: 2026-05-01T13:05:26.860013+00:00
 private: false
 ---
 
@@ -12,15 +12,21 @@ private: false
 
 _(no module docstring — update the source file.)_
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
+
+---
 
 ## CLI flags / arguments
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | m3_sdk itself has no CLI; this row documents the add_database_arg(parser) helper shape. | str | Every CLI that calls add_database_arg(parser) gains this flag with identical semantics. |
+
+---
 
 ## Environment variables read
 
@@ -33,10 +39,14 @@ _(no conventional entry point detected)_
 - `M3_MEMORY_ROOT`
 - `PG_URL`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
 - `chatlog_config`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -50,6 +60,8 @@ _(no conventional entry point detected)_
 - `sqlite3.connect()  → `self.db_path`` (line 202)
 
 
+---
+
 ## Notable external imports
 
 - `atexit`
@@ -58,9 +70,13 @@ _(no conventional entry point detected)_
 - `httpx`
 - `psycopg2`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

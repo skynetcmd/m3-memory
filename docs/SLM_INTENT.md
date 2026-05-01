@@ -45,6 +45,8 @@ Profiles live in YAML, one file per named profile. The module ships four
 starter profiles under `config/slm/`; bench harnesses add their own by
 setting `M3_SLM_PROFILES_DIR` to a co-located directory.
 
+---
+
 ## 2. Gates
 
 Three env-var gates, each independent. All default **off**.
@@ -90,6 +92,8 @@ Set to `1`, `true`, or `yes` (case-insensitive) to enable.
 | `M3_INTENT_USER_FACT_BOOST` | `0.1` | Additive score boost for user-authored turns when `intent_hint == "user-fact"`. |
 | `M3_SLM_PROFILE` | `default` | Profile name used when caller doesn't pass `profile=`. |
 | `M3_SLM_PROFILES_DIR` | — | `os.pathsep`-separated list of dirs searched **before** `config/slm/`. Bench harnesses use this to stack their own profiles. |
+
+---
 
 ## 3. Profile YAML format
 
@@ -215,6 +219,8 @@ won't fire. That's fine for profiles whose labels feed a different consumer
 different purpose). For profiles intended to drive memory retrieval, keep
 the canonical four labels.
 
+---
+
 ## 4. Profile discovery order
 
 When you call `classify_intent(query, profile="memory")`, the loader walks
@@ -245,6 +251,8 @@ python benchmarks/longmemeval/bench_longmemeval.py ...
 export M3_SLM_PROFILES_DIR="$HOME/.config/m3-memory/slm:$PWD/benchmarks/longmemeval/slm"
 # memory.yaml resolves from $HOME/.config (wins), bench.yaml from benchmarks
 ```
+
+---
 
 ## 5. Shipped profiles
 
@@ -278,6 +286,8 @@ listing what to change for your environment.
 The `post:` block in the profile YAML is consumed only by `extract_entities`
 and `extract_text`. It's applied to the raw reply BEFORE any splitting so
 that preamble-strip rules see the whole response.
+
+---
 
 ## 6. End-to-end walkthroughs
 
@@ -379,6 +389,8 @@ from slm_intent import classify_intent
 label = await classify_intent(question, profile="bench")
 ```
 
+---
+
 ## 7. Observability
 
 ### Self-test
@@ -416,6 +428,8 @@ and substring), and fallback. Run with:
 ```bash
 python -m pytest tests/test_slm_intent.py -v
 ```
+
+---
 
 ## 8. Operational notes
 
@@ -459,6 +473,8 @@ invalidate_cache()
 ```
 
 Or just restart the process.
+
+---
 
 ## 9. Related docs
 

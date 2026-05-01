@@ -2,7 +2,7 @@
 tool: bin/test_bulk_parity.py
 sha1: a6d514479d9d
 mtime_utc: 2026-04-28T16:34:11.113337+00:00
-generated_utc: 2026-04-29T13:47:47.006067+00:00
+generated_utc: 2026-05-01T13:05:27.081209+00:00
 private: false
 ---
 
@@ -16,22 +16,32 @@ Verifies that bulk path actually invokes database operations and produces
 equivalent memory_items rows to the single path, with proper enrichment,
 variant handling, contradiction detection, and conversation emitters.
 
+---
+
 ## Entry points
 
 - `async def main()` (line 563)
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
 _(none detected)_
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `memory_core (memory_write_bulk_impl)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -43,13 +53,19 @@ _(none detected)_
 - `sqlite3.connect()  → `db_path`` (line 266)
 
 
+---
+
 ## Notable external imports
 
 - `unittest.mock (AsyncMock, patch)`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `test.db`
+
+---
 
 ## Re-validation
 
