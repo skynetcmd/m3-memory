@@ -1,8 +1,8 @@
 ---
 tool: bin/chroma_health.py
-sha1: 9899881f7960
-mtime_utc: 2026-04-26T10:21:38.719170+00:00
-generated_utc: 2026-04-28T15:48:17.257584+00:00
+sha1: 4a1ef5615cc5
+mtime_utc: 2026-05-01T09:15:53.154019+00:00
+generated_utc: 2026-05-01T13:05:26.763950+00:00
 private: false
 ---
 
@@ -27,10 +27,14 @@ Can be wired into:
     - Windows Scheduled Task / cron job
     - Manual ad-hoc invocation
 
+---
+
 ## Entry points
 
 - `def main()` (line 349)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -41,6 +45,8 @@ Can be wired into:
 | `--quiet` | Suppress info output; only show problems | `False` |  | store_true |  |
 | `--database` | f'Path to SQLite DB (default: {DEFAULT_DB_PATH})' | `M3_DATABASE` |  | str |  |
 
+---
+
 ## Environment variables read
 
 - `CHROMA_BASE_URL`
@@ -48,9 +54,13 @@ Can be wired into:
 - `M3_CHROMA_SYNC_QUEUE_WARN`
 - `M3_DATABASE`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -63,13 +73,19 @@ _(none detected)_
 - `sqlite3.connect()  → `db_path`` (line 62)
 
 
+---
+
 ## Notable external imports
 
 - `httpx`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

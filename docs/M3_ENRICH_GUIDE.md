@@ -406,6 +406,8 @@ the pattern: identical to `enrich_local_qwen.yaml` except the `model`
 field points at the `:2` instance. Then run with `--profile
 enrich_local_qwen_v2` for the core pass.
 
+---
+
 ## Entity-graph enrichment (`bin/m3_entities.py`)
 
 Sister tool to `m3_enrich`. Runs the entity extractor (NOT the
@@ -487,6 +489,8 @@ running simultaneously.
 - Self-loop relationships are dropped post-hoc.
 - `memory_id` canonicals get a `memory_id_` prefix stripped post-hoc to
   match the bare-hex citation format the schema expects.
+
+---
 
 ## Activate enrichment-aware retrieval (REQUIRED after enrichment)
 
@@ -651,6 +655,8 @@ fire the post-rank?" Possibly — that's a Phase J consideration tracked
 in the m3-memory roadmap. The conservative current behavior is
 explicit-opt-in so the retrieval semantics never change without the
 operator knowing.
+
+---
 
 ## Continuous enrichment (auto-enrich on chatlog ingest)
 
@@ -837,6 +843,8 @@ Both stages are env-gated for retrieval (`M3_PREFER_OBSERVATIONS`,
 those flags are set.
 
 For deeper detail, see `docs/MASTRA_DESIGN.md`.
+
+---
 
 ## Adding a new enrichment stage
 
