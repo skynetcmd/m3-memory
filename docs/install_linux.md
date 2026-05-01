@@ -85,6 +85,8 @@ mcp-memory install-m3 --capture-mode both
 mcp-memory doctor
 ```
 
+---
+
 ## Adding to an MCP client
 
 ```bash
@@ -96,6 +98,8 @@ claude mcp add memory mcp-memory
 # If you install Gemini AFTER m3-memory, run:
 mcp-memory chatlog init --apply-gemini
 ```
+
+---
 
 ## Common gotchas
 
@@ -113,12 +117,16 @@ mcp-memory chatlog init --apply-gemini
   install-m3, run `mcp-memory chatlog init --apply-claude` (or `--apply-gemini`)
   to retroactively fix it.
 
+---
+
 ## Advanced setup
 
 The full homelab walkthrough — Postgres sync, ChromaDB, LM Studio embedding
 server, multi-machine federation — lives at
 [install_linux_homelab.md](install_linux_homelab.md). Most users don't need
 any of that; the one-liner above is enough for a working local install.
+
+---
 
 ## Verifying
 

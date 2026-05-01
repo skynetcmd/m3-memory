@@ -2,7 +2,7 @@
 tool: bin/sync_all.py
 sha1: 249d41971297
 mtime_utc: 2026-04-26T08:11:07.730162+00:00
-generated_utc: 2026-04-26T10:12:32.195531+00:00
+generated_utc: 2026-05-01T13:05:27.072099+00:00
 private: false
 ---
 
@@ -27,10 +27,14 @@ DB list:
     Example self-host override:
         M3_SYNC_DBS=memory/agent_memory.db:../m3-memory-bench/data/agent_bench.db
 
+---
+
 ## Entry points
 
 - `def main()` (line 182)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -39,15 +43,21 @@ DB list:
 | `--dry-run` | Check connectivity only | `False` | Checks SYNC_TARGET_IP reachability, then calls pg_sync.py and chroma_sync_cli.py (both write to DBs/ChromaDB). | store_true | Checks reachability only; logs planned sync but skips subprocess calls (no actual writes). |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 
+---
+
 ## Environment variables read
 
 - `M3_SYNC_DBS`
 - `POSTGRES_SERVER`
 - `SYNC_TARGET_IP`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -57,13 +67,19 @@ DB list:
 - `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 116)
 
 
+---
+
 ## Notable external imports
 
 - `platform`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `memory/agent_memory.db`
+
+---
 
 ## Re-validation
 

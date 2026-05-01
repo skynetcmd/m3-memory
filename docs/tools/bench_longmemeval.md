@@ -2,7 +2,7 @@
 tool: benchmarks/longmemeval/bench_longmemeval.py
 sha1: 6979866f19db
 mtime_utc: 2026-04-28T15:30:52.402881+00:00
-generated_utc: 2026-04-29T13:47:47.284080+00:00
+generated_utc: 2026-05-01T13:05:27.193836+00:00
 private: true
 ---
 
@@ -40,11 +40,15 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
     results.json       aggregate accuracy + per-type breakdown
     run.log            progress/errors
 
+---
+
 ## Entry points
 
 - `async def run()` (line 629)
 - `def main()` (line 883)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -66,10 +70,14 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 | `--variant` | tag every ingested row with this variant label | `` | No variant label | str | Tags all ingested items with variant ID |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
 
+---
+
 ## Environment variables read
 
 - `EVAL_GENERATOR_MODEL`
 - `EVAL_JUDGE_MODEL`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -78,18 +86,26 @@ Artifacts go to .scratch/longmemeval_run_<timestamp>/:
 - `memory_core (_db, memory_search_scored_impl, memory_write_bulk_impl, memory_write_impl)`
 - `temporal_utils`
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 - `openai (OpenAI)`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `longmemeval_s_cleaned.json`
 - `results.json`
+
+---
 
 ## Re-validation
 

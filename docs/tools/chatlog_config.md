@@ -2,7 +2,7 @@
 tool: bin/chatlog_config.py
 sha1: 808a94152132
 mtime_utc: 2026-04-22T01:03:02.023999+00:00
-generated_utc: 2026-04-22T01:22:54.465465+00:00
+generated_utc: 2026-05-01T13:05:26.722715+00:00
 private: false
 ---
 
@@ -44,13 +44,19 @@ Deprecated env var:
     is now achieved by setting CHATLOG_DB_PATH equal to the main DB (or by
     leaving both unset when a shared M3_DATABASE covers everything).
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
@@ -59,9 +65,13 @@ _(no argparse arguments detected)_
 - `CHATLOG_DB_POOL_TIMEOUT`
 - `M3_DATABASE`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (_active_db)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -70,9 +80,13 @@ _(no argparse arguments detected)_
 - `sqlite3.connect()  → `db_path`` (line 343)
 
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
@@ -82,6 +96,8 @@ _(only stdlib)_
 - `agent_chatlog.db`
 - `agent_memory.db`
 - `alt_chatlog.db`
+
+---
 
 ## Re-validation
 

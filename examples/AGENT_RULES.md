@@ -15,6 +15,8 @@
 
 5. **Explore connections.** Use `memory_graph` to traverse related memories when you need broader context (up to 3 hops).
 
+---
+
 ## Core tools
 
 | Tool | When to use |
@@ -27,6 +29,8 @@
 | `memory_graph` | To explore connections between memories |
 | `memory_link` | To manually connect two related memories |
 | `gdpr_forget` | When a user asks you to forget something |
+
+---
 
 ## Quick test
 

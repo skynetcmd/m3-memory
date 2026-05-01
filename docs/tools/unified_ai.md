@@ -1,8 +1,8 @@
 ---
 tool: bin/unified_ai.py
-sha1: 80633589c0eb
-mtime_utc: 2026-05-01T06:59:24.432586+00:00
-generated_utc: 2026-05-01T08:49:49.054166+00:00
+sha1: 35ec3cef5cea
+mtime_utc: 2026-05-01T09:13:26.345139+00:00
+generated_utc: 2026-05-01T13:05:27.119602+00:00
 private: false
 ---
 
@@ -31,39 +31,55 @@ The chat method returns just the assistant's text content. For richer
 metadata (token counts, finish reason) call .chat_raw() which returns
 the parsed provider-native JSON.
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
 
+---
+
 ## Calls OUT (external side-channels)
 
 **http**
 
-- `httpx.AsyncClient()` (line 49)
+- `httpx.AsyncClient()` (line 48)
+- `httpx.AsyncClient()` (line 65)
 - `httpx.AsyncClient()` (line 66)
-- `httpx.AsyncClient()` (line 67)
-- `httpx.Client()` (line 85)
+- `httpx.Client()` (line 84)
 
+
+---
 
 ## Notable external imports
 
 - `httpx`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

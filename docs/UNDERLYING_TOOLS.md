@@ -21,6 +21,8 @@ This document details the core services, frameworks, and engines that power the 
 - **Recommended Version**: v15 or v16.
 - **Driver**: `psycopg2-binary` (v2.9.11+).
 
+---
+
 ## Intelligence Engines
 
 ### Local LLM (Reasoning)
@@ -33,6 +35,8 @@ This document details the core services, frameworks, and engines that power the 
 - **Role**: Converting text to semantic vectors for similarity search.
 - **Recommended**: `nomic-embed-text` via Ollama, or `jina-embeddings-v2-base-en` via LM Studio.
 - **Deployment**: Any OpenAI-compatible embedding endpoint.
+
+---
 
 ## Frameworks & Libraries
 

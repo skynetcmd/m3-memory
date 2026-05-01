@@ -2,7 +2,7 @@
 tool: bin/auto_route.py
 sha1: 1a66b3822d9a
 mtime_utc: 2026-04-26T12:39:14.741294+00:00
-generated_utc: 2026-04-26T12:50:25.362294+00:00
+generated_utc: 2026-05-01T13:05:26.707128+00:00
 private: false
 ---
 
@@ -35,33 +35,49 @@ API:
 - signals_summary(query, candidates) -> dict  (all signals as a dict for capture)
 - count_named_entities(query) -> int  (count of proper-noun phrases in query)
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: d997b4dd1090
-mtime_utc: 2026-04-28T16:02:20.951897+00:00
-generated_utc: 2026-04-29T13:47:46.682844+00:00
+sha1: 99984dd5e887
+mtime_utc: 2026-05-01T09:23:06.299813+00:00
+generated_utc: 2026-05-01T13:05:26.854551+00:00
 private: false
 ---
 
@@ -47,10 +47,14 @@ Usage examples:
 The default vocab is `config/lists/entity_graph_m3.yaml` (m3-tuned).
 Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
+---
+
 ## Entry points
 
 - `def main()` (line 660)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -71,15 +75,22 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 | `--skip-preflight` | Skip endpoint smoke + DB backup. Power-user only. | `False` |  | store_true |  |
 | `--yes`, `-y` | Skip the interactive confirm prompt. | `False` |  | store_true |  |
 
+---
+
 ## Environment variables read
 
 - `M3_DATABASE`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
+- `agent_protocol (strip_code_fences)`
 - `auth_utils (get_api_key)`
 - `memory_core`
-- `slm_intent (load_profile, Profile)`
+- `slm_intent (Profile, load_profile)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -93,9 +104,13 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 - `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 332)
 
 
+---
+
 ## Notable external imports
 
 - `httpx`
+
+---
 
 ## File dependencies (repo paths referenced)
 
@@ -108,6 +123,8 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 - `agent_chatlog.db`
 - `agent_memory.db`
 - `entity_graph_m3.yaml`
+
+---
 
 ## Re-validation
 

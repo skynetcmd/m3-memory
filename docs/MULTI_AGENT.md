@@ -82,6 +82,8 @@ Tag related memories with a shared `conversation_id` to create a logical session
 
 Every memory records when it was created and when it was valid. The `as_of` parameter on `memory_search` enables time-travel queries — useful for debugging past decisions or reconciling conflicting reports across agents.
 
+---
+
 ## 🔄 Workflow patterns
 
 ### ➡️ Turn-based (sequential handoff)
@@ -145,6 +147,8 @@ All agents contribute facts and observations to `scope="org"` asynchronously, wi
 
 Agents react to events rather than following a fixed sequence. Add `task_completed` to the orchestrator's `notification_kinds` so a planner automatically wakes up when a subtask finishes. Agents can also use `notify` to broadcast custom signals.
 
+---
+
 ## 🚀 Full example
 
 The [`examples/multi-agent-team/`](../examples/multi-agent-team/) directory contains a complete, runnable orchestrator:
@@ -170,6 +174,8 @@ task_assign(<task_id>, "local-agent")
 The agent picks it up on the next tick, executes tool calls against m3-memory, and writes results back.
 
 See [`examples/multi-agent-team/README.md`](../examples/multi-agent-team/README.md) for provider setup, resilience knobs, and how to add agents without code changes.
+
+---
 
 ## 🧭 Design principles
 

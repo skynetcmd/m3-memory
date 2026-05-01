@@ -2,7 +2,7 @@
 tool: bin/test_mcp_proxy.py
 sha1: f4828f297b84
 mtime_utc: 2026-04-21T20:59:44.495160+00:00
-generated_utc: 2026-04-21T21:22:27.222381+00:00
+generated_utc: 2026-05-01T13:05:27.092410+00:00
 private: false
 ---
 
@@ -24,22 +24,32 @@ Usage:
   # Then run:
   python3 ~/m3-memory/bin/test_mcp_proxy.py
 
+---
+
 ## Entry points
 
 - `async def main()` (line 233)
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
 - `ANTHROPIC_API_KEY`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (resolve_db_path)`
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -58,13 +68,19 @@ _(no argparse arguments detected)_
 - `sqlite3.connect()  → `DB_PATH`` (line 74)
 
 
+---
+
 ## Notable external imports
 
 - `httpx`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `{WORKSPACE}/.aider.conf.yml`
+
+---
 
 ## Re-validation
 

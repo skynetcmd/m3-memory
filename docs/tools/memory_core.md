@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 4ab8e924a544
-mtime_utc: 2026-05-01T03:38:16.423097+00:00
-generated_utc: 2026-05-01T08:48:37.601300+00:00
+sha1: 5a34743aff5e
+mtime_utc: 2026-05-01T13:07:10.179699+00:00
+generated_utc: 2026-05-01T13:07:18.650054+00:00
 private: false
 ---
 
@@ -13,6 +13,8 @@ private: false
 Core memory primitives: single + bulk write, search, enrichment, emitters.
 
 Not a CLI — imported by MCP server, bench drivers, and import scripts.
+
+---
 
 ## Public async API (relevant to ingest)
 
@@ -36,6 +38,8 @@ Of these, only `variant` is exposed on the MCP `memory_write` schema and via
 `--variant` on bench CLIs. `enrich` / `check_contradictions` /
 `emit_conversation` are kwarg-only perf knobs for bulk ingest drivers.
 
+---
+
 ## Env-var gates read
 
 Ingest: `M3_INGEST_AUTO_TITLE`, `M3_INGEST_AUTO_ENTITIES`,
@@ -52,13 +56,19 @@ Embeddings: `EMBED_MODEL`, `EMBED_DIM`, `EMBED_BULK_CHUNK`,
 Other: `CONTRADICTION_THRESHOLD`, `DEDUP_LIMIT`, `DEDUP_THRESHOLD`,
 `LLM_TIMEOUT`, `ORIGIN_DEVICE`.
 
+---
+
 ## Entry points
 
 _(no conventional entry point detected)_
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
@@ -107,6 +117,8 @@ _(no argparse arguments detected)_
 - `SEARCH_ROW_CAP`
 - `SUPERSEDES_PENALTY`
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 - `auto_route`
@@ -122,16 +134,20 @@ _(no argparse arguments detected)_
 - `migrate_memory (_classify_db)`
 - `temporal_utils (extract_referenced_dates, has_temporal_cues)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1204)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1207)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1168)
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1171)
 
+
+---
 
 ## Notable external imports
 
@@ -141,11 +157,15 @@ _(no argparse arguments detected)_
 - `torch`
 - `yaml`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `agent_memory.db`
 - `agent_memory_archive.db`
 - `entity_graph_default.yaml`
+
+---
 
 ## Re-validation
 

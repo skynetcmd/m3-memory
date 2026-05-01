@@ -60,6 +60,8 @@ If the resolved chatlog path **equals** the main memory DB path, the two are a s
                         promote
 ```
 
+---
+
 ## 2. Setup
 
 ### Let your agent install it
@@ -247,6 +249,8 @@ Add a status line command to `~/.claude/settings.json` to show chat log health i
 
 This displays a quiet indicator (no output when healthy) and a short warning tag if any anomalies are detected (regex errors, silent hook, spill files, queue depth >80%, embed backlog).
 
+---
+
 ## 3. Daily Operations
 
 ### Check Subsystem Status
@@ -345,6 +349,8 @@ Returns:
 
 Cost computation uses a built-in price table; if provider/model not in table, cost_usd is null (no fake zeros).
 
+---
+
 ## 4. Redaction
 
 Redaction is **OFF by default** (local-first system; opt-in by choice). When enabled, chat content is scanned with pre-compiled regex patterns and secrets are replaced with `[REDACTED:<group>]`.
@@ -410,6 +416,8 @@ python bin/chatlog_core.py --rescrub [--since 2026-04-01T00:00:00Z]
 
 This updates all rows (or those since a date) with the current redaction policy. Original hashes are preserved in metadata for auditing.
 
+---
+
 ## 5. Observability
 
 ### Status Summary
@@ -455,6 +463,8 @@ The status line (if wired into Claude Code) is quiet when healthy and displays a
 
 Atomically written by the flush loop, sweeper, and hooks.
 
+---
+
 ## 6. Architecture Notes
 
 ### Zero-Latency Writes
@@ -487,6 +497,8 @@ Additional fields in metadata_json:
 ### Promotion (Separate/Hybrid Modes)
 
 `chatlog_promote` uses SQLite `ATTACH DATABASE` to cross-DB copy or move rows. Relationships and metadata are preserved; embed vectors are lazy-embedded in the main DB on next sweeper run.
+
+---
 
 ## 7. Schema Reference
 
@@ -531,6 +543,8 @@ One row per embedded chat log:
 | embed_model | TEXT | Usually 'jina-embeddings-v5' |
 | dim | INTEGER | Always 1024 |
 | created_at | TEXT | ISO 8601 timestamp |
+
+---
 
 ## 8. Troubleshooting
 
@@ -621,6 +635,8 @@ python bin/chatlog_core.py --set-redaction false
 ```
 
 Existing redacted content is not un-redacted (hashes are stored for audit). To change policy retroactively, use `--rescrub`.
+
+---
 
 ## 9. Development & Debugging
 
