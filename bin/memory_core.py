@@ -855,11 +855,15 @@ async def _auto_classify(content: str, title: str) -> str:
     # Localized copy of mcp_tool_catalog.VALID_MEMORY_TYPES minus "auto"
     # (auto is the sentinel that requests classification, not a classifier output).
     # Kept local to avoid circular import: mcp_tool_catalog imports memory_core.
+    # Keep this list in sync with mcp_tool_catalog.VALID_MEMORY_TYPES.
     valid_types = {
         "note", "fact", "decision", "preference", "conversation", "message",
         "task", "code", "config", "observation", "plan", "summary", "snippet",
         "reference", "log", "home", "user_fact", "scratchpad", "knowledge",
         "event_extraction", "chat_log",
+        "local_device", "network_config", "infrastructure", "home_automation",
+        "migration-log", "security",
+        "windows_only", "macos_only", "linux_only", "to_do",
     }
 
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
