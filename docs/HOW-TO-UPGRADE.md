@@ -1,6 +1,6 @@
 # How to Upgrade m3-memory
 
-This guide covers upgrading an existing checkout in place — pulling new code, updating dependencies, running schema migrations, and keeping the host OS current. For a fresh install see [`docs/install_linux.md`](install_linux.md), [`docs/install_macos.md`](install_macos.md), or [`docs/install_windows-powershell.md`](install_windows-powershell.md).
+This guide covers upgrading an existing checkout in place — pulling new code, updating dependencies, running schema migrations, and keeping the host OS current. For a fresh install see [`docs/install_linux.md`](install_linux.md), [`docs/install_macos.md`](install_macos.md), or [`docs/install_windows.md`](install_windows.md).
 
 ---
 

@@ -47,8 +47,8 @@ Create a `docker-compose.yml` that spins up PostgreSQL + ChromaDB alongside M3 M
 - Skills: Docker, docker-compose, networking
 
 ### 8. Add Windows Task Scheduler instructions to install guide
-`install_windows-powershell.md` mentions automated sync but doesn't show how to set up Task Scheduler for `bin/deep_sync.py`. Add step-by-step instructions with screenshots.
-- File: `install_windows-powershell.md`
+`install_windows_homelab.md` mentions automated sync but doesn't show how to set up Task Scheduler for `bin/deep_sync.py`. Add step-by-step instructions with screenshots.
+- File: `install_windows_homelab.md`
 - Skills: Windows, documentation
 
 ---

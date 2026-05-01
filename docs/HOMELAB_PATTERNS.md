@@ -133,7 +133,7 @@ Things we've seen go wrong, and what to do about them:
 - [Configuration & environment variables](ENVIRONMENT_VARIABLES.md) — what to tune for small boxes
 - [Architecture](ARCHITECTURE.md) — system design that makes the homelab patterns work
 - [Comparison guide](COMPARISON.md) — when M3 is the right choice and when it isn't
-- [Sovereign substrates table](M3_Comparison_Table.html) — broader landscape view
+- [Sovereign substrates table](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) — broader landscape view
 
 ---
 

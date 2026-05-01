@@ -177,7 +177,7 @@
 <body>
     <!-- Brand header — click logo to return to README -->
     <div class="brand-header">
-        <a href="../README.md" title="Back to README">
+        <a href="https://github.com/skynetcmd/m3-memory/blob/main/README.md" title="Back to README">
             <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" alt="M3 Memory">
             <span class="name">M3 Memory</span>
         </a>
@@ -190,13 +190,13 @@
     <!-- Honest summary up front: what M3 wins, what it doesn't, and where to go for the developer-tool comparison -->
     <div class="summary">
         <h2>How to read this page</h2>
-        <p>This is a head-to-head against other <strong>sovereign / local-first memory substrates</strong> — projects competing on data residency, integrity, and offline operation. If you're choosing between M3 and a developer-tool memory layer like Mem0, Letta, Zep, or LangChain Memory, see the <a href="COMPARISON.md"><strong>developer-facing decision guide</strong></a> instead.</p>
+        <p>This is a head-to-head against other <strong>sovereign / local-first memory substrates</strong> — projects competing on data residency, integrity, and offline operation. If you're choosing between M3 and a developer-tool memory layer like Mem0, Letta, Zep, or LangChain Memory, see the <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/COMPARISON.md"><strong>developer-facing decision guide</strong></a> instead.</p>
 
         <div class="pillars">
             <div class="pillar"><strong>Sovereignty</strong>Local SQLite, local-<span class="acronym" title="Small Language Model — lightweight on-device language model used for fact extraction">SLM</span> extraction, zero telemetry by default.</div>
             <div class="pillar"><strong>Integrity</strong>Bitemporal logic with native undo across <em>valid time</em> and <em>transaction time</em>.</div>
             <div class="pillar"><strong>Orchestration</strong>Native <span class="acronym" title="Model Context Protocol — Anthropic's open spec used by Claude Code, Gemini CLI, etc.">MCP</span> handoffs, agent registry, atomic <span class="acronym" title="Write-Ahead Logging — SQLite mechanism for safe concurrent writes">WAL</span> writes.</div>
-            <div class="pillar"><strong>Compliance</strong>Built-in <span class="acronym" title="General Data Protection Regulation — Articles 17 (right to erasure) and 20 (data portability)">GDPR</span> primitives; aligns with <a href="M3_Compliance_FISMA.html">FISMA</a> and <a href="M3_Compliance_CMMC.html">CMMC</a>.</div>
+            <div class="pillar"><strong>Compliance</strong>Built-in <span class="acronym" title="General Data Protection Regulation — Articles 17 (right to erasure) and 20 (data portability)">GDPR</span> primitives; aligns with <a href="https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html">FISMA</a> and <a href="https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html">CMMC</a>.</div>
         </div>
 
         <div class="candor">
@@ -282,7 +282,7 @@
             <li><strong>You're committed to a Docker-first ops model</strong> — Mastra OM fits cleanly into containerized stacks.</li>
         </ul>
         <p>If <strong>sovereignty, bitemporal correctness, and a small auditable codebase</strong> matter more than raw recall, M3 is built for that combination — and the table above is the receipt.</p>
-        <p>For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the <a href="COMPARISON.md">developer-facing comparison guide</a>.</p>
+        <p>For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/COMPARISON.md">developer-facing comparison guide</a>.</p>
     </div>
 
     <div class="glossary" id="glossary">
@@ -324,7 +324,7 @@
             <div class="term-header"><h3>Privacy / GDPR</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
             <p><strong>What it means:</strong> Built-in primitives for the right to erasure (Article 17) and data portability (Article 20).</p>
             <p><strong>Why it matters:</strong> Many regulated workloads require these capabilities to be operational, not theoretical. Implementing them retroactively on top of a memory layer is expensive and error-prone.</p>
-            <p><strong>M3 standing:</strong> SOTA — <code>gdpr_forget</code> (hard delete) and <code>gdpr_export</code> (portable JSON) ship as MCP tools. See also the <a href="M3_Compliance_FISMA.html">FISMA</a> and <a href="M3_Compliance_CMMC.html">CMMC</a> alignment notes.</p>
+            <p><strong>M3 standing:</strong> SOTA — <code>gdpr_forget</code> (hard delete) and <code>gdpr_export</code> (portable JSON) ship as MCP tools. See also the <a href="https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html">FISMA</a> and <a href="https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html">CMMC</a> alignment notes.</p>
             <p><strong>Cohort context:</strong> Local-only systems (agentmemory, Memento) inherit privacy by deployment but require custom GDPR tooling. Mem0 has no native GDPR primitives.</p>
         </div>
 
