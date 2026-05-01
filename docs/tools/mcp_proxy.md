@@ -2,7 +2,7 @@
 tool: bin/mcp_proxy.py
 sha1: 3502d47506f6
 mtime_utc: 2026-04-22T01:03:02.043582+00:00
-generated_utc: 2026-04-22T01:22:54.553293+00:00
+generated_utc: 2026-05-01T13:05:26.872236+00:00
 private: false
 ---
 
@@ -63,13 +63,19 @@ Configure clients:
   Aider + Claude:     --model openai/claude-sonnet-4-6 --openai-api-base http://localhost:9000/v1
   OpenClaw:           OPENAI_BASE_URL=http://localhost:9000/v1 (see claw-proxy in .zshrc)
 
+---
+
 ## Entry points
 
 - `if __name__ == "__main__"` guard
 
+---
+
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
+
+---
 
 ## Environment variables read
 
@@ -77,6 +83,8 @@ _(no argparse arguments detected)_
 - `LM_STUDIO_BASE`
 - `MCP_PROXY_ALLOW_DESTRUCTIVE`
 - `MCP_PROXY_HOST`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
@@ -86,12 +94,16 @@ _(no argparse arguments detected)_
 - `mcp_tool_catalog`
 - `memory_bridge`
 
+---
+
 ## Calls OUT (external side-channels)
 
 **http**
 
 - `httpx.AsyncClient()` (line 666)
 
+
+---
 
 ## Notable external imports
 
@@ -101,9 +113,13 @@ _(no argparse arguments detected)_
 - `pydantic (BaseModel, Field)`
 - `uvicorn`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

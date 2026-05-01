@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_agent_instructions.py
-sha1: 539fb6aea7aa
-mtime_utc: 2026-04-22T01:03:02.029175+00:00
-generated_utc: 2026-04-22T01:22:54.521056+00:00
+sha1: ece9a00ff89b
+mtime_utc: 2026-05-01T09:15:53.148020+00:00
+generated_utc: 2026-05-01T13:05:26.786577+00:00
 private: false
 ---
 
@@ -16,40 +16,56 @@ Splits the file into 9 semantic sections, writes each as type=document
 with embed=True. Idempotent: soft-deletes any prior architecture items
 (agent_id="system", source="architecture") before writing fresh ones.
 
+---
+
 ## Entry points
 
-- `async def main()` (line 225)
+- `async def main()` (line 226)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
 _(no argparse arguments detected)_
 
+---
+
 ## Environment variables read
 
 _(none detected)_
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (resolve_db_path)`
 - `memory_bridge (memory_delete, memory_write)`
 
+---
+
 ## Calls OUT (external side-channels)
 
 **sqlite**
 
-- `sqlite3.connect()  → `_db_path()`` (line 232)
-- `sqlite3.connect()  → `_db_path()`` (line 268)
+- `sqlite3.connect()  → `_db_path()`` (line 233)
+- `sqlite3.connect()  → `_db_path()`` (line 269)
 
+
+---
 
 ## Notable external imports
 
 _(only stdlib)_
 
+---
+
 ## File dependencies (repo paths referenced)
 
 - `AGENT_INSTRUCTIONS.md`
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

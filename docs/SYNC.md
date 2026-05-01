@@ -23,6 +23,8 @@ DBs for benchmarking), use `M3_SYNC_DBS` to add them — see the *Advanced*
 section at the bottom — but the repo will not auto-detect them and there
 is no shipped warehouse migration for non-default DBs.
 
+---
+
 ## Setup
 
 You need:
@@ -54,6 +56,8 @@ Note: `memory/migrations/*.sql` (without the `postgres/` subdir) are SQLite
 migrations applied automatically on first connect. Don't put Postgres SQL
 there — `migrate_memory` will warn about malformed files.
 
+---
+
 ## Running sync
 
 Manually:
@@ -75,6 +79,8 @@ Dry-run (just check connectivity, don't write):
 python bin/sync_all.py --dry-run
 ```
 
+---
+
 ## Scheduling
 
 For unattended hourly sync:
@@ -85,6 +91,8 @@ For unattended hourly sync:
 
 The scheduler tolerates outages — if the warehouse is unreachable, sync logs
 a warning and exits cleanly. Next run picks up where it left off.
+
+---
 
 ## How conflict resolution works
 
@@ -98,6 +106,8 @@ the newer one wins. This means:
 - Soft-deletes (rows with `is_deleted=1`) propagate cleanly. The deleted
   state replicates; the row stays in both DBs marked deleted.
 
+---
+
 ## What does NOT sync by default
 
 - **Bench result DBs** — out of scope for the repo. If you run benchmarks
@@ -106,6 +116,8 @@ the newer one wins. This means:
 - **`memory/local_*` rows** — anything tagged `scope='local'` is per-machine
   by design.
 - **`/tmp` scratch and `.scratch/`** — these are workspace, not memory.
+
+---
 
 ## Troubleshooting
 
@@ -129,6 +141,8 @@ warehouse migration. See setup, step 3.
 **Hourly task stops running on Windows** → Task may auto-disable after
 repeated failures. Check `schtasks /Query /FO LIST /V | grep -i m3-memory`
 for `Status: Disabled`. Re-enable with `schtasks /Change /TN "<name>" /ENABLE`.
+
+---
 
 ## Multi-machine quick reference
 

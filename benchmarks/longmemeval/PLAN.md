@@ -27,6 +27,8 @@ The headline 89.0% uses the dataset's `question_type` field as privileged input 
 - Do not rely on strat60 smoke runs for publish-grade decisions — they are retrieval-quality checks only.
 - Do not add benchmark-specific category names (ss-user, ss-assistant, etc.) into `memory_core.py`. Category-aware logic that depends on LongMemEval labels stays in `bin/bench_longmemeval.py`.
 
+---
+
 ## 2. Code placement contract
 
 This plan adheres to the following split:
@@ -36,6 +38,8 @@ This plan adheres to the following split:
 | LongMemEval-specific prompts, dataset munging, category knobs keyed to LME labels | `bin/bench_longmemeval.py` | benchmark-only |
 | Shared retrieval/ingest levers (rerank, HyDE, key-expansion, time boost) | `bin/memory_core.py` / `bin/temporal_utils.py` with gated flags default-off | shared, both benches |
 | Dataset anchor-date parser (LME's `"2023/05/20 (Sat) 02:21"`) | `bin/bench_longmemeval.py`, registered via `temporal_utils.register_anchor_parser()` | benchmark-only |
+
+---
 
 ## 3. Current state on main
 
@@ -64,6 +68,8 @@ This plan adheres to the following split:
 - `role_boost` (ss-user / ss-assistant) — LongMemEval-specific category-name boost, belongs only in bench_longmemeval.py
 - `BENCH_RUN_ID` / `BENCH_CHANGE_AGENT` / `--wipe-run` / `--wipe-all-bench` — provenance + targeted wipe helpers
 
+---
+
 ## 4. Regression-detection contract
 
 Every retrieval change must produce a judged full-500q run before merging to `main`. Gates:
@@ -77,6 +83,8 @@ Every retrieval change must produce a judged full-500q run before merging to `ma
 4. **Noise band**: differences under ±1.5pp are treated as noise (published data shows ≈±0.7pp single-direction variance).
 5. **Budget**: plan for 2 runs per trialed feature — one A, one A+feature — on the same DB snapshot, same day, same LM Studio / llama-server process.
 6. **Cross-benchmark gate**: any change that modifies `memory_core.py` or `temporal_utils.py` must also pass the Phase1 LoCoMo audit (see `benchmarks/locomo/PLAN.md`) before merging.
+
+---
 
 ## 5. Test inventory
 
@@ -114,6 +122,8 @@ Every retrieval change must produce a judged full-500q run before merging to `ma
 | `benchmarks/longmemeval/stage2_rerank.json` | main | Stage 2 — after rerank |
 | `benchmarks/longmemeval/stage3_hyde.json` | main | Stage 3 — after HyDE trial |
 | `benchmarks/longmemeval/stage4_contextual_keys.json` | main | Stage 4 — after LoCoMo key-expansion lands |
+
+---
 
 ## 6. Staged plan
 
@@ -210,6 +220,8 @@ Once Stages 0-4 produce a measurable smart-retrieval lift, update `benchmarks/lo
 - Add the new ablation rows (runtime classifier, rerank, etc.).
 - Update the "14.2pp gap" paragraph to reflect what closed and what remains.
 
+---
+
 ## 7. Test procedures (how-to)
 
 ### A — Smart-retrieval per-category run
@@ -262,6 +274,8 @@ Any run that violates the Section 4 contract:
 
 Before drawing any conclusion from a sub-2pp delta, re-run the same config once more. Published band is ±0.7pp; confirm the delta sign holds across both runs.
 
+---
+
 ## 8. Risks and mitigations
 
 | Risk | Mitigation |
@@ -273,6 +287,8 @@ Before drawing any conclusion from a sub-2pp delta, re-run the same config once 
 | Cross-benchmark regression from shared changes | Every main-side change requires both LME + Phase1 audits before merge |
 | Reproducibility drift across weeks | Pin answer/judge model IDs; record dataset + code git SHA in every `results.json` |
 
+---
+
 ## 9. Timeline
 
 | Stage | Wall time | Gating |
@@ -283,6 +299,8 @@ Before drawing any conclusion from a sub-2pp delta, re-run the same config once 
 | 3 — HyDE trial | 0.5 day | independent |
 | 4 — contextual keys | 0.5 day plumbing, depends on Phase1 | blocked on Phase1 PLAN Stage 1 |
 | 5 — publish refresh | 0.5 day | after 0-4 |
+
+---
 
 ## 10. References
 

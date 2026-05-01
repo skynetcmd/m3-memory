@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_backfill_title.py
-sha1: 30536db20b60
-mtime_utc: 2026-04-28T02:32:27.080198+00:00
-generated_utc: 2026-04-28T15:48:17.315120+00:00
+sha1: fec7c9a8ec45
+mtime_utc: 2026-05-01T09:15:53.147020+00:00
+generated_utc: 2026-05-01T13:05:26.818794+00:00
 private: false
 ---
 
@@ -24,10 +24,14 @@ Quick start:
     python bin/m3_chatlog_backfill_title.py --dry-run
     python bin/m3_chatlog_backfill_title.py
 
+---
+
 ## Entry points
 
 - `def main()` (line 224)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -45,13 +49,19 @@ Quick start:
 | `--skip-backup` |  | `False` |  | store_true |  |
 | `--yes`, `-y` |  | `False` |  | store_true |  |
 
+---
+
 ## Environment variables read
 
 _(none detected)_
 
+---
+
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
+
+---
 
 ## Calls OUT (external side-channels)
 
@@ -62,14 +72,20 @@ _(none detected)_
 - `sqlite3.connect()  → `str(db_path)`` (line 127)
 
 
+---
+
 ## Notable external imports
 
 _(only stdlib)_
+
+---
 
 ## File dependencies (repo paths referenced)
 
 - `agent_chatlog.db`
 - `agent_memory.db`
+
+---
 
 ## Re-validation
 

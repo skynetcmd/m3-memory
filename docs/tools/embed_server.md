@@ -2,7 +2,7 @@
 tool: bin/embed_server.py
 sha1: a87c64f38993
 mtime_utc: 2026-04-19T19:36:52.760678+00:00
-generated_utc: 2026-04-19T21:10:11.599464+00:00
+generated_utc: 2026-05-01T13:05:26.788665+00:00
 private: false
 ---
 
@@ -20,10 +20,14 @@ Usage:
     python bin/embed_server.py                     # default: port 1234
     python bin/embed_server.py --port 9900
 
+---
+
 ## Entry points
 
 - `def main()` (line 92)
 - `if __name__ == "__main__"` guard
+
+---
 
 ## CLI flags / arguments
 
@@ -34,17 +38,25 @@ Usage:
 | `--host` | Host to bind to (default 127.0.0.1; set 0.0.0.0 to serve on LAN) | `os.environ.get('EMBED_SERVER_HOST', '127.0.0.1')` | Binds only to 127.0.0.1 (localhost only) | str | Binds to specified host (0.0.0.0 for LAN access) |
 | `--device` | Device to use (e.g. cuda:0, cpu) | None | Auto-detects: picks cuda:0 if torch.cuda.is_available() else CPU. | str | Forces the SentenceTransformer onto the specified device. |
 
+---
+
 ## Environment variables read
 
 - `EMBED_SERVER_HOST`
+
+---
 
 ## Calls INTO this repo (intra-repo imports)
 
 _(none detected)_
 
+---
+
 ## Calls OUT (external side-channels)
 
 _(no subprocess / http / sqlite calls detected)_
+
+---
 
 ## Notable external imports
 
@@ -54,9 +66,13 @@ _(no subprocess / http / sqlite calls detected)_
 - `torch`
 - `uvicorn`
 
+---
+
 ## File dependencies (repo paths referenced)
 
 _(none detected)_
+
+---
 
 ## Re-validation
 

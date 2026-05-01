@@ -26,6 +26,8 @@ ranked = await memory_search_scored_impl(
 )
 ```
 
+---
+
 ## Why you might want this
 
 A single embedding vector per turn forces you to choose which textual
@@ -44,6 +46,8 @@ vote at retrieval time. The fusion rule is simple: for every
 cosine against the query. `bm25` is per-item (not per-kind), so nothing
 is lost in the dedup — only the losing vector's similarity signal is
 discarded.
+
+---
 
 ## How it works
 
@@ -80,6 +84,8 @@ One new kwarg:
 | `vector_kind_strategy` | `"default"` | `"default"` pins the SQL join to `vector_kind='default'` (preserves pre-v022 behavior). `"max"` lets all kinds through, then dedupes by `memory_id` keeping the row with the highest query-vector cosine. |
 
 Invalid values raise `ValueError`.
+
+---
 
 ## Worked example
 
@@ -120,6 +126,8 @@ The cost is one extra embedding call per eligible turn at ingest time,
 and one extra DB row per eligible turn. Retrieval pays a tiny dedup pass
 (linear in the returned candidate pool, bounded by `SEARCH_ROW_CAP`).
 
+---
+
 ## When NOT to use it
 
 - **No enricher available.** `dual_embed=True` without an enricher is a
@@ -135,12 +143,16 @@ and one extra DB row per eligible turn. Retrieval pays a tiny dedup pass
   (or changing the enricher prompt) shifts which vectors exist and
   therefore which one wins per turn.
 
+---
+
 ## Profile setup for the SLM enricher
 
 See [`SLM_INTENT.md`](SLM_INTENT.md) for the full profile schema. The
 shipped `config/slm/contextual_keys.yaml` profile is a working starting
 point targeting a local LM Studio endpoint. For a cloud backend (opt-in),
 see the "Cloud backends are opt-in" section in the same doc.
+
+---
 
 ## Migration compatibility
 
@@ -151,6 +163,8 @@ and its index. If non-`default` rows exist when you run the down, they
 collapse into the single pre-v022 shape — you lose the distinction but
 not the vectors.
 
+---
+
 ## Tests
 
 - `tests/test_embed_key_enricher.py` covers the enricher hook +
@@ -158,6 +172,8 @@ not the vectors.
   no-enricher no-op).
 - `tests/test_vector_kind_strategy.py` covers the retrieval kwarg
   (signature, invalid-value, SQL filter presence, max-kind dedupe).
+
+---
 
 ## Related: fact_enriched memory type
 
