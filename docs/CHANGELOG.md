@@ -71,13 +71,13 @@ are part of this release; their detail is preserved below.
   - [`docs/COMPARISON.md`](COMPARISON.md) — new "Where the cognition
     lives" framing section; honest table additions for
     multi-agent concurrent writes and cognition placement.
-  - [`docs/M3_Comparison_Table.html`](M3_Comparison_Table.html) —
+  - [`docs/M3_Comparison_Table.html`](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) —
     rebranded sovereign-substrates comparison table; honest
     reordering, accurate MCP expansion, candor block on the LME-S
     accuracy gap.
   - [`docs/COMPLIANCE.md`](COMPLIANCE.md) +
-    [`docs/M3_Compliance_FISMA.html`](M3_Compliance_FISMA.html) +
-    [`docs/M3_Compliance_CMMC.html`](M3_Compliance_CMMC.html) —
+    [`docs/M3_Compliance_FISMA.html`](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html) +
+    [`docs/M3_Compliance_CMMC.html`](https://htmlpreview.github.io/?https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html) —
     framework alignment notes (FISMA / NIST 800-53, CMMC 2.0 /
     NIST 800-171).
   - [`docs/HOMELAB_PATTERNS.md`](HOMELAB_PATTERNS.md) — three
