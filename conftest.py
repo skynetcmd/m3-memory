@@ -16,14 +16,13 @@ if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
 # Files at the repo root that pytest must NOT try to collect.
-# CLAUDE.md is a git symlink (mode 120000) pointing at
-# docs/AGENT_INSTRUCTIONS.md so Claude Code picks up the instructions.
-# On Linux/macOS it's a real symlink; on Windows the GitHub runner
-# checks it out as a "broken" symlink that pytest's scandir(...)
-# +is_file() trips on with OSError WinError 123. Excluding it from
-# collection avoids that platform-specific crash without affecting
-# anything else (CLAUDE.md is not a test file).
-collect_ignore = ["CLAUDE.md"]
+# CLAUDE.md and GEMINI.md were once tracked as git symlinks (mode
+# 120000) pointing at docs/AGENT_INSTRUCTIONS.md so coding agents pick
+# up the instructions. They've been converted to regular files in
+# 2026-05-01 to fix Windows pytest collection (broken symlinks tripped
+# scandir+is_file with OSError WinError 123). Belt-and-braces: keep
+# them out of pytest collection regardless of how they're stored.
+collect_ignore = ["CLAUDE.md", "GEMINI.md"]
 
 
 @pytest.fixture(autouse=True)
