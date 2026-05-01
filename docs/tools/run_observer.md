@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: c261d788348d
-mtime_utc: 2026-04-29T17:11:29.019885+00:00
-generated_utc: 2026-04-29T17:56:17.499425+00:00
+sha1: d568ebe84ade
+mtime_utc: 2026-05-01T07:13:07.615386+00:00
+generated_utc: 2026-05-01T08:48:37.678123+00:00
 private: false
 ---
 
@@ -37,7 +37,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 595)
+- `def main()` (line 619)
 - `if __name__ == "__main__"` guard
 
 ## CLI flags / arguments
@@ -61,14 +61,11 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 - `auth_utils (get_api_key)`
 - `memory_core`
 - `slm_intent (load_profile)`
+- `unified_ai (async_client_for_profile)`
 
 ## Calls OUT (external side-channels)
 
-**http**
-
-- `httpx.AsyncClient()` (line 474)
-- `httpx.AsyncClient()` (line 515)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 

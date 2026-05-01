@@ -87,6 +87,11 @@ CORE_LIBRARIES = {
     # imported by memory_core.memory_search_routed_impl when auto_route=True.
     # No CLI surface but load-bearing for the AUTO retrieval layer.
     "auto_route.py",
+    # unified_ai is a multi-provider chat client + httpx-hardening helper
+    # imported by m3_enrich and run_observer to dodge keep-alive hangs on
+    # the Gemini OAI-compat endpoint. No CLI surface but load-bearing for
+    # any cloud-backend enrichment run.
+    "unified_ai.py",
 }
 
 _ENV_RE = re.compile(r"""os\.(?:environ\.get|getenv)\(\s*['"]([A-Z0-9_]+)['"]""")
