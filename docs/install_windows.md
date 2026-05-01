@@ -81,7 +81,7 @@ claude mcp add memory mcp-memory
 
 The full homelab walkthrough — Postgres sync, ChromaDB, LM Studio embedding
 server, multi-machine federation — lives at
-[install_windows-powershell.md](install_windows-powershell.md). Most users
+[install_windows_homelab.md](install_windows_homelab.md). Most users
 don't need any of that; the quickstart above is enough for a working local
 install.
 
