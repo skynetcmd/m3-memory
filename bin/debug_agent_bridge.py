@@ -16,7 +16,6 @@ import asyncio
 import logging
 import os
 import platform
-import re
 import sqlite3
 import sys
 import uuid

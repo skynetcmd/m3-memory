@@ -11,7 +11,6 @@ DEFAULT_PROTECTED_TYPES = ("preference", "user_fact", "task", "plan")
 import memory_core
 from memory_core import (
     ARCHIVE_DB_PATH,
-    DB_PATH,
     DEDUP_LIMIT,
     DEDUP_THRESHOLD,
     _content_hash,

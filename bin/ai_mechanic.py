@@ -1,7 +1,7 @@
 import argparse
 import os
-import sys
 import sqlite3
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m3_sdk import add_database_arg, resolve_db_path

@@ -5,10 +5,18 @@ import logging
 import os
 import sqlite3
 from contextlib import contextmanager
-from memory_core import (
-    ctx, _pack, _unpack, CHROMA_BASE_URL, CHROMA_COLLECTION, CHROMA_V2_PREFIX, CHROMA_CONTENT_MAX, EMBED_DIM
-)
+
 import migrate_memory
+from memory_core import (
+    CHROMA_BASE_URL,
+    CHROMA_COLLECTION,
+    CHROMA_CONTENT_MAX,
+    CHROMA_V2_PREFIX,
+    EMBED_DIM,
+    _pack,
+    _unpack,
+    ctx,
+)
 
 logger = logging.getLogger("memory_sync")
 
@@ -169,7 +177,7 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
         return 0, 0, ""
 
     from datetime import datetime, timezone
-    
+
     # 1. Get last pull timestamp
     last_pull = "1970-01-01T00:00:00Z"
     with _get_db(target.db_path) as db:
@@ -187,7 +195,7 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
         }, timeout=30.0)
         resp.raise_for_status()
         data = resp.json()
-        
+
         if not data.get("ids"): return 0, 0, ""
 
         ids = data["ids"]
@@ -201,7 +209,7 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
         with _get_db(target.db_path) as db:
             if not _table_exists(db, "chroma_mirror"):
                 return 0, 0, ""
-                
+
             for i in range(len(ids)):
                 mid = ids[i]
                 meta = metadatas[i]
@@ -212,7 +220,7 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
                     continue
 
                 db.execute("""
-                    INSERT INTO chroma_mirror 
+                    INSERT INTO chroma_mirror
                     (id, type, title, content, metadata_json, agent_id, model_id, origin_device, importance, remote_created_at, pulled_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
@@ -221,12 +229,12 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
                         importance = excluded.importance,
                         pulled_at = excluded.pulled_at
                 """, (
-                    mid, meta.get("type", "note"), meta.get("title", ""), content, 
+                    mid, meta.get("type", "note"), meta.get("title", ""), content,
                     json.dumps(meta), meta.get("agent_id", ""), meta.get("model_id", ""),
                     meta.get("origin_device", ""), meta.get("importance", 0.5),
                     meta.get("created_at", last_pull), datetime.now(timezone.utc).isoformat()
                 ))
-                
+
                 db.execute("""
                     INSERT INTO chroma_mirror_embeddings (id, mirror_id, embedding, dim, pulled_at)
                     VALUES (?, ?, ?, ?, ?)
@@ -234,12 +242,12 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
                         embedding = excluded.embedding,
                         pulled_at = excluded.pulled_at
                 """, (mid, mid, _pack(emb_vec), len(emb_vec), datetime.now(timezone.utc).isoformat()))
-                
+
                 pulled += 1
 
             db.execute("INSERT OR REPLACE INTO sync_state (collection_name, last_pull_at) VALUES (?, ?)",
                       (CHROMA_COLLECTION, datetime.now(timezone.utc).isoformat()))
-            
+
     except Exception as e:
         logger.exception(f"[{target.name}] ChromaDB pull failed: {e}")
         failed = max_items
@@ -293,22 +301,22 @@ async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
         return "ChromaDB unreachable"
 
     col_path = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{col_id}"
-    
+
     total_pushed, total_pulled, total_failed = 0, 0, 0
-    
+
     for target in targets:
         logger.info(f"--- Chroma Sync target: {target.name} ---")
         pushed, p_failed = 0, 0
         pulled, l_failed = 0, 0
-        
+
         if direction in ("push", "both"):
             pushed, p_failed, _ = await _push_to_chroma(client, col_id, col_path, max_items, target)
-        
+
         if direction in ("pull", "both"):
             pulled, l_failed, _ = await _pull_from_chroma(client, col_id, col_path, max_items, target)
-        
+
         total_pushed += pushed
         total_pulled += pulled
         total_failed += (p_failed + l_failed)
-        
+
     return f"Synced: {total_pushed} pushed, {total_pulled} pulled, {total_failed} failed"

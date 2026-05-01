@@ -49,25 +49,23 @@ _MAIN_BIN = REPO_ROOT / "bin"
 if str(_MAIN_BIN) not in sys.path:
     sys.path.insert(0, str(_MAIN_BIN))
 
-import httpx  # noqa: E402
-
-import memory_core as mc  # noqa: E402
-from auth_utils import get_api_key  # noqa: E402
-from slm_intent import (  # noqa: E402
-    Profile,
-    invalidate_cache as invalidate_profile_cache,
-    load_profile,
-    _parse_profile,
-)
-
-# Reuse Observer + Reflector implementations.
-import run_observer as observer  # noqa: E402
-import run_reflector as reflector  # noqa: E402
 
 # Optional durable state machine (migration 028). Imported lazily-friendly:
 # m3_enrich works without the tables present unless --track-state / --resume.
 import enrichment_state as estate  # noqa: E402
 
+# Reuse Observer + Reflector implementations.
+import run_observer as observer  # noqa: E402
+import run_reflector as reflector  # noqa: E402
+from auth_utils import get_api_key  # noqa: E402
+from slm_intent import (  # noqa: E402
+    Profile,
+    _parse_profile,
+    load_profile,
+)
+from slm_intent import (
+    invalidate_cache as invalidate_profile_cache,
+)
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
@@ -458,8 +456,8 @@ async def _run_db(
 
     Returns an abort_reason string if budget tripped, else None.
     """
-    import sqlite3
     import random as _random
+    import sqlite3
     os.environ["M3_DATABASE"] = str(db_path)
     _ensure_migration_025(db_path)
     groups = _query_eligible_groups(
@@ -849,7 +847,9 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
         batch=args.drain_batch,
     )
 
-    grand = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
+    # `grand` totals were intended here but the per-DB drainer prints its
+    # own summary and there's nothing to aggregate at this scope. Removed
+    # the unused init in 2026-05-01 cleanup.
     for label, db_path in db_targets:
         os.environ["M3_DATABASE"] = str(db_path)
         # Ensure migration 025 + chroma_sync_queue exist (cheap idempotent check).
@@ -1093,8 +1093,8 @@ async def _main_async(args) -> int:
     print(f"  empty (no extractable user-facts): {counters_total['empty_groups']}")
     print(f"  failed: {counters_total['failed']}")
     print()
-    print(f"  retrieve later via:")
-    print(f"    M3_PREFER_OBSERVATIONS=1 mcp__memory__memory_search ...")
+    print("  retrieve later via:")
+    print("    M3_PREFER_OBSERVATIONS=1 mcp__memory__memory_search ...")
     print(f"  (or pass --observer-variant {args.target_variant} to the bench harness)")
     return 0
 

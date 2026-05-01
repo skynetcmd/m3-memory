@@ -25,7 +25,7 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -301,7 +301,7 @@ async def gather_health() -> dict:
 def format_human_readable(health: dict) -> str:
     """Format health dict as human-readable text."""
     lines = []
-    lines.append(f"ChromaDB Sync Health Report")
+    lines.append("ChromaDB Sync Health Report")
     lines.append(f"Timestamp: {health['timestamp_utc']}")
     lines.append("")
 
@@ -327,7 +327,7 @@ def format_human_readable(health: dict) -> str:
         )
         lines.append(f"Remote: REACHABLE (v{remote['version']}, {latency_str})")
     else:
-        lines.append(f"Remote: UNREACHABLE")
+        lines.append("Remote: UNREACHABLE")
 
     # Sync
     sync = health["sync"]

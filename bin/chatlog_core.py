@@ -273,7 +273,7 @@ def _executemany_insert(batch: list[dict]) -> int:
     ``_db_path`` (legacy queued items from a running process pre-upgrade)
     fall back to the live resolver.
     """
-    from m3_sdk import active_database, M3Context
+    from m3_sdk import M3Context, active_database
 
     sql = (
         "INSERT INTO memory_items ("

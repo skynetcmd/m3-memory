@@ -81,6 +81,7 @@ def rotate_secrets(dry_run: bool = False):
 if __name__ == "__main__":
     import argparse
     import os as _os
+
     from m3_sdk import add_database_arg
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")

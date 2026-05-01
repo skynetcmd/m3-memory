@@ -189,7 +189,7 @@ def _print_dry_run(plan: dict) -> None:
             print(f"        {t:<22} {n}")
         # Sample 3 derived titles for review
         if db_info.get("samples"):
-            print(f"     samples:")
+            print("     samples:")
             for old, new in db_info["samples"][:3]:
                 print(f"        {old!r:<30} → {new!r}")
         print()

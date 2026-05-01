@@ -53,7 +53,6 @@ from __future__ import annotations
 #   (for agent_memory.db tables the legacy bare keys are kept to avoid
 #    resetting existing watermarks).
 # ============================================================================
-
 import argparse
 import os
 import sys
@@ -77,10 +76,9 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-import yaml
-
-from m3_sdk import M3Context
 import migrate_memory
+import yaml
+from m3_sdk import M3Context
 
 # Python 3.12+ sqlite3 datetime adapter deprecation fix
 sqlite3.register_adapter(datetime, lambda val: val.isoformat())
@@ -831,7 +829,11 @@ def _sync_table_generic(
     name = table_cfg["name"]
     pk_columns: list[str] = table_cfg.get("pk_columns", ["id"])
     ts_col: str | None = table_cfg.get("timestamp_column")
-    tombstone_col: str | None = table_cfg.get("tombstone_column")
+    # tombstone_col is read from config but not yet honored in this generic
+    # path — the tasks table has bespoke tombstone handling in
+    # sync_tasks_table. Keeping the read so manifests with tombstone_column
+    # don't break the schema; underscore-prefix silences the unused-var lint.
+    _tombstone_col: str | None = table_cfg.get("tombstone_column")  # noqa: F841 — placeholder for future generic-path support
     skip: bool = table_cfg.get("skip", False)
 
     if skip:
@@ -1111,8 +1113,8 @@ def main():
             if args.dry_run:
                 for target in targets:
                     logger.info(f"[DRY-RUN] Would sync target {target.name} ({target.db_path})")
-                    logger.info(f"[DRY-RUN] Tables: memory_items, memory_embeddings, "
-                                f"memory_relationships, tasks, synchronized_secrets")
+                    logger.info("[DRY-RUN] Tables: memory_items, memory_embeddings, "
+                                "memory_relationships, tasks, synchronized_secrets")
                 return
 
             with ctx.pg_connection() as pg_conn:

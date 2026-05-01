@@ -35,6 +35,7 @@ if IS_WIN:
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE = pathlib.Path(__file__).parent.parent.resolve()
 import sys as _sys
+
 _sys.path.insert(0, str(BASE / "bin"))
 try:
     from m3_sdk import resolve_db_path as _resolve_db

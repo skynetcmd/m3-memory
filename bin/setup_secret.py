@@ -32,6 +32,7 @@ def _db_path() -> str:
 # Expose DB_PATH for backward compat with any helper scripts that imported it
 # from here; it reflects the *default* location, not the active resolved path.
 import auth_utils as _auth_utils
+
 DB_PATH = _auth_utils.DB_PATH
 
 # Known external services. Format validators return (ok, message).

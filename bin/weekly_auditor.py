@@ -33,6 +33,7 @@ REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 # top-level imports still work for tools that import helpers from this file.
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 from m3_sdk import add_database_arg, resolve_db_path
+
 DB_PATH = resolve_db_path(None)
 
 
