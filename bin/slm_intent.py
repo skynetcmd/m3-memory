@@ -55,7 +55,7 @@ import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -302,7 +302,7 @@ async def _call_model(
         # System prompt: either a plain string or a list-of-blocks wrapping
         # the text in a cache_control ephemeral block.
         if prof.cache_system and prof.system:
-            system_field = [{
+            system_field: list[dict[str, Any]] | str = [{
                 "type": "text",
                 "text": prof.system,
                 "cache_control": {"type": "ephemeral"},

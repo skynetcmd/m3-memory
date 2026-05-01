@@ -756,7 +756,7 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
                     # PG returns memoryview for BYTEA — convert to bytes
                     if isinstance(row_list[2], memoryview):
                         row_list[2] = bytes(row_list[2])
-                    batch.append(row_list)
+                    batch.append(tuple(row_list))
 
                 sl_cur.executemany("""
                     INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim)

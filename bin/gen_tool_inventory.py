@@ -679,7 +679,7 @@ def main() -> None:
             continue
 
         doc = extract_docstring(tree)
-        args = extract_argparse(tree)
+        argparse_args = extract_argparse(tree)
         env_vars = extract_env_vars(source)
         entry_points = extract_entry_points(tree, source)
         intra, external = extract_imports(tree, repo_mods, src.stem)
@@ -705,7 +705,7 @@ def main() -> None:
         # (overrides pointing at flags that were removed from source).
         live_keys: set[tuple[str, int]] = set()
         _live_counter: dict[str, int] = {}
-        for a in args:
+        for a in argparse_args:
             if not a["names"]:
                 continue
             fn = a["names"][0]
@@ -733,7 +733,7 @@ def main() -> None:
 
         gen_placeholder = "__GEN_UTC_PLACEHOLDER__"
         mtime_placeholder = "__MTIME_PLACEHOLDER__"
-        candidate = render_entry(rel, sha1, mtime_placeholder, doc, args, env_vars,
+        candidate = render_entry(rel, sha1, mtime_placeholder, doc, argparse_args, env_vars,
                                  entry_points, intra, external, external_calls,
                                  file_deps, private, flag_overrides,
                                  generated_utc=gen_placeholder)

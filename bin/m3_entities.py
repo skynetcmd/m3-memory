@@ -588,11 +588,11 @@ async def _main_async(args: argparse.Namespace) -> int:
         await _smoke_profile(profile, token, valid_types, valid_predicates)
         for label, db_path in db_targets:
             backup = _backup_db(db_path)
-            print(f"[m3-entities] backup: {db_path.name} → {backup}", flush=True)
+            print(f"[m3-entities] backup: {db_path.name} -> {backup}", flush=True)
 
-    counters_total = defaultdict(int)
+    counters_total: defaultdict[str, int] = defaultdict(int)
     for label, db_path in db_targets:
-        counters = defaultdict(int)
+        counters: defaultdict[str, int] = defaultdict(int)
         await _run_db(
             db_path, profile, token, valid_types, valid_predicates,
             type_allowlist, args.source_variant, args.concurrency,
