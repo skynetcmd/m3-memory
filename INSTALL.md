@@ -207,10 +207,15 @@ you pass `--capture-mode both` to `install-m3`).
 
 ## Per-OS walkthroughs
 
-These documents cover the from-scratch homelab install including optional
-Postgres + ChromaDB + LM Studio wiring. They are **not** required for a
-working local-only setup:
+Quick installers for each OS:
 
-- [docs/install_windows-powershell.md](docs/install_windows-powershell.md)
-- [docs/install_macos.md](docs/install_macos.md)
-- [docs/install_linux.md](docs/install_linux.md)
+- [docs/install_windows.md](docs/install_windows.md) — PowerShell + winget
+- [docs/install_macos.md](docs/install_macos.md) — `curl … | bash` via Homebrew
+- [docs/install_linux.md](docs/install_linux.md) — `curl … | bash` (apt / dnf / pacman / zypper / apk)
+
+Full homelab walkthroughs covering optional Postgres + ChromaDB + LM Studio
+wiring (not required for a local-only setup):
+
+- [docs/install_windows_homelab.md](docs/install_windows_homelab.md)
+- [docs/install_macos_homelab.md](docs/install_macos_homelab.md)
+- [docs/install_linux_homelab.md](docs/install_linux_homelab.md)
