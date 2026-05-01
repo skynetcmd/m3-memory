@@ -8,6 +8,19 @@ import uuid
 # imports agent_protocol shares one compiled pattern.
 _THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 
+# Most chat models occasionally wrap JSON output in markdown code fences
+# (```json ... ``` or plain ```). Observer/Reflector/entity-extractor
+# pipelines all need to strip these before json.loads(). Module-scope
+# matches the per-LLM-response criterion in the 2026-04-17 regex
+# precompile decision: hot enough to compile, identical pattern across
+# three call sites, so one source of truth wins.
+CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+
+def strip_code_fences(text: str) -> str:
+    """Strip leading/trailing markdown code fences from an LLM response."""
+    return CODE_FENCE_RE.sub("", text).strip()
+
 
 class AgentProtocol:
     """
