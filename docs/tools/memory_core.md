@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 7370e0712a41
-mtime_utc: 2026-04-28T17:18:08.904219+00:00
-generated_utc: 2026-04-29T13:47:46.832780+00:00
+sha1: 4ab8e924a544
+mtime_utc: 2026-05-01T03:38:16.423097+00:00
+generated_utc: 2026-05-01T08:48:37.601300+00:00
 private: false
 ---
 
@@ -116,6 +116,7 @@ _(no argparse arguments detected)_
 - `embedding_utils (pack)`
 - `embedding_utils (unpack)`
 - `llm_failover (clear_embed_cache)`
+- `llm_failover (clear_failover_caches)`
 - `llm_failover (get_best_embed, get_best_llm, get_smallest_llm)`
 - `m3_sdk (M3Context, resolve_db_path)`
 - `migrate_memory (_classify_db)`
@@ -125,11 +126,11 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1195)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1204)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1159)
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1168)
 
 
 ## Notable external imports

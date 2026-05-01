@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-04-29T17:56:18.052452+00:00._
+_Generated 2026-05-01T08:49:49.147007+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -87,6 +87,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_mcp_proxy_unit.py](test_mcp_proxy_unit.md) | test_mcp_proxy_unit.py - In-process unit tests for mcp_proxy. |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
+| [bin/unified_ai.py](unified_ai.md) | Unified chat client across Gemini, Claude, and LM Studio. |  |
 | [bin/web_research_bridge.py](web_research_bridge.md) | (no docstring) |  |
 | [bin/weekly_auditor.py](weekly_auditor.md) | Weekly Audit Report -- M3 Memory |  |
 | [install_os.py](install_os.md) | (no docstring) |  |
