@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3 Memory — Sovereign Memory Systems Comparison (May 2026)</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+        :root { --col1-width: 340px; --m3-blue: #1e40af; --m3-ink: #0f172a; --m3-muted: #64748b; }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0; padding: 24px;
+            background: #f8f9fa; color: var(--m3-ink);
+            line-height: 1.65;
+        }
+
+        /* Brand header — same icon + linkback as the rest of the docs */
+        .brand-header {
+            max-width: 1200px;
+            margin: 0 auto 24px;
+            display: flex; align-items: center; gap: 16px;
+            padding: 12px 20px;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 12px -4px rgb(15 23 42 / 0.08);
+        }
+        .brand-header a { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--m3-ink); }
+        .brand-header img { height: 44px; }
+        .brand-header .name { font-weight: 600; font-size: 1.15rem; }
+        .brand-header .crumb { color: var(--m3-muted); margin-left: auto; font-size: 0.9rem; }
+
+        h1 { text-align: center; color: var(--m3-ink); margin: 6px 0; font-size: 2.1rem; }
+        .subtitle { text-align: center; color: var(--m3-muted); font-size: 1.05rem; margin-bottom: 28px; }
+
+        /* Honest summary block — no marketing-speak, plain facts */
+        .summary {
+            max-width: 1200px;
+            margin: 0 auto 32px;
+            background: white;
+            padding: 24px 28px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 12px -4px rgb(15 23 42 / 0.08);
+        }
+        .summary h2 { color: var(--m3-blue); margin: 0 0 12px; font-size: 1.25rem; }
+        .summary p { margin: 8px 0; }
+        .summary .pillars {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .summary .pillar {
+            background: #f1f5f9;
+            border-left: 4px solid var(--m3-blue);
+            padding: 12px 14px;
+            border-radius: 6px;
+            font-size: 0.93rem;
+        }
+        .summary .pillar strong { display: block; color: var(--m3-blue); margin-bottom: 4px; }
+        .summary .candor {
+            margin-top: 16px;
+            padding: 14px 16px;
+            background: #fef9c3;
+            border-left: 4px solid #ca8a04;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+
+        .table-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            overflow-y: auto; overflow-x: scroll;
+            max-height: 82vh;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px -5px rgb(15 23 42 / 0.1);
+            border: 1px solid #e2e8f0;
+            padding-bottom: 20px;
+        }
+
+        table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+        th, td {
+            padding: 14px 16px;
+            text-align: left; vertical-align: top;
+            border-bottom: 1px solid #e2e8f0;
+            border-right: 1px solid #e2e8f0;
+            white-space: nowrap;
+        }
+        th:last-child, td:last-child { border-right: none; }
+
+        thead th { position: sticky; top: 0; background: #f1f5f9; font-weight: 600; color: var(--m3-blue); z-index: 60; border-bottom: 3px solid var(--m3-blue); }
+        td:first-child, th:first-child { position: sticky; left: 0; background: #f1f5f9; z-index: 50; min-width: var(--col1-width); max-width: var(--col1-width); border-right: 3px solid var(--m3-muted); white-space: normal; }
+        td:nth-child(2), th:nth-child(2) { position: sticky; left: var(--col1-width); background: #f8fafc; z-index: 55; border-right: 5px solid #334155; box-shadow: 5px 0 12px -4px rgba(0,0,0,0.25); }
+        thead th:first-child, thead th:nth-child(2) { z-index: 70 !important; background: #e0e7ff; border-right: 5px solid #334155; }
+
+        tbody tr:nth-child(even) { background-color: #f8fafc; }
+        tbody tr:nth-child(even) td:first-child,
+        tbody tr:nth-child(even) td:nth-child(2) { background-color: #f1f5f9; }
+        tbody tr:hover td { background-color: #e0f2fe !important; }
+
+        .main-row td:first-child { font-size: 1.05rem; font-weight: 600; }
+        .sub-row td:first-child { padding-left: 52px !important; font-size: 0.93rem; color: #374151; }
+
+        /* Section divider rows for honest grouping */
+        .group-row td {
+            background: #1e293b !important;
+            color: #f1f5f9 !important;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            white-space: normal;
+        }
+        .group-row td:first-child, .group-row td:nth-child(2) { background: #1e293b !important; }
+
+        /* Acronym Tooltips */
+        .acronym {
+            border-bottom: 1px dotted var(--m3-muted);
+            cursor: help;
+        }
+
+        .legend {
+            max-width: 1200px;
+            margin: 36px auto 0;
+            background: white; border-radius: 16px;
+            box-shadow: 0 10px 30px -5px rgb(15 23 42 / 0.1);
+            border: 1px solid #e2e8f0; padding: 28px;
+        }
+        .legend h2 { color: var(--m3-blue); margin-top: 0; }
+        .legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+        .legend-grid > div { font-size: 0.93rem; }
+
+        .when-other {
+            max-width: 1200px;
+            margin: 36px auto 0;
+            background: white; border-radius: 16px;
+            box-shadow: 0 10px 30px -5px rgb(15 23 42 / 0.1);
+            border: 1px solid #e2e8f0; padding: 28px;
+        }
+        .when-other h2 { color: var(--m3-blue); margin-top: 0; }
+        .when-other ul { margin: 12px 0; padding-left: 24px; }
+        .when-other li { margin: 8px 0; }
+
+        .glossary {
+            max-width: 1200px;
+            margin: 36px auto 0;
+            background: white; border-radius: 16px;
+            box-shadow: 0 10px 30px -5px rgb(15 23 42 / 0.1);
+            border: 1px solid #e2e8f0; padding: 32px;
+        }
+        .glossary h2 { color: var(--m3-blue); margin-top: 0; }
+        .term { margin-bottom: 40px; padding-bottom: 28px; border-bottom: 1px solid #e2e8f0; }
+        .term:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .term-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .term-header h3 { margin: 0; color: var(--m3-blue); }
+        .back-to-table { color: var(--m3-muted); text-decoration: none; font-size: 0.92rem; }
+        .back-to-table:hover { color: var(--m3-blue); }
+        .sub-bullets { margin: 12px 0 0 20px; }
+        .sub-bullets li { margin-bottom: 6px; }
+
+        .footer {
+            max-width: 1200px;
+            margin: 36px auto;
+            text-align: center;
+            color: var(--m3-muted);
+            font-size: 0.9rem;
+        }
+        .footer a { color: var(--m3-blue); }
+    </style>
+</head>
+<body>
+    <!-- Brand header — click logo to return to README -->
+    <div class="brand-header">
+        <a href="../README.md" title="Back to README">
+            <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" alt="M3 Memory">
+            <span class="name">M3 Memory</span>
+        </a>
+        <span class="crumb">Comparison · May 2026</span>
+    </div>
+
+    <h1>Sovereign Memory Systems Comparison</h1>
+    <p class="subtitle">Honest dimensional comparison of local-first / sovereign memory substrates</p>
+
+    <!-- Honest summary up front: what M3 wins, what it doesn't, and where to go for the developer-tool comparison -->
+    <div class="summary">
+        <h2>How to read this page</h2>
+        <p>This is a head-to-head against other <strong>sovereign / local-first memory substrates</strong> — projects competing on data residency, integrity, and offline operation. If you're choosing between M3 and a developer-tool memory layer like Mem0, Letta, Zep, or LangChain Memory, see the <a href="COMPARISON.md"><strong>developer-facing decision guide</strong></a> instead.</p>
+
+        <div class="pillars">
+            <div class="pillar"><strong>Sovereignty</strong>Local SQLite, local-<span class="acronym" title="Small Language Model — lightweight on-device language model used for fact extraction">SLM</span> extraction, zero telemetry by default.</div>
+            <div class="pillar"><strong>Integrity</strong>Bitemporal logic with native undo across <em>valid time</em> and <em>transaction time</em>.</div>
+            <div class="pillar"><strong>Orchestration</strong>Native <span class="acronym" title="Model Context Protocol — Anthropic's open spec used by Claude Code, Gemini CLI, etc.">MCP</span> handoffs, agent registry, atomic <span class="acronym" title="Write-Ahead Logging — SQLite mechanism for safe concurrent writes">WAL</span> writes.</div>
+            <div class="pillar"><strong>Compliance</strong>Built-in <span class="acronym" title="General Data Protection Regulation — Articles 17 (right to erasure) and 20 (data portability)">GDPR</span> primitives; aligns with <a href="M3_Compliance_FISMA.html">FISMA</a> and <a href="M3_Compliance_CMMC.html">CMMC</a>.</div>
+        </div>
+
+        <div class="candor">
+            <strong>Where M3 doesn't lead:</strong> on raw <span class="acronym" title="LongMemEval — benchmark for long-horizon conversational memory retrieval">LongMemEval</span> recall accuracy, M3 sits at <strong>89.0%</strong> while several competitors reach 95–96%. M3 trades that gap for sovereignty, bitemporal correctness, and a small auditable codebase. If raw recall is the only thing that matters, the higher scorers in the table below may fit better — and we'll say so directly.
+        </div>
+    </div>
+
+    <div class="table-container">
+        <table id="comparison-table">
+            <thead>
+                <tr>
+                    <th>Dimension</th>
+                    <th>m3-memory (2026.4.24.12)</th>
+                    <th>agentmemory (V4.0.2)</th>
+                    <th>Chronos (High/Res)</th>
+                    <th>Hindsight (v0.5.4)</th>
+                    <th>Mastra OM (v1.26.0)</th>
+                    <th>Mem0 (v3.0.0)</th>
+                    <th>Memento (v1.0.0)</th>
+                    <th>MemPalace (v3.3.0)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- ▸ Group 1: Sovereignty & Integrity — M3 strengths -->
+                <tr class="group-row"><td colspan="9">▸ Sovereignty &amp; Integrity (M3 strengths)</td></tr>
+
+                <tr class="main-row"><td><a href="#sovereignty-main"><strong>Sovereignty (Main)</strong></a></td><td>🛡️ <strong>Full Sovereign</strong></td><td>🛡️ <strong>Full Sovereign</strong></td><td>⚖️ <strong>On-Prem</strong></td><td>⚖️ <strong>High Local</strong></td><td>⚖️ <strong>Hybrid</strong></td><td>🔻 <strong>Cloud-Tied</strong></td><td>⚖️ <strong>Config-Local</strong></td><td>🛡️ <strong>Full Verbatim</strong></td></tr>
+                <tr class="sub-row"><td>└ <em>Data Residency</em></td><td>🏆 <strong>Local SQLite</strong></td><td>✅ <strong>Local SQLite</strong></td><td>✅ <strong>Local Files</strong></td><td>✅ <strong>Local Files</strong></td><td>⚖️ <strong>Postgres / Container</strong></td><td>🔻 <strong>Cloud DB</strong></td><td>✅ <strong>Local SQLite</strong></td><td>✅ <strong>Local SQLite</strong></td></tr>
+                <tr class="sub-row"><td>└ <em>Extraction Compute</em></td><td>🏆 <strong>Local <span class="acronym" title="Small Language Model — lightweight on-device language model">SLM</span></strong></td><td>✅ <strong>Deterministic</strong></td><td>✅ <strong>ISO-Temporal</strong></td><td>✅ <strong>Neural / Local</strong></td><td>🔻 <strong>Cloud Reflector</strong></td><td>🔻 <strong>Cloud <span class="acronym" title="Large Language Model">LLM</span></strong></td><td>⚖️ <strong>User-Defined</strong></td><td>❌ <strong>Verbatim only</strong></td></tr>
+                <tr class="sub-row"><td>└ <em>Telemetry / Audit</em></td><td>🏆 <strong>Zero / Bitemporal</strong></td><td>✅ <strong>Zero / Merkle</strong></td><td>✅ <strong>Event Logs</strong></td><td>✅ <strong>Internal</strong></td><td>⚖️ <strong>Usage Logs</strong></td><td>🔻 <strong>SaaS Metrics</strong></td><td>✅ <strong>Zero / Merkle</strong></td><td>🛡️ <strong>Total Dark</strong></td></tr>
+                <tr class="sub-row"><td>└ <em>Infrastructure</em></td><td>🏆 <strong>Native Python + SQLite</strong></td><td>✅ <strong>Native Python</strong></td><td>⚖️ <strong>Linux / Python</strong></td><td>⚖️ <strong>Py / Services</strong></td><td>🔻 <strong>Docker stack</strong></td><td>✅ <strong>SDK / API</strong></td><td>✅ <strong>Native Python</strong></td><td>✅ <strong>Native Python</strong></td></tr>
+
+                <tr class="main-row"><td><a href="#data-integrity"><strong>Data Integrity</strong></a></td><td>🏆 <strong>Bitemporal Logic + Undo</strong></td><td>🏆 <strong>Merkle Tree</strong></td><td>✅ <strong>Event Logs</strong></td><td>✅ <strong>Traceable</strong></td><td>⚖️ <strong>DB-Level only</strong></td><td>🔻 <strong>Managed only</strong></td><td>🏆 <strong>Merkle-Audit</strong></td><td>🔻 <strong><span class="acronym" title="JavaScript Object Notation">JSON</span> Desync Risk</strong></td></tr>
+
+                <tr class="main-row"><td><a href="#bitemporal-undo"><strong>Bitemporal &amp; Undo</strong></a></td><td>🏆 <strong>Full bitemp + Undo</strong></td><td>⚖️ <strong>Temporal sig.</strong></td><td>✅ <strong>Audit log</strong></td><td>✅ <strong>Traceable</strong></td><td>✅ <strong>3-Date Anchor</strong></td><td>🔻 <strong>No Undo</strong></td><td>🏆 <strong>Merkle-Audit</strong></td><td>❌ <strong>Verbatim only</strong></td></tr>
+
+                <tr class="main-row"><td><a href="#privacy-built-in"><strong>Privacy / GDPR</strong></a></td><td>🏆 <strong>Native <span class="acronym" title="General Data Protection Regulation — Articles 17 and 20 shipped as MCP tools">GDPR</span> tools</strong></td><td>✅ <strong>Local-only</strong></td><td>✅ <strong>On-Prem</strong></td><td>✅ <strong>Local-only</strong></td><td>⚖️ <strong>Hybrid</strong></td><td>🔻 <strong>No native</strong></td><td>✅ <strong>Local-only</strong></td><td>🛡️ <strong>Total sovereignty</strong></td></tr>
+
+                <!-- ▸ Group 2: Multi-agent & concurrency primitives -->
+                <tr class="group-row"><td colspan="9">▸ Multi-Agent &amp; Concurrency</td></tr>
+
+                <tr class="main-row"><td><a href="#multi-agent-writes"><strong>Multi-agent Writes</strong></a></td><td>🏆 <strong>Atomic (<span class="acronym" title="Write-Ahead Logging — SQLite mechanism for safe concurrent writes">WAL</span>)</strong></td><td>🏆 <strong>Durable Objects</strong></td><td>✅ <strong>Turn-based</strong></td><td>🏆 <strong>Shared Banks</strong></td><td>⚖️ <strong>Adapter-based</strong></td><td>✅ <strong>ID-Scoped</strong></td><td>✅ <strong>Transactional</strong></td><td>🔻 <strong>Silent failures</strong></td></tr>
+                <tr class="main-row"><td><a href="#multi-agent-orchestration"><strong>Multi-agent Orchestration</strong></a></td><td>🏆 <strong>Native <span class="acronym" title="Model Context Protocol — Anthropic's open spec used by Claude Code, Gemini CLI, etc.">MCP</span> handoffs</strong></td><td>🏆 <strong>Orchestrated</strong></td><td>✅ <strong>Sequential</strong></td><td>🏆 <strong>Bank-Scoped</strong></td><td>🏆 <strong>Supervisor</strong></td><td>✅ <strong>ID-Scoped</strong></td><td>🏆 <strong>Native (<span class="acronym" title="Model Context Protocol">MCP</span>)</strong></td><td>✅ <strong>Agent Diaries</strong></td></tr>
+
+                <tr class="main-row"><td><a href="#native-os-support"><strong>Native OS Support</strong></a></td><td>🍎 🐧 🪟</td><td>🍎 🐧</td><td>🐧 🍎</td><td>🐧 🍎</td><td>🔻 (Docker only)</td><td>🍎 🐧 🪟</td><td>🍎 🐧 🪟</td><td>🍎 🐧 🪟</td></tr>
+                <tr class="main-row"><td><a href="#multi-computer"><strong>Multi-Computer Sync</strong></a></td><td>🏆 <strong>Bi-dir Delta Sync</strong></td><td>✅ <strong>Managed API</strong></td><td>✅ <strong>Web Server</strong></td><td>🏆 <strong>Local Server</strong></td><td>🏆 <strong>Cloud / EKS</strong></td><td>🏆 <strong>Cloud Native</strong></td><td>⚖️ <strong>Local Sync</strong></td><td>🔻 <strong>Manual Sync</strong></td></tr>
+
+                <!-- ▸ Group 3: Retrieval — M3 is solid but not best-in-class -->
+                <tr class="group-row"><td colspan="9">▸ Retrieval &amp; Extraction (M3 is solid; not the recall leader)</td></tr>
+
+                <tr class="main-row"><td><a href="#lme-s-score"><strong><span class="acronym" title="LongMemEval-S — single-question benchmark for long-horizon conversational memory">LME-S Score</span></strong></a></td><td><strong>89.0%</strong></td><td><strong>96.2%</strong> (🏆 #1)</td><td><strong>95.6%</strong></td><td><strong>91.4%</strong></td><td><strong>94.9%</strong></td><td><strong>89.1%</strong></td><td><strong>90.8%</strong></td><td><strong>96.6%</strong> (R@5)</td></tr>
+                <tr class="main-row"><td><a href="#search-strategy"><strong>Search Strategy</strong></a></td><td>✅ <strong>3-Pillar Hybrid</strong></td><td>🏆 <strong>6-Signal Hybrid</strong></td><td>⚖️ <strong>Dual-Index</strong></td><td>🏆 <strong>4-Stream Neural</strong></td><td>✅ <strong>Reflective</strong></td><td>✅ <strong>Vector-only</strong></td><td>✅ <strong>Compositional</strong></td><td>⚖️ <strong>Spatial / AAAK</strong></td></tr>
+                <tr class="main-row"><td><a href="#local-fact-extraction"><strong>Local Fact Extraction</strong></a></td><td>🏆 <strong>Local <span class="acronym" title="Small Language Model">SLM</span></strong></td><td>✅ <strong>Deterministic</strong></td><td>✅ <strong>ISO-Temporal</strong></td><td>✅ <strong>Entity-centric</strong></td><td>🏆 <strong>Reflector</strong></td><td>✅ <strong><span class="acronym" title="Large Language Model">LLM</span>-Powered</strong></td><td>✅ <strong>Entity-Res.</strong></td><td>❌ <strong>Verbatim only</strong></td></tr>
+                <tr class="main-row"><td><a href="#token-efficiency"><strong>Token Efficiency</strong></a></td><td>🏆 <strong>Working Memory</strong></td><td>✅ <strong>Signal Filter</strong></td><td>✅ <strong>Event-Pruned</strong></td><td>🔻 <strong>Heavy Rerank</strong></td><td>✅ <strong>Cache-Stable</strong></td><td>🏆 <strong>~90% Savings</strong></td><td>✅ <strong>Verbatim Fall.</strong></td><td>⚖️ <strong>AAAK Dialect</strong></td></tr>
+
+                <!-- ▸ Group 4: Architecture, for context -->
+                <tr class="group-row"><td colspan="9">▸ Architecture (for context)</td></tr>
+                <tr class="main-row"><td><a href="#architecture"><strong>Architecture</strong></a></td><td><strong>3-Tier</strong> (Short / Working / Long-Term)</td><td><strong>6-Signal Hybrid</strong></td><td><strong>Event Calendar</strong></td><td><strong>4-Stream</strong></td><td><strong>3-Tier</strong> (Obs / Ref)</td><td><strong>Dual-Store</strong></td><td><strong>Bitemporal KG</strong></td><td><strong>Loci Hierarchy</strong></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="legend">
+        <h2>Icon Legend</h2>
+        <div class="legend-grid">
+            <div><strong>🛡️ Sovereign</strong> — 100% offline, local-SLM extraction, zero telemetry by default.</div>
+            <div><strong>🏆 Best-in-class</strong> — leads the cohort on this dimension.</div>
+            <div><strong>✅ Has feature</strong> — standard implementation; functional and competitive.</div>
+            <div><strong>⚖️ Parity / partial</strong> — feature exists with a meaningful caveat.</div>
+            <div><strong>🔻 Weakness</strong> — significant cloud dependency or stability risk.</div>
+            <div><strong>❌ Missing</strong> — capability not implemented.</div>
+        </div>
+    </div>
+
+    <div class="when-other">
+        <h2>When another tool fits better</h2>
+        <p>M3 is not the right answer for every workload. Pick from the table based on what matters most to <em>you</em>:</p>
+        <ul>
+            <li><strong>Pure recall accuracy is paramount</strong> — agentmemory (96.2%) or MemPalace (96.6% R@5) lead. M3's 89.0% is solid but not state-of-the-art.</li>
+            <li><strong>You need extreme token compression</strong> — Mem0 reports ~90% context savings. M3's working-memory model is good but not as aggressive.</li>
+            <li><strong>You only need verbatim recall, no extraction</strong> — MemPalace's verbatim-only mode is purpose-built for this.</li>
+            <li><strong>Heavy neural reranking is acceptable</strong> — Hindsight's 4-stream architecture wins on rich retrieval if you can absorb the latency cost.</li>
+            <li><strong>You're committed to a Docker-first ops model</strong> — Mastra OM fits cleanly into containerized stacks.</li>
+        </ul>
+        <p>If <strong>sovereignty, bitemporal correctness, and a small auditable codebase</strong> matter more than raw recall, M3 is built for that combination — and the table above is the receipt.</p>
+        <p>For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the <a href="COMPARISON.md">developer-facing comparison guide</a>.</p>
+    </div>
+
+    <div class="glossary" id="glossary">
+        <h2>Dimension Glossary &amp; Analysis</h2>
+        <p style="margin-bottom: 24px; color: var(--m3-muted);">Hover any <span class="acronym" title="Acronym — underlined dotted text shows full meaning on hover">underlined acronym</span> for its full meaning. <strong><span class="acronym" title="State-Of-The-Art — current highest-performing approach">SOTA</span></strong> = state-of-the-art.</p>
+
+        <div class="term" id="sovereignty-main">
+            <div class="term-header"><h3>Sovereignty (Main)</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Independence from cloud services, telemetry, and external dependencies for normal operation.</p>
+            <p><strong>Why it matters:</strong> If your data <em>can't</em> leave the machine — for legal, contractual, or personal reasons — every external dependency is a compliance risk and an attack surface.</p>
+            <p><strong>M3 standing:</strong> Full Sovereign. Local SQLite, local SLM extraction, zero telemetry, native Python — runs on a laptop or in an air-gapped enclave with the same code path.</p>
+            <p><strong>Sub-dimensions:</strong></p>
+            <ul class="sub-bullets">
+                <li><strong>Data Residency:</strong> Local SQLite — single file, portable, inspectable.</li>
+                <li><strong>Extraction Compute:</strong> Local <span class="acronym" title="Small Language Model">SLM</span> via LM Studio / Ollama / vLLM — no data egress.</li>
+                <li><strong>Telemetry / Audit:</strong> Zero by default; bitemporal log gives auditability without phoning home.</li>
+                <li><strong>Infrastructure:</strong> <code>pip install</code> — no Docker, no services, no daemons.</li>
+            </ul>
+            <p><strong>Cohort context:</strong> M3 is tied with agentmemory and MemPalace at the top. Cloud-tied systems (Mem0) can't reach this tier without significant rework. Mastra OM's Docker stack is more dependent than M3's plain-Python install.</p>
+        </div>
+
+        <div class="term" id="data-integrity">
+            <div class="term-header"><h3>Data Integrity</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Mechanisms that keep data accurate, consistent, and tamper-evident across time and across agents.</p>
+            <p><strong>Why it matters:</strong> Silent corruption destroys trust slowly. By the time you notice the memory is wrong, the bad fact has already propagated through dozens of decisions.</p>
+            <p><strong>M3 standing:</strong> Bitemporal logic with native undo. Every write is durable (WAL), every fact is bounded by valid-time and transaction-time, and supersedes relationships record exactly which old fact was replaced and when.</p>
+            <p><strong>Cohort context:</strong> Merkle-tree systems (agentmemory, Memento) provide cryptographic audit but no native undo; bitemporal gives undo but isn't cryptographic. JSON-store systems (MemPalace) carry silent-desync risk.</p>
+        </div>
+
+        <div class="term" id="bitemporal-undo">
+            <div class="term-header"><h3>Bitemporal &amp; Undo</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Tracking facts along two independent time axes — <em>valid time</em> (when the fact was true in the world) and <em>transaction time</em> (when M3 learned it) — with the ability to undo writes.</p>
+            <p><strong>Why it matters:</strong> Agents make mistakes. Without bitemporal logic and undo, every error becomes permanent or requires destructive overwrites that lose context.</p>
+            <p><strong>M3 standing:</strong> SOTA — full bitemporal model + native undo via supersedes relationships.</p>
+            <p><strong>Cohort context:</strong> Memento offers Merkle-style audit (different shape, also strong). Mem0 has no undo; mistakes there are sticky.</p>
+        </div>
+
+        <div class="term" id="privacy-built-in">
+            <div class="term-header"><h3>Privacy / GDPR</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Built-in primitives for the right to erasure (Article 17) and data portability (Article 20).</p>
+            <p><strong>Why it matters:</strong> Many regulated workloads require these capabilities to be operational, not theoretical. Implementing them retroactively on top of a memory layer is expensive and error-prone.</p>
+            <p><strong>M3 standing:</strong> SOTA — <code>gdpr_forget</code> (hard delete) and <code>gdpr_export</code> (portable JSON) ship as MCP tools. See also the <a href="M3_Compliance_FISMA.html">FISMA</a> and <a href="M3_Compliance_CMMC.html">CMMC</a> alignment notes.</p>
+            <p><strong>Cohort context:</strong> Local-only systems (agentmemory, Memento) inherit privacy by deployment but require custom GDPR tooling. Mem0 has no native GDPR primitives.</p>
+        </div>
+
+        <div class="term" id="multi-agent-writes">
+            <div class="term-header"><h3>Multi-agent Writes</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Safe handling of concurrent writes when multiple agents update memory simultaneously.</p>
+            <p><strong>Why it matters:</strong> In real agent swarms, race conditions silently destroy knowledge — and the corruption usually surfaces hours or days later.</p>
+            <p><strong>M3 standing:</strong> Atomic via SQLite WAL. Writes are durable, ordered, and crash-safe.</p>
+            <p><strong>Cohort context:</strong> agentmemory (durable objects) and Hindsight (shared banks) are at parity. MemPalace's "silent failures" mode is the worst category here — writes can drop without surfacing an error.</p>
+        </div>
+
+        <div class="term" id="multi-agent-orchestration">
+            <div class="term-header"><h3>Multi-agent Orchestration</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Built-in primitives for task handoff, context sharing, and coordinated agent lifecycles.</p>
+            <p><strong>Why it matters:</strong> A single agent is useful. Multiple agents that can hand off work mid-task are the actual value of "agentic" systems.</p>
+            <p><strong>M3 standing:</strong> Native <span class="acronym" title="Model Context Protocol — Anthropic's open spec used by Claude Code, Gemini CLI, etc.">MCP</span> handoffs, agent registry, notifications, tasks — all via the same MCP tool surface, no extra runtime required.</p>
+            <p><strong>Cohort context:</strong> Memento also goes native MCP. Mastra OM uses a supervisor pattern. Mem0 scopes by ID but doesn't ship handoff primitives.</p>
+        </div>
+
+        <div class="term" id="native-os-support">
+            <div class="term-header"><h3>Native OS Support</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Runs natively on macOS, Linux, and Windows without Docker or platform-specific dependencies.</p>
+            <p><strong>Why it matters:</strong> Most developers' machines are macOS or Windows; most production servers are Linux. A memory layer that works in all three avoids forcing operational compromises.</p>
+            <p><strong>M3 standing:</strong> Full native support — same install command everywhere.</p>
+            <p><strong>Cohort context:</strong> Mastra OM's Docker-only deployment is the outlier; the rest of the cohort cover at least two OSes.</p>
+        </div>
+
+        <div class="term" id="multi-computer">
+            <div class="term-header"><h3>Multi-Computer Sync</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Synchronizing memory across multiple physical machines without a central cloud.</p>
+            <p><strong>Why it matters:</strong> A laptop, a desktop, and a server should be able to share memory without giving the data to a SaaS provider.</p>
+            <p><strong>M3 standing:</strong> Bi-directional delta sync via PostgreSQL or ChromaDB — set one env var, your memories follow you across devices.</p>
+            <p><strong>Cohort context:</strong> Cloud-native systems (Mem0) deliver sync trivially but at the cost of sovereignty. MemPalace requires manual sync.</p>
+        </div>
+
+        <div class="term" id="lme-s-score">
+            <div class="term-header"><h3>LME-S Score</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> <span class="acronym" title="LongMemEval — benchmark for long-horizon conversational memory">LongMemEval</span>-S, a 500-question benchmark for long-horizon conversational memory retrieval. The single number captures recall accuracy averaged across question types.</p>
+            <p><strong>Why it matters:</strong> A retrieval layer that can't find what's there is a liability. But — and this is the part vendor pages skip — the benchmark doesn't measure sovereignty, integrity, undo, or compliance. A 96% score sourced from a cloud LLM tells you nothing about whether your data left the machine.</p>
+            <p><strong>M3 standing:</strong> 89.0% — solid mid-pack. We chose to optimize correctness, sovereignty, and a small codebase over chasing the last 7 percentage points of recall.</p>
+            <p><strong>Cohort context:</strong> agentmemory (96.2%), MemPalace R@5 (96.6%), Chronos (95.6%), and Mastra OM (94.9%) lead on raw recall. If recall is the only dimension that matters, those are the better picks. M3 (89.0%) is closer to Mem0 (89.1%), Memento (90.8%), and Hindsight (91.4%).</p>
+        </div>
+
+        <div class="term" id="search-strategy">
+            <div class="term-header"><h3>Search Strategy</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> The retrieval architecture under the hood — how the system blends keyword, vector, and structural signals.</p>
+            <p><strong>Why it matters:</strong> Vector-only search hallucinates synonyms. Keyword-only misses paraphrases. The blend is what matters.</p>
+            <p><strong>M3 standing:</strong> 3-Pillar Hybrid — FTS5 (BM25) + vector cosine + MMR diversity reranking. Explainable per-result scores via <code>memory_suggest</code>.</p>
+            <p><strong>Cohort context:</strong> agentmemory's 6-signal hybrid and Hindsight's 4-stream neural model push further. Vector-only systems (Mem0) are simpler but lose precision on terminology-heavy queries.</p>
+        </div>
+
+        <div class="term" id="local-fact-extraction">
+            <div class="term-header"><h3>Local Fact Extraction</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> Distilling structured facts from raw conversational text — entirely on-device.</p>
+            <p><strong>Why it matters:</strong> Raw text is noisy. Extracted facts are dense, queryable, and easier to refresh. Doing this locally preserves sovereignty.</p>
+            <p><strong>M3 standing:</strong> SOTA — dedicated local SLM pipeline (LM Studio / Ollama / vLLM compatible).</p>
+            <p><strong>Cohort context:</strong> Mastra OM's reflector matches M3 in capability but runs in the cloud. Mem0's LLM-powered extraction is strong on quality but breaks sovereignty. MemPalace's verbatim-only design skips extraction entirely.</p>
+        </div>
+
+        <div class="term" id="architecture">
+            <div class="term-header"><h3>Architecture</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> The high-level system design and internal memory organization.</p>
+            <p><strong>Why it matters:</strong> Architecture determines how the system scales, what kinds of queries it can answer, and how easy it is to extend.</p>
+            <p><strong>M3 standing:</strong> 3-Tier (short / working / long-term) optimized for real agent lifecycles, with bitemporal logic threaded through every tier.</p>
+            <p><strong>Cohort context:</strong> agentmemory's 6-signal hybrid is richer; MemPalace's spatial loci hierarchy is novel. Trade-off: more complex architectures cost more to maintain.</p>
+        </div>
+
+        <div class="term" id="token-efficiency">
+            <div class="term-header"><h3>Token Efficiency</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
+            <p><strong>What it means:</strong> How effectively the system reduces context-window usage and downstream LLM costs.</p>
+            <p><strong>Why it matters:</strong> Every token saved is dollars saved and latency reduced. At scale, the difference is order-of-magnitude.</p>
+            <p><strong>M3 standing:</strong> Strong — working-memory optimization plus 3-pillar retrieval keeps context tight without sacrificing recall coverage.</p>
+            <p><strong>Cohort context:</strong> Mem0's reported ~90% savings is the leader; M3 is mid-pack but balances token efficiency against bitemporal richness. Heavy reranking (Hindsight) wastes tokens.</p>
+        </div>
+    </div>
+
+    <p class="footer">
+        Table is interactive — click a dimension name to jump to its detailed analysis.
+        <br>
+        Hover underlined acronyms for definitions. Last updated May 2026 — corrections welcome via
+        <a href="https://github.com/skynetcmd/m3-memory/issues">GitHub issue</a>.
+    </p>
+</body>
+</html>
