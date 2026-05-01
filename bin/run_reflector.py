@@ -41,6 +41,7 @@ import httpx  # noqa: E402
 import memory_core as mc  # noqa: E402
 from slm_intent import load_profile  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
+from agent_protocol import strip_code_fences  # noqa: E402
 
 PROFILE_NAME = os.environ.get("REFLECTOR_PROFILE", "reflector_local")
 JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -49,7 +50,7 @@ JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 def parse_reflector_output(text: str) -> tuple[list[dict], list[dict]]:
     """Parse {observations, supersedes} JSON. Returns (observations, supersedes).
     Drops malformed entries silently."""
-    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
+    text = strip_code_fences(text)
     m = JSON_RE.search(text)
     if not m:
         return [], []
