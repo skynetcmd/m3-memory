@@ -77,12 +77,14 @@
             margin: 0 auto;
             /* Always show horizontal scrollbar (not "auto") so users see
                immediately that the table extends right. Cap vertical
-               height shorter than 82vh so the bottom-edge horizontal
-               scrollbar stays visible inside the user's viewport while
-               they're reading the top rows of the table. */
+               height intentionally short — about a screen of header +
+               ~5-6 data rows — so the bottom-edge horizontal scrollbar
+               appears right after the column-header row, not buried
+               under the entire table. Users scroll vertically inside
+               the container for the rest. */
             overflow-x: scroll;
             overflow-y: auto;
-            max-height: min(70vh, 720px);
+            max-height: min(55vh, 480px);
             background: #ffffff;
             border-radius: 16px;
             box-shadow: 0 10px 30px -5px rgb(15 23 42 / 0.1);
@@ -222,7 +224,7 @@
             <div class="pillar"><strong>Sovereignty</strong>Local SQLite, local-<span class="acronym" title="Small Language Model — lightweight on-device language model used for fact extraction">SLM</span> extraction, zero telemetry by default.</div>
             <div class="pillar"><strong>Integrity</strong>Bitemporal logic with native undo across <em>valid time</em> and <em>transaction time</em>.</div>
             <div class="pillar"><strong>Orchestration</strong>Native <span class="acronym" title="Model Context Protocol — Anthropic's open spec used by Claude Code, Gemini CLI, etc.">MCP</span> handoffs, agent registry, atomic <span class="acronym" title="Write-Ahead Logging — SQLite mechanism for safe concurrent writes">WAL</span> writes.</div>
-            <div class="pillar"><strong>Compliance</strong>Built-in <span class="acronym" title="General Data Protection Regulation — Articles 17 (right to erasure) and 20 (data portability)">GDPR</span> primitives; aligns with <a href="https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html">FISMA</a> and <a href="https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html">CMMC</a>.</div>
+            <div class="pillar"><strong>Compliance</strong>Built-in <span class="acronym" title="General Data Protection Regulation — Articles 17 (right to erasure) and 20 (data portability)">GDPR</span> primitives; aligns with <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.md">FISMA</a> and <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.md">CMMC</a>.</div>
         </div>
 
         <div class="candor">
@@ -350,7 +352,7 @@
             <div class="term-header"><h3>Privacy / GDPR</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
             <p><strong>What it means:</strong> Built-in primitives for the right to erasure (Article 17) and data portability (Article 20).</p>
             <p><strong>Why it matters:</strong> Many regulated workloads require these capabilities to be operational, not theoretical. Implementing them retroactively on top of a memory layer is expensive and error-prone.</p>
-            <p><strong>M3 standing:</strong> SOTA — <code>gdpr_forget</code> (hard delete) and <code>gdpr_export</code> (portable JSON) ship as MCP tools. See also the <a href="https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html">FISMA</a> and <a href="https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html">CMMC</a> alignment notes.</p>
+            <p><strong>M3 standing:</strong> SOTA — <code>gdpr_forget</code> (hard delete) and <code>gdpr_export</code> (portable JSON) ship as MCP tools. See also the <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.md">FISMA</a> and <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.md">CMMC</a> alignment notes.</p>
             <p><strong>Cohort context:</strong> Local-only systems (agentmemory, Memento) inherit privacy by deployment but require custom GDPR tooling. Mem0 has no native GDPR primitives.</p>
         </div>
 
