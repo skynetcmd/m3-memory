@@ -4,7 +4,7 @@
 
 Several tools address agentic memory. This document explains where M3 Memory fits relative to each, and when a different tool is the better choice.
 
-> 💡 Looking for a head-to-head against other **sovereign / local-first memory substrates** (agentmemory, Chronos, Hindsight, Mastra OM, Memento, MemPalace)? See the [Sovereign Memory Systems comparison table](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) ([source](M3_Comparison_Table.html)) — different cohort, different decision.
+> 💡 Looking for a head-to-head against other **sovereign / local-first memory substrates** (agentmemory, Chronos, Hindsight, Mastra OM, Memento, MemPalace)? See the [Sovereign Memory Systems comparison table](M3_Comparison_Table.md) (also available as an [interactive version](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) with sticky columns and tooltip glossary) — different cohort, different decision.
 
 ---
 

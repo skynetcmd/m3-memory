@@ -24,8 +24,8 @@ What M3 ships natively that's relevant here:
 
 | Framework | Coverage | Document |
 |---|---|---|
-| **NIST SP 800-53 (FISMA)** | Federal information systems — agency ATO support | [FISMA / 800-53 alignment](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_FISMA.html) |
-| **CMMC 2.0 / NIST SP 800-171** | DoD contractors handling CUI — Level 2 controls | [CMMC 2.0 alignment](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Compliance_CMMC.html) |
+| **NIST SP 800-53 (FISMA)** | Federal information systems — agency ATO support | [FISMA / 800-53 alignment](M3_Compliance_FISMA.md) |
+| **CMMC 2.0 / NIST SP 800-171** | DoD contractors handling CUI — Level 2 controls | [CMMC 2.0 alignment](M3_Compliance_CMMC.md) |
 | **GDPR (Articles 17 & 20)** | EU data subject rights — built-in MCP tools | See [README "Why trust this"](../README.md#-why-trust-this) and [API_REFERENCE.md](API_REFERENCE.md) |
 
 ### What about FedRAMP?
@@ -48,7 +48,7 @@ If you're preparing an authorization package and have specific control questions
 
 ## See also
 
-- [M3 vs alternatives — sovereign substrates table](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) — where M3 fits in the broader sovereign-memory landscape
+- [M3 vs alternatives — sovereign substrates table](M3_Comparison_Table.md) — where M3 fits in the broader sovereign-memory landscape ([interactive version](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html))
 - [M3 vs alternatives — developer-tool guide](COMPARISON.md) — Mem0, Letta, Zep, LangChain Memory
 - [Homelab patterns](HOMELAB_PATTERNS.md) — small-deployment guidance with similar local-first / sovereign requirements
 - [Architecture](ARCHITECTURE.md) — system design that underlies the compliance posture
