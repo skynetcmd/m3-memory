@@ -8,6 +8,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 import llm_failover
 
+
+@pytest.fixture(autouse=True)
+def _reset_failover_caches():
+    """The llm_failover module caches discovered endpoints process-globally
+    to avoid the GET /v1/models roundtrip on every call. That cache must
+    not leak between tests — clear before each test runs."""
+    llm_failover.clear_failover_caches()
+    yield
+    llm_failover.clear_failover_caches()
+
+
 def test_parse_model_size():
     """Test parsing model sizes from strings."""
     assert llm_failover.parse_model_size("llama-3-70b") == 70.0
