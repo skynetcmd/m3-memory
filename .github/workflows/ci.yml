@@ -39,6 +39,38 @@ jobs:
     - name: Run Mypy
       run: mypy bin/ --ignore-missing-imports
 
+  security:
+    name: Security scan (Bandit + pip-audit on core deps)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+    - name: Set up Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      with:
+        python-version: "3.12"
+
+    # Bandit: static analysis on all code paths. Config (skips, exclusions)
+    # lives in pyproject.toml under [tool.bandit].
+    - name: Install Bandit
+      run: pip install "bandit[toml]"
+    - name: Run Bandit
+      run: bandit -c pyproject.toml -r bin/ m3_memory/
+
+    # pip-audit: scoped to CORE deps only (no [dev] / no opt-in rerank
+    # path). Bench/dev transitive CVEs (e.g. transformers, lxml) shouldn't
+    # gate merges since they don't reach end users; but a CVE in a real
+    # shipped dep should fail the build immediately. We install the
+    # package itself (which pulls only [project.dependencies]) into a
+    # clean venv, then audit.
+    - name: Install M3 (core deps only) into a clean venv
+      run: |
+        python -m venv /tmp/m3-core
+        /tmp/m3-core/bin/pip install --upgrade pip
+        /tmp/m3-core/bin/pip install .
+        /tmp/m3-core/bin/pip install pip-audit
+    - name: pip-audit (core deps)
+      run: /tmp/m3-core/bin/pip-audit --strict
+
   test:
     name: Test on ${{ matrix.os }}
     needs: [lint, typecheck]

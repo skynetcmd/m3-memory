@@ -144,6 +144,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
 | **GDPR compliance** | `gdpr_forget` (Article 17) and `gdpr_export` (Article 20) as built-in tools — see [compliance & assurance](docs/COMPLIANCE.md) for FISMA / CMMC alignment too |
 | **Self-maintaining** | Automatic decay, dedup, orphan pruning, retention enforcement |
+| **Audited security posture** | Periodic Bandit + pip-audit + secrets-scan reports published under [`docs/audits/`](docs/audits/); CI gates on core-dep CVEs |
 | **Apache 2.0 licensed** | Free. No SaaS tier, no usage limits, no lock-in |
 
 > 🧭 **Maturity, honestly.** The core (storage, retrieval, GDPR, MCP tools, sync) is stable and covered by the test suite. The newer enrichment + reflector pipeline matured rapidly through 2026-Q2 and has live-fire experience behind it but is still iterating. **Production-ready for personal, homelab, and multi-agent developer workflows today.** For regulated workloads, do your own evaluation against your specific use case — and we recommend that against any memory tool, not just M3. See [docs/MYTHS_AND_FACTS.md](docs/MYTHS_AND_FACTS.md) for what we *don't* claim.
