@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3 Memory — CMMC 2.0 Alignment (May 2026)</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+        :root { --m3-blue: #1e40af; --m3-ink: #0f172a; --m3-muted: #64748b; }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 0; padding: 24px;
+            background: #f8f9fa; color: var(--m3-ink);
+            line-height: 1.65;
+        }
+
+        /* Brand header — consistent with the rest of the docs */
+        .brand-header {
+            max-width: 1200px;
+            margin: 0 auto 24px;
+            display: flex; align-items: center; gap: 16px;
+            padding: 12px 20px;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 12px -4px rgb(15 23 42 / 0.08);
+        }
+        .brand-header a { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--m3-ink); }
+        .brand-header img { height: 44px; }
+        .brand-header .name { font-weight: 600; font-size: 1.15rem; }
+        .brand-header .crumb { color: var(--m3-muted); margin-left: auto; font-size: 0.9rem; }
+
+        h1 { text-align: center; color: var(--m3-ink); font-size: 2.3rem; margin: 8px 0; }
+        .subtitle { text-align: center; color: var(--m3-muted); font-size: 1.15rem; margin-bottom: 36px; }
+
+        .section {
+            max-width: 1200px; margin: 0 auto 36px;
+            background: white; border-radius: 16px;
+            box-shadow: 0 10px 30px -5px rgb(15 23 42 / 0.1);
+            border: 1px solid #e2e8f0; padding: 28px 32px;
+        }
+        .section h2 { color: var(--m3-blue); margin-top: 0; }
+
+        .scope-note {
+            font-size: 1rem;
+            background: #f0f4ff;
+            border-left: 4px solid var(--m3-blue);
+            padding: 18px 22px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+
+        .candor {
+            margin-top: 12px;
+            padding: 14px 16px;
+            background: #fef9c3;
+            border-left: 4px solid #ca8a04;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95rem;
+        }
+
+        th, td {
+            padding: 14px 18px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: top;
+        }
+
+        thead th {
+            background: #f1f5f9;
+            font-weight: 600;
+            color: var(--m3-blue);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        tr:hover td { background-color: #f8fafc; }
+
+        .assessment-superior { color: #166534; font-weight: 600; }
+        .assessment-strong   { color: #15803d; font-weight: 500; }
+        .assessment-meets    { color: #854d0e; font-weight: 500; }
+
+        .acronym {
+            border-bottom: 1px dotted var(--m3-muted);
+            cursor: help;
+        }
+
+        .footer {
+            max-width: 1200px;
+            margin: 24px auto;
+            text-align: center;
+            color: var(--m3-muted);
+            font-size: 0.9rem;
+        }
+        .footer a { color: var(--m3-blue); }
+    </style>
+</head>
+<body>
+    <!-- Brand header -->
+    <div class="brand-header">
+        <a href="../README.md" title="Back to README">
+            <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" alt="M3 Memory">
+            <span class="name">M3 Memory</span>
+        </a>
+        <span class="crumb">Compliance · <span class="acronym" title="Cybersecurity Maturity Model Certification — DoD program based on NIST SP 800-171">CMMC</span> 2.0 · May 2026</span>
+    </div>
+
+    <h1>CMMC 2.0 Alignment</h1>
+    <p class="subtitle">How M3 Memory supports defense-contractor security controls</p>
+
+    <!-- Scope: what this document is, and isn't -->
+    <div class="section">
+        <h2>Scope of this document</h2>
+        <div class="scope-note">
+            <p style="margin-top: 0;"><strong>What this is:</strong> A control-by-control mapping showing how M3 Memory supports CMMC 2.0 / NIST SP 800-171 requirements when deployed inside a contractor environment that handles <span class="acronym" title="Controlled Unclassified Information — federal information requiring safeguarding under DoD contracts">CUI</span>.</p>
+            <p style="margin-bottom: 0;"><strong>What this is not:</strong> A statement that M3 itself is "CMMC certified." CMMC certifies organizations and their information systems, not standalone software components. M3 is a memory substrate that helps your organization meet the technical controls.</p>
+        </div>
+        <p style="margin-top: 18px;">CMMC 2.0 Level 2 maps directly to NIST SP 800-171. The assessment table below shows where M3 reduces compliance burden, where it meets requirements at parity with other approaches, and where the deploying organization remains responsible.</p>
+    </div>
+
+    <!-- Bottom line up front -->
+    <div class="section">
+        <h2>Bottom line</h2>
+        <p>M3's local-first architecture removes the cloud-shared-responsibility model that drives most CMMC assessment cost and complexity. Practical implications:</p>
+        <ul>
+            <li><strong>Reduced attack surface.</strong> No network listeners by default, no telemetry, no third-party dependencies in the data path.</li>
+            <li><strong>Smaller assessment boundary.</strong> CUI processed by M3 stays on user-controlled hardware — no shared cloud tenancy to evaluate.</li>
+            <li><strong>Audit-ready by design.</strong> Bitemporal logging captures who-wrote-what-when natively; no separate audit pipeline required.</li>
+        </ul>
+        <p>M3 does not eliminate the contractor's compliance work — physical security, personnel screening, and many program-level controls still apply. It does shrink the technical-controls portion meaningfully.</p>
+    </div>
+
+    <!-- Control mapping table -->
+    <div class="section">
+        <h2>M3 alignment with CMMC 2.0 (NIST SP 800-171)</h2>
+        <p style="color: var(--m3-muted); margin-bottom: 18px;">Assessment language: <strong class="assessment-superior">Superior</strong> = M3 actively reduces complexity vs. typical cloud baseline. <strong class="assessment-strong">Strong</strong> = solid implementation. <strong class="assessment-meets">Meets / Equivalent</strong> = covered at parity; deploying organization retains ownership.</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 26%;">CMMC / NIST 800-171 Area</th>
+                    <th style="width: 20%;">Key Requirements</th>
+                    <th style="width: 32%;">How M3 Memory Supports It</th>
+                    <th style="width: 22%;">Assessment</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Access Control</strong></td>
+                    <td>Limit access to authorized users; enforce least privilege</td>
+                    <td>Inherits host OS authentication and filesystem ACLs. No remote network listener by default — no remote access surface to harden.</td>
+                    <td class="assessment-superior">Superior</td>
+                </tr>
+                <tr>
+                    <td><strong>Audit &amp; Accountability</strong></td>
+                    <td>Generate, protect, and review audit records</td>
+                    <td>Bitemporal logging captures every write with valid-time and transaction-time. Native undo + supersedes relationships preserve full historical context. Optional Merkle-style integrity available.</td>
+                    <td class="assessment-superior">Superior</td>
+                </tr>
+                <tr>
+                    <td><strong>Configuration Management</strong></td>
+                    <td>Establish and maintain baseline configurations; manage change</td>
+                    <td>Minimal, auditable codebase — Native Python + SQLite. No containers, no external services to baseline. Configuration is a single YAML file per profile.</td>
+                    <td class="assessment-strong">Strong</td>
+                </tr>
+                <tr>
+                    <td><strong>Identification &amp; Authentication</strong></td>
+                    <td>Identify and authenticate users and processes</td>
+                    <td>Delegates to host OS authentication and local permissions. Pairs cleanly with smart card / PIV / Yubikey-backed OS login.</td>
+                    <td class="assessment-meets">Meets / Equivalent</td>
+                </tr>
+                <tr>
+                    <td><strong>Media Protection</strong></td>
+                    <td>Protect CUI at rest; manage media sanitization</td>
+                    <td>Compatible with full-disk encryption (BitLocker / FileVault / LUKS) and SQLite-level encryption extensions (e.g. SQLCipher). Single-file DB simplifies sanitization workflows.</td>
+                    <td class="assessment-strong">Strong</td>
+                </tr>
+                <tr>
+                    <td><strong>Incident Response</strong></td>
+                    <td>Detect, respond to, and report incidents</td>
+                    <td>Local-only data path means incidents stay containable on user-controlled hardware. No cloud tenant to coordinate with during response.</td>
+                    <td class="assessment-strong">Strong</td>
+                </tr>
+                <tr>
+                    <td><strong>System &amp; Communications Protection</strong></td>
+                    <td>Boundary protection; encryption in transit</td>
+                    <td><strong>Zero network required by default.</strong> Eliminates the entire class of network-boundary controls when M3 is the only memory layer in scope.</td>
+                    <td class="assessment-superior">Superior</td>
+                </tr>
+                <tr>
+                    <td><strong>System &amp; Information Integrity</strong></td>
+                    <td>Flaw remediation; malicious code protection; information handling</td>
+                    <td>Bitemporal logic plus local SLM extraction provides high integrity and tamper evidence. Updates flow through standard <code>pip</code> with reproducible installs.</td>
+                    <td class="assessment-superior">Superior</td>
+                </tr>
+                <tr>
+                    <td><strong>Data Residency &amp; Sovereignty</strong></td>
+                    <td>Control where CUI is stored and processed</td>
+                    <td>100% local SQLite on user-controlled hardware. No cloud component, no telemetry, no implicit data egress.</td>
+                    <td class="assessment-superior">Superior</td>
+                </tr>
+                <tr>
+                    <td><strong>Risk Assessment</strong></td>
+                    <td>Periodic risk assessment; third-party assessment at Level 2</td>
+                    <td>Small attack surface and minimal dependency tree simplify both internal risk assessments and third-party C3PAO audits.</td>
+                    <td class="assessment-strong">Strong</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="candor" style="margin-top: 22px;">
+            <strong>What M3 doesn't give you for free:</strong> personnel security, physical security, awareness training, supply-chain risk management, and most program-level controls remain the deploying organization's responsibility. M3 strengthens the technical-controls portion; it doesn't replace your compliance program.
+        </div>
+    </div>
+
+    <p class="footer">
+        See also: <a href="M3_Compliance_FISMA.html">FISMA / NIST SP 800-53 alignment</a> · <a href="COMPLIANCE.md">Compliance index</a> · <a href="../README.md">README</a><br>
+        Last updated May 2026 — corrections welcome via <a href="https://github.com/skynetcmd/m3-memory/issues">GitHub issue</a>.
+    </p>
+</body>
+</html>
