@@ -393,17 +393,45 @@ def mark_success(
     tokens_in: Optional[int] = None,
     tokens_out: Optional[int] = None,
     cost_usd: Optional[float] = None,
+    partial_failure_chunks: int = 0,
 ) -> None:
-    conn.execute(
-        """
-        UPDATE enrichment_groups
-        SET status='success', obs_emitted=?, enrichment_ms=?,
-            tokens_in=?, tokens_out=?, cost_usd=?,
-            claim_token=NULL, claimed_at=NULL, last_error=NULL, error_class=NULL
-        WHERE id = ?
-        """,
-        (obs_emitted, enrichment_ms, tokens_in, tokens_out, cost_usd, group_id),
-    )
+    """Mark group as success. partial_failure_chunks > 0 records that the
+    group's source was split into chunks and some chunks failed during this
+    pass — observations from the surviving chunks are kept (they're real
+    work), but the counter flags the row for later audit. Status stays
+    'success' so existing filters that select status='success' continue to
+    pick the row up; the partial_failure_chunks column distinguishes
+    incomplete from complete extractions.
+
+    Migration 030 adds partial_failure_chunks. We use COALESCE() so callers
+    on un-migrated DBs don't error out — the column simply stays NULL.
+    """
+    if partial_failure_chunks:
+        # Preserve last_error so the audit row carries why chunks failed.
+        conn.execute(
+            """
+            UPDATE enrichment_groups
+            SET status='success', obs_emitted=?, enrichment_ms=?,
+                tokens_in=?, tokens_out=?, cost_usd=?,
+                partial_failure_chunks=?,
+                claim_token=NULL, claimed_at=NULL
+            WHERE id = ?
+            """,
+            (obs_emitted, enrichment_ms, tokens_in, tokens_out, cost_usd,
+             partial_failure_chunks, group_id),
+        )
+    else:
+        conn.execute(
+            """
+            UPDATE enrichment_groups
+            SET status='success', obs_emitted=?, enrichment_ms=?,
+                tokens_in=?, tokens_out=?, cost_usd=?,
+                partial_failure_chunks=0,
+                claim_token=NULL, claimed_at=NULL, last_error=NULL, error_class=NULL
+            WHERE id = ?
+            """,
+            (obs_emitted, enrichment_ms, tokens_in, tokens_out, cost_usd, group_id),
+        )
     conn.commit()
 
 
