@@ -148,18 +148,18 @@ Every feature is tested — not just the happy path:
 - LLM auto-classification
 - Configurable threshold validation
 
-### Retrieval Quality Benchmarks
+### Retrieval Quality
 
-Automated `benchmark_memory.py` measures what matters:
+Headline benchmark: **89.0% on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)**
+(445/500 correct on a 500-question long-horizon conversational memory
+suite). Per-category breakdown, ablations, and full methodology live in
+the [README's Benchmarks section](../README.md#-benchmarks) and
+[`benchmarks/longmemeval/README.md`](../benchmarks/longmemeval/README.md).
 
-| Metric | What It Measures |
-|--------|-----------------|
-| **Hit@1** | Is the right answer the top result? |
-| **Hit@5** | Is the right answer in the top 5? |
-| **MRR** | Mean Reciprocal Rank — aggregate ranking quality |
-| **Latency** | p50 and p95 per-search timing |
-
-Pass threshold: MRR > 0.5. Runs automatically, skips gracefully when the local LLM server is offline.
+For local development, `bin/benchmark_memory.py` runs a small smoke-test
+suite (Hit@1 / Hit@5 / MRR / latency) against the configured embedder —
+useful for sanity-checking changes to the retrieval path, not a public
+quality claim. Skips gracefully when the local LLM server is offline.
 
 ---
 
