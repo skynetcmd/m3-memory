@@ -152,3 +152,8 @@ scan-reports/
 
 # Claude Code runtime locks
 .claude/scheduled_tasks.lock
+
+# m3_enrich auto-generated per-run reports — contain bench-variant
+# names that are private to development branches. Manually-crafted
+# entries (security-scan-*.md, README.md) stay tracked.
+docs/audits/enrich-run-*.md

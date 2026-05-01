@@ -429,6 +429,73 @@ def _classify_observer_error(exc: BaseException) -> str:
     return "other"
 
 
+def _is_rate_limit_failure(error_class: str, last_error: str) -> bool:
+    """True iff this failure is the signature of an upstream rate-limit /
+    quota wall (429), as opposed to per-group bugs.
+
+    Looks for `http_status` plus a 429 marker in the message. Cloud
+    providers spell the marker different ways ("429", "Too Many Requests",
+    "RESOURCE_EXHAUSTED", "exceeded your current quota") so we match
+    several. Anything that's *just* http_status without those markers is
+    treated as a real per-group failure (bad request, server error, etc.)."""
+    if error_class != "http_status":
+        return False
+    low = (last_error or "").lower()
+    return any(m in low for m in (
+        "429",
+        "too many requests",
+        "resource_exhausted",
+        "exceeded your current quota",
+        "rate limit",
+        "ratelimitexceeded",
+    ))
+
+
+class _RateLimitCascade:
+    """Detects sustained upstream rate-limit cascades and arms an abort.
+
+    Trip condition: `threshold` consecutive rate-limit failures within
+    `window_s` seconds. "Consecutive" means no successful call landed
+    in between — record_success() resets the counter. This catches the
+    quota-wall pattern (one shared upstream limit means every concurrent
+    call fails together) without false-firing on isolated 429s during
+    normal operation.
+
+    Default 10 in 60s matches the cascade we observed on Gemini paid-tier
+    on 2026-05-01: once the daily quota tripped, every subsequent call
+    failed in tight succession until the run completed.
+    """
+
+    def __init__(self, threshold: int = 10, window_s: float = 60.0):
+        self.threshold = threshold
+        self.window_s = window_s
+        # Timestamps of the most recent consecutive rate-limit failures.
+        # Cleared on any success.
+        self._fails: list[float] = []
+
+    def record_failure(self, error_class: str, last_error: str) -> None:
+        if not _is_rate_limit_failure(error_class, last_error):
+            return
+        now = time.monotonic()
+        self._fails.append(now)
+        # Drop entries older than the window so the deque stays bounded.
+        cutoff = now - self.window_s
+        self._fails = [t for t in self._fails if t >= cutoff]
+
+    def record_success(self) -> None:
+        self._fails.clear()
+
+    def should_abort(self) -> bool:
+        return len(self._fails) >= self.threshold
+
+    def summary(self) -> str:
+        n = len(self._fails)
+        if not n:
+            return "no rate-limit failures recorded"
+        span = self._fails[-1] - self._fails[0] if n > 1 else 0
+        return f"{n} rate-limit failures in the last {span:.1f}s"
+
+
 async def _run_db(
     db_path: Path,
     profile: Profile,
@@ -449,12 +516,15 @@ async def _run_db(
     sample_strategy: str = "first",
     min_size_k: Optional[int] = None,
     max_size_k: Optional[int] = None,
+    cascade_threshold: int = 10,
+    cascade_window_s: float = 60.0,
 ) -> Optional[str]:
     """Drive Observer over one DB. Apply migration, set M3_DATABASE so
     memory_core writes land here, then call run_observer.process_conversation
     for each grouped conversation.
 
-    Returns an abort_reason string if budget tripped, else None.
+    Returns an abort_reason string if budget or rate-limit cascade
+    tripped, else None.
     """
     import random as _random
     import sqlite3
@@ -508,6 +578,10 @@ async def _run_db(
     state_conn: Optional[sqlite3.Connection] = None
     group_id_by_key: dict[tuple[str, str], int] = {}
     abort_reason: Optional[str] = None
+    cascade = _RateLimitCascade(
+        threshold=cascade_threshold,
+        window_s=cascade_window_s,
+    )
 
     if track_state:
         if not source_variant:
@@ -634,11 +708,22 @@ async def _run_db(
                     )
                 except BaseException as exc:  # noqa: BLE001
                     elapsed_ms = int((time.monotonic() - t0) * 1000)
+                    ec = _classify_observer_error(exc)
+                    err_repr = repr(exc)
+                    cascade.record_failure(ec, err_repr)
+                    if cascade.should_abort() and abort_reason is None:
+                        abort_reason = "rate_limit_cascade"
+                        print(
+                            f"[m3-enrich] RATE LIMIT CASCADE: {cascade.summary()}; "
+                            f"draining inflight then stopping. Reset failed groups "
+                            f"and re-run with --resume after the upstream quota "
+                            f"resets.",
+                            flush=True,
+                        )
                     if track_state and gid is not None and state_conn is not None:
-                        ec = _classify_observer_error(exc)
                         new_status = estate.mark_failed(
                             state_conn, gid,
-                            error_class=ec, last_error=repr(exc),
+                            error_class=ec, last_error=err_repr,
                             max_attempts=max_attempts, enrichment_ms=elapsed_ms,
                         )
                         if new_status == "dead_letter":
@@ -646,10 +731,16 @@ async def _run_db(
                     raise
 
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
+                written_delta = counters["written"] - pre_written
+                failed_delta = counters["failed"] - pre_failed
+                empty_delta = counters["empty_groups"] - pre_empty
+                # Cascade tracker: any clean outcome (real obs OR legitimate
+                # empty) means upstream is healthy — reset the consecutive
+                # rate-limit counter. A pure chunk-failure outcome may be a
+                # 429 in disguise; classify and feed the tracker.
+                if written_delta > 0 or empty_delta > 0:
+                    cascade.record_success()
                 if track_state and gid is not None and state_conn is not None:
-                    written_delta = counters["written"] - pre_written
-                    failed_delta = counters["failed"] - pre_failed
-                    empty_delta = counters["empty_groups"] - pre_empty
                     if failed_delta > 0 and written_delta == 0:
                         # Some chunks failed and nothing was written — count as failed.
                         # process_conversation stashes the last exception's repr in
@@ -665,6 +756,16 @@ async def _run_db(
                         elif "httpstatus" in low or " http " in low: ec = "http_status"
                         elif "tokeniz" in low: ec = "tokenizer_error"
                         elif "too large" in low or "context" in low: ec = "content_too_large"
+                        cascade.record_failure(ec, raw_err)
+                        if cascade.should_abort() and abort_reason is None:
+                            abort_reason = "rate_limit_cascade"
+                            print(
+                                f"[m3-enrich] RATE LIMIT CASCADE: {cascade.summary()}; "
+                                f"draining inflight then stopping. Reset failed groups "
+                                f"and re-run with --resume after the upstream quota "
+                                f"resets.",
+                                flush=True,
+                            )
                         estate.mark_failed(
                             state_conn, gid,
                             error_class=ec, last_error=raw_err,
@@ -1046,6 +1147,8 @@ async def _main_async(args) -> int:
             sample_strategy=args.sample_strategy,
             min_size_k=args.min_size_k,
             max_size_k=args.max_size_k,
+            cascade_threshold=args.cascade_threshold,
+            cascade_window_s=args.cascade_window_s,
         )
         if abort_reason:
             abort_reasons[label] = abort_reason
@@ -1096,6 +1199,33 @@ async def _main_async(args) -> int:
     print("  retrieve later via:")
     print("    M3_PREFER_OBSERVATIONS=1 mcp__memory__memory_search ...")
     print(f"  (or pass --observer-variant {args.target_variant} to the bench harness)")
+
+    # Auto-emit a per-run report so every enrich run leaves an artifact.
+    # Mirrors the docs/audits/ pattern for security scans. Disabled with
+    # --no-report. Lands at docs/audits/enrich-run-<date>.md by default;
+    # later runs the same day overwrite (intended — re-runs supersede).
+    if args.report and args.source_variant:
+        try:
+            from datetime import datetime as _dt
+            report_path = (
+                Path(args.report) if args.report not in (True, "1", "auto")
+                else Path("docs/audits") / f"enrich-run-{_dt.utcnow().strftime('%Y-%m-%d')}.md"
+            )
+            import subprocess as _sp
+            cmd = [
+                sys.executable, str(Path(__file__).parent / "m3_enrich_report.py"),
+                "--variant", args.source_variant,
+                "--target", str(report_path),
+            ]
+            # Pass through the first DB target so the report reads the
+            # right SQLite. (Reports across multiple DBs would need
+            # separate invocations.)
+            first_db = next(iter(db_targets), None)
+            if first_db:
+                cmd.extend(["--db", str(first_db[1])])
+            _sp.run(cmd, check=False)
+        except Exception as e:
+            print(f"[m3-enrich] (report generation failed: {type(e).__name__}: {e})", flush=True)
     return 0
 
 
@@ -1214,6 +1344,22 @@ Profile picker:
                     help="Cap conversations enriched per DB (smoke testing).")
     ap.add_argument("--concurrency", type=int, default=4,
                     help="Concurrent SLM calls. Default 4.")
+    ap.add_argument("--cascade-threshold", type=int, default=10,
+                    help="Abort the run after N consecutive rate-limit (429) "
+                         "failures within --cascade-window-s seconds. Catches "
+                         "upstream quota walls before the run dirties the DB "
+                         "with thousands of phantom failures. Default 10.")
+    ap.add_argument("--cascade-window-s", type=float, default=60.0,
+                    help="Time window for the consecutive-429 cascade detector. "
+                         "Default 60s. Any successful call resets the counter, "
+                         "so isolated 429s during normal operation don't trip.")
+    ap.add_argument("--report", nargs="?", const="auto", default="auto",
+                    help="Write a per-run summary report at the end of the run. "
+                         "Default 'auto' = docs/audits/enrich-run-<date>.md. "
+                         "Pass an explicit path (--report path/to/file.md) to "
+                         "override. Pair with --no-report to disable.")
+    ap.add_argument("--no-report", action="store_const", const=None, dest="report",
+                    help="Disable the auto-generated end-of-run report.")
     ap.add_argument("--include-summaries", action="store_true",
                     help="Add type='summary' rows to the active allowlist "
                          "(extends whichever default applies; redundant under --core).")
