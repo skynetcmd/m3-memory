@@ -2797,8 +2797,25 @@ async def memory_search_scored_impl(
         params.append(conversation_id)
     if variant:
         # Accept "<name>" for exact-variant, "" for unfiltered (default),
-        # or the sentinel "__none__" to filter for untagged legacy rows.
-        if variant == "__none__":
+        # the sentinel "__none__" for rows where variant IS NULL, or a list /
+        # tuple of names for multi-variant retrieval (e.g. paired source +
+        # observation variants in the same scoring pass).
+        # The "__none__" sentinel inside a list is also honored — it expands
+        # to a separate `OR mi.variant IS NULL` clause.
+        if isinstance(variant, (list, tuple, set)):
+            names = [v for v in variant if v]
+            include_null = "__none__" in names
+            names = [v for v in names if v != "__none__"]
+            sub: list[str] = []
+            if names:
+                placeholders = ",".join(["?"] * len(names))
+                sub.append(f"mi.variant IN ({placeholders})")
+                params.extend(names)
+            if include_null:
+                sub.append("mi.variant IS NULL")
+            if sub:
+                where_clauses.append("(" + " OR ".join(sub) + ")")
+        elif variant == "__none__":
             where_clauses.append("mi.variant IS NULL")
         else:
             where_clauses.append("mi.variant = ?")
@@ -4172,6 +4189,96 @@ async def _maybe_expand_routed(
             best[mid] = (s, item)
     fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
     return fused
+
+
+async def memory_search_multi_db_impl(
+    query: str,
+    databases: "list[str] | str",
+    k: int = 8,
+    type_filter: str = "",
+    agent_filter: str = "",
+    search_mode: str = "hybrid",
+    user_id: str = "",
+    scope: str = "",
+    as_of: str = "",
+    conversation_id: str = "",
+    extra_columns: "list[str] | None" = None,
+    recency_bias: float = 0.0,
+    adaptive_k: bool = False,
+    variant: "str | list" = "",
+    fan_out_limit: "int | None" = None,
+):
+    """Fan out a search across multiple SQLite databases and merge by score.
+
+    `databases` accepts either a list of paths or a comma-separated string
+    (MCP-friendly). Each path is searched independently via the existing
+    `memory_search_scored_impl` under its own `active_database` context, so
+    pool-cache keys stay correct and no global env mutation occurs.
+
+    Score-comparability assumption: all DBs use the same `embed_model`. FTS5
+    BM25 scores depend on per-DB corpus stats and may not be perfectly
+    comparable across DBs; for typical small-N fan-out (chatlog + main) the
+    rank-merge is good enough. Document this limitation in the MCP tool
+    description so callers don't expect cross-DB statistical normalization.
+
+    Each returned item is tagged with `_database` (the source path) so callers
+    can preserve provenance after the merge. Returns a list of (score, item)
+    sorted descending and truncated to `k`.
+    """
+    from m3_sdk import active_database, resolve_db_path
+
+    if isinstance(databases, str):
+        paths = [p.strip() for p in databases.split(",") if p.strip()]
+    else:
+        paths = [p for p in (databases or []) if p]
+    if not paths:
+        return []
+
+    resolved = [resolve_db_path(p) for p in paths]
+
+    # CSV-on-the-wire convenience for MCP callers: a comma-separated `variant`
+    # string upgrades to a list so memory_search_scored_impl produces an
+    # IN (...) clause. Single names + `__none__` keep their string fast path.
+    if isinstance(variant, str) and "," in variant:
+        variant = [s.strip() for s in variant.split(",") if s.strip()]
+
+    sem = asyncio.Semaphore(fan_out_limit) if fan_out_limit and fan_out_limit > 0 else None
+
+    async def _one(path: str):
+        async def _run():
+            with active_database(path):
+                return await memory_search_scored_impl(
+                    query, k=k, type_filter=type_filter,
+                    agent_filter=agent_filter, search_mode=search_mode,
+                    user_id=user_id, scope=scope, as_of=as_of,
+                    conversation_id=conversation_id,
+                    extra_columns=extra_columns,
+                    recency_bias=recency_bias, adaptive_k=adaptive_k,
+                    variant=variant,
+                )
+        if sem is None:
+            ranked = await _run()
+        else:
+            async with sem:
+                ranked = await _run()
+        for _score, item in ranked:
+            item["_database"] = path
+        return ranked
+
+    per_db = await asyncio.gather(*[_one(p) for p in resolved], return_exceptions=True)
+
+    merged: list[tuple[float, dict]] = []
+    for path, result in zip(resolved, per_db):
+        if isinstance(result, BaseException):
+            logger.warning(
+                f"memory_search_multi_db_impl: search failed for {path}: "
+                f"{type(result).__name__}: {result}"
+            )
+            continue
+        merged.extend(result)
+
+    merged.sort(key=lambda sx: sx[0], reverse=True)
+    return merged[:k]
 
 
 async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, variant="", intent_hint="", _depth=0):
