@@ -16,3 +16,6 @@
 
 # Every 30 minutes: Embed un-embedded chat_log rows using the local embedding server
 */30 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/chatlog_embed_sweeper.py --batch 256 --max-per-run 10000 >> [M3_MEMORY_ROOT]/logs/chatlog_embed_sweep.log 2>&1
+
+# Every 15 minutes: Drain observation_queue (extract user-facts from chatlog conversations)
+*/15 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/m3_enrich.py --drain-queue --drain-batch 200 --profile enrich_local_qwen >> [M3_MEMORY_ROOT]/logs/observation_drain.log 2>&1

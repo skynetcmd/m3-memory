@@ -73,11 +73,19 @@ def install_unix_crontab(m3_memory_root):
     finally:
         os.unlink(tmp_path)
 
+def _venv_python(m3_memory_root: str) -> str:
+    """Resolve the project venv's python interpreter, cross-platform.
+    Falls back to sys.executable if no venv is present."""
+    if platform.system() == "Windows":
+        candidate = os.path.join(m3_memory_root, ".venv", "Scripts", "python.exe")
+    else:
+        candidate = os.path.join(m3_memory_root, ".venv", "bin", "python")
+    return candidate if os.path.exists(candidate) else sys.executable
+
+
 def get_schedule_specs(m3_memory_root):
     """Return list of schedule specifications (normalized for Windows & Unix)."""
-    python_exe = os.path.join(m3_memory_root, ".venv", "Scripts", "python.exe")
-    if not os.path.exists(python_exe):
-        python_exe = sys.executable
+    python_exe = _venv_python(m3_memory_root)
 
     log_dir = os.path.join(m3_memory_root, "logs")
     bin_posix = m3_memory_root.replace("\\", "/") + "/bin"
@@ -123,6 +131,14 @@ def get_schedule_specs(m3_memory_root):
             "modifier": "30",
             "time": "00:00",
             "description": "Embed un-embedded chat_log rows using the local embedding server"
+        },
+        {
+            "name": "AgentOS_ObservationDrain",
+            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "m3_enrich.py")}" --drain-queue --drain-batch 200 --profile enrich_local_qwen >> "{os.path.join(log_dir, "observation_drain.log")}" 2>&1',
+            "schedule": "MINUTE",
+            "modifier": "15",
+            "time": "00:00",
+            "description": "Drain observation_queue: extract user-facts from chatlog conversations"
         }
     ]
 
@@ -138,9 +154,8 @@ def _filter_tasks(tasks: list, selector: str | None) -> list:
 
 
 def install_windows_tasks(m3_memory_root, selector: str | None = None):
-    python_exe = os.path.join(m3_memory_root, ".venv", "Scripts", "python.exe")
-    if not os.path.exists(python_exe):
-        python_exe = sys.executable
+    python_exe = _venv_python(m3_memory_root)
+    if python_exe == sys.executable and not os.path.exists(os.path.join(m3_memory_root, ".venv")):
         _safe_print(f"{WARN} Using system Python {python_exe} because .venv was not found.")
 
     log_dir = os.path.join(m3_memory_root, "logs")
@@ -154,9 +169,13 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
     success = True
     for task in tasks:
         subprocess.run(["schtasks", "/Delete", "/TN", task["name"], "/F"], capture_output=True)
+        # Wrap in cmd.exe /c so the shell evaluates `>>` redirects and quoted argv.
+        # Without this, schtasks treats the first quoted token as Execute (literal quotes
+        # included) and CreateProcess fails with ERROR_FILE_NOT_FOUND.
+        wrapped = f'cmd.exe /c "{task["cmd"]}"'
         schtasks_cmd = [
             "schtasks", "/Create", "/TN", task["name"],
-            "/TR", task["cmd"],
+            "/TR", wrapped,
             "/SC", task["schedule"],
             "/ST", task["time"],
             "/F",
@@ -219,6 +238,8 @@ def main():
                        help="Install one schedule by name (e.g. chatlog-embed-sweep) or 'all'.")
     group.add_argument("--remove", metavar="NAME",
                        help="Remove one schedule by name, or 'all'.")
+    group.add_argument("--repair", action="store_true",
+                       help="Re-install every configured schedule in place (alias for --add all).")
     args = parser.parse_args()
 
     if args.list:
@@ -229,10 +250,13 @@ def main():
     _safe_print(f"M3 Memory: Detecting platform... {os_name}")
     _safe_print(f"Project root: {m3_memory_root}")
 
-    if not args.add and not args.remove:
-        _safe_print("Nothing to do. Use --list, --add NAME, or --remove NAME.")
+    if not args.add and not args.remove and not args.repair:
+        _safe_print("Nothing to do. Use --list, --add NAME, --remove NAME, or --repair.")
         _safe_print("(Running with no flags used to install everything — now a no-op for safety.)")
         return
+
+    if args.repair:
+        args.add = "all"
 
     selector = None if (args.add == "all" or args.remove == "all") else (args.add or args.remove)
 
