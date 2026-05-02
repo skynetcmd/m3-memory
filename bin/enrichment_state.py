@@ -453,6 +453,27 @@ def mark_empty(
     conn.commit()
 
 
+_RATE_LIMIT_MARKERS = (
+    "429",
+    "too many requests",
+    "resource_exhausted",
+    "exceeded your current quota",
+    "rate limit",
+    "ratelimitexceeded",
+)
+
+
+def _looks_like_rate_limit(error_class: str, last_error: str) -> bool:
+    """Mirrors m3_enrich._is_rate_limit_failure but lives here so mark_failed
+    doesn't import its caller. Rate-limit failures are an upstream policy
+    signal, not evidence the group itself is bad — we don't want them to
+    consume a group's dead-letter attempts budget."""
+    if error_class != "http_status":
+        return False
+    low = (last_error or "").lower()
+    return any(m in low for m in _RATE_LIMIT_MARKERS)
+
+
 def mark_failed(
     conn: sqlite3.Connection,
     group_id: int,
@@ -465,14 +486,22 @@ def mark_failed(
     """Record a failure. Promotes to dead_letter if (a) the error class is
     deterministic or (b) attempts have hit max_attempts. Otherwise leaves
     the row at status='failed' with next_eligible_at set per exponential
-    backoff. Returns the resulting status."""
+    backoff. Returns the resulting status.
+
+    Rate-limit (429) failures bypass the attempts-cap promotion: a daily
+    quota wall is policy, not a per-group bug, so it must not consume the
+    group's retry budget. They still hit dead_letter via the deterministic
+    branch only if classified as such (they aren't — http_status is not
+    deterministic), so in practice 429s always stay at status='failed'."""
     row = conn.execute(
         "SELECT attempts FROM enrichment_groups WHERE id = ?",
         (group_id,),
     ).fetchone()
     attempts = (row[0] if row else 0) or 0
     truncated = (last_error or "")[:1000]
-    if error_class in DETERMINISTIC_ERROR_CLASSES or attempts >= max_attempts:
+    is_rate_limit = _looks_like_rate_limit(error_class, last_error)
+    attempts_cap_hit = (attempts >= max_attempts) and not is_rate_limit
+    if error_class in DETERMINISTIC_ERROR_CLASSES or attempts_cap_hit:
         new_status = "dead_letter"
         next_eligible_at: Optional[str] = None
     else:
