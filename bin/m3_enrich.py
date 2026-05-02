@@ -791,12 +791,13 @@ async def _run_db(
                     #       — leave row as-is; claim already updated attempts.
 
                 done = counters["processed"] + counters["empty_groups"] + counters["failed"]
-                if done > 0 and done % 25 == 0:
+                if done > 0 and done % 50 == 0:
                     elapsed = time.monotonic() - started
                     rate = done / max(elapsed, 1e-3)
                     eta = (n_groups - done) / max(rate, 1e-3)
+                    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     print(
-                        f"[m3-enrich] {db_path.name}: {done}/{n_groups}  "
+                        f"[{ts}] [m3-enrich] {db_path.name}: {done}/{n_groups}  "
                         f"obs_written={counters['written']} "
                         f"empty={counters['empty_groups']} "
                         f"failed={counters['failed']}  "
