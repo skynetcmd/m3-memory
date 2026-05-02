@@ -506,12 +506,13 @@ async def drain_variant_mode(args, profile, token: str) -> None:
                     profile, client, token, counters,
                 )
                 done = counters["processed"] + counters["empty_groups"] + counters["failed"]
-                if done % 25 == 0:
+                if done % 50 == 0:
                     elapsed = time.monotonic() - started
                     rate = done / max(elapsed, 1e-3)
                     eta = (total_groups - done) / max(rate, 1e-3)
+                    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     print(
-                        f"[observer] {done}/{total_groups}  "
+                        f"[{ts}] [observer] {done}/{total_groups}  "
                         f"obs_written={counters['written']} "
                         f"empty={counters['empty_groups']} "
                         f"failed={counters['failed']}  "
