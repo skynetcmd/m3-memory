@@ -23,6 +23,17 @@ Usage:
     python benchmarks/longmemeval/bench_longmemeval.py --no-judge              # write hypotheses only
     python benchmarks/longmemeval/bench_longmemeval.py --cluster-size 0 --graph-depth 0  # ablation: hybrid only
 
+Variant scoping (multi-pipeline corpora in one DB):
+    --ingestion-variant X            tag every ingested row with variant=X
+                                     (`--variant` is the legacy alias)
+    --retrieval-variant X            scope retrieval to variant=X
+    --retrieval-variant a,b          retrieve from variants a OR b (multi)
+    --retrieval-variant a,__none__   variant=a OR variant IS NULL
+
+    Example — score against paired source+observation variants:
+      python benchmarks/longmemeval/bench_longmemeval.py --skip-ingest \
+        --retrieval-variant <source-ingest-variant>,<observations-variant>
+
 Artifacts go to .scratch/longmemeval_run_<timestamp>/:
     hypotheses.jsonl   one line per question
     results.json       aggregate accuracy + per-type breakdown
@@ -335,6 +346,7 @@ async def retrieve_for_question(
     adaptive_k: bool = False,
     smart_time_boost: float = 0.0,
     smart_neighbor_sessions: int = 0,
+    variant: "str | list[str]" = "",
 ) -> list[dict]:
     """Hybrid FTS5+vector search with optional graph expansion and episodic clustering."""
     ranked = await memory_search_scored_impl(
@@ -344,6 +356,7 @@ async def retrieve_for_question(
         adaptive_k=adaptive_k,
         smart_time_boost=smart_time_boost,
         smart_neighbor_sessions=smart_neighbor_sessions,
+        variant=variant,
     )
     if not ranked:
         return []
@@ -679,7 +692,7 @@ async def run(args: argparse.Namespace) -> None:
 
         async def _one(i: int, inst: dict) -> tuple[int, int]:
             async with sem:
-                n, _dt = await ingest_instance(inst, variant=args.variant, per_item=args.per_item)
+                n, _dt = await ingest_instance(inst, variant=args.ingestion_variant, per_item=args.per_item)
                 return i, n
 
         tasks = [asyncio.create_task(_one(i, inst)) for i, inst in enumerate(dataset)]
@@ -722,6 +735,14 @@ async def run(args: argparse.Namespace) -> None:
                 effective_k = max(effective_k, 30)  # Significantly larger K for date reasoning
 
             try:
+                # Split CSV input into a list so memory_core's variant filter
+                # produces an `IN (...)` clause; single-name input stays a
+                # plain string (preserves the single-variant fast path).
+                _rv_raw = (args.retrieval_variant or "").strip()
+                if "," in _rv_raw:
+                    _rv: object = [s.strip() for s in _rv_raw.split(",") if s.strip()]
+                else:
+                    _rv = _rv_raw
                 hits = await retrieve_for_question(
                     qid, question, effective_k,
                     cluster_size=args.cluster_size,
@@ -730,6 +751,7 @@ async def run(args: argparse.Namespace) -> None:
                     adaptive_k=args.adaptive_k or args.smart_retrieval,
                     smart_time_boost=0.15 if args.smart_retrieval else 0.0,
                     smart_neighbor_sessions=1 if args.smart_retrieval else 0,
+                    variant=_rv,
                 )
             except Exception as e:
                 log(f"  [{qid}] retrieval failed: {e}")
@@ -873,8 +895,18 @@ def parse_args() -> argparse.Namespace:
                         "flag only changes transaction granularity and ordering "
                         "semantics. Roughly 10x slower. Default off (bulk matches "
                         "production MCP clients; per-item is an ablation knob).")
-    p.add_argument("--variant", type=str, default="",
-                   help="tag every ingested row with this variant label")
+    p.add_argument("--ingestion-variant", "--variant", dest="ingestion_variant",
+                   type=str, default="",
+                   help="tag every ingested row with this variant label. "
+                        "(`--variant` is the legacy alias.)")
+    p.add_argument("--retrieval-variant", type=str, default="",
+                   help="scope retrieval to rows with this variant. Empty = "
+                        "unfiltered (default, preserves prior behavior). "
+                        "Use '__none__' to match only rows where variant IS NULL. "
+                        "Pass a comma-separated list to retrieve from multiple "
+                        "variants (e.g. paired source + observation variants in "
+                        "one scoring pass). Defense-in-depth on top of user_id=qid "
+                        "filtering when the bench DB holds multiple variants.")
     from m3_sdk import add_database_arg
     add_database_arg(p)
     return p.parse_args()
