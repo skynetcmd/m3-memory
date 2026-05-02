@@ -259,6 +259,51 @@ def test_mark_failed_deterministic_error_immediately_dead_letters(db_conn):
     assert s == "dead_letter"
 
 
+def test_mark_failed_rate_limit_does_not_consume_attempts_budget(db_conn):
+    """A daily-quota wall is upstream policy, not a per-group bug. 429-shaped
+    failures must keep the group at status='failed' (retryable) even after
+    attempts >= max_attempts, so a quota recovery picks them back up without
+    needing --include-dead-letter."""
+    gid, _ = estate.enroll_group(
+        db_conn, source_variant="v", target_variant="t",
+        group_key="c", user_id="u", db_path="/", turn_count=1,
+        source_content_hash="h",
+    )
+    db_conn.commit()
+    quota_msg = (
+        "RuntimeError: observer http 429: You exceeded your current quota, "
+        "please check your plan and billing details."
+    )
+    for _ in range(5):  # well past max_attempts=3
+        estate.claim_group(db_conn, gid, enrich_run_id="r")
+        s = estate.mark_failed(
+            db_conn, gid,
+            error_class="http_status", last_error=quota_msg, max_attempts=3,
+        )
+        assert s == "failed", f"rate-limit must not promote to dead_letter (got {s})"
+
+
+def test_mark_failed_non_rate_limit_http_status_still_dead_letters(db_conn):
+    """Non-429 http_status (e.g. 500 Internal Server Error) is a real
+    per-group failure and must still consume the attempts budget."""
+    gid, _ = estate.enroll_group(
+        db_conn, source_variant="v", target_variant="t",
+        group_key="c", user_id="u", db_path="/", turn_count=1,
+        source_content_hash="h",
+    )
+    db_conn.commit()
+    err = "HTTPStatusError: 500 Internal Server Error"
+    estate.claim_group(db_conn, gid, enrich_run_id="r")
+    s1 = estate.mark_failed(db_conn, gid, error_class="http_status", last_error=err, max_attempts=3)
+    assert s1 == "failed"
+    estate.claim_group(db_conn, gid, enrich_run_id="r")
+    s2 = estate.mark_failed(db_conn, gid, error_class="http_status", last_error=err, max_attempts=3)
+    assert s2 == "failed"
+    estate.claim_group(db_conn, gid, enrich_run_id="r")
+    s3 = estate.mark_failed(db_conn, gid, error_class="http_status", last_error=err, max_attempts=3)
+    assert s3 == "dead_letter"
+
+
 def test_mark_failed_sets_backoff(db_conn):
     gid, _ = estate.enroll_group(
         db_conn, source_variant="v", target_variant="t",
