@@ -19,7 +19,33 @@ forward-going only.
 
 ---
 
-## [2026.5.3.1] — May 3, 2026 — Multi-variant search, entity-graph v2, xAI/Grok provider
+## [2026.5.3.2] — May 3, 2026 — send_to routing + Windows Unicode fix
+
+Patch release on top of 2026.5.3.1. Two changes:
+
+### Added
+
+- **`--send-to` routing for parallel multi-provider runs.** Migration
+  031 adds `enrichment_groups.send_to TEXT` so the same source variant
+  can be split across providers by explicit assignment instead of
+  relying on bucket-bounds disjointness. New
+  [`bin/m3_enrich_assign.py`](../bin/m3_enrich_assign.py) bulk-tags
+  rows; `bin/m3_enrich.py --send-to <name>` claims only matching rows.
+  Rows with `send_to IS NULL` are excluded in routed mode (NULL means
+  unassigned, and a routed worker should not steal unassigned rows).
+  Backwards compatible: when `--send-to` is omitted, the column is
+  ignored entirely.
+
+### Fixed
+
+- **Windows Unicode crash on `--resume` size-label.** The infinity
+  symbol (`U+221E`) in the resume-banner format string crashed Python
+  on Windows when stdout was redirected to a file (cp1252 default
+  encoding). Replaced with `"inf"`. Reproduced today launching an
+  enricher with `--min-size-k` set and `--max-size-k` unset — the
+  print path tripped `UnicodeEncodeError` before the work loop.
+
+---
 
 This release lands real new capabilities on top of the May 1 enrichment
 baseline: multi-variant retrieval (and a new `memory_search_multi_db`
