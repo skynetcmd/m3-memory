@@ -157,6 +157,12 @@ async def embed_batch(
     """
     Embed a batch of rows. Returns count embedded.
     batch format: [(id, content, title, metadata_json), ...]
+
+    Kept for backwards compatibility. The main() loop now drives
+    embed_sweep_lib.run_embed_loop directly; this function remains for
+    any external caller that imported it. Internally still uses the
+    same memory_core._embed_many primitive — bit-for-bit equivalent
+    to the pre-extraction path.
     """
     if not batch:
         return 0
@@ -353,44 +359,98 @@ async def main() -> int:
             if spill_drained > 0:
                 logger.info("Drained %d rows from spill", spill_drained)
 
-        # Query and embed batches
-        total_to_embed = max_per_run
-        while total_to_embed > 0:
-            batch_limit = min(batch_size, total_to_embed)
+        # Query and embed batches via the shared embed_sweep_lib loop.
+        # This delegates concurrency, batching, cursor advance, and per-
+        # batch hardening (timeout, oversize/empty/bad-dim skip,
+        # consecutive-fail abort) to one place that bin/embed_backfill.py
+        # also uses. Behavior change vs. pre-extraction: ORDER BY id ASC
+        # instead of ORDER BY created_at ASC. UUIDs aren't time-ordered,
+        # so this changes within-batch ordering (negligible at sweeper
+        # cadence) and gains infinite-loop protection on skipped rows
+        # via the after_id cursor.
+        from embed_sweep_lib import Counters as _Counters, run_embed_loop
+        from memory_core import (
+            _content_hash as _ch,
+            _embed_many as _em,
+            _pack as _mc_pack,
+        )
+
+        counters = _Counters()
+
+        # Fetch callback: pulls (after_id, limit) -> rows. Only chat_log
+        # rows still missing an embedding row.
+        def _fetch(after_id, limit):
+            where = [
+                "type='chat_log'",
+                "is_deleted=0",
+                "id NOT IN (SELECT memory_id FROM memory_embeddings)",
+            ]
+            params: list = []
+            if after_id is not None:
+                where.append("id > ?")
+                params.append(after_id)
+            sql = (
+                f"SELECT id, content, title, metadata_json "
+                f"FROM memory_items WHERE {' AND '.join(where)} "
+                f"ORDER BY id LIMIT ?"
+            )
+            params.append(limit)
             try:
-                rows = conn.execute(
-                    """
-                    SELECT id, content, title, metadata_json
-                    FROM memory_items
-                    WHERE type='chat_log'
-                      AND is_deleted=0
-                      AND id NOT IN (SELECT memory_id FROM memory_embeddings)
-                    ORDER BY created_at
-                    LIMIT ?
-                    """,
-                    (batch_limit,),
-                ).fetchall()
+                return conn.execute(sql, params).fetchall()
             except sqlite3.Error as e:
                 logger.error("Failed to query unembedded rows: %s", e)
-                return 1
+                return []
 
-            if not rows:
-                break
-
+        # Write callback: persists one embedding row. Chatlog DB has the
+        # content_hash column (added in 003_chroma_sync_queue_align /
+        # main migration 021's column add), so we write it.
+        def _write(mid: str, vec: list[float], model_str: str, content_hash: str) -> bool:
             if args.dry_run:
-                logger.info(
-                    "DRY RUN: would embed %d rows in batch %d",
-                    len(rows),
-                    batches_processed + 1,
+                return True  # count it but don't write
+            try:
+                cur = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO memory_embeddings
+                    (id, memory_id, embedding, embed_model, dim, created_at, content_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        mid,
+                        _mc_pack(vec),
+                        model_str,
+                        len(vec),
+                        datetime.now(timezone.utc).isoformat(),
+                        content_hash,
+                    ),
                 )
-                rows_embedded += len(rows)
-            else:
-                embedded = await embed_batch(conn, rows, dry_run=False)
-                rows_embedded += embedded
-                logger.info("Embedded %d rows in batch %d", embedded, batches_processed + 1)
+                conn.commit()
+                return cur.rowcount > 0
+            except sqlite3.Error as e:
+                logger.error("Failed to insert embedding for %s: %s", mid[:8], e)
+                return False
 
-            batches_processed += 1
-            total_to_embed -= len(rows)
+        # Drive the loop. limit=max_per_run preserves the existing
+        # "max rows per scheduled run" budget.
+        await run_embed_loop(
+            fetch_candidates=_fetch,
+            write_embedding=_write,
+            counters=counters,
+            embed_many=_em,
+            content_hash_fn=_ch,
+            transform_text=lambda t, _m: t,  # chatlog: no anchor augmentation
+            batch_size=batch_size,
+            concurrency=1,                   # sweeper has historically run sequentially
+            timeout_s=300.0,                 # generous for a scheduled background job
+            deadline_s=None,                 # max_per_run handles the budget
+            max_consecutive_fails=5,
+            max_row_bytes=32_768,
+            expected_dim=None,               # don't reject by dim — chatlog has heterogenous models
+            limit=max_per_run,
+            log=lambda msg: logger.info("%s", msg),
+        )
+        rows_embedded = counters.embedded
+        batches_processed = counters.batches_completed
 
         # Get remaining backlog count
         backlog = await get_unembed_count(conn)

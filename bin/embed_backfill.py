@@ -70,22 +70,22 @@ DEFAULT_CONN_REFRESH_BATCHES = 1000
 
 
 # ── Status counters used in the final report ──────────────────────────────
-class Counters:
-    def __init__(self) -> None:
-        self.scanned = 0
-        self.embedded = 0
-        self.skipped_empty = 0
-        self.skipped_oversize = 0
-        self.skipped_bad_dim = 0
-        self.failed_batches = 0
-        self.consecutive_fails = 0
-        self.batches_completed = 0
-        self.cache_reuses = 0  # rows whose content_hash already had a vector
-        self.errors_by_class: dict[str, int] = {}
+# Re-exported from embed_sweep_lib so callers (including tests) keep using
+# `embed_backfill.Counters`. The lib owns the canonical class.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from embed_sweep_lib import Counters as _LibCounters, run_embed_loop  # noqa: E402
 
-    def record_error(self, exc: Exception) -> None:
-        cls = type(exc).__name__
-        self.errors_by_class[cls] = self.errors_by_class.get(cls, 0) + 1
+class Counters(_LibCounters):  # type: ignore[misc, valid-type]
+    """Backwards-compat shim: subclass of lib Counters with one extra attr.
+
+    `cache_reuses` was tracked in the original embed_backfill but is
+    informational only (never read by the loop). We keep it on the
+    subclass so any downstream code that touched it doesn't break.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cache_reuses = 0  # rows whose content_hash already had a vector
 
 
 # ── Lockfile ──────────────────────────────────────────────────────────────
@@ -237,189 +237,94 @@ def _count_pending(db_path: Path, args: argparse.Namespace) -> int:
 
 # ── Main async loop ───────────────────────────────────────────────────────
 async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
-    # Late import: memory_core reads M3_DATABASE at import time, so we must
-    # set the env var BEFORE importing.  Once imported, _db() ties to that
-    # path for the lifetime of the process.
+    """Delegate to embed_sweep_lib.run_embed_loop with the embed_backfill-
+    specific fetch + write callbacks.
+
+    Late import: memory_core reads M3_DATABASE at import time, so we must
+    set the env var BEFORE importing. Once imported, _db() ties to that
+    path for the lifetime of the process.
+    """
     os.environ["M3_DATABASE"] = str(args.db)
     if str(BIN_DIR) not in sys.path:
         sys.path.insert(0, str(BIN_DIR))
 
     import memory_core as mc  # noqa: E402
-    # Override _embed_many's expected dim if user asked. mc.EMBED_DIM is
-    # used for first-call validation logging, not write-side gating; we
-    # do our own dim check on every batch.
-    expected_dim = args.expected_dim
 
     started = time.monotonic()
     deadline = started + args.max_runtime_min * 60.0
 
-    # Per-batch semaphore to bound concurrency
-    sem = asyncio.Semaphore(args.concurrency)
-
-    # Connection refresh: close + reopen at every N batches to recycle WAL
-    # pages and SQLite's per-connection cache. mc has its own pool but we
-    # want to be explicit about hygiene under long runs.
-
-    async def _embed_batch(batch_rows: list[tuple]) -> int:
-        """Embed one batch. Returns count of rows successfully written."""
-        async with sem:
-            if time.monotonic() > deadline:
-                return 0  # caller will see deadline next loop iter
-
-            # Build (text, mid, content_hash) for each row
-            from memory_core import _augment_embed_text_with_anchors, _content_hash
-            items: list[dict] = []
-            for r in batch_rows:
-                mid, content, title, metadata_json = r
-                base_text = (content or title or "").strip()
-                if not base_text:
-                    counters.skipped_empty += 1
-                    continue
-                if len(base_text.encode("utf-8")) > args.max_row_bytes:
-                    counters.skipped_oversize += 1
-                    continue
-                if args.no_augment_anchors:
-                    embed_text = base_text
-                else:
-                    embed_text = _augment_embed_text_with_anchors(
-                        base_text, metadata_json
-                    )
-                items.append({
-                    "mid": mid,
-                    "text": embed_text,
-                    "chash": _content_hash(embed_text),
-                })
-
-            if not items:
-                return 0
-
-            try:
-                texts = [it["text"] for it in items]
-                # _embed_many handles content-hash cache, retries, bisection.
-                results = await asyncio.wait_for(
-                    mc._embed_many(texts), timeout=args.timeout_s,
-                )
-            except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
-                counters.failed_batches += 1
-                counters.consecutive_fails += 1
-                counters.record_error(e)
-                _log(f"BATCH_FAIL: {type(e).__name__}: {str(e)[:200]}")
-                return 0
-
-            # Write embeddings + chroma_sync_queue rows
-            n_written = 0
-            now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            with mc._db() as db:
-                for it, (vec, model) in zip(items, results):
-                    if vec is None:
-                        continue
-                    if expected_dim and len(vec) != expected_dim:
-                        counters.skipped_bad_dim += 1
-                        continue
-                    try:
-                        # INSERT OR IGNORE handles the race where another
-                        # sweeper just wrote the same memory_id.
-                        cur = db.execute(
-                            "INSERT OR IGNORE INTO memory_embeddings "
-                            "(id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                _new_uuid(),
-                                it["mid"],
-                                mc._pack(vec),
-                                model,
-                                len(vec),
-                                now_iso,
-                                it["chash"],
-                            ),
-                        )
-                        if cur.rowcount > 0:
-                            db.execute(
-                                "INSERT INTO chroma_sync_queue (memory_id, operation) "
-                                "VALUES (?, ?)",
-                                (it["mid"], "upsert"),
-                            )
-                            n_written += 1
-                    except Exception as e:  # noqa: BLE001
-                        counters.record_error(e)
-                        _log(f"WRITE_FAIL: mid={it['mid'][:8]} {type(e).__name__}: {e}")
-                # _db() context-managed commit happens at __exit__
-
-            counters.embedded += n_written
-            counters.batches_completed += 1
-            counters.consecutive_fails = 0
-            return n_written
-
-    # Outer cycle: pull a chunk, dispatch concurrent batches, repeat.
-    # `after_id` is the high-water mark of ids we've seen this run. The
-    # candidate query uses `mi.id > after_id` so skipped rows (oversize,
-    # bad-dim, failed batch) don't get reselected forever.
-    fetch_size = args.batch_size * args.concurrency * 4
-    cycles = 0
-    after_id: str | None = None
-
-    while True:
-        if time.monotonic() > deadline:
-            _log(f"DEADLINE: --max-runtime-min {args.max_runtime_min} reached.")
-            break
-
-        if counters.consecutive_fails >= args.max_consecutive_fails:
-            _log(f"ABORT: {counters.consecutive_fails} consecutive batch failures. "
-                 f"Check embedder availability (8081 / LM Studio).")
-            break
-
-        if args.limit and counters.embedded >= args.limit:
-            _log(f"LIMIT_REACHED: --limit {args.limit}")
-            break
-
-        # Fetch
+    # ── Fetch callback ────────────────────────────────────────────────
+    # Pulls candidates from args.db using _build_query. The helper passes
+    # us the high-water mark (after_id) and a fetch size; we just plug
+    # them into the existing SQL builder.
+    def _fetch(after_id, limit):
         sql, params = _build_query(args, after_id=after_id)
-        params_with_limit = params + [fetch_size]
-        # Use a fresh connection so we don't hold a long transaction
+        params_with_limit = params + [limit]
         conn = sqlite3.connect(str(args.db), timeout=30.0)
         try:
             conn.execute("PRAGMA busy_timeout=30000")
-            rows = conn.execute(sql, params_with_limit).fetchall()
+            return conn.execute(sql, params_with_limit).fetchall()
         finally:
             conn.close()
-        counters.scanned += len(rows)
 
-        if not rows:
-            _log("DRAIN: 0 rows pending.")
-            break
+    # ── Write callback ────────────────────────────────────────────────
+    # Persists one embedding row + the chroma_sync_queue marker. Uses
+    # mc._db() so writes funnel through memory_core's connection pool
+    # (keeps WAL / busy_timeout behavior consistent with the rest of
+    # the codebase). Returns True iff a row was newly written.
+    def _write(mid: str, vec: list[float], model_str: str, content_hash: str) -> bool:
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with mc._db() as db:
+            cur = db.execute(
+                "INSERT OR IGNORE INTO memory_embeddings "
+                "(id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    _new_uuid(),
+                    mid,
+                    mc._pack(vec),
+                    model_str,
+                    len(vec),
+                    now_iso,
+                    content_hash,
+                ),
+            )
+            if cur.rowcount > 0:
+                db.execute(
+                    "INSERT INTO chroma_sync_queue (memory_id, operation) "
+                    "VALUES (?, ?)",
+                    (mid, "upsert"),
+                )
+                return True
+            return False
 
-        # Advance the high-water mark to the largest id we just fetched,
-        # BEFORE dispatching batches. Even if every row in this fetch
-        # gets skipped, the next cycle queries strictly past these ids.
-        after_id = rows[-1][0]
+    # ── Text transform callback ───────────────────────────────────────
+    # Match memory_write_impl's inline behavior: augment with anchors.
+    # Skip when --no-augment-anchors set.
+    if args.no_augment_anchors:
+        transform = None  # use lib default (identity)
+    else:
+        def transform(text: str, metadata) -> str:
+            return mc._augment_embed_text_with_anchors(text, metadata)
 
-        # Split into batches and dispatch
-        batches: list[list[tuple]] = [
-            rows[i:i + args.batch_size] for i in range(0, len(rows), args.batch_size)
-        ]
-        results = await asyncio.gather(
-            *(_embed_batch(b) for b in batches), return_exceptions=False,
-        )
-        cycles += 1
-
-        # Periodic progress
-        elapsed = time.monotonic() - started
-        rate = counters.embedded / max(elapsed, 1e-3)
-        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        _log(
-            f"CYCLE {cycles}: scanned={counters.scanned} embedded={counters.embedded} "
-            f"skipped_empty={counters.skipped_empty} skipped_oversize={counters.skipped_oversize} "
-            f"skipped_bad_dim={counters.skipped_bad_dim} failed_batches={counters.failed_batches} "
-            f"rate={rate:.1f}/s",
-            ts=ts,
-        )
-
-        # Connection refresh hint (memory_core's pool handles its own; this
-        # is a no-op unless we add explicit recycle; left as a marker for
-        # future tuning).
-        if counters.batches_completed % args.connection_refresh == 0:
-            pass  # placeholder for explicit recycle if profiling shows need
-
+    # Drive the loop
+    await run_embed_loop(
+        fetch_candidates=_fetch,
+        write_embedding=_write,
+        counters=counters,
+        embed_many=mc._embed_many,
+        content_hash_fn=mc._content_hash,
+        transform_text=transform if transform is not None else (lambda t, _m: t),
+        batch_size=args.batch_size,
+        concurrency=args.concurrency,
+        timeout_s=args.timeout_s,
+        deadline_s=deadline,
+        max_consecutive_fails=args.max_consecutive_fails,
+        max_row_bytes=args.max_row_bytes,
+        expected_dim=(args.expected_dim if args.expected_dim else None),
+        limit=args.limit,
+        log=_log,
+    )
     return 0
 
 
