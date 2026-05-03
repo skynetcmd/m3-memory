@@ -147,8 +147,18 @@ async def call_observer(
     profile,
     client: httpx.AsyncClient,
     token: str,
-) -> list[dict]:
-    """Call the Observer SLM and return parsed observations.
+) -> tuple[list[dict], dict]:
+    """Call the Observer SLM and return (parsed_observations, usage_meta).
+
+    usage_meta is a dict with keys tokens_in, tokens_out, cost_usd (zeros
+    when the upstream response doesn't include them). Used by the budget
+    watchdog and per-row cost provenance in enrichment_groups.
+
+    Cost computation: openai-shape responses sometimes carry
+    cost_in_usd_ticks (xAI returns this in nanocents == USD * 1e9). When
+    absent, callers can compute cost from profile.input_cost_per_mtok and
+    profile.output_cost_per_mtok if those are set; we don't compute it
+    here to keep this function provider-neutral.
 
     Dispatches on profile.backend (anthropic / openai), mirroring the
     same pattern as run_fact_enrichment.py. Anthropic shape is the default
@@ -164,6 +174,8 @@ async def call_observer(
         # paginate by splitting the conversation in half.
         # For this iteration we just truncate; real pagination is task-future.
         user_text = user_text[:input_max_chars]
+
+    usage_meta = {"tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0}
 
     if backend == "anthropic":
         payload = {
@@ -188,6 +200,10 @@ async def call_observer(
             b.get("text", "") for b in blocks
             if isinstance(b, dict) and b.get("type") == "text"
         ).strip()
+        # Anthropic usage shape: input_tokens / output_tokens
+        u = data.get("usage") or {}
+        usage_meta["tokens_in"] = int(u.get("input_tokens") or 0)
+        usage_meta["tokens_out"] = int(u.get("output_tokens") or 0)
     else:
         payload = {
             "model": profile.model,
@@ -213,7 +229,33 @@ async def call_observer(
             raise RuntimeError(f"observer http {r.status_code}: {r.text[:200]}")
         data = r.json()
         text = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-    return parse_observations(text)
+        # OpenAI-compat usage shape: prompt_tokens / completion_tokens.
+        # xAI extension: cost_in_usd_ticks (USD * 1e9).
+        u = data.get("usage") or {}
+        usage_meta["tokens_in"] = int(u.get("prompt_tokens") or 0)
+        usage_meta["tokens_out"] = int(u.get("completion_tokens") or 0)
+        ticks = u.get("cost_in_usd_ticks")
+        if ticks is not None:
+            try:
+                usage_meta["cost_usd"] = float(ticks) / 1e9
+            except (TypeError, ValueError):
+                pass
+
+    # Provider-neutral fallback: when cost_usd wasn't returned by the API
+    # but the profile carries per-mtok pricing, compute from token counts.
+    # Lets us track Anthropic + Gemini cost without provider-specific code
+    # paths in the enricher hot loop. Fields are optional: profiles that
+    # don't set them simply leave cost_usd at 0.
+    if usage_meta["cost_usd"] == 0.0:
+        in_per_m = getattr(profile, "input_cost_per_mtok", None)
+        out_per_m = getattr(profile, "output_cost_per_mtok", None)
+        if in_per_m or out_per_m:
+            usage_meta["cost_usd"] = (
+                (usage_meta["tokens_in"] / 1_000_000.0) * float(in_per_m or 0)
+                + (usage_meta["tokens_out"] / 1_000_000.0) * float(out_per_m or 0)
+            )
+
+    return parse_observations(text), usage_meta
 
 
 def _build_session_block(turns: list[tuple], session_date: str) -> dict:
@@ -384,11 +426,19 @@ async def process_conversation(
 
     observations: list[dict] = []
     chunk_fail_count = 0
+    # Accumulate per-chunk usage so the caller can attribute cost to this
+    # group on the enrichment_groups row.
+    group_tokens_in = 0
+    group_tokens_out = 0
+    group_cost_usd = 0.0
     for ci, chunk in enumerate(chunks):
         block = _build_session_block(chunk, session_date)
         try:
-            chunk_obs = await call_observer(block, profile, client, token)
+            chunk_obs, chunk_usage = await call_observer(block, profile, client, token)
             observations.extend(chunk_obs)
+            group_tokens_in += chunk_usage.get("tokens_in", 0)
+            group_tokens_out += chunk_usage.get("tokens_out", 0)
+            group_cost_usd += chunk_usage.get("cost_usd", 0.0)
         except Exception as e:  # noqa: BLE001
             chunk_fail_count += 1
             # Stash the most recent error so wrappers (e.g. m3_enrich's
@@ -403,6 +453,16 @@ async def process_conversation(
                       flush=True)
             # Continue to next chunk rather than aborting the whole conversation.
             continue
+
+    # Surface usage to the caller. Cumulative session totals also tracked
+    # in counters["total_*"] for cross-group budget queries that don't
+    # round-trip through the DB.
+    counters["last_tokens_in"] = group_tokens_in
+    counters["last_tokens_out"] = group_tokens_out
+    counters["last_cost_usd"] = group_cost_usd
+    counters["total_tokens_in"] = counters.get("total_tokens_in", 0) + group_tokens_in
+    counters["total_tokens_out"] = counters.get("total_tokens_out", 0) + group_tokens_out
+    counters["total_cost_usd"] = counters.get("total_cost_usd", 0.0) + group_cost_usd
 
     if not observations:
         # Group produced nothing. If any chunk failed, classify as failed;

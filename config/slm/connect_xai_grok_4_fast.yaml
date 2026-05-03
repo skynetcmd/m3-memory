@@ -17,8 +17,15 @@ backend: openai
 cache_system: false
 temperature: 0
 timeout_s: 60.0
-max_tokens: 1024
-input_max_chars: 6000
+max_tokens: 4096
+input_max_chars: 32000
+# Pricing per https://docs.x.ai/docs/models (grok-4-1-fast-non-reasoning):
+# $0.20 / 1M input tokens, $0.50 / 1M output tokens. Used by the cost-tracking
+# fallback in run_observer.call_observer when xAI's response doesn't include
+# cost_in_usd_ticks (which it usually does — the fallback is belt-and-
+# suspenders so the budget watchdog stays honest).
+input_cost_per_mtok: 0.20
+output_cost_per_mtok: 0.50
 labels:
   - observed
 fallback: observed

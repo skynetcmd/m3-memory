@@ -211,7 +211,7 @@ async def _smoke_profile(profile: Profile) -> None:
     from unified_ai import async_client_for_profile
     try:
         async with async_client_for_profile(profile, timeout=30.0) as client:
-            obs = await observer.call_observer(test_block, profile, client, token)
+            obs, _usage = await observer.call_observer(test_block, profile, client, token)
         # Empty list is a clean pass; non-empty also fine (model just made stuff up).
         print(f"[m3-enrich] profile smoke OK: model={profile.model} backend={profile.backend} "
               f"({len(obs)} obs returned on empty input)", flush=True)
@@ -770,19 +770,31 @@ async def _run_db(
                                 f"resets.",
                                 flush=True,
                             )
+                        # Pull last-group usage even on failure, so that
+                        # partial-chunk costs (chunks that succeeded before
+                        # the failing one) get attributed to this row. Zero
+                        # for clean failures where no chunk succeeded.
+                        f_tin = counters.pop("last_tokens_in", 0) or 0
+                        f_tout = counters.pop("last_tokens_out", 0) or 0
+                        f_cost = counters.pop("last_cost_usd", 0.0) or 0.0
                         estate.mark_failed(
                             state_conn, gid,
                             error_class=ec, last_error=raw_err,
                             max_attempts=max_attempts, enrichment_ms=elapsed_ms,
+                            tokens_in=f_tin, tokens_out=f_tout, cost_usd=f_cost,
                         )
                     elif written_delta > 0:
                         # run_observer stashes per-call partial-failure count
                         # in counters["last_partial_failure_chunks"]. Pull and
                         # zero it so it doesn't leak into the next group.
                         pfc = counters.pop("last_partial_failure_chunks", 0) or 0
+                        s_tin = counters.pop("last_tokens_in", 0) or 0
+                        s_tout = counters.pop("last_tokens_out", 0) or 0
+                        s_cost = counters.pop("last_cost_usd", 0.0) or 0.0
                         estate.mark_success(
                             state_conn, gid,
                             obs_emitted=written_delta, enrichment_ms=elapsed_ms,
+                            tokens_in=s_tin, tokens_out=s_tout, cost_usd=s_cost,
                             partial_failure_chunks=pfc,
                         )
                         if pfc > 0:
@@ -790,7 +802,13 @@ async def _run_db(
                                   f"{pfc} chunk(s) failed, {written_delta} obs kept",
                                   flush=True)
                     elif empty_delta > 0 or counters["processed"] - pre_processed > 0:
-                        estate.mark_empty(state_conn, gid, enrichment_ms=elapsed_ms)
+                        e_tin = counters.pop("last_tokens_in", 0) or 0
+                        e_tout = counters.pop("last_tokens_out", 0) or 0
+                        e_cost = counters.pop("last_cost_usd", 0.0) or 0.0
+                        estate.mark_empty(
+                            state_conn, gid, enrichment_ms=elapsed_ms,
+                            tokens_in=e_tin, tokens_out=e_tout, cost_usd=e_cost,
+                        )
                     # else: process_conversation early-returned (empty turns)
                     #       — leave row as-is; claim already updated attempts.
 

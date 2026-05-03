@@ -137,6 +137,13 @@ class Profile:
     # can use this as their pre-call cap. Defaults to None so existing
     # classify_intent / extract_text callers see no behavior change.
     input_max_chars: Optional[int] = None
+    # Optional pricing ($/M tokens). When set, run_observer computes
+    # cost_usd from token counts even if the upstream API doesn't return
+    # cost natively. Used by the budget watchdog and per-row provenance.
+    # None on either side means "don't compute that side" — a profile
+    # with only input_cost set still attributes input cost.
+    input_cost_per_mtok: Optional[float] = None
+    output_cost_per_mtok: Optional[float] = None
     # Post-processing for free-text output (extract_text / extract_entities).
     # All optional. Applied in order: skip_if_matches → strip_prefixes →
     # format. classify_intent does NOT apply these — its label-matching
@@ -227,6 +234,8 @@ def _parse_profile(name: str, path: Path) -> Profile:
         anthropic_version=anthropic_version,
         max_tokens=int(raw.get("max_tokens", 512)),
         input_max_chars=int(raw["input_max_chars"]) if raw.get("input_max_chars") is not None else None,
+        input_cost_per_mtok=float(raw["input_cost_per_mtok"]) if raw.get("input_cost_per_mtok") is not None else None,
+        output_cost_per_mtok=float(raw["output_cost_per_mtok"]) if raw.get("output_cost_per_mtok") is not None else None,
         post_strip_prefixes=post_strip_prefixes,
         post_skip_if_matches=post_skip_if_matches,
         post_format=post_format,

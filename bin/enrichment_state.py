@@ -482,6 +482,9 @@ def mark_failed(
     last_error: str,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     enrichment_ms: Optional[int] = None,
+    tokens_in: Optional[int] = None,
+    tokens_out: Optional[int] = None,
+    cost_usd: Optional[float] = None,
 ) -> str:
     """Record a failure. Promotes to dead_letter if (a) the error class is
     deterministic or (b) attempts have hit max_attempts. Otherwise leaves
@@ -509,15 +512,23 @@ def mark_failed(
         # Exponential backoff: 30s, 60s, 120s ...
         backoff_sec = BACKOFF_BASE_SEC * (2 ** max(0, attempts - 1))
         next_eligible_at = _iso_plus(backoff_sec)
+    # COALESCE on cost columns: failed groups can be retried, and a
+    # successful retry should ADD its cost to whatever a prior partial-
+    # success attempt charged (rather than overwrite). For the first
+    # failure these are simply the chunk-success-before-fail amounts.
     conn.execute(
         """
         UPDATE enrichment_groups
         SET status=?, error_class=?, last_error=?,
             next_eligible_at=?, enrichment_ms=?,
+            tokens_in=COALESCE(tokens_in,0)+COALESCE(?,0),
+            tokens_out=COALESCE(tokens_out,0)+COALESCE(?,0),
+            cost_usd=COALESCE(cost_usd,0)+COALESCE(?,0),
             claim_token=NULL, claimed_at=NULL
         WHERE id = ?
         """,
-        (new_status, error_class, truncated, next_eligible_at, enrichment_ms, group_id),
+        (new_status, error_class, truncated, next_eligible_at, enrichment_ms,
+         tokens_in, tokens_out, cost_usd, group_id),
     )
     conn.commit()
     return new_status
