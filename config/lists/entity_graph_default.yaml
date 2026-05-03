@@ -1,53 +1,62 @@
-# Default entity-graph vocabulary for m3-memory — v2 (2026-05-03).
-# Loaded by memory_core.load_entity_vocab() when no override path is given.
-# Matches the hardcoded VALID_ENTITY_TYPES and VALID_ENTITY_PREDICATES
-# constants in memory_core.py — both must stay in sync.
+# Default entity-graph vocabulary for m3-memory — SUPERSET (2026-05-03).
 #
-# Vocabulary v2 organizes predicates into four layers:
+# This YAML is the SCHEMA-VALIDATION DEFAULT. It is the union of the two
+# narrower domain vocabs:
 #
-#   Layer 1 — provenance / aliasing
-#     mentions    memory_item → entity (catch-all reference, retrieval expansion)
-#     same_as     entity ↔ entity (canonical alias)
-#     source_of   fact → memory_item (which observation derived this fact)
+#   * entity_graph_v2.yaml  — human-life vocab (chatlog, persona-grounded
+#                              benchmark corpora)
+#   * entity_graph_m3.yaml  — technical vocab (homelab inventory, code
+#                              structure, bench/ML run records)
 #
-#   Layer 2 — stable person attributes (single active per (subject, predicate))
-#     located_in  person → place (residence; person-stable)
-#     works_at    person → organization
-#     family_of   person → person (kinship; "role" metadata distinguishes son/wife/etc.)
-#     knows       person → person (non-family social tie; "role" metadata for friend/doctor/coworker/etc.)
-#     prefers     person → preference|product|organization (multi-valued)
-#     owns        person → product|object (countable possessions)
+# Why a superset: a single SQLite memory DB may hold rows from both domains
+# (e.g. agent_memory.db, when chatlog content gets promoted into the same
+# DB that already holds homelab/code observations). The schema validator
+# needs to accept any predicate or entity_type emitted by either domain's
+# extractor without rejecting cross-domain content.
 #
-#   Layer 3 — event / object attributes
-#     has_participant  event → person
-#     has_location     event → place (event-scoped, distinct from located_in)
-#     has_time         event → date
-#     has_quantity     event|product|object → quantity (numeric attribute)
+# At EXTRACTION time, callers should still load the narrower domain vocab:
 #
-#   Layer 4 — change
-#     supersedes  fact → fact (canonical update edge; pairs with valid_from/valid_to)
+#   M3_ENTITY_VOCAB_YAML=config/lists/entity_graph_v2.yaml  python ...   # human-life content
+#   M3_ENTITY_VOCAB_YAML=config/lists/entity_graph_m3.yaml  python ...   # technical content
 #
-# Stored direction: edges are emitted from the speaker's perspective (single
-# direction per fact). Inverse traversal at query time covers reverse lookups.
+# This keeps each extractor's prompt focused on a small relevant vocab
+# while the schema accepts the union.
 #
-# Time-bounding: Layer 2 stable facts use entity_relationships.valid_from /
-# valid_to to record version history. Active = valid_to IS NULL.
+# Contents — by domain layer:
 #
-# Legacy entries (preserved-but-deprecated): kept valid in the schema for
-# rows migrated from v1 vocab, but new extractors emit only the active
-# vocabulary above.
-#   - legacy_concept  (was: concept)
-#   - legacy_object   (was: object)
-#   - before          (deprecated; temporal ordering now derived from has_time)
-#   - after           (deprecated; same)
+#   ─── Cross-domain (provenance + change) ───
+#     mentions, same_as, source_of, supersedes
 #
-# Migration script: bin/migrate_entity_vocab.py performs in-place rename of
-# v1 data to the v2 vocab. relates_to → mentions; contradicts → supersedes;
-# concept → legacy_concept; object → legacy_object. before/after rows are
-# left as-is (still valid for query, just no longer emitted).
+#   ─── Human-life Layer 2 (stable person attributes) ───
+#     located_in, works_at, family_of, knows, prefers, owns
+#
+#   ─── Human-life Layer 3 (event/object attributes) ───
+#     has_participant, has_location, has_time, has_quantity
+#
+#   ─── Human-life legacy (preserved-but-deprecated) ───
+#     before, after  predicates
+#     legacy_concept, legacy_object  types
+#
+#   ─── Technical infrastructure ───
+#     runs_on, hosts, listens_on, assigned_ip, on_vlan, fails_over_to
+#
+#   ─── Technical code structure ───
+#     defined_in, imports, calls
+#
+#   ─── Technical provenance ───
+#     references, introduced_in, deprecates
+#
+#   ─── Technical bench/ML ───
+#     measured_on, uses_model, judged_by, produced_artifact, affects_category
+#
+#   ─── Technical human signals ───
+#     authorizes_budget
+#
+# Note: 'contradicts' from v1 is intentionally NOT in this superset. v1 rows
+# using 'contradicts' are migrated to 'supersedes' by bin/migrate_entity_vocab.py.
 
 entity_types:
-  # Active (9)
+  # ── Active human-life vocab (v2) ──
   - person
   - place
   - organization
@@ -57,35 +66,112 @@ entity_types:
   - preference
   - product
   - topic
-  # Legacy (preserved-but-deprecated)
+
+  # ── Human-life legacy (preserved-but-deprecated) ──
   - legacy_concept
   - legacy_object
 
+  # ── Technical: homelab infrastructure (m3) ──
+  - host
+  - container
+  - service
+  - device
+  - ip_address
+  - vlan
+  - port
+  - mac_address
+  - endpoint_url
+  - firewall_rule
+
+  # ── Technical: code + software engineering (m3) ──
+  - file_path
+  - function
+  - class_or_table
+  - cli_flag
+  - env_var
+  - module
+  - commit_or_branch
+  - migration
+
+  # ── Technical: benchmark + ML (m3) ──
+  - benchmark
+  - model
+  - variant
+  - metric
+  - dataset_field
+  - bench_artifact
+  - task_category
+  - bench_run_id
+
+  # ── Technical: memory-system primitives (m3) ──
+  - memory_id
+  - memory_type
+  - task_id
+
+  # ── Technical: misc (m3) ──
+  - protocol
+  - datetime
+
 entity_predicates:
-  # Layer 1: provenance / aliasing (3)
+  # ── Cross-domain: provenance/aliasing ──
   - mentions
   - same_as
   - source_of
-  # Layer 2: stable person attributes (6)
+
+  # ── Cross-domain: change ──
+  - supersedes
+
+  # ── Human-life Layer 2: stable person attributes ──
   - located_in
   - works_at
   - family_of
   - knows
   - prefers
   - owns
-  # Layer 3: event / object attributes (4)
+
+  # ── Human-life Layer 3: event/object attributes ──
   - has_participant
   - has_location
   - has_time
   - has_quantity
-  # Layer 4: change (1)
-  - supersedes
-  # Legacy (preserved-but-deprecated)
+
+  # ── Human-life legacy (preserved-but-deprecated) ──
   - before
   - after
 
+  # ── Technical infrastructure topology (m3) ──
+  - runs_on
+  - hosts
+  - listens_on
+  - assigned_ip
+  - on_vlan
+  - fails_over_to
+
+  # ── Technical code structure (m3) ──
+  - defined_in
+  - imports
+  - calls
+
+  # ── Technical provenance (m3) ──
+  - references
+  - introduced_in
+  - deprecates
+
+  # ── Technical bench/ML (m3) ──
+  - measured_on
+  - uses_model
+  - judged_by
+  - produced_artifact
+  - affects_category
+
+  # ── Technical human signals (m3) ──
+  - authorizes_budget
+
 metadata:
-  description: "Default vocabulary v2 (four-layer model) for entity-graph extraction and traversal"
-  source: "Mirror of memory_core.py VALID_ENTITY_* constants as of 2026-05-03"
-  version: "v2"
-  v1_migration: "bin/migrate_entity_vocab.py performs rename of v1 rows to v2 vocabulary"
+  description: "Default schema-validation superset (union of human-life v2 + technical m3 vocabs)"
+  domain: "all (cross-domain superset)"
+  version: "default-2026-05-03"
+  applies_to: "schema validation in DBs that may hold both human-life and technical content"
+  v2_yaml: "config/lists/entity_graph_v2.yaml — narrower vocab for extractors processing human-life content"
+  m3_yaml: "config/lists/entity_graph_m3.yaml — narrower vocab for extractors processing technical content"
+  v1_migration: "bin/migrate_entity_vocab.py renames v1 'concept'/'object' types and 'relates_to'/'contradicts' predicates to v2-equivalent values"

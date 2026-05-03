@@ -75,8 +75,7 @@ entity_predicates:
   - calls              # function -> function
   # Memory provenance
   - references         # any -> memory_id (8-hex citation)
-  - supersedes         # decision|plan -> decision|plan
-  - contradicts        # any -> any
+  - supersedes         # any -> any (canonical update edge, replaces v1 'contradicts')
   - introduced_in      # function|cli_flag|migration -> commit_or_branch
   - deprecates         # memory_type|function -> memory_type|function
   # Bench / ML
@@ -92,6 +91,10 @@ entity_predicates:
   - mentions           # any -> any (last-resort fallback)
 
 metadata:
-  description: "m3-memory domain-tuned vocab for entity-graph enrichment"
+  description: "Technical-domain vocabulary for homelab/code/bench-ML entity-graph enrichment"
+  domain: "technical (homelab + code-engineering + bench-ML)"
   source: "Derived 2026-04-28 from 50-row sample (.scratch/vocab_proposal.md)"
   tuning_corpus: "agent_memory.db core (variant IS NULL)"
+  applies_to: "extractors processing infrastructure inventory, code structure, benchmark/ML run records"
+  schema_validation_default: "config/lists/entity_graph_default.yaml (superset of v2 + m3)"
+  v2_alignment_2026_05_03: "Dropped 'contradicts' predicate; use 'supersedes' as canonical change edge. Rows with predicate='contradicts' are migrated by bin/migrate_entity_vocab.py."

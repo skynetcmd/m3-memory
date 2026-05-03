@@ -247,49 +247,82 @@ ENTITY_RESOLVE_COSINE_MIN    = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MI
 # Bootstrap hardcoded defaults for when YAML is unavailable or malformed.
 # These are mirrored exactly in config/lists/entity_graph_default.yaml.
 #
-# Vocabulary v2 (2026-05-03): four-layer model.
+# This is the SCHEMA-VALIDATION DEFAULT — the SUPERSET of two narrower
+# domain vocabs:
 #
-#   Layer 1 — provenance/aliasing:        mentions, same_as, source_of
-#   Layer 2 — stable person attributes:   located_in, works_at, family_of, knows, prefers, owns
-#   Layer 3 — event/object attributes:    has_participant, has_location, has_time, has_quantity
-#   Layer 4 — change:                     supersedes
+#   * entity_graph_v2.yaml  — human-life vocab (chatlog, persona-grounded
+#                              benchmarks). Four-layer model:
+#       Layer 1 — provenance/aliasing:    mentions, same_as, source_of
+#       Layer 2 — stable person attrs:    located_in, works_at, family_of,
+#                                         knows, prefers, owns
+#       Layer 3 — event/object attrs:     has_participant, has_location,
+#                                         has_time, has_quantity
+#       Layer 4 — change:                 supersedes
+#   * entity_graph_m3.yaml  — technical-domain vocab (homelab + code +
+#                              bench/ML).
 #
-# Active types (9): person, place, organization, event, date, quantity,
-#                   preference, product, topic.
-# Active predicates (14): see four-layer model above.
+# At EXTRACTION time, callers select a narrower domain vocab via
+# M3_ENTITY_VOCAB_YAML so the LLM extractor sees a focused, relevant set.
+# At VALIDATION time (this superset), both domains' types/predicates are
+# valid so a single DB can hold rows extracted under either vocab without
+# rejection.
 #
-# Legacy entries (preserved-but-deprecated): kept VALID in the schema so that
-# data migrated from v1 vocab continues to read/write without validation errors,
-# but new extractors (per the qsum/observer prompt instructions) emit only the
-# active vocabulary above. Legacy types: legacy_concept, legacy_object.
-# Legacy predicates: before, after. The bin/migrate_entity_vocab.py script
-# performs the in-place rename of v1 rows to these legacy types and to the
-# v2-equivalent predicates (relates_to → mentions, contradicts → supersedes).
+# Legacy entries (preserved-but-deprecated): kept VALID in the schema so
+# data migrated from v1 vocab continues to read/write without validation
+# errors. Legacy types: legacy_concept, legacy_object. Legacy predicates:
+# before, after. The bin/migrate_entity_vocab.py script performs the
+# in-place rename of v1 rows: 'concept'->'legacy_concept',
+# 'object'->'legacy_object', 'relates_to'->'mentions',
+# 'contradicts'->'supersedes' (the latter affects both default and m3
+# vocab rows since 'contradicts' is dropped from m3 alongside v2).
 #
 # Role metadata convention: family_of and knows edges carry a {"role": "..."}
-# key in entity_relationships (per the schema's relationships JSON column where
-# applicable). Family roles: son, daughter, mother, father, parent, child, wife,
-# husband, spouse, partner, brother, sister, sibling, etc. Non-family roles
-# (knows): friend, neighbor, coworker, doctor, teacher, mentor, classmate, etc.
+# key. Family roles: son, daughter, mother, father, wife, husband, sibling,
+# etc. Non-family roles (knows): friend, neighbor, coworker, doctor, etc.
 # Roles are guidance for the extractor, not enforced by validation.
 _DEFAULT_VALID_ENTITY_TYPES = frozenset({
-    # Active vocabulary
+    # Human-life active (v2)
     "person", "place", "organization", "event", "date",
     "quantity", "preference", "product", "topic",
-    # Legacy preserved-but-deprecated
+    # Human-life legacy (preserved-but-deprecated)
     "legacy_concept", "legacy_object",
+    # Technical: homelab infrastructure (m3)
+    "host", "container", "service", "device", "ip_address", "vlan",
+    "port", "mac_address", "endpoint_url", "firewall_rule",
+    # Technical: code + software engineering (m3)
+    "file_path", "function", "class_or_table", "cli_flag", "env_var",
+    "module", "commit_or_branch", "migration",
+    # Technical: benchmark + ML (m3)
+    "benchmark", "model", "variant", "metric", "dataset_field",
+    "bench_artifact", "task_category", "bench_run_id",
+    # Technical: memory-system primitives (m3)
+    "memory_id", "memory_type", "task_id",
+    # Technical: misc (m3)
+    "protocol", "datetime",
 })
 _DEFAULT_VALID_ENTITY_PREDICATES = frozenset({
-    # Layer 1: provenance / aliasing
+    # Cross-domain: provenance/aliasing
     "mentions", "same_as", "source_of",
-    # Layer 2: stable person attributes
-    "located_in", "works_at", "family_of", "knows", "prefers", "owns",
-    # Layer 3: event / object attributes
-    "has_participant", "has_location", "has_time", "has_quantity",
-    # Layer 4: change
+    # Cross-domain: change
     "supersedes",
-    # Legacy preserved-but-deprecated
+    # Human-life Layer 2: stable person attributes
+    "located_in", "works_at", "family_of", "knows", "prefers", "owns",
+    # Human-life Layer 3: event/object attributes
+    "has_participant", "has_location", "has_time", "has_quantity",
+    # Human-life legacy (preserved-but-deprecated)
     "before", "after",
+    # Technical: infrastructure topology (m3)
+    "runs_on", "hosts", "listens_on", "assigned_ip", "on_vlan",
+    "fails_over_to",
+    # Technical: code structure (m3)
+    "defined_in", "imports", "calls",
+    # Technical: provenance (m3)
+    "references", "introduced_in", "deprecates",
+    # Technical: bench/ML (m3)
+    "measured_on", "uses_model", "judged_by", "produced_artifact",
+    "affects_category",
+    # Technical: human signals (m3)
+    "authorizes_budget",
 })
 
 DEFAULT_ENTITY_VOCAB_YAML = Path(__file__).parent.parent / "config" / "lists" / "entity_graph_default.yaml"
