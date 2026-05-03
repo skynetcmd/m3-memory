@@ -19,6 +19,99 @@ forward-going only.
 
 ---
 
+## [2026.5.3.1] — May 3, 2026 — Multi-variant search, entity-graph v2, xAI/Grok provider
+
+This release lands real new capabilities on top of the May 1 enrichment
+baseline: multi-variant retrieval (and a new `memory_search_multi_db`
+MCP tool), the four-layer entity-graph vocabulary v2, an xAI/Grok
+enrichment profile, the cross-platform schedule installer, and an
+enricher rate-limit cascade guard that stops a run cleanly when an
+upstream API is throttling instead of burning the retry budget.
+
+### Added
+
+- **`memory_search_multi_db` MCP tool** — searches across multiple
+  M3 databases in a single call, scoring and merging hits by the same
+  hybrid pipeline used in `memory_search`. The existing `memory_search`
+  also gains a multi-variant filter (pass a list/tuple/set as
+  `variant=` and it expands to `IN (?,?,...)` instead of `=`).
+- **Entity-graph vocabulary v2** — four-layer model (provenance /
+  stable / event / change) with 42 entity types and 34 predicates as
+  the superset default for `memory_core`. Migration aligns existing
+  m3 vocab with the v2 superset; narrower per-domain vocabs load via
+  `M3_ENTITY_VOCAB_YAML`. New `config/lists/entity_graph_v2.yaml`
+  (human-life narrow vocab, 11 types / 16 predicates) ships alongside.
+- **xAI / Grok enrichment profile** —
+  `config/slm/connect_xai_grok_4_fast.yaml` runs Grok 4.1 Fast
+  (Non-Reasoning) against `api.x.ai`'s OpenAI-compatible endpoint.
+  Drop-in alongside the existing local + Gemini + Anthropic profiles.
+- **Schedule installer** — cross-platform installer for the
+  background tasks (auto-enrich queue drain, chatlog backfill).
+  Single `bin/install_schedules.py` covers Windows Task Scheduler
+  and `cron`.
+- **Enricher rate-limit cascade guard** — `m3_enrich.py` now detects
+  when an upstream provider is returning HTTP 429 across most inflight
+  requests and aborts the run cleanly with a `RATE LIMIT CASCADE`
+  log line, preserving `pending` rows for `--resume` after the quota
+  resets. Avoids burning each row's retry budget against a wall.
+- **Per-50 progress + ISO-UTC timestamps** on `m3_enrich.py` and
+  `run_observer.py` emitters so a tail-following monitor sees a
+  steady cadence with comparable absolute timestamps across logs.
+- **`fact_enriched` auto-classify** — adds the type to the LLM
+  classifier's allowlist so enriched-fact writes route correctly
+  instead of falling back to `note` (drift fix).
+- **`benchmarks/locomo/README.md`** — public placeholder noting the
+  LoCoMo audit is pending; results published when complete.
+
+### Changed
+
+- **HTML-rendered docs** (`COMPARISON_TABLE.html`,
+  `COMPLIANCE_TABLE.html`) converted to native Markdown so GitHub
+  renders them inline; htmlpreview-proxy links used for the
+  remaining HTML artifacts. Removes the click-through and the
+  dependency on a third-party rendering proxy.
+- **README "Who this is for"** split into two distinct tables
+  (current users vs adjacent personas) for clearer fit.
+- **Comparison-table** — sticky section labels visible during
+  horizontal scroll; always-show scrollbar so users on hidden-by-
+  default OS scrollbar settings notice horizontal overflow.
+- **Heading-spacing standard (option-B)** applied repo-wide to
+  Markdown docs and the audit reports for consistent rendering.
+- **`docs/AGENT_INSTRUCTIONS.md`** — new Rule 7 (entity lookups)
+  cross-linked from `AGENT_RULES.md`. Tool count reference bumped
+  from 66 → 72 to match v2026.5.1.1's MCP inventory.
+- **bench-territory removed from main** — the LongMemEval / LoCoMo
+  harnesses, plans, and run artifacts now live exclusively on the
+  `private/lme` and `private/locomo` worktrees. Public main carries
+  only the LME-S report and the LoCoMo placeholder.
+
+### Fixed
+
+- **Enricher 429 retry-budget bug** — HTTP 429 responses no longer
+  consume a row's `attempts` counter, so transient throttling
+  doesn't silently push rows into `dead_letter`. Counts toward the
+  cascade detector instead.
+- **Comparison table scrolling** — section labels stayed pinned but
+  became hidden on horizontal scroll on narrow viewports; fixed.
+- **README benchmarks link** — pointed at
+  `benchmarks/longmemeval/README.md` (which lives only on
+  `private/lme`); now points at the real
+  `benchmarks/longmemeval/LME-S_Benchmarking_Report.md` that ships
+  on main.
+- **Windows install link** — broken anchor in the Windows install
+  doc fixed.
+- **CI greens:** `pip-audit` scoped to locally-installed deps
+  (skips pip's own meta-CVE); mypy backlog cleared with
+  `types-PyYAML` + B311 suppressions; ruff backlog cleared in
+  `bin/` (two latent bugs fixed in passing); chatlog ingest fixture
+  + fact-enriched schema + drain-queue env unblocked; migration
+  002 + chatlog migration 003 + two flaky tests stabilized.
+- **CLAUDE.md / GEMINI.md symlinks** converted to regular files so
+  pytest collects them on Windows (symlinks across the worktree
+  boundary tripped the collector).
+
+---
+
 ## [2026.5.1.1] — May 1, 2026 — Enrichment pipeline matures + doc/security hardening
 
 This release rolls up roughly five weeks of ingest-pipeline work plus a
