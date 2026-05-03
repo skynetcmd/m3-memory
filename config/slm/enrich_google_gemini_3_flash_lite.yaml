@@ -33,6 +33,13 @@ temperature: 0
 timeout_s: 30.0
 max_tokens: 1024
 input_max_chars: 6000
+# Pricing per Google list (gemini-3.1-flash-lite-preview, 2026-04):
+# $0.25 / 1M input tokens, $1.50 / 1M output tokens. Used by
+# run_observer to compute cost_usd from prompt/completion tokens
+# (Gemini's OAI-compat endpoint returns prompt/completion_tokens but
+# no native cost field). Drives --budget-usd and per-row provenance.
+input_cost_per_mtok: 0.25
+output_cost_per_mtok: 1.50
 labels:
   - observed
 fallback: observed
