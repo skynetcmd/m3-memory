@@ -36,6 +36,14 @@ temperature: 0
 timeout_s: 60.0                 # Some calls hit ~40s tail; give buffer.
 max_tokens: 1024
 input_max_chars: 6000
+# Pricing per Google AI Studio (gemini-2.5-flash, ≤200K input tier;
+# our enrichment calls are <10K input so this tier always applies):
+# $0.075 / 1M input tokens, $0.30 / 1M output tokens.
+# Used by run_observer.call_observer to compute cost_usd from token
+# counts (Gemini's OAI-compat endpoint returns prompt/completion_tokens
+# but not native cost). Drives --budget-usd and per-row cost provenance.
+input_cost_per_mtok: 0.075
+output_cost_per_mtok: 0.30
 extra_params:
   reasoning_effort: none        # Gemini 2.5 Flash thinking off — ~3x faster.
 labels:
