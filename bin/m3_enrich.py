@@ -516,6 +516,7 @@ async def _run_db(
     sample_strategy: str = "first",
     min_size_k: Optional[int] = None,
     max_size_k: Optional[int] = None,
+    send_to: Optional[str] = None,
     cascade_threshold: int = 10,
     cascade_window_s: float = 60.0,
 ) -> Optional[str]:
@@ -644,17 +645,20 @@ async def _run_db(
                     include_dead_letter=include_dead_letter,
                     min_size_k=min_size_k,
                     max_size_k=max_size_k,
+                    send_to=send_to,
                 )
                 eligible_keys = {(uid, gkey) for _gid, gkey, uid in eligible}
                 before = len(groups)
                 groups = [(u, c, t) for (u, c, t) in groups if (u, c) in eligible_keys]
-                size_label = ""
+                filter_label = ""
                 if min_size_k is not None or max_size_k is not None:
                     lo = min_size_k if min_size_k is not None else 0
                     hi = max_size_k if max_size_k is not None else "inf"
-                    size_label = f" [size {lo}-{hi} KB]"
+                    filter_label += f" [size {lo}-{hi} KB]"
+                if send_to is not None:
+                    filter_label += f" [send_to={send_to}]"
                 print(
-                    f"[m3-enrich] --resume{size_label}: {len(groups)}/{before} groups pending "
+                    f"[m3-enrich] --resume{filter_label}: {len(groups)}/{before} groups pending "
                     f"(skipped {before - len(groups)} already-done/dead-letter/out-of-band)",
                     flush=True,
                 )
@@ -1148,6 +1152,7 @@ async def _main_async(args) -> int:
             sample_strategy=args.sample_strategy,
             min_size_k=args.min_size_k,
             max_size_k=args.max_size_k,
+            send_to=args.send_to,
             cascade_threshold=args.cascade_threshold,
             cascade_window_s=args.cascade_window_s,
         )
@@ -1341,6 +1346,15 @@ Profile picker:
                          "is at most N KB. Pair with --concurrency to fit per-slot "
                          "ctx budget. Excludes legacy rows where content_size_k "
                          "is NULL. Env: M3_ENRICH_MAX_SIZE_K.")
+    ap.add_argument("--send-to", type=str, default=os.environ.get("M3_ENRICH_SEND_TO"),
+                    help="--resume only: pick groups whose send_to column matches "
+                         "this name. Use for parallel multi-provider runs where "
+                         "each provider's worker should claim only its assigned "
+                         "rows. Rows with send_to IS NULL are EXCLUDED in routed "
+                         "mode — assign rows via bin/m3_enrich_assign.py before "
+                         "running with --send-to. When this flag is omitted, the "
+                         "send_to column is ignored entirely (backwards compatible "
+                         "with non-routed runs). Env: M3_ENRICH_SEND_TO.")
     ap.add_argument("--limit", type=int, default=None,
                     help="Cap conversations enriched per DB (smoke testing).")
     ap.add_argument("--concurrency", type=int, default=4,
