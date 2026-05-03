@@ -124,9 +124,6 @@ benchmarks/longmemeval/PLAN*.md
 benchmarks/longmemeval/results.json
 benchmarks/longmemeval/LME-*.json
 benchmarks/longmemeval/refs/
-benchmarks/locomo/*_results.json
-benchmarks/locomo/RUN_CATALOG.md
-benchmarks/locomo/PLAN*.md
 docs/tools/probe_ingest_cost.md
 
 # Generated MCP config (machine-specific paths; run bin/generate_configs.py to create)
@@ -161,10 +158,12 @@ scan-reports/
 # entries (security-scan-*.md, README.md) stay tracked.
 docs/audits/enrich-run-*.md
 
-# LoCoMo benchmark README — testing pending; not ready for public main.
-benchmarks/locomo/README.md
-
 # LongMemEval bench territory — only the public benchmark report ships on main;
 # everything else (harness, plans, runs, refs) is private to bench/lme.
 benchmarks/longmemeval/*
 !benchmarks/longmemeval/LME-S_Benchmarking_Report.md
+
+# LoCoMo bench territory — only the public README ships on main; the audit
+# is pending and the harness lives on private/locomo until results land.
+benchmarks/locomo/*
+!benchmarks/locomo/README.md
