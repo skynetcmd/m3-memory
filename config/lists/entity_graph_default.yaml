@@ -1,27 +1,91 @@
-# Default entity-graph vocabulary for m3-memory.
+# Default entity-graph vocabulary for m3-memory — v2 (2026-05-03).
 # Loaded by memory_core.load_entity_vocab() when no override path is given.
-# Matches the historical hardcoded VALID_ENTITY_TYPES and VALID_ENTITY_PREDICATES
-# constants exactly — backward-compat invariant.
+# Matches the hardcoded VALID_ENTITY_TYPES and VALID_ENTITY_PREDICATES
+# constants in memory_core.py — both must stay in sync.
+#
+# Vocabulary v2 organizes predicates into four layers:
+#
+#   Layer 1 — provenance / aliasing
+#     mentions    memory_item → entity (catch-all reference, retrieval expansion)
+#     same_as     entity ↔ entity (canonical alias)
+#     source_of   fact → memory_item (which observation derived this fact)
+#
+#   Layer 2 — stable person attributes (single active per (subject, predicate))
+#     located_in  person → place (residence; person-stable)
+#     works_at    person → organization
+#     family_of   person → person (kinship; "role" metadata distinguishes son/wife/etc.)
+#     knows       person → person (non-family social tie; "role" metadata for friend/doctor/coworker/etc.)
+#     prefers     person → preference|product|organization (multi-valued)
+#     owns        person → product|object (countable possessions)
+#
+#   Layer 3 — event / object attributes
+#     has_participant  event → person
+#     has_location     event → place (event-scoped, distinct from located_in)
+#     has_time         event → date
+#     has_quantity     event|product|object → quantity (numeric attribute)
+#
+#   Layer 4 — change
+#     supersedes  fact → fact (canonical update edge; pairs with valid_from/valid_to)
+#
+# Stored direction: edges are emitted from the speaker's perspective (single
+# direction per fact). Inverse traversal at query time covers reverse lookups.
+#
+# Time-bounding: Layer 2 stable facts use entity_relationships.valid_from /
+# valid_to to record version history. Active = valid_to IS NULL.
+#
+# Legacy entries (preserved-but-deprecated): kept valid in the schema for
+# rows migrated from v1 vocab, but new extractors emit only the active
+# vocabulary above.
+#   - legacy_concept  (was: concept)
+#   - legacy_object   (was: object)
+#   - before          (deprecated; temporal ordering now derived from has_time)
+#   - after           (deprecated; same)
+#
+# Migration script: bin/migrate_entity_vocab.py performs in-place rename of
+# v1 data to the v2 vocab. relates_to → mentions; contradicts → supersedes;
+# concept → legacy_concept; object → legacy_object. before/after rows are
+# left as-is (still valid for query, just no longer emitted).
 
 entity_types:
+  # Active (9)
   - person
   - place
   - organization
   - event
-  - concept
-  - object
   - date
+  - quantity
+  - preference
+  - product
+  - topic
+  # Legacy (preserved-but-deprecated)
+  - legacy_concept
+  - legacy_object
 
 entity_predicates:
-  - works_at
+  # Layer 1: provenance / aliasing (3)
+  - mentions
+  - same_as
+  - source_of
+  # Layer 2: stable person attributes (6)
   - located_in
+  - works_at
+  - family_of
+  - knows
+  - prefers
+  - owns
+  # Layer 3: event / object attributes (4)
+  - has_participant
+  - has_location
+  - has_time
+  - has_quantity
+  # Layer 4: change (1)
+  - supersedes
+  # Legacy (preserved-but-deprecated)
   - before
   - after
-  - same_as
-  - contradicts
-  - mentions
-  - relates_to
 
 metadata:
-  description: "Default vocabulary for entity-graph extraction and traversal"
-  source: "Mirror of memory_core.py VALID_ENTITY_* constants as of 2026-04-26"
+  description: "Default vocabulary v2 (four-layer model) for entity-graph extraction and traversal"
+  source: "Mirror of memory_core.py VALID_ENTITY_* constants as of 2026-05-03"
+  version: "v2"
+  v1_migration: "bin/migrate_entity_vocab.py performs rename of v1 rows to v2 vocabulary"
