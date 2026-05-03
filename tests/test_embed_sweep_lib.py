@@ -127,7 +127,14 @@ async def test_cursor_advances_past_skipped(lib):
 
 @pytest.mark.asyncio
 async def test_limit_stops_loop_without_deadline(lib):
-    """limit=N should stop after N successful embeds with no deadline set."""
+    """limit=N stops at the next outer-cycle boundary past N, not at exactly N.
+
+    This is the documented contract — see run_embed_loop's `limit` arg
+    docstring and embed_backfill.py's --limit help text. The check fires
+    at the top of each outer cycle, so a fetched chunk runs to completion
+    and may overshoot. For strict caps, callers pair limit with smaller
+    batch_size and concurrency.
+    """
     rows = [(f"id-{i}", "ok", "", None) for i in range(10)]
     fetched = [False]
 
@@ -157,16 +164,12 @@ async def test_limit_stops_loop_without_deadline(lib):
         max_row_bytes=32_000,
         expected_dim=4,
     )
-    # Limit is checked at the OUTER cycle, so we may slightly overshoot
-    # within a fetched chunk but the loop stops at next outer iter.
-    # With batch_size=5 and 10 rows fetched, all 10 get written in the
-    # first cycle's gather; then the limit check fires at the top of
-    # the second iter and breaks. So we expect 10 embedded, not 3.
-    # Documenting current behavior; if you want strict cap, enforce
-    # within the batch — present semantics is "don't START a new cycle
-    # past the limit."
+    # batch_size=5, fetch_multiplier defaults to 4, so fetch_size=20.
+    # The first cycle pulls all 10 rows (fewer than fetch_size); they
+    # all complete in one gather() before the limit check at the top
+    # of cycle 2 breaks. So embedded=10, not the requested 3.
     assert counters.embedded == 10
-    assert counters.embedded >= 3
+    assert counters.embedded >= 3  # at minimum, the limit must have been honored
 
 
 # ── Consecutive-fail abort ────────────────────────────────────────────────
