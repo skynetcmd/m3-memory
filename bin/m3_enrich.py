@@ -651,7 +651,7 @@ async def _run_db(
                 size_label = ""
                 if min_size_k is not None or max_size_k is not None:
                     lo = min_size_k if min_size_k is not None else 0
-                    hi = max_size_k if max_size_k is not None else "∞"
+                    hi = max_size_k if max_size_k is not None else "inf"
                     size_label = f" [size {lo}-{hi} KB]"
                 print(
                     f"[m3-enrich] --resume{size_label}: {len(groups)}/{before} groups pending "
