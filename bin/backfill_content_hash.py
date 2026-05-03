@@ -262,6 +262,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                           f"hashing is safe for these). For other types, pass "
                           f"--type explicitly with --augment-anchors so the "
                           f"hash matches what _embed_many would compute.")
+    sel.add_argument("--all-types", action="store_true",
+                     help="Backfill rows of any type (no type filter). Pair "
+                          "with --augment-anchors so hashes match what "
+                          "memory_write_impl would have computed at write "
+                          "time. Note: rows whose metadata.temporal_anchors "
+                          "predates current schema will get a hash that "
+                          "doesn't match new writes — strictly an improvement "
+                          "on NULL (cache miss → cache hit on identical "
+                          "future text) but may not deduplicate against "
+                          "older inline-written embeddings of the same text.")
     sel.add_argument("--variant", action="append", default=[],
                      help="Filter to memory_items.variant. Repeatable for OR.")
     sel.add_argument("--user-id", type=str, default=None,
@@ -288,7 +298,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help="Count rows that would be updated; write nothing.")
 
     args = ap.parse_args(argv)
-    if args.type is None:
+    if args.all_types:
+        if args.type:
+            ap.error("--all-types and --type are mutually exclusive")
+        args.type = []  # empty list = no type filter
+    elif args.type is None:
         args.type = list(DEFAULT_TYPES)
     return args
 
