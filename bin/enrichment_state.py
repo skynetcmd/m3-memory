@@ -534,6 +534,7 @@ def eligible_for_resume(
     limit: Optional[int] = None,
     min_size_k: Optional[int] = None,
     max_size_k: Optional[int] = None,
+    send_to: Optional[str] = None,
 ) -> list[tuple[int, str, str]]:
     """Return [(id, group_key, user_id)] for groups that resume should pick up.
 
@@ -545,6 +546,12 @@ def eligible_for_resume(
     at enrollment) are EXCLUDED when either bound is set, since we can't
     safely place them in a size band. Run a one-off backfill to populate
     content_size_k on legacy rows, or omit the size bounds.
+
+    Optional send_to: when set, only return rows whose send_to column
+    matches. Rows with send_to IS NULL are EXCLUDED in routed mode —
+    NULL means unassigned, and a routed worker should not claim
+    unassigned rows. When send_to is None (default), the column is
+    ignored entirely (backwards compatible).
     """
     statuses = ["pending", "failed"]
     if include_dead_letter:
@@ -565,6 +572,9 @@ def eligible_for_resume(
     if max_size_k is not None:
         sql += " AND content_size_k <= ?"
         params.append(max_size_k)
+    if send_to is not None:
+        sql += " AND send_to = ?"
+        params.append(send_to)
     sql += " ORDER BY attempts ASC, turn_count DESC"
     if limit:
         sql += " LIMIT ?"
