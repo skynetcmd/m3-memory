@@ -117,7 +117,16 @@ async def run_embed_loop(
       max_consecutive_fails: abort after this many back-to-back batch fails.
       max_row_bytes:    skip rows whose post-transform text > this size.
       expected_dim:     skip embeddings whose dim != this. None = don't check.
-      limit:            stop after this many successful embeds. None = unlimited.
+      limit:            stop after AT LEAST this many successful embeds.
+                        Checked at outer-cycle boundaries (NOT per-batch),
+                        so the actual stop point can overshoot by up to one
+                        full cycle's fetch_size = batch_size * concurrency *
+                        fetch_multiplier rows. At defaults (256 * 4 * 4 = 4096),
+                        a `limit=100` smoke test will embed up to ~4096 rows
+                        before stopping. Mental model: "don't START a new
+                        cycle past the limit" — not "stop at exactly N." For
+                        strict row caps, callers should pair limit with
+                        smaller batch_size and concurrency. None = unlimited.
       log:              optional status-line writer. Helper uses for CYCLE /
                         DEADLINE / DRAIN / ABORT lines. If None, no logging.
 

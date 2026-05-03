@@ -399,7 +399,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                      help="Only rows older than N days. Useful when you want "
                           "to leave fresh writes alone for a window first.")
     sel.add_argument("--limit", type=int, default=None,
-                     help="Stop after N successful embeds. Smoke testing.")
+                     help="Stop after AT LEAST N successful embeds. The check "
+                          "fires at outer-cycle boundaries, so the actual stop "
+                          "point can overshoot by up to one cycle's fetch "
+                          "(batch_size * concurrency * 4 = "
+                          f"{DEFAULT_BATCH_SIZE * DEFAULT_CONCURRENCY * 4} rows "
+                          "at defaults). Used for smoke testing — for strict "
+                          "row caps, also lower --batch-size and --concurrency.")
 
     # Performance
     perf = ap.add_argument_group("performance")
