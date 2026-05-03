@@ -160,3 +160,6 @@ scan-reports/
 # names that are private to development branches. Manually-crafted
 # entries (security-scan-*.md, README.md) stay tracked.
 docs/audits/enrich-run-*.md
+
+# LoCoMo benchmark README — testing pending; not ready for public main.
+benchmarks/locomo/README.md
