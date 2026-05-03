@@ -32,6 +32,15 @@ temperature: 0
 timeout_s: 30.0
 max_tokens: 1024
 input_max_chars: 6000
+# Pricing per Anthropic list (claude-haiku-4-5, 2026-04):
+# $1.00 / 1M input tokens, $5.00 / 1M output tokens. Used by
+# run_observer to compute cost_usd from prompt/completion tokens
+# (Anthropic's response carries input_tokens/output_tokens but no
+# native cost field). Drives --budget-usd and per-row cost provenance.
+# Note: cache_system above reduces real input cost ~10x via prompt
+# caching, but we charge full rate here for safe overestimates.
+input_cost_per_mtok: 1.00
+output_cost_per_mtok: 5.00
 labels:
   - observed
 fallback: observed
