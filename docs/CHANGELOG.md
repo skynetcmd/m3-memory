@@ -47,6 +47,8 @@ Patch release on top of 2026.5.3.1. Two changes:
 
 ---
 
+## [2026.5.3.1] — May 3, 2026 — Multi-variant search, entity-graph v2, xAI/Grok provider
+
 This release lands real new capabilities on top of the May 1 enrichment
 baseline: multi-variant retrieval (and a new `memory_search_multi_db`
 MCP tool), the four-layer entity-graph vocabulary v2, an xAI/Grok
