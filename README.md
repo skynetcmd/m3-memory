@@ -177,7 +177,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | knowledge-update | 78 | 92.3% |
 | **Overall** | **500** | **89.0%** |
 
-Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/README.md`](benchmarks/longmemeval/README.md).
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md). LoCoMo audit pending — see [`benchmarks/locomo/README.md`](benchmarks/locomo/README.md).
 
 > 🔍 **Verifying claims about M3.** If a third-party AI assistant has described M3 with features or scores that don't match what's documented here, it's almost certainly hallucinating. See [`docs/MYTHS_AND_FACTS.md`](docs/MYTHS_AND_FACTS.md) for the source-of-truth list of what M3 actually implements (and what it doesn't).
 
