@@ -245,13 +245,51 @@ ENTITY_RESOLVE_COSINE_MIN    = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MI
 # Wave 3 will re-export these from mcp_tool_catalog.py and memory_bridge.py.
 
 # Bootstrap hardcoded defaults for when YAML is unavailable or malformed.
-# These are mirrored exactly in config/lists/entity_graph_default.yaml for backward-compat.
+# These are mirrored exactly in config/lists/entity_graph_default.yaml.
+#
+# Vocabulary v2 (2026-05-03): four-layer model.
+#
+#   Layer 1 — provenance/aliasing:        mentions, same_as, source_of
+#   Layer 2 — stable person attributes:   located_in, works_at, family_of, knows, prefers, owns
+#   Layer 3 — event/object attributes:    has_participant, has_location, has_time, has_quantity
+#   Layer 4 — change:                     supersedes
+#
+# Active types (9): person, place, organization, event, date, quantity,
+#                   preference, product, topic.
+# Active predicates (14): see four-layer model above.
+#
+# Legacy entries (preserved-but-deprecated): kept VALID in the schema so that
+# data migrated from v1 vocab continues to read/write without validation errors,
+# but new extractors (per the qsum/observer prompt instructions) emit only the
+# active vocabulary above. Legacy types: legacy_concept, legacy_object.
+# Legacy predicates: before, after. The bin/migrate_entity_vocab.py script
+# performs the in-place rename of v1 rows to these legacy types and to the
+# v2-equivalent predicates (relates_to → mentions, contradicts → supersedes).
+#
+# Role metadata convention: family_of and knows edges carry a {"role": "..."}
+# key in entity_relationships (per the schema's relationships JSON column where
+# applicable). Family roles: son, daughter, mother, father, parent, child, wife,
+# husband, spouse, partner, brother, sister, sibling, etc. Non-family roles
+# (knows): friend, neighbor, coworker, doctor, teacher, mentor, classmate, etc.
+# Roles are guidance for the extractor, not enforced by validation.
 _DEFAULT_VALID_ENTITY_TYPES = frozenset({
-    "person", "place", "organization", "event", "concept", "object", "date",
+    # Active vocabulary
+    "person", "place", "organization", "event", "date",
+    "quantity", "preference", "product", "topic",
+    # Legacy preserved-but-deprecated
+    "legacy_concept", "legacy_object",
 })
 _DEFAULT_VALID_ENTITY_PREDICATES = frozenset({
-    "works_at", "located_in", "before", "after",
-    "same_as", "contradicts", "mentions", "relates_to",
+    # Layer 1: provenance / aliasing
+    "mentions", "same_as", "source_of",
+    # Layer 2: stable person attributes
+    "located_in", "works_at", "family_of", "knows", "prefers", "owns",
+    # Layer 3: event / object attributes
+    "has_participant", "has_location", "has_time", "has_quantity",
+    # Layer 4: change
+    "supersedes",
+    # Legacy preserved-but-deprecated
+    "before", "after",
 })
 
 DEFAULT_ENTITY_VOCAB_YAML = Path(__file__).parent.parent / "config" / "lists" / "entity_graph_default.yaml"
