@@ -379,3 +379,33 @@ def test_parse_args_explicit_types_override_default():
     import backfill_content_hash as bf
     args = bf._parse_args(["--type", "summary", "--type", "note"])
     assert args.type == ["summary", "note"]
+
+
+def test_parse_args_all_types_clears_filter():
+    import backfill_content_hash as bf
+    args = bf._parse_args(["--all-types"])
+    assert args.type == []  # empty list = no type filter at SQL level
+
+
+def test_parse_args_all_types_conflicts_with_type():
+    import backfill_content_hash as bf
+    with pytest.raises(SystemExit):
+        bf._parse_args(["--all-types", "--type", "note"])
+
+
+def test_count_all_types_returns_every_pending_row(db):
+    """With --all-types, the type filter is skipped — all rows match."""
+    import backfill_content_hash as bf
+    _seed(db, [
+        {"id": "row-A", "content": "a", "type": "message"},
+        {"id": "row-B", "content": "b", "type": "summary"},
+        {"id": "row-C", "content": "c", "type": "note"},
+        {"id": "row-D", "content": "d", "type": "decision"},
+    ], [
+        {"id": "e-A", "memory_id": "row-A", "content_hash": None},
+        {"id": "e-B", "memory_id": "row-B", "content_hash": None},
+        {"id": "e-C", "memory_id": "row-C", "content_hash": None},
+        {"id": "e-D", "memory_id": "row-D", "content_hash": None},
+    ])
+    args = _make_args(db, type=[])  # mimics --all-types
+    assert bf._count_pending(db, args) == 4
