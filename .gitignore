@@ -163,3 +163,8 @@ docs/audits/enrich-run-*.md
 
 # LoCoMo benchmark README — testing pending; not ready for public main.
 benchmarks/locomo/README.md
+
+# LongMemEval bench territory — only the public benchmark report ships on main;
+# everything else (harness, plans, runs, refs) is private to bench/lme.
+benchmarks/longmemeval/*
+!benchmarks/longmemeval/LME-S_Benchmarking_Report.md
