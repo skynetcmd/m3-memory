@@ -368,10 +368,15 @@ async def main() -> int:
         # so this changes within-batch ordering (negligible at sweeper
         # cadence) and gains infinite-loop protection on skipped rows
         # via the after_id cursor.
-        from embed_sweep_lib import Counters as _Counters, run_embed_loop
+        from embed_sweep_lib import Counters as _Counters
+        from embed_sweep_lib import run_embed_loop
         from memory_core import (
             _content_hash as _ch,
+        )
+        from memory_core import (
             _embed_many as _em,
+        )
+        from memory_core import (
             _pack as _mc_pack,
         )
 
