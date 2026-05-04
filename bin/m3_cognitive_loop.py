@@ -275,8 +275,13 @@ def main():
     args = parser.parse_args()
 
     # Resolve paths once to normalize env vs flag
-    args.database = resolve_db_path(args.database)
-    args.chatlog_db = chatlog_config.chatlog_db_path(args.chatlog_db)
+    if args.database:
+        os.environ["M3_DATABASE"] = os.path.abspath(args.database)
+    args.database = resolve_db_path()
+
+    if args.chatlog_db:
+        os.environ["CHATLOG_DB_PATH"] = os.path.abspath(args.chatlog_db)
+    args.chatlog_db = chatlog_config.chatlog_db_path()
 
     try:
         asyncio.run(main_loop(args))
