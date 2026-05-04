@@ -15,8 +15,8 @@ target variant.
 Cross-platform: only depends on Python stdlib + sqlite3.
 """
 from __future__ import annotations
+
 import argparse
-import os
 import sqlite3
 import sys
 from pathlib import Path
