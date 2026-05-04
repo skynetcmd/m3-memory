@@ -319,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     pending = _count_pending(args.db, args)
     print(f"DB:        {args.db}")
     print(f"Pending:   {pending}")
-    print(f"Filters:")
+    print("Filters:")
     print(f"  type:        {args.type}")
     if args.variant:    print(f"  variant:     {args.variant}")
     if args.user_id:    print(f"  user_id:     {args.user_id}")

@@ -44,6 +44,7 @@ The default DB resolution order (M3_DATABASE env > --database flag > default
 agent_memory.db) follows the same convention as other m3-memory scripts.
 """
 from __future__ import annotations
+
 import argparse
 import os
 import sqlite3
