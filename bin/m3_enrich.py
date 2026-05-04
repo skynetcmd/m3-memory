@@ -291,28 +291,78 @@ def _query_eligible_groups(
     elif source_variant:
         variant_clause = " AND variant = ?"
         variant_params = [source_variant]
-    sql = f"""
-        SELECT id,
-               content,
-               COALESCE(json_extract(metadata_json,'$.role'),
-                        title,
-                        'user') AS role,
-               COALESCE(json_extract(metadata_json,'$.turn_index'), 0) AS turn_index,
-               created_at,
-               metadata_json,
-               COALESCE(conversation_id,
-                        json_extract(metadata_json,'$.session_id'),
-                        id) AS group_key,
-               COALESCE(user_id, '') AS user_id
-        FROM memory_items
-        WHERE COALESCE(is_deleted,0)=0
-          AND type IN ({placeholders})
-          AND type NOT IN ({excl_placeholders})
-          {variant_clause}
-        ORDER BY user_id, group_key, turn_index ASC, created_at ASC
-    """
-    params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params
-    rows = conn.execute(sql, params).fetchall()
+
+    # Push the conv_filter to SQL. On the bench DB this turns a 128s full
+    # scan (2.4M rows) into a ~3s scoped scan when the filter is small.
+    # SQLite's parameter limit is 999 by default, so chunk the IN-list if
+    # the filter is large.
+    conv_chunks: list[list[str]] = []
+    if conv_filter is not None:
+        # Convert set to deterministic list for IN-list parameters
+        cf_list = list(conv_filter)
+        # SQLite default SQLITE_MAX_VARIABLE_NUMBER is 999 (older builds) or
+        # 32766 (3.32+). We chunk at 800 to be safe and union-merge results.
+        chunk_size = 800
+        conv_chunks = [cf_list[i:i + chunk_size] for i in range(0, len(cf_list), chunk_size)]
+
+    if conv_chunks:
+        # Run one query per chunk, accumulate rows. Each chunk pushes the
+        # IN-list down to the WHERE so the planner can use idx_mi_conversation_id
+        # for the common case where group_key == conversation_id. Falls back
+        # to a session_id metadata extract for old rows where conversation_id
+        # is NULL — those still need the OR branch.
+        rows: list = []
+        for chunk in conv_chunks:
+            ph_chunk = ",".join("?" * len(chunk))
+            sql = f"""
+                SELECT id,
+                       content,
+                       COALESCE(json_extract(metadata_json,'$.role'),
+                                title,
+                                'user') AS role,
+                       COALESCE(json_extract(metadata_json,'$.turn_index'), 0) AS turn_index,
+                       created_at,
+                       metadata_json,
+                       COALESCE(conversation_id,
+                                json_extract(metadata_json,'$.session_id'),
+                                id) AS group_key,
+                       COALESCE(user_id, '') AS user_id
+                FROM memory_items
+                WHERE COALESCE(is_deleted,0)=0
+                  AND type IN ({placeholders})
+                  AND type NOT IN ({excl_placeholders})
+                  {variant_clause}
+                  AND COALESCE(conversation_id,
+                               json_extract(metadata_json,'$.session_id'),
+                               id) IN ({ph_chunk})
+            """
+            params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params + list(chunk)
+            rows.extend(conn.execute(sql, params).fetchall())
+    else:
+        # No conv_filter: must scan everything (caller will paginate via
+        # --limit downstream).
+        sql = f"""
+            SELECT id,
+                   content,
+                   COALESCE(json_extract(metadata_json,'$.role'),
+                            title,
+                            'user') AS role,
+                   COALESCE(json_extract(metadata_json,'$.turn_index'), 0) AS turn_index,
+                   created_at,
+                   metadata_json,
+                   COALESCE(conversation_id,
+                            json_extract(metadata_json,'$.session_id'),
+                            id) AS group_key,
+                   COALESCE(user_id, '') AS user_id
+            FROM memory_items
+            WHERE COALESCE(is_deleted,0)=0
+              AND type IN ({placeholders})
+              AND type NOT IN ({excl_placeholders})
+              {variant_clause}
+            ORDER BY user_id, group_key, turn_index ASC, created_at ASC
+        """
+        params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params
+        rows = conn.execute(sql, params).fetchall()
     conn.close()
 
     # Group ALL rows first, THEN apply --limit at the conversation-group
@@ -323,7 +373,17 @@ def _query_eligible_groups(
         # row layout: id, content, role, turn_index, created_at, metadata_json, group_key, user_id
         groups[(r[7], r[6])].append((r[0], r[1], r[2], r[3], r[4], r[5]))
 
+    # Sort each group's turns now that the SQL-level ORDER BY only applies
+    # in the no-filter path. With the chunked-IN path turns can come back
+    # interleaved across chunks — sort defensively.
+    if conv_chunks:
+        for k, turns in groups.items():
+            turns.sort(key=lambda t: (t[3], t[4]))  # turn_index, created_at
+
     out = [(uid, cid, turns) for (uid, cid), turns in groups.items()]
+    # Belt-and-suspenders: if conv_filter was provided, this is already enforced
+    # at SQL but a Python-side filter catches any drift between the IN-list
+    # and the conv_filter set (e.g. casing differences).
     if conv_filter is not None:
         out = [g for g in out if g[1] in conv_filter]
     # Sort by group size descending so --limit picks the BIGGEST conversations
