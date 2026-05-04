@@ -73,7 +73,9 @@ DEFAULT_CONN_REFRESH_BATCHES = 1000
 # Re-exported from embed_sweep_lib so callers (including tests) keep using
 # `embed_backfill.Counters`. The lib owns the canonical class.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from embed_sweep_lib import Counters as _LibCounters, run_embed_loop  # noqa: E402
+from embed_sweep_lib import Counters as _LibCounters  # noqa: E402
+from embed_sweep_lib import run_embed_loop
+
 
 class Counters(_LibCounters):  # type: ignore[misc, valid-type]
     """Backwards-compat shim: subclass of lib Counters with one extra attr.
@@ -361,7 +363,7 @@ def _print_report(counters: Counters, started_at: float, db_path: Path) -> None:
     print(f"  skipped (oversize):{counters.skipped_oversize}")
     print(f"  skipped (bad dim): {counters.skipped_bad_dim}")
     print(f"  failed batches:    {counters.failed_batches}")
-    print(f"  cache reuses:      (handled by _embed_many internal cache)")
+    print("  cache reuses:      (handled by _embed_many internal cache)")
     print(f"  wall time:         {elapsed:.1f}s")
     print(f"  effective rate:    {rate:.1f} embeds/s")
     if counters.errors_by_class:
@@ -462,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     pending = _count_pending(args.db, args)
     print(f"DB:       {args.db}")
     print(f"Pending:  {pending}")
-    print(f"Filters:")
+    print("Filters:")
     if args.variant:    print(f"  variant: {args.variant}")
     if args.type:       print(f"  type: {args.type}")
     if args.user_id:    print(f"  user_id: {args.user_id}")

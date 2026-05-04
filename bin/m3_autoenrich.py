@@ -18,8 +18,8 @@ Detection of current state reads the persistent store, NOT os.environ — that
 way the result is consistent regardless of which shell launched this script.
 """
 from __future__ import annotations
+
 import argparse
-import os
 import platform
 import re
 import shutil
@@ -44,8 +44,9 @@ def _read_windows() -> str | None:
     except ImportError:
         return None
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
-            val, _ = winreg.QueryValueEx(k, VAR)
+        # winreg is Windows-only stdlib; mypy on Linux can't resolve attrs.
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:  # type: ignore[attr-defined]
+            val, _ = winreg.QueryValueEx(k, VAR)  # type: ignore[attr-defined]
             return str(val)
     except FileNotFoundError:
         return None
@@ -103,8 +104,8 @@ def _write_unix(value: str | None) -> None:
 def _shell_rc_hint() -> str:
     """Suggest the right shell rc snippet for sourcing the env file."""
     return (
-        f'echo \'[ -f "$HOME/.config/m3-memory/env" ] && '
-        f'. "$HOME/.config/m3-memory/env"\' >> "$HOME/.zshrc"'
+        'echo \'[ -f "$HOME/.config/m3-memory/env" ] && '
+        '. "$HOME/.config/m3-memory/env"\' >> "$HOME/.zshrc"'
     )
 
 
