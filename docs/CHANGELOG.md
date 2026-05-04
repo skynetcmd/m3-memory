@@ -19,6 +19,114 @@ forward-going only.
 
 ---
 
+## [2026.5.3.3] — May 3, 2026 — Cost tracking + embed sweepers + tool inventory drift
+
+Patch release on top of 2026.5.3.2. Largest m3-memory patch this week —
+real per-row cost tracking, two new general-purpose CLI tools, a
+shared embed-loop helper, and a tool-inventory drift fix.
+
+### Added
+
+- **`bin/embed_backfill.py`** — sweeper for memory_items rows missing
+  embeddings. Companion to the `M3_OBSERVER_NO_EMBED=1` ingest pattern
+  (decouple write throughput from embedder throughput, fill embeddings
+  asynchronously). Works on any m3-memory DB. Hardened: per-batch
+  timeout, runtime cap, consecutive-fail abort, dim validation,
+  oversize/empty skip, optional lockfile, `--id-prefix` sharding,
+  `after_id` cursor advance so skipped rows don't reselect forever.
+  21 tests.
+- **`bin/backfill_content_hash.py`** — populates
+  `memory_embeddings.content_hash` on legacy NULL rows so they become
+  visible to the embed-cache lookup in `_embed` / `_embed_many`.
+  Real-data run today on this machine: 65,900 rows fixed across the
+  chatlog + main DBs with 0 errors. `--all-types` opt-in for cross-
+  type backfill; `--augment-anchors` matches inline `_embed` behavior
+  for non-chatlog types. 20 tests.
+- **`bin/embed_sweep_lib.py`** — internal shared embed-loop helper.
+  Both `embed_backfill.py` and `chatlog_embed_sweeper.py` now drive
+  the same loop via callbacks (fetch / write / transform). Future
+  hardening lands in one place; chatlog gained `after_id` cursor
+  protection it previously lacked. 7 tests; the chatlog sweeper's
+  `embed_batch` function is preserved as a thin compat wrapper for
+  any external caller.
+- **`bin/m3_enrich_assign.py`** — bulk-tags `enrichment_groups.send_to`
+  for parallel multi-provider runs. Pair with `m3_enrich.py --send-to`
+  (also new) to route disjoint subsets across providers by explicit
+  assignment rather than bucket-bound disjointness.
+- **Migration 031 — `enrichment_groups.send_to`** — adds the column
+  + index that the `--send-to` routing relies on. Idempotent under
+  `bin/migrate_memory.py`.
+- **`--budget-usd` actually works on enrichment runs.** The schema
+  and DB API supported it but the caller never populated
+  `tokens_in / tokens_out / cost_usd`. Wired up: every successful and
+  failed enrichment row now carries its own cost. Reads native
+  `usage` from both openai-compat and anthropic backends; falls back
+  to `profile.input_cost_per_mtok / output_cost_per_mtok` when the
+  upstream API doesn't return cost natively.
+- **Pricing fields on all 6 paid-cloud profiles** —
+  `connect_xai_grok_4_fast`, `enrich_google_gemini`,
+  `enrich_google_gemini_3_flash`,
+  `enrich_google_gemini_3_flash_lite`, `enrich_anthropic_haiku`,
+  `enrich_openai_gpt`. Per published list pricing (2026-04). Drives
+  the budget watchdog and per-row cost provenance.
+
+### Changed
+
+- **`memory_search_multi_db` reclassified.** Was landing in
+  "Uncategorized" in the auto-generated MCP tool inventory because
+  `bin/gen_mcp_inventory.py`'s category map missed it on its
+  introduction in `2026.5.3.1`. Now lives under "Memory Operations"
+  alongside `memory_search` and `memory_search_routed`.
+- **Tool count: 72 → 73 across all user-facing docs.**
+  `memory_search_multi_db` (shipped in `2026.5.3.1`) was a real
+  capability addition that the count-claim docs had missed. Updated:
+  `pyproject.toml` PyPI description, `README.md` badge + 4 prose
+  references, `examples/AGENT_RULES.md`, `docs/MYTHS_AND_FACTS.md`,
+  `docs/COMPARISON.md` (3 refs), `docs/CORE_FEATURES.md` (2 refs),
+  `docs/API_REFERENCE.md`, `docs/QUICKSTART.md` (2 refs),
+  `docs/claude_ai_connector.md`. The auto-generated `docs/MCP_TOOLS.md`
+  was regenerated; `bin/gen_mcp_inventory.py:EXPECTED_TOOL_COUNT`
+  bumped to match.
+- **`enrich_openai_gpt.yaml`** — bumped `input_max_chars` 6000 → 32000
+  and `max_tokens` 1024 → 4096 (gpt-4o-mini supports 128K input /
+  16K output, so well within limits). Tuned the system prompt to be
+  less restrictive on hypothetical / project-discussion content;
+  added explicit user-context inference guidance + worked examples
+  so the model emits inferred user-facts for project conversations
+  rather than returning empty.
+- **`bin/m3_enrich.py` `--limit` semantics documented.** The flag
+  fires at outer-cycle boundaries (not per-batch), so smoke tests
+  using `--limit N` may overshoot by up to one cycle's fetch
+  (`batch_size * concurrency * 4 = 4096` rows at defaults). Help
+  text and helper docstring now state the boundary; for strict caps,
+  pair with smaller `--batch-size` and `--concurrency`. No behavior
+  change.
+- **`bin/chatlog_embed_sweeper.py`** internally migrates to the
+  shared `embed_sweep_lib`. Public surface (CLI flags, scheduled-job
+  contract) unchanged. Behavior change: candidate selection now
+  ORDERs BY id ASC instead of created_at ASC (UUIDs aren't
+  time-ordered, so within-batch ordering shifts negligibly), gaining
+  infinite-loop protection on skipped rows. Sweeper now also writes
+  `content_hash` on new embedding rows.
+
+### Fixed
+
+- **Windows Unicode crash in `--resume` size-label** (already on
+  2026.5.3.2; carried forward, no regression).
+- **Tool inventory drift.** `memory_search_multi_db` was missing from
+  the category map (landing in "Uncategorized") and `EXPECTED_TOOL_COUNT`
+  was stuck at 72 even after the tool was added. The next inventory
+  regeneration will be clean by construction.
+
+### Security
+
+- **Pre-release scan (DefectDojo engagement 30, commit `7072f7f`)**:
+  0 active findings across gitleaks / trufflehog / trivy / bandit
+  (33,225 LOC) / semgrep (147 rules) / pip-audit / checkov /
+  osv-scanner. Beats the prior 0C/0H/1M/5L baseline (engagement 9).
+
+---
+
 ## [2026.5.3.2] — May 3, 2026 — send_to routing + Windows Unicode fix
 
 Patch release on top of 2026.5.3.1. Two changes:

@@ -45,4 +45,4 @@ Write a memory: "M3 Memory is active in this project"
 Then search for: "M3 Memory"
 ```
 
-For the full tool reference (all 72 tools, parameters, and behaviors), see [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/docs/AGENT_INSTRUCTIONS.md). The full inventory with parameter schemas lives at [docs/MCP_TOOLS.md](https://github.com/skynetcmd/m3-memory/blob/main/docs/MCP_TOOLS.md).
+For the full tool reference (all 73 tools, parameters, and behaviors), see [AGENT_INSTRUCTIONS.md](https://github.com/skynetcmd/m3-memory/blob/main/docs/AGENT_INSTRUCTIONS.md). The full inventory with parameter schemas lives at [docs/MCP_TOOLS.md](https://github.com/skynetcmd/m3-memory/blob/main/docs/MCP_TOOLS.md).

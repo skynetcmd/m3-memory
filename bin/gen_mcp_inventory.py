@@ -45,6 +45,7 @@ def get_category_map():
         "memory_write_from_file": "Memory Operations",
         "memory_search": "Memory Operations",
         "memory_search_routed": "Memory Operations",
+        "memory_search_multi_db": "Memory Operations",
         "memory_suggest": "Memory Operations",
         "memory_get": "Memory Operations",
         "memory_update": "Memory Operations",
@@ -246,7 +247,7 @@ def main():
     # number when adding/removing tools as part of the regular tool-inventory
     # workflow. Per memory `feedback_tool_inventory`: every flag needs a default;
     # similarly every tool needs a category.
-    EXPECTED_TOOL_COUNT = 72
+    EXPECTED_TOOL_COUNT = 73
     if len(all_tools) != EXPECTED_TOOL_COUNT:
         print(f"Warning: Expected {EXPECTED_TOOL_COUNT} tools, found {len(all_tools)} — update EXPECTED_TOOL_COUNT in gen_mcp_inventory.py if a tool was added/removed.")
 

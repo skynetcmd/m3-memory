@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 72 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 73 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
@@ -10,6 +10,7 @@ This document provides a comprehensive inventory of all 72 MCP tools available i
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
 | `memory_get` | Memory Operations | Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
+| `memory_search_multi_db` | Memory Operations | Search across multiple SQLite databases (e.g. agent_memory.db AND agent_chatlog.db) in one call. Each DB is searched independently via hybrid FTS5+vector search and the top results are merged by score. Returns the global top-K with each item tagged with its source database. Caveat: FTS5 BM25 scores depend on per-DB corpus stats so cross-DB ranks are approximate; works well for small fan-out (typically 2-5 DBs sharing the same embed_model). |
 | `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. Optional graph_depth and expand_sessions add post-retrieval neighbor expansion. |
 | `memory_suggest` | Memory Operations | Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected. |
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
@@ -148,6 +149,32 @@ Search across memory items using semantic similarity or keyword matching. Filter
 | `adaptive_k` | `boolean` | No | Auto-trim results at the score drop-off point. WARNING: regresses on temporal-reasoning, knowledge-update, and multi-session queries; safe only for sharp-curve queries where most retrievals would be noise. Prefer `auto_route=True` on memory_search_routed for safer multi-signal routing. | `False` |
 | `variant` | `string` | No | Ingest-pipeline filter. '' = real user data only (default, equivalent to IS NULL). Pass a specific variant name (e.g. 'heuristic_c1c4') to scope to that bench ingest. | `` |
 | `include_bench_data` | `boolean` | No | Opt in to LOCOMO / LongMemEval bench rows. Default False hides any row with a variant tag. | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+### `memory_search_multi_db`
+
+Search across multiple SQLite databases (e.g. agent_memory.db AND agent_chatlog.db) in one call. Each DB is searched independently via hybrid FTS5+vector search and the top results are merged by score. Returns the global top-K with each item tagged with its source database. Caveat: FTS5 BM25 scores depend on per-DB corpus stats so cross-DB ranks are approximate; works well for small fan-out (typically 2-5 DBs sharing the same embed_model).
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `query` | `string` | Yes | Search query. | `-` |
+| `databases` | `string` | Yes | Comma-separated list of DB paths to fan out to (e.g. 'memory/agent_memory.db,memory/agent_chatlog.db'). Empty = no-op. | `-` |
+| `k` | `integer` | No | Top-K to return globally after merge. Each per-DB search also retrieves K, then results are pooled and re-sorted. | `8` |
+| `type_filter` | `string` | No |  | `` |
+| `agent_filter` | `string` | No |  | `` |
+| `search_mode` | `string` | No |  | `hybrid` |
+| `user_id` | `string` | No |  | `` |
+| `scope` | `string` | No |  | `` |
+| `as_of` | `string` | No |  | `` |
+| `conversation_id` | `string` | No |  | `` |
+| `recency_bias` | `number` | No |  | `0.0` |
+| `adaptive_k` | `boolean` | No |  | `False` |
+| `variant` | `string` | No | Variant filter applied uniformly to each DB. Pass a comma-separated list to use multi-variant IN filtering (passed through to memory_search_scored_impl). | `` |
+| `fan_out_limit` | `integer` | No | Cap on concurrent per-DB searches. 0 = unbounded (typical, since fan-out N is small). | `0` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ### `memory_search_routed`
