@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: 19552ee2aaad
-mtime_utc: 2026-05-01T09:46:22.059922+00:00
-generated_utc: 2026-05-01T13:05:26.836585+00:00
+sha1: ae59460c6e9e
+mtime_utc: 2026-05-04T21:55:21.359345+00:00
+generated_utc: 2026-05-04T22:24:29.252559+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 1232)
+- `def main()` (line 1316)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -74,6 +74,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 | `--input-max-k` | Override the per-call input cap for the SLM, in KB. Caps the total chars sent to the model at N*1024. Use to fit a smaller per-slot ctx budget when raising concurrency in the model server. Falls back to profile.input_max_chars when unset. Env: M3_ENRICH_INPUT_MAX_K. | `int(os.environ['M3_ENRICH_INPUT_MAX_K']) if os.environ.get('M3_ENRICH_INPUT_MAX_K') else None` |  | int |  |
 | `--min-size-k` | --resume only: pick groups whose total source content is at least N KB. Use with --max-attempts to retry the big groups at lower concurrency. Excludes legacy rows where content_size_k is NULL. Env: M3_ENRICH_MIN_SIZE_K. | `int(os.environ['M3_ENRICH_MIN_SIZE_K']) if os.environ.get('M3_ENRICH_MIN_SIZE_K') else None` |  | int |  |
 | `--max-size-k` | --resume only: pick groups whose total source content is at most N KB. Pair with --concurrency to fit per-slot ctx budget. Excludes legacy rows where content_size_k is NULL. Env: M3_ENRICH_MAX_SIZE_K. | `int(os.environ['M3_ENRICH_MAX_SIZE_K']) if os.environ.get('M3_ENRICH_MAX_SIZE_K') else None` |  | int |  |
+| `--send-to` | --resume only: pick groups whose send_to column matches this name. Use for parallel multi-provider runs where each provider's worker should claim only its assigned rows. Rows with send_to IS NULL are EXCLUDED in routed mode — assign rows via bin/m3_enrich_assign.py before running with --send-to. When this flag is omitted, the send_to column is ignored entirely (backwards compatible with non-routed runs). Env: M3_ENRICH_SEND_TO. | `os.environ.get('M3_ENRICH_SEND_TO')` |  | str |  |
 | `--limit` | Cap conversations enriched per DB (smoke testing). | None |  | int |  |
 | `--concurrency` | Concurrent SLM calls. Default 4. | `4` |  | int |  |
 | `--cascade-threshold` | Abort the run after N consecutive rate-limit (429) failures within --cascade-window-s seconds. Catches upstream quota walls before the run dirties the DB with thousands of phantom failures. Default 10. | `10` |  | int |  |
@@ -103,6 +104,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 - `M3_ENRICH_MAX_SIZE_K`
 - `M3_ENRICH_MIN_SIZE_K`
 - `M3_ENRICH_PROFILE`
+- `M3_ENRICH_SEND_TO`
 - `M3_ENRICH_TRACK_STATE`
 
 ---
@@ -123,11 +125,11 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 **sqlite**
 
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 1043)
 - `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 284)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 842)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 960)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 925)
 - `sqlite3.connect()  → `str(db_path)`` (line 142)
-- `sqlite3.connect()  → `str(db_path)`` (line 591)
+- `sqlite3.connect()  → `str(db_path)`` (line 652)
 
 
 ---
