@@ -245,7 +245,7 @@ def test_call_observer_anthropic_shape():
                 _Profile(), client, token="test-token",
             )
 
-    out = asyncio.run(go())
+    out, usage = asyncio.run(go())
     # Verify the Anthropic shape was used
     assert "system" in captured["json"]
     assert captured["json"]["system"] == "extract facts"
@@ -255,6 +255,10 @@ def test_call_observer_anthropic_shape():
     # Verify parsing
     assert len(out) == 1
     assert out[0]["text"] == "User did a thing."
+    # call_observer signature now returns (observations, usage_meta);
+    # usage_meta should reflect anthropic input_tokens/output_tokens
+    assert usage["tokens_in"] == 50
+    assert usage["tokens_out"] == 30
 
 
 def test_call_observer_openai_fallback():
@@ -293,12 +297,16 @@ def test_call_observer_openai_fallback():
                 _Profile(), client, token="test-token",
             )
 
-    out = asyncio.run(go())
+    out, usage = asyncio.run(go())
     # OpenAI shape: messages list with system + user
     assert captured["json"]["messages"][0]["role"] == "system"
     assert captured["json"]["messages"][1]["role"] == "user"
     assert len(out) == 1
     assert out[0]["text"] == "User OAI test."
+    # call_observer signature now returns (observations, usage_meta).
+    # OAI mock didn't include usage block, so counts should be 0.
+    assert usage["tokens_in"] == 0
+    assert usage["tokens_out"] == 0
 
 
 def test_write_observation_populates_three_dates(bench_db, monkeypatch):

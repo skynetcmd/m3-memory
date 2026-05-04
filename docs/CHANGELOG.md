@@ -19,6 +19,116 @@ forward-going only.
 
 ---
 
+## [2026.5.4.1] — May 4, 2026 — Provider-neutral batch enrichment + reliability fixes
+
+Adds a batch-API enrichment path (50% off list pricing in exchange for
+async wallclock) with provider-neutral abstraction, plus several
+hardness/correctness fixes to the live enrichment worker.
+
+### Added
+
+- **`bin/batch_runner.py`** — provider-neutral batch interface
+  (`BatchRunner` Protocol + `BatchRequest` / `BatchResult` / `BatchUsage`
+  dataclasses). Two implementations: `AnthropicBatchRunner` (native
+  `/v1/messages/batches`, ephemeral cache_control supported) and a
+  Gemini Developer API implementation that uses the inline-batch path
+  on `models/<model>:batchGenerateContent` (no Cloud Storage upload
+  required). Factory `make_runner(profile, token=...)` dispatches on
+  `profile.backend` + URL host. Shared `run_to_completion_chunked`
+  helper auto-splits requests by `runner.max_batch_size`.
+- **`bin/m3_enrich_batch.py`** — async batch worker. Wraps a runner with
+  the same `enrichment_groups` claim/finalize state machine as the live
+  worker, ingests results into `memory_items` via `run_observer.write_observation`.
+  CLI mirrors `m3_enrich.py`: `--profile`, `--core-db`, `--source-variant`,
+  `--target-variant`, `--source-conv-list`, plus batch-specific flags
+  (`--slice-size`, `--budget-usd`, `--poll-interval-s`, `--max-wait-s`,
+  `--resume-run`).
+- **`--resume-run <enrichment_runs.id>`** — pick up where a crashed
+  worker left off. Reads `notes.batches` (a structured array of
+  `{slice_idx, batch_id, ingested}` entries persisted as the worker
+  submits each slice), polls any non-ingested batches, fetches results,
+  and ingests against the in-progress claims still under that run_id.
+  Doesn't re-submit to the provider.
+- **`--budget-usd <N>`** — hard cap on cumulative cost. Worker checks
+  after each slice's ingest; if cumulative cost ≥ cap, releases the
+  remaining unsubmitted claims, finalizes the run as `aborted` with
+  `abort_reason=budget_cap_$<N>`, returns exit code 3.
+- **`bin/release_orphan_claims.py`** — safe cleanup utility for
+  `enrichment_groups` rows stuck in `in_progress` after a crash. Three
+  filter modes (`--run-id`, `--older-than <min>`, `--all`), plus
+  `--dry-run` preview and `--skip-qps-done` defensive flag (the latter
+  excludes rows whose `question_pipeline_state` is already terminal —
+  prevents a reverse-drift class of bugs where releasing a claim
+  re-flags an already-complete question as incomplete).
+
+### Changed
+
+- **`_query_eligible_groups` enumeration phase: 40-43× faster.**
+  When `conv_filter` is provided (the common batch-worker case), the
+  filter is now pushed to SQL via a chunked `IN`-list (800 group_keys
+  per chunk to stay under SQLite's default `SQLITE_MAX_VARIABLE_NUMBER`).
+  A 3-conv-filtered enumeration on a 50GB DB went from 128s to 3s; a
+  6,490-conv-filtered enumeration went to 27s. The unfiltered path is
+  unchanged. Each group's turns are sorted post-load (by `turn_index,
+  created_at`) since the chunked path can return rows interleaved
+  across chunks.
+- **Hardened submit-failure cleanup in `m3_enrich_batch.py`.** When a
+  later-slice submit raises, the worker now releases claims under
+  *both* the placeholder enrich_run_id and the real enrich_run_id, plus
+  finalizes the run row with the right partial counts. Prior code only
+  released placeholder claims, leaving real-run-id claims orphaned and
+  forcing manual SQL cleanup.
+- **`_reap_stale_runs` startup pass.** On every batch-worker startup,
+  rows in `enrichment_runs` with `status='running'` and no `finished_at`
+  older than 6 hours get marked as `aborted` with
+  `abort_reason='stale_run_reaped'`. Cosmetic but keeps audit clean
+  after crashed-worker incidents.
+- **`enrichment_runs.notes` schema upgraded to structured form.** Was
+  a free-form JSON blob with one `batch_id` field. Now:
+  `{n_groups_submitted, slice_size, batches: [{slice_idx, batch_id,
+  ingested}, ...]}`. Read/write via `_read_run_notes` / `_write_run_notes`
+  helpers; per-slice transitions tracked via `_record_batch_submitted`
+  / `_record_batch_ingested`. Required for `--resume-run` to know which
+  batches still need ingestion.
+- **`call_observer` test signature updated.** The function returns
+  `(observations, usage_meta)` since the cost-tracking work landed in
+  `2026.5.3.3`; two unit tests in `tests/test_observer.py` were still
+  asserting the old single-value return shape.
+- **Entity-vocab unit test caught up to v2 vocabulary.** Migration
+  `concept→legacy_concept` and `object→legacy_object` happened
+  pre-2026.5.3.3 but the assert-list in
+  `tests/test_entity_graph.py::test_type_enum_validates_known` still
+  used the old names. Updated to assert against the v2-active names
+  plus `legacy_*` aliases.
+
+### Fixed
+
+- **Reverse-drift bug in `question_pipeline_state` ↔ `enrichment_groups`
+  sync.** A class of bug where releasing an `in_progress` claim
+  unconditionally flips the row to `pending`, even when the row's
+  question_pipeline_state was already terminal — the next forward sync
+  then drags qps back to `pending`, causing previously-complete
+  questions to drop from "100% done" rolls. Fixed two ways: the
+  worker's submit-failure path now scopes its release to the run_id;
+  the `release_orphan_claims.py` utility's `--skip-qps-done` flag
+  excludes already-terminal rows via `NOT EXISTS` guard. Documented
+  reverse-sync SQL pattern for any future raw cleanup.
+
+### Notes
+
+- Batch-mode cost validated end-to-end on an Anthropic Haiku run:
+  $0.000237/kB observed on a 6,490-conv batch — ~50% of live-mode
+  list pricing, exactly the documented batch-tier discount.
+- Gemini batch path validated end-to-end: 598 success across two
+  1000-request slices before hitting Tier-1's 3M-enqueued-tokens cap.
+  Tier-1's per-batch real-shape ceiling is ~1,000 reqs at 5,600 input
+  tokens each. Tier-2 ($100 cumulative spend + 3 days) lifts the cap
+  to 400M tokens.
+- Ruff, Bandit, Mypy clean on touched files; full test suite (464
+  passed, 2 skipped) green.
+
+---
+
 ## [2026.5.3.3] — May 3, 2026 — Cost tracking + embed sweepers + tool inventory drift
 
 Patch release on top of 2026.5.3.2. Largest m3-memory patch this week —

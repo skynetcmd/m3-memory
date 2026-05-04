@@ -211,8 +211,14 @@ async def test_type_enum_validates_known(monkeypatch, tmp_path):
     _create_entity_graph_schema(db_path)
     monkeypatch.setenv("M3_DATABASE", str(db_path))
 
-    # All valid entity types should be present in the frozenset
-    for valid_type in ("person", "place", "organization", "event", "concept", "object", "date"):
+    # All valid entity types should be present in the frozenset.
+    # Vocab v2 (migration 2026-04-22) renamed concept→legacy_concept and
+    # object→legacy_object; both old and new names are accepted via the
+    # legacy_* aliases for back-compat.
+    for valid_type in (
+        "person", "place", "organization", "event", "date",
+        "legacy_concept", "legacy_object",
+    ):
         assert valid_type in memory_core.VALID_ENTITY_TYPES, (
             f"Expected '{valid_type}' in VALID_ENTITY_TYPES"
         )
