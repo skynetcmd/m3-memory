@@ -25,9 +25,12 @@ models/
 # LM Studio / memory
 memory/
 !memory/
+!memory/*.py
 !memory/migrations/
 !memory/migrations/*
 !memory/migrations/*.sql
+!memory/chatlog_migrations/
+!memory/chatlog_migrations/*.sql
 
 # Database files
 *.db
@@ -35,6 +38,7 @@ memory/
 *.db-wal
 *.db.*.bak
 *.db.bak*
+*.db.backup-*
 *.bak
 *.sqlite
 
