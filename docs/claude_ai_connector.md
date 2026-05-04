@@ -72,7 +72,7 @@ section below.
 2. **URL**: paste the tunnel URL with `/mcp` suffix.
 3. **Auth**: configure if your tunnel requires it (Cloudflare Access /
    ngrok-auth / mTLS — claude.ai supports OAuth and bearer-token).
-4. Save. Claude.ai will probe the endpoint and list the 72 tools.
+4. Save. Claude.ai will probe the endpoint and list the 73 tools.
 
 ---
 
