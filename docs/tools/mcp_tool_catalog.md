@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: edd0fbc51730
-mtime_utc: 2026-05-01T08:55:29.492726+00:00
-generated_utc: 2026-05-01T13:05:26.886428+00:00
+sha1: ab5d2ca6033d
+mtime_utc: 2026-05-02T20:17:58.758013+00:00
+generated_utc: 2026-05-04T22:24:29.339538+00:00
 private: false
 ---
 
