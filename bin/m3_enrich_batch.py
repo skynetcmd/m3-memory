@@ -370,6 +370,21 @@ async def _ingest_one_group(
     # ~8-10s for the same workload while staying well under embedder
     # capacity.
     source_turn_ids = [t[0] for t in turns]
+    # Lift source session_id from the first turn's metadata so observations
+    # can be traced back to the LongMemEval session. Required for SHR scoring
+    # (memory 914843f8, 2026-05-05); mirrors run_observer.process_conversation.
+    source_session_id = ""
+    for t in turns:
+        meta = t[5] if len(t) > 5 else None
+        if meta:
+            try:
+                m = json.loads(meta)
+                sid = m.get("session_id")
+                if sid:
+                    source_session_id = str(sid)
+                    break
+            except Exception:
+                pass
     sem = asyncio.Semaphore(8)
     async def _write_one(obs: dict) -> bool:
         nonlocal n_chunk_failed, last_err
@@ -378,6 +393,7 @@ async def _ingest_one_group(
                 obs_id = await observer.write_observation(
                     obs, target_variant, user_id, conv_id, source_turn_ids,
                     source_group_id=group_id,
+                    session_id=source_session_id,
                 )
                 return bool(obs_id)
             except Exception as e:  # noqa: BLE001
