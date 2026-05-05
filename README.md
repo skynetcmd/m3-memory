@@ -93,6 +93,8 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ## ⚡ What it does
 
+**Autonomous cognitive loop** — optional background worker (`m3_cognitive_loop.py`) that extracts facts, resolves contradictions, and links entities while you sleep. Turns raw chat logs into a refined knowledge graph without human intervention.
+
 **Persistent memory** — facts, decisions, preferences survive across sessions. Stored in local SQLite.
 
 **Hybrid retrieval** — FTS5 keyword matching + semantic vector similarity + MMR diversity re-ranking. Automatic, no tuning required.
@@ -100,8 +102,6 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 **Contradiction handling** — conflicting facts are automatically superseded. Bitemporal versioning preserves the full history.
 
 **Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal. Entity extraction (`entity_search`, `entity_get`) supplements the graph with first-class people / places / things resolution.
-
-**Local SLM enrichment pipeline** — optional Observer + Reflector workers extract atomic facts from raw conversation turns and resolve contradictions across sessions. Runs entirely on a local SLM (qwen3-8b via LM Studio, Anthropic Haiku, Gemini Flash — your choice via [`config/slm/`](config/slm/) profiles). See [`docs/M3_ENRICH_GUIDE.md`](docs/M3_ENRICH_GUIDE.md).
 
 **Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `mcp-memory install-m3` for a one-command setup that wires settings.json, hooks, and the chatlog subsystem in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 

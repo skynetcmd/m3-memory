@@ -2,7 +2,7 @@
 tool: scan_repo_v7.py
 sha1: 748ccf7325a2
 mtime_utc: 2026-04-22T01:03:02.092891+00:00
-generated_utc: 2026-05-01T13:05:27.202649+00:00
+generated_utc: 2026-05-05T01:50:16.570172+00:00
 private: false
 ---
 
@@ -62,6 +62,7 @@ with a setup hint covering both input shapes.
 - `DD_TOKEN`
 - `DD_URL`
 - `DD_USERNAME`
+- `PATH`
 
 ---
 

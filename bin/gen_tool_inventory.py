@@ -82,7 +82,9 @@ CORE_LIBRARIES = {
     # failover are load-bearing even without a CLI surface.
     "chatlog_config.py", "chatlog_core.py", "chatlog_redaction.py",
     "chatlog_status.py", "memory_maintenance.py", "memory_sync.py",
-    "llm_failover.py",
+    "llm_failover.py", "m3_cognitive_loop.py",
+    "enrichment_state.py", "thermal_utils.py", "embed_sweep_lib.py",
+    "batch_runner.py",
     # auto_route is a pure-helper module (signal extractors + branch decider)
     # imported by memory_core.memory_search_routed_impl when auto_route=True.
     # No CLI surface but load-bearing for the AUTO retrieval layer.
@@ -92,9 +94,11 @@ CORE_LIBRARIES = {
     # the Gemini OAI-compat endpoint. No CLI surface but load-bearing for
     # any cloud-backend enrichment run.
     "unified_ai.py",
+    "slm_intent.py",
 }
 
-_ENV_RE = re.compile(r"""os\.(?:environ\.get|getenv)\(\s*['"]([A-Z0-9_]+)['"]""")
+# Detects both os.environ.get("VAR") and os.environ["VAR"] = ...
+_ENV_RE = re.compile(r"""(?:os\.(?:environ\.get|getenv)\(\s*['"]([A-Z0-9_]+)['"]|os\.environ\[\s*['"]([A-Z0-9_]+)['"]\])""")
 
 # External-call surface we care about. Maps attribute-call pattern → bucket.
 _EXTERNAL_BUCKETS: dict[tuple[str, ...], str] = {
@@ -159,7 +163,13 @@ def extract_docstring(tree: ast.Module) -> str:
 
 
 def extract_env_vars(source: str) -> list[str]:
-    return sorted(set(_ENV_RE.findall(source)))
+    vars = set()
+    for match in _ENV_RE.finditer(source):
+        # match.groups() will have (GET_VAR, SET_VAR)
+        v = next((g for g in match.groups() if g), None)
+        if v:
+            vars.add(v)
+    return sorted(list(vars))
 
 
 def _literal(n):

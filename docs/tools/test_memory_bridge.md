@@ -2,7 +2,7 @@
 tool: bin/test_memory_bridge.py
 sha1: 5eb51e5dfca1
 mtime_utc: 2026-04-21T20:59:33.529255+00:00
-generated_utc: 2026-05-01T13:05:27.113300+00:00
+generated_utc: 2026-05-05T01:50:16.526168+00:00
 private: false
 ---
 
@@ -37,6 +37,7 @@ _(no argparse arguments detected)_
 ## Environment variables read
 
 - `ORIGIN_DEVICE`
+- `SEARCH_ROW_CAP`
 
 ---
 

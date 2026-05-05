@@ -2,7 +2,7 @@
 tool: bin/migrate_memory.py
 sha1: bc8fc8a0920f
 mtime_utc: 2026-05-05T00:24:10.842324+00:00
-generated_utc: 2026-05-05T00:26:52.855778+00:00
+generated_utc: 2026-05-05T01:50:16.403764+00:00
 private: false
 ---
 
@@ -73,7 +73,7 @@ transaction already committed.
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 

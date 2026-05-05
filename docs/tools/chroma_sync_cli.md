@@ -2,7 +2,7 @@
 tool: bin/chroma_sync_cli.py
 sha1: 1ae5f8f1bb43
 mtime_utc: 2026-04-21T20:44:36.924503+00:00
-generated_utc: 2026-05-01T13:05:26.765544+00:00
+generated_utc: 2026-05-05T01:50:16.051800+00:00
 private: false
 ---
 
@@ -38,7 +38,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 
