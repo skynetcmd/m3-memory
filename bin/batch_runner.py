@@ -306,8 +306,8 @@ class GeminiBatchRunner:
     """Google Gemini Developer API batch — 50% off list pricing.
 
     Uses the inline-requests path (no Cloud Storage / file upload required):
-      POST /v1beta/models/<model>:batchGenerateContent?key=<key>
-      GET  /v1beta/<batch_name>?key=<key>     (poll + fetch — output is inline)
+      POST /v1beta/models/<model>:batchGenerateContent  (Authorization: Bearer)
+      GET  /v1beta/<batch_name>                         (poll + fetch — output is inline)
 
     Per Google's batch docs, BATCH_STATE_SUCCEEDED carries
     metadata.output.inlinedResponses with per-request response or error
@@ -389,8 +389,13 @@ class GeminiBatchRunner:
                 },
             },
         }
-        url = f"{self._base}/{self._model}:batchGenerateContent?key={self._token}"
-        r = await client.post(url, json=payload, timeout=120.0)
+        # Auth via Authorization: Bearer header rather than ?key=<token> on
+        # the URL. httpx INFO-level request logs include the full URL, which
+        # would otherwise leak the API key into log files; using a header
+        # keeps it out of the request line. Gemini accepts both forms.
+        url = f"{self._base}/{self._model}:batchGenerateContent"
+        headers = {"Authorization": f"Bearer {self._token}"}
+        r = await client.post(url, json=payload, headers=headers, timeout=120.0)
         if r.status_code != 200:
             raise RuntimeError(
                 f"gemini batch submit http {r.status_code}: {r.text[:500]}"
@@ -404,8 +409,10 @@ class GeminiBatchRunner:
     async def poll(
         self, batch_id: str, *, client: httpx.AsyncClient
     ) -> BatchStatus:
-        url = f"{self._base}/{batch_id}?key={self._token}"
-        r = await client.get(url, timeout=30.0)
+        # See note on Bearer-header auth in submit() — same rationale here.
+        url = f"{self._base}/{batch_id}"
+        headers = {"Authorization": f"Bearer {self._token}"}
+        r = await client.get(url, headers=headers, timeout=30.0)
         if r.status_code != 200:
             raise RuntimeError(
                 f"gemini batch poll http {r.status_code}: {r.text[:300]}"
@@ -445,8 +452,10 @@ class GeminiBatchRunner:
         self, batch_id: str, *, client: httpx.AsyncClient
     ) -> AsyncIterator[BatchResult]:
         # Gemini returns results inline on the batch resource itself.
-        url = f"{self._base}/{batch_id}?key={self._token}"
-        r = await client.get(url, timeout=120.0)
+        # See note on Bearer-header auth in submit() — same rationale here.
+        url = f"{self._base}/{batch_id}"
+        headers = {"Authorization": f"Bearer {self._token}"}
+        r = await client.get(url, headers=headers, timeout=120.0)
         if r.status_code != 200:
             raise RuntimeError(
                 f"gemini batch fetch http {r.status_code}: {r.text[:300]}"
