@@ -38,6 +38,14 @@ Or to resume polling/ingesting a previously-submitted run:
       --core-db memory/your-corpus.db \\
       --resume-run <enrichment_runs.id>
 
+Graceful stop signal: drop a file at .scratch/STOP_AFTER_CURRENT_SLICE_COMPLETES.md
+(its first non-blank line becomes the stop reason in the audit row).
+The worker checks the file at startup and before each new slice submit.
+On detection it lets the in-flight slice finish ingesting via the
+consumer task, then exits with code 5 and abort_reason='stop_flag: ...'.
+Mid-poll Anthropic batches are NOT released — use --resume-run to
+drain them later, or bin/release_orphan_claims.py --run-id to reset.
+
 Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 """
 from __future__ import annotations
@@ -69,6 +77,46 @@ from slm_intent import _parse_profile  # noqa: E402
 
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%fZ")
+
+
+# ── Stop-flag — graceful drain signal ──────────────────────────────────────
+# Drop a file at this path to tell any running m3_enrich_batch worker to
+# finish its current slice's ingest, release remaining unsubmitted claims,
+# and exit cleanly. The file's first line (if present) is echoed as the
+# stop reason for audit. Useful for "I need to take down the machine in 30
+# min, let the in-flight slice finish but don't start any more" scenarios.
+#
+# The path lives under .scratch/ (gitignored) so it doesn't pollute the
+# tree. Use absolute paths so workers launched from any cwd find it.
+STOP_FLAG_PATH = REPO_ROOT / ".scratch" / "STOP_AFTER_CURRENT_SLICE_COMPLETES.md"
+
+
+def _check_stop_flag() -> Optional[str]:
+    """Return a stop-reason string if the stop-flag file exists, else None.
+
+    The reason is the file's first non-blank line (or a generic message if
+    the file is empty). Caller is responsible for actually stopping; this
+    function is read-only.
+    """
+    if not STOP_FLAG_PATH.exists():
+        return None
+    try:
+        text = STOP_FLAG_PATH.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                return stripped
+        return f"stop flag set at {STOP_FLAG_PATH} (no reason given)"
+    except Exception as e:  # noqa: BLE001
+        return f"stop flag set at {STOP_FLAG_PATH} (read error: {e!r})"
+
+
+def _emit_stop_message(reason: str, *, where: str) -> None:
+    """Log the stop reason to both STDOUT and STDERR so it lands in tee'd
+    log files AND in the parent process's stderr if it's piping ours."""
+    msg = f"[batch] STOP_FLAG detected at {where}: {reason}"
+    print(msg, flush=True)
+    print(msg, file=sys.stderr, flush=True)
 
 
 # ── Default core type allowlist (same as m3_enrich.py default) ─────────────
@@ -315,20 +363,29 @@ async def _ingest_one_group(
 
     # Write observations using the same writer as live mode.
     # process_conversation does this for us, but we already have the
-    # parsed observations. Inline the write loop.
+    # parsed observations. Inline the write loop with bounded concurrency
+    # (Fix #1, 2026-05-05) — write_observation is mostly waiting on the
+    # local 8081 embedder, which has 22 slots. Sequential writes left ~75s
+    # of embedder serial time per slice; gather'd writes drop that to
+    # ~8-10s for the same workload while staying well under embedder
+    # capacity.
     source_turn_ids = [t[0] for t in turns]
-    written = 0
-    for obs in observations:
-        try:
-            obs_id = await observer.write_observation(
-                obs, target_variant, user_id, conv_id, source_turn_ids,
-                source_group_id=group_id,
-            )
-            if obs_id:
-                written += 1
-        except Exception as e:  # noqa: BLE001
-            last_err = f"write_observation: {type(e).__name__}: {e!r}"
-            n_chunk_failed += 1
+    sem = asyncio.Semaphore(8)
+    async def _write_one(obs: dict) -> bool:
+        nonlocal n_chunk_failed, last_err
+        async with sem:
+            try:
+                obs_id = await observer.write_observation(
+                    obs, target_variant, user_id, conv_id, source_turn_ids,
+                    source_group_id=group_id,
+                )
+                return bool(obs_id)
+            except Exception as e:  # noqa: BLE001
+                last_err = f"write_observation: {type(e).__name__}: {e!r}"
+                n_chunk_failed += 1
+                return False
+    results = await asyncio.gather(*(_write_one(o) for o in observations))
+    written = sum(1 for r in results if r)
 
     estate.mark_success(
         state_conn, group_id,
@@ -582,6 +639,14 @@ async def _resume_run(args, *, profile, token: str, db_path: Path) -> int:
 
 
 async def _run_async(args) -> int:
+    # Stop-flag check #1 — early-exit before enumeration. Lets callers
+    # leave the flag in place between runs without each launch racing
+    # the producer for a brief window.
+    early_stop = _check_stop_flag()
+    if early_stop:
+        _emit_stop_message(early_stop, where="startup (before enumeration)")
+        return 5
+
     profile = _parse_profile(args.profile, Path(args.profile_path)) if args.profile_path \
         else _parse_profile(args.profile, REPO_ROOT / "config" / "slm" / f"{args.profile}.yaml")
     # Validate the profile's backend is supported by some BatchRunner.
@@ -737,197 +802,269 @@ async def _run_async(args) -> int:
     total_cost = 0.0
     batch_ids: list[str] = []
 
-    async with httpx.AsyncClient() as client:
-        for slice_idx in range(n_slices):
-            slice_requests = batch_requests[slice_idx*max_slice : (slice_idx+1)*max_slice]
-            print(f"[batch] slice {slice_idx+1}/{n_slices}: submitting "
-                  f"{len(slice_requests)} requests...", flush=True)
-            try:
+    # Fix #2 (2026-05-05) — pipelined slice processing. Earlier code did
+    # submit→poll→fetch→ingest serially per slice, leaving Anthropic idle
+    # while we did 60-90s of local DB writes between slices. New flow:
+    #
+    #   Producer task: walks all N slices, for each does submit→poll→fetch,
+    #     then pushes the (slice_idx, batch_id, results_by_gid) tuple to
+    #     an asyncio.Queue.
+    #
+    #   Consumer task: drains the queue and runs _ingest_one_group for each
+    #     slice's groups. Ingest happens concurrently with the producer's
+    #     work on the next slice (which is mostly polling Anthropic for
+    #     batch completion — embedder/SQLite are idle).
+    #
+    # On fatal/cascade in the producer, we drain whatever's already been
+    # ingested, mark the run aborted, release remaining claims.
+    ingest_queue: asyncio.Queue = asyncio.Queue(maxsize=4)
+    producer_failure: dict = {"err": None, "slice_idx": -1}
+    consumer_failure: dict = {"err": None}
+
+    async def _produce_slices(client: httpx.AsyncClient) -> None:
+        nonlocal enrich_run_id  # set on first successful submit
+        try:
+            for slice_idx in range(n_slices):
+                # Stop-flag check #2 — graceful drain. Checked before each
+                # new slice submit so a flag dropped mid-run lets the
+                # current slice's poll/fetch/ingest finish, then exits
+                # without submitting the next slice. The consumer task
+                # will drain whatever's already queued.
+                stop_reason = _check_stop_flag()
+                if stop_reason:
+                    _emit_stop_message(
+                        stop_reason,
+                        where=f"producer pre-submit slice {slice_idx+1}/{n_slices}",
+                    )
+                    raise StopIteration(stop_reason)
+
+                slice_requests = batch_requests[slice_idx*max_slice:(slice_idx+1)*max_slice]
+                print(f"[batch] slice {slice_idx+1}/{n_slices}: submitting "
+                      f"{len(slice_requests)} requests...", flush=True)
                 batch_id = await runner.submit(slice_requests, client=client)
-            except Exception as e:  # noqa: BLE001
-                print(f"[batch] FATAL: slice {slice_idx+1} submit failed: "
-                      f"{type(e).__name__}: {e}", flush=True)
-                # Release in_progress claims belonging to THIS run. Two cases:
-                #   - Slice 1 failure: claims still under enrich_run_id_placeholder
-                #     (we never got to the placeholder->real swap).
-                #   - Slice N>=2 failure: claims under enrich_run_id (the real one,
-                #     swapped after slice 1's successful submit).
-                # Earlier worker only released placeholder; that left N>=2-failure
-                # claims orphaned and forced manual cleanup. Now we release both.
-                ids_to_release = [enrich_run_id_placeholder]
-                if enrich_run_id:
-                    ids_to_release.append(enrich_run_id)
-                ph = ",".join("?" * len(ids_to_release))
-                state_conn.execute(
-                    f"UPDATE enrichment_groups SET status='pending', claim_token=NULL, "
-                    f"claimed_at=NULL, enrich_run_id=NULL "
-                    f"WHERE enrich_run_id IN ({ph}) AND status='in_progress'",
-                    ids_to_release,
-                )
-                state_conn.commit()
-                # Also finalize the run row (if it exists) so audit doesn't show
-                # a perpetually-running ghost.
+                batch_ids.append(batch_id)
+                print(f"[batch] slice {slice_idx+1} submitted batch_id={batch_id}",
+                      flush=True)
+
+                # Record the run row on first successful submit; thereafter
+                # append batch_ids to notes.
+                if enrich_run_id is None:
+                    enrich_run_id = _record_run_started(
+                        state_conn, profile=profile, db_path=db_path,
+                        source_variant=args.source_variant or "",
+                        target_variant=args.target_variant,
+                        batch_id=batch_id, n_groups=n_claimed,
+                        slice_size=max_slice,
+                        argv=sys.argv,
+                    )
+                    state_conn.execute(
+                        "UPDATE enrichment_groups SET enrich_run_id=? "
+                        "WHERE enrich_run_id=? AND status='in_progress'",
+                        (enrich_run_id, enrich_run_id_placeholder),
+                    )
+                    state_conn.commit()
+                else:
+                    _record_batch_submitted(state_conn, enrich_run_id,
+                                            slice_idx=slice_idx, batch_id=batch_id)
+
+                # Poll this slice
+                last_state = None
+                deadline = time.monotonic() + args.max_wait_s
+                poll_n = 0
+                while True:
+                    status = await runner.poll(batch_id, client=client)
+                    poll_n += 1
+                    if status.state != last_state or (poll_n % 10 == 0):
+                        done = status.n_succeeded + status.n_errored + status.n_canceled + status.n_expired
+                        total = done + status.n_processing
+                        print(f"[batch] slice {slice_idx+1} poll #{poll_n}: "
+                              f"state={status.state} done={done}/{total} "
+                              f"success={status.n_succeeded} errored={status.n_errored}",
+                              flush=True)
+                        last_state = status.state
+                    if status.state == "ended":
+                        break
+                    if status.state in ("canceled", "failed"):
+                        raise RuntimeError(
+                            f"slice {slice_idx+1} batch ended in state {status.state!r}")
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"slice {slice_idx+1} batch still in_progress after "
+                            f"{args.max_wait_s}s")
+                    await asyncio.sleep(args.poll_interval_s)
+
+                # Fetch
+                print(f"[batch] slice {slice_idx+1} fetching results...", flush=True)
+                results_by_gid: dict[int, list[tuple[int, object]]] = {}
+                n_results = 0
+                async for r in runner.fetch_results(batch_id, client=client):
+                    n_results += 1
+                    try:
+                        if not r.custom_id.startswith("g"):
+                            raise ValueError("missing 'g' prefix")
+                        gid_str, ci_str = r.custom_id[1:].split("_c", 1)
+                        gid = int(gid_str)
+                        ci = int(ci_str)
+                    except Exception:
+                        print(f"[batch] WARN: bad custom_id {r.custom_id!r}",
+                              flush=True)
+                        continue
+                    results_by_gid.setdefault(gid, []).append((ci, r))
+                print(f"[batch] slice {slice_idx+1} fetched {n_results} results "
+                      f"across {len(results_by_gid)} groups; queued for ingest",
+                      flush=True)
+
+                # Hand off to the consumer; if the queue is full (consumer
+                # falling behind), this awaits naturally — preventing the
+                # producer from running >4 slices ahead of ingest.
+                await ingest_queue.put((slice_idx, batch_id, results_by_gid))
+        except (RuntimeError, TimeoutError, Exception) as e:  # noqa: BLE001
+            producer_failure["err"] = e
+            producer_failure["slice_idx"] = slice_idx if 'slice_idx' in locals() else -1
+        finally:
+            # Sentinel — tells the consumer there are no more slices coming.
+            await ingest_queue.put(None)
+
+    async def _consume_slices() -> None:
+        nonlocal n_success, n_empty, n_failed, total_cost
+        try:
+            while True:
+                item = await ingest_queue.get()
+                if item is None:
+                    return  # producer signaled done
+                slice_idx, batch_id, results_by_gid = item
+                ingested_in_slice = 0
+                for gid in results_by_gid:
+                    meta = group_meta.get(str(gid))
+                    if meta is None:
+                        print(f"[batch] WARN: gid {gid} not in group_meta",
+                              flush=True)
+                        continue
+                    _, uid, conv_id, turns = meta
+                    chunk_results = results_by_gid[gid]
+                    res = await _ingest_one_group(
+                        group_id=gid, conv_id=conv_id, user_id=uid, turns=turns,
+                        chunk_results=chunk_results,
+                        target_variant=args.target_variant,
+                        state_conn=state_conn, db_path=db_path,
+                        cost_per_in=cost_per_in, cost_per_out=cost_per_out,
+                    )
+                    total_cost += res["cost"]
+                    if res["status"] == "success":
+                        n_success += 1
+                    elif res["status"] == "empty":
+                        n_empty += 1
+                    else:
+                        n_failed += 1
+                    ingested_in_slice += 1
+                    if ingested_in_slice % 100 == 0:
+                        print(f"[batch] slice {slice_idx+1} ingested "
+                              f"{ingested_in_slice}/{len(results_by_gid)} "
+                              f"(cumul: success={n_success} empty={n_empty} "
+                              f"failed={n_failed} cost=${total_cost:.2f})",
+                              flush=True)
+                print(f"[batch] slice {slice_idx+1} done: groups_ingested="
+                      f"{ingested_in_slice}", flush=True)
+                _record_batch_ingested(state_conn, enrich_run_id, batch_id=batch_id)
+        except Exception as e:  # noqa: BLE001
+            consumer_failure["err"] = e
+
+    async with httpx.AsyncClient() as client:
+        producer = asyncio.create_task(_produce_slices(client))
+        consumer = asyncio.create_task(_consume_slices())
+        await asyncio.gather(producer, consumer)
+
+        # Surface producer/consumer failures with the same recovery semantics
+        # the old loop had (release claims, mark run aborted).
+        if producer_failure["err"] is not None or consumer_failure["err"] is not None:
+            err = producer_failure["err"] or consumer_failure["err"]
+            slice_idx = producer_failure["slice_idx"]
+            is_stop_flag = isinstance(err, StopIteration)
+
+            if is_stop_flag:
+                # Graceful drain — consumer has finished ingesting whatever
+                # was already queued. Don't release claims for submitted-
+                # but-not-yet-ingested slices: their batches are still on
+                # Anthropic's side and `--resume-run` can pick them up.
+                # Only release claims for slices we never submitted (the
+                # producer stopped at slice_idx, so any claim under this
+                # run_id whose group_id is in slices >= slice_idx is fair
+                # game to release). Easier heuristic: leave all in_progress
+                # claims under this run_id alone — they fall into two
+                # buckets and operator can choose `--resume-run` (drain
+                # mid-poll batches) or `release_orphan_claims.py
+                # --run-id <id>` (reset everything).
+                print(f"[batch] STOP — pipeline drained gracefully. "
+                      f"{n_success} success / {n_empty} empty / {n_failed} failed; "
+                      f"cost=${total_cost:.2f}", flush=True)
+                print(f"[batch] STOP — leaving {n_claimed - n_success - n_empty - n_failed} "
+                      f"claim(s) in_progress under run_id={enrich_run_id}. "
+                      f"To drain mid-flight Anthropic batches: --resume-run {enrich_run_id}. "
+                      f"To reset everything: bin/release_orphan_claims.py "
+                      f"--run-id {enrich_run_id}", flush=True)
                 if enrich_run_id:
                     _record_run_finished(state_conn, enrich_run_id,
                         status="aborted",
                         n_success=n_success,
-                        n_failed=n_claimed - n_success - n_empty,
+                        n_failed=n_failed,
                         n_empty=n_empty,
                         total_cost_usd=total_cost,
-                        abort_reason=f"submit_failed_slice_{slice_idx+1}",
+                        abort_reason=f"stop_flag: {str(err)[:200]}",
                         batch_id=",".join(batch_ids) if batch_ids else "")
                 state_conn.close()
-                raise
+                return 5
 
-            batch_ids.append(batch_id)
-            print(f"[batch] slice {slice_idx+1} submitted batch_id={batch_id}",
-                  flush=True)
-
-            # Record the run row on first successful submit; then patch
-            # placeholder run_id rows to the real one.
-            if enrich_run_id is None:
-                enrich_run_id = _record_run_started(
-                    state_conn, profile=profile, db_path=db_path,
-                    source_variant=args.source_variant or "",
-                    target_variant=args.target_variant,
-                    batch_id=batch_id, n_groups=n_claimed,
-                    slice_size=max_slice,
-                    argv=sys.argv,
-                )
-                state_conn.execute(
-                    "UPDATE enrichment_groups SET enrich_run_id=? "
-                    "WHERE enrich_run_id=? AND status='in_progress'",
-                    (enrich_run_id, enrich_run_id_placeholder),
-                )
-                state_conn.commit()
-            else:
-                # Slice 2+: append batch_id to run notes for resume
-                _record_batch_submitted(state_conn, enrich_run_id,
-                                        slice_idx=slice_idx, batch_id=batch_id)
-
-            # Poll this slice
-            last_state = None
-            deadline = time.monotonic() + args.max_wait_s
-            poll_n = 0
-            while True:
-                status = await runner.poll(batch_id, client=client)
-                poll_n += 1
-                if status.state != last_state or (poll_n % 10 == 0):
-                    done = status.n_succeeded + status.n_errored + status.n_canceled + status.n_expired
-                    total = done + status.n_processing
-                    print(f"[batch] slice {slice_idx+1} poll #{poll_n}: "
-                          f"state={status.state} done={done}/{total} "
-                          f"success={status.n_succeeded} errored={status.n_errored}",
-                          flush=True)
-                    last_state = status.state
-                if status.state == "ended":
-                    break
-                if status.state in ("canceled", "failed"):
-                    print(f"[batch] FATAL: slice {slice_idx+1} ended in state "
-                          f"{status.state!r}", flush=True)
-                    _record_run_finished(state_conn, enrich_run_id,
-                        status="aborted", n_success=n_success,
-                        n_failed=n_claimed - n_success - n_empty, n_empty=n_empty,
-                        total_cost_usd=total_cost,
-                        abort_reason=f"batch_{status.state}",
-                        batch_id=",".join(batch_ids))
-                    state_conn.execute(
-                        "UPDATE enrichment_groups SET status='pending', claim_token=NULL, "
-                        "claimed_at=NULL WHERE enrich_run_id=? AND status='in_progress'",
-                        (enrich_run_id,),
-                    )
-                    state_conn.commit()
-                    state_conn.close()
-                    return 1
-                if time.monotonic() >= deadline:
-                    print(f"[batch] slice {slice_idx+1} timeout after "
-                          f"{args.max_wait_s}s; batch still in_progress. "
-                          f"Re-run with the same conv-list later (claims preserved).",
-                          flush=True)
-                    state_conn.close()
-                    return 2
-                await asyncio.sleep(args.poll_interval_s)
-
-            # Fetch + ingest this slice's results
-            print(f"[batch] slice {slice_idx+1} fetching results...", flush=True)
-            results_by_gid: dict[int, list[tuple[int, object]]] = {}
-            n_results = 0
-            async for r in runner.fetch_results(batch_id, client=client):
-                n_results += 1
-                try:
-                    if not r.custom_id.startswith("g"):
-                        raise ValueError("missing 'g' prefix")
-                    gid_str, ci_str = r.custom_id[1:].split("_c", 1)
-                    gid = int(gid_str)
-                    ci = int(ci_str)
-                except Exception:
-                    print(f"[batch] WARN: bad custom_id {r.custom_id!r}", flush=True)
-                    continue
-                results_by_gid.setdefault(gid, []).append((ci, r))
-            print(f"[batch] slice {slice_idx+1} fetched {n_results} results "
-                  f"across {len(results_by_gid)} groups; ingesting...",
-                  flush=True)
-
-            # Per-group ingest for ONLY the groups touched by this slice.
-            ingested_in_slice = 0
-            for gid in results_by_gid:
-                meta = group_meta.get(str(gid))
-                if meta is None:
-                    print(f"[batch] WARN: gid {gid} not in group_meta", flush=True)
-                    continue
-                _, uid, conv_id, turns = meta
-                chunk_results = results_by_gid[gid]
-                res = await _ingest_one_group(
-                    group_id=gid, conv_id=conv_id, user_id=uid, turns=turns,
-                    chunk_results=chunk_results,
-                    target_variant=args.target_variant,
-                    state_conn=state_conn, db_path=db_path,
-                    cost_per_in=cost_per_in, cost_per_out=cost_per_out,
-                )
-                total_cost += res["cost"]
-                if res["status"] == "success":
-                    n_success += 1
-                elif res["status"] == "empty":
-                    n_empty += 1
-                else:
-                    n_failed += 1
-                ingested_in_slice += 1
-                if ingested_in_slice % 100 == 0:
-                    print(f"[batch] slice {slice_idx+1} ingested "
-                          f"{ingested_in_slice}/{len(results_by_gid)} "
-                          f"(cumul: success={n_success} empty={n_empty} "
-                          f"failed={n_failed} cost=${total_cost:.2f})",
-                          flush=True)
-            print(f"[batch] slice {slice_idx+1} done: groups_ingested="
-                  f"{ingested_in_slice}", flush=True)
-            _record_batch_ingested(state_conn, enrich_run_id, batch_id=batch_id)
-
-            # Budget cap: check after each slice ingest. If we've blown the
-            # cap, abort cleanly — release any remaining placeholder claims
-            # and stop scheduling new slices.
-            budget = getattr(args, "budget_usd", None)
-            if budget is not None and total_cost >= budget:
-                slices_remaining = n_slices - (slice_idx + 1)
-                print(f"[batch] BUDGET CAP HIT: cost=${total_cost:.4f} "
-                      f">= budget=${budget:.4f}; aborting with "
-                      f"{slices_remaining} slice(s) unsubmitted.", flush=True)
-                # Release claims for groups in unsubmitted slices.
-                # Their custom_ids are in batch_requests but we never submitted
-                # them, so they're still claimed under enrich_run_id.
-                state_conn.execute(
-                    "UPDATE enrichment_groups SET status='pending', "
-                    "claim_token=NULL, claimed_at=NULL "
-                    "WHERE enrich_run_id=? AND status='in_progress'",
-                    (enrich_run_id,),
-                )
-                state_conn.commit()
+            print(f"[batch] FATAL: pipeline aborted at slice {slice_idx+1}: "
+                  f"{type(err).__name__}: {err}", flush=True)
+            ids_to_release = [enrich_run_id_placeholder]
+            if enrich_run_id:
+                ids_to_release.append(enrich_run_id)
+            ph = ",".join("?" * len(ids_to_release))
+            state_conn.execute(
+                f"UPDATE enrichment_groups SET status='pending', claim_token=NULL, "
+                f"claimed_at=NULL, enrich_run_id=NULL "
+                f"WHERE enrich_run_id IN ({ph}) AND status='in_progress'",
+                ids_to_release,
+            )
+            state_conn.commit()
+            if enrich_run_id:
                 _record_run_finished(state_conn, enrich_run_id,
-                    status="aborted", n_success=n_success, n_failed=n_failed,
-                    n_empty=n_empty, total_cost_usd=total_cost,
-                    abort_reason=f"budget_cap_${budget:.2f}",
-                    batch_id=",".join(batch_ids))
-                state_conn.close()
-                return 3
+                    status="aborted",
+                    n_success=n_success,
+                    n_failed=n_claimed - n_success - n_empty,
+                    n_empty=n_empty,
+                    total_cost_usd=total_cost,
+                    abort_reason=f"pipeline_{type(err).__name__.lower()}",
+                    batch_id=",".join(batch_ids) if batch_ids else "")
+            state_conn.close()
+            return 1
+
+        # Budget cap check after pipeline completes. If we've blown the cap
+        # while running, the producer's already submitted everything but the
+        # consumer keeps draining; budget cap matters most when monitoring
+        # rather than mid-run abort. The pipelined producer doesn't have a
+        # mid-flight bail point, so this is now a post-hoc check that just
+        # adjusts the abort_reason if cost overshot.
+        budget = getattr(args, "budget_usd", None)
+        if budget is not None and total_cost >= budget:
+            print(f"[batch] BUDGET CAP HIT post-pipeline: cost=${total_cost:.4f} "
+                  f">= budget=${budget:.4f}", flush=True)
+            # Release any still-in_progress claims (some may remain if a slice
+            # had no result for a group).
+            state_conn.execute(
+                "UPDATE enrichment_groups SET status='pending', "
+                "claim_token=NULL, claimed_at=NULL "
+                "WHERE enrich_run_id=? AND status='in_progress'",
+                (enrich_run_id,),
+            )
+            state_conn.commit()
+            _record_run_finished(state_conn, enrich_run_id,
+                status="aborted", n_success=n_success, n_failed=n_failed,
+                n_empty=n_empty, total_cost_usd=total_cost,
+                abort_reason=f"budget_cap_${budget:.2f}",
+                batch_id=",".join(batch_ids))
+            state_conn.close()
+            return 3
 
         # All slices complete. Catch any groups that had no results in any
         # slice (shouldn't happen if claim & submit were consistent, but
