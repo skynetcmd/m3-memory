@@ -1384,6 +1384,49 @@ _shared_embed_client: _httpx.AsyncClient | None = None
 def _get_embed_client() -> _httpx.AsyncClient:
     return ctx.get_async_client()
 
+
+# Hard override for the embedder endpoint. When set, bypasses
+# get_best_embed entirely (no discovery, no race, no failover) and uses
+# the URL + model verbatim. Set via M3_EMBED_URL env var (Linux/macOS:
+# `export M3_EMBED_URL=...`; Windows PowerShell: `$env:M3_EMBED_URL=...`)
+# OR programmatically via set_embed_override(). The optional model name
+# falls back to a llama.cpp-server-friendly default; LM Studio bge-m3
+# accepts the model id via M3_EMBED_MODEL.
+#
+# Why an override exists alongside get_best_embed: under concurrent load
+# multiple coroutines can each see _EMBED_ENDPOINT_CACHE=None and run
+# parallel discoveries; whichever finishes last wins, so the resolved
+# endpoint becomes nondeterministic across runs. The override is the
+# escape hatch when callers need pinned routing (multi-server LM Studio
+# + llama.cpp setups, CI, benchmarks where one endpoint is reserved).
+_EMBED_URL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_URL") or "").strip() or None
+_EMBED_MODEL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_MODEL") or "").strip() or None
+
+
+def set_embed_override(url: str | None, model: str | None = None) -> None:
+    """Set or clear the embedder endpoint override at runtime.
+
+    `url` of None / empty string clears the override (returns to discovery).
+    `model` is optional; if None or empty, the override URL is used with
+    whatever model name resolution would have picked (or the llama.cpp
+    default 'bge-m3-GGUF-Q4_K_M.gguf').
+
+    Callers (CLI tools, tests, services) should call this once at startup
+    after parsing args, before any embedding-producing operation. It is
+    process-global; do not toggle mid-run.
+    """
+    global _EMBED_URL_OVERRIDE, _EMBED_MODEL_OVERRIDE
+    _EMBED_URL_OVERRIDE = (url or "").strip() or None
+    _EMBED_MODEL_OVERRIDE = (model or "").strip() or None
+    # Drop any cached endpoint from prior discovery so subsequent calls
+    # cannot land on a stale route.
+    try:
+        from llm_failover import clear_embed_cache as _cec
+        _cec()
+    except Exception:
+        pass
+
+
 async def _embed(text: str) -> tuple[list[float] | None, str]:
     global _EMBED_DIM_VALIDATED
     c_hash = _content_hash(text)
@@ -1405,9 +1448,16 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         _track_cost("embed_calls", len(text.split()) * 2)
         token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
         client = _get_embed_client()
-        result = await get_best_embed(client, token)
-        if not result: return None, EMBED_MODEL
-        base_url, model = result
+        if _EMBED_URL_OVERRIDE:
+            base_url = _EMBED_URL_OVERRIDE.rstrip("/")
+            # Default model: llama.cpp's bge-m3 GGUF id. LM Studio rejects
+            # this and needs 'text-embedding-bge-m3' — set M3_EMBED_MODEL
+            # explicitly when overriding to a different server type.
+            model = _EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
+        else:
+            result = await get_best_embed(client, token)
+            if not result: return None, EMBED_MODEL
+            base_url, model = result
 
         last_exc = None
         for attempt in range(3):
@@ -2286,6 +2336,34 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
     return None  # Tiers 1+2 only in sync path
 
 
+# Process-global cache for canonical_name embeddings used in Tier-3 cosine
+# resolution. Key: canonical_name (text). Value: list[float] embedding.
+# Bounded by ENTITY_NAME_EMBED_CACHE_MAX (env, default 50000); on overflow
+# the cache is dropped wholesale (rare in normal usage; cap is defensive).
+# The cache is process-local and not invalidated when a row is updated/
+# deleted because canonical_name → embedding is a stable function (the
+# embedder is deterministic at temperature 0). Persisting to disk is a
+# v2-class improvement; for now in-memory is sufficient to convert
+# Tier-3 from O(N) embed calls per new entity to O(1) after warmup.
+_ENTITY_NAME_EMBED_CACHE: dict[str, list[float]] = {}
+ENTITY_NAME_EMBED_CACHE_MAX = int(os.environ.get("ENTITY_NAME_EMBED_CACHE_MAX", "50000"))
+
+
+async def _embed_canonical_cached(canonical_name: str) -> list[float] | None:
+    """Embed a canonical_name via the cache. Misses fall through to _embed
+    and record the result; hits skip the network round-trip entirely."""
+    cached = _ENTITY_NAME_EMBED_CACHE.get(canonical_name)
+    if cached is not None:
+        return cached
+    vec, _ = await _embed(canonical_name)
+    if vec is None:
+        return None
+    if len(_ENTITY_NAME_EMBED_CACHE) >= ENTITY_NAME_EMBED_CACHE_MAX:
+        _ENTITY_NAME_EMBED_CACHE.clear()
+    _ENTITY_NAME_EMBED_CACHE[canonical_name] = vec
+    return vec
+
+
 async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> str | None:
     """Full 3-tier resolution including embedding cosine. Use from async context."""
     sync_id = _resolve_entity(canonical_name, entity_type, db)
@@ -2293,9 +2371,11 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
         return sync_id
 
     # Tier 3: embedding cosine within same entity_type.
-    # TODO: pre-embed and cache canonical_name embeddings to avoid per-candidate
-    #       embed calls when the entity table is large.
-    # Cap candidates to 100 most-recently created to bound embed cost.
+    # Cap candidates to 100 most-recently created to bound the comparison.
+    # Each canonical_name is embedded at most once per process via
+    # _embed_canonical_cached — successive lookups against the same
+    # candidate set hit the cache after warmup, avoiding the O(N) embed
+    # calls per new entity that previously dominated wall time.
     candidates = db.execute(
         "SELECT id, canonical_name FROM entities WHERE entity_type = ? ORDER BY created_at DESC LIMIT 100",
         (entity_type,),
@@ -2303,13 +2383,13 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
     if not candidates:
         return None
 
-    qvec, _ = await _embed(canonical_name)
+    qvec = await _embed_canonical_cached(canonical_name)
     if qvec is None:
         return None
 
     best_score, best_id = 0.0, None
     for c in candidates:
-        cvec, _ = await _embed(c["canonical_name"])
+        cvec = await _embed_canonical_cached(c["canonical_name"])
         if cvec is None:
             continue
         s = _cosine(qvec, cvec)
