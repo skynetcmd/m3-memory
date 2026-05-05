@@ -282,6 +282,7 @@ async def write_observation(
     conversation_id: str,
     source_turn_ids: list[str],
     source_group_id: int | None = None,
+    session_id: str = "",
 ) -> str | None:
     """Write a single observation as a type='observation' memory_items row.
 
@@ -291,6 +292,11 @@ async def write_observation(
                           for audit purposes)
       referenced_date  → valid_from
       relative_date    → metadata_json.relative_date
+
+    `session_id` (when non-empty) is the upstream session identifier copied
+    from the source turn's metadata.session_id. Required for SHR scoring on
+    LongMemEval bench runs; downstream callers can pass empty for non-bench
+    contexts.
     """
     md = {
         "observation_date": obs["observation_date"],
@@ -301,6 +307,8 @@ async def write_observation(
         "source_turn_ids": source_turn_ids,
         "conversation_id": conversation_id,
     }
+    if session_id:
+        md["session_id"] = session_id
     valid_from = obs["referenced_date"] or obs["observation_date"]
     # When M3_OBSERVER_NO_EMBED is set, skip the embedding pass. Used by unit
     # tests that don't have the embedding endpoint available; in production
@@ -398,14 +406,25 @@ async def process_conversation(
         return
     # Use the earliest turn's session_date as the canonical observation_date.
     # Falls back to the row's created_at if no metadata.session_date.
+    # While scanning, also lift session_id from the source turns so observations
+    # can be traced back to the LongMemEval session (or any upstream session
+    # identifier) without a separate DB lookup. Bench SHR scoring requires
+    # metadata.session_id on observation rows; without it observation hits are
+    # invisible to the metric (memory 914843f8, 2026-05-05).
     session_date = "unknown"
+    source_session_id = ""
     for t in turns:
         meta = t[5] if len(t) > 5 else None
         if meta:
             try:
                 m = json.loads(meta)
-                if m.get("session_date"):
+                if not source_session_id:
+                    sid = m.get("session_id")
+                    if sid:
+                        source_session_id = str(sid)
+                if m.get("session_date") and session_date == "unknown":
                     session_date = str(m["session_date"]).split(" ")[0].replace("/", "-")
+                if source_session_id and session_date != "unknown":
                     break
             except Exception:
                 pass
@@ -490,6 +509,7 @@ async def process_conversation(
         obs_id = await write_observation(
             obs, target_variant, user_id, conversation_id, source_turn_ids,
             source_group_id=source_group_id,
+            session_id=source_session_id,
         )
         if obs_id:
             counters["written"] += 1
