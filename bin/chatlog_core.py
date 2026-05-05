@@ -33,6 +33,7 @@ from typing import Any, Optional
 
 import chatlog_config
 import chatlog_redaction
+from memory_core import _sanitize_fts
 
 logger = logging.getLogger("chatlog_core")
 
@@ -636,7 +637,8 @@ async def _chatlog_search_separate(
         where = " AND ".join(clauses)
 
         with ctx.get_chatlog_conn() as conn:
-            if query.strip():
+            fts_query = _sanitize_fts(query) if query.strip() else ""
+            if fts_query:
                 sql = (
                     "SELECT mi.id, mi.title, mi.content, mi.metadata_json, mi.created_at, "
                     "       mi.conversation_id, mi.model_id "
@@ -645,7 +647,7 @@ async def _chatlog_search_separate(
                     f"WHERE memory_items_fts MATCH ? AND {where} "
                     "ORDER BY rank LIMIT ?"
                 )
-                rows = conn.execute(sql, [query] + params + [k]).fetchall()
+                rows = conn.execute(sql, [fts_query] + params + [k]).fetchall()
             else:
                 sql = (
                     "SELECT id, title, content, metadata_json, created_at, "

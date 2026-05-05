@@ -499,6 +499,19 @@ def _sanitize_fts(query: str, max_len: int = 500) -> str:
     return _FTS_OPERATORS.sub(' ', query).strip()
 
 
+# Mirror of the SQLite mi_fts_insert trigger sanitization. The trigger lowercases
+# and replaces these 8 punctuation chars with spaces before storing in
+# content_searchable / title_searchable. Query-side text must apply the same
+# transform so MATCH terms align with what FTS5 indexed.
+_SEARCHABLE_PUNCT = str.maketrans({c: " " for c in "?!:.,;/\""})
+
+def _sanitize_for_searchable(text: str) -> str:
+    """Apply the same lowercase + depunctuate transform as the FTS triggers."""
+    if not text:
+        return ""
+    return text.lower().translate(_SEARCHABLE_PUNCT)
+
+
 _TOKEN_SPLIT = re.compile(r"[^\w]+", re.UNICODE)
 
 def _augment_title_with_role(title: str, metadata: str | dict | None) -> str:
@@ -3054,8 +3067,10 @@ async def memory_search_scored_impl(
                     fts_query = f'"{clean_query}"'
                 else:
                     clean_query = _sanitize_fts(clean_query)
-                    if not clean_query:
+                    clean_query = _sanitize_for_searchable(clean_query)
+                    if not clean_query.strip():
                         return await _recurse_semantic()
+                    clean_query = clean_query.strip()
                     fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
 
                 rows = db.execute(sql, (*params, fts_query)).fetchall()
