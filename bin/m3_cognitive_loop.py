@@ -23,6 +23,7 @@ import atexit
 import logging
 import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -41,6 +42,49 @@ from m3_sdk import M3Context, resolve_db_path
 
 # PID file path for single-instance locking
 PID_FILE = REPO_ROOT / "memory" / "cognitive_loop.pid"
+
+def daemonize_windows(args):
+    """Restart this process using pythonw.exe to detach from console."""
+    # Build the same argument list but remove --background
+    argv = [sys.executable.replace("python.exe", "pythonw.exe")]
+    argv.append(os.path.abspath(__file__))
+    for arg in sys.argv[1:]:
+        if arg != "--background":
+            argv.append(arg)
+    
+    # Spawn and exit parent
+    subprocess.Popen(argv, creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+    print(f"Cognitive Loop started in background (Windows pythonw).")
+    sys.exit(0)
+
+def daemonize_unix():
+    """Double-fork to detach from the terminal."""
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0) # Exit first parent
+    except OSError as e:
+        sys.exit(f"fork #1 failed: {e}")
+
+    os.setsid()
+    os.umask(0)
+
+    try:
+        pid = os.fork()
+        if pid > 0:
+            print(f"Cognitive Loop started in background (PID {pid}).")
+            sys.exit(0) # Exit second parent
+    except OSError as e:
+        sys.exit(f"fork #2 failed: {e}")
+
+    # Redirect standard file descriptors
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with open(os.devnull, "r") as f:
+        os.dup2(f.fileno(), sys.stdin.fileno())
+    with open(os.devnull, "a") as f:
+        os.dup2(f.fileno(), sys.stdout.fileno())
+        os.dup2(f.fileno(), sys.stderr.fileno())
 
 def acquire_lock():
     """Ensure only one instance of the loop is running."""
@@ -250,14 +294,10 @@ async def main_loop(args):
     logger.info("Cognitive Loop stopped.")
 
 def main():
-    acquire_lock()
-    
-    env_interval = os.environ.get("M3_COGNITIVE_LOOP_INTERVAL")
-    default_interval = int(env_interval) if env_interval and env_interval.isdigit() else 300
-
     parser = argparse.ArgumentParser(description="m3-memory Cognitive Loop")
-    parser.add_argument("--interval", type=int, default=default_interval, 
-                        help=f"Seconds between passes (default: {default_interval})")
+    parser.add_argument("--interval", type=int, default=300, 
+                        help="Seconds between passes (default: 300)")
+    parser.add_argument("--background", action="store_true", help="Run in background (fire and forget)")
     parser.add_argument("--concurrency", type=int, default=2, help="SLM concurrency (default: 2)")
     parser.add_argument("--limit-per-pass", type=int, default=50, help="Max groups/rows per pass (default: 50)")
     
@@ -273,6 +313,15 @@ def main():
     parser.add_argument("--no-reflect", action="store_true", help="Skip reflection pass")
 
     args = parser.parse_args()
+
+    if args.background:
+        if sys.platform == "win32":
+            daemonize_windows(args)
+        else:
+            daemonize_unix()
+
+    # Only acquire lock AFTER daemonizing
+    acquire_lock()
 
     # Resolve paths once to normalize env vs flag
     if args.database:
