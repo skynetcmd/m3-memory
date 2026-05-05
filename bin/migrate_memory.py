@@ -158,9 +158,9 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
     # caller is targeting, not always agent_memory.db.
     try:
         from m3_sdk import resolve_db_path as _resolve_main
-        main_path = _resolve_main(None)
+        main_path = os.path.abspath(_resolve_main(None))
     except ImportError:
-        main_path = DB_PATH
+        main_path = os.path.abspath(DB_PATH)
 
     main_kind = _classify_db(main_path)
     main_target_valid = main_kind in ("main", "empty")
@@ -201,7 +201,15 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
         try:
             from chatlog_config import CHATLOG_MIGRATIONS_DIR, chatlog_db_path
             chatlog_path = os.path.abspath(chatlog_db_path())
-            if chatlog_path != os.path.abspath(main_path):
+            
+            # Case-insensitive comparison on Windows for path equality
+            is_same_file = False
+            if sys.platform == "win32":
+                is_same_file = chatlog_path.lower() == main_path.lower()
+            else:
+                is_same_file = chatlog_path == main_path
+
+            if not is_same_file:
                 chatlog_kind = _classify_db(chatlog_path)
                 if chatlog_kind in ("chatlog", "empty"):
                     chatlog_target = MigrationTarget(
