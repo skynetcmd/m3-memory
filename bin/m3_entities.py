@@ -315,18 +315,39 @@ def _build_type_allowlist(
     return DEFAULT_TYPES
 
 
+def _load_conv_list(path: Path) -> set[str]:
+    """Read newline-delimited conv_ids (with optional # comments) OR a JSON
+    array. Mirrors bin/m3_enrich.py's --source-conv-list shape."""
+    raw = path.read_text(encoding="utf-8").strip()
+    if raw.startswith("["):
+        import json as _json
+        return {str(x).strip() for x in _json.loads(raw) if str(x).strip()}
+    out: set[str] = set()
+    for line in raw.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            out.add(line)
+    return out
+
+
 def _query_eligible_rows(
     db_path: Path,
     type_allowlist: tuple[str, ...],
     source_variant: Optional[str],
     limit: Optional[int],
     skip_already_extracted: bool,
+    source_conv_list: Optional[set[str]] = None,
 ) -> list[tuple[str, str]]:
     """Return [(memory_id, content)] for rows the extractor should process.
 
     skip_already_extracted=True (the default) excludes rows that already
     have at least one row in memory_item_entities — re-running the driver
     incrementally picks up only new rows.
+
+    source_conv_list (optional) further narrows to memory_items whose
+    metadata_json.conversation_id matches one of the supplied conv_ids.
+    Falls back to memory_items.conversation_id column when metadata is
+    missing (handles legacy rows + Observer output uniformly).
     """
     import sqlite3
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -347,7 +368,9 @@ def _query_eligible_rows(
         )
 
     sql = f"""
-        SELECT id, COALESCE(title, '') || CASE WHEN COALESCE(title,'') != '' THEN '\n\n' ELSE '' END || COALESCE(content, '')
+        SELECT id,
+               COALESCE(title, '') || CASE WHEN COALESCE(title,'') != '' THEN '\n\n' ELSE '' END || COALESCE(content, ''),
+               COALESCE(json_extract(metadata_json, '$.conversation_id'), conversation_id) AS conv_id
         FROM memory_items
         WHERE COALESCE(is_deleted, 0) = 0
           AND type IN ({placeholders})
@@ -359,6 +382,8 @@ def _query_eligible_rows(
     params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params
     rows = conn.execute(sql, params).fetchall()
     conn.close()
+    if source_conv_list is not None:
+        rows = [r for r in rows if r[2] in source_conv_list]
     if limit is not None:
         rows = rows[:limit]
     return [(r[0], r[1]) for r in rows]
@@ -401,6 +426,7 @@ async def _run_db(
     limit: Optional[int],
     skip_already_extracted: bool,
     counters: dict,
+    source_conv_list: Optional[set[str]] = None,
 ) -> None:
     """Drive the extractor across all eligible rows in one DB."""
     os.environ["M3_DATABASE"] = str(db_path)
@@ -408,7 +434,8 @@ async def _run_db(
     os.environ.setdefault("M3_ENABLE_ENTITY_GRAPH", "1")
 
     rows = _query_eligible_rows(
-        db_path, type_allowlist, source_variant, limit, skip_already_extracted
+        db_path, type_allowlist, source_variant, limit, skip_already_extracted,
+        source_conv_list=source_conv_list,
     )
     counters["eligible"] = len(rows)
     print(f"[m3-entities] {db_path.name}: {len(rows)} eligible rows", flush=True)
@@ -488,9 +515,9 @@ async def _run_db(
 
 def _print_dry_run(plan: dict) -> None:
     print()
-    print("══════════════════════════════════════════════════════════════")
-    print("  m3-entities DRY RUN — no writes will happen")
-    print("══════════════════════════════════════════════════════════════")
+    print("==============================================================")
+    print("  m3-entities DRY RUN -- no writes will happen")
+    print("==============================================================")
     print()
     print(f"  Profile:             {plan['profile_name']}")
     print(f"  Model:               {plan['model']}")
@@ -506,14 +533,14 @@ def _print_dry_run(plan: dict) -> None:
     print(f"  Skip already-extracted: {plan['skip_already_extracted']}")
     print()
     for db_label, info in plan["dbs"].items():
-        print(f"  ── {db_label} ─────────────")
+        print(f"  -- {db_label} -------------")
         print(f"     path:        {info['path']}")
         print(f"     eligible:    {info['n_rows']} rows")
         print(f"     est wall:    ~{info['n_rows'] * 3 / 60:.1f} min @ concurrency=4 (local model)")
         print("     est cost:    $0 (local)")
         print()
     print("To run for real, drop --dry-run.")
-    print("══════════════════════════════════════════════════════════════")
+    print("==============================================================")
 
 
 async def _main_async(args: argparse.Namespace) -> int:
@@ -521,10 +548,27 @@ async def _main_async(args: argparse.Namespace) -> int:
     if profile is None:
         sys.exit(f"ERROR: profile {args.profile!r} not found")
 
-    vocab_path = Path(args.entity_vocab_yaml) if args.entity_vocab_yaml else DEFAULT_VOCAB_YAML
+    # CLI flag wins. Otherwise honor M3_ENTITY_VOCAB_YAML env var (matches
+    # memory_core.load_entity_vocab's contract). Final fallback: m3 default.
+    if args.entity_vocab_yaml:
+        vocab_path = Path(args.entity_vocab_yaml)
+    elif os.environ.get("M3_ENTITY_VOCAB_YAML"):
+        vocab_path = Path(os.environ["M3_ENTITY_VOCAB_YAML"])
+    else:
+        vocab_path = DEFAULT_VOCAB_YAML
     if not vocab_path.exists():
         sys.exit(f"ERROR: vocab YAML not found: {vocab_path}")
     valid_types, valid_predicates = _load_vocab(vocab_path)
+    print(f"[m3-entities] vocab: {vocab_path}", flush=True)
+    print(f"[m3-entities]   types: {len(valid_types)} ({sorted(valid_types)[:6]}...)", flush=True)
+    print(f"[m3-entities]   preds: {len(valid_predicates)} ({sorted(valid_predicates)[:6]}...)", flush=True)
+
+    # Apply embedder override if requested. CLI flag wins, env var is fallback,
+    # both already merged into args.embed_url/embed_model by argparse.
+    if args.embed_url:
+        mc.set_embed_override(args.embed_url, args.embed_model)
+        print(f"[m3-entities] embedder override: {args.embed_url} "
+              f"(model: {args.embed_model or 'default'})", flush=True)
 
     type_allowlist = _build_type_allowlist(args)
 
@@ -558,9 +602,18 @@ async def _main_async(args: argparse.Namespace) -> int:
         "skip_already_extracted": not args.force,
         "dbs": {},
     }
+    conv_set: Optional[set[str]] = None
+    if getattr(args, "source_conv_list", None):
+        conv_path = Path(args.source_conv_list)
+        if not conv_path.exists():
+            sys.exit(f"ERROR: --source-conv-list path not found: {conv_path}")
+        conv_set = _load_conv_list(conv_path)
+        print(f"[m3-entities] --source-conv-list: {len(conv_set)} conv_ids loaded", flush=True)
+
     for label, db_path in db_targets:
         rows = _query_eligible_rows(
-            db_path, type_allowlist, args.source_variant, args.limit, not args.force
+            db_path, type_allowlist, args.source_variant, args.limit, not args.force,
+            source_conv_list=conv_set,
         )
         plan["dbs"][label] = {"path": str(db_path), "n_rows": len(rows)}
 
@@ -597,14 +650,15 @@ async def _main_async(args: argparse.Namespace) -> int:
             db_path, profile, token, valid_types, valid_predicates,
             type_allowlist, args.source_variant, args.concurrency,
             args.limit, not args.force, counters,
+            source_conv_list=conv_set,
         )
         for k, v in counters.items():
             counters_total[k] += v
 
     print()
-    print("══════════════════════════════════════════════════════════════")
+    print("==============================================================")
     print("  m3-entities COMPLETE")
-    print("══════════════════════════════════════════════════════════════")
+    print("==============================================================")
     print(f"  rows processed:        {counters_total.get('processed', 0)}")
     print(f"  entities emitted:      {counters_total.get('entities_emitted', 0)}")
     print(f"  relationships emitted: {counters_total.get('relationships_emitted', 0)}")
@@ -627,6 +681,21 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"Profile name in config/slm/. Default: {DEFAULT_PROFILE}.")
     ap.add_argument("--entity-vocab-yaml", default=None,
                     help=f"Vocab YAML path. Default: {DEFAULT_VOCAB_YAML}.")
+    ap.add_argument("--embed-url",
+                    default=os.environ.get("M3_EMBED_URL"),
+                    help="Hard override for the embedder endpoint URL "
+                         "(e.g. http://127.0.0.1:8081/v1). Bypasses "
+                         "get_best_embed discovery — use when you need "
+                         "deterministic routing under concurrent load. "
+                         "Env: M3_EMBED_URL.")
+    ap.add_argument("--embed-model",
+                    default=os.environ.get("M3_EMBED_MODEL"),
+                    help="Model id to send to the override endpoint. "
+                         "llama.cpp default: 'bge-m3-GGUF-Q4_K_M.gguf'. "
+                         "LM Studio: 'text-embedding-bge-m3'. "
+                         "Required only when --embed-url is set and the "
+                         "default model id is wrong for that server. "
+                         "Env: M3_EMBED_MODEL.")
     ap.add_argument("--core", action="store_true", dest="core_only",
                     help="Only enrich the core memory DB (skip chatlog).")
     ap.add_argument("--chatlog", action="store_true", dest="chatlog_only",
@@ -638,6 +707,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--source-variant", default=None,
                     help="Filter source rows by variant. '__none__' = true core memory only "
                          "(variant IS NULL). A name = single-variant scope. Default: no filter.")
+    ap.add_argument("--source-conv-list",
+                    default=os.environ.get("M3_ENTITIES_CONV_LIST"),
+                    help="Path to a file listing conversation_ids to scope extraction to. "
+                         "Format: newline-delimited text (with optional # comments) OR a "
+                         "JSON array. Filtering reads metadata_json.$.conversation_id, "
+                         "falling back to the memory_items.conversation_id column. "
+                         "Narrows the eligible set AFTER --source-variant + type filtering. "
+                         "Env: M3_ENTITIES_CONV_LIST.")
     ap.add_argument("--types", default=None,
                     help="Comma-separated type allowlist override. Default: chat + curated.")
     ap.add_argument("--limit", type=int, default=None,
