@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-05T00:26:53.089916+00:00._
+_Generated 2026-05-05T01:50:16.573675+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -13,6 +13,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/auth_utils.py](auth_utils.md) | (no docstring) |  |
 | [bin/auto_route.py](auto_route.md) | auto_route — multi-signal retrieval branch decider. |  |
 | [bin/backfill_content_hash.py](backfill_content_hash.md) | backfill_content_hash.py — populate memory_embeddings.content_hash on legacy rows. |  |
+| [bin/batch_runner.py](batch_runner.md) | Provider-neutral batch-API runner protocol with Anthropic implementation. |  |
 | [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. |  |
 | [bin/benchmark_memory.py](benchmark_memory.md) | Retrieval Quality Benchmark for M3 Memory System. |  |
 | [bin/build_kg_variant.py](build_kg_variant.md) | Build a KG-enriched variant from an existing source variant. |  |
@@ -36,7 +37,9 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/embed_backfill.py](embed_backfill.md) | embed_backfill.py — fill in missing embeddings for memory_items rows. |  |
 | [bin/embed_server.py](embed_server.md) | Local embedding server — OpenAI-compatible /v1/embeddings endpoint. |  |
 | [bin/embed_server_gpu.py](embed_server_gpu.md) | AMD GPU Optimized Embedding Proxy — delegates to llama-server.exe. | yes |
+| [bin/embed_sweep_lib.py](embed_sweep_lib.md) | embed_sweep_lib — shared embed-loop helper for sweeper-style backfill tools. |  |
 | [bin/embedding_utils.py](embedding_utils.md) | Shared embedding and vector-math utilities for MCP bridges. |  |
+| [bin/enrichment_state.py](enrichment_state.md) | Durable per-group enrichment state for m3_enrich. |  |
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
 | [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
@@ -87,6 +90,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_mcp_proxy_unit.py](test_mcp_proxy_unit.md) | test_mcp_proxy_unit.py - In-process unit tests for mcp_proxy. |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
+| [bin/thermal_utils.py](thermal_utils.md) | (no docstring) |  |
 | [bin/unified_ai.py](unified_ai.md) | Unified chat client across Gemini, Claude, and LM Studio. |  |
 | [bin/web_research_bridge.py](web_research_bridge.md) | (no docstring) |  |
 | [bin/weekly_auditor.py](weekly_auditor.md) | Weekly Audit Report -- M3 Memory |  |

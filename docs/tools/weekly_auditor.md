@@ -2,7 +2,7 @@
 tool: bin/weekly_auditor.py
 sha1: 9566da92f689
 mtime_utc: 2026-05-01T09:15:53.146020+00:00
-generated_utc: 2026-05-01T13:05:27.127484+00:00
+generated_utc: 2026-05-05T01:50:16.548803+00:00
 private: false
 ---
 
@@ -42,7 +42,7 @@ Use --no-memory to skip the memory write step.
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 

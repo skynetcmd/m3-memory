@@ -2,7 +2,7 @@
 tool: bin/cli_knowledge.py
 sha1: a90253ea9ab4
 mtime_utc: 2026-04-21T20:44:20.430808+00:00
-generated_utc: 2026-05-01T13:05:26.772517+00:00
+generated_utc: 2026-05-05T01:50:16.060852+00:00
 private: false
 ---
 
@@ -46,7 +46,7 @@ _(no module docstring — update the source file.)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 

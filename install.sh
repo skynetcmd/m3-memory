@@ -198,6 +198,9 @@ INSTALL_M3_ARGS=(--non-interactive --capture-mode "$CAPTURE_MODE")
 if [[ -n "$ENDPOINT" ]]; then
     INSTALL_M3_ARGS+=(--endpoint "$ENDPOINT")
 fi
+if [[ $COGNITIVE_LOOP -eq 1 ]]; then
+    INSTALL_M3_ARGS+=(--cognitive-loop)
+fi
 
 # install-m3 is idempotent only with --force when a previous install exists.
 # Detect and force, since this script is the "fresh install" entrypoint.

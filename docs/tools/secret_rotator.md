@@ -2,7 +2,7 @@
 tool: bin/secret_rotator.py
 sha1: 547b73bd9fb7
 mtime_utc: 2026-05-01T09:15:53.151020+00:00
-generated_utc: 2026-05-01T13:05:27.055540+00:00
+generated_utc: 2026-05-05T01:50:16.458082+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ _(no module docstring — update the source file.)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 
