@@ -2,7 +2,7 @@
 tool: bin/chatlog_ingest.py
 sha1: 0fbe6fc02bed
 mtime_utc: 2026-04-28T03:05:32.881224+00:00
-generated_utc: 2026-05-01T13:05:26.743823+00:00
+generated_utc: 2026-05-05T01:50:16.022817+00:00
 private: false
 ---
 
@@ -52,8 +52,10 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 ## Environment variables read
 
+- `CHATLOG_DB_PATH`
 - `M3_AUTO_ENRICH`
 - `M3_AUTO_ENRICH_MIN_TURNS`
+- `M3_DATABASE`
 - `USER`
 - `USERNAME`
 

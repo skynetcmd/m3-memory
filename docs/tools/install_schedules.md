@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 1d1cab813444
-mtime_utc: 2026-05-04T22:56:39.854641+00:00
-generated_utc: 2026-05-05T00:26:52.508716+00:00
+sha1: 635bb737508f
+mtime_utc: 2026-05-05T01:48:54.442176+00:00
+generated_utc: 2026-05-05T01:49:21.702243+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 226)
+- `def main()` (line 234)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -52,9 +52,9 @@ _(none detected)_
 
 - `subprocess.run()  → `['crontab', '-l']`` (line 49)
 - `subprocess.run()  → `['crontab', tmp_path]`` (line 68)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 171)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 206)
-- `subprocess.run()  → `schtasks_cmd`` (line 188)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 179)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 214)
+- `subprocess.run()  → `schtasks_cmd`` (line 196)
 
 
 ---

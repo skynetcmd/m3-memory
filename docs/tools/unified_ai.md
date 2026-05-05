@@ -2,7 +2,7 @@
 tool: bin/unified_ai.py
 sha1: 35ec3cef5cea
 mtime_utc: 2026-05-01T09:13:26.345139+00:00
-generated_utc: 2026-05-01T13:05:27.119602+00:00
+generated_utc: 2026-05-05T01:50:16.539436+00:00
 private: false
 ---
 
@@ -47,7 +47,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `GEMINI_API_KEY`
 
 ---
 

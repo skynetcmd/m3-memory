@@ -2,7 +2,7 @@
 tool: bin/m3_enrich.py
 sha1: ae59460c6e9e
 mtime_utc: 2026-05-04T21:55:21.359345+00:00
-generated_utc: 2026-05-04T22:24:29.252559+00:00
+generated_utc: 2026-05-05T01:50:16.180461+00:00
 private: false
 ---
 
@@ -97,6 +97,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Environment variables read
 
+- `M3_DATABASE`
 - `M3_ENRICH_BUDGET_USD`
 - `M3_ENRICH_CONV_LIST`
 - `M3_ENRICH_INPUT_MAX_K`
