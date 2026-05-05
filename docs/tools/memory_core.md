@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: fbf0e850fb2f
-mtime_utc: 2026-05-03T03:01:13.276323+00:00
-generated_utc: 2026-05-04T22:24:29.457277+00:00
+sha1: 477546aed535
+mtime_utc: 2026-05-05T13:40:00.130135+00:00
+generated_utc: 2026-05-05T13:54:32.289996+00:00
 private: false
 ---
 
@@ -82,8 +82,11 @@ _(no argparse arguments detected)_
 - `EMBED_BULK_CONCURRENCY`
 - `EMBED_DIM`
 - `EMBED_MODEL`
+- `ENTITY_NAME_EMBED_CACHE_MAX`
 - `LLM_TIMEOUT`
 - `M3_DISABLE_AUTO_ACTIVATION`
+- `M3_EMBED_MODEL`
+- `M3_EMBED_URL`
 - `M3_ENABLE_ENTITY_GRAPH`
 - `M3_ENABLE_FACT_ENRICHED`
 - `M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS`
