@@ -306,7 +306,7 @@ class GeminiBatchRunner:
     """Google Gemini Developer API batch — 50% off list pricing.
 
     Uses the inline-requests path (no Cloud Storage / file upload required):
-      POST /v1beta/models/<model>:batchGenerateContent  (Authorization: Bearer)
+      POST /v1beta/models/<model>:batchGenerateContent  (x-goog-api-key header)
       GET  /v1beta/<batch_name>                         (poll + fetch — output is inline)
 
     Per Google's batch docs, BATCH_STATE_SUCCEEDED carries
@@ -389,12 +389,17 @@ class GeminiBatchRunner:
                 },
             },
         }
-        # Auth via Authorization: Bearer header rather than ?key=<token> on
-        # the URL. httpx INFO-level request logs include the full URL, which
-        # would otherwise leak the API key into log files; using a header
-        # keeps it out of the request line. Gemini accepts both forms.
+        # Auth via x-goog-api-key header rather than ?key=<token> on the URL.
+        # httpx INFO-level request logs include the full URL, which would
+        # otherwise leak the API key into log files; using a header keeps it
+        # out of the request line. NOTE: the native v1beta endpoint
+        # (/v1beta/models/...:batchGenerateContent) does NOT accept
+        # Authorization: Bearer (returns 401 "Expected OAuth 2 access token")
+        # — that header form is only valid on the OAI-compat shim
+        # (/v1beta/openai/...). For the native API key, Google's documented
+        # header is x-goog-api-key.
         url = f"{self._base}/{self._model}:batchGenerateContent"
-        headers = {"Authorization": f"Bearer {self._token}"}
+        headers = {"x-goog-api-key": self._token}
         r = await client.post(url, json=payload, headers=headers, timeout=120.0)
         if r.status_code != 200:
             raise RuntimeError(
@@ -409,9 +414,9 @@ class GeminiBatchRunner:
     async def poll(
         self, batch_id: str, *, client: httpx.AsyncClient
     ) -> BatchStatus:
-        # See note on Bearer-header auth in submit() — same rationale here.
+        # See note on x-goog-api-key in submit() — same rationale here.
         url = f"{self._base}/{batch_id}"
-        headers = {"Authorization": f"Bearer {self._token}"}
+        headers = {"x-goog-api-key": self._token}
         r = await client.get(url, headers=headers, timeout=30.0)
         if r.status_code != 200:
             raise RuntimeError(
@@ -452,9 +457,9 @@ class GeminiBatchRunner:
         self, batch_id: str, *, client: httpx.AsyncClient
     ) -> AsyncIterator[BatchResult]:
         # Gemini returns results inline on the batch resource itself.
-        # See note on Bearer-header auth in submit() — same rationale here.
+        # See note on x-goog-api-key in submit() — same rationale here.
         url = f"{self._base}/{batch_id}"
-        headers = {"Authorization": f"Bearer {self._token}"}
+        headers = {"x-goog-api-key": self._token}
         r = await client.get(url, headers=headers, timeout=120.0)
         if r.status_code != 200:
             raise RuntimeError(
