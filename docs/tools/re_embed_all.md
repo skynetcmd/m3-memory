@@ -2,7 +2,7 @@
 tool: bin/re_embed_all.py
 sha1: 747c35141ccf
 mtime_utc: 2026-04-22T01:03:02.049780+00:00
-generated_utc: 2026-05-01T13:05:27.041869+00:00
+generated_utc: 2026-05-05T01:50:16.437289+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ _(no module docstring — update the source file.)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 

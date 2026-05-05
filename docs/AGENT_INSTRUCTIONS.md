@@ -79,6 +79,21 @@ extracted entity graph directly rather than scoring text similarity over
 every memory. Free-text `memory_search` is still right for thematic or
 fuzzy queries; entity tools are right for "who/what/where" lookups.
 
+### 8. Collaborate with the Cognitive Loop
+M3 includes an **Autonomous Cognitive Loop** (`m3_cognitive_loop.py`) that
+runs in the background to refine facts, resolve contradictions, and link
+entities.
+
+**Your role:**
+- **Trust the loop:** You don't need to manually re-verify every historical
+  contradiction. If the background worker is active, it will eventually
+  merge and supersede conflicting facts.
+- **Provide raw data:** Continue to `memory_write` your observations. The loop
+  uses these as raw material for its refinement passes.
+- **Check loop status:** If the user asks about the "state of my memory," call
+  `mcp-memory doctor` or `chatlog_status` to confirm the background workers
+  are healthy.
+
 ### Quick Reference Flow
 | Situation | Action |
 |-----------|--------|
@@ -90,6 +105,7 @@ fuzzy queries; entity tools are right for "who/what/where" lookups.
 | Session start / agent register returns refresh hint | `memory_refresh_queue` |
 | User asks to forget something | `gdpr_forget` |
 | Need full context on a specific memory | `memory_get` or `memory_suggest` |
+| Memory seems cluttered or inconsistent | Trust the Autonomous Cognitive Loop to resolve |
 
 > **Key principle:** Whenever you think "Should this be remembered?" → the answer is almost always **yes**. Whenever you think "Do I already know this?" → **search first**.
 

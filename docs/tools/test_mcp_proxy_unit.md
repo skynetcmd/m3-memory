@@ -2,7 +2,7 @@
 tool: bin/test_mcp_proxy_unit.py
 sha1: 994a5ba6d42c
 mtime_utc: 2026-04-22T01:03:02.054983+00:00
-generated_utc: 2026-05-01T13:05:27.094874+00:00
+generated_utc: 2026-05-05T01:50:16.506718+00:00
 private: false
 ---
 
@@ -38,7 +38,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `MCP_PROXY_ALLOW_DESTRUCTIVE`
 
 ---
 

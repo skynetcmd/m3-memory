@@ -2,7 +2,7 @@
 tool: bin/m3_enrich_batch.py
 sha1: 68852877970a
 mtime_utc: 2026-05-04T21:54:28.136904+00:00
-generated_utc: 2026-05-04T22:24:29.267634+00:00
+generated_utc: 2026-05-05T01:50:16.198919+00:00
 private: false
 ---
 
@@ -88,6 +88,7 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 ## Environment variables read
 
 - `COMPUTERNAME`
+- `M3_DATABASE`
 
 ---
 
