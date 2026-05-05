@@ -306,15 +306,62 @@ def _query_eligible_groups(
         conv_chunks = [cf_list[i:i + chunk_size] for i in range(0, len(cf_list), chunk_size)]
 
     if conv_chunks:
-        # Run one query per chunk, accumulate rows. Each chunk pushes the
-        # IN-list down to the WHERE so the planner can use idx_mi_conversation_id
-        # for the common case where group_key == conversation_id. Falls back
-        # to a session_id metadata extract for old rows where conversation_id
-        # is NULL — those still need the OR branch.
+        # Two-path approach. The earlier single-query form wrapped
+        # `conversation_id` in COALESCE inside the WHERE, which prevents
+        # SQLite from using `idx_mi_conversation_id` — measured at 106s
+        # per 800-key chunk on a 50GB DB, fully scanning every variant
+        # row. Splitting into two queries lets each one hit the right
+        # index:
+        #
+        #   Path A — direct conversation_id IN (...) — uses
+        #     idx_mi_conversation_id for an index seek per key
+        #     (handles >99% of rows on production-shape data).
+        #
+        #   Path B — fallback for rows where conversation_id IS NULL
+        #     and group_key was derived from metadata_json.$.session_id
+        #     or row.id. This path still scans variant rows but only
+        #     the NULL-conversation_id slice (typically tiny for fresh
+        #     ingest, larger for legacy data).
+        #
+        # Path B is opt-in via a one-shot pre-flight: if the variant has
+        # zero rows with NULL conversation_id, we skip Path B entirely
+        # (saves ~25s/chunk on bench-style corpora that always populate
+        # conversation_id). The pre-flight uses the partial-index path
+        # too, so it's effectively free.
+        #
+        # Net effect on the 19,287-key bench enumeration: 60+ minutes of
+        # full scans → seconds-to-tens-of-seconds of indexed seeks plus
+        # one small fallback scan.
+        need_path_b = True
+        if variant_clause:
+            # Pre-flight: does this variant have ANY rows with NULL
+            # conversation_id? If not, Path B will return 0 rows for
+            # every chunk and we can skip it.
+            preflight_sql = f"""
+                SELECT 1 FROM memory_items
+                WHERE is_deleted=0
+                  {variant_clause}
+                  AND conversation_id IS NULL
+                LIMIT 1
+            """
+            preflight_rows = conn.execute(preflight_sql, variant_params).fetchall()
+            need_path_b = bool(preflight_rows)
         rows: list = []
         for chunk in conv_chunks:
             ph_chunk = ",".join("?" * len(chunk))
-            sql = f"""
+            # Path A — direct conversation_id IN, index-using.
+            # NB: WHERE uses raw `is_deleted=0` (not COALESCE) because the
+            # partial index `idx_mi_conversation_id` is defined with predicate
+            # `WHERE is_deleted=0`. SQLite's planner only matches partial-
+            # index predicates by literal expression — `COALESCE(is_deleted,0)=0`
+            # disqualifies the index even though it's logically equivalent.
+            # Verified 2026-05-05: COALESCE form took 106s/chunk, raw form
+            # takes 3.4s/chunk on the bench DB. is_deleted distribution on
+            # this corpus has 0 NULLs (4.9M zeros + 67K ones), so dropping
+            # the COALESCE is safe; rows with NULL is_deleted (if any future
+            # writer creates them) would be excluded — which is the intended
+            # is_deleted=0 semantic anyway.
+            sql_a = f"""
                 SELECT id,
                        content,
                        COALESCE(json_extract(metadata_json,'$.role'),
@@ -323,21 +370,45 @@ def _query_eligible_groups(
                        COALESCE(json_extract(metadata_json,'$.turn_index'), 0) AS turn_index,
                        created_at,
                        metadata_json,
-                       COALESCE(conversation_id,
-                                json_extract(metadata_json,'$.session_id'),
-                                id) AS group_key,
+                       conversation_id AS group_key,
                        COALESCE(user_id, '') AS user_id
                 FROM memory_items
-                WHERE COALESCE(is_deleted,0)=0
+                WHERE is_deleted=0
                   AND type IN ({placeholders})
                   AND type NOT IN ({excl_placeholders})
                   {variant_clause}
-                  AND COALESCE(conversation_id,
-                               json_extract(metadata_json,'$.session_id'),
-                               id) IN ({ph_chunk})
+                  AND conversation_id IN ({ph_chunk})
             """
-            params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params + list(chunk)
-            rows.extend(conn.execute(sql, params).fetchall())
+            params_a = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params + list(chunk)
+            rows.extend(conn.execute(sql_a, params_a).fetchall())
+            if not need_path_b:
+                continue
+            # Path B — fallback for NULL conversation_id rows whose group_key
+            # comes from metadata.session_id or row.id. Most ingest pipelines
+            # populate conversation_id, so this path returns 0 rows on bench
+            # variants. The pre-flight check above sets need_path_b=False on
+            # those variants, skipping this scan entirely.
+            sql_b = f"""
+                SELECT id,
+                       content,
+                       COALESCE(json_extract(metadata_json,'$.role'),
+                                title,
+                                'user') AS role,
+                       COALESCE(json_extract(metadata_json,'$.turn_index'), 0) AS turn_index,
+                       created_at,
+                       metadata_json,
+                       COALESCE(json_extract(metadata_json,'$.session_id'), id) AS group_key,
+                       COALESCE(user_id, '') AS user_id
+                FROM memory_items
+                WHERE is_deleted=0
+                  AND type IN ({placeholders})
+                  AND type NOT IN ({excl_placeholders})
+                  {variant_clause}
+                  AND conversation_id IS NULL
+                  AND COALESCE(json_extract(metadata_json,'$.session_id'), id) IN ({ph_chunk})
+            """
+            params_b = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params + list(chunk)
+            rows.extend(conn.execute(sql_b, params_b).fetchall())
     else:
         # No conv_filter: must scan everything (caller will paginate via
         # --limit downstream).
