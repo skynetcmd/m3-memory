@@ -19,6 +19,46 @@ forward-going only.
 
 ---
 
+## [2026.5.4.7] — May 3, 2026 — Embedder URL override across enrichment workers
+
+Closes a routing gap that caused observation embeds during ingest to fall
+through to the default discovery (which prefers a 1-slot LM Studio
+endpoint at :1234) even when the operator wanted to pin all worker
+embeds to a multi-slot llama.cpp server. Under multi-worker parallel
+ingest the 1-slot path becomes the bottleneck — symptoms were visible
+as periodic high-volume traffic to LMS that nothing in the foreground
+flow seemed to be issuing.
+
+### Added
+
+- **`bin/m3_enrich.py --embed-url / --embed-model`** — flag parity with
+  `bin/m3_enrich_batch.py` and `bin/m3_entities.py`. When set, the live
+  worker exports the env var (so any subprocess that re-imports
+  `memory_core` picks it up) and calls `memory_core.set_embed_override`
+  (so the already-imported module's resolved `_EMBED_URL_OVERRIDE` is
+  updated in-process). Default is `os.environ.get("M3_EMBED_URL")`.
+
+### Fixed
+
+- **`bin/memory_core._embed_many`** — now honors `_EMBED_URL_OVERRIDE`
+  the same way `_embed()` (singular) already did. Prior to this fix the
+  bulk embed path silently fell through to `get_best_embed` discovery
+  even when an override was set, which is the path most ingest writes
+  flow through. Effect: with `--embed-url` set, all embeds (singular and
+  bulk) now route to the chosen endpoint instead of being split between
+  override and discovery.
+
+### Notes
+
+- `bin/m3_enrich_batch_parallel.py` accepts and forwards `--embed-url` /
+  `--embed-model` to every worker it spawns (already wired in 2026.5.4.6
+  but only effective end-to-end after the `_embed_many` fix above).
+- Operator guidance unchanged: set `--embed-url http://127.0.0.1:8081/v1`
+  for the multi-slot llama.cpp path during multi-worker bench ingest;
+  leave unset to use the default discovery.
+
+---
+
 ## [2026.5.4.1] — May 4, 2026 — Provider-neutral batch enrichment + reliability fixes
 
 Adds a batch-API enrichment path (50% off list pricing in exchange for

@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich_batch.py
-sha1: 68852877970a
-mtime_utc: 2026-05-04T21:54:28.136904+00:00
-generated_utc: 2026-05-05T01:50:16.198919+00:00
+sha1: f853b40178b2
+mtime_utc: 2026-05-05T13:40:47.523553+00:00
+generated_utc: 2026-05-05T13:54:32.086232+00:00
 private: false
 ---
 
@@ -49,13 +49,21 @@ Or to resume polling/ingesting a previously-submitted run:
       --core-db memory/your-corpus.db \
       --resume-run <enrichment_runs.id>
 
+Graceful stop signal: drop a file at .scratch/STOP_AFTER_CURRENT_SLICE_COMPLETES.md
+(its first non-blank line becomes the stop reason in the audit row).
+The worker checks the file at startup and before each new slice submit.
+On detection it lets the in-flight slice finish ingesting via the
+consumer task, then exits with code 5 and abort_reason='stop_flag: ...'.
+Mid-poll Anthropic batches are NOT released — use --resume-run to
+drain them later, or bin/release_orphan_claims.py --run-id to reset.
+
 Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 
 ---
 
 ## Entry points
 
-- `def main()` (line 967)
+- `def main()` (line 1129)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -77,6 +85,8 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 | `--limit` | Cap number of conversations submitted (smoke testing). | None |  | int |  |
 | `--poll-interval-s` | Seconds between batch poll requests. Default 30. | `30.0` |  | float |  |
 | `--max-wait-s` | Max seconds to wait for batch completion. Default 86400 (24h). | `24 * 3600` |  | float |  |
+| `--embed-url` | Hard override for the embedder endpoint URL (e.g. http://127.0.0.1:8081/v1). Bypasses llm_failover discovery so observation embeds during ingest pin to a chosen server. Without this, the default discovery prefers LMS :1234 (1-slot), which throttles ingest under multi-worker load. Set to the multi-slot llama.cpp endpoint instead. Env: M3_EMBED_URL. | `os.environ.get('M3_EMBED_URL')` |  | str |  |
+| `--embed-model` | Model id for the override endpoint. llama.cpp default: 'bge-m3-GGUF-Q4_K_M.gguf'. LM Studio: 'text-embedding-bge-m3'. Required only when --embed-url is set and the default model id is wrong for that server. Env: M3_EMBED_MODEL. | `os.environ.get('M3_EMBED_MODEL')` |  | str |  |
 | `--slice-size` | Override runner.max_batch_size. Use to fit Gemini's Tier-1 enqueued-tokens cap (3M) — at ~5,600 tok/req set this to ~500 for 16k-input convos. | None |  | int |  |
 | `--budget-usd` | Hard cap on total run cost in USD. The worker checks after each slice ingest; if cumulative cost exceeds the cap, the run aborts cleanly (claims released, remaining slices NOT submitted). Use to prevent runaway spend on a misconfigured conv-list. | None |  | float |  |
 | `--skip-preflight` |  | `True` |  | store_true |  |
@@ -89,6 +99,8 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 
 - `COMPUTERNAME`
 - `M3_DATABASE`
+- `M3_EMBED_MODEL`
+- `M3_EMBED_URL`
 
 ---
 
@@ -99,6 +111,7 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 - `batch_runner (make_runner)`
 - `enrichment_state`
 - `m3_enrich (_load_conv_list, _query_eligible_groups)`
+- `memory_core`
 - `run_observer`
 - `slm_intent (_parse_profile)`
 
@@ -108,12 +121,12 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 
 **http**
 
-- `httpx.AsyncClient()` (line 525)
-- `httpx.AsyncClient()` (line 740)
+- `httpx.AsyncClient()` (line 582)
+- `httpx.AsyncClient()` (line 997)
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 120)
+- `sqlite3.connect()  → `db_path`` (line 168)
 
 
 ---
@@ -127,6 +140,7 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 ## File dependencies (repo paths referenced)
 
 - `Override profile YAML path. Default: config/slm/<profile>.yaml`
+- `STOP_AFTER_CURRENT_SLICE_COMPLETES.md`
 
 ---
 
