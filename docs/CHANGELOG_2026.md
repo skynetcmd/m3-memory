@@ -1,6 +1,29 @@
 # M3 Memory System Changelog - 2026
 
-## April 25, 2026
+## May 4, 2026
+
+### 🤖 Autonomous Cognitive Loop (v2026.5.4.5)
+
+#### Unified Background Heartbeat
+- New `bin/m3_cognitive_loop.py` daemon that automates high-level reasoning:
+  - **Entity Extraction:** Links facts from core and chatlog DBs into the knowledge graph.
+  - **Observation Extraction:** Pulls user-facts and preferences from conversation history.
+  - **Consistency Reflection:** Merges/supersedes conflicting facts autonomously.
+- **Resource Optimized:** SQL-based "has work" detection skips AI calls when system is idle.
+- **Robustness:** PID-based single-instance lock, graceful signal handling, and adaptive heartbeat.
+- **Fire and Forget:** `--background` flag for self-daemonization (Windows pythonw / Unix fork).
+
+#### Multi-DB Architecture Hardening
+- **Path Resolution:** `migrate_memory.py` now expands to absolute paths and uses case-insensitive matching (on Windows) to robustly detect split-DB configurations.
+- **Schema Alignment:** New migration `004_entity_graph_align` for Chatlog DBs, ensuring consistent entity tracking across partitioned data.
+- **Granular Knobs:** Cognitive loop supports explicit `--database` and `--chatlog-db` flags and respects global environment variables.
+
+#### Integrated Installation
+- `--cognitive-loop` flag added to `mcp-memory install-m3` and `install.sh`.
+- Interactive onboarding proactively offers the autonomous loop to new users.
+- Automated boot persistence wiring via `bin/install_schedules.py`.
+
+---
 
 - Added optional entity-relation knowledge graph: `entities`, `memory_item_entities`, `entity_relationships` tables; SLM-extraction pipeline with 3-tier resolution; `entity_graph` kwarg on `memory_search_routed`. Off by default. See ARCHITECTURE.md and ENVIRONMENT_VARIABLES.md.
 - Added optional `fact_enriched` memory type and SLM-distillation pipeline. Off by default. See ARCHITECTURE.md and ENVIRONMENT_VARIABLES.md.
