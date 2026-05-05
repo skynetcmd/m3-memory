@@ -1156,6 +1156,29 @@ async def _main_async(args) -> int:
             f"Set it before running."
         )
 
+    # Pin the embedder endpoint if --embed-url / M3_EMBED_URL is set. Default
+    # discovery prefers LMS :1234 (1-slot), which throttles ingest under
+    # multi-stream load. Override redirects to a chosen endpoint (typically
+    # the multi-slot llama.cpp :8081). Set both the env var (for any
+    # subprocess that re-imports memory_core) AND call set_embed_override
+    # (since memory_core's _EMBED_URL_OVERRIDE was already resolved at
+    # import time).
+    embed_url = getattr(args, "embed_url", None)
+    embed_model = getattr(args, "embed_model", None)
+    if embed_url:
+        os.environ["M3_EMBED_URL"] = embed_url
+        if embed_model:
+            os.environ["M3_EMBED_MODEL"] = embed_model
+        try:
+            import memory_core as _mc
+            _mc.set_embed_override(embed_url, embed_model)
+            print(f"[enrich] embedder pinned: {embed_url}"
+                  + (f" (model={embed_model})" if embed_model else ""),
+                  flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[enrich] WARN: set_embed_override failed: {e!r}",
+                  flush=True)
+
     # Phase E2: drain-queue mode dispatches early — doesn't need profile smoke
     # or backups since it only enriches queue rows that were validated at
     # enqueue time.
@@ -1412,6 +1435,22 @@ Profile picker:
     ap.add_argument("--reflector-profile", default=None,
                     help="Override the Reflector stage with a different profile. "
                          "Defaults to --profile (same model for both stages).")
+    ap.add_argument("--embed-url",
+                    default=os.environ.get("M3_EMBED_URL"),
+                    help="Hard override for the embedder endpoint URL "
+                         "(e.g. http://127.0.0.1:8081/v1). Bypasses "
+                         "llm_failover discovery so observation embeds during "
+                         "ingest pin to a chosen server. Without this, the "
+                         "default discovery prefers LMS :1234 (often a single-"
+                         "slot server that throttles ingest under multi-stream "
+                         "load). Env: M3_EMBED_URL.")
+    ap.add_argument("--embed-model",
+                    default=os.environ.get("M3_EMBED_MODEL"),
+                    help="Model id for the override endpoint. llama.cpp "
+                         "default: 'bge-m3-GGUF-Q4_K_M.gguf'. LM Studio: "
+                         "'text-embedding-bge-m3'. Required only when "
+                         "--embed-url is set and the default model id is "
+                         "wrong for that server. Env: M3_EMBED_MODEL.")
     ap.add_argument("--core", action="store_true", dest="core_only",
                     help="Only enrich the core memory DB (skip chatlog). "
                          "Auto-broadens default type allowlist to: "
