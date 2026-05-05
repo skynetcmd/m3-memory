@@ -1544,12 +1544,22 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     _track_cost("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
     client = _get_embed_client()
-    result = await get_best_embed(client, token)
-    if not result:
-        for i in miss_indices:
-            out[i] = (None, EMBED_MODEL)
-        return out  # type: ignore[return-value]
-    base_url, model = result
+    # Honor _EMBED_URL_OVERRIDE the same way _embed() (singular) does. Prior
+    # behavior went straight to get_best_embed() unconditionally — a bulk
+    # caller's per-write override was silently ignored, routing through
+    # llm_failover discovery (which prefers LMS:1234) instead of the pinned
+    # endpoint. Bench/CI workloads with M3_EMBED_URL set landed on the
+    # wrong server. Now bulk-path matches singular-path semantics.
+    if _EMBED_URL_OVERRIDE:
+        base_url = _EMBED_URL_OVERRIDE.rstrip("/")
+        model = _EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
+    else:
+        result = await get_best_embed(client, token)
+        if not result:
+            for i in miss_indices:
+                out[i] = (None, EMBED_MODEL)
+            return out  # type: ignore[return-value]
+        base_url, model = result
 
     # Captured by _post_once's except handlers so the drop log can surface
     # the real reason. Shared across all concurrent chunks in this call.

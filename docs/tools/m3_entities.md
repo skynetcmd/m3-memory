@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: 99984dd5e887
-mtime_utc: 2026-05-01T09:23:06.299813+00:00
-generated_utc: 2026-05-01T13:05:26.854551+00:00
+sha1: 64973195e9d5
+mtime_utc: 2026-05-05T05:47:18.430447+00:00
+generated_utc: 2026-05-05T13:54:32.118430+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 ## Entry points
 
-- `def main()` (line 660)
+- `def main()` (line 737)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -62,11 +62,14 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 |---|---|---|---|---|---|
 | `--profile` | f'Profile name in config/slm/. Default: {DEFAULT_PROFILE}.' | `DEFAULT_PROFILE` |  | str |  |
 | `--entity-vocab-yaml` | f'Vocab YAML path. Default: {DEFAULT_VOCAB_YAML}.' | None |  | str |  |
+| `--embed-url` | Hard override for the embedder endpoint URL (e.g. http://127.0.0.1:8081/v1). Bypasses get_best_embed discovery — use when you need deterministic routing under concurrent load. Env: M3_EMBED_URL. | `os.environ.get('M3_EMBED_URL')` |  | str |  |
+| `--embed-model` | Model id to send to the override endpoint. llama.cpp default: 'bge-m3-GGUF-Q4_K_M.gguf'. LM Studio: 'text-embedding-bge-m3'. Required only when --embed-url is set and the default model id is wrong for that server. Env: M3_EMBED_MODEL. | `os.environ.get('M3_EMBED_MODEL')` |  | str |  |
 | `--core` | Only enrich the core memory DB (skip chatlog). | `False` |  | store_true |  |
 | `--chatlog` | Only enrich the chatlog DB (skip core). | `False` |  | store_true |  |
 | `--core-db` | Explicit path to the core memory DB. | None |  | str |  |
 | `--chatlog-db` | Explicit path to the chatlog DB. | None |  | str |  |
 | `--source-variant` | Filter source rows by variant. '__none__' = true core memory only (variant IS NULL). A name = single-variant scope. Default: no filter. | None |  | str |  |
+| `--source-conv-list` | Path to a file listing conversation_ids to scope extraction to. Format: newline-delimited text (with optional # comments) OR a JSON array. Filtering reads metadata_json.$.conversation_id, falling back to the memory_items.conversation_id column. Narrows the eligible set AFTER --source-variant + type filtering. Env: M3_ENTITIES_CONV_LIST. | `os.environ.get('M3_ENTITIES_CONV_LIST')` |  | str |  |
 | `--types` | Comma-separated type allowlist override. Default: chat + curated. | None |  | str |  |
 | `--limit` | Cap rows enriched per DB (smoke testing). | None |  | int |  |
 | `--concurrency` | Concurrent SLM calls. Default 2 (single-host LM Studio with two qwen3-8b instances was OOM-reloading at 4). | `2` |  | int |  |
@@ -80,6 +83,10 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 ## Environment variables read
 
 - `M3_DATABASE`
+- `M3_EMBED_MODEL`
+- `M3_EMBED_URL`
+- `M3_ENTITIES_CONV_LIST`
+- `M3_ENTITY_VOCAB_YAML`
 
 ---
 
@@ -96,12 +103,12 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 **http**
 
-- `httpx.AsyncClient()` (line 374)
-- `httpx.AsyncClient()` (line 421)
+- `httpx.AsyncClient()` (line 399)
+- `httpx.AsyncClient()` (line 448)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 332)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 353)
 
 
 ---
