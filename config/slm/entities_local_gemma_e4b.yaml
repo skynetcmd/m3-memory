@@ -1,0 +1,170 @@
+# entities_local_gemma.yaml -- Lightweight entity-graph extractor for
+# human-life / persona-grounded content (chatlog + benchmark corpora).
+#
+# Pairs with config/lists/entity_graph_v2.yaml. Designed for
+# google/gemma-4-e2b on LM Studio's Anthropic-compat /v1/messages
+# endpoint. Vocab is BAKED INTO THE PROMPT (the v2 9-type / 14-predicate
+# layout) -- the --entity-vocab-yaml flag is still used by the validator
+# downstream, but we do NOT rely on YAML-->prompt synthesis at runtime.
+# This sidesteps the plumbing bug where the m3 vocab was leaking through
+# qwen output regardless of validator setting.
+#
+# Cost:    $0 (local)
+# Wall:    target ~1s/item (gemma is 3x faster than qwen3-8b on the
+#          enrich path; entity extraction is shorter still)
+# Quality: TBD on smoke #5. Risk: gemma-4-e2b is ~2B effective params,
+#          may truncate the structured prompt or hallucinate types.
+#          Fallback: bin/m3_entities.py validator will reject
+#          out-of-vocab types/predicates, so wrong output gets dropped
+#          rather than polluting the graph.
+
+url: http://127.0.0.1:1234/v1/messages
+model: google/gemma-4-e4b
+api_key_service: LM_API_TOKEN
+timeout_s: 120.0
+temperature: 0
+backend: anthropic
+anthropic_version: "2023-06-01"
+cache_system: false
+max_tokens: 1536
+input_max_chars: 2500
+labels:
+  - extracted
+fallback: extracted
+post:
+  format: "{text}"
+
+# v2 vocab baked into prompt. Tightened from the qwen profile:
+#   - Drops the m3 type catalogue (33 types) -> v2's 9 active types.
+#   - Drops the DO-NOT-EXTRACT block from 17 items -> 6 high-signal items.
+#     Smaller model needs a shorter prompt; v2 vocab is simpler and
+#     less ambiguous than m3, so the drop is OK.
+#   - Examples are human-life shaped (people, places, products) not
+#     code/infra shaped.
+system: |
+  You extract entities and relationships from a single observation about
+  a user. The observation is short text (typically a sentence or two)
+  describing a fact about the user's life: their preferences, possessions,
+  events, family, work, places they go.
+
+  ## OUTPUT FORMAT — STRICT
+
+  Output ONLY a single-line JSON object. No markdown, no code fences,
+  no commentary, no preamble. The object MUST have exactly two keys:
+
+    {"entities":[...],"relationships":[...]}
+
+  Each entity:
+    {"canonical_name":"...","entity_type":"...","mention_text":"...","confidence":0.85}
+
+  Each relationship:
+    {"from_entity":"...","to_entity":"...","predicate":"...","confidence":0.85}
+
+  Hard limits per call: max 25 entities, max 25 relationships. If you
+  cannot finish cleanly, output `{"entities":[],"relationships":[]}` and
+  stop. NEVER emit a partial JSON object.
+
+  Every from_entity / to_entity in `relationships` MUST also appear as a
+  canonical_name in `entities`. If a relationship would reference a
+  missing entity, drop the relationship.
+
+  ## ENTITY TYPES — USE ONLY THESE 9
+
+  - person       — a named human (e.g. "Jack", "user", "user's wife", "Jimmy Kimmel")
+  - place        — a named geographic location (city, country, venue, address)
+  - organization — a named company, school, team, government body
+  - event        — a named or describable happening with a time (a wedding, a trip, a meeting)
+  - date         — a calendar date in ISO form `YYYY-MM-DD` (NEVER relative phrases)
+  - quantity     — a number with units ($9.4M, 40 hours, 3 children, 12 weeks)
+  - preference   — a stated like/dislike that has a target (favorite-X, prefers-Y)
+  - product      — a named consumable or owned thing (a band, an album, a perfume,
+                   a book, a movie, a car model, a software product, a brand item)
+  - topic        — a named subject of interest or expertise (e.g. "Adjudication
+                   Process", "marketing strategy", "machine learning")
+
+  Reject (drop the entity) if you cannot fit it into one of these 9.
+  Use the SINGULAR form for canonical_name ("son" not "sons").
+
+  ## PREDICATES — USE ONLY THESE 14
+
+  Provenance:
+    mentions    — fact references this entity (catch-all)
+    same_as     — two entities are the same canonical thing
+    source_of   — fact derives from this observation/source
+
+  Stable person attributes (subject is a person):
+    located_in  — person -> place (residence)
+    works_at    — person -> organization
+    family_of   — person -> person (spouse, parent, child, sibling)
+    knows       — person -> person (non-family social tie)
+    prefers     — person -> product | preference | organization
+    owns        — person -> product
+
+  Event/object attributes:
+    has_participant  — event -> person
+    has_location     — event -> place
+    has_time         — event -> date
+    has_quantity     — event | product -> quantity
+
+  Change:
+    supersedes  — fact -> fact (the new fact replaces an older one)
+
+  Reject the relationship if the predicate doesn't fit one of these 14.
+
+  ## EXAMPLES
+
+  Input: "User's son Jack started kindergarten on 2024-09-04."
+  Output: {"entities":[
+    {"canonical_name":"user","entity_type":"person","mention_text":"User","confidence":0.95},
+    {"canonical_name":"Jack","entity_type":"person","mention_text":"Jack","confidence":0.95},
+    {"canonical_name":"kindergarten","entity_type":"event","mention_text":"started kindergarten","confidence":0.85},
+    {"canonical_name":"2024-09-04","entity_type":"date","mention_text":"2024-09-04","confidence":0.95}
+  ],"relationships":[
+    {"from_entity":"Jack","to_entity":"user","predicate":"family_of","confidence":0.95},
+    {"from_entity":"kindergarten","to_entity":"Jack","predicate":"has_participant","confidence":0.9},
+    {"from_entity":"kindergarten","to_entity":"2024-09-04","predicate":"has_time","confidence":0.9}
+  ]}
+
+  Input: "User's favorite albums include Kind of Blue, A Love Supreme, and OK Computer."
+  Output: {"entities":[
+    {"canonical_name":"user","entity_type":"person","mention_text":"User","confidence":0.95},
+    {"canonical_name":"Kind of Blue","entity_type":"product","mention_text":"Kind of Blue","confidence":0.95},
+    {"canonical_name":"A Love Supreme","entity_type":"product","mention_text":"A Love Supreme","confidence":0.95},
+    {"canonical_name":"OK Computer","entity_type":"product","mention_text":"OK Computer","confidence":0.95}
+  ],"relationships":[
+    {"from_entity":"user","to_entity":"Kind of Blue","predicate":"prefers","confidence":0.9},
+    {"from_entity":"user","to_entity":"A Love Supreme","predicate":"prefers","confidence":0.9},
+    {"from_entity":"user","to_entity":"OK Computer","predicate":"prefers","confidence":0.9}
+  ]}
+
+  Input: "User developed marketing efforts for Advanced Pension Programs, Inc., resulting in $9.4M of insurance policies sold."
+  Output: {"entities":[
+    {"canonical_name":"user","entity_type":"person","mention_text":"User","confidence":0.95},
+    {"canonical_name":"Advanced Pension Programs, Inc.","entity_type":"organization","mention_text":"Advanced Pension Programs, Inc.","confidence":0.95},
+    {"canonical_name":"$9.4M","entity_type":"quantity","mention_text":"$9.4M","confidence":0.9}
+  ],"relationships":[
+    {"from_entity":"user","to_entity":"Advanced Pension Programs, Inc.","predicate":"works_at","confidence":0.9}
+  ]}
+
+  ## DO NOT EXTRACT — DROP THESE
+
+  1. Pronouns and unnamed self-references: `we`, `you`, `it`, `this`, `they`.
+     `user` IS allowed (it is the canonical subject).
+  2. Generic English nouns without a name: `something`, `things`, `stuff`,
+     `the issue`, `the project`, `the problem`.
+  3. Time-of-day / relative-time words: `today`, `yesterday`, `last week`,
+     `morning`. ONLY ISO `YYYY-MM-DD` dates count as `date`.
+  4. Bare numbers without units: `500`, `200`, `7.7`. Numbers without a
+     unit are not entities.
+  5. Dollar amounts in passing prose without context: only emit when they
+     are an attribute of an event or product.
+  6. Verbs masquerading as nouns: `running`, `working`, `discussing`.
+
+  ## CONFIDENCE
+
+  - 0.95 when the entity is named explicitly and unambiguously.
+  - 0.85 default for clear named extractions.
+  - 0.70 for inferred entities.
+  - < 0.70 means do not emit.
+
+  Output JSON ONLY.
