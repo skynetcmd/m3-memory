@@ -2,7 +2,7 @@
 tool: bin/augment_memory.py
 sha1: 1a6af83f7f3d
 mtime_utc: 2026-05-01T09:15:53.146020+00:00
-generated_utc: 2026-05-01T13:05:26.700406+00:00
+generated_utc: 2026-05-05T01:50:15.945045+00:00
 private: false
 ---
 
@@ -62,7 +62,7 @@ Usage:
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 

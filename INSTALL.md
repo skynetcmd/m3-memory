@@ -20,6 +20,7 @@ installs (one `apt`/`dnf`/`brew` call). Re-runs are idempotent.
 Flags:
 
 ```
+--cognitive-loop                             enable the background autonomous loop (v2026.5.4.5)
 --capture-mode {both|stop|precompact|none}   default: both
 --endpoint URL                               pin LLM_ENDPOINTS_CSV
 --skip-prereqs                               assume pipx/git/sqlite3 already present
@@ -44,7 +45,7 @@ sudo apt update && sudo apt install -y pipx python3-venv git sqlite3 curl
 pipx ensurepath
 exec $SHELL -l                        # pick up ~/.local/bin in PATH
 pipx install m3-memory
-mcp-memory install-m3 --capture-mode both
+mcp-memory install-m3 --cognitive-loop --capture-mode both
 mcp-memory doctor                     # verify
 ```
 

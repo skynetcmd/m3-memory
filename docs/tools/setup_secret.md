@@ -2,7 +2,7 @@
 tool: bin/setup_secret.py
 sha1: e8a4f8c2dc53
 mtime_utc: 2026-05-01T09:15:53.144020+00:00
-generated_utc: 2026-05-01T13:05:27.061553+00:00
+generated_utc: 2026-05-05T01:50:16.465120+00:00
 private: false
 ---
 
@@ -41,7 +41,7 @@ Usage:
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 

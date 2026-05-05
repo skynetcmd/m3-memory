@@ -2,7 +2,7 @@
 tool: bin/sync_all.py
 sha1: 249d41971297
 mtime_utc: 2026-04-26T08:11:07.730162+00:00
-generated_utc: 2026-05-01T13:05:27.072099+00:00
+generated_utc: 2026-05-05T01:50:16.478080+00:00
 private: false
 ---
 
@@ -47,6 +47,7 @@ DB list:
 
 ## Environment variables read
 
+- `M3_DATABASE`
 - `M3_SYNC_DBS`
 - `POSTGRES_SERVER`
 - `SYNC_TARGET_IP`

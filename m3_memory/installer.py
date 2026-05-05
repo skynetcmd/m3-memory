@@ -515,6 +515,7 @@ def install_m3(
     interactive: Optional[bool] = None,
     endpoint: Optional[str] = None,
     capture_mode: Optional[str] = None,
+    cognitive_loop: bool = False,
 ) -> Path:
     """Clone or download the m3-memory repo and record the bridge path in config.
 
@@ -545,6 +546,7 @@ def install_m3(
     # promptly and the clone/download doesn't block on input below.
     endpoint_choice = _prompt_endpoint_choice(interactive, endpoint)
     capture_choice = _prompt_capture_mode(interactive, capture_mode)
+    cognitive_loop_choice = _prompt_cognitive_loop(interactive, cognitive_loop)
 
     # Preserve user data across --force / update. The repo tree under
     # repo_path/memory/ holds chatlog DBs, the chatlog config, and the

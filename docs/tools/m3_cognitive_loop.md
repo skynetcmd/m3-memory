@@ -2,7 +2,7 @@
 tool: bin/m3_cognitive_loop.py
 sha1: b7fe273c3de2
 mtime_utc: 2026-05-04T23:42:46.663321+00:00
-generated_utc: 2026-05-05T00:26:52.565568+00:00
+generated_utc: 2026-05-05T01:50:16.156935+00:00
 private: false
 ---
 
@@ -56,7 +56,8 @@ for m3_enrich and m3_entities.
 
 ## Environment variables read
 
-_(none detected)_
+- `CHATLOG_DB_PATH`
+- `M3_DATABASE`
 
 ---
 
