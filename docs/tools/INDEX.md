@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-05T01:50:16.573675+00:00._
+_Generated 2026-05-05T13:54:32.731116+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -53,6 +53,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_enrich.py](m3_enrich.md) | m3_enrich — User-facing enrichment CLI for core memory + chatlogs. |  |
 | [bin/m3_enrich_assign.py](m3_enrich_assign.md) | m3_enrich_assign.py — assign enrichment_groups.send_to for routed runs. |  |
 | [bin/m3_enrich_batch.py](m3_enrich_batch.md) | m3-enrich-batch — async/batch variant of bin/m3_enrich.py. |  |
+| [bin/m3_enrich_batch_parallel.py](m3_enrich_batch_parallel.md) | m3_enrich_batch_parallel — launch N pipelined batch workers against |  |
 | [bin/m3_enrich_report.py](m3_enrich_report.md) | Summarize an m3_enrich run from enrichment_groups + enrichment_runs. |  |
 | [bin/m3_entities.py](m3_entities.md) | m3_entities — build entity-graph rows from your core/chatlog DBs. |  |
 | [bin/m3_sdk.py](m3_sdk.md) | (no docstring) |  |

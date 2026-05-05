@@ -673,6 +673,31 @@ async def _run_async(args) -> int:
     # Set M3_DATABASE so memory_core.write picks the right DB
     os.environ["M3_DATABASE"] = str(db_path)
 
+    # Pin the embedder endpoint if --embed-url / M3_EMBED_URL was given.
+    # Default behavior (without override) sends ingest embeds through
+    # llm_failover discovery, which prefers LMS :1234 — typically a 1-slot
+    # server that becomes the bottleneck under multi-worker concurrent
+    # ingest. Override redirects to the user-specified endpoint (typically
+    # the multi-slot llama.cpp :8081 we run for bench work). We set both
+    # the env var (for any subprocess that re-imports memory_core) AND
+    # call set_embed_override (since memory_core's module-level
+    # _EMBED_URL_OVERRIDE was already resolved at import time).
+    embed_url = getattr(args, "embed_url", None)
+    embed_model = getattr(args, "embed_model", None)
+    if embed_url:
+        os.environ["M3_EMBED_URL"] = embed_url
+        if embed_model:
+            os.environ["M3_EMBED_MODEL"] = embed_model
+        try:
+            import memory_core as _mc
+            _mc.set_embed_override(embed_url, embed_model)
+            print(f"[batch] embedder pinned: {embed_url}"
+                  + (f" (model={embed_model})" if embed_model else ""),
+                  flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[batch] WARN: set_embed_override failed: {e!r}",
+                  flush=True)
+
     # Resume path: if --resume-run is given, skip enumeration + claim + submit.
     # Goes straight to poll/ingest for any non-ingested batches in notes.
     if getattr(args, "resume_run", None):
@@ -1135,6 +1160,23 @@ def main() -> int:
                     help="Seconds between batch poll requests. Default 30.")
     ap.add_argument("--max-wait-s", type=float, default=24*3600,
                     help="Max seconds to wait for batch completion. Default 86400 (24h).")
+    ap.add_argument("--embed-url",
+                    default=os.environ.get("M3_EMBED_URL"),
+                    help="Hard override for the embedder endpoint URL "
+                         "(e.g. http://127.0.0.1:8081/v1). Bypasses "
+                         "llm_failover discovery so observation embeds during "
+                         "ingest pin to a chosen server. Without this, the "
+                         "default discovery prefers LMS :1234 (1-slot), which "
+                         "throttles ingest under multi-worker load. Set to "
+                         "the multi-slot llama.cpp endpoint instead. "
+                         "Env: M3_EMBED_URL.")
+    ap.add_argument("--embed-model",
+                    default=os.environ.get("M3_EMBED_MODEL"),
+                    help="Model id for the override endpoint. llama.cpp "
+                         "default: 'bge-m3-GGUF-Q4_K_M.gguf'. LM Studio: "
+                         "'text-embedding-bge-m3'. Required only when "
+                         "--embed-url is set and the default model id is "
+                         "wrong for that server. Env: M3_EMBED_MODEL.")
     ap.add_argument("--slice-size", type=int, default=None,
                     help="Override runner.max_batch_size. Use to fit Gemini's "
                          "Tier-1 enqueued-tokens cap (3M) — at ~5,600 tok/req "

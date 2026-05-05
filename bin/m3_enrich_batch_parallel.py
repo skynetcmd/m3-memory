@@ -89,6 +89,10 @@ def _build_cmd(args, shard_path: Path, log_path: Path) -> list[str]:
     ]
     if args.budget_usd is not None:
         cmd += ["--budget-usd", str(args.budget_usd)]
+    if args.embed_url:
+        cmd += ["--embed-url", args.embed_url]
+    if args.embed_model:
+        cmd += ["--embed-model", args.embed_model]
     return cmd
 
 
@@ -198,6 +202,19 @@ def main() -> int:
     ap.add_argument("--budget-usd", type=float, default=None,
                     help="Per-worker budget cap. Total spend can be up to "
                          "workers × budget_usd.")
+    ap.add_argument("--embed-url",
+                    default=os.environ.get("M3_EMBED_URL"),
+                    help="Pin observation embeds to this URL on every "
+                         "worker (passed through as --embed-url to each). "
+                         "Default discovery prefers LMS :1234 (1-slot); "
+                         "set this to the multi-slot llama.cpp endpoint "
+                         "(e.g. http://127.0.0.1:8081/v1) to avoid "
+                         "throttling 3-worker ingest through a single "
+                         "slot. Env: M3_EMBED_URL.")
+    ap.add_argument("--embed-model",
+                    default=os.environ.get("M3_EMBED_MODEL"),
+                    help="Model id for the override endpoint. See "
+                         "m3_enrich_batch.py --embed-model. Env: M3_EMBED_MODEL.")
     ap.add_argument("--shard-dir", default=None,
                     help="Directory for shard files. Default: .scratch/")
     ap.add_argument("--log-base", default=None,

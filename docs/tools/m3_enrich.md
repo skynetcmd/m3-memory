@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: ae59460c6e9e
-mtime_utc: 2026-05-04T21:55:21.359345+00:00
-generated_utc: 2026-05-05T01:50:16.180461+00:00
+sha1: f43de2379f14
+mtime_utc: 2026-05-05T13:53:45.852655+00:00
+generated_utc: 2026-05-05T13:54:32.059370+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 1316)
+- `def main()` (line 1410)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -57,6 +57,8 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 | `--profile` | f'Profile name in config/slm/. Default: {DEFAULT_PROFILE}.' | `DEFAULT_PROFILE` |  | str |  |
 | `--profile-path` | Explicit YAML path. Overrides --profile when set. | None |  | str |  |
 | `--reflector-profile` | Override the Reflector stage with a different profile. Defaults to --profile (same model for both stages). | None |  | str |  |
+| `--embed-url` | Hard override for the embedder endpoint URL (e.g. http://127.0.0.1:8081/v1). Bypasses llm_failover discovery so observation embeds during ingest pin to a chosen server. Without this, the default discovery prefers LMS :1234 (often a single-slot server that throttles ingest under multi-stream load). Env: M3_EMBED_URL. | `os.environ.get('M3_EMBED_URL')` |  | str |  |
+| `--embed-model` | Model id for the override endpoint. llama.cpp default: 'bge-m3-GGUF-Q4_K_M.gguf'. LM Studio: 'text-embedding-bge-m3'. Required only when --embed-url is set and the default model id is wrong for that server. Env: M3_EMBED_MODEL. | `os.environ.get('M3_EMBED_MODEL')` |  | str |  |
 | `--core` | f"Only enrich the core memory DB (skip chatlog). Auto-broadens default type allowlist to: {','.join(DEFAULT_CORE_TYPES)}." | `False` |  | store_true |  |
 | `--chatlog` | f"Only enrich the chatlog DB (skip core). Default type allowlist stays message-shaped: {','.join(DEFAULT_CHATLOG_TYPES)}." | `False` |  | store_true |  |
 | `--core-db` | Explicit path to the core memory DB. | None |  | str |  |
@@ -98,6 +100,8 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 ## Environment variables read
 
 - `M3_DATABASE`
+- `M3_EMBED_MODEL`
+- `M3_EMBED_URL`
 - `M3_ENRICH_BUDGET_USD`
 - `M3_ENRICH_CONV_LIST`
 - `M3_ENRICH_INPUT_MAX_K`
@@ -114,6 +118,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 - `auth_utils (get_api_key)`
 - `enrichment_state`
+- `memory_core`
 - `run_observer`
 - `run_reflector`
 - `slm_intent (Profile, _parse_profile, load_profile)`
@@ -126,11 +131,11 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 1043)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 1114)
 - `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 284)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 925)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 996)
 - `sqlite3.connect()  → `str(db_path)`` (line 142)
-- `sqlite3.connect()  → `str(db_path)`` (line 652)
+- `sqlite3.connect()  → `str(db_path)`` (line 723)
 
 
 ---
