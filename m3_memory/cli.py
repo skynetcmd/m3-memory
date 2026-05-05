@@ -136,6 +136,7 @@ def _cmd_install_m3(args: argparse.Namespace) -> int:
             interactive=(False if args.non_interactive else None),
             endpoint=args.endpoint,
             capture_mode=args.capture_mode,
+            cognitive_loop=args.cognitive_loop,
         )
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)

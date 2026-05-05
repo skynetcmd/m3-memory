@@ -2,7 +2,7 @@
 tool: bin/m3_chatlog_backfill_embed.py
 sha1: 57735152a3b3
 mtime_utc: 2026-04-28T02:30:35.391295+00:00
-generated_utc: 2026-05-01T13:05:26.814340+00:00
+generated_utc: 2026-05-05T01:50:16.142744+00:00
 private: false
 ---
 
@@ -66,7 +66,7 @@ Defaults:
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 

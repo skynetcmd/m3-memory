@@ -139,6 +139,14 @@ def get_schedule_specs(m3_memory_root):
             "modifier": "15",
             "time": "00:00",
             "description": "Drain observation_queue: extract user-facts from chatlog conversations"
+        },
+        {
+            "name": "AgentOS_CognitiveLoop",
+            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "m3_cognitive_loop.py")}" --interval 300 >> "{os.path.join(log_dir, "cognitive_loop.log")}" 2>&1',
+            "schedule": "ONSTART",
+            "modifier": "",
+            "time": "00:00",
+            "description": "Autonomous heartbeat: entity extraction, observations, and reflection (continuous)"
         }
     ]
 
