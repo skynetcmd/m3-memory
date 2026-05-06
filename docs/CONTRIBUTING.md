@@ -134,4 +134,31 @@ Open an issue on GitHub with:
 
 ---
 
+## Database hygiene
+
+All M3 databases run in WAL (Write-Ahead Log) mode. The WAL file (`<db>-wal`)
+and shared-memory file (`<db>-shm`) are **part of the live database** and must
+never be deleted manually.
+
+**Rules for contributors:**
+
+- **Never delete `*-wal` or `*-shm` files.** If the file looks empty or
+  stale, it may still hold unflushed writes. Deleting it silently reverts
+  the database to the last checkpointed state.
+- To legitimately shrink a large WAL, run:
+  ```bash
+  sqlite3 <db-path> 'PRAGMA wal_checkpoint(TRUNCATE);'
+  ```
+- All new database connections must call `apply_pragmas` from
+  `bin/sqlite_pragmas.py` rather than setting inline `PRAGMA` statements.
+  Use `profile_for_db(path)` to select the right profile automatically.
+- Long-running write tools should call `PRAGMA wal_checkpoint(PASSIVE)`
+  every ~1 000 rows or every 60 s, and `PRAGMA wal_checkpoint(TRUNCATE)`
+  at clean exit to keep WAL size bounded.
+- The `journal_size_limit` pragma in each profile is the hard ceiling on WAL
+  file size. Do not lower it below 64 MiB (`production`/`chatlog`) or
+  256 MiB (`bench`) without a documented rationale.
+
+---
+
 *M3 Memory: the industrial-strength foundation for agents that remember.*
