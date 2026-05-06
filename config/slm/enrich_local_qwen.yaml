@@ -24,7 +24,7 @@
 #   convs but slightly higher quality + no LM Studio dependency)
 
 url: http://127.0.0.1:1234/v1/messages
-model: qwen/qwen3-8b
+model: qwen/qwen3.5-9b
 api_key_service: LM_API_TOKEN
 backend: anthropic
 anthropic_version: "2023-06-01"

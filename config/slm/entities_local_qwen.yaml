@@ -20,7 +20,7 @@ url: http://127.0.0.1:1234/v1/messages
 # on a single-GPU LM Studio host because the embed model + 2x 8B SLMs
 # competed for VRAM. One-instance + queue is faster than two-instance +
 # eviction.
-model: qwen/qwen3-8b
+model: qwen/qwen3.5-9b
 api_key_service: LM_API_TOKEN
 timeout_s: 240.0
 temperature: 0
