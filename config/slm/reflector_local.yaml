@@ -18,7 +18,7 @@
 #     long-running conversations.
 
 url: http://127.0.0.1:1234/v1/messages
-model: qwen/qwen3-8b
+model: qwen/qwen3.5-9b
 api_key_service: LM_API_TOKEN
 timeout_s: 180.0
 temperature: 0

@@ -45,6 +45,8 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from typing import Literal, Optional
 
+from sqlite_pragmas import apply_pragmas
+
 logger = logging.getLogger("chatlog_config")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -318,22 +320,6 @@ _POOL_LOCK = threading.Lock()
 _POOL_DB_PATH: Optional[str] = None  # path the pool was opened against; if it changes, rebuild
 
 
-# Chatlog-tuned pragmas. Larger mmap and cache than main DB — chat logs are
-# bigger and more append-heavy. WAL + synchronous=NORMAL is the zero-latency
-# combo; wal_autocheckpoint bounds WAL growth.
-_CHATLOG_PRAGMAS = (
-    "PRAGMA journal_mode = WAL",
-    "PRAGMA synchronous = NORMAL",
-    "PRAGMA foreign_keys = ON",
-    "PRAGMA busy_timeout = 30000",
-    "PRAGMA wal_autocheckpoint = 2000",
-    "PRAGMA journal_size_limit = 67108864",   # 64 MiB
-    "PRAGMA temp_store = MEMORY",
-    "PRAGMA mmap_size = 1073741824",          # 1 GiB
-    "PRAGMA cache_size = -131072",            # 128 MiB
-)
-
-
 def _build_pool(db_path: str) -> "queue.Queue[sqlite3.Connection]":
     pool_size = int(os.environ.get("CHATLOG_DB_POOL_SIZE", "4"))
     pool_timeout = int(os.environ.get("CHATLOG_DB_POOL_TIMEOUT", "10"))
@@ -342,8 +328,9 @@ def _build_pool(db_path: str) -> "queue.Queue[sqlite3.Connection]":
     for _ in range(pool_size):
         conn = sqlite3.connect(db_path, check_same_thread=False, timeout=pool_timeout)
         conn.row_factory = sqlite3.Row
-        for pragma in _CHATLOG_PRAGMAS:
-            conn.execute(pragma)
+        # Centralised pragma stack — "chatlog" profile matches the values that
+        # shipped in the previous inline _CHATLOG_PRAGMAS block exactly.
+        apply_pragmas(conn, "chatlog")
         q.put(conn)
     return q
 
