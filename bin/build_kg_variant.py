@@ -31,6 +31,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m3_sdk import add_database_arg, resolve_db_path
+from sqlite_pragmas import apply_pragmas, profile_for_db
 
 # AGENT_DB env var is kept as a deprecated alias; new code should prefer
 # M3_DATABASE or the --database CLI flag.
@@ -136,10 +137,6 @@ def build_kg_edges(db: sqlite3.Connection, variant: str, top_n: int, sim_thresho
     total_edges = 0
     t0 = time.perf_counter()
 
-    # Use WAL for bulk insert perf
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("PRAGMA synchronous=NORMAL")
-
     for start in range(0, len(vecs_norm), chunk_size):
         end = min(start + chunk_size, len(vecs_norm))
         chunk = vecs_norm[start:end]
@@ -195,6 +192,10 @@ def main():
     db_path = resolve_db_path(args.database) if args.database else DB_PATH
     db = sqlite3.connect(db_path)
     db.row_factory = sqlite3.Row
+    # Centralised pragma stack — applies wal_autocheckpoint + journal_size_limit
+    # to bound WAL growth on bulk-insert workloads.  profile_for_db() selects
+    # "production" for the main memory DB, "bench" for bench-named DBs.
+    apply_pragmas(db, profile_for_db(db_path))
 
     if args.wipe_target:
         log(f"wiping existing target variant {args.target_variant!r}")

@@ -37,6 +37,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from sqlite_pragmas import apply_pragmas, profile_for_db
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -68,7 +70,8 @@ def main() -> int:
         return 2
 
     conn = sqlite3.connect(str(args.db), timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL")
+    # Centralised pragma stack — "production" profile for this assignment helper.
+    apply_pragmas(conn, profile_for_db(args.db))
 
     # Verify the column exists (migration 031 applied).
     cols = {r[1] for r in conn.execute("PRAGMA table_info(enrichment_groups)")}
