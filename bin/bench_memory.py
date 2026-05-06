@@ -22,6 +22,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m3_sdk import add_database_arg, resolve_db_path
+from sqlite_pragmas import apply_pragmas, profile_for_db
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -56,8 +57,8 @@ def _cosine(a, b):
 def get_conn(db_path: str):
     c = sqlite3.connect(db_path, timeout=10)
     c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode = WAL")
-    c.execute("PRAGMA busy_timeout = 5000")
+    # Centralised pragma stack — "production" profile for the benchmark helper.
+    apply_pragmas(c, profile_for_db(db_path))
     return c
 
 

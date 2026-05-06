@@ -371,3 +371,29 @@ python bin/benchmark_memory.py                # Retrieval quality benchmarks
 ```
 
 See [M3_HEALTH_FAQ.md](M3_HEALTH_FAQ.md) for how to read and act on `/m3:health` output — quick reference for developers and general users.
+
+---
+
+## SQLite WAL discipline
+
+All M3 databases run in WAL (Write-Ahead Log) mode. The WAL file (`<db>-wal`)
+and shared-memory file (`<db>-shm`) are **part of the live database**; they
+must never be deleted manually.
+
+**Rules:**
+
+- **Never delete `*-wal` or `*-shm` files.** Deleting a non-empty WAL
+  discards every write since the last checkpoint — the main DB file reverts
+  silently to a prior state with no error.
+- If the WAL is unexpectedly large, run a legitimate cleanup:
+  ```
+  sqlite3 <db-path> 'PRAGMA wal_checkpoint(TRUNCATE);'
+  ```
+  or in Python: `from sqlite_pragmas import checkpoint_truncate; checkpoint_truncate(conn)`
+- Long-running writers should call `PRAGMA wal_checkpoint(PASSIVE)` periodically
+  (every ~1 000 rows or every 60 s) to keep the WAL from accumulating.
+- At clean job end, call `PRAGMA wal_checkpoint(TRUNCATE)` to flush and shrink
+  the WAL to zero before closing the connection.
+- The `production` and `chatlog` pragma profiles set `journal_size_limit=64 MiB`
+  as a hard ceiling; the `bench` profile sets 256 MiB. These limits mean the
+  worst-case WAL size is bounded even if checkpoints are busy-failed by readers.

@@ -37,6 +37,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = REPO_ROOT / "data" / "longmemeval" / "longmemeval_m_cleaned.json"
 DEFAULT_DB = REPO_ROOT / "memory" / "lme_m.db"
 
+sys.path.insert(0, str(REPO_ROOT / "bin"))
+from sqlite_pragmas import apply_pragmas, profile_for_db
 
 SCHEMA_QUESTIONS = """
 CREATE TABLE IF NOT EXISTS lme_m_questions (
@@ -205,9 +207,8 @@ def main() -> int:
     # Open DB
     args.db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(args.db), timeout=60.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    # Centralised pragma stack — "bench" profile for write-heavy reference DBs.
+    apply_pragmas(conn, profile_for_db(args.db))
 
     if args.rebuild:
         print("Dropping existing tables ...")
