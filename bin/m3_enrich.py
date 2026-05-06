@@ -66,6 +66,7 @@ from slm_intent import (  # noqa: E402
 from slm_intent import (
     invalidate_cache as invalidate_profile_cache,
 )
+from sqlite_pragmas import apply_pragmas  # noqa: E402
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
@@ -721,7 +722,8 @@ async def _run_db(
             track_state = False
         else:
             state_conn = sqlite3.connect(str(db_path), timeout=30.0)
-            state_conn.execute("PRAGMA journal_mode=WAL")
+            # Centralised pragma stack — "production" profile for state DB connections.
+            apply_pragmas(state_conn, "production")
             if not estate.has_state_tables(state_conn):
                 state_conn.close()
                 sys.exit(
@@ -1289,7 +1291,8 @@ async def _main_async(args) -> int:
         if args.track_state:
             import sqlite3 as _sqlite3
             _sc = _sqlite3.connect(str(db_path), timeout=30.0)
-            _sc.execute("PRAGMA journal_mode=WAL")
+            # Centralised pragma stack — "production" profile for state DB connections.
+            apply_pragmas(_sc, "production")
             if not estate.has_state_tables(_sc):
                 _sc.close()
                 sys.exit(

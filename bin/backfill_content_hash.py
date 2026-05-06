@@ -59,6 +59,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BIN_DIR = REPO_ROOT / "bin"
 DEFAULT_DB = REPO_ROOT / "memory" / "agent_memory.db"
+
+sys.path.insert(0, str(REPO_ROOT / "bin"))
+from sqlite_pragmas import apply_pragmas, profile_for_db
+
 DEFAULT_TYPES = ("chat_log", "message")
 DEFAULT_BATCH_SIZE = 1000
 
@@ -175,8 +179,8 @@ def _run_backfill(args: argparse.Namespace) -> dict:
     # Open with separate read/write connections via the same DB path.
     # WAL mode allows concurrent reads while we update.
     write_conn = sqlite3.connect(str(args.db), timeout=30.0)
-    write_conn.execute("PRAGMA journal_mode=WAL")
-    write_conn.execute("PRAGMA busy_timeout=30000")
+    # Centralised pragma stack — "production" profile for this backfill writer.
+    apply_pragmas(write_conn, profile_for_db(args.db))
     read_conn = sqlite3.connect(str(args.db), timeout=30.0)
 
     try:

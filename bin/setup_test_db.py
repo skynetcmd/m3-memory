@@ -24,6 +24,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
 from m3_sdk import add_database_arg, resolve_db_path  # noqa: E402
+from sqlite_pragmas import apply_pragmas, profile_for_db  # noqa: E402
 
 MIGRATIONS_DIR = os.path.join(BASE_DIR, "memory", "migrations")
 
@@ -59,7 +60,8 @@ def main() -> int:
 
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
+    # Centralised pragma stack — profile selected by DB basename.
+    apply_pragmas(conn, profile_for_db(db_path))
     applied = 0
     failed: list[str] = []
     for f in files:

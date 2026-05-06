@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
+from sqlite_pragmas import apply_pragmas, profile_for_db
 
 try:
     from dotenv import load_dotenv
@@ -201,13 +202,9 @@ class M3Context:
                 try:
                     conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=pool_timeout)
                     conn.row_factory = sqlite3.Row
-                    conn.execute("PRAGMA journal_mode = WAL")
-                    conn.execute("PRAGMA synchronous = NORMAL")
-                    conn.execute("PRAGMA foreign_keys = ON")
-                    conn.execute("PRAGMA busy_timeout = 10000")
-                    conn.execute("PRAGMA cache_size = -64000")   # 64 MB
-                    conn.execute("PRAGMA mmap_size = 536870912") # 512 MB memory-mapped I/O
-                    conn.execute("PRAGMA temp_store = MEMORY")   # temp tables in RAM
+                    # Centralised pragma stack — profile selected by DB basename.
+                    # Gains wal_autocheckpoint + journal_size_limit to bound WAL growth.
+                    apply_pragmas(conn, profile_for_db(self.db_path))
                     pool.put(conn)
                 except sqlite3.Error as e:
                     logger.error(f"Failed to create SQLite connection for {self.db_path}: {e}")
