@@ -22,6 +22,7 @@ the parsed provider-native JSON.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -31,10 +32,13 @@ _DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=40.0, write=10.0, pool=10.0)
 def _is_gemini_endpoint(url: str | None) -> bool:
     """True for endpoints that need keep-alive disabled to avoid the
     Google OAI-compat hang. Centralized so callers don't sprinkle URL
-    matching across the codebase."""
+    matching across the codebase. Parses the URL and matches on hostname
+    to avoid false positives where the host string appears in a path or
+    query (CodeQL py/incomplete-url-substring-sanitization)."""
     if not url:
         return False
-    return "generativelanguage.googleapis.com" in url
+    host = (urlparse(url).hostname or "").lower()
+    return host == "generativelanguage.googleapis.com" or host.endswith(".googleapis.com")
 
 
 def hardened_async_client(timeout: httpx.Timeout | float | None = None,

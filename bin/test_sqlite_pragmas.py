@@ -243,8 +243,8 @@ if __name__ == "__main__":
             traceback.print_exc()
 
     print("=== test_sqlite_pragmas standalone run ===")
-    with tempfile.TemporaryDirectory() as td:
-        td = Path(td)
+    with tempfile.TemporaryDirectory() as td_str:
+        td = Path(td_str)
 
         # profile_for_db tests
         pfd = TestProfileForDb()
