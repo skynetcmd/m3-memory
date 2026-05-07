@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path  # noqa: F401 - used in _auto_install return-type comment
 
@@ -178,12 +179,12 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from m3_memory.installer import doctor
     code = doctor()
-    
+
     # Also run the project-specific doctor if payload is installed
     if _resolve_bin_script("memory_doctor.py"):
         print("\n--- Project Payload Diagnostics ---")
         return _run_bin_script("memory_doctor.py", args.rest)
-    
+
     return code
 
 
@@ -680,7 +681,7 @@ Examples:
     p_embedder_mgmt.set_defaults(func=_cmd_embedder)
 
     # Use parse_known_args so flags after `chatlog <sub>`, `install-embedder`
-    # or `embedder` aren't fought over by the outer parser — they're passed 
+    # or `embedder` aren't fought over by the outer parser — they're passed
     # through to the child script. args.rest carries them.
     args, extras = parser.parse_known_args()
     if getattr(args, "command", None) in ("chatlog", "install-embedder", "embedder", "doctor"):

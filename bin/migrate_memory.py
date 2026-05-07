@@ -204,7 +204,7 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
         try:
             from chatlog_config import CHATLOG_MIGRATIONS_DIR, chatlog_db_path
             chatlog_path = os.path.abspath(chatlog_db_path())
-            
+
             # Case-insensitive comparison on Windows for path equality
             is_same_file = False
             if sys.platform == "win32":
@@ -284,10 +284,10 @@ def prompt_backup_dir(assume_yes: bool) -> str:
     saved = cfg.get("backup_dir")
     if saved and os.path.isdir(saved):
         return saved
-    
+
     # Precedence: M3_MEMORY_ROOT/backups > ~/.m3-memory/backups
     default = os.path.join(get_m3_root(), "backups")
-    
+
     if assume_yes:
         # Non-interactive: fall back to out-of-repo default under the user's home
         os.makedirs(default, exist_ok=True)

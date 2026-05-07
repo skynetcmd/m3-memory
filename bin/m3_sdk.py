@@ -101,7 +101,7 @@ def _default_db_path() -> str:
     root = os.getenv("M3_MEMORY_ROOT")
     if root:
         return os.path.join(os.path.abspath(os.path.expanduser(root)), "memory", "agent_memory.db")
-    
+
     # Fallback to sibling memory/ directory (developer clone case)
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "memory", "agent_memory.db")
@@ -268,7 +268,7 @@ class M3Context:
                     timeout = httpx.Timeout(connect=5.0, read=4800.0, write=10.0, pool=5.0)
                     from crypto_provider import provider as crypto
                     ssl_ctx = crypto.get_ssl_context()
-                    
+
                     try:
                         _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=True, verify=ssl_ctx)
                         logger.debug("Initialized shared httpx.AsyncClient with HTTP/2 and hardened SSL.")

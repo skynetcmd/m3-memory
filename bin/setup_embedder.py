@@ -4,8 +4,7 @@ setup_embedder.py — Sovereign, air-gapped installation of local embedder (LM S
 Usage: python bin/setup_embedder.py
 """
 
-import hashlib
-import hashlib
+import http.client
 import json
 import os
 import pathlib
@@ -14,7 +13,8 @@ import shutil
 import subprocess
 import sys
 import time
-from crypto_provider import get_sha256 as _sha256_hex, provider as crypto
+
+from crypto_provider import get_sha256 as _sha256_hex
 
 BASE = pathlib.Path(__file__).parent.parent.resolve()
 ASSETS_DIR = BASE / "_assets" / "embedder"
@@ -30,8 +30,8 @@ def get_sha256(file_path):
 
 def sign_fips_binary(bin_path):
     """
-    Stub for FIPS In-Core Integrity signing. 
-    In a real FIPS-validated workflow, this would run the hmac-sha256 
+    Stub for FIPS In-Core Integrity signing.
+    In a real FIPS-validated workflow, this would run the hmac-sha256
     generator against the binary to ensure the in-memory hash matches.
     """
     if os.environ.get("M3_CRYPTO_BACKEND") == "WOLFSSL":
@@ -271,7 +271,7 @@ def main():
 
     if src_bin.exists():
         shutil.copy2(src_bin, dest_bin)
-        os.chmod(dest_bin, 0o755)
+        os.chmod(dest_bin, 0o755)  # nosec B103 - lms CLI must be executable by the installing user
         sign_fips_binary(dest_bin)
     else:
         log(f"Critical Error: Source binary {src_bin} missing from _assets.")
