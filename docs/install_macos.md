@@ -32,8 +32,11 @@ pipx ensurepath
 exec $SHELL -l                         # pick up ~/.local/bin in PATH
 pipx install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder (M1-M4)
 mcp-memory doctor
 ```
+
+> 🍎 **Note for Intel Macs:** The integrated `install-embedder` path is optimized for Apple Silicon (M-series). If you are on an Intel Mac, we recommend using **Ollama** for embeddings instead.
 
 ---
 

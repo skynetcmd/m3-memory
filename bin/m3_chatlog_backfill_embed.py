@@ -43,8 +43,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import memory_core as mc  # noqa: E402
+from m3_sdk import get_m3_root
 
-BACKUP_DIR = Path.home() / ".m3-memory" / "backups"
+BACKUP_DIR = Path(get_m3_root()) / "backups"
 
 
 def _resolve_db(arg_path: Optional[str], env_var: str, default_name: str) -> Optional[Path]:

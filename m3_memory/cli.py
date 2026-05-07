@@ -7,8 +7,8 @@ Usage:
     mcp-memory --help              Show this help
 
     mcp-memory install-m3          Fetch the m3-memory system payload from
-                                   GitHub into ~/.m3-memory/repo (required
-                                   once after `pip install m3-memory`)
+                                   GitHub into the M3 root directory
+                                   (default: ~/.m3-memory/repo)
     mcp-memory update              Re-fetch the payload for the current
                                    wheel version
     mcp-memory uninstall           Remove the cloned payload and config
@@ -93,6 +93,10 @@ def _run_bridge() -> None:
     """
     from m3_memory.installer import config_file, find_bridge
 
+    # Trigger self-healing for local embedder if it moved
+    if _resolve_bin_script("setup_embedder.py"):
+        _run_bin_script("setup_embedder.py", ["--heal"])
+
     bridge = find_bridge()
     if bridge is None:
         # Nothing on disk, no env override, no sibling — try to auto-install.
@@ -138,6 +142,17 @@ def _cmd_install_m3(args: argparse.Namespace) -> int:
             capture_mode=args.capture_mode,
             cognitive_loop=args.cognitive_loop,
         )
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_reinstall(args: argparse.Namespace) -> int:
+    """Wipe and reinstall the system payload (alias for install-m3 --force)."""
+    from m3_memory.installer import install_m3
+    try:
+        install_m3(force=True, interactive=sys.stdin.isatty())
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -448,6 +463,40 @@ def _cmd_chatlog(args: argparse.Namespace) -> int:
     return 2
 
 
+def _cmd_install_embedder(args: argparse.Namespace) -> int:
+    """Execute the setup_embedder.py script."""
+    return _run_bin_script("setup_embedder.py", args.rest)
+
+
+def _cmd_embedder(args: argparse.Namespace) -> int:
+    """Manage the local embedder subsystem (start|stop|status|install)."""
+    sub = args.embedder_cmd
+    if sub == "install":
+        return _run_bin_script("setup_embedder.py", args.rest)
+
+    from m3_memory.installer import find_bridge
+    bridge = find_bridge()
+    if not bridge:
+        return 1
+
+    # Target directory is sibling to ~/.m3-memory/repo/bin/
+    target_dir = bridge.parent.parent / ".m3-lmstudio"
+    lms_bin = target_dir / "bin" / ("lms.exe" if sys.platform == "win32" else "lms")
+
+    if not lms_bin.exists():
+        print("Error: Local embedder not installed. Run `mcp-memory install-embedder`.", file=sys.stderr)
+        return 1
+
+    if sub == "start":
+        return subprocess.run([str(lms_bin), "server", "start", "--port", "8081"]).returncode
+    if sub == "stop":
+        return subprocess.run([str(lms_bin), "server", "stop"]).returncode
+    if sub == "status":
+        return subprocess.run([str(lms_bin), "server", "status"]).returncode
+
+    return 0
+
+
 def main() -> None:
     from m3_memory import __version__
 
@@ -463,22 +512,11 @@ Examples:
   # First-time setup after `pip install m3-memory`:
   mcp-memory install-m3
 
+  # Install a self-contained local embedder (Sovereign/Air-gapped):
+  mcp-memory install-embedder
+
   # Start the MCP server (used by Claude Code / Gemini CLI / Aider):
   mcp-memory
-
-  # Suggested mcp.json snippet:
-  {
-    "mcpServers": {
-      "memory": {
-        "command": "mcp-memory"
-      }
-    }
-  }
-
-  # Diagnose setup issues:
-  mcp-memory doctor
-
-Docs: https://github.com/skynetcmd/m3-memory
 """,
     )
     parser.add_argument("--version", action="version", version=f"m3-memory {__version__}")
@@ -487,11 +525,11 @@ Docs: https://github.com/skynetcmd/m3-memory
 
     p_install = subparsers.add_parser(
         "install-m3",
-        help="Fetch the m3-memory system payload from GitHub (~/.m3-memory/repo)",
+        help="Fetch the m3-memory system payload from GitHub into the M3 root (default: ~/.m3-memory/repo)",
     )
     p_install.add_argument(
         "--force", action="store_true",
-        help="Wipe an existing ~/.m3-memory/repo before re-fetching.",
+        help="Wipe an existing repo before re-fetching.",
     )
     p_install.add_argument(
         "--tag", default=None,
@@ -509,7 +547,23 @@ Docs: https://github.com/skynetcmd/m3-memory
         "--capture-mode", default=None, choices=("both", "stop", "precompact", "none"),
         help="Chatlog capture hooks to enable (skips the capture-mode prompt).",
     )
+    p_install.add_argument(
+        "--cognitive-loop", action="store_true",
+        help="Enable the background cognitive loop worker.",
+    )
     p_install.set_defaults(func=_cmd_install_m3)
+
+    p_reinstall = subparsers.add_parser(
+        "reinstall",
+        help="Wipe and reinstall the system payload (alias for install-m3 --force).",
+    )
+    p_reinstall.set_defaults(func=_cmd_reinstall)
+
+    p_embedder = subparsers.add_parser(
+        "install-embedder",
+        help="Install a self-contained local embedder (Sovereign/Air-gapped).",
+    )
+    p_embedder.set_defaults(func=_cmd_install_embedder)
 
     p_update = subparsers.add_parser(
         "update",
@@ -607,11 +661,22 @@ Docs: https://github.com/skynetcmd/m3-memory
     chatlog_sub.add_parser("hook-path", help="Print absolute path to the chatlog hook script for plugin hooks.",      add_help=False)
     p_chatlog.set_defaults(func=_cmd_chatlog)
 
-    # Use parse_known_args so flags after `chatlog <sub>` (e.g. --non-interactive,
-    # --reconfigure, --json) aren't fought over by the outer parser — they're
-    # passed through to the child script. args.rest carries them.
+    p_embedder_mgmt = subparsers.add_parser(
+        "embedder",
+        help="Manage the local embedder subsystem (start|stop|status|install).",
+    )
+    embedder_sub = p_embedder_mgmt.add_subparsers(dest="embedder_cmd", metavar="<subcommand>")
+    embedder_sub.add_parser("install", help="Interactive setup for local embedder.")
+    embedder_sub.add_parser("start",   help="Start the local embedder server.")
+    embedder_sub.add_parser("stop",    help="Stop the local embedder server.")
+    embedder_sub.add_parser("status",  help="Check the status of the local embedder.")
+    p_embedder_mgmt.set_defaults(func=_cmd_embedder)
+
+    # Use parse_known_args so flags after `chatlog <sub>`, `install-embedder`
+    # or `embedder` aren't fought over by the outer parser — they're passed 
+    # through to the child script. args.rest carries them.
     args, extras = parser.parse_known_args()
-    if getattr(args, "command", None) == "chatlog":
+    if getattr(args, "command", None) in ("chatlog", "install-embedder", "embedder"):
         args.rest = extras
     elif extras:
         # For any other subcommand, unknown flags are genuine errors.

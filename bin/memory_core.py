@@ -130,6 +130,44 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
 
     _record_history(summary_id, "create", None, summary_text, "content", "system")
     return summary_text
+
+
+async def embedder_status_impl() -> dict:
+    """Returns the status of the local embedder server (port 8081)."""
+    import http.client
+    import json
+    import pathlib
+
+    res = {
+        "status": "offline",
+        "port": 8081,
+        "models": [],
+        "binary_found": False,
+        "error": None
+    }
+
+    # Check for binary
+    base = pathlib.Path(__file__).parent.parent.resolve()
+    target_dir = base / ".m3-lmstudio"
+    bin_path = target_dir / "bin" / ("lms.exe" if sys.platform == "win32" else "lms")
+    res["binary_found"] = bin_path.exists()
+
+    # Try to ping server
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", 8081, timeout=2)
+        conn.request("GET", "/v1/models")
+        resp = conn.getresponse()
+        if resp.status == 200:
+            res["status"] = "online"
+            data = json.loads(resp.read().decode())
+            res["models"] = data.get("data", [])
+        else:
+            res["status"] = f"error-{resp.status}"
+        conn.close()
+    except Exception as e:
+        res["error"] = str(e)
+
+    return res
 from embedding_utils import (
     batch_cosine as _batch_cosine,
 )

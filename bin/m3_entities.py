@@ -63,10 +63,11 @@ import memory_core as mc  # noqa: E402
 from agent_protocol import strip_code_fences  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
 from slm_intent import Profile, load_profile  # noqa: E402
+from m3_sdk import get_m3_root
 
 DEFAULT_PROFILE = "entities_local_qwen"
 DEFAULT_VOCAB_YAML = REPO_ROOT / "config" / "lists" / "entity_graph_m3.yaml"
-BACKUP_DIR = Path(os.path.expanduser("~/.m3-memory/backups/entities"))
+BACKUP_DIR = Path(get_m3_root()) / "backups" / "entities"
 
 # By default, only types where named-entity extraction is sensible.
 # Curated content (note/decision/knowledge/reference/fact/plan/document/

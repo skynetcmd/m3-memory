@@ -189,6 +189,9 @@ def main():
     print("="*50)
     print(f"M3 Memory is now fully initialized for {platform.system()}.")
     print("\nMCP bridges are configured in .mcp.json — Claude Code will load them automatically.")
+    print("\nNext Steps:")
+    print("  1. (Recommended) Install a self-contained local embedder for Hybrid Search:")
+    print(f"     {python_exe} -m m3_memory.cli install-embedder")
     print("\nNext Steps for scheduling automated background syncs:")
 
     if sys.platform == "win32":

@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_backfill_embed.py
-sha1: 57735152a3b3
-mtime_utc: 2026-04-28T02:30:35.391295+00:00
-generated_utc: 2026-05-05T01:50:16.142744+00:00
+sha1: c8d785a5ca4c
+mtime_utc: 2026-05-06T23:54:56.243587+00:00
+generated_utc: 2026-05-06T23:57:12.285500+00:00
 private: false
 ---
 
@@ -40,7 +40,7 @@ Defaults:
 
 ## Entry points
 
-- `def main()` (line 339)
+- `def main()` (line 340)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -73,6 +73,7 @@ Defaults:
 ## Calls INTO this repo (intra-repo imports)
 
 - `embedding_utils (pack)`
+- `m3_sdk (get_m3_root)`
 - `memory_core`
 
 ---
@@ -81,9 +82,9 @@ Defaults:
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 206)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 76)
-- `sqlite3.connect()  → `str(db_path)`` (line 139)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 207)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 77)
+- `sqlite3.connect()  → `str(db_path)`` (line 140)
 
 
 ---

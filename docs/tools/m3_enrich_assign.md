@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich_assign.py
-sha1: 46df885e494b
-mtime_utc: 2026-05-03T18:43:38.270824+00:00
-generated_utc: 2026-05-04T22:24:29.255058+00:00
+sha1: 9d017a26b0eb
+mtime_utc: 2026-05-06T05:08:27.887590+00:00
+generated_utc: 2026-05-06T23:11:45.213987+00:00
 private: false
 ---
 
@@ -44,7 +44,7 @@ override.
 
 ## Entry points
 
-- `def main()` (line 41)
+- `def main()` (line 43)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -73,7 +73,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
 
@@ -81,7 +81,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(args.db)`` (line 70)
+- `sqlite3.connect()  → `str(args.db)`` (line 72)
 
 
 ---
