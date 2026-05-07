@@ -7,7 +7,7 @@
 
 # M3 Memory
 
-Persistent, local memory for MCP agents.
+Local-first Agentic Memory Layer Framework for MCP Agents.
 
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
