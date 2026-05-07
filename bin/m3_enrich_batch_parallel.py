@@ -119,7 +119,7 @@ async def _launch_worker_with_offset(
     p = subprocess.Popen(
         cmd, stdout=log_f, stderr=subprocess.STDOUT,
         cwd=str(REPO_ROOT),
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
     )
     print(f"[parallel] worker {worker_idx+1}/{n_workers}: pid={p.pid}", flush=True)
     return p

@@ -4,20 +4,32 @@ fetch_sovereign_assets.py — Hydrate the _assets/embedder directory for soverei
 Usage: python bin/fetch_sovereign_assets.py
 """
 
-import hashlib
 import json
 import os
 import pathlib
-import sys
+
 import requests
-from tqdm import tqdm
 from crypto_provider import get_sha256 as _sha256_hex
+from tqdm import tqdm
 
 BASE = pathlib.Path(__file__).parent.parent.resolve()
 ASSETS_DIR = BASE / "_assets" / "embedder"
 MANIFEST_FILE = ASSETS_DIR / "manifest.json"
 
-# ... (rest of ASSETS remains same)
+LMS_RELEASES_URL = "https://github.com/lmstudio-ai/lms-cli/releases/download/v0.3.0/"
+
+ASSETS = {
+    "bin": {
+        "lms-windows-x64.exe": f"{LMS_RELEASES_URL}lms-windows-x64.exe",
+        "lms-macos-arm64": f"{LMS_RELEASES_URL}lms-macos-arm64",
+        "lms-linux-x64": f"{LMS_RELEASES_URL}lms-linux-x64",
+        "lms-linux-arm64": f"{LMS_RELEASES_URL}lms-linux-arm64",
+    },
+    "models": {
+        "bge-m3-q4_k_m.gguf": "https://huggingface.co/bartowski/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf",
+    },
+}
+
 
 def get_sha256(file_path):
     with open(file_path, "rb") as f:
@@ -26,7 +38,7 @@ def get_sha256(file_path):
 
 def download_file(url, dest_path):
     os.makedirs(dest_path.parent, exist_ok=True)
-    response = requests.get(url, stream=True)
+    response = requests.get(url, stream=True, timeout=(10, 120))
     total_size = int(response.headers.get('content-length', 0))
 
     with open(dest_path, "wb") as f, tqdm(

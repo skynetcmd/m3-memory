@@ -8,12 +8,8 @@ gracefully skipped when LM Studio is offline.
 import asyncio
 import os
 import sqlite3
-import sys
-import json
-import uuid
 import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
+import sys
 
 try:
     import httpx
@@ -47,7 +43,6 @@ def skip(name: str, reason: str = "") -> None:
 
 # Honors M3_DATABASE — run the suite against a scratch DB
 import tempfile
-from pathlib import Path
 
 # Create a truly unique DB for this run to avoid Windows locks
 _test_tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -59,7 +54,6 @@ os.environ["M3_DATABASE"] = DB_PATH
 subprocess.run([sys.executable, os.path.join(BASE_DIR, "bin", "setup_test_db.py"), "--database", DB_PATH, "--force"], check=True, capture_output=True)
 
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
-from m3_sdk import resolve_db_path  # noqa: E402
 
 AGENT = "test_debug_agent"
 

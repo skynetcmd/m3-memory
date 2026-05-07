@@ -47,10 +47,8 @@ Other: `CONTRADICTION_THRESHOLD`, `DEDUP_LIMIT`, `DEDUP_THRESHOLD`,
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
-from crypto_provider import get_sha256 as _sha256_hex
 import os
 import platform
 import re
@@ -64,6 +62,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
 import yaml
+from crypto_provider import get_sha256 as _sha256_hex
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
 
