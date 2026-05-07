@@ -34,15 +34,27 @@ The user spawning you has NO visibility into your internal work. They see "agent
 
 ### Progress heartbeats (mandatory)
 
-At each phase transition, emit a one-line status via `Bash: echo "[curator] phase=<name> elapsed=<sec>s tool_calls=<n> ..."`. Phases:
+The user spawning you sees nothing between tool calls. Heartbeats are how you stay visible. Emit them via `Bash: echo "[curator] phase=<name> elapsed=<sec>s tool_calls=<n> ..."`.
+
+**PLAN-mode phases** (one heartbeat per phase boundary):
 - `start` — first thing you do, before any tool call.
 - `survey_done` — after final memory_search call. Include `n_memories_seen=<count>`.
 - `dedup_done` — after final memory_dedup call. Include `n_pairs=<count>`.
 - `clustering_done` — after grouping into action clusters. Include `n_clusters=<count>`.
 - `plan_ready` — just before emitting the apply-prompt. Include `n_to_delete=<n> n_to_supersede=<n> n_to_consolidate=<n>`.
-- `apply_start`, `apply_progress` (every 10 ops), `apply_done` — for APPLY mode.
 
-Each `echo` line costs ~1 second of agent time but gives the user a heartbeat. Do not skip them.
+**APPLY-mode heartbeats are stricter** — the user needs visibility into a multi-minute write loop:
+
+- `apply_start` — IMMEDIATELY upon parsing the plan, before any MCP write. Include the full plan size: `n_link=<n> n_consolidate=<n> n_supersede=<n> n_delete=<n> total_ops=<sum>`.
+- `apply_progress` — emit one heartbeat **every 10 MCP operations** AND **at least every 30 seconds of wall-clock**, whichever comes first. Format: `phase=apply_progress done=<n>/<total> last_op=<delete|update|write|link> last_id=<id_prefix>...`. If you're processing a batch of 58 deletes and each takes 0.5s, that's 6 heartbeats total — not 1.
+- `apply_done` — after the final operation. Include `succeeded=<n> failed=<n> not_found=<n>` and a one-line summary.
+
+**Three reasons each heartbeat is non-negotiable:**
+1. The user is watching a black-box subagent and a 60-second silence reads as a hang.
+2. If you crash mid-run, the heartbeats are the user's only forensic trail.
+3. APPLY operations are not idempotent in aggregate — knowing how far you got matters for restart.
+
+Each `echo` line costs ~1 second of agent time. Skipping them to "save time" is exactly wrong — the user time wasted wondering if you're stuck dwarfs the agent time spent emitting them.
 
 ### Tool-call cap (mandatory)
 
