@@ -50,6 +50,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from crypto_provider import get_sha256 as _sha256_hex
 import os
 import platform
 import re
@@ -1425,7 +1426,7 @@ def memory_history_impl(memory_id: str, limit: int = 20) -> str:
     return "\n".join(lines)
 
 def _content_hash(content: str) -> str:
-    return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+    return _sha256_hex((content or "").encode("utf-8"))
 
 # Shared Async Client
 import httpx as _httpx
@@ -1932,7 +1933,7 @@ async def memory_write_bulk_impl(
                     p["source"], ORIGIN_DEVICE, p["user_id"], p["scope"], p["expires_at"],
                     now, p["valid_from"], p["valid_to"], p["conversation_id"],
                     p["refresh_on"], p["refresh_reason"],
-                    hashlib.sha256((p["content"] or "").encode("utf-8")).hexdigest(),
+                    _sha256_hex((p["content"] or "").encode("utf-8")),
                     p["variant"],
                 ),
             )
@@ -2329,7 +2330,7 @@ async def _write_fact_rows(memory_id: str, facts: list[dict]) -> None:
                         ORIGIN_DEVICE,
                         "agent",
                         now,
-                        hashlib.sha256(fact_text.encode("utf-8")).hexdigest(),
+                        _sha256_hex(fact_text.encode("utf-8")),
                     )
                 )
                 # Link via references edge: fact_id -> memory_id (from fact to source)
@@ -2466,9 +2467,9 @@ def _create_entity(canonical_name: str, entity_type: str, attributes: dict, db) 
     """INSERT new row into entities; return new uuid id."""
     entity_id = str(uuid.uuid4())
     attrs_json = json.dumps(attributes or {})
-    content_hash = hashlib.sha256(
+    content_hash = _sha256_hex(
         f"{canonical_name}|{entity_type}|{attrs_json}".encode("utf-8")
-    ).hexdigest()
+    )
     db.execute(
         "INSERT INTO entities (id, canonical_name, entity_type, attributes_json, content_hash) "
         "VALUES (?, ?, ?, ?, ?)",
@@ -4587,7 +4588,7 @@ def memory_verify_impl(memory_id: str) -> str:
         if not row:
             return f"Error: memory {memory_id} not found"
         stored_hash = row["content_hash"] or ""
-        computed_hash = hashlib.sha256((row["content"] or "").encode("utf-8")).hexdigest()
+        computed_hash = _sha256_hex((row["content"] or "").encode("utf-8"))
         if not stored_hash:
             return f"Warning: no content hash stored for {memory_id}. Computed: {computed_hash}"
         if stored_hash == computed_hash:
@@ -5162,7 +5163,7 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         # NOTE: chroma_sync_queue insert moved below into the `if vec:` block
         # so embed failures don't leave orphan queue rows.
         db.execute("UPDATE memory_items SET content_hash = ? WHERE id = ?",
-                   (hashlib.sha256((content or "").encode("utf-8")).hexdigest(), item_id))
+                   (_sha256_hex((content or "").encode("utf-8")), item_id))
 
     vec = None
     if embed:

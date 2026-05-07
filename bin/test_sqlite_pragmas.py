@@ -202,7 +202,8 @@ class TestWalGrowth:
 
 class TestCheckpointHelpers:
     def test_checkpoint_passive_returns_tuple(self, tmp_path):
-        conn = _new_conn(str(tmp_path / "cp.db"))
+        db_path = str(tmp_path) if str(tmp_path).endswith(".db") else str(tmp_path / "cp.db")
+        conn = _new_conn(db_path)
         apply_pragmas(conn, "production")
         conn.execute("CREATE TABLE t (x TEXT)")
         conn.commit()
@@ -211,7 +212,8 @@ class TestCheckpointHelpers:
         conn.close()
 
     def test_checkpoint_truncate_returns_tuple(self, tmp_path):
-        conn = _new_conn(str(tmp_path / "cp.db"))
+        db_path = str(tmp_path) if str(tmp_path).endswith(".db") else str(tmp_path / "cp.db")
+        conn = _new_conn(db_path)
         apply_pragmas(conn, "production")
         conn.execute("CREATE TABLE t (x TEXT)")
         conn.commit()
@@ -271,8 +273,8 @@ if __name__ == "__main__":
 
         # checkpoint helpers
         ch = TestCheckpointHelpers()
-        run("checkpoint/passive", ch.test_checkpoint_passive_returns_tuple, td)
-        run("checkpoint/truncate", ch.test_checkpoint_truncate_returns_tuple, td)
+        run("checkpoint/passive", ch.test_checkpoint_passive_returns_tuple, td / "cp_passive.db")
+        run("checkpoint/truncate", ch.test_checkpoint_truncate_returns_tuple, td / "cp_truncate.db")
 
     print(f"\n  {len(PASS)} passed, {len(FAIL)} failed")
     sys.exit(1 if FAIL else 0)

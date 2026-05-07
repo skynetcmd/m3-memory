@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_sdk.py
-sha1: 82edc8c55695
-mtime_utc: 2026-05-06T23:54:35.159578+00:00
-generated_utc: 2026-05-06T23:57:12.375357+00:00
+sha1: 4fad790b368d
+mtime_utc: 2026-05-07T00:42:17.699688+00:00
+generated_utc: 2026-05-07T00:43:52.477536+00:00
 private: false
 ---
 
@@ -45,6 +45,7 @@ _(no conventional entry point detected)_
 
 - `auth_utils (get_api_key)`
 - `chatlog_config`
+- `crypto_provider (provider)`
 - `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
@@ -53,8 +54,8 @@ _(no conventional entry point detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 270)
 - `httpx.AsyncClient()` (line 273)
+- `httpx.AsyncClient()` (line 276)
 
 **sqlite**
 
