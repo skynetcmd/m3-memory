@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 73 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 74 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
@@ -78,6 +78,7 @@ This document provides a comprehensive inventory of all 73 MCP tools available i
 | `memory_export` | Data Governance | Export memories as portable JSON. Filter by agent, type, or date. |
 | `memory_import` | Data Governance | Import memories from a JSON export. UPSERT semantics — safe to re-run. |
 | `chroma_sync` | Infrastructure Operations | Bi-directional sync between local SQLite and ChromaDB. |
+| `embedder_status` | Infrastructure Operations | Check the status of the local sovereign embedder server (port 8081). |
 | `memory_cost_report` | Infrastructure Operations | Returns current session operation counts and estimated token usage for memory operations. |
 
 ---
@@ -1283,6 +1284,18 @@ Bi-directional sync between local SQLite and ChromaDB.
 | `max_items` | `integer` | No | Max items per batch. | `50` |
 | `direction` | `string` | No | Sync direction. | `both` |
 | `reset_stalled` | `boolean` | No | Reset stalled sync records. | `True` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+### `embedder_status`
+
+Check the status of the local sovereign embedder server (port 8081).
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ### `memory_cost_report`

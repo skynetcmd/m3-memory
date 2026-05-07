@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 477546aed535
-mtime_utc: 2026-05-05T13:40:00.130135+00:00
-generated_utc: 2026-05-05T13:54:32.289996+00:00
+sha1: 55eab47c7b3d
+mtime_utc: 2026-05-06T23:12:36.251250+00:00
+generated_utc: 2026-05-06T23:57:12.517454+00:00
 private: false
 ---
 
@@ -144,17 +144,18 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1278)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1329)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1242)
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1293)
 
 
 ---
 
 ## Notable external imports
 
+- `http.client`
 - `httpx`
 - `platform`
 - `sentence_transformers (CrossEncoder)`

@@ -38,6 +38,7 @@ pipx ensurepath
 exec $SHELL -l
 pipx install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor
 ```
 
@@ -49,6 +50,7 @@ pipx ensurepath
 exec $SHELL -l
 pipx install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor
 ```
 
@@ -60,6 +62,7 @@ pipx ensurepath
 exec $SHELL -l
 pipx install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor
 ```
 
@@ -71,6 +74,7 @@ pipx ensurepath
 exec $SHELL -l
 pipx install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor
 ```
 
@@ -82,6 +86,7 @@ pipx ensurepath
 exec $SHELL -l
 pipx install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor
 ```
 

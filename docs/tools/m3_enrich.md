@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: f43de2379f14
-mtime_utc: 2026-05-05T13:53:45.852655+00:00
-generated_utc: 2026-05-05T13:54:32.059370+00:00
+sha1: 8c401d910c1c
+mtime_utc: 2026-05-06T23:55:25.598555+00:00
+generated_utc: 2026-05-06T23:57:12.324949+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 1410)
+- `def main()` (line 1414)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -118,11 +118,13 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 - `auth_utils (get_api_key)`
 - `enrichment_state`
+- `m3_sdk (get_m3_root)`
 - `memory_core`
 - `run_observer`
 - `run_reflector`
 - `slm_intent (Profile, _parse_profile, load_profile)`
 - `slm_intent (invalidate_cache)`
+- `sqlite_pragmas (apply_pragmas)`
 - `unified_ai (async_client_for_profile)`
 
 ---
@@ -131,11 +133,11 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 1114)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 284)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 996)
-- `sqlite3.connect()  → `str(db_path)`` (line 142)
-- `sqlite3.connect()  → `str(db_path)`` (line 723)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 1117)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 286)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 999)
+- `sqlite3.connect()  → `str(db_path)`` (line 144)
+- `sqlite3.connect()  → `str(db_path)`` (line 725)
 
 
 ---

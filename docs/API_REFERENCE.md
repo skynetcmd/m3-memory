@@ -1,6 +1,6 @@
 # M3 Memory: API Reference
 
-All 73 MCP tools exposed by the memory bridge (`bin/memory_bridge.py`) and the MCP proxy (`bin/mcp_proxy.py`). For behavioral rules and usage guidance, see [AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md).
+All 74 MCP tools exposed by the memory bridge (`bin/memory_bridge.py`) and the MCP proxy (`bin/mcp_proxy.py`). For behavioral rules and usage guidance, see [AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md).
 
 ---
 
@@ -313,3 +313,7 @@ Check session operation counts (embed calls, tokens, searches, writes).
 ### `chroma_sync`
 Manual sync with ChromaDB.
 - **Args**: `direction` (str: push|pull|both), `max_items` (int), `reset_stalled` (bool)
+
+### `embedder_status`
+Check the status of the local sovereign embedder server (port 8081).
+- **Args**: None

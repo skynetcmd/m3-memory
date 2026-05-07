@@ -1,8 +1,8 @@
 ---
 tool: bin/backfill_content_hash.py
-sha1: 351e966af079
-mtime_utc: 2026-05-04T22:04:47.603377+00:00
-generated_utc: 2026-05-04T22:24:28.983363+00:00
+sha1: f2c1588d5a12
+mtime_utc: 2026-05-06T05:10:44.395301+00:00
+generated_utc: 2026-05-06T23:11:44.777075+00:00
 private: false
 ---
 
@@ -61,7 +61,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 310)
+- `def main()` (line 314)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -92,6 +92,7 @@ Usage:
 ## Calls INTO this repo (intra-repo imports)
 
 - `memory_core`
+- `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
 
@@ -99,10 +100,10 @@ Usage:
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(args.db)`` (line 177)
-- `sqlite3.connect()  → `str(args.db)`` (line 180)
-- `sqlite3.connect()  → `str(db_path)`` (line 148)
-- `sqlite3.connect()  → `str(db_path)`` (line 70)
+- `sqlite3.connect()  → `str(args.db)`` (line 181)
+- `sqlite3.connect()  → `str(args.db)`` (line 184)
+- `sqlite3.connect()  → `str(db_path)`` (line 152)
+- `sqlite3.connect()  → `str(db_path)`` (line 74)
 
 
 ---

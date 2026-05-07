@@ -16,6 +16,7 @@
 #   --endpoint URL                               pin LLM_ENDPOINTS_CSV
 #   --skip-prereqs                               assume pipx/git/sqlite3 already present
 #   --no-install-m3                              stop after pipx install (don't fetch payload)
+#   --install-embedder                           run sovereign embedder setup after install
 
 set -euo pipefail
 
@@ -23,15 +24,17 @@ CAPTURE_MODE="both"
 ENDPOINT=""
 SKIP_PREREQS=0
 RUN_INSTALL_M3=1
+RUN_INSTALL_EMBEDDER=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --capture-mode) CAPTURE_MODE="$2"; shift 2 ;;
-        --endpoint)     ENDPOINT="$2"; shift 2 ;;
-        --skip-prereqs) SKIP_PREREQS=1; shift ;;
-        --no-install-m3) RUN_INSTALL_M3=0; shift ;;
+        --capture-mode)     CAPTURE_MODE="$2"; shift 2 ;;
+        --endpoint)         ENDPOINT="$2"; shift 2 ;;
+        --skip-prereqs)     SKIP_PREREQS=1; shift ;;
+        --no-install-m3)    RUN_INSTALL_M3=0; shift ;;
+        --install-embedder) RUN_INSTALL_EMBEDDER=1; shift ;;
         -h|--help)
-            sed -n '2,18p' "$0" | sed 's/^# \?//'
+            sed -n '2,19p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         *) echo "unknown flag: $1" >&2; exit 2 ;;
@@ -204,12 +207,18 @@ fi
 
 # install-m3 is idempotent only with --force when a previous install exists.
 # Detect and force, since this script is the "fresh install" entrypoint.
-if [[ -d "$HOME/.m3-memory/repo" ]]; then
+M3_ROOT="${M3_MEMORY_ROOT:-$HOME/.m3-memory}"
+if [[ -d "$M3_ROOT/repo" ]]; then
     INSTALL_M3_ARGS+=(--force)
 fi
 
 say "Running: mcp-memory install-m3 ${INSTALL_M3_ARGS[*]}"
 mcp-memory install-m3 "${INSTALL_M3_ARGS[@]}"
+
+if [[ $RUN_INSTALL_EMBEDDER -eq 1 ]]; then
+    say "Running: mcp-memory install-embedder"
+    mcp-memory install-embedder
+fi
 
 # ── doctor summary ────────────────────────────────────────────────────────────
 
@@ -223,8 +232,10 @@ echo
 cat <<EOF
 Next steps:
   1. Open a new terminal (or run: exec \$SHELL -l) so PATH picks up ~/.local/bin.
-  2. Wire your AI agent to call mcp-memory:
+  2. (Optional) Install a self-contained local embedder for Hybrid Search:
+       mcp-memory install-embedder
+  3. Wire your AI agent to call mcp-memory:
        Claude Code: claude mcp add memory mcp-memory
        Gemini CLI:  already configured by install-m3 if gemini was on PATH.
-  3. Re-run this script anytime to upgrade and re-verify.
+  4. Re-run this script anytime to upgrade and re-verify.
 EOF

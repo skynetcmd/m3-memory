@@ -40,6 +40,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
 
+sys.path.insert(0, os.path.dirname(__file__))
+from m3_sdk import get_m3_root
+
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
 logger = logging.getLogger("migrate_memory")
 
@@ -281,9 +284,12 @@ def prompt_backup_dir(assume_yes: bool) -> str:
     saved = cfg.get("backup_dir")
     if saved and os.path.isdir(saved):
         return saved
+    
+    # Precedence: M3_MEMORY_ROOT/backups > ~/.m3-memory/backups
+    default = os.path.join(get_m3_root(), "backups")
+    
     if assume_yes:
         # Non-interactive: fall back to out-of-repo default under the user's home
-        default = os.path.join(os.path.expanduser("~"), ".m3-memory", "backups")
         os.makedirs(default, exist_ok=True)
         cfg["backup_dir"] = default
         save_config(cfg)
@@ -293,7 +299,6 @@ def prompt_backup_dir(assume_yes: bool) -> str:
     print("\nBefore applying migrations, the database will be backed up.")
     print("Recommended: choose a directory OUTSIDE this repo to avoid any risk")
     print("of accidentally committing backup files (even though *.db is gitignored).")
-    default = os.path.join(os.path.expanduser("~"), ".m3-memory", "backups")
     print(f"Default: {default}")
     choice = input("Backup directory [press Enter for default]: ").strip()
     backup_dir = choice or default

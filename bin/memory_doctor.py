@@ -56,6 +56,31 @@ def fix_metadata_json(conn):
     if fixed:
         logger.info(f"Repaired {fixed} items with invalid metadata JSON.")
 
+def check_sovereign_embedder():
+    """Checks the status of the integrated sovereign embedder."""
+    logger.info("Checking Sovereign Embedder status...")
+    import asyncio
+    # Import locally to avoid circular dependencies if any
+    import memory_core
+    
+    status = asyncio.run(memory_core.embedder_status_impl())
+    
+    if status["binary_found"]:
+        logger.info("✓ Sovereign binary found.")
+    else:
+        logger.info("- Sovereign binary not installed (optional).")
+
+    if status["status"] == "online":
+        logger.info(f"✓ Sovereign server is ONLINE on port {status['port']}.")
+        if status["models"]:
+            model_ids = [m["id"] for m in status["models"]]
+            logger.info(f"  Loaded models: {', '.join(model_ids)}")
+    elif status["binary_found"]:
+        stat_str = status["status"].upper()
+        logger.warning(f"⚠ Sovereign binary exists but server is {stat_str} on port {status['port']}.")
+        logger.info("  Tip: Run `mcp-memory embedder start` to boot it.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Memory health check and repair.")
     add_database_arg(parser)
@@ -68,6 +93,7 @@ def main():
 
     conn = sqlite3.connect(db_path)
     try:
+        check_sovereign_embedder()
         fix_missing_timestamps(conn)
         validate_relationships(conn)
         fix_metadata_json(conn)
