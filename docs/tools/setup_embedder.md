@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_embedder.py
-sha1: 6bb944c91d29
-mtime_utc: 2026-05-06T23:50:45.218960+00:00
-generated_utc: 2026-05-06T23:57:12.635587+00:00
+sha1: d5113f90d35a
+mtime_utc: 2026-05-07T00:41:40.031899+00:00
+generated_utc: 2026-05-07T00:43:52.729872+00:00
 private: false
 ---
 
@@ -17,7 +17,7 @@ Usage: python bin/setup_embedder.py
 
 ## Entry points
 
-- `def main()` (line 169)
+- `def main()` (line 179)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -32,12 +32,13 @@ _(no argparse arguments detected)_
 
 - `APPDATA`
 - `LLM_ENDPOINTS_CSV`
+- `M3_CRYPTO_BACKEND`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `crypto_provider (get_sha256, provider)`
 
 ---
 
@@ -45,25 +46,25 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `[str(bin_path), 'server', 'start', '--port', '8081']`` (line 147)
-- `subprocess.run()  → `['launchctl', 'load', str(plist_path)]`` (line 117)
-- `subprocess.run()  → `['launchctl', 'unload', str(plist_path)]`` (line 116)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 138)
-- `subprocess.run()  → `['systemctl', '--user', 'enable', 'm3-embedder']`` (line 139)
-- `subprocess.run()  → `['systemctl', '--user', 'start', 'm3-embedder']`` (line 140)
+- `subprocess.Popen()  → `[str(bin_path), 'server', 'start', '--port', '8081']`` (line 157)
+- `subprocess.run()  → `['launchctl', 'load', str(plist_path)]`` (line 127)
+- `subprocess.run()  → `['launchctl', 'unload', str(plist_path)]`` (line 126)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 148)
+- `subprocess.run()  → `['systemctl', '--user', 'enable', 'm3-embedder']`` (line 149)
+- `subprocess.run()  → `['systemctl', '--user', 'start', 'm3-embedder']`` (line 150)
 
 
 ---
 
 ## Notable external imports
 
-- `http.client`
 - `platform`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
+- `./fips-hash.sh`
 - `manifest.json`
 
 ---
