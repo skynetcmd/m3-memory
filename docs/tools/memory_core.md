@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 55eab47c7b3d
-mtime_utc: 2026-05-06T23:12:36.251250+00:00
-generated_utc: 2026-05-06T23:57:12.517454+00:00
+sha1: 1e27c1f3d2a4
+mtime_utc: 2026-05-07T00:23:09.538954+00:00
+generated_utc: 2026-05-07T00:43:52.615077+00:00
 private: false
 ---
 
@@ -125,6 +125,7 @@ _(no argparse arguments detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `auto_route`
+- `crypto_provider (get_sha256)`
 - `embedding_utils (batch_cosine)`
 - `embedding_utils (cosine)`
 - `embedding_utils (infer_change_agent)`
@@ -144,11 +145,11 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1329)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1330)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1293)
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1294)
 
 
 ---

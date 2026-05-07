@@ -212,7 +212,7 @@ class M3Context:
             if self._pool is not None:
                 return
             pool_size = int(os.environ.get("DB_POOL_SIZE", "5"))
-            pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "10"))
+            pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
             pool: "queue.Queue[sqlite3.Connection]" = queue.Queue(maxsize=pool_size)
             for _ in range(pool_size):
                 try:
@@ -266,11 +266,14 @@ class M3Context:
                 # Double-check inside lock to prevent redundant recreation
                 if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed or loop_id != _HTTP_CLIENT_LOOP_ID:
                     timeout = httpx.Timeout(connect=5.0, read=4800.0, write=10.0, pool=5.0)
+                    from crypto_provider import provider as crypto
+                    ssl_ctx = crypto.get_ssl_context()
+                    
                     try:
-                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=True)
-                        logger.debug("Initialized shared httpx.AsyncClient with HTTP/2.")
+                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=True, verify=ssl_ctx)
+                        logger.debug("Initialized shared httpx.AsyncClient with HTTP/2 and hardened SSL.")
                     except ImportError:
-                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=False)
+                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=False, verify=ssl_ctx)
                         logger.info("HTTP/2 support not found (h2 package missing). Falling back to HTTP/1.1.")
                     _HTTP_CLIENT_LOOP_ID = loop_id
         return _HTTP_CLIENT
@@ -373,7 +376,7 @@ class M3Context:
             return conn.execute(sql, params).fetchall()
 
     def log_event(self, category: str, detail_a: str,
-                  detail_b: str = "", detail_c: str = "None") -> None:
+                  detail_b: str = "", detail_c: Optional[str] = None) -> None:
         """Route a structured event to the correct legacy table.
 
         Used by bridges that predate the unified memory_items model.
@@ -439,6 +442,10 @@ class StructuredLogger:
                 continue
             parts.append(f"{k}={v}")
         return " | ".join(parts)
+
+    def log(self, event: str, *args, **kwargs) -> None:
+        """Helper to format and print a structured log line to stderr."""
+        print(self.format(event, *args, **kwargs), file=sys.stderr)
 
 
 def _cleanup():
