@@ -266,11 +266,14 @@ class M3Context:
                 # Double-check inside lock to prevent redundant recreation
                 if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed or loop_id != _HTTP_CLIENT_LOOP_ID:
                     timeout = httpx.Timeout(connect=5.0, read=4800.0, write=10.0, pool=5.0)
+                    from crypto_provider import provider as crypto
+                    ssl_ctx = crypto.get_ssl_context()
+                    
                     try:
-                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=True)
-                        logger.debug("Initialized shared httpx.AsyncClient with HTTP/2.")
+                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=True, verify=ssl_ctx)
+                        logger.debug("Initialized shared httpx.AsyncClient with HTTP/2 and hardened SSL.")
                     except ImportError:
-                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=False)
+                        _HTTP_CLIENT = httpx.AsyncClient(timeout=timeout, http2=False, verify=ssl_ctx)
                         logger.info("HTTP/2 support not found (h2 package missing). Falling back to HTTP/1.1.")
                     _HTTP_CLIENT_LOOP_ID = loop_id
         return _HTTP_CLIENT
