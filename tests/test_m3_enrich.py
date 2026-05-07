@@ -246,7 +246,7 @@ def test_load_profile_falls_back_to_named_profile(monkeypatch):
     import m3_enrich
     out = m3_enrich._load_profile_with_path(name="enrich_local_qwen", path=None)
     assert out.name == "enrich_local_qwen"
-    assert out.model == "qwen/qwen3-8b"
+    assert out.model == "qwen/qwen3.5-9b"
 
 
 def test_load_profile_aborts_on_unknown_name():

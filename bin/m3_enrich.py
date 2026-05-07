@@ -58,6 +58,7 @@ import enrichment_state as estate  # noqa: E402
 import run_observer as observer  # noqa: E402
 import run_reflector as reflector  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
+from m3_sdk import get_m3_root
 from slm_intent import (  # noqa: E402
     Profile,
     _parse_profile,
@@ -67,7 +68,6 @@ from slm_intent import (
     invalidate_cache as invalidate_profile_cache,
 )
 from sqlite_pragmas import apply_pragmas  # noqa: E402
-from m3_sdk import get_m3_root
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
