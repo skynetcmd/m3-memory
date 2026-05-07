@@ -19,6 +19,102 @@ forward-going only.
 
 ---
 
+## [2026.5.6.3] — May 7, 2026 — GH Actions Node-24 upgrade + banner refresh
+
+Pure infrastructure + asset bump; no library behavior changes.
+
+### Changed
+
+- **GitHub Actions pinned to Node-24-compatible SHAs.** GitHub announced Node.js 20 deprecation: default flips to Node 24 on 2026-06-02; Node 20 removed from runners 2026-09-16. Every workflow action bumped to its latest release-tag SHA so CI keeps working past the removal:
+
+  | action | from | to |
+  |---|---|---|
+  | `actions/checkout` | v4 | v6.0.2 |
+  | `actions/setup-python` | v5 | v6.2.0 |
+  | `actions/upload-artifact` | v4 | v7.0.1 |
+  | `actions/download-artifact` | v4 | v8.0.1 |
+
+  Major-version bumps in the artifact actions verified safe for our usage: `upload-artifact` v7's optional unzipped uploads aren't enabled (we don't set `archive: false`); `download-artifact` v5's path-behavior fix doesn't affect us (we download by name into a fixed path); `download-artifact` v8's hash-mismatch-errors-by-default is desirable and our pipeline doesn't rely on partial downloads.
+
+- **`docs/M3-banner.jpg`** — replaced with new banner art. README hero image only.
+
+All CI checks (Lint, Mypy, Bandit + pip-audit, ubuntu/macos/windows tests) pass on the bump.
+
+---
+
+## [2026.5.6.2] — May 6, 2026 — Harden Gemini endpoint check (CodeQL #27, #28)
+
+### Fixed
+
+- **`bin/unified_ai.py:37` and `bin/batch_runner.py:540`** — `py/incomplete-url-substring-sanitization` (CodeQL alerts #27 and #28). Replaces `"generativelanguage.googleapis.com" in url` substring tests with hostname parsing via `urlparse`, centralized on `unified_ai._is_gemini_endpoint`. Both call sites are config-driven dispatch decisions (pick the hardened httpx client for Gemini's OAI-compat hang workaround; pick the Gemini batch runner) sourced from our own YAML config — neither was a real SSRF or open-redirect risk. The parsed form is more correct anyway (catches edge cases where the hostname appears in a query string or as a look-alike suffix) and silences the CodeQL warnings.
+
+  Smoke-tested with 8 cases including the CodeQL bypass shape (`http://evil.com/?x=generativelanguage.googleapis.com` → `False`) and the look-alike suffix attack (`evil-generativelanguage.googleapis.com.attacker.io` → `False`). Both alerts auto-closed by GitHub's post-merge CodeQL re-scan.
+
+- **CI debt cleared.** The same PR that fixed the CodeQL alerts also cleaned up errors that had accumulated since the FIPS-readiness merge:
+  - **ruff:** 82 → 0 (auto-fix + manual fixes for missing imports — `http.client` in `setup_embedder.py`, `subprocess` in `m3_memory/cli.py` — and a truncated `ASSETS` dict in `fetch_sovereign_assets.py` that had been replaced with a `# ...` placeholder).
+  - **mypy:** 4 → 0 (Path/str rebind in test fixture; Windows-only `subprocess.CREATE_NEW_PROCESS_GROUP` fetched via `getattr` for cross-platform safety).
+  - **bandit:** 3 → 0 (B113 timeout added on `requests.get`; B103/B105 annotated `# nosec` with justification on cases that aren't credentials).
+  - **tests:** `tests/test_m3_enrich.py` assertion aligned with the `qwen/qwen3-8b → qwen/qwen3.5-9b` config bump.
+
+### Added
+
+- **`m3_memory/installer.py` `_prompt_cognitive_loop`** — passthrough stub for the `--cognitive-loop` install flag. Reserves the prompt site for when the cognitive-loop install path lands; today returns the flag verbatim.
+
+---
+
+## [2026.5.6.1] — May 6, 2026 — Bound WAL growth, centralize SQLite pragma stack
+
+### Fixed
+
+- **Unbounded WAL growth on long-running write workloads.** `m3_sdk.py`'s connection pool never set `wal_autocheckpoint` or `journal_size_limit`. SQLite's default `wal_autocheckpoint` (1000 pages, ~4 MiB) fires only in PASSIVE mode and busy-fails against active readers, after which SQLite silently lets the WAL grow. Without `journal_size_limit`, the WAL is never truncated even after a successful checkpoint. Result: a long-running enrichment workload could accumulate a ~15 GB `*-wal` file alongside a much smaller main DB.
+
+### Added
+
+- **`bin/sqlite_pragmas.py`** — single source of truth for pragma stacks. Three profiles (`production`, `chatlog`, `bench`) with a `profile_for_db` selector. Universal pragmas across all profiles: `wal_autocheckpoint`, `journal_size_limit`, `temp_store`, `foreign_keys`, `busy_timeout`. Two helper functions for runtime checkpoint discipline: `checkpoint_passive` and `checkpoint_truncate`.
+- **`bin/test_sqlite_pragmas.py`** — regression test asserting the WAL stays under `journal_size_limit` under sustained writes across all three profiles.
+
+### Changed
+
+- `m3_sdk.py`'s connection pool now sources its pragmas from `sqlite_pragmas.py`. `agent_memory.db` gains `wal_autocheckpoint=2000` + `journal_size_limit=64MiB` it didn't have; cache and mmap settings are unchanged.
+- `chatlog_config.py` sources its pragma values from `sqlite_pragmas.py` (chatlog profile). Pragma values are bit-for-bit identical to before; the change is structural, not behavioral.
+- 7 ad-hoc inline pragma blocks across `bin/` replaced with calls to the shared helper.
+
+### Documentation
+
+- WAL discipline notes added to `docs/AGENT_INSTRUCTIONS.md` and `docs/CONTRIBUTING.md`: never `rm` a `-wal`/`-shm` file; if WAL is huge, run `PRAGMA wal_checkpoint(TRUNCATE)`.
+
+---
+
+## [2026.5.4.6] — May 4, 2026 — Hardened inventory scanner + boot-start improvements
+
+### Changed
+
+- **`bin/gen_tool_inventory.py`** hardened: now captures both reads and writes to `os.environ`; source scan expanded to include the `m3_memory` package; missing load-bearing modules added (`enrichment_state`, `thermal_utils`, etc.).
+- **Cognitive-loop boot persistence.** `AgentOS_CognitiveLoop` now uses `ONSTART` on Windows for continuous background execution.
+- Final documentation audit: 90+ internal modules and CLI tools have up-to-date documentation in `docs/tools/`.
+
+---
+
+## [2026.5.4.5] — May 4, 2026 — Autonomous Cognitive Loop + multi-DB hardening
+
+### Added
+
+- **`bin/m3_cognitive_loop.py`** — unified background heartbeat that automates entity extraction, fact enrichment (Observer), and consistency management (Reflector).
+  - Resource-optimized: SQL-based "has work" detection skips redundant AI calls when idle.
+  - Robust: PID-based single-instance locking and signal-aware graceful shutdown.
+  - Fire-and-forget: `--background` flag for self-daemonization.
+- **`mcp-memory install-m3 --cognitive-loop`** — interactive onboarding for the cognitive loop during installation.
+
+### Changed
+
+- **`bin/migrate_memory.py`** uses absolute paths and case-insensitive matching (Windows) for reliable split-DB detection across worktrees.
+
+### Schema
+
+- **Migration 004** — adds Entity Graph tables to chatlog databases for consistent tracking across the chatlog and main memory DBs.
+
+---
+
 ## [2026.5.4.7] — May 3, 2026 — Embedder URL override across enrichment workers
 
 Closes a routing gap that caused observation embeds during ingest to fall
