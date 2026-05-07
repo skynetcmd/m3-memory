@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-06T23:57:12.762240+00:00._
+_Generated 2026-05-07T01:00:25.889112+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -40,6 +40,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/embed_sweep_lib.py](embed_sweep_lib.md) | embed_sweep_lib — shared embed-loop helper for sweeper-style backfill tools. |  |
 | [bin/embedding_utils.py](embedding_utils.md) | Shared embedding and vector-math utilities for MCP bridges. |  |
 | [bin/enrichment_state.py](enrichment_state.md) | Durable per-group enrichment state for m3_enrich. |  |
+| [bin/fetch_sovereign_assets.py](fetch_sovereign_assets.md) | fetch_sovereign_assets.py — Hydrate the _assets/embedder directory for sovereign setup. |  |
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
 | [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
@@ -86,6 +87,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/temporal_utils.py](temporal_utils.md) | Enhanced temporal resolution utility for m3-memory. |  |
 | [bin/test_bulk_parity.py](test_bulk_parity.md) | Real integration tests for memory_write_bulk_impl. |  |
 | [bin/test_debug_agent.py](test_debug_agent.md) | End-to-end test suite for debug_agent_bridge.py. |  |
+| [bin/test_fips_integrity.py](test_fips_integrity.md) | test_fips_integrity.py — Validation suite for FIPS-ready crypto abstraction. |  |
 | [bin/test_keychain.py](test_keychain.md) | (no docstring) |  |
 | [bin/test_knowledge.py](test_knowledge.md) | (no docstring) |  |
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
