@@ -28,6 +28,38 @@ For deletes, use `mcp__plugin_m3_m3__memory_delete` (or `mcp__memory__memory_del
 
 If an MCP tool fails with "not found," fall back to direct sqlite3 via Bash against the resolved DB path — but log this fallback in your report so the user knows the canonical path errored.
 
+## Visibility — emit progress, run bounded
+
+The user spawning you has NO visibility into your internal work. They see "agent started" and then nothing until you exit. Long silences look like infinite loops, even when you're doing real work. Two rules to fix this:
+
+### Progress heartbeats (mandatory)
+
+At each phase transition, emit a one-line status via `Bash: echo "[curator] phase=<name> elapsed=<sec>s tool_calls=<n> ..."`. Phases:
+- `start` — first thing you do, before any tool call.
+- `survey_done` — after final memory_search call. Include `n_memories_seen=<count>`.
+- `dedup_done` — after final memory_dedup call. Include `n_pairs=<count>`.
+- `clustering_done` — after grouping into action clusters. Include `n_clusters=<count>`.
+- `plan_ready` — just before emitting the apply-prompt. Include `n_to_delete=<n> n_to_supersede=<n> n_to_consolidate=<n>`.
+- `apply_start`, `apply_progress` (every 10 ops), `apply_done` — for APPLY mode.
+
+Each `echo` line costs ~1 second of agent time but gives the user a heartbeat. Do not skip them.
+
+### Tool-call cap (mandatory)
+
+PLAN mode is bounded:
+- `memory_search` ≤ 3 calls
+- `memory_dedup` ≤ 2 calls
+- Total tool calls (including Bash echoes) ≤ 25
+- Wall-clock soft budget: 5 minutes; emit `[curator] phase=budget_exceeded` and exit if you hit it.
+
+APPLY mode is bounded:
+- One MCP call per item in the structured plan; no extra exploration.
+- Total wall-clock soft budget: 10 minutes for plans up to 200 items.
+
+### No-loop self-check (mandatory)
+
+If two consecutive tool calls return identical or near-identical results (same IDs, same counts), treat as a stuck-state signal: emit `[curator] phase=stuck_detected` and exit with whatever plan you have so far. Don't keep trying.
+
 ## PLAN mode
 
 1. **Survey scope.** Run `memory_search` with a broad query (e.g., empty string or `"*"`) and `k=50` to get a representative sample. Read titles + first 200 chars.
