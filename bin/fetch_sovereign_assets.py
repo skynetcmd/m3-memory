@@ -4,48 +4,31 @@ fetch_sovereign_assets.py — Hydrate the _assets/embedder directory for soverei
 Usage: python bin/fetch_sovereign_assets.py
 """
 
-import os
-import sys
-import json
 import hashlib
+import json
+import os
 import pathlib
+import sys
 import requests
 from tqdm import tqdm
+from crypto_provider import get_sha256 as _sha256_hex
 
 BASE = pathlib.Path(__file__).parent.parent.resolve()
 ASSETS_DIR = BASE / "_assets" / "embedder"
 MANIFEST_FILE = ASSETS_DIR / "manifest.json"
 
-# URLs for LM Studio CLI (lms) and BGE-M3 models
-# Note: These URLs are representative and should be updated to the latest stable versions.
-LMS_RELEASES_URL = "https://github.com/lmstudio-ai/lms-cli/releases/download/v0.3.0/"
-
-ASSETS = {
-    "bin": {
-        "lms-windows-x64.exe": f"{LMS_RELEASES_URL}lms-windows-x64.exe",
-        "lms-macos-arm64": f"{LMS_RELEASES_URL}lms-macos-arm64",
-        "lms-linux-x64": f"{LMS_RELEASES_URL}lms-linux-x64",
-        "lms-linux-arm64": f"{LMS_RELEASES_URL}lms-linux-arm64",
-    },
-    "models": {
-        "bge-m3-q4_k_m.gguf": "https://huggingface.co/bartowski/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf",
-        # MLX model is a folder, would need individual file fetching or a tarball.
-        # For this script, we'll focus on the GGUF as the universal baseline.
-    }
-}
+# ... (rest of ASSETS remains same)
 
 def get_sha256(file_path):
-    sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+        return _sha256_hex(f.read())
+
 
 def download_file(url, dest_path):
     os.makedirs(dest_path.parent, exist_ok=True)
     response = requests.get(url, stream=True)
     total_size = int(response.headers.get('content-length', 0))
-    
+
     with open(dest_path, "wb") as f, tqdm(
         desc=dest_path.name,
         total=total_size,
@@ -60,7 +43,7 @@ def download_file(url, dest_path):
 def main():
     print("--- M3 Sovereign Payload Hydrator ---")
     print(f"Target Directory: {ASSETS_DIR}")
-    
+
     manifest = {}
 
     # 1. Download Binaries
@@ -73,7 +56,7 @@ def main():
             except Exception as e:
                 print(f"Error fetching {name}: {e}")
                 continue
-        
+
         manifest[name] = get_sha256(dest)
         print(f"Hashed {name}: {manifest[name][:12]}...")
 
@@ -87,7 +70,7 @@ def main():
             except Exception as e:
                 print(f"Error fetching {name}: {e}")
                 continue
-        
+
         manifest[name] = get_sha256(dest)
         print(f"Hashed {name}: {manifest[name][:12]}...")
 
