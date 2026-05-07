@@ -25,6 +25,8 @@ from typing import Any, AsyncIterator, Callable, Optional, Protocol
 
 import httpx
 
+from unified_ai import _is_gemini_endpoint
+
 # ── Provider-neutral request/result shapes ─────────────────────────────────
 
 @dataclass
@@ -537,7 +539,7 @@ def make_runner(profile, *, token: str) -> BatchRunner:
         return AnthropicBatchRunner(profile, token=token)
     if backend == "openai":
         url = getattr(profile, "url", "") or ""
-        if "generativelanguage.googleapis.com" in url:
+        if _is_gemini_endpoint(url):
             return GeminiBatchRunner(profile, token=token)
     raise NotImplementedError(
         f"batch_runner.make_runner: backend {backend!r} (url={getattr(profile, 'url', '')!r}) "
