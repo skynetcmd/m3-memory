@@ -2,7 +2,9 @@
 
 `m3-memory` ships as a Claude Code plugin in the same repo as the Python
 package. The plugin auto-registers the memory MCP, wires up chatlog
-hooks, and adds 15 `/m3:*` slash commands plus a `memory-curator` subagent.
+hooks, and adds 15 `/m3:*` slash commands plus two curator subagents
+(`m3:curate-memory` for the memory store and `m3:curate-chatlog` for
+captured agentic-coding conversations).
 
 ## Install
 
@@ -65,12 +67,24 @@ slash commands are shortcuts to the high-leverage subset.
 
 ---
 
-## Subagent: memory-curator
+## Subagents: `m3:curate-memory` and `m3:curate-chatlog`
 
-Triggered by phrases like "tidy memory", "dedupe memories", or
-"consolidate notes". Surveys the memory store, finds clusters of
-near-duplicates, and proposes a consolidate / supersede / leave-alone
-plan that you confirm before any deletion.
+Two curator subagents handle the two stores:
+
+- **`m3:curate-memory`** — triggered by "curate memory", "tidy memory",
+  "dedupe memory", or "consolidate memory". Surveys the memory store,
+  finds clusters of near-duplicates, and proposes a consolidate /
+  supersede / leave-alone plan that you confirm before any deletion.
+- **`m3:curate-chatlog`** — triggered by "curate chatlog", "tidy chatlog",
+  "dedupe chatlog", or "consolidate chatlog". Same workflow against the
+  chatlog store, plus aggressive ephemeral-content decay (transient PIDs,
+  status snapshots, short user commands lose retrieval ranking with age).
+  Deferred to `bin/chatlog_decay.py` for the heavy lifting.
+
+Both use a two-spawn execution model: the first invocation surveys and
+proposes a plan; you re-spawn with the structured plan back as input
+(prefixed with `apply`) to actually execute it. The plan is always
+human-reviewable and reversible.
 
 ---
 
