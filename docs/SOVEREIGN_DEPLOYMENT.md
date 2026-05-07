@@ -88,6 +88,27 @@ python bin/setup_embedder.py --verify
 
 ---
 
+## 🛡️ FIPS-Ready Deployment (Hardened)
+
+For environments requiring **FIPS 140-3** compliance, M3-Memory can be configured to use a validated cryptographic module (e.g., wolfSSL/wolfCrypt).
+
+1.  **Enable FIPS Mode:**
+    Set the backend and mode in your environment:
+    ```bash
+    export M3_CRYPTO_BACKEND=WOLFSSL
+    export M3_FIPS_MODE=1
+    ```
+
+2.  **Hardened TLS:**
+    In FIPS mode, M3 restricts all internal communication (e.g., to the embedder on port 8081) to **TLS 1.3 only** with FIPS-approved ciphersuites.
+
+3.  **Key Access Management:**
+    The secrets vault automatically transitions to **AES-256-GCM** and enforces mandatory `PRIVATE_KEY_UNLOCK`/`LOCK` sequences.
+
+See the [🛡️ FIPS Compliance Guide](FIPS_COMPLIANCE.md) for deep technical details and control mappings.
+
+---
+
 ## 🍎 Hardware Notes
 
 *   **Apple Silicon (M1-M4):** The installer defaults to the high-performance native MLX embedder.
