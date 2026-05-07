@@ -373,6 +373,16 @@ def _prompt_capture_mode(interactive: bool, capture_flag: Optional[str]) -> Opti
     return {"1": "both", "2": "precompact", "3": "stop", "4": "none"}.get(reply)
 
 
+def _prompt_cognitive_loop(interactive: bool, cognitive_loop_flag: bool) -> bool:
+    """Passthrough for the --cognitive-loop install flag.
+
+    Stub today: returns the flag verbatim. Reserved as the prompt site for
+    when the cognitive-loop install path lands and we want to ask
+    interactively (mirrors _prompt_endpoint_choice / _prompt_capture_mode).
+    """
+    return cognitive_loop_flag
+
+
 def _chatlog_init_supports(chatlog_init: Path, flag: str) -> bool:
     """Probe whether bin/chatlog_init.py advertises a given flag.
 
@@ -552,6 +562,7 @@ def install_m3(
     endpoint_choice = _prompt_endpoint_choice(interactive, endpoint)
     capture_choice = _prompt_capture_mode(interactive, capture_mode)
     cognitive_loop_choice = _prompt_cognitive_loop(interactive, cognitive_loop)
+    del cognitive_loop_choice  # placeholder: wired downstream once the cognitive-loop install path lands
 
     # Preserve user data across --force / update. The repo tree under
     # repo_path/memory/ holds chatlog DBs, the chatlog config, and the
@@ -790,7 +801,7 @@ def doctor() -> int:
 
     root = os.environ.get("M3_MEMORY_ROOT")
     root_src = "(M3_MEMORY_ROOT env)" if root else "(default)"
-    
+
     print(f"m3-memory package version: {__version__}")
     print(f"M3 root directory:         {config_dir()} {root_src}")
     print(f"config file:               {config_file()}")

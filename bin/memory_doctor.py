@@ -60,11 +60,12 @@ def check_sovereign_embedder():
     """Checks the status of the integrated sovereign embedder."""
     logger.info("Checking Sovereign Embedder status...")
     import asyncio
+
     # Import locally to avoid circular dependencies if any
     import memory_core
-    
+
     status = asyncio.run(memory_core.embedder_status_impl())
-    
+
     if status["binary_found"]:
         logger.info("✓ Sovereign binary found.")
     else:

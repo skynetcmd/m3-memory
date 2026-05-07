@@ -34,10 +34,9 @@ _BIN = REPO_ROOT / "bin"
 if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
+import chatlog_config
 import m3_enrich
 import m3_entities
-import memory_core as mc
-import chatlog_config
 from m3_sdk import M3Context, resolve_db_path
 
 # PID file path for single-instance locking
@@ -51,10 +50,10 @@ def daemonize_windows(args):
     for arg in sys.argv[1:]:
         if arg != "--background":
             argv.append(arg)
-    
+
     # Spawn and exit parent
     subprocess.Popen(argv, creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
-    print(f"Cognitive Loop started in background (Windows pythonw).")
+    print("Cognitive Loop started in background (Windows pythonw).")
     sys.exit(0)
 
 def daemonize_unix():
@@ -108,7 +107,7 @@ def acquire_lock():
         except (ValueError, ProcessLookupError, PermissionError, OSError):
             # Stale PID file or can't check
             pass
-    
+
     PID_FILE.parent.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(os.getpid()))
     atexit.register(release_lock)
@@ -146,20 +145,20 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
         sql = """
             SELECT 1 FROM memory_items mi
             LEFT JOIN memory_item_entities mie ON mi.id = mie.memory_id
-            WHERE mi.is_deleted = 0 
+            WHERE mi.is_deleted = 0
               AND mi.type IN ('message', 'chat_log', 'note', 'observation')
               AND mie.memory_id IS NULL
             LIMIT 1
         """
         if len(ctx_core.query_memory(sql)) > 0:
             return True
-            
+
         # 2. Check Chatlog DB (if separate)
         if chatlog_db and os.path.abspath(chatlog_db) != os.path.abspath(ctx_core.db_path):
             ctx_chat = M3Context(chatlog_db)
             if len(ctx_chat.query_memory(sql)) > 0:
                 return True
-                
+
         return False
     except Exception as e:
         logger.debug(f"Entity work check failed (non-fatal): {e}")
@@ -260,7 +259,7 @@ async def run_enrich_pass(args):
 async def main_loop(args):
     """Main execution loop with adaptive backoff and signal awareness."""
     logger.info(f"Cognitive Loop heartbeat started. Interval: {args.interval}s")
-    
+
     # Register signal handlers for graceful shutdown
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -271,21 +270,21 @@ async def main_loop(args):
 
     while not _STOP_EVENT.is_set():
         start_time = time.monotonic()
-        
+
         if not args.skip_entities:
             await run_entity_pass(args)
             if _STOP_EVENT.is_set(): break
-            
+
         if not args.skip_enrich:
             await run_enrich_pass(args)
             if _STOP_EVENT.is_set(): break
-            
+
         elapsed = time.monotonic() - start_time
         wait_time = max(0, args.interval - elapsed)
-        
+
         if _STOP_EVENT.is_set():
             break
-            
+
         try:
             await asyncio.wait_for(_STOP_EVENT.wait(), timeout=wait_time)
         except asyncio.TimeoutError:
@@ -295,16 +294,16 @@ async def main_loop(args):
 
 def main():
     parser = argparse.ArgumentParser(description="m3-memory Cognitive Loop")
-    parser.add_argument("--interval", type=int, default=300, 
+    parser.add_argument("--interval", type=int, default=300,
                         help="Seconds between passes (default: 300)")
     parser.add_argument("--background", action="store_true", help="Run in background (fire and forget)")
     parser.add_argument("--concurrency", type=int, default=2, help="SLM concurrency (default: 2)")
     parser.add_argument("--limit-per-pass", type=int, default=50, help="Max groups/rows per pass (default: 50)")
-    
+
     # Database knobs
     parser.add_argument("--database", default=None, help="Core Memory DB path (Env: M3_DATABASE)")
     parser.add_argument("--chatlog-db", default=None, help="Chatlog DB path (Env: CHATLOG_DB_PATH)")
-    
+
     parser.add_argument("--profile-entities", default="entities_local_qwen", help="Profile for entities")
     parser.add_argument("--profile-enrich", default="enrich_local_qwen", help="Profile for enrichment")
     parser.add_argument("--reflector-threshold", type=int, default=5, help="Min observations before Reflector (default: 5)")
