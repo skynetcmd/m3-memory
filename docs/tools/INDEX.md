@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-05T13:54:32.731116+00:00._
+_Generated 2026-05-06T23:57:12.762240+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -78,6 +78,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/run_reflector.py](run_reflector.md) | Phase D Mastra-style Reflector drainer. |  |
 | [bin/secret_rotator.py](secret_rotator.md) | (no docstring) |  |
 | [bin/session_handoff.py](session_handoff.md) | (no docstring) |  |
+| [bin/setup_embedder.py](setup_embedder.md) | setup_embedder.py — Sovereign, air-gapped installation of local embedder (LM Studio + BGE-M3). |  |
 | [bin/setup_secret.py](setup_secret.md) | Interactive CLI for adding API keys to the m3-memory encrypted vault. |  |
 | [bin/setup_test_db.py](setup_test_db.md) | Seed a fresh SQLite DB with the full m3-memory schema for test isolation. |  |
 | [bin/slm_intent.py](slm_intent.md) | Small-Language-Model intent classifier with named-profile configs. |  |
@@ -90,6 +91,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
 | [bin/test_mcp_proxy_unit.py](test_mcp_proxy_unit.md) | test_mcp_proxy_unit.py - In-process unit tests for mcp_proxy. |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |
+| [bin/test_sqlite_pragmas.py](test_sqlite_pragmas.md) | test_sqlite_pragmas.py — regression tests for bin/sqlite_pragmas.py. |  |
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
 | [bin/thermal_utils.py](thermal_utils.md) | (no docstring) |  |
 | [bin/unified_ai.py](unified_ai.md) | Unified chat client across Gemini, Claude, and LM Studio. |  |

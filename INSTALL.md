@@ -46,6 +46,7 @@ pipx ensurepath
 exec $SHELL -l                        # pick up ~/.local/bin in PATH
 pipx install m3-memory
 mcp-memory install-m3 --cognitive-loop --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor                     # verify
 ```
 
@@ -57,6 +58,7 @@ pipx ensurepath
 exec $SHELL -l
 pipx install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor
 ```
 
@@ -66,6 +68,7 @@ mcp-memory doctor
 winget install Python.Python.3.12 Git.Git SQLite.SQLite
 pip install m3-memory
 mcp-memory install-m3 --capture-mode both
+mcp-memory install-embedder           # optional: self-contained local embedder
 mcp-memory doctor
 ```
 
