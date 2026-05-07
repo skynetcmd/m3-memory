@@ -30,6 +30,41 @@ For decay sweeps, **delegate to `bin/chatlog_decay.py`** via `Bash`. Do NOT comp
 
 If an MCP tool fails with "not found," fall back to direct sqlite3 via Bash against the resolved DB path — but log the fallback in your report.
 
+## Visibility — emit progress, run bounded
+
+The user spawning you has NO visibility into your internal work. They see "agent started" and then nothing until you exit. Long silences look like infinite loops, even when you're doing real work. Two rules to fix this:
+
+### Progress heartbeats (mandatory)
+
+At each phase transition, emit a one-line status via `Bash: echo "[chatlog-curator] phase=<name> elapsed=<sec>s tool_calls=<n> ..."`. Phases:
+- `start` — first thing you do, before any tool call.
+- `db_resolved` — after determining DB path + layout. Include `db=<path> layout=<unified|separate>`.
+- `survey_done` — after `chatlog_status` and basic counts. Include `n_turns=<count> n_conversations=<count>`.
+- `decay_dryrun_done` — after `bin/chatlog_decay.py --dry-run`. Include the JSON `applied_writes` count.
+- `candidates_found` — after dedup / abandoned-conv / promotion-candidate searches. Include `n_dedup=<n> n_abandoned=<n> n_promote=<n>`.
+- `plan_ready` — just before emitting the apply-prompt.
+- `apply_start`, `apply_progress` (every 10 ops), `apply_done` — for APPLY mode.
+
+Each `echo` line costs ~1 second of agent time but gives the user a heartbeat. Do not skip them.
+
+### Tool-call cap (mandatory)
+
+PLAN mode is bounded:
+- `chatlog_status` ≤ 1 call
+- `chatlog_search` ≤ 3 calls (semantic promote-candidate searches)
+- `Bash` SQL queries ≤ 5 calls (survey, dedup-content, abandoned-conv, etc.)
+- `bin/chatlog_decay.py --dry-run` exactly once
+- Total tool calls (including Bash echoes) ≤ 25
+- Wall-clock soft budget: 5 minutes; emit `[chatlog-curator] phase=budget_exceeded` and exit if you hit it.
+
+APPLY mode is bounded:
+- One MCP call per item in the structured plan; no extra exploration.
+- Total wall-clock soft budget: 10 minutes for plans up to 200 items.
+
+### No-loop self-check (mandatory)
+
+If two consecutive tool calls return identical or near-identical results, treat as a stuck-state signal: emit `[chatlog-curator] phase=stuck_detected` and exit with whatever plan you have so far. Don't keep trying.
+
 ## DB selection — env vars and overrides
 
 Pick the chatlog DB path in this priority order (matches `bin/chatlog_config.chatlog_db_path()`):
