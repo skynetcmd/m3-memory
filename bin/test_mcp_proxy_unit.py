@@ -146,9 +146,9 @@ class TestMcpProxyAllowDestructive(unittest.TestCase):
                          f"Missing destructive tools when enabled: {destructive - present}")
 
     def test_full_catalog_count(self):
-        # 46 catalog tools when destructive enabled (includes memory_refresh_queue)
+        # 63 catalog tools when destructive enabled (includes memory_refresh_queue, embedder_status, etc.)
         catalog_schemas, _ = self.mcp_proxy._build_catalog_tools()
-        self.assertEqual(len(catalog_schemas), 46)
+        self.assertEqual(len(catalog_schemas), 63)
 
 
 if __name__ == "__main__":

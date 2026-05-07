@@ -212,7 +212,7 @@ class M3Context:
             if self._pool is not None:
                 return
             pool_size = int(os.environ.get("DB_POOL_SIZE", "5"))
-            pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "10"))
+            pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
             pool: "queue.Queue[sqlite3.Connection]" = queue.Queue(maxsize=pool_size)
             for _ in range(pool_size):
                 try:
@@ -376,7 +376,7 @@ class M3Context:
             return conn.execute(sql, params).fetchall()
 
     def log_event(self, category: str, detail_a: str,
-                  detail_b: str = "", detail_c: str = "None") -> None:
+                  detail_b: str = "", detail_c: Optional[str] = None) -> None:
         """Route a structured event to the correct legacy table.
 
         Used by bridges that predate the unified memory_items model.
@@ -442,6 +442,10 @@ class StructuredLogger:
                 continue
             parts.append(f"{k}={v}")
         return " | ".join(parts)
+
+    def log(self, event: str, *args, **kwargs) -> None:
+        """Helper to format and print a structured log line to stderr."""
+        print(self.format(event, *args, **kwargs), file=sys.stderr)
 
 
 def _cleanup():
