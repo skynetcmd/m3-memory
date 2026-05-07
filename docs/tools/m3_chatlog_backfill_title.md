@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_chatlog_backfill_title.py
-sha1: fec7c9a8ec45
-mtime_utc: 2026-05-01T09:15:53.147020+00:00
-generated_utc: 2026-05-01T13:05:26.818794+00:00
+sha1: 3fe5547eaf29
+mtime_utc: 2026-05-06T23:55:06.653082+00:00
+generated_utc: 2026-05-06T23:57:12.290921+00:00
 private: false
 ---
 
@@ -28,7 +28,7 @@ Quick start:
 
 ## Entry points
 
-- `def main()` (line 224)
+- `def main()` (line 227)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -59,7 +59,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (get_m3_root)`
 
 ---
 
@@ -67,9 +67,9 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 207)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 99)
-- `sqlite3.connect()  → `str(db_path)`` (line 127)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 102)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 210)
+- `sqlite3.connect()  → `str(db_path)`` (line 130)
 
 
 ---

@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: 2804ae648d29
-mtime_utc: 2026-05-01T09:15:53.143021+00:00
-generated_utc: 2026-05-01T13:05:26.984205+00:00
+sha1: 38bacf472984
+mtime_utc: 2026-05-06T23:50:56.421645+00:00
+generated_utc: 2026-05-06T23:57:12.522449+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 59)
+- `def main()` (line 84)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -38,6 +38,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg, resolve_db_path)`
+- `memory_core`
 
 ---
 
@@ -45,7 +46,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 69)
+- `sqlite3.connect()  → `db_path`` (line 94)
 
 
 ---

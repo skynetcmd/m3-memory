@@ -1,8 +1,8 @@
 ---
 tool: bin/build_lme_m_db.py
-sha1: 303d70294d8d
-mtime_utc: 2026-05-03T21:28:26.613102+00:00
-generated_utc: 2026-05-04T22:24:29.012006+00:00
+sha1: 6fb25bac162f
+mtime_utc: 2026-05-06T05:10:44.395301+00:00
+generated_utc: 2026-05-06T23:11:44.839614+00:00
 private: false
 ---
 
@@ -38,7 +38,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 135)
+- `def main()` (line 137)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -62,7 +62,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
 
@@ -70,7 +70,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(args.db)`` (line 207)
+- `sqlite3.connect()  → `str(args.db)`` (line 209)
 
 
 ---
