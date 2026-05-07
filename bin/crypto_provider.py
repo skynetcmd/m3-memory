@@ -4,10 +4,10 @@ crypto_provider.py — Abstraction layer for FIPS-ready cryptography.
 Supports standard Python crypto and wolfSSL/wolfCrypt backends.
 """
 
-import os
+import ctypes
 import hashlib
 import logging
-import ctypes
+import os
 from typing import Optional
 
 logger = logging.getLogger("m3-crypto")
@@ -44,7 +44,6 @@ class CryptoProvider:
                 self._libwolf = ctypes.CDLL(lib_name)
             except OSError:
                 # Attempt to find it via python package if possible
-                import wolfssl
                 logger.info("M3 Crypto: wolfSSL library loaded via python package.")
                 # We still need the handle for low-level FIPS calls if not exposed
                 # This is a fallback/placeholder logic
@@ -54,7 +53,7 @@ class CryptoProvider:
             # 1. Register FIPS Status Callback
             # wolfCrypt_SetCb_fips(myFipsCb)
             FIPS_CB_TYPE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_char_p)
-            
+
             def myFipsCb(status, msg):
                 msg_str = msg.decode('utf-8') if msg else "No message"
                 err_desc = WOLF_ERROR_CODES.get(status, "Status OK" if status == 0 else "Unknown Status")
@@ -99,7 +98,7 @@ class CryptoProvider:
                 return wolfcrypt.sha256(data).hexdigest()
             except (ImportError, AttributeError):
                 logger.debug("M3 Crypto: wolfssl.wolfcrypt not found, using placeholder.")
-        
+
         # Default Fallback
         return hashlib.sha256(data).hexdigest()
 
@@ -110,7 +109,7 @@ class CryptoProvider:
             # In production: call wc_AesGcmEncrypt via ctypes or wolfssl module
             logger.debug("M3 Crypto: wolfSSL AES-GCM encrypt stub triggered.")
             # return self._wolf_aes_gcm_encrypt(data, key)
-        
+
         # Default Fallback: AES-256-GCM via cryptography
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         aesgcm = AESGCM(key)
@@ -124,7 +123,7 @@ class CryptoProvider:
             # Stub for wolfCrypt AES-GCM
             logger.debug("M3 Crypto: wolfSSL AES-GCM decrypt stub triggered.")
             # return self._wolf_aes_gcm_decrypt(token, key)
-        
+
         # Default Fallback: AES-256-GCM via cryptography
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         aesgcm = AESGCM(key)
@@ -166,7 +165,7 @@ class CryptoProvider:
         # Explicitly disable old TLS versions
         if hasattr(ssl, "OP_NO_TLSv1"): ctx.options |= ssl.OP_NO_TLSv1
         if hasattr(ssl, "OP_NO_TLSv1_1"): ctx.options |= ssl.OP_NO_TLSv1_1
-        
+
         # Enforce TLS 1.3 if possible even in default mode
         try:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_3
