@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-07T00:43:52.853274+00:00._
+_Generated 2026-05-07T01:00:25.889112+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -87,6 +87,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/temporal_utils.py](temporal_utils.md) | Enhanced temporal resolution utility for m3-memory. |  |
 | [bin/test_bulk_parity.py](test_bulk_parity.md) | Real integration tests for memory_write_bulk_impl. |  |
 | [bin/test_debug_agent.py](test_debug_agent.md) | End-to-end test suite for debug_agent_bridge.py. |  |
+| [bin/test_fips_integrity.py](test_fips_integrity.md) | test_fips_integrity.py — Validation suite for FIPS-ready crypto abstraction. |  |
 | [bin/test_keychain.py](test_keychain.md) | (no docstring) |  |
 | [bin/test_knowledge.py](test_knowledge.md) | (no docstring) |  |
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
