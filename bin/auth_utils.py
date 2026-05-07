@@ -3,6 +3,11 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import threading
+from crypto_provider import provider as crypto
+
+# --- Global Sync ---
+_crypto_lock = threading.Lock()
 import platform
 import re
 import sqlite3
@@ -93,6 +98,24 @@ def _get_device_salt() -> bytes:
 _PBKDF2_ITERATIONS = 600_000
 _PBKDF2_LEGACY_ITERATIONS = 100_000
 
+def _derive_raw_key(master_key: str, iterations: int = _PBKDF2_ITERATIONS) -> bytes:
+    """
+    Derives a raw 32-byte key from the master key using PBKDF2HMAC.
+    Uses a per-device salt for protection against rainbow tables.
+    """
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    salt = _get_device_salt()
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=iterations,
+    )
+    return kdf.derive(master_key.encode("utf-8"))
+
+
 def _get_fernet(master_key: str, iterations: int = _PBKDF2_ITERATIONS):
     """
     Derives a Fernet encryption object from the master key using PBKDF2HMAC.
@@ -111,6 +134,39 @@ def _get_fernet(master_key: str, iterations: int = _PBKDF2_ITERATIONS):
     )
     key = base64.urlsafe_b64encode(kdf.derive(master_key.encode("utf-8")))
     return Fernet(key)
+
+
+def _decrypt_token(token_str: str, master_key: str, iterations: int = _PBKDF2_ITERATIONS) -> str | None:
+    """Decrypts a token string using AES-GCM or Fernet (legacy). Protected by global sync."""
+    try:
+        raw_token = base64.b64decode(token_str)
+        key = _derive_raw_key(master_key, iterations)
+        
+        with _crypto_lock:
+            # Try modern AES-GCM first
+            try:
+                crypto.unlock_key()
+                return crypto.decrypt(raw_token, key).decode("utf-8")
+            except Exception:
+                # Try legacy Fernet
+                from cryptography.fernet import Fernet
+                f_key = base64.urlsafe_b64encode(key)
+                return Fernet(f_key).decrypt(raw_token).decode("utf-8")
+            finally:
+                crypto.lock_key()
+    except Exception:
+        return None
+
+def _encrypt_value(value: str, master_key: str) -> str:
+    """Encrypts a value using the modern AES-GCM provider. Protected by global sync."""
+    key = _derive_raw_key(master_key)
+    with _crypto_lock:
+        try:
+            crypto.unlock_key()
+            encrypted = crypto.encrypt(value.encode("utf-8"), key)
+            return base64.b64encode(encrypted).decode("utf-8")
+        finally:
+            crypto.lock_key()
 
 
 def _sanitize_service(service: str) -> str:
@@ -208,25 +264,30 @@ def get_api_key(service: str) -> str | None:
                     return None
 
                 # Try current iteration count first, fall back to legacy
-                try:
-                    fernet = _get_fernet(master_key)
-                    decrypted = fernet.decrypt(row[0].encode("utf-8")).decode("utf-8")
-                except Exception:
-                    try:
-                        fernet_legacy = _get_fernet(master_key, iterations=_PBKDF2_LEGACY_ITERATIONS)
-                        decrypted = fernet_legacy.decrypt(row[0].encode("utf-8")).decode("utf-8")
-                        logger.warning(f"Secret '{service}' decrypted with legacy PBKDF2 iterations. Auto-migrating to {_PBKDF2_ITERATIONS} iterations.")
-                        # Auto-migrate: re-encrypt with current iterations
-                        try:
-                            fernet_new = _get_fernet(master_key)
-                            new_encrypted = fernet_new.encrypt(decrypted.encode("utf-8")).decode("utf-8")
-                            cur.execute("UPDATE synchronized_secrets SET encrypted_value = ? WHERE service_name = ?", (new_encrypted, service))
-                            conn.commit()
-                        except Exception as mig_err:
-                            logger.debug(f"Auto-migration of '{service}' failed: {mig_err}")
-                    except Exception:
+                decrypted = _decrypt_token(row[0], master_key)
+                is_legacy = row[0].startswith("gAAAA")
+                needs_migration = is_legacy
+                
+                if decrypted is None:
+                    # Try legacy PBKDF2 iterations
+                    decrypted = _decrypt_token(row[0], master_key, iterations=_PBKDF2_LEGACY_ITERATIONS)
+                    if decrypted:
+                        logger.warning(f"Secret '{service}' decrypted with legacy iterations. Auto-migrating.")
+                        needs_migration = True
+                    else:
                         logger.debug(f"Failed to decrypt vault secret for {service}")
                         return None
+                
+                # Auto-migrate if it was legacy Fernet OR legacy iterations
+                if decrypted and needs_migration:
+                    try:
+                        new_encrypted = _encrypt_value(decrypted, master_key)
+                        cur.execute("UPDATE synchronized_secrets SET encrypted_value = ? WHERE service_name = ?", (new_encrypted, service))
+                        conn.commit()
+                        logger.info(f"Auto-migrated '{service}' to modern AES-GCM encryption.")
+                    except Exception as mig_err:
+                        logger.debug(f"Auto-migration of '{service}' failed: {mig_err}")
+
                 return decrypted
         except Exception as exc:
             logger.debug(f"Failed to read from encrypted vault: {type(exc).__name__}")
@@ -245,8 +306,7 @@ def set_api_key(service: str, value: str):
     if not master_key:
         raise ValueError("AGENT_OS_MASTER_KEY not found in OS keyring. Cannot encrypt secret.")
 
-    fernet = _get_fernet(master_key)
-    encrypted_value = fernet.encrypt(value.encode("utf-8")).decode("utf-8")
+    encrypted_value = _encrypt_value(value, master_key)
     origin_device = os.environ.get("ORIGIN_DEVICE", platform.node())
     # ISO-8601 UTC timestamp
     now = datetime.now(timezone.utc).isoformat()
