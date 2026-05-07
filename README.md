@@ -7,7 +7,7 @@
 
 # M3 Memory
 
-Local-first Agentic Memory Layer Framework for MCP Agents.
+Local-first Agentic Memory Layer Framework for MCP Agents • 74 tools • Hybrid search (FTS5 + vector + MMR) • GDPR • FIPS 140-3 ready • 100% local
 
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
