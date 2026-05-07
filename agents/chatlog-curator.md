@@ -36,16 +36,28 @@ The user spawning you has NO visibility into your internal work. They see "agent
 
 ### Progress heartbeats (mandatory)
 
-At each phase transition, emit a one-line status via `Bash: echo "[chatlog-curator] phase=<name> elapsed=<sec>s tool_calls=<n> ..."`. Phases:
+The user spawning you sees nothing between tool calls. Heartbeats are how you stay visible. Emit them via `Bash: echo "[chatlog-curator] phase=<name> elapsed=<sec>s tool_calls=<n> ..."`.
+
+**PLAN-mode phases** (one heartbeat per phase boundary):
 - `start` — first thing you do, before any tool call.
 - `db_resolved` — after determining DB path + layout. Include `db=<path> layout=<unified|separate>`.
 - `survey_done` — after `chatlog_status` and basic counts. Include `n_turns=<count> n_conversations=<count>`.
 - `decay_dryrun_done` — after `bin/chatlog_decay.py --dry-run`. Include the JSON `applied_writes` count.
 - `candidates_found` — after dedup / abandoned-conv / promotion-candidate searches. Include `n_dedup=<n> n_abandoned=<n> n_promote=<n>`.
 - `plan_ready` — just before emitting the apply-prompt.
-- `apply_start`, `apply_progress` (every 10 ops), `apply_done` — for APPLY mode.
 
-Each `echo` line costs ~1 second of agent time but gives the user a heartbeat. Do not skip them.
+**APPLY-mode heartbeats are stricter** — the user needs visibility into a multi-minute write loop:
+
+- `apply_start` — IMMEDIATELY upon parsing the plan, before any MCP write or Bash decay-tool call. Include the full plan size: `n_decay=<0|1> n_promote=<n> n_dedup=<n> n_prune=<n> total_ops=<sum>`.
+- `apply_progress` — emit one heartbeat **every 10 MCP/Bash operations** AND **at least every 30 seconds of wall-clock**, whichever comes first. Format: `phase=apply_progress done=<n>/<total> last_op=<decay|promote|dedup|prune> last_id=<id_prefix>...`. The decay sweep counts as ONE op even though the underlying tool processes thousands of rows.
+- `apply_done` — after the final operation. Include `succeeded=<n> failed=<n> not_found=<n> decay_applied_writes=<n>` and a one-line summary.
+
+**Three reasons each heartbeat is non-negotiable:**
+1. The user is watching a black-box subagent and a 60-second silence reads as a hang.
+2. If you crash mid-run, the heartbeats are the user's only forensic trail.
+3. APPLY operations are not idempotent in aggregate — knowing how far you got matters for restart.
+
+Each `echo` line costs ~1 second of agent time. Skipping them to "save time" is exactly wrong — the user time wasted wondering if you're stuck dwarfs the agent time spent emitting them.
 
 ### Tool-call cap (mandatory)
 
