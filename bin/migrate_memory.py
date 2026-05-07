@@ -441,8 +441,21 @@ def init_migrations_table(conn):
     conn.commit()
 
 def get_applied_versions(conn):
+    """Return integer-valued schema version markers from `schema_versions`.
+
+    Skips non-numeric markers — some bench / scratch DBs store custom string
+    labels in the version column. Without this coercion, `max(applied)`
+    could return a string and downstream `f"{cur:03d}"` formatting would
+    raise ValueError on a freshly-bootstrapped DB.
+    """
     rows = conn.execute("SELECT version FROM schema_versions ORDER BY version").fetchall()
-    return [row[0] for row in rows]
+    out = []
+    for (v,) in rows:
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            continue   # skip non-numeric markers (bench DBs may use TEXT labels)
+    return out
 
 def current_version(conn) -> int:
     applied = get_applied_versions(conn)
