@@ -26,9 +26,9 @@ package install.
 ```
 
 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`,
-`/m3:status`, …), the `memory-curator` subagent, and auto-wired Stop +
-PreCompact chatlog hooks. See [claude_code_plugin.md](./claude_code_plugin.md)
-for the full reference.
+`/m3:status`, …), the `m3:curate-memory` and `m3:curate-chatlog` subagents,
+and auto-wired Stop + PreCompact chatlog hooks. See
+[claude_code_plugin.md](./claude_code_plugin.md) for the full reference.
 
 ### Windows
 
