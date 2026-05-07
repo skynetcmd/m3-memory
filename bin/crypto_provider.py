@@ -163,6 +163,10 @@ class CryptoProvider:
         # Default Fallback (Standard Python ssl)
         import ssl
         ctx = ssl.create_default_context()
+        # Explicitly disable old TLS versions
+        if hasattr(ssl, "OP_NO_TLSv1"): ctx.options |= ssl.OP_NO_TLSv1
+        if hasattr(ssl, "OP_NO_TLSv1_1"): ctx.options |= ssl.OP_NO_TLSv1_1
+        
         # Enforce TLS 1.3 if possible even in default mode
         try:
             ctx.minimum_version = ssl.TLSVersion.TLSv1_3
