@@ -5,7 +5,7 @@ Aggressively suppresses chatlog turns whose content has only short-term
 value (transient IDs, status snapshots, short user commands) by lowering
 their `importance` over time and setting `valid_to` past a hard cutoff.
 
-The chatlog-curator subagent calls this tool to do the heavy lifting
+The `m3:curate-chatlog` subagent calls this tool to do the heavy lifting
 without spending tokens evaluating each row.
 
 USAGE
@@ -239,7 +239,7 @@ def run_sweep(db_path: str, *, apply: bool, batch_size: int = 1000) -> dict:
                 return {"error": f"memory_items.{col} missing in {db_path}"}
         has_valid_to = _has_column(conn, "memory_items", "valid_to")
 
-        # MANDATORY: type='chat_log' filter, regardless of layout (per chatlog-curator policy).
+        # MANDATORY: type='chat_log' filter, regardless of layout (per m3:curate-chatlog policy).
         # Role is derived from `title` prefix using the `<role>@<host_agent>: ...`
         # convention enforced by chatlog_core's writer. Empirical match rate vs
         # metadata_json.role on 1000-row sample: 99.8% (2 mismatches).
