@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "m3-memory"
 version = "2026.5.6.2"
-description = "Local-first persistent memory for MCP agents — 74 tools, 89% LongMemEval, hybrid search, GDPR, zero cloud"
+description = "Local-first Agentic Memory Layer Framework for MCP Agents — 74 tools, 89% LongMemEval, GDPR, 100% local"
 
 readme = "README.md"
 license = "Apache-2.0"
@@ -16,15 +16,25 @@ authors = [
 ]
 keywords = [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
     "agentic-memory",
+    "ai-memory",
+    "long-term-memory",
     "local-llm",
     "claude",
+    "claude-code",
     "gemini",
+    "gemini-cli",
+    "aider",
     "rag",
+    "rag-memory",
     "vector-search",
+    "hybrid-search",
     "sqlite",
     "gdpr",
+    "privacy",
+    "homelab",
     "ai-agents",
     "ollama",
     "contradiction-detection",
