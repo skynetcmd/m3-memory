@@ -175,9 +175,16 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_doctor(_args: argparse.Namespace) -> int:
+def _cmd_doctor(args: argparse.Namespace) -> int:
     from m3_memory.installer import doctor
-    return doctor()
+    code = doctor()
+    
+    # Also run the project-specific doctor if payload is installed
+    if _resolve_bin_script("memory_doctor.py"):
+        print("\n--- Project Payload Diagnostics ---")
+        return _run_bin_script("memory_doctor.py", args.rest)
+    
+    return code
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
@@ -676,7 +683,7 @@ Examples:
     # or `embedder` aren't fought over by the outer parser — they're passed 
     # through to the child script. args.rest carries them.
     args, extras = parser.parse_known_args()
-    if getattr(args, "command", None) in ("chatlog", "install-embedder", "embedder"):
+    if getattr(args, "command", None) in ("chatlog", "install-embedder", "embedder", "doctor"):
         args.rest = extras
     elif extras:
         # For any other subcommand, unknown flags are genuine errors.
