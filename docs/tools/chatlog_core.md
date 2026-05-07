@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_core.py
-sha1: 3a1f33b010a1
-mtime_utc: 2026-05-01T09:15:53.156020+00:00
-generated_utc: 2026-05-01T13:05:26.733502+00:00
+sha1: 95d76552aa98
+mtime_utc: 2026-05-05T21:35:18.399209+00:00
+generated_utc: 2026-05-06T23:11:44.862294+00:00
 private: false
 ---
 
@@ -56,6 +56,7 @@ _(none detected)_
 - `m3_sdk (M3Context, resolve_db_path)`
 - `m3_sdk (resolve_db_path)`
 - `memory_core`
+- `memory_core (_sanitize_fts)`
 
 ---
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_test_db.py
-sha1: 1bf21c5c9711
-mtime_utc: 2026-04-22T01:03:02.051328+00:00
-generated_utc: 2026-05-01T13:05:27.063299+00:00
+sha1: 9d4c46b13d44
+mtime_utc: 2026-05-06T05:08:54.263203+00:00
+generated_utc: 2026-05-06T23:11:45.662697+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Exits non-zero if any migration fails.
 
 ## Entry points
 
-- `def main()` (line 37)
+- `def main()` (line 38)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -49,6 +49,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg, resolve_db_path)`
+- `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
 
@@ -56,7 +57,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 61)
+- `sqlite3.connect()  → `db_path`` (line 62)
 
 
 ---

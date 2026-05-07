@@ -36,7 +36,12 @@ TARBALL_URL_TEMPLATE = "https://github.com/skynetcmd/m3-memory/archive/refs/tags
 
 
 def config_dir() -> Path:
-    """Directory for per-user m3-memory state (config + default repo clone)."""
+    """Directory for per-user m3-memory state (config + default repo clone).
+    Honors M3_MEMORY_ROOT environment variable, defaults to ~/.m3-memory.
+    """
+    root = os.environ.get("M3_MEMORY_ROOT")
+    if root:
+        return Path(root).expanduser().resolve()
     return Path.home() / ".m3-memory"
 
 
@@ -783,7 +788,11 @@ def doctor() -> int:
     """Print diagnostic info and return 0 on healthy, 1 on missing payload."""
     from m3_memory import __version__
 
+    root = os.environ.get("M3_MEMORY_ROOT")
+    root_src = "(M3_MEMORY_ROOT env)" if root else "(default)"
+    
     print(f"m3-memory package version: {__version__}")
+    print(f"M3 root directory:         {config_dir()} {root_src}")
     print(f"config file:               {config_file()}")
     cfg = load_config()
     if cfg:

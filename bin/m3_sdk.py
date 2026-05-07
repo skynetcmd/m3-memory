@@ -86,8 +86,24 @@ def resolve_venv_python() -> str:
     return os.path.join(base, ".venv", "bin", "python")
 
 
+def get_m3_root() -> str:
+    """Returns the M3 root directory for user state (config, backups, etc.).
+    Honors M3_MEMORY_ROOT env var, defaults to ~/.m3-memory.
+    """
+    root = os.getenv("M3_MEMORY_ROOT")
+    if root:
+        return os.path.abspath(os.path.expanduser(root))
+    return os.path.join(os.path.expanduser("~"), ".m3-memory")
+
+
 def _default_db_path() -> str:
-    base = os.getenv("M3_MEMORY_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Precedence: M3_MEMORY_ROOT/memory/agent_memory.db > sibling memory/ folder.
+    root = os.getenv("M3_MEMORY_ROOT")
+    if root:
+        return os.path.join(os.path.abspath(os.path.expanduser(root)), "memory", "agent_memory.db")
+    
+    # Fallback to sibling memory/ directory (developer clone case)
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "memory", "agent_memory.db")
 
 

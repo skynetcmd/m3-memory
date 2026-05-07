@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich_batch.py
-sha1: f853b40178b2
-mtime_utc: 2026-05-05T13:40:47.523553+00:00
-generated_utc: 2026-05-05T13:54:32.086232+00:00
+sha1: b66eb01f75a5
+mtime_utc: 2026-05-05T15:48:00.986773+00:00
+generated_utc: 2026-05-06T23:11:45.237756+00:00
 private: false
 ---
 
@@ -63,7 +63,7 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 
 ## Entry points
 
-- `def main()` (line 1129)
+- `def main()` (line 1145)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -121,8 +121,8 @@ Status:  Phase E worker. Pairs with batch_runner.py (provider abstraction).
 
 **http**
 
-- `httpx.AsyncClient()` (line 582)
-- `httpx.AsyncClient()` (line 997)
+- `httpx.AsyncClient()` (line 1013)
+- `httpx.AsyncClient()` (line 598)
 
 **sqlite**
 

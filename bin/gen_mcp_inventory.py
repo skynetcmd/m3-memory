@@ -121,6 +121,7 @@ def get_category_map():
         # Infrastructure Operations
         "memory_cost_report": "Infrastructure Operations",
         "chroma_sync": "Infrastructure Operations",
+        "embedder_status": "Infrastructure Operations",
 
         # Proxy tools
         "log_activity": "Operational Protocol",
@@ -247,7 +248,7 @@ def main():
     # number when adding/removing tools as part of the regular tool-inventory
     # workflow. Per memory `feedback_tool_inventory`: every flag needs a default;
     # similarly every tool needs a category.
-    EXPECTED_TOOL_COUNT = 73
+    EXPECTED_TOOL_COUNT = 74
     if len(all_tools) != EXPECTED_TOOL_COUNT:
         print(f"Warning: Expected {EXPECTED_TOOL_COUNT} tools, found {len(all_tools)} — update EXPECTED_TOOL_COUNT in gen_mcp_inventory.py if a tool was added/removed.")
 

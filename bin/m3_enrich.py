@@ -67,6 +67,7 @@ from slm_intent import (
     invalidate_cache as invalidate_profile_cache,
 )
 from sqlite_pragmas import apply_pragmas  # noqa: E402
+from m3_sdk import get_m3_root
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
@@ -83,7 +84,7 @@ DEFAULT_CORE_TYPES = (
     "message", "conversation",
 )
 ALWAYS_SKIP_TYPES = ("observation",)  # already enriched; idempotency
-BACKUP_DIR = Path.home() / ".m3-memory" / "backups"
+BACKUP_DIR = Path(get_m3_root()) / "backups"
 
 
 def _today() -> str:
