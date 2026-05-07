@@ -237,7 +237,7 @@ def _find_callers(function_name: str) -> str:
 def _log_to_db(category: str, detail_a: str, detail_b: str):
     """Log to agent_memory.db via SDK."""
     try:
-        ctx.log_event(category, detail_a, detail_b)
+        ctx.log_event(category, detail_a, detail_b, detail_c="test_debug_agent")
     except Exception as e:
         logger.debug(f"DB log failed: {e}")
 
