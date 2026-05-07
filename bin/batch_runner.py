@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Optional, Protocol
 
 import httpx
-
 from unified_ai import _is_gemini_endpoint
 
 # ── Provider-neutral request/result shapes ─────────────────────────────────
