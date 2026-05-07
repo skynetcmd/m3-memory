@@ -259,6 +259,7 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 | Tool | When to Use |
 |------|-------------|
 | `memory_cost_report()` | Check session operation counts (embed calls, tokens, searches, writes) |
+| `embedder_status()` | Check the status of the local sovereign embedder server (port 8081). |
 | `chroma_sync(direction)` | Manual sync with ChromaDB. Use `push`, `pull`, or `both`. |
 
 ---
