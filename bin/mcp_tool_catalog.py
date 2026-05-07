@@ -1517,6 +1517,20 @@ TOOLS: list[ToolSpec] = [
         default_allowed=False,
         inject_agent_id=False,
     ),
+    ToolSpec(
+        name="embedder_status",
+        description="Check the status of the local sovereign embedder server (port 8081).",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        impl=memory_core.embedder_status_impl,
+        is_async=True,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
 ]
 
 

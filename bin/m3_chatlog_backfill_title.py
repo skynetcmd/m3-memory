@@ -26,8 +26,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from m3_sdk import get_m3_root
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BACKUP_DIR = Path.home() / ".m3-memory" / "backups"
+BACKUP_DIR = Path(get_m3_root()) / "backups"
 
 # Default set of titles we consider "useless" for FTS purposes.
 # These are role labels or generic placeholders — they tell you nothing

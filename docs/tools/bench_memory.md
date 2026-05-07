@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_memory.py
-sha1: 40e554906d2c
-mtime_utc: 2026-04-21T20:40:42.253040+00:00
-generated_utc: 2026-05-01T13:05:26.711105+00:00
+sha1: 488bf9c0dfa6
+mtime_utc: 2026-05-06T05:09:14.767568+00:00
+generated_utc: 2026-05-06T23:11:44.803541+00:00
 private: false
 ---
 
@@ -23,7 +23,7 @@ back to memory/agent_memory.db.
 
 ## Entry points
 
-- `def main()` (line 205)
+- `def main()` (line 206)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -45,6 +45,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (add_database_arg, resolve_db_path)`
+- `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
 
@@ -52,7 +53,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 57)
+- `sqlite3.connect()  → `db_path`` (line 58)
 
 
 ---
