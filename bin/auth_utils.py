@@ -4,6 +4,7 @@ import base64
 import logging
 import os
 import threading
+
 from crypto_provider import provider as crypto
 
 # --- Global Sync ---
@@ -141,7 +142,7 @@ def _decrypt_token(token_str: str, master_key: str, iterations: int = _PBKDF2_IT
     try:
         raw_token = base64.b64decode(token_str)
         key = _derive_raw_key(master_key, iterations)
-        
+
         with _crypto_lock:
             # Try modern AES-GCM first
             try:
@@ -267,7 +268,7 @@ def get_api_key(service: str) -> str | None:
                 decrypted = _decrypt_token(row[0], master_key)
                 is_legacy = row[0].startswith("gAAAA")
                 needs_migration = is_legacy
-                
+
                 if decrypted is None:
                     # Try legacy PBKDF2 iterations
                     decrypted = _decrypt_token(row[0], master_key, iterations=_PBKDF2_LEGACY_ITERATIONS)
@@ -277,7 +278,7 @@ def get_api_key(service: str) -> str | None:
                     else:
                         logger.debug(f"Failed to decrypt vault secret for {service}")
                         return None
-                
+
                 # Auto-migrate if it was legacy Fernet OR legacy iterations
                 if decrypted and needs_migration:
                     try:
