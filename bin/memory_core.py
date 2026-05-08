@@ -232,6 +232,19 @@ CONTRADICTION_TYPE_EXCLUSIONS = frozenset(
     t.strip() for t in os.environ.get("CONTRADICTION_TYPE_EXCLUSIONS", "conversation").split(",")
     if t.strip()
 )
+# Auto-related-edge writer (single-insert path only; bulk path never auto-links).
+# `M3_AUTO_RELATED_LINK=0` disables the writer entirely — every newly inserted
+# memory_item just gets stored, no `related` edge follow-up. Default ON for
+# back-compat. `M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT=0` restores legacy
+# variant-blind candidate scan; default ON restricts contradiction/related
+# candidates to items of the same `variant` value. This prevents cross-variant
+# contamination — an INSERT under one variant linking to twins under a
+# different variant that happens to share content. When `variant` is None on
+# the inserted item, the scope filter degrades to "no variant filter applied"
+# — that is, legacy behavior is preserved for callers that don't use variants
+# at all.
+AUTO_RELATED_LINK              = os.environ.get("M3_AUTO_RELATED_LINK", "1").lower() in ("1", "true", "yes")
+AUTO_RELATED_LINK_SCOPE_BY_VARIANT = os.environ.get("M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT", "1").lower() in ("1", "true", "yes")
 SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "500"))
 LLM_TIMEOUT            = float(os.environ.get("LLM_TIMEOUT", "120.0"))
 
@@ -2087,6 +2100,7 @@ async def memory_write_bulk_impl(
                 superseded_ids, _ = await _check_contradictions(
                     p["id"], p["content"], p["title"], vec, p["type"], p["agent_id"],
                     new_valid_from=p.get("valid_from"),
+                    variant=p.get("variant"),
                 )
                 return p["id"], superseded_ids
 
@@ -2155,11 +2169,16 @@ async def _check_contradictions(
     type_: str,
     agent_id: str,
     new_valid_from: str | None = None,
+    variant: str | None = None,
 ) -> tuple[list[str], list[tuple[str, float]]]:
     """
     Detects contradictions with existing memories of the same type.
     Returns (superseded_ids, related_candidates) where related_candidates
     are (id, score) pairs with cosine > 0.7 that are NOT contradictions.
+
+    When `variant` is non-None and `AUTO_RELATED_LINK_SCOPE_BY_VARIANT` is on
+    (default), candidate scan is restricted to memories of the same variant.
+    This prevents cross-variant contamination during obs INSERT.
     """
     superseded = []
     related = []
@@ -2171,6 +2190,9 @@ async def _check_contradictions(
             if agent_id:
                 where += " AND mi.agent_id = ?"
                 params.append(agent_id)
+            if variant is not None and AUTO_RELATED_LINK_SCOPE_BY_VARIANT:
+                where += " AND mi.variant = ?"
+                params.append(variant)
             rows = db.execute(
                 f"SELECT mi.id, mi.title, mi.content, me.embedding FROM memory_items mi "
                 f"JOIN memory_embeddings me ON mi.id = me.memory_id WHERE {where} LIMIT 200",
@@ -5209,12 +5231,20 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         except Exception as e:
             logger.debug(f"entity extraction dispatch failed: {e}")
 
-    # Contradiction detection + auto-linking (runs after embedding is stored)
+    # Contradiction detection + auto-linking (runs after embedding is stored).
+    # `variant` is threaded into _check_contradictions so candidates respect the
+    # M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT scope rule (default ON: same-variant
+    # only when variant is set on the inserted item).
     superseded_ids = []
     if vec and type not in ("conversation", "message"):
-        superseded_ids, related_candidates = await _check_contradictions(item_id, content, title, vec, type, agent_id)
-        # Auto-link top related (non-contradictory) memory
-        if related_candidates and not superseded_ids:
+        superseded_ids, related_candidates = await _check_contradictions(
+            item_id, content, title, vec, type, agent_id, variant=variant,
+        )
+        # Auto-link top related (non-contradictory) memory. Gated by
+        # M3_AUTO_RELATED_LINK (default ON for back-compat). Disable in any
+        # deployment where you want only explicit `memory_link` calls or where
+        # edge curation is handled by an offline tool.
+        if AUTO_RELATED_LINK and related_candidates and not superseded_ids:
             best_id, best_score = related_candidates[0]
             try:
                 memory_link_impl(item_id, best_id, "related")
