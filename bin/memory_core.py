@@ -1310,11 +1310,24 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
                     "AND name IN ('schema_versions','schema_migrations')"
                 ).fetchall()
                 tables = {r[0] for r in cur}
+                # CAST to INTEGER so a TEXT-affinity column with mixed
+                # numeric markers ('9' vs '34') returns the numeric max
+                # rather than the lexicographic max. Bench DBs imported
+                # without migration markers may have version stored as
+                # TEXT — see lme_m_bench_v1 origin.
                 if "schema_versions" in tables:
-                    row = conn.execute("SELECT MAX(version) FROM schema_versions").fetchone()
+                    row = conn.execute(
+                        "SELECT MAX(CAST(version AS INTEGER)) FROM schema_versions "
+                        "WHERE typeof(CAST(version AS INTEGER))='integer' "
+                        "  AND CAST(version AS INTEGER) > 0"
+                    ).fetchone()
                     db_latest = int(row[0]) if row and row[0] is not None else -1
                 elif "schema_migrations" in tables:
-                    row = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+                    row = conn.execute(
+                        "SELECT MAX(CAST(version AS INTEGER)) FROM schema_migrations "
+                        "WHERE typeof(CAST(version AS INTEGER))='integer' "
+                        "  AND CAST(version AS INTEGER) > 0"
+                    ).fetchone()
                     db_latest = int(row[0]) if row and row[0] is not None else -1
             finally:
                 conn.close()
