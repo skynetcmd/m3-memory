@@ -1,8 +1,8 @@
 ---
 tool: bin/test_bulk_parity.py
-sha1: a6d514479d9d
-mtime_utc: 2026-04-28T16:34:11.113337+00:00
-generated_utc: 2026-05-01T13:05:27.081209+00:00
+sha1: e8ad10c5807a
+mtime_utc: 2026-05-07T01:48:32.238585+00:00
+generated_utc: 2026-05-09T13:54:34.952089+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ variant handling, contradiction detection, and conversation emitters.
 
 ## Entry points
 
-- `async def main()` (line 563)
+- `async def main()` (line 393)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -33,12 +33,13 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `m3_sdk (_cleanup)`
 - `memory_core (memory_write_bulk_impl)`
 
 ---
@@ -48,9 +49,9 @@ _(none detected)_
 **sqlite**
 
 - `sqlite3.connect()  → `db_path`` (line 109)
-- `sqlite3.connect()  → `db_path`` (line 177)
-- `sqlite3.connect()  → `db_path`` (line 239)
-- `sqlite3.connect()  → `db_path`` (line 266)
+- `sqlite3.connect()  → `db_path`` (line 171)
+- `sqlite3.connect()  → `db_path`` (line 212)
+- `sqlite3.connect()  → `db_path`` (line 227)
 
 
 ---
