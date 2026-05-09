@@ -1,8 +1,8 @@
 ---
 tool: bin/batch_runner.py
-sha1: 28a5a4863a06
-mtime_utc: 2026-05-05T15:24:44.204573+00:00
-generated_utc: 2026-05-06T23:11:44.792653+00:00
+sha1: dd9a5afc9276
+mtime_utc: 2026-05-07T03:32:14.554106+00:00
+generated_utc: 2026-05-09T13:54:33.807915+00:00
 private: false
 ---
 
@@ -49,7 +49,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `unified_ai (_is_gemini_endpoint)`
 
 ---
 
