@@ -63,13 +63,19 @@ PRIVATE = {
 
 # Path-prefix-based privacy. Any tracked source whose path-relative-to-repo
 # starts with one of these prefixes is marked private regardless of basename.
-# This keeps benchmark-side internals (knob configs, harness specifics, run
-# orchestration details that reveal current bench targets) from leaking into
-# a public publish. Per memory `22c5aa8b`: bench-only fixes never land on
-# origin/main without an explicit publish commit.
+# This keeps benchmark and bench-harness internals from leaking into a publish
+# unless someone explicitly removes the prefix here. Per memory `22c5aa8b`:
+# bench-only fixes should never land on origin/main.
 PRIVATE_PATH_PREFIXES = (
     "benchmarks/longmemeval/",
     "benchmarks/locomo/",
+    # bench-side helper modules at the worktree root
+    "bench_db.py",
+    "bench_analysis_db.py",
+    # bench analysis scripts
+    "scripts/knob_auto_retro_eval.py",
+    "scripts/repatriate_bench_rows.py",
+    "scripts/seed_bench_analysis.py",
 )
 
 # Core library modules worth auditing even though they lack a CLI surface —
@@ -162,13 +168,21 @@ def extract_docstring(tree: ast.Module) -> str:
     return (ast.get_docstring(tree) or "").strip()
 
 
-def extract_env_vars(source: str) -> list[str]:
+def extract_env_vars(source: str, is_sh: bool = False) -> list[str]:
     vars = set()
-    for match in _ENV_RE.finditer(source):
-        # match.groups() will have (GET_VAR, SET_VAR)
-        v = next((g for g in match.groups() if g), None)
-        if v:
-            vars.add(v)
+    if is_sh:
+        # Match shell variables: $VAR, ${VAR}, or export VAR=
+        # Only pick up upper-case vars (standard for env/config).
+        for match in re.finditer(r"""(?:\$([A-Z0-9_]{2,})|\$\{([A-Z0-9_]{2,})\}|export\s+([A-Z0-9_]{2,})=)""", source):
+            v = next((g for g in match.groups() if g), None)
+            if v:
+                vars.add(v)
+    else:
+        for match in _ENV_RE.finditer(source):
+            # match.groups() will have (GET_VAR, SET_VAR)
+            v = next((g for g in match.groups() if g), None)
+            if v:
+                vars.add(v)
     return sorted(list(vars))
 
 
@@ -235,19 +249,69 @@ def extract_argparse(tree: ast.Module) -> list[dict]:
     return args
 
 
-def is_cli_tool(tree: ast.Module, source: str, name: str = "") -> bool:
-    """Decide whether a source file belongs in the inventory.
+def extract_docstring_sh(source: str) -> str:
+    """Extract leading comment block from a shell script as a docstring."""
+    lines = []
+    for line in source.splitlines():
+        line = line.strip()
+        if line.startswith("#!"):
+            continue
+        if line.startswith("#"):
+            lines.append(line.lstrip("# ").strip())
+        elif not line and not lines:
+            continue
+        else:
+            break
+    return "\n".join(lines).strip()
 
-    Previous logic required either an ``argparse.ArgumentParser`` literal
-    or a ``def main`` / ``async def main`` paired with a ``__main__`` guard.
-    That missed files like mission_control.py (entry point is
-    ``run_dashboard``) and benchmarks/locomo/probe_issues.py (entry is
-    ``probe_dataset`` + sibling probes). Relaxed to: any ``__main__`` guard
-    qualifies — the inventory's value (env vars, file deps, intra-repo
-    imports, call-out buckets) is useful even without argparse.
+
+def extract_argparse_sh(source: str) -> list[dict]:
+    """Heuristic extraction of CLI flags from shell scripts.
+    Looks for case patterns like --flag) or -f) and associated comments.
     """
+    args: list[dict] = []
+    # Match patterns like: --out-dir)  # help text
+    # or: -k|--k)  # help text
+    # or: --k)  # [default: 20] help text
+    pattern = re.compile(r"""^\s+([a-zA-Z0-9\-\|]+)\)\s*(?:#\s*(.*))?$""", re.MULTILINE)
+    for match in pattern.finditer(source):
+        flags_raw, help_text = match.groups()
+        if not flags_raw.startswith("-"):
+            continue
+        names = [f.strip() for f in flags_raw.split("|")]
+        help_str = help_text or ""
+        default = None
+        # Try to extract default from comment: [default: value]
+        default_match = re.search(r"\[default:\s*(.*?)\]", help_str)
+        if default_match:
+            default = default_match.group(1).strip()
+            help_str = help_str.replace(default_match.group(0), "").strip()
+        
+        args.append({
+            "names": names,
+            "help": help_str,
+            "default": default,
+            "default_passed": default is not None,
+            "type": None,
+            "action": None,
+            "required": None,
+            "choices": None,
+        })
+    return args
+
+
+def is_cli_tool(source: str, name: str = "", tree: ast.Module | None = None) -> bool:
+    """Decide whether a source file belongs in the inventory."""
     if name in CORE_LIBRARIES:
         return True
+    
+    is_sh = name.endswith(".sh")
+    if is_sh:
+        # Any .sh file with a shebang or more than 10 lines of code is a tool
+        if source.startswith("#!"):
+            return True
+        return len(source.splitlines()) > 10
+
     if "argparse.ArgumentParser" in source:
         return True
     # A __main__ guard is sufficient. Regex matches both single- and
@@ -267,11 +331,11 @@ def _repo_module_set() -> set[str]:
     mods: set[str] = set()
     for d in SOURCE_DIRS:
         if d.is_dir():
-            for p in d.glob("*.py"):
+            for p in list(d.glob("*.py")) + list(d.glob("*.sh")):
                 mods.add(p.stem)
     for d in RECURSIVE_SOURCE_DIRS:
         if d.is_dir():
-            for p in d.rglob("*.py"):
+            for p in list(d.rglob("*.py")) + list(d.rglob("*.sh")):
                 if "__pycache__" in p.parts:
                     continue
                 mods.add(p.stem)
@@ -658,13 +722,13 @@ def main() -> None:
     sources: list[Path] = []
     for d in SOURCE_DIRS:
         if d.is_dir():
-            sources.extend(sorted(d.glob("*.py")))
+            sources.extend(sorted(list(d.glob("*.py")) + list(d.glob("*.sh"))))
     # Recursive dirs (e.g. benchmarks/) have harness subfolders — walk them
     # but skip __pycache__ and site-packages-like trees.
     for d in RECURSIVE_SOURCE_DIRS:
         if not d.is_dir():
             continue
-        for p in sorted(d.rglob("*.py")):
+        for p in sorted(list(d.rglob("*.py")) + list(d.rglob("*.sh"))):
             if "__pycache__" in p.parts:
                 continue
             sources.append(p)
@@ -680,22 +744,37 @@ def main() -> None:
         if tracked and src.resolve() not in tracked:
             untracked_skipped.append(str(src.relative_to(BASE_DIR)))
             continue
+        
+        is_sh = src.name.endswith(".sh")
         try:
             source = src.read_text(encoding="utf-8")
-            tree = ast.parse(source)
+            if is_sh:
+                tree = None
+            else:
+                tree = ast.parse(source)
         except (OSError, SyntaxError) as e:
             print(f"skip {src.name}: {e}")
             continue
 
-        if not is_cli_tool(tree, source, src.name):
+        if not is_cli_tool(source, name=src.name, tree=tree):
             continue
 
-        doc = extract_docstring(tree)
-        argparse_args = extract_argparse(tree)
-        env_vars = extract_env_vars(source)
-        entry_points = extract_entry_points(tree, source)
-        intra, external = extract_imports(tree, repo_mods, src.stem)
-        external_calls = extract_external_calls(tree)
+        if is_sh:
+            doc = extract_docstring_sh(source)
+            argparse_args = extract_argparse_sh(source)
+            env_vars = extract_env_vars(source, is_sh=True)
+            entry_points = ["Bash execution"]
+            intra = [] # shell script imports are hard to track accurately
+            external = []
+            external_calls = {}
+        else:
+            doc = extract_docstring(tree)
+            argparse_args = extract_argparse(tree)
+            env_vars = extract_env_vars(source)
+            entry_points = extract_entry_points(tree, source)
+            intra, external = extract_imports(tree, repo_mods, src.stem)
+            external_calls = extract_external_calls(tree)
+            
         file_deps = extract_file_deps(source)
         sha1 = file_sha1(src)
         mtime = datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc).isoformat()
