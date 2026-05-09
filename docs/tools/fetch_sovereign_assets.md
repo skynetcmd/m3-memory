@@ -1,8 +1,8 @@
 ---
 tool: bin/fetch_sovereign_assets.py
-sha1: 0c2e70a3c18f
-mtime_utc: 2026-05-07T00:41:46.421083+00:00
-generated_utc: 2026-05-07T00:43:52.339282+00:00
+sha1: 019e20067347
+mtime_utc: 2026-05-07T03:32:14.556216+00:00
+generated_utc: 2026-05-09T13:54:34.165911+00:00
 private: false
 ---
 
@@ -17,7 +17,7 @@ Usage: python bin/fetch_sovereign_assets.py
 
 ## Entry points
 
-- `def main()` (line 43)
+- `def main()` (line 55)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -44,7 +44,7 @@ _(none detected)_
 
 **http**
 
-- `requests.get()  → `url`` (line 29)
+- `requests.get()  → `url`` (line 41)
 
 
 ---

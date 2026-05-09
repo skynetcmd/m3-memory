@@ -1,8 +1,8 @@
 ---
 tool: bin/test_sqlite_pragmas.py
-sha1: c209b2cc0ab3
-mtime_utc: 2026-05-06T05:10:44.395301+00:00
-generated_utc: 2026-05-06T23:11:45.805492+00:00
+sha1: bd4a0292abf6
+mtime_utc: 2026-05-07T03:32:14.565827+00:00
+generated_utc: 2026-05-09T13:54:35.071345+00:00
 private: false
 ---
 
@@ -67,10 +67,13 @@ _(none detected)_
 
 ## File dependencies (repo paths referenced)
 
+- `.db`
 - `/data/my_results_bench.db`
 - `/some/path/test_chatlog.db`
 - `/var/data/myapp.db`
 - `cp.db`
+- `cp_passive.db`
+- `cp_truncate.db`
 - `memory/agent_chatlog.db`
 - `memory/agent_memory.db`
 - `memory/agent_test_bench.db`

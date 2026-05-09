@@ -1,8 +1,8 @@
 ---
 tool: bin/auth_utils.py
-sha1: 501e6c3ab0eb
-mtime_utc: 2026-05-07T00:41:24.978458+00:00
-generated_utc: 2026-05-07T00:43:52.180380+00:00
+sha1: adf379f8e153
+mtime_utc: 2026-05-07T03:32:14.554106+00:00
+generated_utc: 2026-05-09T13:54:33.765155+00:00
 private: false
 ---
 
@@ -45,15 +45,15 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 225)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 58)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 214)
-- `subprocess.run()` (line 239)
+- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 226)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 59)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 215)
+- `subprocess.run()` (line 240)
 
 **sqlite**
 
-- `sqlite3.connect()  → `_vault_db_path()`` (line 316)
-- `sqlite3.connect()  → `vault_path`` (line 255)
+- `sqlite3.connect()  → `_vault_db_path()`` (line 317)
+- `sqlite3.connect()  → `vault_path`` (line 256)
 
 
 ---
