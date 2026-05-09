@@ -529,9 +529,19 @@ def parse_existing_flag_overrides(path: Path) -> dict[tuple[str, int], tuple[str
         if not line.startswith("|"):
             break
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 6:
+        if len(cells) < 5:
             continue
-        flag_cell, help_text, _default, default_behavior, _type, impact = cells[:6]
+        
+        if len(cells) == 5:
+            # Legacy 5-column table migration:
+            # | Flag(s) | Help | Default | Type/Action | Impact when set |
+            flag_cell, help_text, _default, _type, impact = cells[:5]
+            default_behavior = ""
+        else:
+            # New 6-column table:
+            # | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+            flag_cell, help_text, _default, default_behavior, _type, impact = cells[:6]
+        
         # First flag name, stripped of `` and commas.
         first_flag = flag_cell.split(",", 1)[0].strip().strip("`").strip()
         if not first_flag or first_flag == "_positional_":
