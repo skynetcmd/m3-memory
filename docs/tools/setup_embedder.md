@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_embedder.py
-sha1: d5113f90d35a
-mtime_utc: 2026-05-07T00:41:40.031899+00:00
-generated_utc: 2026-05-07T00:43:52.729872+00:00
+sha1: 84ea7b6dcc94
+mtime_utc: 2026-05-07T03:32:14.563827+00:00
+generated_utc: 2026-05-09T13:54:34.855221+00:00
 private: false
 ---
 
@@ -38,7 +38,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `crypto_provider (get_sha256, provider)`
+- `crypto_provider (get_sha256)`
 
 ---
 
@@ -58,6 +58,7 @@ _(no argparse arguments detected)_
 
 ## Notable external imports
 
+- `http.client`
 - `platform`
 
 ---

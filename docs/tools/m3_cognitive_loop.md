@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: b7fe273c3de2
-mtime_utc: 2026-05-04T23:42:46.663321+00:00
-generated_utc: 2026-05-05T01:50:16.156935+00:00
+sha1: 3272ce41604b
+mtime_utc: 2026-05-07T03:32:14.556216+00:00
+generated_utc: 2026-05-09T13:54:34.296979+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 296)
+- `def main()` (line 295)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -67,7 +67,6 @@ for m3_enrich and m3_entities.
 - `m3_enrich`
 - `m3_entities`
 - `m3_sdk (M3Context, resolve_db_path)`
-- `memory_core`
 
 ---
 
@@ -75,7 +74,7 @@ for m3_enrich and m3_entities.
 
 **subprocess**
 
-- `subprocess.Popen()  → `argv`` (line 56)
+- `subprocess.Popen()  → `argv`` (line 55)
 
 
 ---
