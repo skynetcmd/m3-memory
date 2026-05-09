@@ -1,7 +1,5 @@
 # LongMemEval-S Benchmark
 
-> Benchmark harnesses are not part of the published package. They live in `benchmarks/` and require a repository checkout to run — see [CONTRIBUTING.md](../../CONTRIBUTING.md) for reproduction steps. The harness is not shipped on PyPI.
-
 Without retrieval, the answer model scores 6–9%. With M3 Memory's hybrid retrieval, it reaches **89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500) — the 500-question long-horizon conversational memory benchmark from Wu et al., 2024.
 
 The 89.0% result uses oracle category metadata from the dataset. Without oracle metadata, accuracy is **74.8%** (smart retrieval with time-aware expansion) to **68.0%** (fixed-k baseline). Both numbers matter: the first measures the retrieval + answer ceiling; the second measures what the system achieves without privileged information.
@@ -101,12 +99,12 @@ git clone https://github.com/skynetcmd/m3-memory && cd m3-memory
 export ANTHROPIC_API_KEY=...
 export OPENAI_API_KEY=...
 
-python benchmarks/longmemeval/bench_longmemeval.py                    # stock (89.0%)
-python benchmarks/longmemeval/bench_longmemeval.py --smart-retrieval --skip-ingest    # smart retrieval (74.8%)
-python benchmarks/longmemeval/bench_longmemeval.py --adaptive-k --skip-ingest         # adaptive-k (72.6%)
-python benchmarks/longmemeval/bench_longmemeval.py --no-category-knobs --skip-ingest  # ablation (68.0%)
-python benchmarks/longmemeval/bench_longmemeval.py --no-memory        # neutral baseline (6.4%)
-python benchmarks/longmemeval/bench_longmemeval.py --rag-aware-empty  # RAG-aware baseline (8.4%)
+python bin/bench_longmemeval.py                    # stock (89.0%)
+python bin/bench_longmemeval.py --smart-retrieval --skip-ingest    # smart retrieval (74.8%)
+python bin/bench_longmemeval.py --adaptive-k --skip-ingest         # adaptive-k (72.6%)
+python bin/bench_longmemeval.py --no-category-knobs --skip-ingest  # ablation (68.0%)
+python bin/bench_longmemeval.py --no-memory        # neutral baseline (6.4%)
+python bin/bench_longmemeval.py --rag-aware-empty  # RAG-aware baseline (8.4%)
 ```
 
 Wall-clock on a single RTX 5080: ~50 min ingest, ~75 min judged answer phase. Baselines and `--skip-ingest` runs reuse an existing DB.
@@ -141,31 +139,3 @@ Long-horizon memory systems make different architectural bets. Cross-system scor
 Without oracle metadata, smart retrieval (time-aware expansion + adaptive k) recovers roughly a third of the 21pp gap, reaching 74.8%. The remaining 14pp is primarily answer-side scaffolds — closing it within the retrieval paradigm via runtime task inference is the next milestone.
 
 See the [LongMemEval leaderboard](https://github.com/xiaowu0162/LongMemEval#leaderboard) for the current field.
-
-## Newly available bench levers (2026-04 Tier A repatriation)
-
-The following flags have been re-landed on `main` after the 2026-04 rebase
-dropped them. All default off — adding any one to a sweep is opt-in.
-See [docs/CHANGELOG.md](../../docs/CHANGELOG.md) for the full entry.
-
-| Flag | Default | Effect |
-|------|---------|--------|
-| `--rerank` | off | Cross-encoder rerank pass on retrieved hits (production primitive in `memory_core`, exposed via MCP `memory_search_routed`). |
-| `--rerank-model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Override the CE model. |
-| `--rerank-pool-k` | `0` (= `3*k`) | Pool size before rerank. |
-| `--rerank-blend` | `1.0` | `final = blend*ce + (1-blend)*hybrid`. |
-| `--chain-of-note` | off | Per-session SLM extraction + JSON history serialization in the answer prompt. Paper §5.5 reports up to +10pp. |
-| `--chain-of-note-model` | (= `--generator-model`) | Override the extractor model. |
-| `--chain-of-note-max-tokens` | `400` | Per-session extractor cap. |
-| `--ingest-mode` | `turn` | `session` writes one memory per session with evidence-aware truncation at 8 KB. |
-
-### Quick smokes (no API, no DB)
-
-```
-python bin/test_rerank_quick.py            # ~7s incl. CE cold-load
-python bin/test_chain_of_note_quick.py     # 0.25s in mock mode
-python bin/test_session_ingest_quick.py    # 0.26s
-python bin/test_category_knobs_quick.py    # 0.6s
-```
-
-Each test names the regression it catches in its module docstring.
