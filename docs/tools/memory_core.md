@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 1e27c1f3d2a4
-mtime_utc: 2026-05-07T00:23:09.538954+00:00
-generated_utc: 2026-05-07T00:43:52.615077+00:00
+sha1: 8b1251731ce5
+mtime_utc: 2026-05-08T07:15:25.046952+00:00
+generated_utc: 2026-05-09T13:54:34.603867+00:00
 private: false
 ---
 
@@ -84,6 +84,8 @@ _(no argparse arguments detected)_
 - `EMBED_MODEL`
 - `ENTITY_NAME_EMBED_CACHE_MAX`
 - `LLM_TIMEOUT`
+- `M3_AUTO_RELATED_LINK`
+- `M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT`
 - `M3_DISABLE_AUTO_ACTIVATION`
 - `M3_EMBED_MODEL`
 - `M3_EMBED_URL`
@@ -145,11 +147,11 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1330)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1355)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1294)
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1306)
 
 
 ---

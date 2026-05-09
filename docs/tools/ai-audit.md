@@ -1,22 +1,22 @@
 ---
-tool: bin/test_fips_integrity.py
-sha1: 9cece4bdb8e1
-mtime_utc: 2026-05-07T03:32:14.565827+00:00
-generated_utc: 2026-05-09T13:54:34.982853+00:00
+tool: bin/ai-audit.sh
+sha1: 659882eaf6ae
+mtime_utc: 2026-04-06T00:25:00.977104+00:00
+generated_utc: 2026-05-09T18:07:57.341678+00:00
 private: false
 ---
 
-# bin/test_fips_integrity.py
+# bin/ai-audit.sh
 
 ## Purpose
 
-test_fips_integrity.py — Validation suite for FIPS-ready crypto abstraction.
+_(no module docstring — update the source file.)_
 
 ---
 
 ## Entry points
 
-- `if __name__ == "__main__"` guard
+- Bash execution
 
 ---
 
@@ -34,8 +34,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils`
-- `crypto_provider (get_sha256, provider)`
+_(none detected)_
 
 ---
 
@@ -47,12 +46,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `base64`
-- `cryptography.fernet (Fernet)`
-- `cryptography.hazmat.primitives (hashes)`
-- `cryptography.hazmat.primitives.kdf.pbkdf2 (PBKDF2HMAC)`
-- `ssl`
-- `unittest`
+_(only stdlib)_
 
 ---
 

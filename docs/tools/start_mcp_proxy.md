@@ -1,22 +1,23 @@
 ---
-tool: bin/test_fips_integrity.py
-sha1: 9cece4bdb8e1
-mtime_utc: 2026-05-07T03:32:14.565827+00:00
-generated_utc: 2026-05-09T13:54:34.982853+00:00
+tool: bin/start_mcp_proxy.sh
+sha1: 6fb29a949ca6
+mtime_utc: 2026-04-07T04:04:58.142071+00:00
+generated_utc: 2026-05-09T18:07:57.849180+00:00
 private: false
 ---
 
-# bin/test_fips_integrity.py
+# bin/start_mcp_proxy.sh
 
 ## Purpose
 
-test_fips_integrity.py — Validation suite for FIPS-ready crypto abstraction.
+start_mcp_proxy.sh — Launch the MCP Tool Execution Proxy on localhost:9000
+Usage: bash ~/m3-memory/bin/start_mcp_proxy.sh [--background]
 
 ---
 
 ## Entry points
 
-- `if __name__ == "__main__"` guard
+- Bash execution
 
 ---
 
@@ -28,14 +29,18 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `EXISTING_PID`
+- `HOME`
+- `LOG_FILE`
+- `PID_FILE`
+- `PORT`
+- `PROXY_SCRIPT`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `auth_utils`
-- `crypto_provider (get_sha256, provider)`
+_(none detected)_
 
 ---
 
@@ -47,12 +52,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `base64`
-- `cryptography.fernet (Fernet)`
-- `cryptography.hazmat.primitives (hashes)`
-- `cryptography.hazmat.primitives.kdf.pbkdf2 (PBKDF2HMAC)`
-- `ssl`
-- `unittest`
+_(only stdlib)_
 
 ---
 
