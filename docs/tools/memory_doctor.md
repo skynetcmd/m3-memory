@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: 38bacf472984
-mtime_utc: 2026-05-06T23:50:56.421645+00:00
-generated_utc: 2026-05-06T23:57:12.522449+00:00
+sha1: 6726bcd1a520
+mtime_utc: 2026-05-07T03:32:14.562827+00:00
+generated_utc: 2026-05-09T13:54:34.617628+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 84)
+- `def main()` (line 85)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -46,7 +46,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 94)
+- `sqlite3.connect()  → `db_path`` (line 95)
 
 
 ---

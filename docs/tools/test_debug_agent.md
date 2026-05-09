@@ -1,8 +1,8 @@
 ---
 tool: bin/test_debug_agent.py
-sha1: d698fd7e3504
-mtime_utc: 2026-04-21T20:59:41.985179+00:00
-generated_utc: 2026-05-01T13:05:27.085900+00:00
+sha1: 6e8ae17d93cb
+mtime_utc: 2026-05-07T03:32:14.564827+00:00
+generated_utc: 2026-05-09T13:54:34.966058+00:00
 private: false
 ---
 
@@ -19,8 +19,8 @@ gracefully skipped when LM Studio is offline.
 
 ## Entry points
 
-- `async def run()` (line 114)
-- `async def main()` (line 291)
+- `async def run()` (line 130)
+- `async def main()` (line 279)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -33,7 +33,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_DATABASE`
 
 ---
 
@@ -41,22 +41,24 @@ _(none detected)_
 
 - `auth_utils (get_api_key)`
 - `debug_agent_bridge (_check_thermal, _get_largest_llm_model, _log_to_db, _safe_read_file, debug_analyze, debug_bisect, debug_correlate, debug_history, debug_report, debug_trace)`
-- `m3_sdk (resolve_db_path)`
+- `m3_sdk (_cleanup)`
 
 ---
 
 ## Calls OUT (external side-channels)
 
+**subprocess**
+
+- `subprocess.run()` (line 54)
+
 **http**
 
-- `httpx.AsyncClient()` (line 60)
+- `httpx.AsyncClient()` (line 69)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 177)
-- `sqlite3.connect()  → `DB_PATH`` (line 185)
-- `sqlite3.connect()  → `DB_PATH`` (line 85)
-- `sqlite3.connect()  → `DB_PATH`` (line 96)
+- `sqlite3.connect()  → `DB_PATH`` (line 109)
+- `sqlite3.connect()  → `DB_PATH`` (line 94)
 
 
 ---
@@ -69,7 +71,7 @@ _(none detected)_
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `.db`
 
 ---
 
