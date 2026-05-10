@@ -3147,7 +3147,13 @@ async def memory_search_scored_impl(
                             return await _recurse_semantic()
                         return []
                     clean_query = clean_query.strip()
-                    fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
+                    if search_mode == "fts5":
+                        toks = [t for t in clean_query.split() if t]
+                        fts_query = " OR ".join(toks) if len(toks) > 1 else (
+                            f"{clean_query}*" if clean_query.isalnum() else clean_query
+                        )
+                    else:
+                        fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
 
                 rows = db.execute(sql, (*params, fts_query)).fetchall()
                 if not rows and search_mode != "fts5":
@@ -3155,7 +3161,7 @@ async def memory_search_scored_impl(
     except sqlite3.OperationalError:
         if search_mode != "fts5":
             return await _recurse_semantic()
-        raise
+        return []
 
     scored = []
     # Under max-kind, trim AFTER dedup so SEARCH_ROW_CAP counts unique items,
