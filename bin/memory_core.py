@@ -3300,14 +3300,20 @@ async def memory_search_scored_impl(
             for ci, (c_score, c_item) in enumerate(candidates):
                 c_vec = _emb_lookup.get(c_item["id"])
                 if c_vec is None:
-                    best_idx = ci
-                    break
-                similarities = [_batch_cosine(c_vec, [_emb_lookup[s[1]["id"]]])[0]
-                                for s in selected if s[1]["id"] in _emb_lookup]
-                max_sim = max(similarities, default=0.0)
-                mmr = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
-                if mmr > best_mmr:
-                    best_mmr = mmr
+                    # Candidate has no embedding in the lookup (e.g. vector-side hit
+                    # not represented in `rows`). Treat as max_sim=0 — neutral on the
+                    # diversification term — so the MMR score reduces to lambda*c_score.
+                    # Earlier code break-selected on this branch, which collapsed MMR
+                    # to "first-non-embedded-candidate-wins" pop ordering whenever any
+                    # candidate lacked an embedding.
+                    max_sim = 0.0
+                else:
+                    similarities = [_batch_cosine(c_vec, [_emb_lookup[s[1]["id"]]])[0]
+                                    for s in selected if s[1]["id"] in _emb_lookup]
+                    max_sim = max(similarities, default=0.0)
+                mmr_score = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
+                if mmr_score > best_mmr:
+                    best_mmr = mmr_score
                     best_idx = ci
                 if explain:
                     if "_explanation" not in c_item:
