@@ -2936,6 +2936,7 @@ def _apply_temporal_boost(scored, query, explain=False):
 
 async def memory_search_scored_impl(
     query,
+    mmr=True,
     k=8,
     type_filter="",
     agent_filter="",
@@ -3142,15 +3143,19 @@ async def memory_search_scored_impl(
                     clean_query = _sanitize_fts(clean_query)
                     clean_query = _sanitize_for_searchable(clean_query)
                     if not clean_query.strip():
-                        return await _recurse_semantic()
+                        if search_mode != "fts5":
+                            return await _recurse_semantic()
+                        return []
                     clean_query = clean_query.strip()
                     fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
 
                 rows = db.execute(sql, (*params, fts_query)).fetchall()
-                if not rows:
+                if not rows and search_mode != "fts5":
                     return await _recurse_semantic()
     except sqlite3.OperationalError:
-        return await _recurse_semantic()
+        if search_mode != "fts5":
+            return await _recurse_semantic()
+        raise
 
     scored = []
     # Under max-kind, trim AFTER dedup so SEARCH_ROW_CAP counts unique items,
@@ -3280,7 +3285,7 @@ async def memory_search_scored_impl(
         pre_ranked.append(entry)
         if len(pre_ranked) >= k * 3:
             break
-    if len(pre_ranked) > k and len(page_matrix) > 0:
+    if mmr and len(pre_ranked) > k and len(page_matrix) > 0:
         _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
         selected = [pre_ranked[0]]
         candidates = list(pre_ranked[1:])
@@ -3971,6 +3976,7 @@ async def _score_extra_rows(query: str, rows_by_id: dict, base_score: float = 0.
 
 async def memory_search_routed_impl(
     query: str,
+    mmr: bool = True,
     k: int = 10,
     fact_variant: str = "",
     temporal_k_bump: int = 5,
@@ -4079,8 +4085,7 @@ async def memory_search_routed_impl(
         # Pre-retrieval signals (temporal cue regex) may short-circuit this — but we
         # always run the overshoot to keep the code path simple and branch_values
         # consistent across all branches.
-        overshoot_candidates = await memory_search_scored_impl(
-            query, k=20, user_id=user_id, scope=scope,
+        overshoot_candidates = await memory_search_scored_impl(query, mmr=mmr, k=20, user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
             search_mode=search_mode, variant=variant, as_of=as_of,
             conversation_id=conversation_id, extra_columns=extra_columns,
@@ -4200,8 +4205,7 @@ async def memory_search_routed_impl(
     bump = int(os.environ.get("M3_ROUTER_TEMPORAL_K_BUMP", str(temporal_k_bump)))
 
     if is_temporal_query(query):
-        primary = await memory_search_scored_impl(
-            query, k=k + bump, user_id=user_id, scope=scope,
+        primary = await memory_search_scored_impl(query, mmr=mmr, k=k + bump, user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
             search_mode=search_mode, variant=variant, as_of=as_of,
             conversation_id=conversation_id, explain=explain,
@@ -4224,8 +4228,7 @@ async def memory_search_routed_impl(
         )
     else:
         # Non-temporal path
-        base_hits = await memory_search_scored_impl(
-            query, k=k * 2 if fact_variant else k,
+        base_hits = await memory_search_scored_impl(query, mmr=mmr, k=k * 2 if fact_variant else k,
             user_id=user_id, scope=scope, type_filter=type_filter,
             agent_filter=agent_filter, search_mode=search_mode,
             variant=variant, as_of=as_of, conversation_id=conversation_id,
@@ -4250,8 +4253,7 @@ async def memory_search_routed_impl(
             )
         else:
             # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
-            fact_hits = await memory_search_scored_impl(
-                query, k=k * 2, user_id=user_id, scope=scope,
+            fact_hits = await memory_search_scored_impl(query, mmr=mmr, k=k * 2, user_id=user_id, scope=scope,
                 type_filter=type_filter, agent_filter=agent_filter,
                 search_mode=search_mode, variant=fact_variant, as_of=as_of,
                 conversation_id=conversation_id, explain=explain,
@@ -4496,8 +4498,7 @@ async def memory_search_multi_db_impl(
     async def _one(path: str):
         async def _run():
             with active_database(path):
-                return await memory_search_scored_impl(
-                    query, k=k, type_filter=type_filter,
+                return await memory_search_scored_impl(query, mmr=mmr, k=k, type_filter=type_filter,
                     agent_filter=agent_filter, search_mode=search_mode,
                     user_id=user_id, scope=scope, as_of=as_of,
                     conversation_id=conversation_id,
@@ -4530,17 +4531,41 @@ async def memory_search_multi_db_impl(
     return merged[:k]
 
 
-async def memory_search_impl(query, k=8, type_filter="", agent_filter="", search_mode="hybrid", include_scratchpad=False, user_id="", scope="", as_of="", explain=False, conversation_id="", recency_bias=0.0, adaptive_k=False, variant="", intent_hint="", _depth=0):
+async def memory_search_impl(
+    query,
+    k=8,
+    type_filter="",
+    agent_filter="",
+    search_mode="hybrid",
+    include_scratchpad=False,
+    user_id="",
+    scope="",
+    as_of="",
+    explain=False,
+    conversation_id="",
+    recency_bias=0.0,
+    adaptive_k=False,
+    variant="",
+    intent_hint="",
+    mmr=True,
+    _depth=0,
+):
     ranked = await memory_search_scored_impl(
-        query, k=k, type_filter=type_filter, agent_filter=agent_filter,
-        search_mode=search_mode, user_id=user_id, scope=scope, as_of=as_of,
-        conversation_id=conversation_id, explain=explain,
+        query,
+        mmr=mmr,
+        k=k,
+        type_filter=type_filter,
+        agent_filter=agent_filter,
+        search_mode=search_mode,
+        user_id=user_id,
+        scope=scope,
+        as_of=as_of,
+        conversation_id=conversation_id,
+        explain=explain,
         recency_bias=float(recency_bias) if recency_bias else 0.0,
         adaptive_k=bool(adaptive_k),
         variant=variant,
         intent_hint=intent_hint,
-        # metadata_json needed for role-boost + predecessor pull when
-        # intent_hint routing is live.
         extra_columns=["metadata_json", "conversation_id"] if intent_hint else None,
     )
     if ranked is None:
