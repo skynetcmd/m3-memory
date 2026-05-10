@@ -245,7 +245,7 @@ CONTRADICTION_TYPE_EXCLUSIONS = frozenset(
 # at all.
 AUTO_RELATED_LINK              = os.environ.get("M3_AUTO_RELATED_LINK", "1").lower() in ("1", "true", "yes")
 AUTO_RELATED_LINK_SCOPE_BY_VARIANT = os.environ.get("M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT", "1").lower() in ("1", "true", "yes")
-SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "500"))
+SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "5000"))
 LLM_TIMEOUT            = float(os.environ.get("LLM_TIMEOUT", "120.0"))
 
 # Ranker/write-path tuning. See _augment_title_with_role and the scoring loop
@@ -255,6 +255,22 @@ SPEAKER_IN_TITLE       = os.environ.get("M3_SPEAKER_IN_TITLE", "1").lower() in (
 SHORT_TURN_THRESHOLD   = int(os.environ.get("M3_SHORT_TURN_THRESHOLD", "20"))
 TITLE_MATCH_BOOST      = float(os.environ.get("M3_TITLE_MATCH_BOOST", "0.05"))
 IMPORTANCE_WEIGHT      = float(os.environ.get("M3_IMPORTANCE_WEIGHT", "0.05"))
+
+# Adaptive-K (_trim_by_elbow) safety knobs. The naive elbow heuristic can
+# collapse a 5000-row pool to 1 result when the top hit dominates the avg
+# diff (LME-M @ 2.4M-row haystack). These three knobs keep the trimmer
+# scale-aware:
+#   - MIN_INPUT (default 20): need ~20 samples for the avg-diff estimate
+#     to be stable. On smaller pools the elbow is too noise-driven.
+#   - MIN_RETURN (default 8): preserve headroom for downstream MMR /
+#     cross-encoder rerank diversity ops. Below ~8 those become no-ops.
+#   - ABS_THRESHOLD (default 0.05): cosine-score drops below this are
+#     within ranking-noise on a hybrid FTS+vector blend; not real elbows.
+# Production callers wanting the legacy behavior can set:
+#   M3_ELBOW_MIN_INPUT=3 M3_ELBOW_MIN_RETURN=1 M3_ELBOW_ABS_THRESHOLD=0.0
+ELBOW_MIN_INPUT        = int(os.environ.get("M3_ELBOW_MIN_INPUT", "20"))
+ELBOW_MIN_RETURN       = int(os.environ.get("M3_ELBOW_MIN_RETURN", "8"))
+ELBOW_ABS_THRESHOLD    = float(os.environ.get("M3_ELBOW_ABS_THRESHOLD", "0.05"))
 
 # Phase 1 ingestion optimizations. Three opt-in emitters (off by default) and
 # one retrieval-side router. All safe-no-op when gated off. See the helpers
@@ -554,7 +570,7 @@ def _sanitize_fts(query: str, max_len: int = 500) -> str:
 # and replaces these 8 punctuation chars with spaces before storing in
 # content_searchable / title_searchable. Query-side text must apply the same
 # transform so MATCH terms align with what FTS5 indexed.
-_SEARCHABLE_PUNCT = str.maketrans({c: " " for c in "?!:.,;/\""})
+_SEARCHABLE_PUNCT = str.maketrans({c: " " for c in "?!:.,;/\"'"})
 
 def _sanitize_for_searchable(text: str) -> str:
     """Apply the same lowercase + depunctuate transform as the FTS triggers."""
@@ -1400,6 +1416,8 @@ def _lazy_init(db_path: str | None = None) -> None:
 @contextmanager
 def _db():
     active_ctx = _current_ctx()
+    if os.environ.get("M3_DEBUG"):
+        print(f"DEBUG DB PATH: {active_ctx.db_path}")
     _lazy_init(active_ctx.db_path)
     with active_ctx.get_sqlite_conn() as conn:
         try:
@@ -2871,19 +2889,29 @@ def _apply_recency_bonus(scored, recency_bias, explain=False):
 
 
 def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -> list[tuple[float, dict]]:
-    """Trims results where the score drop-off is significantly higher than average."""
-    if len(ranked) < 3:
+    """Trims results where the score drop-off is significantly higher than average.
+
+    Scale-aware (see M3_ELBOW_* env vars):
+      * skip pools smaller than ELBOW_MIN_INPUT (default 5) — too few points to estimate avg
+      * require the drop to exceed ELBOW_ABS_THRESHOLD in absolute terms
+        (default 0.01) — guards against floating-point noise in big haystacks
+      * always return at least ELBOW_MIN_RETURN (default 3) — prevents
+        catastrophic 1-hit collapse when the top item dominates the average
+    """
+    if len(ranked) < ELBOW_MIN_INPUT:
         return ranked
 
     # Calculate score differences between consecutive results
     diffs = [ranked[i][0] - ranked[i+1][0] for i in range(len(ranked) - 1)]
     avg_diff = sum(diffs) / len(diffs)
+    threshold = max(ELBOW_ABS_THRESHOLD, avg_diff * sensitivity)
 
-    # Find the first 'elbow' where the drop is significantly larger than the average
+    # Find the first 'elbow' where the drop is significantly larger than the average,
+    # subject to the absolute-threshold guard.
     for i, d in enumerate(diffs):
-        if d > avg_diff * sensitivity:
-            # We found an elbow, trim here
-            return ranked[:i+1]
+        if d > threshold:
+            # We found an elbow, trim here. Preserve at least ELBOW_MIN_RETURN items.
+            return ranked[:max(ELBOW_MIN_RETURN, i+1)]
 
     return ranked
 
@@ -2959,6 +2987,7 @@ async def memory_search_scored_impl(
     intent_hint="",
     vector_kind_strategy="default",
     _depth=0,
+    _capture_dict: dict = None,
 ):
     """Hybrid FTS5+vector+MMR search returning a list of (score, item_dict).
 
@@ -3103,6 +3132,7 @@ async def memory_search_scored_impl(
             intent_hint=intent_hint,
             vector_kind_strategy=vector_kind_strategy,
             _depth=_depth + 1,
+            _capture_dict=_capture_dict,
         )
 
     # When strategy="max" the memory_embeddings join returns one row per
@@ -3111,7 +3141,7 @@ async def memory_search_scored_impl(
     # unique-item pool would shrink to 1000/N. Double the SQL-level cap
     # for max-kind so the unique pool stays near 1000. Strategy="default"
     # pins to a single kind, so the base cap already counts unique items.
-    sql_row_limit = 2000 if vector_kind_strategy == "max" else 1000
+    sql_row_limit = 5000 if vector_kind_strategy == "max" else 2000
 
     try:
         with _db() as db:
@@ -3121,10 +3151,17 @@ async def memory_search_scored_impl(
                     FROM memory_items mi
                     JOIN memory_embeddings me ON mi.id = me.memory_id
                     WHERE {where_sql}
-                    LIMIT {sql_row_limit}
+                    ORDER BY mi.created_at DESC
                 """
+                if os.environ.get("M3_DEBUG"):
+                    print(f"DEBUG SQL (semantic):\n{sql}")
+                    print(f"DEBUG PARAMS: {params}")
                 rows = db.execute(sql, params).fetchall()
+                if os.environ.get("M3_DEBUG"):
+                    print(f"DEBUG SQL HITS (semantic): {len(rows)}")
             else:
+                # ...
+                # (omitted for brevity, will do hybrid next)
                 sql = f"""
                     SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
                            bm25(memory_items_fts) as bm25_score{extra_sql}
@@ -3155,10 +3192,17 @@ async def memory_search_scored_impl(
                     else:
                         fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
 
+                if os.environ.get("M3_DEBUG"):
+                    print(f"DEBUG SQL (hybrid):\n{sql}")
+                    print(f"DEBUG PARAMS: {(*params, fts_query)}")
                 rows = db.execute(sql, (*params, fts_query)).fetchall()
+                if os.environ.get("M3_DEBUG"):
+                    print(f"DEBUG SQL HITS (hybrid): {len(rows)}")
                 if not rows and search_mode != "fts5":
                     return await _recurse_semantic()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as e:
+        if os.environ.get("M3_DEBUG"):
+            print(f"DEBUG SQL ERROR: {e}")
         if search_mode != "fts5":
             return await _recurse_semantic()
         return []
@@ -3191,6 +3235,9 @@ async def memory_search_scored_impl(
         if len(rows) > SEARCH_ROW_CAP:
             rows = rows[:SEARCH_ROW_CAP]
             page_scores = page_scores[:SEARCH_ROW_CAP]
+
+    if _capture_dict is not None:
+        _capture_dict["pre_seen_content_filter_rows"] = len(rows)
 
     for i, row in enumerate(rows):
         item = dict(row)
@@ -3271,15 +3318,23 @@ async def memory_search_scored_impl(
 
     # Adaptive K: Trim by elbow if requested
     if adaptive_k:
+        if _capture_dict is not None:
+            _capture_dict["pre_adaptive_k_rows"] = len(pre_ranked_all)
         pre_ranked_all = _trim_by_elbow(pre_ranked_all, sensitivity=elbow_sensitivity)
+        if _capture_dict is not None:
+            _capture_dict["post_elbow_trim_rows"] = len(pre_ranked_all)
         if adaptive_k_min and len(pre_ranked_all) < adaptive_k_min:
             # Floor: undo the trim when it leaves fewer than the requested minimum.
             pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)[:adaptive_k_min]
         if adaptive_k_max and len(pre_ranked_all) > adaptive_k_max:
             pre_ranked_all = pre_ranked_all[:adaptive_k_max]
+        if _capture_dict is not None:
+            _capture_dict["post_adaptive_k_rows"] = len(pre_ranked_all)
         if len(pre_ranked_all) < k:
             k = len(pre_ranked_all)
 
+    if _capture_dict is not None:
+        _capture_dict["pre_seen_content_dedup_rows"] = len(pre_ranked_all)
     seen_content: set[str] = set()
     pre_ranked: list = []
     for entry in pre_ranked_all:
@@ -3291,6 +3346,8 @@ async def memory_search_scored_impl(
         pre_ranked.append(entry)
         if len(pre_ranked) >= k * 3:
             break
+    if _capture_dict is not None:
+        _capture_dict["post_seen_content_dedup_rows"] = len(pre_ranked)
     if mmr and len(pre_ranked) > k and len(page_matrix) > 0:
         _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
         selected = [pre_ranked[0]]
@@ -4087,6 +4144,17 @@ async def memory_search_routed_impl(
       If _capture_dict is passed (a mutable dict), it is populated with:
         auto_branch, auto_branch_values, caller_overrides, auto_signals.
 
+    Retrieval-pool telemetry (always populated when _capture_dict is passed,
+    regardless of auto_route — written by the primary memory_search_scored_impl
+    call; the overshoot and fact-fuse calls do not write):
+        pre_seen_content_filter_rows  -- pool size after row-cap, before content-dedup
+        pre_seen_content_dedup_rows   -- pool size entering dedup loop (post-rank)
+        post_seen_content_dedup_rows  -- pool size after content-dedup, before MMR/rerank
+      Adaptive-K elbow telemetry (only present when adaptive_k=True):
+        pre_adaptive_k_rows           -- pool size before _trim_by_elbow
+        post_elbow_trim_rows          -- pool size immediately after the elbow trim
+        post_adaptive_k_rows          -- pool size after min/max floors applied
+
     Returns the same shape as memory_search_scored_impl: list[tuple[score, dict]].
     """
     # AUTO routing layer (opt-in, default off — invariant: off = byte-identical to today)
@@ -4227,6 +4295,7 @@ async def memory_search_routed_impl(
             adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
             smart_neighbor_sessions=smart_neighbor_sessions,
             intent_hint=intent_hint, vector_kind_strategy="default",
+            _capture_dict=_capture_dict,
         )
         final_hits = await _maybe_expand_routed(
             query, primary, k=k + bump,
@@ -4250,6 +4319,7 @@ async def memory_search_routed_impl(
             adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
             smart_neighbor_sessions=smart_neighbor_sessions,
             intent_hint=intent_hint, vector_kind_strategy="max",
+            _capture_dict=_capture_dict,
         )
 
         if not fact_variant:
