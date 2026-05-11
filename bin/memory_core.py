@@ -2669,9 +2669,14 @@ async def _run_entity_extractor(
                 canonical_to_id[cname] = entity_id
                 mention_text = ent.get("mention_text") or cname
                 confidence = float(ent.get("confidence", 0.85))
+                # Read mention_offset from the extractor output; default 0
+                # (preserves backward compatibility with extractors that don't
+                # report span positions). Coerced via int() because some JSON
+                # extractors emit it as a float. GLiNER reports as `start`.
+                mention_offset = int(ent.get("mention_offset") or 0)
                 try:
                     # _link_memory_to_entity uses INSERT OR IGNORE — idempotent.
-                    _link_memory_to_entity(memory_id, entity_id, mention_text, 0, confidence, db)
+                    _link_memory_to_entity(memory_id, entity_id, mention_text, mention_offset, confidence, db)
                 except Exception as e:
                     logger.debug(f"Entity link failed for {memory_id}->{entity_id}: {e}")
 
