@@ -272,6 +272,22 @@ ELBOW_MIN_INPUT        = int(os.environ.get("M3_ELBOW_MIN_INPUT", "20"))
 ELBOW_MIN_RETURN       = int(os.environ.get("M3_ELBOW_MIN_RETURN", "8"))
 ELBOW_ABS_THRESHOLD    = float(os.environ.get("M3_ELBOW_ABS_THRESHOLD", "0.05"))
 
+# Entity-graph seed stoplist. Persona/role tokens like "User" co-occur with
+# essentially every turn in conversational corpora, so when an NER pass
+# materializes them as entities they become hub nodes that hub-out the BFS
+# expansion and pull in the whole haystack. Stoplisted canonical_names are
+# dropped at two points in _entity_graph_neighbor_ids: (1) the seed lookup,
+# so they never become a starting node, and (2) the BFS frontier, so they
+# aren't expanded to even as 1-hop neighbors of legitimate seeds.
+#
+# Comma-separated, case-insensitive. Empty string disables filtering.
+# Per-call override: pass entity_stoplist=[] to _entity_graph_neighbor_ids.
+ENTITY_SEED_STOPLIST = tuple(
+    s.strip().lower()
+    for s in os.environ.get("M3_ENTITY_SEED_STOPLIST", "User,user,assistant").split(",")
+    if s.strip()
+)
+
 # Phase 1 ingestion optimizations. Three opt-in emitters (off by default) and
 # one retrieval-side router. All safe-no-op when gated off. See the helpers
 # _maybe_emit_event_rows / _maybe_emit_window_chunk / _maybe_emit_gist_row
@@ -3872,6 +3888,8 @@ async def _entity_graph_neighbor_ids(
     query: str, depth: int, max_neighbors: int, db,
     valid_types: list = None,
     valid_predicates: list = None,
+    entity_stoplist: list = None,
+    _capture_dict: dict = None,
 ) -> set:
     """Parse query for entity mentions, traverse entity_relationships up to `depth`
     hops, and return a set of memory_id values linked to the discovered entities.
@@ -3880,13 +3898,18 @@ async def _entity_graph_neighbor_ids(
       1. Extract candidate mentions from query via _ENTITY_MENTION_RE.
       2. Lookup each candidate in `entities` table (exact then LIKE, cap 5/candidate).
          If valid_types is given, restrict entity lookup to those entity_type values.
+         Stoplisted canonical_names (case-insensitive) are excluded.
       3. BFS over `entity_relationships` up to min(depth, 3) hops,
          capped at min(max_neighbors, 100) total entity nodes.
          If valid_predicates is given, only traverse edges with matching predicate.
+         Stoplisted entities are dropped from the frontier.
       4. Fetch memory_ids from `memory_item_entities` for all discovered entities.
 
     valid_types: list of allowed entity_type strings; None = use VALID_ENTITY_TYPES defaults.
     valid_predicates: list of allowed predicate strings; None = use VALID_ENTITY_PREDICATES defaults.
+    entity_stoplist: list of canonical_name strings (case-insensitive) to never seed
+      from or expand to. None = use M3_ENTITY_SEED_STOPLIST env default.
+      Pass [] to explicitly disable filtering.
 
     Returns set[str] of memory_ids. Returns empty set on any early-exit condition.
     """
@@ -3918,6 +3941,32 @@ async def _entity_graph_neighbor_ids(
     except Exception:  # noqa: BLE001
         return set()
 
+    # Resolve entity stoplist: caller list (incl. explicit []) > env default.
+    _stoplist_lower: tuple = ()
+    if entity_stoplist is None:
+        _stoplist_lower = ENTITY_SEED_STOPLIST
+    else:
+        _stoplist_lower = tuple(s.strip().lower() for s in entity_stoplist if s and s.strip())
+    _stop_clause = ""
+    _stop_params: list = []
+    if _stoplist_lower:
+        _stop_ph = ",".join(["?"] * len(_stoplist_lower))
+        _stop_clause = f" AND LOWER(canonical_name) NOT IN ({_stop_ph})"
+        _stop_params = list(_stoplist_lower)
+
+    # Pre-compute stoplisted entity IDs so we can drop them from the BFS
+    # frontier even if a non-stoplisted seed has them as a 1-hop neighbor.
+    _stoplisted_eids: set[str] = set()
+    if _stoplist_lower:
+        try:
+            sl_rows = db.execute(
+                f"SELECT id FROM entities WHERE LOWER(canonical_name) IN ({','.join(['?']*len(_stoplist_lower))})",
+                list(_stoplist_lower),
+            ).fetchall()
+            _stoplisted_eids = {r["id"] for r in sl_rows}
+        except Exception:  # noqa: BLE001
+            _stoplisted_eids = set()
+
     # Build optional entity_type filter clause (caller-provided list overrides core defaults)
     _type_clause = ""
     _type_params: list = []
@@ -3927,23 +3976,41 @@ async def _entity_graph_neighbor_ids(
         _type_params = list(valid_types)
 
     matched_entity_ids: set[str] = set()
+    seeds_dropped = 0
     for candidate in candidates:
         try:
             # Tier 1: exact canonical_name match
             rows = db.execute(
-                f"SELECT id FROM entities WHERE canonical_name = ?{_type_clause} LIMIT 5",
-                [candidate] + _type_params,
+                f"SELECT id FROM entities WHERE canonical_name = ?{_type_clause}{_stop_clause} LIMIT 5",
+                [candidate] + _type_params + _stop_params,
             ).fetchall()
             if not rows:
                 # Tier 2: case-insensitive LIKE match
                 rows = db.execute(
-                    f"SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?){_type_clause} LIMIT 5",
-                    [f"%{candidate}%"] + _type_params,
+                    f"SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?){_type_clause}{_stop_clause} LIMIT 5",
+                    [f"%{candidate}%"] + _type_params + _stop_params,
                 ).fetchall()
             for r in rows:
                 matched_entity_ids.add(r["id"])
+            # Telemetry: count how many candidates would have hit a stoplisted
+            # canonical_name had we not filtered. Cheap (re-runs the unfiltered
+            # exact lookup only when capture is on).
+            if _capture_dict is not None and _stoplist_lower and not rows:
+                try:
+                    chk = db.execute(
+                        "SELECT 1 FROM entities WHERE LOWER(canonical_name) = ? LIMIT 1",
+                        [candidate.lower()],
+                    ).fetchone()
+                    if chk and candidate.lower() in _stoplist_lower:
+                        seeds_dropped += 1
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception:  # noqa: BLE001
             continue
+
+    if _capture_dict is not None:
+        _capture_dict["entity_seeds_dropped"] = seeds_dropped
+        _capture_dict["entity_stoplist_size"] = len(_stoplist_lower)
 
     if not matched_entity_ids:
         return set()
@@ -3959,6 +4026,7 @@ async def _entity_graph_neighbor_ids(
     # Step 3 — BFS over entity_relationships up to `depth` hops
     seen_entities: set[str] = set(matched_entity_ids)
     frontier: set[str] = set(matched_entity_ids)
+    frontier_dropped = 0
     for _ in range(depth):
         if not frontier or len(seen_entities) >= max_neighbors:
             break
@@ -3976,6 +4044,10 @@ async def _entity_graph_neighbor_ids(
         next_frontier: set[str] = set()
         for r in rel_rows:
             for eid in (r["from_entity"], r["to_entity"]):
+                if eid in _stoplisted_eids:
+                    if eid not in seen_entities:
+                        frontier_dropped += 1
+                    continue
                 if eid not in seen_entities:
                     seen_entities.add(eid)
                     next_frontier.add(eid)
@@ -3984,6 +4056,9 @@ async def _entity_graph_neighbor_ids(
             if len(seen_entities) >= max_neighbors:
                 break
         frontier = next_frontier
+
+    if _capture_dict is not None:
+        _capture_dict["entity_frontier_dropped"] = frontier_dropped
 
     # Step 4 — memory_item lookup
     if not seen_entities:
@@ -4057,6 +4132,7 @@ async def memory_search_routed_impl(
     entity_graph_max_neighbors: int = 20,
     entity_graph_valid_types: list = None,          # None = use VALID_ENTITY_TYPES; [] from MCP treated as None
     entity_graph_valid_predicates: list = None,     # None = use VALID_ENTITY_PREDICATES; [] from MCP treated as None
+    entity_stoplist: list = None,                   # None = use M3_ENTITY_SEED_STOPLIST env; [] disables filtering
     # Cross-encoder rerank — default off; production behavior unchanged when False.
     # When True: rescores top (rerank_pool_k or 3*k) hits with sentence-transformers
     # CrossEncoder, blends with hybrid score, re-sorts. See _apply_rerank() docstring
@@ -4306,6 +4382,8 @@ async def memory_search_routed_impl(
             entity_graph_max_neighbors=entity_graph_max_neighbors,
             entity_graph_valid_types=_egt,
             entity_graph_valid_predicates=_egp,
+            entity_stoplist=entity_stoplist,
+            _capture_dict=_capture_dict,
         )
     else:
         # Non-temporal path
@@ -4332,6 +4410,8 @@ async def memory_search_routed_impl(
                 entity_graph_max_neighbors=entity_graph_max_neighbors,
                 entity_graph_valid_types=_egt,
                 entity_graph_valid_predicates=_egp,
+                entity_stoplist=entity_stoplist,
+                _capture_dict=_capture_dict,
             )
         else:
             # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
@@ -4365,6 +4445,8 @@ async def memory_search_routed_impl(
                 entity_graph_max_neighbors=entity_graph_max_neighbors,
                 entity_graph_valid_types=_egt,
                 entity_graph_valid_predicates=_egp,
+                entity_stoplist=entity_stoplist,
+                _capture_dict=_capture_dict,
             )
 
     # Sharp-branch post-process trim (only when AUTO routing is active and sharp branch fired)
@@ -4423,6 +4505,8 @@ async def _maybe_expand_routed(
     entity_graph_max_neighbors: int = 20,
     entity_graph_valid_types: list = None,
     entity_graph_valid_predicates: list = None,
+    entity_stoplist: list = None,
+    _capture_dict: dict = None,
 ) -> list:
     """Apply optional graph, session, and entity-graph expansion to a routed retrieval result.
 
@@ -4474,6 +4558,8 @@ async def _maybe_expand_routed(
                     db=db,
                     valid_types=entity_graph_valid_types,
                     valid_predicates=entity_graph_valid_predicates,
+                    entity_stoplist=entity_stoplist,
+                    _capture_dict=_capture_dict,
                 )
             new_ids = eg_memory_ids - primary_ids - set(extra_rows.keys())
             if new_ids:
