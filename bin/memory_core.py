@@ -3975,8 +3975,17 @@ async def _entity_graph_neighbor_ids(
         _type_clause = f" AND entity_type IN ({_type_ph})"
         _type_params = list(valid_types)
 
+    # Pre-compute stoplisted-candidate count for telemetry. A candidate is
+    # "dropped at seed" if its lowercased form matches the stoplist exactly —
+    # that's the case the LIKE-tier filter wouldn't redeem either, so it's a
+    # true seed-rejection rather than a "no exact match, fell through to LIKE"
+    # event. Cheap O(N) set check; no extra SQL.
+    seeds_dropped = (
+        sum(1 for c in candidates if c.lower() in _stoplist_lower)
+        if _stoplist_lower else 0
+    )
+
     matched_entity_ids: set[str] = set()
-    seeds_dropped = 0
     for candidate in candidates:
         try:
             # Tier 1: exact canonical_name match
@@ -3992,19 +4001,6 @@ async def _entity_graph_neighbor_ids(
                 ).fetchall()
             for r in rows:
                 matched_entity_ids.add(r["id"])
-            # Telemetry: count how many candidates would have hit a stoplisted
-            # canonical_name had we not filtered. Cheap (re-runs the unfiltered
-            # exact lookup only when capture is on).
-            if _capture_dict is not None and _stoplist_lower and not rows:
-                try:
-                    chk = db.execute(
-                        "SELECT 1 FROM entities WHERE LOWER(canonical_name) = ? LIMIT 1",
-                        [candidate.lower()],
-                    ).fetchone()
-                    if chk and candidate.lower() in _stoplist_lower:
-                        seeds_dropped += 1
-                except Exception:  # noqa: BLE001
-                    pass
         except Exception:  # noqa: BLE001
             continue
 
