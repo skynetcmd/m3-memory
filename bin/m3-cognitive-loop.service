@@ -1,0 +1,28 @@
+# m3-memory Cognitive Loop — Linux systemd --user unit template.
+#
+# Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT]
+# and [M3_PYTHON] and writes the result to
+# ~/.config/systemd/user/m3-cognitive-loop.service, then runs
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now m3-cognitive-loop.service
+#
+# NOTE: ExecStart deliberately does NOT pass --background. systemd manages
+# the process directly (Type=simple); the loop must run in the foreground or
+# the double-fork would detach it from systemd's supervision.
+#
+# Headless / server boxes where the user is not always logged in may want
+#   loginctl enable-linger <user>
+# so the service runs without an active login session.
+
+[Unit]
+Description=m3-memory Cognitive Loop (autonomous heartbeat)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/m3_cognitive_loop.py --interval 300 --log-file [M3_MEMORY_ROOT]/logs/cognitive_loop.log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

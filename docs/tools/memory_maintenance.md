@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: 873b3b11d212
-mtime_utc: 2026-05-01T09:15:53.149021+00:00
-generated_utc: 2026-05-01T13:05:26.990958+00:00
+sha1: ba3d613fb9d7
+mtime_utc: 2026-05-14T05:25:36.033320+00:00
+generated_utc: 2026-05-14T05:37:12.908575+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-_(no conventional entry point detected)_
+- `if __name__ == "__main__"` guard
 
 ---
 
@@ -34,6 +34,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `memory_core`
 - `memory_core (ARCHIVE_DB_PATH, DEDUP_LIMIT, DEDUP_THRESHOLD, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, memory_link_impl)`
 
