@@ -78,6 +78,8 @@ You can also use a standalone [Ollama](https://ollama.com) or [LM Studio](https:
 
 Want auto-classification, summarization, and consolidation? Load a small chat model alongside the embedder (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B instruct GGUF in LM Studio / llama.cpp). M3 auto-selects it; embedding-only features work without it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
+> **Optional — Rust core (`m3-memory[oxidation]`).** A Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) can take over hot-path work — hashing, cosine/MMR ranking, redaction, and in-process llama.cpp embeddings. Install with `pip install m3-memory[oxidation]` (needs a Rust toolchain + maturin). Every path falls back to pure Python when the extra is absent, and `M3_CORE_RS_DISABLE=1` forces the Python path at runtime. See [docs/ENVIRONMENT_VARIABLES.md → Project Oxidation](docs/ENVIRONMENT_VARIABLES.md).
+
 Restart your agent. Done!
 
 ---
