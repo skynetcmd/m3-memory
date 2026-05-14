@@ -272,6 +272,26 @@ ELBOW_MIN_INPUT        = int(os.environ.get("M3_ELBOW_MIN_INPUT", "20"))
 ELBOW_MIN_RETURN       = int(os.environ.get("M3_ELBOW_MIN_RETURN", "8"))
 ELBOW_ABS_THRESHOLD    = float(os.environ.get("M3_ELBOW_ABS_THRESHOLD", "0.05"))
 
+# Expansion-displacement guard. At small k, expansion-sourced rows (entity_graph,
+# graph, session, neighbor) win rank-1 from the hybrid primary far more often
+# than they deserve to. The fusion step compares expansion and primary rows on a
+# single score, but the two pools are not calibrated against each other — an
+# expansion row's score against the query is not directly comparable to a
+# primary row's hybrid score, and the resulting rank-1 promotion is wrong much
+# more often than right at small k.
+#
+# Rule: at ranks 1..M3_EXPANSION_PROTECTED_RANKS, an expansion row may only
+# displace the highest-scoring primary row if expansion_score >=
+# M3_EXPANSION_DISPLACEMENT_MARGIN * primary_score. Otherwise the primary takes
+# precedence at that rank. Beyond protected ranks, normal score-based ordering
+# applies — expansion is still free to contribute candidates at higher k.
+#
+# Defaults: 1.75x margin at the top 3 ranks. Override via env var; not exposed
+# as a per-call parameter (deliberate — this is an engine invariant, not a
+# tuning knob for callers).
+EXPANSION_DISPLACEMENT_MARGIN  = float(os.environ.get("M3_EXPANSION_DISPLACEMENT_MARGIN", "1.75"))
+EXPANSION_PROTECTED_RANKS      = int(os.environ.get("M3_EXPANSION_PROTECTED_RANKS", "3"))
+
 # Entity-graph seed stoplist. Persona/role tokens like "User" co-occur with
 # essentially every turn in conversational corpora, so when an NER pass
 # materializes them as entities they become hub nodes that hub-out the BFS
@@ -469,6 +489,67 @@ def _get_reranker(model_name: str):
     return _RERANKER_MODEL
 
 
+def _enforce_expansion_displacement_guard(
+    hits: list,
+    *,
+    protected_ranks: int = EXPANSION_PROTECTED_RANKS,
+    margin: float = EXPANSION_DISPLACEMENT_MARGIN,
+) -> list:
+    """Enforce: at ranks 1..protected_ranks, expansion rows may only outrank a
+    primary row if expansion_score >= margin * primary_score.
+
+    Operates on a list[tuple[score, dict]] in current ranked order. Items are
+    classified as "expansion" if dict["_expanded_via"] is set and != "primary";
+    everything else (including missing tag, "primary") is treated as primary.
+
+    The pass walks rank 1..protected_ranks. At each protected rank, if the row
+    is an expansion that fails the margin test against the next primary row in
+    the list, swap them. The same primary is then locked at that rank; we move
+    on to the next protected rank. Beyond protected_ranks, the original order
+    is preserved.
+
+    Idempotent on already-conforming lists. No-op if protected_ranks <= 0 or
+    margin <= 1.0 (treating margin <= 1.0 as "no displacement allowed at all"
+    would be too strict; instead we treat it as "feature disabled, score-only").
+    """
+    if not hits or protected_ranks <= 0 or margin <= 1.0:
+        return hits
+    work = list(hits)
+
+    def _is_expansion(item) -> bool:
+        if not isinstance(item, dict):
+            return False
+        tag = item.get("_expanded_via")
+        return bool(tag) and tag != "primary"
+
+    n = len(work)
+    limit = min(protected_ranks, n)
+    for rank in range(limit):
+        score, item = work[rank]
+        if not _is_expansion(item):
+            continue
+        # Find the next primary candidate at rank+1..end
+        next_primary_idx = None
+        for j in range(rank + 1, n):
+            if not _is_expansion(work[j][1]):
+                next_primary_idx = j
+                break
+        if next_primary_idx is None:
+            # No primary below — leave the expansion in place (no replacement available).
+            continue
+        primary_score, _ = work[next_primary_idx]
+        # Displacement allowed only when expansion overwhelmingly outscores primary.
+        # Sign handling: if either score is non-positive, "overwhelmingly larger"
+        # has no clean ratio interpretation, so fall back to "primary wins" —
+        # consistent with the calibration evidence that expansion-rank-1 is
+        # usually wrong.
+        if score > 0 and primary_score > 0 and score >= margin * primary_score:
+            continue  # expansion earned its rank
+        # Swap: primary comes up to `rank`, expansion drops to where primary was.
+        work[rank], work[next_primary_idx] = work[next_primary_idx], work[rank]
+    return work
+
+
 def _apply_rerank(
     hits: list,
     query: str,
@@ -524,6 +605,11 @@ def _apply_rerank(
         new_score = blend * ce + (1.0 - blend) * hybrid_score
         blended.append((new_score, item))
     blended.sort(key=lambda t: t[0], reverse=True)
+    # Enforce expansion-displacement guard at top ranks so the CE step cannot
+    # promote an expansion row past a primary at rank <= protected unless the
+    # CE-blended score overwhelmingly outscores the next primary. Without this,
+    # rerank with blend=1.0 freely undoes the same invariant applied at fusion.
+    blended = _enforce_expansion_displacement_guard(blended)
     return blended[:final_k]
 
 
@@ -4607,7 +4693,14 @@ async def _maybe_expand_routed(
         elif s == best[mid][0] and item.get("_expanded_via", "primary") != "primary":
             # On exact score tie, prefer the non-primary tag to preserve cross-peer evidence.
             best[mid] = (s, item)
-    fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
+    fused = sorted(best.values(), key=lambda x: x[0], reverse=True)
+    # Enforce expansion-displacement guard at top ranks before truncation to k.
+    # The fusion sort treats expansion and primary rows at parity on score, but
+    # the two score scales are not calibrated against each other at small k.
+    # See EXPANSION_DISPLACEMENT_MARGIN docstring for the rule and env-var
+    # overrides.
+    fused = _enforce_expansion_displacement_guard(fused)
+    fused = fused[:k]
     return fused
 
 
