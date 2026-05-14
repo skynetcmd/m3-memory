@@ -56,11 +56,17 @@ all parity-verified. In-process llama.cpp embeddings are also wired (opt-in via
 
 ## Verification debt
 
-- [ ] **Benchmark the swaps.** Every wired operation is *correctness*-verified
-  (parity tests) but not *performance*-verified. The plan's targets (<50 ms
-  retrieval, ingest throughput) are unmeasured. Run the LME-S reproducible stack
-  with and without the Rust core to confirm the swaps actually pay off — "routes
-  through Rust" is not "measurably faster" until benchmarked.
+- [x] **Per-operation micro-benchmark.** _Done 2026-05-14_ — `tests/bench_oxidation.py`
+  times each swap FFI-inclusive against its Python baseline on realistic inputs.
+  Results: MMR 55–85× faster, cosine ~3×, cosine_batch 2.5–3×. It also caught a
+  regression: `m3_core_rs.scrub` was ~13× *slower* (recompiled regexes per call) —
+  fixed by caching the compiled `Redactor` in the binding, re-benchmarked at
+  8.5–10× faster. `sha256` is a mild loss (~0.4–0.9×, FFI cost > hashing win vs
+  `hashlib`); kept for FIPS-provider consistency, low stakes.
+- [ ] **End-to-end retrieval benchmark.** The micro-benchmarks are per-op, not
+  end-to-end. The plan's headline target (<50 ms retrieval p50, ingest throughput)
+  still needs the LME-S reproducible stack run with and without the Rust core.
+  Not available in this repo — requires the private bench stack.
 
 - [ ] **Embedded-embedder bulk-namespace parity.** See the default-switch item —
   before any corpus-wide adoption, verify the embedded backend matches the LM Studio
