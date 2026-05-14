@@ -62,9 +62,32 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
 import yaml
-from crypto_provider import get_sha256 as _sha256_hex
+from crypto_provider import get_sha256 as _sha256_hex_py
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
+
+# ── Project Oxidation: optional Rust compute core ────────────────────────────
+# m3_core_rs is an optional dependency (pip install m3-memory[oxidation]).
+# M3_CORE_RS_DISABLE=1 forces the Python path even when the wheel is installed
+# — the load-bearing kill-switch from the oxidation plan §9.6. Import failure
+# is non-fatal: m3-memory runs fully on the Python path without the core.
+_OXIDATION_DISABLED = os.environ.get("M3_CORE_RS_DISABLE", "0").lower() in ("1", "true", "yes")
+m3_core_rs = None
+if not _OXIDATION_DISABLED:
+    try:
+        import m3_core_rs  # type: ignore
+        logging.getLogger(__name__).info(
+            "m3_core_rs loaded (hash provider: %s)", m3_core_rs.hash_provider()
+        )
+    except ImportError:
+        m3_core_rs = None  # extra not installed — Python path is the default
+
+
+def _sha256_hex(data: bytes) -> str:
+    """SHA-256 hex digest. Routes through the Rust core when available."""
+    if m3_core_rs is not None:
+        return m3_core_rs.sha256_hex_bytes(data)
+    return _sha256_hex_py(data)
 
 
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
