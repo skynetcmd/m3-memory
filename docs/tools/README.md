@@ -24,6 +24,8 @@ Produced as input to Section 9.6 of the Project "Oxidation" Rust transition plan
 
 Cross-checked against [INDEX.md](INDEX.md) — **no drift** between the tool inventory and the env-var reader set.
 
+> **Update — Oxidation wiring (post-report):** the Rust core is now wired into `bin/memory_core.py`, `bin/chatlog_redaction.py`, and `bin/auto_route.py`. This introduced **5 new live `M3_*` vars** beyond the original 73-var count: `M3_CORE_RS_DISABLE`, `M3_ROUTE_SHADOW_MODE`, `M3_EMBED_GGUF`, `M3_EMBED_GGUF_MODEL_TAG`, plus the test-only `M3_TEST_GGUF`. All are documented in [`docs/ENVIRONMENT_VARIABLES.md` → Project Oxidation](../ENVIRONMENT_VARIABLES.md). Re-run the reconcile sweep to fold them into the master inventory.
+
 ## Regenerating the per-tool docs
 
 The auto-generated `<tool_name>.md` files and `INDEX.md` are produced by:

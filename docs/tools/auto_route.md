@@ -1,8 +1,8 @@
 ---
 tool: bin/auto_route.py
-sha1: 1a66b3822d9a
-mtime_utc: 2026-04-26T12:39:14.741294+00:00
-generated_utc: 2026-05-01T13:05:26.707128+00:00
+sha1: 0e824eb9c6f3
+mtime_utc: 2026-05-14T08:10:51.901511+00:00
+generated_utc: 2026-05-14T14:05:30.596889+00:00
 private: false
 ---
 
@@ -51,7 +51,8 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_CORE_RS_DISABLE`
+- `M3_ROUTE_SHADOW_MODE`
 
 ---
 
@@ -69,7 +70,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core_rs`
 
 ---
 
