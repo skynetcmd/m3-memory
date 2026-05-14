@@ -1,8 +1,8 @@
 ---
 tool: bin/auth_utils.py
-sha1: adf379f8e153
-mtime_utc: 2026-05-07T03:32:14.554106+00:00
-generated_utc: 2026-05-09T13:54:33.765155+00:00
+sha1: 95168c771ffa
+mtime_utc: 2026-05-14T06:03:06.905715+00:00
+generated_utc: 2026-05-14T14:05:30.589295+00:00
 private: false
 ---
 
@@ -36,6 +36,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (no_window_kwargs)`
 - `crypto_provider (provider)`
 - `m3_sdk (resolve_db_path)`
 
@@ -45,15 +46,15 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 226)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 59)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 215)
-- `subprocess.run()` (line 240)
+- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 232)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 61)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 218)
+- `subprocess.run()` (line 247)
 
 **sqlite**
 
-- `sqlite3.connect()  → `_vault_db_path()`` (line 317)
-- `sqlite3.connect()  → `vault_path`` (line 256)
+- `sqlite3.connect()  → `_vault_db_path()`` (line 325)
+- `sqlite3.connect()  → `vault_path`` (line 264)
 
 
 ---
