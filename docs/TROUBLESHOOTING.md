@@ -26,6 +26,30 @@
 - **Solution**: Verify the correct embedding model is loaded (e.g., `nomic-embed-text` for Ollama, or check your LM Studio model list).
 - **Solution**: Ensure all devices use the same embedding model and dimension (`EMBED_DIM`, default 1024). Mismatched dimensions break cosine similarity.
 
+## Scheduled Task Visibility
+
+### Focus-stealing command prompt windows (Windows)
+- **Cause**: Older installs registered the `AgentOS_*` scheduled tasks to run
+  through `cmd.exe`, which draws a console window on screen every time a task
+  fires (every 15-30 minutes for the busy ones).
+- **Fix**: Run the fix script — it self-elevates (accept the UAC prompt), so
+  you can start it from a normal terminal:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File bin\fix_scheduled_tasks.ps1
+  ```
+  It re-registers all tasks with `pythonw.exe` (no console subsystem → no
+  window) and prints a before/after summary.
+- **Equivalent manual fix**: in an **Administrator** terminal, run the
+  installer directly:
+  ```powershell
+  python bin/install_schedules.py --repair
+  ```
+- **Note**: the older `-Hidden` / `Set-ScheduledTask ... Hidden` trick does
+  **not** fix this — it only hides the task's entry in the Task Scheduler UI,
+  not the console window. Use the fix above instead.
+- **macOS / Linux**: not affected — cron jobs never draw a window. Just run
+  `python bin/install_schedules.py --add all` normally.
+
 ---
 
 ## Installation Issues
