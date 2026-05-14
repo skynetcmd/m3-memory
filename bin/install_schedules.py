@@ -73,28 +73,154 @@ def install_unix_crontab(m3_memory_root):
     finally:
         os.unlink(tmp_path)
 
-def _venv_python(m3_memory_root: str) -> str:
+
+def _render_template(template_path: str, m3_memory_root: str, python_exe: str) -> str:
+    """Read a template file and substitute the [M3_MEMORY_ROOT] / [M3_PYTHON]
+    placeholders. Used for the launchd plist and systemd unit."""
+    with open(template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return (content
+            .replace("[M3_MEMORY_ROOT]", m3_memory_root)
+            .replace("[M3_PYTHON]", python_exe))
+
+
+def install_unix_cognitive_loop(m3_memory_root):
+    """Install the cognitive loop as a native service (launchd on macOS,
+    systemd --user on Linux) so it auto-starts at login and auto-restarts on
+    crash. The loop's own acquire_lock() makes a redundant launch a quiet
+    no-op, so this is safe to re-run. Cron is deliberately NOT used — it is the
+    wrong tool for a keepalive daemon."""
+    os_name = platform.system()
+    python_exe = _venv_python(m3_memory_root)
+    bin_dir = os.path.join(m3_memory_root, "bin")
+    os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+
+    if os_name == "Darwin":
+        template = os.path.join(bin_dir, "com.m3memory.cognitiveloop.plist")
+        if not os.path.exists(template):
+            _safe_print(f"{FAIL} Missing template: {template}")
+            return
+        dest_dir = os.path.expanduser("~/Library/LaunchAgents")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, "com.m3memory.cognitiveloop.plist")
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(_render_template(template, m3_memory_root, python_exe))
+        # unload first (ignore failure if not loaded), then load.
+        subprocess.run(["launchctl", "unload", dest], capture_output=True)
+        r = subprocess.run(["launchctl", "load", dest], capture_output=True, text=True)
+        if r.returncode == 0:
+            _safe_print(f"{OK} Installed + loaded launchd agent: {dest}")
+        else:
+            _safe_print(f"{FAIL} launchctl load failed: {r.stderr.strip()}")
+
+    elif os_name == "Linux":
+        template = os.path.join(bin_dir, "m3-cognitive-loop.service")
+        if not os.path.exists(template):
+            _safe_print(f"{FAIL} Missing template: {template}")
+            return
+        dest_dir = os.path.expanduser("~/.config/systemd/user")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, "m3-cognitive-loop.service")
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(_render_template(template, m3_memory_root, python_exe))
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        r = subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "m3-cognitive-loop.service"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            _safe_print(f"{OK} Installed + started systemd --user unit: {dest}")
+        else:
+            _safe_print(f"{FAIL} systemctl enable --now failed: {r.stderr.strip()}")
+    else:
+        _safe_print(f"{WARN} install_unix_cognitive_loop: unsupported OS {os_name}")
+
+
+def remove_unix_cognitive_loop():
+    """Uninstall the launchd agent / systemd unit for the cognitive loop."""
+    os_name = platform.system()
+    if os_name == "Darwin":
+        dest = os.path.expanduser(
+            "~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist")
+        if os.path.exists(dest):
+            subprocess.run(["launchctl", "unload", dest], capture_output=True)
+            os.unlink(dest)
+            _safe_print(f"{OK} Removed launchd agent: {dest}")
+        else:
+            _safe_print(f"{WARN} launchd agent not installed (nothing to remove).")
+    elif os_name == "Linux":
+        dest = os.path.expanduser(
+            "~/.config/systemd/user/m3-cognitive-loop.service")
+        subprocess.run(
+            ["systemctl", "--user", "disable", "--now", "m3-cognitive-loop.service"],
+            capture_output=True,
+        )
+        if os.path.exists(dest):
+            os.unlink(dest)
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+            _safe_print(f"{OK} Removed systemd --user unit: {dest}")
+        else:
+            _safe_print(f"{WARN} systemd unit not installed (nothing to remove).")
+    else:
+        _safe_print(f"{WARN} remove_unix_cognitive_loop: unsupported OS {os_name}")
+
+
+def _venv_python(m3_memory_root: str, windowless: bool = False) -> str:
     """Resolve the project venv's python interpreter, cross-platform.
-    Falls back to sys.executable if no venv is present."""
+    Falls back to sys.executable if no venv is present.
+
+    windowless=True (Windows only) returns pythonw.exe instead of python.exe.
+    pythonw.exe is a GUI-subsystem binary — the OS never allocates a console
+    for it, so a scheduled task running it draws NO window. python.exe is a
+    console-subsystem binary and DOES flash a console window when launched by
+    Task Scheduler, even without a cmd.exe wrapper. Because pythonw.exe has no
+    stdout/stderr, scheduled-task entrypoints MUST self-log via _task_runtime
+    (they do — see get_schedule_specs / the --log-file args).
+    """
     if platform.system() == "Windows":
-        candidate = os.path.join(m3_memory_root, ".venv", "Scripts", "python.exe")
+        exe = "pythonw.exe" if windowless else "python.exe"
+        candidate = os.path.join(m3_memory_root, ".venv", "Scripts", exe)
+        if os.path.exists(candidate):
+            return candidate
+        # Fall back to a sibling of sys.executable (e.g. pythonw.exe next to
+        # python.exe) before giving up on the windowless request entirely.
+        if windowless:
+            sibling = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+            if os.path.exists(sibling):
+                return sibling
+        return sys.executable
     else:
         candidate = os.path.join(m3_memory_root, ".venv", "bin", "python")
-    return candidate if os.path.exists(candidate) else sys.executable
+        return candidate if os.path.exists(candidate) else sys.executable
 
 
 def get_schedule_specs(m3_memory_root):
-    """Return list of schedule specifications (normalized for Windows & Unix)."""
-    python_exe = _venv_python(m3_memory_root)
+    """Return list of schedule specifications (normalized for Windows & Unix).
 
+    Each spec carries an ``args`` list — the python script path plus its CLI
+    flags, including ``--log-file``. The Windows task action is ``python.exe``
+    invoked directly with these args: NO ``cmd.exe`` wrapper and NO shell
+    ``>>`` redirect (those drew a focus-stealing console window every fire).
+    The entrypoints self-log via bin/_task_runtime.py instead.
+
+    Note: ``AgentOS_CognitiveLoop`` is the Windows ONSTART spec. On macOS/Linux
+    the cognitive loop is installed as a launchd/systemd service instead — see
+    install_unix_cognitive_loop().
+    """
     log_dir = os.path.join(m3_memory_root, "logs")
-    bin_posix = m3_memory_root.replace("\\", "/") + "/bin"
-    maintenance_log = os.path.join(log_dir, "maintenance.log")
+    bin_dir = os.path.join(m3_memory_root, "bin")
+
+    def _log(name):
+        return os.path.join(log_dir, name)
+
+    def _script(name):
+        return os.path.join(bin_dir, name)
 
     return [
         {
             "name": "AgentOS_WeeklyAuditor",
-            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "weekly_auditor.py")}" >> "{os.path.join(log_dir, "auditor.log")}" 2>&1',
+            "args": [_script("weekly_auditor.py"),
+                     "--log-file", _log("auditor.log")],
             "schedule": "WEEKLY",
             "modifier": "FRI",
             "time": "16:00",
@@ -102,7 +228,8 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_HourlySync",
-            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "sync_all.py")}" >> "{os.path.join(log_dir, "sync_all.log")}" 2>&1',
+            "args": [_script("sync_all.py"),
+                     "--log-file", _log("sync_all.log")],
             "schedule": "HOURLY",
             "modifier": "1",
             "time": "00:00",
@@ -110,7 +237,11 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_Maintenance",
-            "cmd": f'"{python_exe}" -c "import sys; sys.path.insert(0, \'{bin_posix}\'); import memory_maintenance; memory_maintenance.memory_maintenance_impl()" >> "{maintenance_log}" 2>&1',
+            # Previously invoked via `python -c "...memory_maintenance_impl()"`;
+            # memory_maintenance.py now has a real __main__ block so it runs as
+            # a script (enables --log-file + single-instance locking).
+            "args": [_script("memory_maintenance.py"),
+                     "--log-file", _log("maintenance.log")],
             "schedule": "DAILY",
             "modifier": "",
             "time": "03:00",
@@ -118,7 +249,8 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_SecretRotator",
-            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "secret_rotator.py")}" >> "{os.path.join(log_dir, "secret_rotator.log")}" 2>&1',
+            "args": [_script("secret_rotator.py"),
+                     "--log-file", _log("secret_rotator.log")],
             "schedule": "MONTHLY",
             "modifier": "1",
             "time": "02:00",
@@ -126,7 +258,9 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_ChatlogEmbedSweep",
-            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "chatlog_embed_sweeper.py")}" --batch 256 --max-per-run 10000 >> "{os.path.join(log_dir, "chatlog_embed_sweep.log")}" 2>&1',
+            "args": [_script("chatlog_embed_sweeper.py"),
+                     "--batch", "256", "--max-per-run", "10000",
+                     "--log-file", _log("chatlog_embed_sweep.log")],
             "schedule": "MINUTE",
             "modifier": "30",
             "time": "00:00",
@@ -134,7 +268,10 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_ObservationDrain",
-            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "m3_enrich.py")}" --drain-queue --drain-batch 200 --profile enrich_local_qwen >> "{os.path.join(log_dir, "observation_drain.log")}" 2>&1',
+            "args": [_script("m3_enrich.py"),
+                     "--drain-queue", "--drain-batch", "200",
+                     "--profile", "enrich_local_qwen",
+                     "--log-file", _log("observation_drain.log")],
             "schedule": "MINUTE",
             "modifier": "15",
             "time": "00:00",
@@ -142,7 +279,11 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_CognitiveLoop",
-            "cmd": f'"{python_exe}" "{os.path.join(m3_memory_root, "bin", "m3_cognitive_loop.py")}" --interval 300 >> "{os.path.join(log_dir, "cognitive_loop.log")}" 2>&1',
+            # --background re-execs under pythonw.exe (no console at all) on
+            # Windows. macOS/Linux use a launchd/systemd service instead.
+            "args": [_script("m3_cognitive_loop.py"),
+                     "--interval", "300", "--background",
+                     "--log-file", _log("cognitive_loop.log")],
             "schedule": "ONSTART",
             "modifier": "",
             "time": "00:00",
@@ -162,7 +303,11 @@ def _filter_tasks(tasks: list, selector: str | None) -> list:
 
 
 def install_windows_tasks(m3_memory_root, selector: str | None = None):
-    python_exe = _venv_python(m3_memory_root)
+    # pythonw.exe (GUI subsystem) — Task Scheduler draws NO console window for
+    # it. python.exe (console subsystem) flashes a window every fire even
+    # without a cmd.exe wrapper. Entrypoints self-log via _task_runtime, so
+    # pythonw.exe having no stdout is fine.
+    python_exe = _venv_python(m3_memory_root, windowless=True)
     if python_exe == sys.executable and not os.path.exists(os.path.join(m3_memory_root, ".venv")):
         _safe_print(f"{WARN} Using system Python {python_exe} because .venv was not found.")
 
@@ -177,18 +322,27 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
     success = True
     for task in tasks:
         subprocess.run(["schtasks", "/Delete", "/TN", task["name"], "/F"], capture_output=True)
-        # Wrap in cmd.exe /c so the shell evaluates `>>` redirects and quoted argv.
-        # Without this, schtasks treats the first quoted token as Execute (literal quotes
-        # included) and CreateProcess fails with ERROR_FILE_NOT_FOUND.
-        wrapped = f'cmd.exe /c "{task["cmd"]}"'
+        # Task action is python.exe invoked directly — NO cmd.exe wrapper.
+        # The old cmd.exe wrapper existed only to evaluate the `>>` redirect,
+        # and being a console app it drew a focus-stealing window every fire.
+        # Entrypoints now self-log via _task_runtime, so no redirect is needed.
+        # /TR is a single string: each path is quoted individually so paths
+        # with spaces survive. (The historical ERROR_FILE_NOT_FOUND came from
+        # quoting the *whole* command including `>>`, not from quoting argv.)
+        tr = " ".join(f'"{part}"' for part in [python_exe, *task["args"]])
         schtasks_cmd = [
             "schtasks", "/Create", "/TN", task["name"],
-            "/TR", wrapped,
+            "/TR", tr,
             "/SC", task["schedule"],
-            "/ST", task["time"],
             "/F",
         ]
-        if task["modifier"]:
+        # /ST (start time) and /MO (interval modifier) are NOT valid for
+        # event-based schedules — schtasks rejects them for ONSTART/ONLOGON/
+        # ONIDLE/ONEVENT. Only pass them for time/interval-based schedules.
+        event_based = task["schedule"] in ("ONSTART", "ONLOGON", "ONIDLE", "ONEVENT")
+        if not event_based:
+            schtasks_cmd.extend(["/ST", task["time"]])
+        if task["modifier"] and not event_based:
             # /D for WEEKLY+MONTHLY day-of-week, /MO for interval-based (MINUTE/HOURLY).
             flag = "/D" if task["schedule"] in ("WEEKLY", "MONTHLY") else "/MO"
             schtasks_cmd.extend([flag, task["modifier"]])
@@ -273,11 +427,21 @@ def main():
             install_windows_tasks(m3_memory_root, selector)
         elif os_name in ("Darwin", "Linux"):
             if selector:
-                _safe_print(f"{WARN} Unix crontab installer currently rewrites all entries. "
-                            "Single-task add on Unix is not supported yet — use --add all or edit "
-                            "crontab directly.")
+                if selector.lower().replace("-", "").replace("_", "") in (
+                    "cognitiveloop", "agentoscognitiveloop"
+                ):
+                    # The cognitive loop is a service, not a cron entry —
+                    # support installing it on its own.
+                    install_unix_cognitive_loop(m3_memory_root)
+                else:
+                    _safe_print(f"{WARN} Unix crontab installer currently rewrites all entries. "
+                                "Single-task add on Unix is not supported yet — use --add all or edit "
+                                "crontab directly. (cognitive-loop can be added on its own.)")
             else:
                 install_unix_crontab(m3_memory_root)
+                # The cognitive loop runs as a launchd/systemd service, not a
+                # cron entry — install it alongside the crontab.
+                install_unix_cognitive_loop(m3_memory_root)
         else:
             _safe_print(f"Unsupported OS: {os_name}")
         return
@@ -285,8 +449,19 @@ def main():
     if args.remove:
         if os_name == "Windows":
             remove_windows_tasks(selector, m3_memory_root)
+        elif os_name in ("Darwin", "Linux"):
+            if selector and selector.lower().replace("-", "").replace("_", "") in (
+                "cognitiveloop", "agentoscognitiveloop"
+            ):
+                remove_unix_cognitive_loop()
+            elif selector:
+                _safe_print(f"{WARN} Unix removal of individual cron entries: edit crontab "
+                            "directly with `crontab -e`. (cognitive-loop can be removed on its own.)")
+            else:
+                remove_unix_cognitive_loop()
+                _safe_print(f"{WARN} Cron entries: edit crontab directly with `crontab -e` to remove them.")
         else:
-            _safe_print(f"{WARN} Unix removal: edit crontab directly with `crontab -e`.")
+            _safe_print(f"Unsupported OS: {os_name}")
         return
 
 

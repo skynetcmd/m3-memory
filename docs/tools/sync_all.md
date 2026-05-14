@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: 249d41971297
-mtime_utc: 2026-04-26T08:11:07.730162+00:00
-generated_utc: 2026-05-05T01:50:16.478080+00:00
+sha1: cedb3362614b
+mtime_utc: 2026-05-14T05:44:46.105784+00:00
+generated_utc: 2026-05-14T05:46:35.139330+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ DB list:
 
 ## Entry points
 
-- `def main()` (line 182)
+- `def main()` (line 186)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -56,6 +56,8 @@ DB list:
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (add_log_file_arg, setup_task_runtime)`
+- `_task_runtime (no_window_kwargs)`
 - `m3_sdk (add_database_arg)`
 
 ---
@@ -64,8 +66,8 @@ DB list:
 
 **subprocess**
 
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 159)
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 116)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 162)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 117)
 
 
 ---

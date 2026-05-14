@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: f966206ca731
-mtime_utc: 2026-05-09T03:18:32.153252+00:00
-generated_utc: 2026-05-09T13:54:34.220833+00:00
+sha1: bb6d1403cecc
+mtime_utc: 2026-05-14T05:41:26.861767+00:00
+generated_utc: 2026-05-14T05:43:18.197359+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 239)
+- `def main()` (line 388)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -52,10 +52,16 @@ _(none detected)_
 
 - `subprocess.run()  → `['crontab', '-l']`` (line 49)
 - `subprocess.run()  → `['crontab', tmp_path]`` (line 68)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 179)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 219)
-- `subprocess.run()  → `schtasks_cmd`` (line 196)
-- `subprocess.run()` (line 199)
+- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 110)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 109)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 146)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 324)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 368)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 126)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 160)
+- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 154)
+- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 127)
+- `subprocess.run()  → `schtasks_cmd`` (line 350)
 
 
 ---
