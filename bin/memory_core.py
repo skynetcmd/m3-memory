@@ -424,8 +424,10 @@ FACT_ENRICH_MAX_ATTEMPTS = int(os.environ.get("M3_FACT_ENRICH_MAX_ATTEMPTS", "5"
 # Entity-relation graph pipeline (Phase 4-5). Gated off by default.
 ENABLE_ENTITY_GRAPH          = os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() in ("1", "true", "yes")
 ENTITY_EXTRACT_CONCURRENCY   = int(os.environ.get("M3_ENTITY_EXTRACT_CONCURRENCY", "2"))
-ENTITY_EXTRACT_MAX_ATTEMPTS  = int(os.environ.get("M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS",
-                                   os.environ.get("M3_ENTITY_EXTRACT_MAX_ATTEMPTS", "3")))
+# Canonical name wins; M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS is a legacy typo-alias
+# kept as fallback only (its precedence used to be inverted).
+ENTITY_EXTRACT_MAX_ATTEMPTS  = int(os.environ.get("M3_ENTITY_EXTRACT_MAX_ATTEMPTS",
+                                   os.environ.get("M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS", "3")))
 ENTITY_RESOLVE_FUZZY_MIN     = float(os.environ.get("M3_ENTITY_RESOLVE_FUZZY_MIN", "0.8"))
 ENTITY_RESOLVE_COSINE_MIN    = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MIN", "0.85"))
 
