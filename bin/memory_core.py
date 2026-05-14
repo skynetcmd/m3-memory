@@ -102,6 +102,40 @@ def _batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
     return _batch_cosine_py(query, matrix)
 
 
+# M3_MMR_SHADOW=1 runs the Rust mmr_rerank_scored alongside the authoritative
+# Python MMR loop and logs any disagreement. Shadow only — never changes the
+# returned ranking. This is the §4c.5 shadow-mode gate before a real cutover.
+_MMR_SHADOW = os.environ.get("M3_MMR_SHADOW", "0").lower() in ("1", "true", "yes")
+
+
+def _mmr_shadow_compare(pre_ranked: list, emb_lookup: dict, lam: float, k: int,
+                        py_selected: list) -> None:
+    """Compare the Rust policy-aware MMR against the Python loop's result.
+    Only runs when every pre_ranked item has an embedding — otherwise the two
+    sides aren't fed equivalent inputs (Python treats a missing vector as
+    max_sim=0, the Rust path has no vector to pass). Logs, never raises."""
+    if m3_core_rs is None or not _MMR_SHADOW:
+        return
+    try:
+        vecs = [emb_lookup.get(item["id"]) for _, item in pre_ranked]
+        if any(v is None for v in vecs):
+            logging.getLogger(__name__).debug(
+                "mmr shadow skipped: %d/%d candidates lack embeddings",
+                sum(v is None for v in vecs), len(vecs))
+            return
+        relevance = [float(score) for score, _ in pre_ranked]
+        rust_idx = m3_core_rs.mmr_rerank_scored(relevance, vecs, lam, k, True)
+        rust_ids = [pre_ranked[i][1]["id"] for i in rust_idx]
+        py_ids = [item["id"] for _, item in py_selected]
+        if rust_ids == py_ids:
+            logging.getLogger(__name__).debug("mmr shadow: agree (k=%d)", len(py_ids))
+        else:
+            logging.getLogger(__name__).warning(
+                "mmr shadow: DISAGREE py=%s rust=%s", py_ids, rust_ids)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("mmr shadow: error %s", exc)
+
+
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
     """Summarizes a conversation into key points using the local LLM."""
     # 1. Fetch all messages for the conversation
@@ -3529,6 +3563,8 @@ async def memory_search_scored_impl(
                     c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
             selected.append(candidates.pop(best_idx))
         ranked = selected
+        if _MMR_SHADOW:
+            _mmr_shadow_compare(pre_ranked, _emb_lookup, _MMR_LAMBDA, k, selected)
     else:
         ranked = pre_ranked
 
