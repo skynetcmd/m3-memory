@@ -72,10 +72,20 @@ is *not* done.
     FIPS is unaffected — a FIPS-validated OpenSSL makes `hashlib.sha256` the
     validated path; the `ring`-based `m3-hash` crate stays FIPS-gated in the
     workspace for any Rust-side hashing, just unwired from this hot path.
-- [ ] **End-to-end retrieval benchmark.** The micro-benchmarks are per-op, not
-  end-to-end. The plan's headline target (<50 ms retrieval p50, ingest throughput)
-  still needs the LME-S reproducible stack run with and without the Rust core.
-  Not available in this repo — requires the private bench stack.
+- [x] **End-to-end retrieval benchmark — local-scale proxy.** _Done 2026-05-14_ —
+  `tests/bench_e2e_retrieval.py` drives the real `memory_search_scored_impl`
+  against the local `agent_memory.db` (~20k items), Rust core on vs off,
+  subprocess-per-arm. Amdahl-shaped result: **1.37×** at k=8 (scoring is a small
+  slice of a small-k query), **4.56×** at k=20, **36.8×** at k=50 — Python's MMR
+  is O(k·n) and degrades to ~2.3 s at k=50 while the Rust path stays flat ~62 ms.
+  Sanity: 20/20 queries parity-clean at the set level; one order-only divergence
+  (ranks 2/3 swapped) traced to the float32 round-off boundary between Rust and
+  numpy cosine on near-tied scores — deterministic per-arm, benign.
+- [ ] **End-to-end retrieval benchmark — LME-S scale.** The local proxy above is
+  ~20k rows; it does NOT speak to the plan's headline target (<50 ms retrieval
+  p50 at LME-M scale, ingest throughput). That still needs the LME-S reproducible
+  stack run with and without the Rust core — not available in this repo, requires
+  the private bench stack.
 
 - [ ] **Embedded-embedder bulk-namespace parity.** See the default-switch item —
   before any corpus-wide adoption, verify the embedded backend matches the LM Studio
