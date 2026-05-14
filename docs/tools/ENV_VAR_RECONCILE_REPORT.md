@@ -187,7 +187,7 @@ The Rust binding crate (`m3-core-py`) will accept both legacy and `M3_`-prefixed
 | ENTITY_NAME_EMBED_CACHE_MAX | M3_ENTITY_NAME_EMBED_CACHE_MAX | `50000` | int | bin/memory_core.py |
 | LLAMA_PORT | M3_LLAMA_PORT | `9904` | int | bin/embed_server_gpu.py |
 | LLM_ENDPOINTS_CSV | M3_LLM_ENDPOINTS_CSV | `` (empty; set by installer/setup_embedder) | csv | bin/llm_failover.py |
-| LLM_READ_TIMEOUT | M3_LLM_READ_TIMEOUT | `4800.0` (m3_sdk.py); `300` (mcp_proxy.py) | float | bin/m3_sdk.py, bin/mcp_proxy.py |
+| LM_READ_TIMEOUT | M3_LM_READ_TIMEOUT | `4800.0` (m3_sdk.py); `300` (mcp_proxy.py) | float | bin/m3_sdk.py, bin/mcp_proxy.py |
 | LLM_TIMEOUT | M3_LLM_TIMEOUT | `120.0` | float | bin/memory_core.py |
 | LM_STUDIO_BASE | M3_LM_STUDIO_BASE | `http://localhost:1234/v1` | url | bin/m3_sdk.py, bin/mcp_proxy.py |
 | MACBOOK_STATUS_HOST | M3_MACBOOK_STATUS_HOST | `127.0.0.1` | ip | bin/macbook_status_server.py |
@@ -215,13 +215,13 @@ These follow secrets-manager naming convention and stay unprefixed. They route t
 ## Conflicts & gotchas
 
 1.  **`M3_EMBED_MODEL` vs `EMBED_MODEL`.** Two readers with different defaults. Consolidate on `M3_EMBED_MODEL` with default `qwen3-embedding`; `EMBED_MODEL` accepted as legacy alias.
-2.  **`M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS` is a typo-alias** of `M3_ENTITY_EXTRACT_MAX_ATTEMPTS`. Both supported; the Rust binding should accept both and log a deprecation for the typo form.
+2.  **`M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS` is a typo-alias** of `M3_ENTITY_EXTRACT_MAX_ATTEMPTS`. _Resolved 2026-05-14:_ the precedence in `bin/memory_core.py` was inverted (typo form won); now the canonical `M3_ENTITY_EXTRACT_MAX_ATTEMPTS` wins and the typo form is fallback only. The Rust binding should accept both and log a deprecation for the typo form.
 3.  **`M3_MEMORY_ROOT` and `M3_SLM_PROFILES_DIR` are inferred when unset.** The Rust binding must preserve the inference logic (walk up from `__file__`); cannot fall back to a hardcoded path.
 4.  **`M3_ROUTER_TEMPORAL_K_BUMP` has caller-dependent defaults.** Different call sites in `memory_core.py` supply different defaults. The Rust port must preserve per-call-site defaults rather than hoisting to a single global default.
 5.  **The planned new `M3_HASH_PROVIDER` env var does not conflict** with `M3_CRYPTO_BACKEND`. They're orthogonal (hashing vs encryption backend).
-6.  **`LLM_READ_TIMEOUT` has two readers with divergent defaults.** `bin/m3_sdk.py` defaults to `4800.0`; `bin/mcp_proxy.py` defaults to `300`. The Rust binding (or any consolidation) must preserve per-reader defaults — they are not interchangeable (SDK long-poll vs proxy request timeout).
+6.  **`LM_READ_TIMEOUT` has two readers with divergent defaults — and the divergence is intentional.** `bin/m3_sdk.py` defaults to `4800.0` (~80 min, slow local-LLM generation); `bin/mcp_proxy.py` defaults to `300` (5 min, proxied tool calls). These are genuinely different workloads — they are *not* a bug to unify. The Rust binding must preserve per-reader defaults, not hoist to one global. (Note: an earlier draft of this report misnamed the var `LLM_READ_TIMEOUT` — the actual var is `LM_READ_TIMEOUT`, corrected 2026-05-14.)
 7.  **`POSTGRES_SERVER` and `SYNC_TARGET_IP` are chained in `bin/sync_all.py`** — `os.environ.get("POSTGRES_SERVER", os.environ.get("SYNC_TARGET_IP", ""))`. `POSTGRES_SERVER` wins; `SYNC_TARGET_IP` is the fallback. Namespacing must keep the precedence. `POSTGRES_SERVER` is also read by `examples/homelab-dashboard/backend/main.py` (out of scope — example app, not the m3-memory surface).
-8.  **`CHATLOG_DB` (legacy, `bin/chatlog_decay.py`) vs `CHATLOG_DB_PATH` (canonical).** `chatlog_decay.py` reads `CHATLOG_DB` then falls back to `M3_DATABASE` — it does *not* consult `CHATLOG_DB_PATH`, so a user who set only `CHATLOG_DB_PATH` would have `chatlog_decay` silently target the main DB. Pre-existing inconsistency; flag for the namespacing pass.
+8.  **`CHATLOG_DB` (legacy, `bin/chatlog_decay.py`) vs `CHATLOG_DB_PATH` (canonical).** _Resolved 2026-05-14:_ `chatlog_decay.py`'s `resolve_db_path` previously read `CHATLOG_DB` → `M3_DATABASE`, skipping `CHATLOG_DB_PATH` entirely — so setting only the canonical var made decay silently target the main DB. The resolution chain is now `CHATLOG_DB` → `CHATLOG_DB_PATH` → `M3_DATABASE` → default.
 9.  **`AGENT_DB` (legacy, `bin/build_kg_variant.py`) is a deprecated alias** for the main memory DB path; it shadows `M3_DATABASE`/`resolve_db_path()` when set. Source comment already marks it deprecated.
 
 ## Methodology
