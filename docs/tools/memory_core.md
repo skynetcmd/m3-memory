@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 8b1251731ce5
-mtime_utc: 2026-05-08T07:15:25.046952+00:00
-generated_utc: 2026-05-09T13:54:34.603867+00:00
+sha1: 2b457fc1930b
+mtime_utc: 2026-05-14T05:45:45.029381+00:00
+generated_utc: 2026-05-14T05:46:35.020577+00:00
 private: false
 ---
 
@@ -86,7 +86,11 @@ _(no argparse arguments detected)_
 - `LLM_TIMEOUT`
 - `M3_AUTO_RELATED_LINK`
 - `M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT`
+- `M3_DEBUG`
 - `M3_DISABLE_AUTO_ACTIVATION`
+- `M3_ELBOW_ABS_THRESHOLD`
+- `M3_ELBOW_MIN_INPUT`
+- `M3_ELBOW_MIN_RETURN`
 - `M3_EMBED_MODEL`
 - `M3_EMBED_URL`
 - `M3_ENABLE_ENTITY_GRAPH`
@@ -96,7 +100,10 @@ _(no argparse arguments detected)_
 - `M3_ENTITY_EXTRACT_MAX_ATTEMPTS`
 - `M3_ENTITY_RESOLVE_COSINE_MIN`
 - `M3_ENTITY_RESOLVE_FUZZY_MIN`
+- `M3_ENTITY_SEED_STOPLIST`
 - `M3_ENTITY_VOCAB_YAML`
+- `M3_EXPANSION_DISPLACEMENT_MARGIN`
+- `M3_EXPANSION_PROTECTED_RANKS`
 - `M3_FACT_ENRICH_CONCURRENCY`
 - `M3_FACT_ENRICH_MAX_ATTEMPTS`
 - `M3_FEDERATION_LOW_SCORE_THRESHOLD`
@@ -126,6 +133,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (no_window_kwargs)`
 - `auto_route`
 - `crypto_provider (get_sha256)`
 - `embedding_utils (batch_cosine)`
@@ -147,11 +155,11 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1355)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1480)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1306)
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1424)
 
 
 ---

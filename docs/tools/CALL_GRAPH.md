@@ -10,34 +10,39 @@ graph LR
   classDef sync fill:#dcfce7,stroke:#14532d,color:#000
 
   ai_mechanic --> m3_sdk
-  analyze_prompt --> bench_locomo
-  analyze_prompt --> memory_core
   augment_memory --> m3_sdk
   augment_memory --> memory_core
   augment_memory --> slm_intent
+  auth_utils --> crypto_provider
   auth_utils --> m3_sdk
-  bench_locomo --> auth_utils
-  bench_locomo --> memory_core
-  bench_locomo --> temporal_utils
-  bench_longmemeval --> auth_utils
-  bench_longmemeval --> m3_sdk
-  bench_longmemeval --> memory_core
-  bench_longmemeval --> temporal_utils
+  backfill_content_hash --> memory_core
+  backfill_content_hash --> sqlite_pragmas
+  batch_runner --> unified_ai
   bench_memory --> m3_sdk
+  bench_memory --> sqlite_pragmas
+  benchmark_memory --> auth_utils
+  benchmark_memory --> memory_core
   build_kg_variant --> m3_sdk
+  build_kg_variant --> sqlite_pragmas
+  build_lme_m_db --> sqlite_pragmas
   chatlog_config --> m3_sdk
+  chatlog_config --> sqlite_pragmas
   chatlog_core --> chatlog_config
   chatlog_core --> chatlog_redaction
   chatlog_core --> m3_sdk
   chatlog_core --> memory_core
+  chatlog_embed_sweeper --> _task_runtime
   chatlog_embed_sweeper --> chatlog_config
+  chatlog_embed_sweeper --> embed_sweep_lib
   chatlog_embed_sweeper --> embedding_utils
   chatlog_embed_sweeper --> m3_sdk
   chatlog_embed_sweeper --> memory_core
   chatlog_ingest --> chatlog_config
   chatlog_ingest --> chatlog_core
   chatlog_ingest --> m3_sdk
+  chatlog_ingest --> memory_core
   chatlog_init --> chatlog_config
+  chatlog_init --> m3_memory
   chatlog_status --> chatlog_config
   chatlog_status --> m3_sdk
   chatlog_status_line --> chatlog_config
@@ -54,9 +59,46 @@ graph LR
   debug_agent_bridge --> thermal_utils
   embed_agent_instructions --> m3_sdk
   embed_agent_instructions --> memory_bridge
+  embed_backfill --> embed_sweep_lib
+  embed_backfill --> memory_core
+  fetch_sovereign_assets --> crypto_provider
   gen_mcp_inventory --> mcp_tool_catalog
+  grok_bridge --> m3_sdk
+  m3_chatlog_backfill_embed --> embedding_utils
+  m3_chatlog_backfill_embed --> m3_sdk
+  m3_chatlog_backfill_embed --> memory_core
+  m3_chatlog_backfill_title --> m3_sdk
+  m3_cognitive_loop --> chatlog_config
+  m3_cognitive_loop --> m3_enrich
+  m3_cognitive_loop --> m3_entities
+  m3_cognitive_loop --> m3_sdk
+  m3_enrich --> _task_runtime
+  m3_enrich --> auth_utils
+  m3_enrich --> enrichment_state
+  m3_enrich --> m3_sdk
+  m3_enrich --> memory_core
+  m3_enrich --> run_observer
+  m3_enrich --> run_reflector
+  m3_enrich --> slm_intent
+  m3_enrich --> sqlite_pragmas
+  m3_enrich --> unified_ai
+  m3_enrich_assign --> sqlite_pragmas
+  m3_enrich_batch --> auth_utils
+  m3_enrich_batch --> batch_runner
+  m3_enrich_batch --> enrichment_state
+  m3_enrich_batch --> m3_enrich
+  m3_enrich_batch --> memory_core
+  m3_enrich_batch --> run_observer
+  m3_enrich_batch --> slm_intent
+  m3_entities --> agent_protocol
+  m3_entities --> auth_utils
+  m3_entities --> m3_sdk
+  m3_entities --> memory_core
+  m3_entities --> slm_intent
   m3_sdk --> auth_utils
   m3_sdk --> chatlog_config
+  m3_sdk --> crypto_provider
+  m3_sdk --> sqlite_pragmas
   mcp_proxy --> custom_tool_bridge
   mcp_proxy --> debug_agent_bridge
   mcp_proxy --> m3_sdk
@@ -71,81 +113,138 @@ graph LR
   memory_bridge --> m3_sdk
   memory_bridge --> mcp_tool_catalog
   memory_bridge --> memory_core
+  memory_core --> _task_runtime
+  memory_core --> auto_route
+  memory_core --> crypto_provider
   memory_core --> embedding_utils
   memory_core --> llm_failover
   memory_core --> m3_sdk
+  memory_core --> migrate_memory
   memory_core --> temporal_utils
   memory_doctor --> m3_sdk
+  memory_doctor --> memory_core
+  memory_maintenance --> _task_runtime
   memory_maintenance --> memory_core
   memory_sync --> memory_core
   memory_sync --> migrate_memory
+  migrate_entity_vocab --> m3_sdk
   migrate_flat_memory --> m3_sdk
   migrate_flat_memory --> memory_core
   migrate_memory --> chatlog_config
   migrate_memory --> m3_sdk
+  mission_control --> m3_sdk
   pg_setup --> auth_utils
-  pg_sync --> m3_sdk
-  pg_sync --> migrate_memory
   probe_ingest_cost --> bench_locomo
   probe_ingest_cost --> memory_core
   probe_ingest_cost --> temporal_utils
   re_embed_all --> m3_sdk
   re_embed_all --> memory_core
-  reingest --> bench_locomo
-  retrieval_audit --> bench_locomo
-  retrieval_audit --> memory_core
+  run_observer --> agent_protocol
+  run_observer --> auth_utils
+  run_observer --> memory_core
+  run_observer --> slm_intent
+  run_observer --> unified_ai
+  run_reflector --> agent_protocol
+  run_reflector --> auth_utils
+  run_reflector --> memory_core
+  run_reflector --> slm_intent
+  secret_rotator --> _task_runtime
   secret_rotator --> auth_utils
   secret_rotator --> m3_sdk
+  session_handoff --> m3_sdk
+  setup_embedder --> crypto_provider
   setup_secret --> auth_utils
   setup_secret --> m3_sdk
   setup_test_db --> m3_sdk
+  setup_test_db --> sqlite_pragmas
+  slm_intent --> auth_utils
+  sync_all --> _task_runtime
   sync_all --> m3_sdk
+  test_bulk_parity --> m3_sdk
   test_bulk_parity --> memory_core
   test_debug_agent --> auth_utils
   test_debug_agent --> debug_agent_bridge
   test_debug_agent --> m3_sdk
+  test_fips_integrity --> auth_utils
+  test_fips_integrity --> crypto_provider
+  test_focus_fix --> m3_sdk
+  test_keychain --> auth_utils
   test_mcp_proxy --> m3_sdk
+  test_mcp_proxy_unit --> mcp_proxy
+  test_mcp_proxy_unit --> mcp_tool_catalog
   test_memory_bridge --> auth_utils
   test_memory_bridge --> m3_sdk
   test_memory_bridge --> memory_bridge
   test_memory_bridge --> memory_core
+  test_sqlite_pragmas --> sqlite_pragmas
+  web_research_bridge --> m3_sdk
+  weekly_auditor --> _task_runtime
   weekly_auditor --> m3_sdk
   weekly_auditor --> memory_bridge
 
+  class ENV_VAR_RECONCILE_REPORT lib
+  class README lib
+  class _task_runtime lib
   class agent_protocol lib
+  class ai-audit lib
   class ai_mechanic lib
-  class analyze_handoff lib
-  class analyze_prompt lib
   class augment_memory lib
   class auth_utils lib
-  class bench_locomo test
-  class bench_longmemeval test
+  class auto_route lib
+  class backfill_content_hash lib
+  class batch_runner lib
+  class bench_locomo lib
   class bench_memory test
+  class benchmark_memory lib
   class build_kg_variant lib
+  class build_lme_m_db lib
   class chatlog_config lib
   class chatlog_core lib
+  class chatlog_decay lib
   class chatlog_embed_sweeper lib
   class chatlog_ingest lib
   class chatlog_init lib
   class chatlog_redaction lib
   class chatlog_status lib
   class chatlog_status_line lib
+  class chroma_health lib
   class chroma_sync_cli sync
+  class cleanup_logs lib
   class cli_kb_browse cli
   class cli_knowledge cli
-  class compare_runs lib
+  class crypto_provider lib
   class custom_tool_bridge lib
   class debug_agent_bridge lib
+  class deep_sync sync
   class embed_agent_instructions sync
+  class embed_backfill lib
   class embed_server sync
   class embed_server_gpu sync
+  class embed_sweep_lib lib
   class embedding_utils lib
+  class enrichment_state lib
+  class fetch_sovereign_assets lib
   class gen_mcp_inventory lib
+  class generate_configs lib
+  class grok_bridge lib
+  class install_os lib
   class install_schedules cli
   class inventory_graph lib
-  class join_variant_reports lib
   class llm_failover lib
+  class m3_autoenrich lib
+  class m3_chatlog_backfill_embed lib
+  class m3_chatlog_backfill_title lib
+  class m3_chatlog_enrich_backfill lib
+  class m3_cognitive_loop lib
+  class m3_enrich lib
+  class m3_enrich_assign lib
+  class m3_enrich_batch lib
+  class m3_enrich_batch_parallel lib
+  class m3_enrich_report lib
+  class m3_entities lib
+  class m3_memory lib
   class m3_sdk lib
+  class macbook_status_server lib
   class mcp_proxy lib
   class mcp_tool_catalog lib
   class memory_bridge lib
@@ -154,33 +253,53 @@ graph LR
   class memory_maintenance lib
   class memory_sync sync
   class metadata_filler lib
+  class migrate_entity_vocab lib
   class migrate_flat_memory cli
   class migrate_memory cli
+  class mission_control lib
+  class news_fetcher lib
   class pg_setup sync
   class pg_sync sync
   class probe_ingest_cost lib
   class re_embed_all lib
-  class reingest lib
-  class retrieval_audit lib
+  class release_orphan_claims lib
+  class run_observer lib
+  class run_reflector lib
+  class run_tests lib
+  class scan_repo_v7 lib
   class secret_rotator sync
+  class session_handoff lib
+  class setup_embedder lib
   class setup_secret cli
   class setup_test_db lib
   class slm_intent lib
-  class stamp_variants_from_chainlog lib
+  class sqlite_pragmas lib
+  class start_mcp_proxy lib
+  class statusline-command lib
   class sync_all sync
   class temporal_utils lib
   class test_bulk_parity test
   class test_debug_agent test
+  class test_fips_integrity test
+  class test_focus_fix test
+  class test_keychain test
+  class test_knowledge test
   class test_mcp_proxy test
+  class test_mcp_proxy_unit test
   class test_memory_bridge test
+  class test_sqlite_pragmas test
+  class test_unified_router test
   class thermal_utils lib
+  class unified_ai lib
+  class validate_env lib
+  class web_research_bridge lib
   class weekly_auditor sync
 ```
 
-**Stats:** 61 tools, 102 edges, 63 total nodes.
+**Stats:** 107 tools, 172 edges, 112 total nodes.
 
 ## Notes
 
 - Solid arrows = Python import; dotted `exec` = subprocess launch.
-- Library modules (imported but not themselves tools): `slm_intent`, `thermal_utils`.
-- Orphans (no edges to or from other tools in this graph): `analyze_handoff`, `compare_runs`, `embed_server`, `embed_server_gpu`, `install_schedules`, `inventory_graph`, `join_variant_reports`, `metadata_filler`, `stamp_variants_from_chainlog`. Either stdlib-only or they shell out without naming a sibling `bin/*.py`.
+- Library modules (imported but not themselves tools): `_task_runtime`, `bench_locomo`, `crypto_provider`, `m3_memory`, `sqlite_pragmas`.
+- Orphans (no edges to or from other tools in this graph): `ENV_VAR_RECONCILE_REPORT`, `README`, `ai-audit`, `chatlog_decay`, `chroma_health`, `cleanup_logs`, `deep_sync`, `embed_server`, `embed_server_gpu`, `generate_configs`, `install_os`, `install_schedules`, `inventory_graph`, `m3_autoenrich`, `m3_chatlog_enrich_backfill`, `m3_enrich_batch_parallel`, `m3_enrich_report`, `macbook_status_server`, `metadata_filler`, `news_fetcher`, `pg_sync`, `release_orphan_claims`, `run_tests`, `scan_repo_v7`, `start_mcp_proxy`, `statusline-command`, `test_knowledge`, `test_unified_router`, `validate_env`. Either stdlib-only or they shell out without naming a sibling `bin/*.py`.

@@ -33,6 +33,7 @@ REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 # top-level imports still work for tools that import helpers from this file.
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 from m3_sdk import add_database_arg, resolve_db_path
+from _task_runtime import no_window_kwargs
 
 DB_PATH = resolve_db_path(None)
 
@@ -249,7 +250,9 @@ def section_git(pdf, summary):
             "git", "-C", REPO_PATH, "log", "--since=1 week ago",
             "--pretty=format:%h - %s (%an)",
         ]
-        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode("utf-8")
+        output = subprocess.check_output(
+            cmd, stderr=subprocess.DEVNULL, **no_window_kwargs()
+        ).decode("utf-8")
     except subprocess.CalledProcessError:
         output = "No recent git activity."
 
@@ -300,7 +303,7 @@ def section_tool_inventory(pdf, summary):
         subprocess.check_call(
             [sys.executable, gen_script],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=120,
+            timeout=120, **no_window_kwargs(),
         )
         ran = True
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
@@ -317,7 +320,7 @@ def section_tool_inventory(pdf, summary):
             subprocess.check_call(
                 [sys.executable, graph_script],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=30,
+                timeout=30, **no_window_kwargs(),
             )
             graph_ok = True
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
@@ -386,8 +389,12 @@ def main():
         "--no-memory", action="store_true",
         help="Skip writing summary to memory system and ChromaDB",
     )
+    from _task_runtime import add_log_file_arg, setup_task_runtime
+    add_log_file_arg(parser)
     add_database_arg(parser)
     args = parser.parse_args()
+
+    setup_task_runtime(args.log_file, lock_name="weekly_auditor")
 
     if args.database:
         os.environ["M3_DATABASE"] = args.database
