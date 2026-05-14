@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 2b457fc1930b
-mtime_utc: 2026-05-14T05:45:45.029381+00:00
-generated_utc: 2026-05-14T05:46:35.020577+00:00
+sha1: e8aec47ef83e
+mtime_utc: 2026-05-14T14:03:16.199594+00:00
+generated_utc: 2026-05-14T14:05:31.198705+00:00
 private: false
 ---
 
@@ -86,11 +86,14 @@ _(no argparse arguments detected)_
 - `LLM_TIMEOUT`
 - `M3_AUTO_RELATED_LINK`
 - `M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT`
+- `M3_CORE_RS_DISABLE`
 - `M3_DEBUG`
 - `M3_DISABLE_AUTO_ACTIVATION`
 - `M3_ELBOW_ABS_THRESHOLD`
 - `M3_ELBOW_MIN_INPUT`
 - `M3_ELBOW_MIN_RETURN`
+- `M3_EMBED_GGUF`
+- `M3_EMBED_GGUF_MODEL_TAG`
 - `M3_EMBED_MODEL`
 - `M3_EMBED_URL`
 - `M3_ENABLE_ENTITY_GRAPH`
@@ -155,11 +158,11 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1480)
+- `subprocess.run()  → `[sys.executable, migration_script, 'up', '--yes', *target_flag]`` (line 1574)
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1424)
+- `sqlite3.connect()  → `f'file:{active}?mode=ro'`` (line 1518)
 
 
 ---
@@ -168,6 +171,7 @@ _(no argparse arguments detected)_
 
 - `http.client`
 - `httpx`
+- `m3_core_rs`
 - `platform`
 - `sentence_transformers (CrossEncoder)`
 - `torch`

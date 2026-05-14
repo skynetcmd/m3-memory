@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_redaction.py
-sha1: a6f9dcd842ef
-mtime_utc: 2026-04-21T19:15:03.919848+00:00
-generated_utc: 2026-05-01T13:05:26.754907+00:00
+sha1: 1ec53b087f8e
+mtime_utc: 2026-05-14T08:02:36.163352+00:00
+generated_utc: 2026-05-14T14:05:30.719402+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_CORE_RS_DISABLE`
 
 ---
 
@@ -49,7 +49,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core_rs`
 
 ---
 
