@@ -81,7 +81,7 @@ postgres = ["psycopg[binary]>=3.2.0,<4"]
 # Python path even when installed. Installing this extra builds from source,
 # so it needs a Rust toolchain (>=1.94) + maturin on the installing machine.
 oxidation = [
-    "m3-core-rs @ git+https://github.com/skynetcmd/m3-memory-rs.git#subdirectory=m3-core-rs/crates/m3-core-py",
+    "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git#subdirectory=crates/m3-core-py",
 ]
 dev = [
     "pytest>=9.0.3,<10",
