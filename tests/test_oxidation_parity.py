@@ -503,10 +503,12 @@ def _rows_eq(a, b):
 
 def _guard(items, protected_ranks=EXPANSION_PROTECTED_RANKS,
            margin=EXPANSION_DISPLACEMENT_MARGIN):
-    rust = [tuple(t) for t in m3_core_rs.enforce_displacement_guard(
-        items, protected_ranks, margin)]
+    # The Rust binding returns an index permutation, not reordered rows — so
+    # callers can map back to their own row objects even when (score, flag)
+    # pairs collide. Apply it to recover the reordered list for comparison.
+    perm = m3_core_rs.enforce_displacement_guard(items, protected_ranks, margin)
+    rust = [items[i] for i in perm]
     py = py_enforce_displacement_guard(items, protected_ranks, margin)
-    # Rust round-trips scores through f32; compare ordering + values within TOL.
     assert _rows_eq(rust, py), f"{rust} != {py}"
     return rust
 
