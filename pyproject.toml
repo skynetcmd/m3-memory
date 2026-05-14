@@ -76,6 +76,13 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2.0,<4"]
+# "Project Oxidation" Rust compute core. Optional by design — m3-memory runs
+# fully on the Python path without it, and M3_CORE_RS_DISABLE forces the
+# Python path even when installed. Installing this extra builds from source,
+# so it needs a Rust toolchain (>=1.94) + maturin on the installing machine.
+oxidation = [
+    "m3-core-rs @ git+https://github.com/skynetcmd/m3-memory-rs.git#subdirectory=m3-core-rs/crates/m3-core-py",
+]
 dev = [
     "pytest>=9.0.3,<10",
     "pytest-asyncio>=1.3.0,<2",
