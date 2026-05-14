@@ -84,9 +84,17 @@ if not _OXIDATION_DISABLED:
 
 
 def _sha256_hex(data: bytes) -> str:
-    """SHA-256 hex digest. Routes through the Rust core when available."""
-    if m3_core_rs is not None:
-        return m3_core_rs.sha256_hex_bytes(data)
+    """SHA-256 hex digest.
+
+    Deliberately NOT routed through m3_core_rs. Benchmarking (tests/
+    bench_oxidation.py) showed the Rust path is slower for every realistic
+    input size: hashlib is already OpenSSL C with SHA-NI, and the PyO3 FFI
+    crossing adds fixed overhead that the hashing work never amortizes on
+    turn-sized content (~bytes to low KB). ring and hashlib only tie above
+    ~64KB. FIPS is unaffected — when CPython is built against a FIPS-validated
+    OpenSSL, hashlib.sha256 IS the validated path; the ring-based m3-hash
+    crate stays FIPS-gated in the workspace for any Rust-side hashing.
+    """
     return _sha256_hex_py(data)
 
 
