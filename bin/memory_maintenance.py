@@ -413,7 +413,7 @@ async def memory_consolidate_impl(
     stale_cutoff = (now_dt - timedelta(days=stale_days)).isoformat() if stale_days > 0 else None
 
     # 1. Query groups exceeding threshold
-    sql = "SELECT type, agent_id, COUNT(*) as cnt FROM memory_items WHERE is_deleted = 0"
+    sql = "SELECT type, agent_id, user_id, COUNT(*) as cnt FROM memory_items WHERE is_deleted = 0"
     params = []
     if type_filter:
         sql += " AND type = ?"
@@ -425,7 +425,7 @@ async def memory_consolidate_impl(
         placeholders = ",".join(["?"] * len(protected_types))
         sql += f" AND type NOT IN ({placeholders})"
         params.extend(protected_types)
-    sql += " GROUP BY type, agent_id HAVING cnt > ?"
+    sql += " GROUP BY type, agent_id, user_id HAVING cnt > ?"
     params.append(threshold)
 
     with _db() as db:
@@ -435,7 +435,7 @@ async def memory_consolidate_impl(
         return "No memory groups exceed consolidation threshold."
 
     if dry_run:
-        preview = [f"{g['type']}/{g['agent_id']}: {g['cnt'] - threshold} items would consolidate" for g in groups]
+        preview = [f"{g['type']}/{g['agent_id']} (user={g['user_id']}): {g['cnt'] - threshold} items would consolidate" for g in groups]
         return "DRY RUN — no changes. Candidates:\n" + "\n".join(preview)
 
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
@@ -447,16 +447,16 @@ async def memory_consolidate_impl(
 
     results = []
     for g in groups:
-        g_type, g_agent = g["type"], g["agent_id"]
+        g_type, g_agent, g_user = g["type"], g["agent_id"], g["user_id"]
         n_to_consolidate = g["cnt"] - threshold
 
         # 2. Fetch oldest N items, honoring stale_days + importance gates
         fetch_sql = (
             "SELECT id, title, content FROM memory_items "
-            "WHERE type = ? AND agent_id = ? AND is_deleted = 0 "
+            "WHERE type = ? AND agent_id = ? AND user_id = ? AND is_deleted = 0 "
             "AND COALESCE(importance, 0) <= ?"
         )
-        fetch_params = [g_type, g_agent, max_importance]
+        fetch_params = [g_type, g_agent, g_user, max_importance]
         if stale_cutoff:
             fetch_sql += " AND created_at < ?"
             fetch_params.append(stale_cutoff)
@@ -503,8 +503,8 @@ async def memory_consolidate_impl(
 
         with _db() as db:
             db.execute(
-                "INSERT INTO memory_items (id, type, title, content, agent_id, created_at, content_hash) VALUES (?, 'summary', ?, ?, ?, ?, ?)",
-                (summary_id, f"Consolidated {g_type} memories for {g_agent}", summary_text, g_agent, now, _content_hash(summary_text))
+                "INSERT INTO memory_items (id, type, title, content, agent_id, user_id, created_at, content_hash) VALUES (?, 'summary', ?, ?, ?, ?, ?, ?)",
+                (summary_id, f"Consolidated {g_type} memories for {g_agent}", summary_text, g_agent, g_user, now, _content_hash(summary_text))
             )
 
             if s_vec:
@@ -521,3 +521,31 @@ async def memory_consolidate_impl(
         results.append(f"Consolidated {len(rows)} {g_type} items into summary {summary_id}")
 
     return "\n".join(results)
+
+
+if __name__ == "__main__":
+    # Scheduled-task entrypoint. Previously invoked via
+    #   python -c "import memory_maintenance; memory_maintenance.memory_maintenance_impl()"
+    # which never reached this block. install_schedules.py / crontab.template
+    # now invoke this file as a script so logging + single-instance locking
+    # apply. The helper call lives here (not in memory_maintenance_impl) so
+    # MCP-server imports of this module are unaffected.
+    import argparse
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _task_runtime import add_log_file_arg, setup_task_runtime
+
+    parser = argparse.ArgumentParser(
+        description="Daily memory maintenance (decay, prune orphans, retention)."
+    )
+    add_log_file_arg(parser)
+    args = parser.parse_args()
+
+    setup_task_runtime(
+        args.log_file,
+        lock_name="memory_maintenance",
+        logger_name="memory_maintenance",
+    )
+
+    print(memory_maintenance_impl())

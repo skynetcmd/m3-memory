@@ -1604,9 +1604,20 @@ Profile picker:
                     help="Skip endpoint-smoke and DB backup. Power-user only.")
     ap.add_argument("--yes", "-y", action="store_true",
                     help="Skip the interactive confirm prompt.")
+    from _task_runtime import add_log_file_arg, setup_task_runtime
+    add_log_file_arg(ap)
     args = ap.parse_args()
     if args.core_only and args.chatlog_only:
         sys.exit("ERROR: --core and --chatlog are mutually exclusive (omit both for default behavior).")
+    # Single-instance lock only for the scheduled drain-queue task — keyed on
+    # 'm3_enrich_drain' so an interactive m3_enrich run for other purposes is
+    # not blocked by (or blocking) the drainer. setup_task_runtime also moves
+    # logging in-process so the scheduled task needs no shell `>>` redirect.
+    if args.log_file or args.drain_queue:
+        setup_task_runtime(
+            args.log_file,
+            lock_name="m3_enrich_drain" if args.drain_queue else None,
+        )
     return asyncio.run(_main_async(args))
 
 

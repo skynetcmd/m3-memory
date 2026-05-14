@@ -1,8 +1,8 @@
 ---
 tool: bin/secret_rotator.py
-sha1: 547b73bd9fb7
-mtime_utc: 2026-05-01T09:15:53.151020+00:00
-generated_utc: 2026-05-05T01:50:16.458082+00:00
+sha1: 63ab0361b2ae
+mtime_utc: 2026-05-14T05:24:41.211987+00:00
+generated_utc: 2026-05-14T05:37:12.993505+00:00
 private: false
 ---
 
@@ -37,6 +37,7 @@ _(no module docstring — update the source file.)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `auth_utils (set_api_key)`
 - `m3_sdk (M3Context)`
 - `m3_sdk (add_database_arg)`

@@ -83,10 +83,13 @@ if __name__ == "__main__":
     import os as _os
 
     from m3_sdk import add_database_arg
+    from _task_runtime import add_log_file_arg, setup_task_runtime
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    add_log_file_arg(parser)
     add_database_arg(parser)
     args = parser.parse_args()
+    setup_task_runtime(args.log_file, lock_name="secret_rotator")
     if args.database:
         _os.environ["M3_DATABASE"] = args.database
     rotate_secrets(dry_run=args.dry_run)

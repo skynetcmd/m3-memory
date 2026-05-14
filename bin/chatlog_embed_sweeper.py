@@ -312,8 +312,12 @@ async def main() -> int:
     )
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from m3_sdk import add_database_arg
+    from _task_runtime import add_log_file_arg, setup_task_runtime
+    add_log_file_arg(parser)
     add_database_arg(parser)
     args = parser.parse_args()
+
+    setup_task_runtime(args.log_file, lock_name="chatlog_embed_sweeper")
 
     if args.database:
         # M3_DATABASE unifies main+chatlog unless CHATLOG_DB_PATH overrides.
@@ -492,6 +496,9 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    # Logging is configured inside main() via setup_task_runtime once args
+    # are parsed. A minimal fallback keeps logger output visible if main()
+    # raises before that point.
     logging.basicConfig(
         level=logging.INFO,
         format="%(name)s: [%(levelname)s] %(message)s",

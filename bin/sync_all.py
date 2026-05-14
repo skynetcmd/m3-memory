@@ -35,13 +35,13 @@ LOG_FILE = LOG_DIR / "sync_all.log"
 PY      = BASE / ".venv" / ("Scripts/python.exe" if IS_WIN else "bin/python")
 TARGET_IP = os.environ.get("POSTGRES_SERVER", os.environ.get("SYNC_TARGET_IP", ""))
 
+# Logging is configured in main() via setup_task_runtime so scheduled-task
+# runs self-log without a shell `>>` redirect. This minimal fallback keeps
+# `log` usable if a caller imports this module without running main().
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger("sync_all")
 
@@ -113,9 +113,11 @@ def run_pg_sync_for_db(db_path: pathlib.Path, dry_run: bool) -> bool:
 
     log.info(f"Running pg_sync.py --db {db_path} ...")
     try:
+        from _task_runtime import no_window_kwargs
         result = subprocess.run(
             [str(PY), str(BASE / "bin" / "pg_sync.py"), "--db", str(db_path)],
             capture_output=True, text=True, timeout=120,
+            **no_window_kwargs(),
         )
         for line in (result.stdout + result.stderr).splitlines():
             if line.strip():
@@ -153,12 +155,14 @@ def run_chroma_sync(dry_run: bool) -> bool:
         return True
     log.info("Running ChromaDB sync (both directions)...")
     try:
+        from _task_runtime import no_window_kwargs
         env = os.environ.copy()
         env.setdefault("CHROMA_BASE_URL", f"http://{TARGET_IP}:8000")
         env.setdefault("LM_STUDIO_EMBED_URL", "http://127.0.0.1:1234/v1/embeddings")
         result = subprocess.run(
             [str(PY), str(BASE / "bin" / "chroma_sync_cli.py"), "both"],
-            capture_output=True, text=True, timeout=120, env=env
+            capture_output=True, text=True, timeout=120, env=env,
+            **no_window_kwargs(),
         )
         for line in (result.stdout + result.stderr).splitlines():
             if line.strip():
@@ -184,8 +188,12 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Check connectivity only")
     sys.path.insert(0, str(BASE / "bin"))
     from m3_sdk import add_database_arg
+    from _task_runtime import add_log_file_arg, setup_task_runtime
+    add_log_file_arg(parser)
     add_database_arg(parser)
     args = parser.parse_args()
+
+    setup_task_runtime(args.log_file or LOG_FILE, lock_name="sync_all")
 
     if args.database:
         # Pass-through env so pg_sync and chroma_sync subprocesses inherit.

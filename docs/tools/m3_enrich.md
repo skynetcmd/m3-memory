@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: 98f45429ed2d
-mtime_utc: 2026-05-07T03:32:14.557220+00:00
-generated_utc: 2026-05-09T13:54:34.322272+00:00
+sha1: 9f709139faf6
+mtime_utc: 2026-05-14T05:26:04.409065+00:00
+generated_utc: 2026-05-14T05:37:12.655262+00:00
 private: false
 ---
 
@@ -116,6 +116,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `auth_utils (get_api_key)`
 - `enrichment_state`
 - `m3_sdk (get_m3_root)`
