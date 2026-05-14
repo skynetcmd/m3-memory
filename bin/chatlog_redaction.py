@@ -6,9 +6,28 @@ and replaces matches with [REDACTED:<group>]. Disabled by default.
 """
 
 import hashlib
+import logging
+import os
 import re
 import threading
 from typing import Optional
+
+# ── Project Oxidation: optional Rust compute core ────────────────────────────
+# m3_core_rs is an optional dependency (pip install m3-memory[oxidation]).
+# M3_CORE_RS_DISABLE=1 forces the Python path even when the wheel is installed
+# — the load-bearing kill-switch from the oxidation plan §9.6. Import failure
+# is non-fatal: m3-memory runs fully on the Python path without the core.
+_OXIDATION_DISABLED = os.environ.get("M3_CORE_RS_DISABLE", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+m3_core_rs = None
+if not _OXIDATION_DISABLED:
+    try:
+        import m3_core_rs  # type: ignore
+    except ImportError:
+        m3_core_rs = None  # extra not installed — Python path is the default
 
 # Module-scope compiled patterns cache
 _COMPILED: dict[str, list[re.Pattern]] = {}
@@ -18,8 +37,11 @@ _COMPILE_LOCK = threading.Lock()
 
 
 def get_compile_errors() -> list[str]:
-    """Return any regex compilation errors from the last compile_patterns() call.
-    Empty list if all patterns compiled cleanly."""
+    """Return any regex compilation errors from the last scrub()/compile_patterns()
+    call. Empty list if all patterns compiled cleanly. When the Rust core handled
+    the last scrub(), returns the Rust core's compile errors instead."""
+    if m3_core_rs is not None:
+        return list(m3_core_rs.redaction_compile_errors())
     with _COMPILE_LOCK:
         return list(_COMPILE_ERRORS)
 
@@ -176,6 +198,21 @@ def scrub(content: str, config: dict) -> tuple[str, int, list[str]]:
 
     If config["enabled"] is False, return (content, 0, []) immediately
     without any regex work (hot path).
+
+    Dispatch: when the m3_core_rs Rust core is loaded, this routes to the
+    byte-exact Rust port. Otherwise the pure-Python implementation below runs.
+    The kill-switch (M3_CORE_RS_DISABLE=1) forces the Python path.
+    """
+    if m3_core_rs is not None:
+        return m3_core_rs.scrub(content, config)
+    return _scrub_python(content, config)
+
+
+def _scrub_python(content: str, config: dict) -> tuple[str, int, list[str]]:
+    """Pure-Python redaction implementation — the fallback / parity reference.
+
+    Identical contract to scrub(): returns (scrubbed_content, match_count,
+    groups_fired). Kept intact regardless of whether the Rust core is loaded.
     """
     if not config.get("enabled", False):
         return (content, 0, [])
