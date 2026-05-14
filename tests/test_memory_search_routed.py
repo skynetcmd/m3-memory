@@ -1022,7 +1022,9 @@ async def test_entity_graph_valid_types_override(monkeypatch):
         return []
 
     async def stub_entity_neighbor_ids(query, depth, max_neighbors, db,
-                                        valid_types=None, valid_predicates=None):
+                                        valid_types=None, valid_predicates=None,
+                                        **kwargs):
+        # **kwargs absorbs additions like entity_stoplist / _capture_dict.
         captured["valid_types"] = valid_types
         captured["valid_predicates"] = valid_predicates
         return set()
@@ -1060,7 +1062,9 @@ async def test_entity_graph_valid_predicates_override(monkeypatch):
         return []
 
     async def stub_entity_neighbor_ids(query, depth, max_neighbors, db,
-                                        valid_types=None, valid_predicates=None):
+                                        valid_types=None, valid_predicates=None,
+                                        **kwargs):
+        # **kwargs absorbs additions like entity_stoplist / _capture_dict.
         captured["valid_types"] = valid_types
         captured["valid_predicates"] = valid_predicates
         return set()
@@ -1181,3 +1185,180 @@ async def test_byte_identity_invariant_with_entity_params_unset(monkeypatch):
     # Exactly 1 scored call at k=10 — no overshoot
     assert len(calls) == 1, f"Expected 1 scored call; got {len(calls)}: {calls}"
     assert calls[0] == 10, f"Expected k=10 (no overshoot), got k={calls[0]}"
+
+
+# ── Expansion-displacement guard ───────────────────────────────────────────
+#
+# At small k, expansion-sourced rows (entity_graph, graph, session, neighbor)
+# previously won rank-1 from the hybrid primary on score parity, even though
+# the two pools' scores are not calibrated against each other. The guard
+# enforces: at ranks 1..M3_EXPANSION_PROTECTED_RANKS, an expansion row may
+# only outrank a primary if expansion_score >= margin * primary_score.
+
+def _make_hit(score, item_id, source):
+    """Build a (score, dict) hit shaped like memory_search_scored_impl output."""
+    item = {"id": item_id}
+    if source is not None:
+        item["_expanded_via"] = source
+    return (score, item)
+
+
+def test_displacement_guard_weak_expansion_is_demoted():
+    """Expansion at rank 1 with sub-margin score must yield to the next primary."""
+    import memory_core as mc
+
+    # 0.8 / 0.6 = 1.33x, below default 1.75x margin -> primary wins
+    hits = [
+        _make_hit(0.8, "e1", "entity_graph"),
+        _make_hit(0.6, "p1", "primary"),
+        _make_hit(0.5, "p2", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    assert out[0][1]["id"] == "p1"
+    # Demoted expansion lands in the slot the primary vacated.
+    assert {h[1]["id"] for h in out} == {"e1", "p1", "p2"}
+
+
+def test_displacement_guard_strong_expansion_is_preserved():
+    """Expansion at rank 1 with score >= margin*primary stays at rank 1."""
+    import memory_core as mc
+
+    # 1.0 / 0.5 = 2.0x, above default 1.75x margin -> expansion stays
+    hits = [
+        _make_hit(1.0, "e1", "entity_graph"),
+        _make_hit(0.5, "p1", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    assert out[0][1]["id"] == "e1"
+
+
+def test_displacement_guard_primary_at_top_is_unchanged():
+    """A primary already at rank 1 is never touched."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.9, "p1", "primary"),
+        _make_hit(0.95, "e1", "entity_graph"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    assert [h[1]["id"] for h in out] == ["p1", "e1"]
+
+
+def test_displacement_guard_zero_score_path_defaults_to_primary():
+    """When scores are non-positive, ratio is undefined → primary wins."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.0, "e1", "entity_graph"),
+        _make_hit(0.0, "p1", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    assert out[0][1]["id"] == "p1"
+
+
+def test_displacement_guard_below_protected_ranks_is_free():
+    """An expansion at rank > protected_ranks is not touched."""
+    import memory_core as mc
+
+    # Protected = 3 by default; expansion at rank 4 stays put.
+    hits = [
+        _make_hit(0.9, "p1", "primary"),
+        _make_hit(0.9, "p2", "primary"),
+        _make_hit(0.9, "p3", "primary"),
+        _make_hit(0.95, "e1", "entity_graph"),
+        _make_hit(0.5, "p4", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    assert out[3][1]["id"] == "e1"
+
+
+def test_displacement_guard_untagged_row_is_treated_as_primary():
+    """A row without _expanded_via tag is treated as primary (legacy compatibility)."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.5, "untagged", None),
+        _make_hit(0.4, "p1", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    assert out[0][1]["id"] == "untagged"
+
+
+def test_displacement_guard_cascading_displacement():
+    """Multiple weak expansions in a row all get demoted, in order."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.8, "e1", "entity_graph"),
+        _make_hit(0.7, "e2", "entity_graph"),
+        _make_hit(0.5, "p1", "primary"),
+        _make_hit(0.4, "p2", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    # rank 1=p1 (was at idx 2), rank 2=p2 (was at idx 3), then the demoted expansions
+    assert [h[1]["id"] for h in out] == ["p1", "p2", "e1", "e2"]
+
+
+def test_displacement_guard_disabled_when_protected_ranks_zero():
+    """protected_ranks=0 → no-op (feature off)."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.8, "e1", "entity_graph"),
+        _make_hit(0.6, "p1", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits, protected_ranks=0)
+    assert [h[1]["id"] for h in out] == ["e1", "p1"]
+
+
+def test_displacement_guard_disabled_when_margin_at_or_below_one():
+    """margin <= 1.0 → no-op (feature off)."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.8, "e1", "entity_graph"),
+        _make_hit(0.6, "p1", "primary"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits, margin=1.0)
+    assert [h[1]["id"] for h in out] == ["e1", "p1"]
+
+
+def test_displacement_guard_idempotent_on_conforming_list():
+    """Applying the guard twice yields the same result as applying it once."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.8, "e1", "entity_graph"),
+        _make_hit(0.6, "p1", "primary"),
+    ]
+    once = mc._enforce_expansion_displacement_guard(hits)
+    twice = mc._enforce_expansion_displacement_guard(once)
+    assert [h[1]["id"] for h in once] == [h[1]["id"] for h in twice]
+
+
+def test_displacement_guard_no_primary_available_leaves_expansion(monkeypatch):
+    """If there's no primary below an expansion to swap with, it stays in place."""
+    import memory_core as mc
+
+    hits = [
+        _make_hit(0.9, "e1", "entity_graph"),
+        _make_hit(0.8, "e2", "graph"),
+        _make_hit(0.7, "e3", "session"),
+    ]
+    out = mc._enforce_expansion_displacement_guard(hits)
+    # All-expansion list: nothing to swap with → unchanged.
+    assert [h[1]["id"] for h in out] == ["e1", "e2", "e3"]
+
+
+def test_displacement_guard_env_var_override(monkeypatch):
+    """Verify the module-level defaults read from M3_EXPANSION_* env vars.
+
+    Note: env-var reads happen at module import. This test just verifies the
+    constants are exposed and have the documented default values; full env-var
+    behavior is covered by re-importing in a separate process, which is more
+    fragile than it's worth here.
+    """
+    import memory_core as mc
+
+    assert mc.EXPANSION_DISPLACEMENT_MARGIN == 1.75
+    assert mc.EXPANSION_PROTECTED_RANKS == 3
