@@ -1470,12 +1470,20 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
             # Pin the runner at the chatlog file we resolved, so a misdirected
             # M3_DATABASE in the parent env doesn't repoint it elsewhere.
             env["M3_DATABASE"] = active
+        # CREATE_NO_WINDOW (via no_window_kwargs) so this migration subprocess
+        # never flashes a console window when reached from a scheduled task.
+        try:
+            from _task_runtime import no_window_kwargs
+            _nw = no_window_kwargs()
+        except Exception:
+            _nw = {}
         subprocess.run(
             [sys.executable, migration_script, "up", "--yes", *target_flag],
             check=True,
             timeout=300,
             stdin=subprocess.DEVNULL,
             env=env,
+            **_nw,
         )
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")

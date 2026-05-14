@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-09T18:07:57.943927+00:00._
+_Generated 2026-05-14T05:46:35.227372+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.

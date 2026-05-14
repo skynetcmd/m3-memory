@@ -297,6 +297,9 @@ def main():
     parser.add_argument("--interval", type=int, default=300,
                         help="Seconds between passes (default: 300)")
     parser.add_argument("--background", action="store_true", help="Run in background (fire and forget)")
+    parser.add_argument("--log-file", default=None, metavar="PATH",
+                        help="Append logging to this file (scheduled-task / service mode). "
+                             "Survives the Windows pythonw re-exec.")
     parser.add_argument("--concurrency", type=int, default=2, help="SLM concurrency (default: 2)")
     parser.add_argument("--limit-per-pass", type=int, default=50, help="Max groups/rows per pass (default: 50)")
 
@@ -321,6 +324,18 @@ def main():
 
     # Only acquire lock AFTER daemonizing
     acquire_lock()
+
+    # Attach a file handler AFTER daemonizing so it lands in the real worker
+    # process (the pythonw re-exec on Windows / double-fork on Unix). The
+    # --log-file arg survives the re-exec because daemonize_windows copies
+    # sys.argv[1:]. Under launchd/systemd there is no re-exec (no --background)
+    # and this still runs in the managed process.
+    if args.log_file:
+        os.makedirs(os.path.dirname(os.path.abspath(args.log_file)), exist_ok=True)
+        _fh = logging.FileHandler(args.log_file, encoding="utf-8")
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        logging.getLogger().addHandler(_fh)
 
     # Resolve paths once to normalize env vs flag
     if args.database:

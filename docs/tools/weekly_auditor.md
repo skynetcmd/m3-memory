@@ -1,8 +1,8 @@
 ---
 tool: bin/weekly_auditor.py
-sha1: 9566da92f689
-mtime_utc: 2026-05-01T09:15:53.146020+00:00
-generated_utc: 2026-05-05T01:50:16.548803+00:00
+sha1: 5c18388375c7
+mtime_utc: 2026-05-14T05:45:17.907455+00:00
+generated_utc: 2026-05-14T05:46:35.206724+00:00
 private: false
 ---
 
@@ -26,7 +26,7 @@ Use --no-memory to skip the memory write step.
 
 ## Entry points
 
-- `def main()` (line 383)
+- `def main()` (line 386)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -48,6 +48,8 @@ Use --no-memory to skip the memory write step.
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime (add_log_file_arg, setup_task_runtime)`
+- `_task_runtime (no_window_kwargs)`
 - `m3_sdk (add_database_arg, resolve_db_path)`
 - `memory_bridge (chroma_sync, memory_write)`
 
@@ -57,13 +59,13 @@ Use --no-memory to skip the memory write step.
 
 **subprocess**
 
-- `subprocess.check_call()  → `[sys.executable, gen_script]`` (line 300)
-- `subprocess.check_call()  → `[sys.executable, graph_script]`` (line 317)
-- `subprocess.check_output()  → `cmd`` (line 252)
+- `subprocess.check_call()  → `[sys.executable, gen_script]`` (line 303)
+- `subprocess.check_call()  → `[sys.executable, graph_script]`` (line 320)
+- `subprocess.check_output()  → `cmd`` (line 253)
 
 **sqlite**
 
-- `sqlite3.connect()  → `resolve_db_path(None)`` (line 69)
+- `sqlite3.connect()  → `resolve_db_path(None)`` (line 70)
 
 
 ---

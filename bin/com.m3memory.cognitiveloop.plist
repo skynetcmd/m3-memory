@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  m3-memory Cognitive Loop — macOS launchd agent template.
+
+  Installed by bin/install_schedules.py, which substitutes [M3_MEMORY_ROOT]
+  and [M3_PYTHON] and writes the result to
+  ~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist.
+
+  NOTE: ProgramArguments deliberately does NOT pass --background. launchd
+  manages the process directly; the loop must run in the foreground or
+  KeepAlive would lose track of the real worker after the double-fork.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.m3memory.cognitiveloop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>[M3_PYTHON]</string>
+        <string>[M3_MEMORY_ROOT]/bin/m3_cognitive_loop.py</string>
+        <string>--interval</string>
+        <string>300</string>
+        <string>--log-file</string>
+        <string>[M3_MEMORY_ROOT]/logs/cognitive_loop.log</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/cognitive_loop.log</string>
+    <key>StandardErrorPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/cognitive_loop.log</string>
+</dict>
+</plist>

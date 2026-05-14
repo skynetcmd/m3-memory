@@ -1,21 +1,29 @@
 # M3 Memory: Scheduled Tasks Template
 # Replace [M3_MEMORY_ROOT] with your absolute project path (e.g., /path/to/your/m3-memory)
+#
+# Entrypoints self-log via bin/_task_runtime.py — each takes a --log-file arg
+# instead of relying on a shell `>>` redirect, and refuses to run a second
+# concurrent instance (logs a quiet "duplicate process" line and exits 0).
+#
+# The cognitive loop is NOT a cron entry — it is a long-running daemon
+# installed as a launchd agent (macOS) / systemd --user unit (Linux) by
+# bin/install_schedules.py.
 
 # Weekly auditor (Fridays 4pm)
-0 16 * * 5 [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/weekly_auditor.py >> [M3_MEMORY_ROOT]/logs/auditor.log 2>&1
+0 16 * * 5 [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/weekly_auditor.py --log-file [M3_MEMORY_ROOT]/logs/auditor.log
 
 # Hourly sync: SQLite <-> PostgreSQL + ChromaDB (pve-database-host)
 # pg_sync.sh delegates to sync_all.py — covers both pg + chroma
 0 * * * * [M3_MEMORY_ROOT]/bin/pg_sync.sh >> [M3_MEMORY_ROOT]/logs/sync_all.log 2>&1
 
 # Daily Memory Maintenance (3:00 AM) - Decay scores, prune orphans
-0 3 * * * [M3_MEMORY_ROOT]/.venv/bin/python3 -c "import sys; sys.path.insert(0, '[M3_MEMORY_ROOT]/bin'); import memory_maintenance; memory_maintenance.memory_maintenance_impl()" >> [M3_MEMORY_ROOT]/logs/maintenance.log 2>&1
+0 3 * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/memory_maintenance.py --log-file [M3_MEMORY_ROOT]/logs/maintenance.log
 
 # Monthly Automated Secret Rotation (1st of every month at 2:00 AM)
-0 2 1 * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/secret_rotator.py >> [M3_MEMORY_ROOT]/logs/secret_rotator.log 2>&1
+0 2 1 * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/secret_rotator.py --log-file [M3_MEMORY_ROOT]/logs/secret_rotator.log
 
 # Every 30 minutes: Embed un-embedded chat_log rows using the local embedding server
-*/30 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/chatlog_embed_sweeper.py --batch 256 --max-per-run 10000 >> [M3_MEMORY_ROOT]/logs/chatlog_embed_sweep.log 2>&1
+*/30 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/chatlog_embed_sweeper.py --batch 256 --max-per-run 10000 --log-file [M3_MEMORY_ROOT]/logs/chatlog_embed_sweep.log
 
 # Every 15 minutes: Drain observation_queue (extract user-facts from chatlog conversations)
-*/15 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/m3_enrich.py --drain-queue --drain-batch 200 --profile enrich_local_qwen >> [M3_MEMORY_ROOT]/logs/observation_drain.log 2>&1
+*/15 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/m3_enrich.py --drain-queue --drain-batch 200 --profile enrich_local_qwen --log-file [M3_MEMORY_ROOT]/logs/observation_drain.log
