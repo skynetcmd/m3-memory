@@ -15,16 +15,16 @@ This directory contains per-tool documentation generated from the live source tr
 
 ### `ENV_VAR_RECONCILE_REPORT.md` (2026-05-14)
 
-Inventories **108 environment variables** across the m3-memory surface:
-- **73** `M3_*`-prefixed vars in active use
-- **32** non-prefixed vars (recommended for `M3_*` namespacing under deprecation alias)
+Inventories the m3-memory environment-variable surface. After the 2026-05-14 regeneration:
+- **77** `M3_*`-prefixed vars in active use (72 original + 5 added; the original report's "73" headline was an off-by-one on a 72-row table, corrected in the regeneration)
+- **32** non-prefixed vars (recommended for `M3_*` namespacing under deprecation alias) — not re-swept in the regeneration
 - **3** auth/credential vars (intentionally unprefixed; touch FIPS path)
 
-Produced as input to Section 9.6 of the Project "Oxidation" Rust transition plan (`~/m3_oxidation_plan.md`). The Rust binding crate (`m3-core-py`) must surface all 73 existing `M3_*` vars unchanged for backward compatibility, with typed configs derived from them.
+Produced as input to Section 9.6 of the Project "Oxidation" Rust transition plan (`~/m3_oxidation_plan.md`). The Rust binding crate (`m3-core-py`) must surface the original `M3_*` vars unchanged for backward compatibility, with typed configs derived from them.
 
-Cross-checked against [INDEX.md](INDEX.md) — **no drift** between the tool inventory and the env-var reader set.
+Cross-checked against [INDEX.md](INDEX.md) — **one known gap**: `bin/_task_runtime.py` (reader of `M3_TASK_LOG_FILE`) is not indexed because `gen_tool_inventory.py` skips leading-underscore modules. Every other env-var reader is indexed.
 
-> **Update — Oxidation wiring (post-report):** the Rust core is now wired into `bin/memory_core.py`, `bin/chatlog_redaction.py`, and `bin/auto_route.py`. This introduced **5 new live `M3_*` vars** beyond the original 73-var count: `M3_CORE_RS_DISABLE`, `M3_ROUTE_SHADOW_MODE`, `M3_EMBED_GGUF`, `M3_EMBED_GGUF_MODEL_TAG`, plus the test-only `M3_TEST_GGUF`. All are documented in [`docs/ENVIRONMENT_VARIABLES.md` → Project Oxidation](../ENVIRONMENT_VARIABLES.md). Re-run the reconcile sweep to fold them into the master inventory.
+> **Update — Oxidation wiring (regenerated 2026-05-14):** the Rust core is now wired into `bin/memory_core.py`, `bin/chatlog_redaction.py`, and `bin/auto_route.py`. The regeneration added **5 new live `M3_*` vars**: `M3_CORE_RS_DISABLE`, `M3_ROUTE_SHADOW_MODE`, `M3_EMBED_GGUF`, `M3_EMBED_GGUF_MODEL_TAG` (oxidation), plus `M3_TASK_LOG_FILE` (unrelated). The test-only `M3_TEST_GGUF` is excluded (read only by the Rust crate's test). All five are in [ENV_VAR_RECONCILE_REPORT.md](ENV_VAR_RECONCILE_REPORT.md#oxidation-additions-5--added-since-the-original-sweep) and the oxidation vars also in [`docs/ENVIRONMENT_VARIABLES.md`](../ENVIRONMENT_VARIABLES.md). Still owed: a full re-sweep of the non-prefixed + auth groups.
 
 ## Regenerating the per-tool docs
 
