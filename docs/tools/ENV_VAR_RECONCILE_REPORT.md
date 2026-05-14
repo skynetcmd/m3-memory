@@ -1,6 +1,6 @@
 # Environment Variable Reconcile Report
 
-_Generated 2026-05-14 as part of the Project "Oxidation" Rust transition planning (see `~/m3_oxidation_plan.md` §9.6)._
+_Generated 2026-05-14 as part of the Project "Oxidation" Rust transition planning (see `~/m3_oxidation_plan.md` §9.6). Regenerated 2026-05-14 (post-oxidation-wiring sweep): the Rust core was wired into `memory_core.py`, `chatlog_redaction.py`, and `auto_route.py`, and an unrelated task-runtime tool was added — see "Oxidation additions" below._
 
 This report inventories every environment variable consumed or set by m3-memory tools, cross-checks readers against the tool inventory at `docs/tools/INDEX.md`, and recommends the namespacing strategy for the future Rust binding crate (`m3-core-py`).
 
@@ -17,19 +17,22 @@ Read-only audit. No source files were modified.
 
 | Group | Count |
 |---|---|
-| `M3_*`-prefixed env vars in active use | **73** |
+| `M3_*`-prefixed env vars in active use | **77** |
 | Non-prefixed vars that belong to m3-memory's surface | **32** |
 | Auth/credential vars (not namespaced — touch FIPS path) | **3** |
-| **Total env vars in m3-memory surface** | **108** |
+| **Total env vars in m3-memory surface** | **112** |
+
+The `M3_*` count is **77** after the 2026-05-14 regeneration: the original report's inventory table held **72** rows (its headline said "73" — a pre-existing off-by-one, corrected here), plus **5** new vars — **4** from the oxidation wiring (`M3_CORE_RS_DISABLE`, `M3_ROUTE_SHADOW_MODE`, `M3_EMBED_GGUF`, `M3_EMBED_GGUF_MODEL_TAG`) and **1** unrelated (`M3_TASK_LOG_FILE`, added by `bin/_task_runtime.py`). The test-only `M3_TEST_GGUF` (read only by the `m3-embed-llamacpp` Rust crate's opt-in test, never by m3-memory at runtime) is intentionally excluded. The non-prefixed and auth groups were not re-swept this round — the regeneration was scoped to the `M3_*` delta; a full non-prefixed re-sweep is still pending.
 
 ## Reader → tool inventory cross-check
 
-All env-var-reading files are present in `docs/tools/INDEX.md` (107 listed tools). **No drift between the inventory and the env-var surface.**
+All env-var-reading files are present in `docs/tools/INDEX.md` (107 listed tools) **with one known exception**: `bin/_task_runtime.py` (reader of `M3_TASK_LOG_FILE`) is not in `INDEX.md` and has no per-tool doc — the leading-underscore name is treated as a private module by `gen_tool_inventory.py` and skipped. This is a generator-scope gap, not env-var drift; the var itself is captured above. Every other env-var reader is indexed.
 
 Readers categorized for the Rust transition:
 
 ### Hot-path readers (must route through `m3-core-py` after oxidation)
-- `bin/memory_core.py`
+- `bin/memory_core.py` — **now wired**: hashing, cosine/MMR, displacement guard, optional in-process embeddings
+- `bin/chatlog_redaction.py` — **now wired**: `scrub()` dispatches to the Rust redactor
 - `bin/chatlog_config.py`
 - `bin/chatlog_ingest.py`
 - `bin/chatlog_embed_sweeper.py`
@@ -39,7 +42,7 @@ Readers categorized for the Rust transition:
 - `bin/m3_enrich.py`
 - `bin/m3_enrich_batch.py`
 - `bin/slm_intent.py`
-- `bin/auto_route.py` (Phase 3d §4c.5)
+- `bin/auto_route.py` — **now wired** (Phase 3d §4c.5): `decide_route` runs in shadow mode
 - `bin/sqlite_pragmas.py`
 
 ### Bootstrap/config readers (stay in Python; read env before any Rust call)
@@ -52,11 +55,14 @@ Readers categorized for the Rust transition:
 ### Out-of-scope readers (not on the oxidation path)
 - `bin/discord_bot.py`
 - `bin/mission_control.py`
+- `bin/_task_runtime.py` (reads `M3_TASK_LOG_FILE`; task-runtime plumbing, not a retrieval/ingest hot path)
 - `bin/test_*.py`
 - `bin/setup_*.py`
 - `examples/mac-agent/router/router.py`
 
-## `M3_*` inventory (73 vars)
+## `M3_*` inventory (77 vars)
+
+The table below holds the original 72 vars; the 5 vars from the 2026-05-14 regeneration are in the **Oxidation additions** subsection that follows it.
 
 | Env var | Default | Type | Controls | Primary reader |
 |---|---|---|---|---|
@@ -99,7 +105,7 @@ Readers categorized for the Rust transition:
 | M3_ENTITY_RESOLVE_FUZZY_MIN | `0.8` | float | Min fuzzy score for entity resolution | bin/memory_core.py |
 | M3_ENTITY_SEED_STOPLIST | `User,user,assistant` | csv | Entities excluded from BFS expansion | bin/memory_core.py |
 | M3_ENTITY_VOCAB_YAML | (unset) | path | Entity type/predicate vocab YAML | bin/memory_core.py, bin/m3_entities.py |
-| M3_EXPANSION_DISPLACEMENT_MARGIN | `1.75` | float | Margin for expansion-vs-primary guard | bin/memory_core.py |
+| M3_EXPANSION_DISPLACEMENT_MARGIN | `2.0` | float | Margin for expansion-vs-primary guard | bin/memory_core.py |
 | M3_EXPANSION_PROTECTED_RANKS | `3` | int | Ranks protected from displacement | bin/memory_core.py |
 | M3_FACT_ENRICH_CONCURRENCY | `2` | int | Parallel fact enrichment workers | bin/memory_core.py |
 | M3_FACT_ENRICH_MAX_ATTEMPTS | `5` | int | Max retries for fact enrichment | bin/memory_core.py |
@@ -132,6 +138,20 @@ Readers categorized for the Rust transition:
 | M3_TRANSPORT | `stdio` | enum | MCP transport (stdio/http) | m3_memory/cli.py, bin/memory_bridge.py |
 | M3_TWO_STAGE_MAX_TURNS_PER_OBS | `3` | int | Max turns per observation (two-stage) | bin/memory_core.py |
 | M3_TWO_STAGE_TURN_PENALTY | `0.7` | float | Turn age penalty (two-stage) | bin/memory_core.py |
+
+### Oxidation additions (5 — added since the original sweep)
+
+These post-date the initial report. The four `M3_CORE_RS_*` / `M3_EMBED_GGUF*` / `M3_ROUTE_*` vars gate the Project Oxidation Rust core; they are read in pure Python (the kill-switch and opt-in gates live in m3-memory, not `m3-core-py`) — so unlike the original 72, the Rust binding crate does **not** need to surface these, they gate *whether* it is used. `M3_TASK_LOG_FILE` is unrelated to oxidation.
+
+| Env var | Default | Type | Controls | Primary reader |
+|---|---|---|---|---|
+| M3_CORE_RS_DISABLE | `0` | bool | Kill-switch: force pure-Python for every oxidation-wired op even when the `m3_core_rs` wheel is installed | bin/memory_core.py, bin/chatlog_redaction.py, bin/auto_route.py |
+| M3_ROUTE_SHADOW_MODE | `off` | enum | Shadow-mode gate for the Rust route decider (`off` / `log`; `enforce` reserved, not implemented) | bin/auto_route.py |
+| M3_EMBED_GGUF | (unset) | path | Path to a bge-m3 GGUF; when set, `_embed`/`_embed_many` use in-process llama.cpp instead of the HTTP embed server | bin/memory_core.py |
+| M3_EMBED_GGUF_MODEL_TAG | `bge-m3-GGUF-Q4_K_M.gguf` | string | `embed_model` tag applied to in-process-embedded vectors (a distinct content-hash cache namespace) | bin/memory_core.py |
+| M3_TASK_LOG_FILE | (unset) | path | Override path for the task-runtime log file | bin/_task_runtime.py |
+
+> **Cross-check note:** `bin/_task_runtime.py` is a tool not present in the `docs/tools/INDEX.md` snapshot the original report cross-referenced. Re-run `python bin/gen_tool_inventory.py` and confirm it is now indexed; if so, the "no drift" claim below holds with `_task_runtime.py` added to the reader set.
 
 ## Non-prefixed vars (32) — recommended for `M3_*` namespacing
 
@@ -199,6 +219,8 @@ Search patterns applied across the tree:
 - `$M3_`, `${M3_` (shell/PowerShell)
 - Same patterns for non-`M3_` candidates with known m3-memory semantics (`CHATLOG_`, `EMBED_`, etc.)
 - Cross-checked all reader file paths against `docs/tools/INDEX.md` (107 tools listed as of 2026-05-09)
+
+**2026-05-14 regeneration scope:** re-ran the `M3_*` patterns only (`os.environ.get`/`os.environ[`/`os.getenv` for `M3_`) across `bin/`, `m3_memory/`, `scripts/`. Diffed the result against the existing inventory table (72 rows) to surface the 5-var delta, and corrected the original headline's off-by-one (it said "73" for a 72-row table). The non-prefixed and auth/credential groups were **not** re-swept; a full re-run of all four pattern classes is still owed.
 
 ## Re-running the audit
 
