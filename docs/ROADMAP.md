@@ -75,6 +75,7 @@
 - [ ] **Stable public API** — `m3_memory.sdk` Python API with semver guarantees
 - [ ] **Full documentation site** — MkDocs or Docusaurus with API reference, tutorials, architecture deep-dives
 - [ ] **Plugin system** — register custom memory types, custom embedders, custom sync backends
+- [ ] **Project Oxidation** — optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) for hot-path ops. Six operations wired and parity-verified; remaining work (benchmarking, NER model export, route cutover) tracked in [OXIDATION_TODO.md](./OXIDATION_TODO.md).
 
 ---
 
