@@ -1360,5 +1360,5 @@ def test_displacement_guard_env_var_override(monkeypatch):
     """
     import memory_core as mc
 
-    assert mc.EXPANSION_DISPLACEMENT_MARGIN == 1.75
+    assert mc.EXPANSION_DISPLACEMENT_MARGIN == 2.0
     assert mc.EXPANSION_PROTECTED_RANKS == 3
