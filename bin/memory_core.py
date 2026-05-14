@@ -286,10 +286,10 @@ ELBOW_ABS_THRESHOLD    = float(os.environ.get("M3_ELBOW_ABS_THRESHOLD", "0.05"))
 # precedence at that rank. Beyond protected ranks, normal score-based ordering
 # applies — expansion is still free to contribute candidates at higher k.
 #
-# Defaults: 1.75x margin at the top 3 ranks. Override via env var; not exposed
+# Defaults: 2.0x margin at the top 3 ranks. Override via env var; not exposed
 # as a per-call parameter (deliberate — this is an engine invariant, not a
 # tuning knob for callers).
-EXPANSION_DISPLACEMENT_MARGIN  = float(os.environ.get("M3_EXPANSION_DISPLACEMENT_MARGIN", "1.75"))
+EXPANSION_DISPLACEMENT_MARGIN  = float(os.environ.get("M3_EXPANSION_DISPLACEMENT_MARGIN", "2.0"))
 EXPANSION_PROTECTED_RANKS      = int(os.environ.get("M3_EXPANSION_PROTECTED_RANKS", "3"))
 
 # Entity-graph seed stoplist. Persona/role tokens like "User" co-occur with
