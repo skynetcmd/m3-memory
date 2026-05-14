@@ -25,8 +25,31 @@ API:
 """
 from __future__ import annotations
 
+import logging
+import os
 import re
 from typing import Any
+
+_log = logging.getLogger(__name__)
+
+# ── Project Oxidation: optional Rust route decider (SHADOW MODE ONLY) ─────────
+# m3_core_rs is an optional dependency (pip install m3-memory[oxidation]).
+# M3_CORE_RS_DISABLE=1 forces the Python path even when the wheel is installed
+# — the load-bearing kill-switch from the oxidation plan §9.6. Import failure
+# is non-fatal: auto_route runs fully on the Python path without the core.
+_OXIDATION_DISABLED = os.environ.get("M3_CORE_RS_DISABLE", "0").lower() in ("1", "true", "yes")
+m3_core_rs = None
+if not _OXIDATION_DISABLED:
+    try:
+        import m3_core_rs  # type: ignore
+    except ImportError:
+        m3_core_rs = None  # extra not installed — Python path is the default
+
+# Shadow-mode flag. Uses M3_ROUTE_SHADOW_MODE (plan §9.6) with values off/log;
+# `enforce` is intentionally NOT implemented — cutover is out of scope here.
+# Anything other than "log" (case-insensitive) means shadow is OFF.
+_ROUTE_SHADOW_MODE = os.environ.get("M3_ROUTE_SHADOW_MODE", "off").lower()
+_ROUTE_SHADOW = _ROUTE_SHADOW_MODE == "log"
 
 # ---------------------------------------------------------------------------
 # Default thresholds — all overridable via passed params
@@ -184,6 +207,50 @@ def conv_id_diversity(candidates: list, top_n: int = 10) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Rust shadow comparison (observe-only — never changes routing)
+# ---------------------------------------------------------------------------
+
+
+def _route_shadow_compare(query: str, py_branch: str) -> None:
+    """Run the Rust route decider alongside Python and log any disagreement.
+
+    SHADOW MODE ONLY — this function never affects the returned branch. Python
+    stays fully authoritative; this just collects data for a *later* cutover
+    decision (oxidation plan §4c.5 / §9.6).
+
+    NOTE: some disagreement is EXPECTED and not a bug. The Python decider uses
+    post-retrieval signals derived from the `candidates` list (top_1_score,
+    slope_at_3, conv_id_diversity); the Rust `decide_route` only sees the query
+    string and has no candidates input. The two also use different branch-name
+    vocabularies. The shadow's job is to *quantify* the disagreement rate, not
+    to achieve zero disagreement.
+
+    No-op when the Rust core is unavailable or shadow mode is off. Any failure
+    is caught and logged — a shadow error must never break routing.
+    """
+    if m3_core_rs is None or not _ROUTE_SHADOW:
+        return
+    try:
+        signals = m3_core_rs.extract_signals(query)
+        decision = m3_core_rs.decide_route(query, signals)
+        rs_branch = decision.branch
+        if rs_branch == py_branch:
+            _log.debug(
+                "route shadow AGREE: branch=%s query=%r rs_confidence=%.3f",
+                py_branch, query, decision.confidence,
+            )
+        else:
+            _log.warning(
+                "route shadow DISAGREE: py_branch=%s rs_branch=%s query=%r "
+                "rs_confidence=%.3f rs_signal_breakdown=%s",
+                py_branch, rs_branch, query, decision.confidence,
+                decision.signal_breakdown,
+            )
+    except Exception as exc:  # noqa: BLE001 — shadow must never break routing
+        _log.warning("route shadow comparison failed (non-fatal): %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Branch decision
 # ---------------------------------------------------------------------------
 
@@ -204,6 +271,15 @@ def decide_branch(query: str, candidates: list, params: dict) -> str:
     params may override any threshold via keys matching the AUTO_* constant names
     (lowercase, e.g. 'auto_top1_sharp_min').
     """
+    branch = _decide_branch_impl(query, candidates, params)
+    # Shadow hook — runs the Rust route decider alongside Python and logs
+    # disagreements. Observe-only: `branch` is returned unchanged regardless.
+    _route_shadow_compare(query, branch)
+    return branch
+
+
+def _decide_branch_impl(query: str, candidates: list, params: dict) -> str:
+    """Authoritative Python branch decision (see decide_branch docstring)."""
     # --- 1. temporal ---
     if has_temporal_cues(query):
         return "temporal"
