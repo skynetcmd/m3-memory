@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: 3272ce41604b
-mtime_utc: 2026-05-07T03:32:14.556216+00:00
-generated_utc: 2026-05-09T13:54:34.296979+00:00
+sha1: 747530ea035a
+mtime_utc: 2026-05-14T05:26:33.275442+00:00
+generated_utc: 2026-05-14T05:37:12.624469+00:00
 private: false
 ---
 
@@ -41,6 +41,7 @@ for m3_enrich and m3_entities.
 |---|---|---|---|---|---|
 | `--interval` | Seconds between passes (default: 300) | `300` |  | int |  |
 | `--background` | Run in background (fire and forget) | `False` |  | store_true |  |
+| `--log-file` | Append logging to this file (scheduled-task / service mode). Survives the Windows pythonw re-exec. | None |  | str |  |
 | `--concurrency` | SLM concurrency (default: 2) | `2` |  | int |  |
 | `--limit-per-pass` | Max groups/rows per pass (default: 50) | `50` |  | int |  |
 | `--database` | Core Memory DB path (Env: M3_DATABASE) | None |  | str |  |
