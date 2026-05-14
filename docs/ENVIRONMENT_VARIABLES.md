@@ -150,3 +150,19 @@ Optional SLM-extraction pipeline to build a typed knowledge graph of entities an
 | `M3_ENTITY_RESOLVE_COSINE_MIN` | `0.85` | Minimum embedding cosine similarity for cosine-match resolution tier (final fallback before creating a new entity). |
 | `M3_ENTITY_GRAPH_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `entity_graph.yaml` profile `url` field. |
 | `M3_ENTITY_GRAPH_MODEL` | (empty) | Override SLM model name. If unset, reads from the `entity_graph.yaml` profile `model` field. Both URL and model must be non-empty when extraction runs, or the process fails with a clear error. |
+
+---
+
+## Project Oxidation — Rust Core (`m3_core_rs`)
+
+Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)), installed via `pip install m3-memory[oxidation]`. When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, and chat-log redaction — route through Rust. **Every path falls back to the pure-Python implementation when the wheel is absent**, so the extra is genuinely optional. See `~/m3_oxidation_plan.md` for the full design.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_CORE_RS_DISABLE` | `0` | Kill-switch. Set to `1`/`true`/`yes` to force the pure-Python path for **every** oxidation-wired operation even when the `m3_core_rs` wheel is installed. The escape hatch if the Rust core ever misbehaves — no redeploy, just set and restart. |
+| `M3_ROUTE_SHADOW_MODE` | `off` | Shadow-mode gate for the Rust route decider in `bin/auto_route.py`. `log` runs `m3_core_rs.decide_route` alongside the authoritative Python `decide_branch` and logs branch agreement/disagreement (Python result is always returned). `off` disables the shadow. `enforce` is reserved but not implemented — there is no Rust route cutover. |
+| `M3_EMBED_GGUF` | (empty) | Path to a bge-m3 GGUF file. When set (and `m3_core_rs` is built with the `embedded` feature), `_embed` / `_embed_many` produce embeddings **in-process via llama.cpp** instead of POSTing to a llama-server. Unset (default) keeps the HTTP embed path. Guarded: a GGUF whose embedding dimension ≠ `EMBED_DIM` is rejected and HTTP is used. |
+| `M3_EMBED_GGUF_MODEL_TAG` | `bge-m3-GGUF-Q4_K_M.gguf` | The `embed_model` tag applied to vectors produced by the in-process path (above). Defaults to the llama.cpp-served bge-m3 tag the embedded backend is parity-verified against (cosine ≈ 0.996 vs stored rows with that tag). This is a distinct content-hash cache namespace from LM Studio's `text-embedding-bge-m3` rows. |
+| `M3_TEST_GGUF` | (empty) | Test-only. Points the `m3-embed-llamacpp` crate's opt-in real-inference test at a GGUF model. Unset → that test is skipped. Not read by m3-memory at runtime. |
+
+> **Note — the `M3_MMR_SHADOW` var has been retired.** An earlier build added a shadow-mode flag for the MMR reranker; the Rust MMR (`mmr_rerank_scored`) is now authoritative when `m3_core_rs` is loaded (it replicates the Python loop's selection sequence exactly, verified by `tests/test_oxidation_parity.py`). No env var gates it — `M3_CORE_RS_DISABLE` is the only override.

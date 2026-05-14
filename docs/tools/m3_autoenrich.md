@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_autoenrich.py
-sha1: 67a2e0b74158
-mtime_utc: 2026-05-04T22:05:11.189182+00:00
-generated_utc: 2026-05-04T22:24:29.207100+00:00
+sha1: 7cdc559e0562
+mtime_utc: 2026-05-14T06:03:37.719750+00:00
+generated_utc: 2026-05-14T14:05:30.907470+00:00
 private: false
 ---
 
@@ -32,7 +32,7 @@ way the result is consistent regardless of which shell launched this script.
 
 ## Entry points
 
-- `def main()` (line 145)
+- `def main()` (line 150)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -63,8 +63,8 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['reg', 'delete', 'HKCU\\Environment', '/F', '/V', VAR]`` (line 65)
-- `subprocess.run()  → `['setx', VAR, value]`` (line 71)
+- `subprocess.run()  → `['reg', 'delete', 'HKCU\\Environment', '/F', '/V', VAR]`` (line 69)
+- `subprocess.run()  → `['setx', VAR, value]`` (line 76)
 
 
 ---
