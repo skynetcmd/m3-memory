@@ -90,6 +90,55 @@ def _sha256_hex(data: bytes) -> str:
     return _sha256_hex_py(data)
 
 
+# In-process llama.cpp embedding backend. Opt-in: set M3_EMBED_GGUF to the
+# bge-m3 GGUF path. Unset (default) -> the HTTP embed path is used unchanged.
+# Guarded on EMBED_DIM: if the GGUF's dimension doesn't match, the embedded
+# path is disabled and HTTP is used, rather than writing incompatible vectors
+# into the index. M3_CORE_RS_DISABLE forces HTTP regardless.
+#
+# Vectors from the embedded path are tagged with M3_EMBED_GGUF_MODEL_TAG
+# (default 'bge-m3-GGUF-Q4_K_M.gguf' — the llama.cpp-served bge-m3 tag the
+# embedded backend is parity-verified against, cosine ~0.996 vs stored rows
+# with that tag). This is a distinct cache namespace from LM Studio's
+# 'text-embedding-bge-m3' rows; the embedded backend IS llama.cpp, so it
+# belongs with the llama.cpp-tagged vectors.
+_EMBED_GGUF_PATH = (os.environ.get("M3_EMBED_GGUF") or "").strip() or None
+_EMBED_GGUF_MODEL_TAG = (os.environ.get("M3_EMBED_GGUF_MODEL_TAG") or "").strip() \
+    or "bge-m3-GGUF-Q4_K_M.gguf"
+_embedded_embedder = None          # m3_core_rs.EmbeddedEmbedder | None
+_embedded_embed_checked = False    # dimension guard runs once
+
+
+def _get_embedded_embedder():
+    """Return the in-process EmbeddedEmbedder, or None if unavailable/unsafe.
+    The dimension guard runs once: a GGUF whose embedding dim != EMBED_DIM is
+    rejected so it can never write incompatible vectors into the index."""
+    global _embedded_embedder, _embedded_embed_checked
+    if _embedded_embed_checked:
+        return _embedded_embedder
+    _embedded_embed_checked = True
+    if m3_core_rs is None or _EMBED_GGUF_PATH is None:
+        return None
+    if not hasattr(m3_core_rs, "EmbeddedEmbedder"):
+        logger.warning("M3_EMBED_GGUF set but m3_core_rs lacks EmbeddedEmbedder "
+                       "(wheel built without --features embedded) — using HTTP")
+        return None
+    try:
+        emb = m3_core_rs.EmbeddedEmbedder(_EMBED_GGUF_PATH)
+        dim = emb.embedding_dim()
+        if dim != EMBED_DIM:
+            logger.error("M3_EMBED_GGUF dimension %d != EMBED_DIM %d — embedded "
+                         "embedder disabled, using HTTP", dim, EMBED_DIM)
+            return None
+        logger.info("embedded llama.cpp embedder active (%s, dim=%d)",
+                    _EMBED_GGUF_PATH, dim)
+        _embedded_embedder = emb
+        return emb
+    except Exception as e:
+        logger.error("embedded embedder init failed (%s) — using HTTP", e)
+        return None
+
+
 def _batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
     """Cosine of one query against many vectors. Routes through the Rust core
     when available, but only on a dimension-homogeneous corpus — the Rust path
@@ -1680,12 +1729,32 @@ def set_embed_override(url: str | None, model: str | None = None) -> None:
 async def _embed(text: str) -> tuple[list[float] | None, str]:
     global _EMBED_DIM_VALIDATED
     c_hash = _content_hash(text)
+    # When the embedded path is active its vectors are tagged with the GGUF
+    # model tag, a distinct cache namespace — look up under that tag so the
+    # embedded path's own writes are cache-hit.
+    embedded = _get_embedded_embedder()
+    cache_model = _EMBED_GGUF_MODEL_TAG if embedded is not None else EMBED_MODEL
     try:
         with _db() as db:
-            cached = db.execute("SELECT embedding, embed_model FROM memory_embeddings WHERE content_hash = ? AND embed_model = ? LIMIT 1", (c_hash, EMBED_MODEL)).fetchone()
+            cached = db.execute("SELECT embedding, embed_model FROM memory_embeddings WHERE content_hash = ? AND embed_model = ? LIMIT 1", (c_hash, cache_model)).fetchone()
             if cached: return _unpack(cached["embedding"]), cached["embed_model"]
     except Exception as e:
         logger.debug(f"Embedding cache lookup failed: {e}")
+
+    # In-process llama.cpp path (opt-in, dimension-guarded). Bypasses the HTTP
+    # semaphore — EmbeddedBackend serializes via its own blocking pool. On any
+    # failure, fall through to the HTTP path rather than returning None.
+    if embedded is not None:
+        try:
+            _track_cost("embed_calls", len(text.split()) * 2)
+            vec = await asyncio.to_thread(lambda: embedded.embed([text])[0])
+            if not _EMBED_DIM_VALIDATED:
+                if len(vec) != EMBED_DIM:
+                    logger.error(f"Embedded embedding dim {len(vec)} != EMBED_DIM {EMBED_DIM}")
+                _EMBED_DIM_VALIDATED = True
+            return vec, _EMBED_GGUF_MODEL_TAG
+        except Exception as e:
+            logger.warning(f"Embedded embed failed ({e}) — falling back to HTTP")
 
     # Acquire semaphore with timeout to prevent deadlock under load
     try:
@@ -1760,6 +1829,11 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
 
     out: list[tuple[list[float] | None, str] | None] = [None] * len(texts)
 
+    # Embedded-path cache namespace: when active, its vectors carry the GGUF
+    # model tag — look up (and later tag writes) under that tag.
+    embedded = _get_embedded_embedder()
+    cache_model = _EMBED_GGUF_MODEL_TAG if embedded is not None else EMBED_MODEL
+
     # Cache lookup: dedupe by content_hash, fetch any cached rows in one pass.
     hashes = [_content_hash(t) for t in texts]
     uniq_hashes = list(set(hashes))
@@ -1770,7 +1844,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             rows = db.execute(
                 f"SELECT content_hash, embedding, embed_model FROM memory_embeddings "
                 f"WHERE embed_model = ? AND content_hash IN ({placeholders})",
-                (EMBED_MODEL, *uniq_hashes),
+                (cache_model, *uniq_hashes),
             ).fetchall()
             for r in rows:
                 cached_vecs[r["content_hash"]] = (_unpack(r["embedding"]), r["embed_model"])
@@ -1790,6 +1864,18 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
 
     if not miss_texts:
         return out  # type: ignore[return-value]
+
+    # In-process llama.cpp path (opt-in, dimension-guarded). Embeds all misses
+    # in one Rust call. On failure, fall through to the HTTP path below.
+    if embedded is not None:
+        try:
+            _track_cost("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
+            vecs = await asyncio.to_thread(lambda: embedded.embed(miss_texts))
+            for idx, vec in zip(miss_indices, vecs):
+                out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
+            return out  # type: ignore[return-value]
+        except Exception as e:
+            logger.warning(f"Embedded bulk embed failed ({e}) — falling back to HTTP")
 
     _track_cost("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
