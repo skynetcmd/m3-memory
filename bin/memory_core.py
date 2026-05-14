@@ -102,38 +102,6 @@ def _batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
     return _batch_cosine_py(query, matrix)
 
 
-# M3_MMR_SHADOW=1 runs the Rust mmr_rerank_scored alongside the authoritative
-# Python MMR loop and logs any disagreement. Shadow only — never changes the
-# returned ranking. This is the §4c.5 shadow-mode gate before a real cutover.
-_MMR_SHADOW = os.environ.get("M3_MMR_SHADOW", "0").lower() in ("1", "true", "yes")
-
-
-def _mmr_shadow_compare(pre_ranked: list, emb_lookup: dict, lam: float, k: int,
-                        py_selected: list) -> None:
-    """Compare the Rust policy-aware MMR against the Python loop's result.
-    Only runs when every pre_ranked item has an embedding — otherwise the two
-    sides aren't fed equivalent inputs (Python treats a missing vector as
-    max_sim=0, the Rust path has no vector to pass). Logs, never raises."""
-    if m3_core_rs is None or not _MMR_SHADOW:
-        return
-    try:
-        vecs = [emb_lookup.get(item["id"]) for _, item in pre_ranked]
-        if any(v is None for v in vecs):
-            logging.getLogger(__name__).debug(
-                "mmr shadow skipped: %d/%d candidates lack embeddings",
-                sum(v is None for v in vecs), len(vecs))
-            return
-        relevance = [float(score) for score, _ in pre_ranked]
-        rust_idx = m3_core_rs.mmr_rerank_scored(relevance, vecs, lam, k, True)
-        rust_ids = [pre_ranked[i][1]["id"] for i in rust_idx]
-        py_ids = [item["id"] for _, item in py_selected]
-        if rust_ids == py_ids:
-            logging.getLogger(__name__).debug("mmr shadow: agree (k=%d)", len(py_ids))
-        else:
-            logging.getLogger(__name__).warning(
-                "mmr shadow: DISAGREE py=%s rust=%s", py_ids, rust_ids)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("mmr shadow: error %s", exc)
 
 
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
@@ -583,7 +551,6 @@ def _enforce_expansion_displacement_guard(
     """
     if not hits or protected_ranks <= 0 or margin <= 1.0:
         return hits
-    work = list(hits)
 
     def _is_expansion(item) -> bool:
         if not isinstance(item, dict):
@@ -591,6 +558,15 @@ def _enforce_expansion_displacement_guard(
         tag = item.get("_expanded_via")
         return bool(tag) and tag != "primary"
 
+    # Rust path: classification stays here (it knows _expanded_via); the Rust
+    # core computes the reordering permutation, which we apply to the original
+    # (score, item) rows.
+    if m3_core_rs is not None:
+        typed = [(float(s), _is_expansion(it)) for s, it in hits]
+        perm = m3_core_rs.enforce_displacement_guard(typed, protected_ranks, margin)
+        return [hits[i] for i in perm]
+
+    work = list(hits)
     n = len(work)
     limit = min(protected_ranks, n)
     for rank in range(limit):
@@ -3534,37 +3510,45 @@ async def memory_search_scored_impl(
         _capture_dict["post_seen_content_dedup_rows"] = len(pre_ranked)
     if mmr and len(pre_ranked) > k and len(page_matrix) > 0:
         _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
-        selected = [pre_ranked[0]]
-        candidates = list(pre_ranked[1:])
-        while candidates and len(selected) < k:
-            best_idx, best_mmr = 0, -float('inf')
-            for ci, (c_score, c_item) in enumerate(candidates):
-                c_vec = _emb_lookup.get(c_item["id"])
-                if c_vec is None:
-                    # Candidate has no embedding in the lookup (e.g. vector-side hit
-                    # not represented in `rows`). Treat as max_sim=0 — neutral on the
-                    # diversification term — so the MMR score reduces to lambda*c_score.
-                    # Earlier code break-selected on this branch, which collapsed MMR
-                    # to "first-non-embedded-candidate-wins" pop ordering whenever any
-                    # candidate lacked an embedding.
-                    max_sim = 0.0
-                else:
-                    similarities = [_batch_cosine(c_vec, [_emb_lookup[s[1]["id"]]])[0]
-                                    for s in selected if s[1]["id"] in _emb_lookup]
-                    max_sim = max(similarities, default=0.0)
-                mmr_score = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
-                if mmr_score > best_mmr:
-                    best_mmr = mmr_score
-                    best_idx = ci
-                if explain:
-                    if "_explanation" not in c_item:
-                        c_item["_explanation"] = {}
-                    c_item["_explanation"]["max_sim_to_selected"] = max_sim
-                    c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
-            selected.append(candidates.pop(best_idx))
-        ranked = selected
-        if _MMR_SHADOW:
-            _mmr_shadow_compare(pre_ranked, _emb_lookup, _MMR_LAMBDA, k, selected)
+        # Rust path: authoritative when every candidate has an embedding and
+        # explanations aren't requested. The Rust mmr_rerank_scored needs a
+        # vector per candidate (it can't express the max_sim=0 missing-vector
+        # case), and only the Python loop writes per-item _explanation rows.
+        _mmr_vecs = [_emb_lookup.get(it["id"]) for _, it in pre_ranked]
+        if m3_core_rs is not None and not explain and all(v is not None for v in _mmr_vecs):
+            relevance = [float(s) for s, _ in pre_ranked]
+            sel_idx = m3_core_rs.mmr_rerank_scored(relevance, _mmr_vecs, _MMR_LAMBDA, k, True)
+            ranked = [pre_ranked[i] for i in sel_idx]
+        else:
+            selected = [pre_ranked[0]]
+            candidates = list(pre_ranked[1:])
+            while candidates and len(selected) < k:
+                best_idx, best_mmr = 0, -float('inf')
+                for ci, (c_score, c_item) in enumerate(candidates):
+                    c_vec = _emb_lookup.get(c_item["id"])
+                    if c_vec is None:
+                        # Candidate has no embedding in the lookup (e.g. vector-side hit
+                        # not represented in `rows`). Treat as max_sim=0 — neutral on the
+                        # diversification term — so the MMR score reduces to lambda*c_score.
+                        # Earlier code break-selected on this branch, which collapsed MMR
+                        # to "first-non-embedded-candidate-wins" pop ordering whenever any
+                        # candidate lacked an embedding.
+                        max_sim = 0.0
+                    else:
+                        similarities = [_batch_cosine(c_vec, [_emb_lookup[s[1]["id"]]])[0]
+                                        for s in selected if s[1]["id"] in _emb_lookup]
+                        max_sim = max(similarities, default=0.0)
+                    mmr_score = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
+                    if mmr_score > best_mmr:
+                        best_mmr = mmr_score
+                        best_idx = ci
+                    if explain:
+                        if "_explanation" not in c_item:
+                            c_item["_explanation"] = {}
+                        c_item["_explanation"]["max_sim_to_selected"] = max_sim
+                        c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
+                selected.append(candidates.pop(best_idx))
+            ranked = selected
     else:
         ranked = pre_ranked
 
