@@ -61,14 +61,19 @@ def _write_windows(value: str | None) -> None:
     is broadcast (WM_SETTINGCHANGE) — which setx does and direct registry
     writes do not.
     """
+    # reg.exe / setx.exe are console binaries; CREATE_NO_WINDOW keeps them
+    # from flashing a window. (Standalone copy of _task_runtime.no_window_kwargs
+    # — this module has no sibling imports and stays dependency-free.)
+    no_window = {"creationflags": subprocess.CREATE_NO_WINDOW} if _is_windows() else {}
     if value is None:
         subprocess.run(
             ["reg", "delete", "HKCU\\Environment", "/F", "/V", VAR],
             capture_output=True,
             check=False,
+            **no_window,
         )
         return
-    subprocess.run(["setx", VAR, value], capture_output=True, check=True)
+    subprocess.run(["setx", VAR, value], capture_output=True, check=True, **no_window)
 
 
 # --- Unix persistence ------------------------------------------------------
