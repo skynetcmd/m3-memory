@@ -16,6 +16,8 @@ import subprocess
 import unicodedata
 from datetime import datetime, timezone
 
+from _task_runtime import no_window_kwargs
+
 logger = logging.getLogger(__name__)
 
 # Dynamically resolve DB path relative to project root.
@@ -58,7 +60,8 @@ def get_master_key() -> str | None:
         try:
             result = subprocess.run(
                 ["security", "find-generic-password", "-s", "AGENT_OS_MASTER_KEY", "-w"],
-                capture_output=True, text=True, check=True, timeout=5
+                capture_output=True, text=True, check=True, timeout=5,
+                **no_window_kwargs(),
             )
             return result.stdout.strip()
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -214,18 +217,22 @@ def get_api_key(service: str) -> str | None:
         try:
             result = subprocess.run(
                 ["security", "find-generic-password", "-s", service, "-w"],
-                capture_output=True, text=True, check=True, timeout=5
+                capture_output=True, text=True, check=True, timeout=5,
+                **no_window_kwargs(),
             )
             return result.stdout.strip()
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
 
     elif system == "Windows":
-        # Windows Credential Manager via cmdkey (fallback when keyring module unavailable)
+        # Windows Credential Manager via cmdkey (fallback when keyring module
+        # unavailable). cmdkey.exe is a console binary — no_window_kwargs()
+        # keeps it from flashing a window on scheduled-task runs.
         try:
             result = subprocess.run(
                 ["cmdkey", f"/list:{service}"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=5,
+                **no_window_kwargs(),
             )
             if service.lower() in result.stdout.lower() and result.returncode == 0:
                 # Note: Get-StoredCredential is not a standard PS cmdlet.
@@ -241,7 +248,8 @@ def get_api_key(service: str) -> str | None:
                 ["dbus-send", "--session", "--dest=org.freedesktop.DBus",
                  "--type=method_call", "--print-reply",
                  "/org/freedesktop/DBus", "org.freedesktop.DBus.ListNames"],
-                capture_output=True, text=True, timeout=3
+                capture_output=True, text=True, timeout=3,
+                **no_window_kwargs(),
             )
             if "org.freedesktop.secrets" not in result.stdout:
                 logger.debug("Linux Secret Service (D-Bus) not running — skipping keyring")
