@@ -1002,7 +1002,11 @@ async def test_routed_with_entity_graph_kwarg(monkeypatch):
                                 session_cap=12, entity_graph=False, entity_graph_depth=1,
                                 entity_graph_max_neighbors=20,
                                 entity_graph_valid_types=None,
-                                entity_graph_valid_predicates=None):
+                                entity_graph_valid_predicates=None,
+                                **kwargs):
+        # **kwargs absorbs additions like entity_stoplist and _capture_dict
+        # that production code threads through. Tests should not break when
+        # _maybe_expand_routed grows new optional parameters.
         if entity_graph:
             # Simulate calling _entity_graph_neighbor_ids
             entity_graph_expand_called["value"] = True
