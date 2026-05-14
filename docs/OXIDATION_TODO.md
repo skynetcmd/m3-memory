@@ -5,10 +5,13 @@ integration. This is *not* the community roadmap (see `ROADMAP.md`) — it track
 known-incomplete work and deferred decisions from the oxidation effort.
 
 Status as of 2026-05-14. The Rust core is wired into m3-memory's hot path for
-**six operations** — SHA-256, cosine, batch-cosine, MMR, the expansion-displacement
+**five operations** — cosine, batch-cosine, MMR, the expansion-displacement
 guard, and chat-log redaction — all behind the `M3_CORE_RS_DISABLE` kill-switch,
 all parity-verified. In-process llama.cpp embeddings are also wired (opt-in via
-`M3_EMBED_GGUF`). What follows is what is *not* done.
+`M3_EMBED_GGUF`). SHA-256 was wired and then **reverted** to pure-Python
+`hashlib` (2026-05-14) — the micro-benchmark showed the Rust path is slower at
+every realistic input size; see the benchmark item below. What follows is what
+is *not* done.
 
 ---
 
@@ -58,11 +61,17 @@ all parity-verified. In-process llama.cpp embeddings are also wired (opt-in via
 
 - [x] **Per-operation micro-benchmark.** _Done 2026-05-14_ — `tests/bench_oxidation.py`
   times each swap FFI-inclusive against its Python baseline on realistic inputs.
-  Results: MMR 55–85× faster, cosine ~3×, cosine_batch 2.5–3×. It also caught a
-  regression: `m3_core_rs.scrub` was ~13× *slower* (recompiled regexes per call) —
-  fixed by caching the compiled `Redactor` in the binding, re-benchmarked at
-  8.5–10× faster. `sha256` is a mild loss (~0.4–0.9×, FFI cost > hashing win vs
-  `hashlib`); kept for FIPS-provider consistency, low stakes.
+  Results: MMR 55–85× faster, cosine ~3×, cosine_batch 2.5–3×, redaction 8.5–10×
+  faster. It earned its keep by catching two problems:
+  - `m3_core_rs.scrub` was ~13× *slower* (recompiled regexes per call) — fixed by
+    caching the compiled `Redactor` in the binding, re-benchmarked at 8.5–10× faster.
+  - `sha256` was slower at every realistic input size (~0.4–0.9×; FFI overhead vs
+    `hashlib`, which is already OpenSSL C with SHA-NI). A crossover sweep confirmed
+    `ring` and `hashlib` only *tie* above ~64KB — Rust never wins on turn-sized
+    content. **Reverted to pure-Python `hashlib`** (`memory_core.py::_sha256_hex`).
+    FIPS is unaffected — a FIPS-validated OpenSSL makes `hashlib.sha256` the
+    validated path; the `ring`-based `m3-hash` crate stays FIPS-gated in the
+    workspace for any Rust-side hashing, just unwired from this hot path.
 - [ ] **End-to-end retrieval benchmark.** The micro-benchmarks are per-op, not
   end-to-end. The plan's headline target (<50 ms retrieval p50, ingest throughput)
   still needs the LME-S reproducible stack run with and without the Rust core.
