@@ -18,11 +18,11 @@ Read-only audit. No source files were modified.
 | Group | Count |
 |---|---|
 | `M3_*`-prefixed env vars in active use | **77** |
-| Non-prefixed vars that belong to m3-memory's surface | **32** |
+| Non-prefixed vars that belong to m3-memory's surface | **42** |
 | Auth/credential vars (not namespaced — touch FIPS path) | **3** |
-| **Total env vars in m3-memory surface** | **112** |
+| **Total env vars in m3-memory surface** | **122** |
 
-The `M3_*` count is **77** after the 2026-05-14 regeneration: the original report's inventory table held **72** rows (its headline said "73" — a pre-existing off-by-one, corrected here), plus **5** new vars — **4** from the oxidation wiring (`M3_CORE_RS_DISABLE`, `M3_ROUTE_SHADOW_MODE`, `M3_EMBED_GGUF`, `M3_EMBED_GGUF_MODEL_TAG`) and **1** unrelated (`M3_TASK_LOG_FILE`, added by `bin/_task_runtime.py`). The test-only `M3_TEST_GGUF` (read only by the `m3-embed-llamacpp` Rust crate's opt-in test, never by m3-memory at runtime) is intentionally excluded. The non-prefixed and auth groups were not re-swept this round — the regeneration was scoped to the `M3_*` delta; a full non-prefixed re-sweep is still pending.
+The `M3_*` count is **77** after the 2026-05-14 regeneration: the original report's inventory table held **72** rows (its headline said "73" — a pre-existing off-by-one, corrected here), plus **5** new vars — **4** from the oxidation wiring (`M3_CORE_RS_DISABLE`, `M3_ROUTE_SHADOW_MODE`, `M3_EMBED_GGUF`, `M3_EMBED_GGUF_MODEL_TAG`) and **1** unrelated (`M3_TASK_LOG_FILE`, added by `bin/_task_runtime.py`). The test-only `M3_TEST_GGUF` (read only by the `m3-embed-llamacpp` Rust crate's opt-in test, never by m3-memory at runtime) is intentionally excluded. The non-prefixed group was re-swept on 2026-05-14 (see Methodology): it grew from **32** to **42** — all 32 prior rows still resolve to live `os.environ`/`os.getenv` reads, and **10** new vars were found (`AGENT_DB`, `CHATLOG_DB`, `LLM_ENDPOINTS_CSV`, `MCP_PROXY_HOST`, `MCP_PROXY_ALLOW_DESTRUCTIVE`, `MACBOOK_STATUS_HOST`, `POSTGRES_SERVER`, `SYNC_TARGET_IP`, `REFLECTOR_PROFILE`, `OBSERVER_PROFILE`). The auth group was re-swept the same round and stayed at **3** (one reader path corrected — see that table). Total surface = 77 + 42 + 3 = **122**.
 
 ## Reader → tool inventory cross-check
 
@@ -153,44 +153,54 @@ These post-date the initial report. The four `M3_CORE_RS_*` / `M3_EMBED_GGUF*` /
 
 > **Cross-check note:** `bin/_task_runtime.py` is a tool not present in the `docs/tools/INDEX.md` snapshot the original report cross-referenced. Re-run `python bin/gen_tool_inventory.py` and confirm it is now indexed; if so, the "no drift" claim below holds with `_task_runtime.py` added to the reader set.
 
-## Non-prefixed vars (32) — recommended for `M3_*` namespacing
+## Non-prefixed vars (42) — recommended for `M3_*` namespacing
 
 The Rust binding crate (`m3-core-py`) will accept both legacy and `M3_`-prefixed forms during a one-release-cycle deprecation window. The legacy form will emit a Python `DeprecationWarning` log line.
 
-| Legacy var | New alias | Default | Type |
-|---|---|---|---|
-| CHATLOG_DB_PATH | M3_CHATLOG_DB_PATH | `memory/agent_chatlog.db` | path |
-| CHATLOG_DB_POOL_SIZE | M3_CHATLOG_DB_POOL_SIZE | `4` | int |
-| CHATLOG_DB_POOL_TIMEOUT | M3_CHATLOG_DB_POOL_TIMEOUT | `10` | int |
-| CHATLOG_EMBED_MAX_PER_RUN | M3_CHATLOG_EMBED_MAX_PER_RUN | `10000` | int |
-| CHATLOG_STATUSLINE | M3_CHATLOG_STATUSLINE | (unset) | bool |
-| CHATLOG_STATUSLINE_ASCII | M3_CHATLOG_STATUSLINE_ASCII | (unset) | bool |
-| CHROMA_BASE_URL | M3_CHROMA_BASE_URL | (unset) | url |
-| CONTRADICTION_THRESHOLD | M3_CONTRADICTION_THRESHOLD | `0.92` | float |
-| CONTRADICTION_TITLE_GATE | M3_CONTRADICTION_TITLE_GATE | `loose` | enum |
-| CONTRADICTION_TYPE_EXCLUSIONS | M3_CONTRADICTION_TYPE_EXCLUSIONS | `conversation` | csv |
-| DB_POOL_SIZE | M3_DB_POOL_SIZE | `5` | int |
-| DB_POOL_TIMEOUT | M3_DB_POOL_TIMEOUT | `30` | int |
-| DEDUP_LIMIT | M3_DEDUP_LIMIT | `1000` | int |
-| DEDUP_THRESHOLD | M3_DEDUP_THRESHOLD | `0.92` | float |
-| EMBED_BULK_CHUNK | M3_EMBED_BULK_CHUNK | `1024` | int |
-| EMBED_BULK_CONCURRENCY | M3_EMBED_BULK_CONCURRENCY | `4` | int |
-| EMBED_DIM | M3_EMBED_DIM | `1024` | int |
-| EMBED_MODEL (in `memory_core.py`) | merge into M3_EMBED_MODEL | `qwen3-embedding` | string |
-| EMBED_PRIMARY | M3_EMBED_PRIMARY | `http://localhost:1234` | url |
-| EMBED_SECONDARY | M3_EMBED_SECONDARY | _(internal LAN address; see source)_ | url |
-| EMBED_SERVER_GPU_HOST | M3_EMBED_SERVER_GPU_HOST | `127.0.0.1` | ip |
-| EMBED_SERVER_HOST | M3_EMBED_SERVER_HOST | `127.0.0.1` | ip |
-| EMBED_TERTIARY | M3_EMBED_TERTIARY | _(internal LAN address; see source)_ | url |
-| ENTITY_NAME_EMBED_CACHE_MAX | M3_ENTITY_NAME_EMBED_CACHE_MAX | `50000` | int |
-| LLAMA_PORT | M3_LLAMA_PORT | `9904` | int |
-| LLM_READ_TIMEOUT | M3_LLM_READ_TIMEOUT | `4800.0` | float |
-| LLM_TIMEOUT | M3_LLM_TIMEOUT | `120.0` | float |
-| LM_STUDIO_BASE | M3_LM_STUDIO_BASE | `http://localhost:1234/v1` | url |
-| ORIGIN_DEVICE | M3_ORIGIN_DEVICE | `platform.node()` | string |
-| PG_URL | M3_PG_URL | (unset) | url |
-| SEARCH_ROW_CAP | M3_SEARCH_ROW_CAP | `5000` | int |
-| SUPERSEDES_PENALTY | M3_SUPERSEDES_PENALTY | `0.5` | float |
+| Legacy var | New alias | Default | Type | Primary reader |
+|---|---|---|---|---|
+| AGENT_DB | M3_AGENT_DB | (unset) | path | bin/build_kg_variant.py |
+| CHATLOG_DB | M3_CHATLOG_DB | (unset) | path | bin/chatlog_decay.py |
+| CHATLOG_DB_PATH | M3_CHATLOG_DB_PATH | `memory/agent_chatlog.db` | path | bin/chatlog_config.py |
+| CHATLOG_DB_POOL_SIZE | M3_CHATLOG_DB_POOL_SIZE | `4` | int | bin/chatlog_config.py |
+| CHATLOG_DB_POOL_TIMEOUT | M3_CHATLOG_DB_POOL_TIMEOUT | `10` | int | bin/chatlog_config.py |
+| CHATLOG_EMBED_MAX_PER_RUN | M3_CHATLOG_EMBED_MAX_PER_RUN | `10000` | int | bin/chatlog_embed_sweeper.py |
+| CHATLOG_STATUSLINE | M3_CHATLOG_STATUSLINE | (unset) | bool | bin/chatlog_status_line.py |
+| CHATLOG_STATUSLINE_ASCII | M3_CHATLOG_STATUSLINE_ASCII | (unset) | bool | bin/chatlog_status_line.py |
+| CHROMA_BASE_URL | M3_CHROMA_BASE_URL | (unset) / `""` (in chroma_health.py) | url | bin/memory_core.py, bin/chroma_health.py |
+| CONTRADICTION_THRESHOLD | M3_CONTRADICTION_THRESHOLD | `0.92` | float | bin/memory_core.py |
+| CONTRADICTION_TITLE_GATE | M3_CONTRADICTION_TITLE_GATE | `loose` | enum | bin/memory_core.py |
+| CONTRADICTION_TYPE_EXCLUSIONS | M3_CONTRADICTION_TYPE_EXCLUSIONS | `conversation` | csv | bin/memory_core.py |
+| DB_POOL_SIZE | M3_DB_POOL_SIZE | `5` | int | bin/m3_sdk.py |
+| DB_POOL_TIMEOUT | M3_DB_POOL_TIMEOUT | `30` | int | bin/m3_sdk.py |
+| DEDUP_LIMIT | M3_DEDUP_LIMIT | `1000` | int | bin/memory_core.py |
+| DEDUP_THRESHOLD | M3_DEDUP_THRESHOLD | `0.92` | float | bin/memory_core.py |
+| EMBED_BULK_CHUNK | M3_EMBED_BULK_CHUNK | `1024` | int | bin/memory_core.py |
+| EMBED_BULK_CONCURRENCY | M3_EMBED_BULK_CONCURRENCY | `4` | int | bin/memory_core.py |
+| EMBED_DIM | M3_EMBED_DIM | `1024` | int | bin/memory_core.py |
+| EMBED_MODEL (in `memory_core.py`) | merge into M3_EMBED_MODEL | `qwen3-embedding` | string | bin/memory_core.py |
+| EMBED_PRIMARY | M3_EMBED_PRIMARY | `http://localhost:1234` | url | bin/discord_bot.py |
+| EMBED_SECONDARY | M3_EMBED_SECONDARY | _(internal LAN address; see source)_ | url | bin/discord_bot.py |
+| EMBED_SERVER_GPU_HOST | M3_EMBED_SERVER_GPU_HOST | `127.0.0.1` | ip | bin/embed_server_gpu.py |
+| EMBED_SERVER_HOST | M3_EMBED_SERVER_HOST | `127.0.0.1` | ip | bin/embed_server.py |
+| EMBED_TERTIARY | M3_EMBED_TERTIARY | _(internal LAN address; see source)_ | url | bin/discord_bot.py |
+| ENTITY_NAME_EMBED_CACHE_MAX | M3_ENTITY_NAME_EMBED_CACHE_MAX | `50000` | int | bin/memory_core.py |
+| LLAMA_PORT | M3_LLAMA_PORT | `9904` | int | bin/embed_server_gpu.py |
+| LLM_ENDPOINTS_CSV | M3_LLM_ENDPOINTS_CSV | `` (empty; set by installer/setup_embedder) | csv | bin/llm_failover.py |
+| LLM_READ_TIMEOUT | M3_LLM_READ_TIMEOUT | `4800.0` (m3_sdk.py); `300` (mcp_proxy.py) | float | bin/m3_sdk.py, bin/mcp_proxy.py |
+| LLM_TIMEOUT | M3_LLM_TIMEOUT | `120.0` | float | bin/memory_core.py |
+| LM_STUDIO_BASE | M3_LM_STUDIO_BASE | `http://localhost:1234/v1` | url | bin/m3_sdk.py, bin/mcp_proxy.py |
+| MACBOOK_STATUS_HOST | M3_MACBOOK_STATUS_HOST | `127.0.0.1` | ip | bin/macbook_status_server.py |
+| MCP_PROXY_ALLOW_DESTRUCTIVE | M3_MCP_PROXY_ALLOW_DESTRUCTIVE | (unset) | bool | bin/mcp_proxy.py |
+| MCP_PROXY_HOST | M3_MCP_PROXY_HOST | `127.0.0.1` | ip | bin/mcp_proxy.py |
+| OBSERVER_PROFILE | M3_OBSERVER_PROFILE | `observer_local` | string | bin/run_observer.py |
+| ORIGIN_DEVICE | M3_ORIGIN_DEVICE | `platform.node()` | string | bin/memory_core.py |
+| PG_URL | M3_PG_URL | (unset) | url | bin/m3_sdk.py, bin/pg_sync.py, bin/pg_setup.py |
+| POSTGRES_SERVER | M3_POSTGRES_SERVER | (unset; falls back to `SYNC_TARGET_IP`) | ip | bin/sync_all.py |
+| REFLECTOR_PROFILE | M3_REFLECTOR_PROFILE | `reflector_local` | string | bin/run_reflector.py |
+| SEARCH_ROW_CAP | M3_SEARCH_ROW_CAP | `5000` | int | bin/memory_core.py |
+| SUPERSEDES_PENALTY | M3_SUPERSEDES_PENALTY | `0.5` | float | bin/memory_core.py |
+| SYNC_TARGET_IP | M3_SYNC_TARGET_IP | `` (empty) | ip | bin/sync_all.py |
 
 ## Auth/credential vars (3) — NOT namespaced
 
@@ -199,8 +209,8 @@ These follow secrets-manager naming convention and stay unprefixed. They route t
 | Var | Reader | Notes |
 |---|---|---|
 | AGENT_OS_MASTER_KEY | bin/auth_utils.py | Master encryption key. Production: must come from OS keychain, not env. |
-| LM_STUDIO_API_KEY | bin/auth_utils.py | LM Studio API key. Optional fallback. |
-| LM_API_TOKEN | bin/m3_cognitive_loop.py | Generic LM API token. |
+| LM_STUDIO_API_KEY | bin/auth_utils.py (+ bin/macbook_status_server.py, bin/mission_control.py) | LM Studio API key. Optional fallback. |
+| LM_API_TOKEN | bin/mission_control.py, bin/macbook_status_server.py, bin/hooks/pre-commit | Generic LM API token. **Reader corrected 2026-05-14:** the original report listed `bin/m3_cognitive_loop.py`, which no longer reads this var (refactored out). |
 
 ## Conflicts & gotchas
 
@@ -209,6 +219,10 @@ These follow secrets-manager naming convention and stay unprefixed. They route t
 3.  **`M3_MEMORY_ROOT` and `M3_SLM_PROFILES_DIR` are inferred when unset.** The Rust binding must preserve the inference logic (walk up from `__file__`); cannot fall back to a hardcoded path.
 4.  **`M3_ROUTER_TEMPORAL_K_BUMP` has caller-dependent defaults.** Different call sites in `memory_core.py` supply different defaults. The Rust port must preserve per-call-site defaults rather than hoisting to a single global default.
 5.  **The planned new `M3_HASH_PROVIDER` env var does not conflict** with `M3_CRYPTO_BACKEND`. They're orthogonal (hashing vs encryption backend).
+6.  **`LLM_READ_TIMEOUT` has two readers with divergent defaults.** `bin/m3_sdk.py` defaults to `4800.0`; `bin/mcp_proxy.py` defaults to `300`. The Rust binding (or any consolidation) must preserve per-reader defaults — they are not interchangeable (SDK long-poll vs proxy request timeout).
+7.  **`POSTGRES_SERVER` and `SYNC_TARGET_IP` are chained in `bin/sync_all.py`** — `os.environ.get("POSTGRES_SERVER", os.environ.get("SYNC_TARGET_IP", ""))`. `POSTGRES_SERVER` wins; `SYNC_TARGET_IP` is the fallback. Namespacing must keep the precedence. `POSTGRES_SERVER` is also read by `examples/homelab-dashboard/backend/main.py` (out of scope — example app, not the m3-memory surface).
+8.  **`CHATLOG_DB` (legacy, `bin/chatlog_decay.py`) vs `CHATLOG_DB_PATH` (canonical).** `chatlog_decay.py` reads `CHATLOG_DB` then falls back to `M3_DATABASE` — it does *not* consult `CHATLOG_DB_PATH`, so a user who set only `CHATLOG_DB_PATH` would have `chatlog_decay` silently target the main DB. Pre-existing inconsistency; flag for the namespacing pass.
+9.  **`AGENT_DB` (legacy, `bin/build_kg_variant.py`) is a deprecated alias** for the main memory DB path; it shadows `M3_DATABASE`/`resolve_db_path()` when set. Source comment already marks it deprecated.
 
 ## Methodology
 
@@ -221,6 +235,10 @@ Search patterns applied across the tree:
 - Cross-checked all reader file paths against `docs/tools/INDEX.md` (107 tools listed as of 2026-05-09)
 
 **2026-05-14 regeneration scope:** re-ran the `M3_*` patterns only (`os.environ.get`/`os.environ[`/`os.getenv` for `M3_`) across `bin/`, `m3_memory/`, `scripts/`. Diffed the result against the existing inventory table (72 rows) to surface the 5-var delta, and corrected the original headline's off-by-one (it said "73" for a 72-row table). The non-prefixed and auth/credential groups were **not** re-swept; a full re-run of all four pattern classes is still owed.
+
+**2026-05-14 non-prefixed + auth re-sweep (completed):** re-ran the full `os.environ.get` / `os.environ[` / `os.getenv` pattern set across `bin/`, `m3_memory/`, `scripts/` for non-`M3_`-prefixed names, filtered to vars belonging to m3-memory's own surface (excluding OS/standard vars — `PATH`, `USER`, `USERNAME`, `USERPROFILE`, `APPDATA`, `COMPUTERNAME`, `WT_SESSION`, `ANSICON`, `FORCE_COLOR`, `TERM_PROGRAM`, `CUDA_*`, `HF_*` — and third-party SDK keys — `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `NEWS_API_KEY`). **Non-prefixed: 32 → 42.** All 32 prior rows verified still live; **10 added**: `AGENT_DB`, `CHATLOG_DB`, `LLM_ENDPOINTS_CSV`, `MCP_PROXY_HOST`, `MCP_PROXY_ALLOW_DESTRUCTIVE`, `MACBOOK_STATUS_HOST`, `POSTGRES_SERVER`, `SYNC_TARGET_IP`, `REFLECTOR_PROFILE`, `OBSERVER_PROFILE`. No rows removed; no defaults drifted. A primary-reader column was added to the non-prefixed table this round. **Auth: 3 → 3** (no new auth-shaped `os.environ`/`os.getenv` vars); the `LM_API_TOKEN` reader was corrected from the stale `bin/m3_cognitive_loop.py` to its actual readers (`bin/mission_control.py`, `bin/macbook_status_server.py`, `bin/hooks/pre-commit`). Total surface: 112 → **122**.
+
+_Borderline / judgment calls:_ `NEWS_API_KEY` (`bin/news_fetcher.py`) — excluded; it is a third-party news API key, not m3-memory's own surface. `MCP_PROXY_KEY` (`bin/mcp_proxy.py`) — auth-shaped but read via `ctx.get_secret(...)`, not `os.environ`/`os.getenv`, so it is not an env-var read and was not added to the auth table. `POSTGRES_SERVER` / `MACBOOK_STATUS_HOST` / `MCP_PROXY_HOST` — utility/sidecar servers, but they are m3-memory's own tools, so included. `examples/homelab-dashboard/backend/main.py` reads `POSTGRES_SERVER` too but is an example app, out of scope.
 
 ## Re-running the audit
 
