@@ -90,6 +90,18 @@ def _sha256_hex(data: bytes) -> str:
     return _sha256_hex_py(data)
 
 
+def _batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
+    """Cosine of one query against many vectors. Routes through the Rust core
+    when available, but only on a dimension-homogeneous corpus — the Rust path
+    raises on ragged input where the Python path silently zero-fills, so a
+    ragged matrix falls back to Python to preserve that behavior."""
+    if m3_core_rs is not None and matrix:
+        q_dim = len(query)
+        if all(len(v) == q_dim for v in matrix):
+            return m3_core_rs.cosine_batch(query, matrix)
+    return _batch_cosine_py(query, matrix)
+
+
 async def conversation_summarize_impl(conversation_id: str, threshold: int = 20) -> str:
     """Summarizes a conversation into key points using the local LLM."""
     # 1. Fetch all messages for the conversation
@@ -192,7 +204,7 @@ async def embedder_status_impl() -> dict:
 
     return res
 from embedding_utils import (
-    batch_cosine as _batch_cosine,
+    batch_cosine as _batch_cosine_py,
 )
 from embedding_utils import (
     infer_change_agent as _infer_change_agent_util,
@@ -5002,7 +5014,9 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
     return f"Updated: {id}"
 
 def _cosine(v1: list[float], v2: list[float]) -> float:
-    """Fallback cosine similarity if numpy is unavailable."""
+    """Cosine similarity. Routes through the Rust core when available."""
+    if m3_core_rs is not None and len(v1) == len(v2):
+        return m3_core_rs.cosine(v1, v2)
     from embedding_utils import cosine
     return cosine(v1, v2)
 
