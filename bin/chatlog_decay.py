@@ -84,7 +84,14 @@ from pathlib import Path
 def resolve_db_path(cli_arg: str | None) -> str:
     if cli_arg:
         return os.path.abspath(cli_arg)
-    env = os.environ.get("CHATLOG_DB") or os.environ.get("M3_DATABASE")
+    # Resolution order: legacy CHATLOG_DB alias, then the canonical
+    # CHATLOG_DB_PATH (used by chatlog_config / chatlog_ingest /
+    # m3_cognitive_loop), then the generic M3_DATABASE. CHATLOG_DB_PATH was
+    # previously skipped entirely — setting it and running decay silently
+    # pointed at M3_DATABASE instead of the chatlog DB.
+    env = (os.environ.get("CHATLOG_DB")
+           or os.environ.get("CHATLOG_DB_PATH")
+           or os.environ.get("M3_DATABASE"))
     if env:
         return os.path.abspath(env)
     # Default: bench worktree's standard chatlog location
