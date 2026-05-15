@@ -3798,39 +3798,8 @@ async def memory_search_scored_impl(
                     except Exception as e:
                         logger.debug(f"smart_neighbor_sessions expansion failed: {e}")
 
-    # Phase 11 architectural fix: supersedence-aware demotion. Memories that
-    # have been superseded (i.e., they appear as `to_id` on a 'supersedes'
-    # edge) get their score multiplied by SUPERSEDES_PENALTY (default 0.5x).
-    # Default penalty is "demote, not delete" so the older fact stays
-    # retrievable for "what did I previously say about X?" questions, but
-    # ranks below the newer version for "what's my current X?" Set
-    # SUPERSEDES_PENALTY=0 to hide superseded items entirely; 1.0 to disable
-    # demotion (no-op).
-    if ranked and SUPERSEDES_PENALTY < 1.0:
-        ranked_ids = [item.get("id") for _, item in ranked if isinstance(item, dict) and item.get("id")]
-        if ranked_ids:
-            try:
-                with _db() as db:
-                    placeholders = ",".join("?" * len(ranked_ids))
-                    sup_rows = db.execute(
-                        f"SELECT to_id FROM memory_relationships "
-                        f"WHERE relationship_type = 'supersedes' "
-                        f"AND to_id IN ({placeholders})",
-                        ranked_ids,
-                    ).fetchall()
-                    superseded_ids: set = {r["to_id"] for r in sup_rows}
-                if superseded_ids:
-                    ranked = [
-                        (
-                            (s * SUPERSEDES_PENALTY) if isinstance(item, dict) and item.get("id") in superseded_ids else s,
-                            item,
-                        )
-                        for s, item in ranked
-                    ]
-                    # Re-sort once after demotion so ordering reflects new scores.
-                    ranked.sort(key=lambda t: t[0], reverse=True)
-            except Exception as e:
-                logger.debug(f"supersedence-aware demotion failed: {e}")
+    # Phase 11 supersedence-aware demotion moved to memory_search_scored_impl
+    # (after _apply_rerank) so the MiniLM cross-encoder cannot undo it.
 
     # Phase D Mastra: post-rank preference for type='observation' rows.
     # When M3_PREFER_OBSERVATIONS=1, partition the ranked list into
@@ -4737,6 +4706,38 @@ async def memory_search_routed_impl(
             _capture_dict["rerank_blend"] = rerank_blend
             _capture_dict["rerank_pre_count"] = _final_n
             _capture_dict["rerank_post_count"] = len(final_hits)
+
+    # Phase 11: supersedence-aware demotion — runs AFTER reranker so the
+    # cross-encoder cannot undo it. Items that are the to_id of a 'supersedes'
+    # edge (i.e. an older version exists) get score * SUPERSEDES_PENALTY.
+    # Default 0.5x: demote but keep retrievable for "what did I previously
+    # say?" queries. Set SUPERSEDES_PENALTY=0 to exclude entirely.
+    if final_hits and SUPERSEDES_PENALTY < 1.0:
+        hit_ids = [item.get("id") for _, item in final_hits if isinstance(item, dict) and item.get("id")]
+        if hit_ids:
+            try:
+                with _db() as db:
+                    placeholders = ",".join("?" * len(hit_ids))
+                    sup_rows = db.execute(
+                        f"SELECT to_id FROM memory_relationships "
+                        f"WHERE relationship_type = 'supersedes' "
+                        f"AND to_id IN ({placeholders})",
+                        hit_ids,
+                    ).fetchall()
+                    superseded_ids: set = {r["to_id"] for r in sup_rows}
+                if superseded_ids:
+                    final_hits = [
+                        (
+                            (s * SUPERSEDES_PENALTY) if isinstance(item, dict) and item.get("id") in superseded_ids else s,
+                            item,
+                        )
+                        for s, item in final_hits
+                    ]
+                    final_hits.sort(key=lambda t: t[0], reverse=True)
+                    if _capture_dict is not None:
+                        _capture_dict["superseded_demoted"] = len(superseded_ids)
+            except Exception as e:
+                logger.debug(f"supersedence-aware demotion failed: {e}")
 
     return final_hits
 
