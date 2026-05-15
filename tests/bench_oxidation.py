@@ -330,13 +330,17 @@ for pool in (24, 150, 500):
     cands = take_vecs(pool)
     # descending-sorted blended relevance, as the production call site guarantees
     relevance = [1.0 - i / pool for i in range(pool)]
+    # Python MMR is O(pool^2) cosine calls — cap iters to avoid multi-minute hangs
+    # on large pools. 50 iters is enough for a stable median.
+    py_max = 50 if pool >= 150 else 500
     py_med, py_p95, _ = bench(
         lambda c=cands, r=relevance, kk=k: py_mmr_scored_select(r, c, MMR_LAMBDA, kk, True),
-        target_seconds=1.0,
+        target_seconds=0.5,
+        max_iters=py_max,
     )
     rs_med, rs_p95, _ = bench(
         lambda c=cands, r=relevance, kk=k: m3_core_rs.mmr_rerank_scored(r, c, MMR_LAMBDA, kk, True),
-        target_seconds=1.0,
+        target_seconds=0.5,
     )
     unit = "ms" if py_med > 1000 or rs_med > 1000 else "us"
     record("mmr_rerank", f"pool={pool},k={k}", py_med, py_p95, rs_med, rs_p95, unit)
