@@ -21,5 +21,6 @@ defer imports here, because:
 """
 from . import config  # noqa: F401
 from . import util  # noqa: F401
+from . import fts  # noqa: F401
 
-__all__ = ["config", "util"]
+__all__ = ["config", "util", "fts"]
