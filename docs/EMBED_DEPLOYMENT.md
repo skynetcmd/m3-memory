@@ -169,6 +169,42 @@ python -c "import m3_core_rs; print(m3_core_rs.embed_backend_label())"
 # -> cuda
 ```
 
+#### CUDA wheel portability
+
+The CUDA wheel produced by `maturin build --release --features embedded-cuda`
+is **not** self-contained. The compiled `m3_core_rs*.pyd` dynamically links
+against:
+
+- `cublas64_13.dll`
+- `cublasLt64_13.dll`
+- `cudart64_13.dll`
+
+These DLLs are loaded at import time from `$env:CUDA_PATH\bin\x64`. The
+Python shim in `python/m3_core_rs/__init__.py` auto-registers that path via
+`os.add_dll_directory()` before the extension is imported, so as long as the
+target machine has a matching CUDA Toolkit installed and `CUDA_PATH` is set
+(or the toolkit lives at the standard
+`C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v*` layout), the wheel
+imports cleanly — no extra operator setup.
+
+What this means in practice:
+
+- **The CUDA wheel is NOT redistributable.** Copying it to a machine without
+  the CUDA Toolkit installed will fail at import with
+  `ImportError: DLL load failed while importing m3_core_rs: The specified
+  module could not be found.`
+- The CUDA Toolkit version on the target machine should match the major
+  version the wheel was built against (CUDA 13.x for this repo's wheels —
+  `cublas64_13.dll` is the giveaway). A CUDA 12 host will not satisfy a
+  CUDA 13 wheel.
+- The **CPU wheel** (`--features embedded` with no `-cuda`) IS self-contained
+  and portable — no external runtime DLLs needed.
+- For a truly redistributable CUDA wheel, the CUDA runtime DLLs would need
+  to be bundled into the wheel. On Linux this is `auditwheel repair`; on
+  Windows the equivalent is [`delvewheel`](https://github.com/adang1345/delvewheel),
+  which we have NOT exercised in this repo. Filed as future work — the
+  current operator story assumes CUDA Toolkit is installed locally.
+
 **Blackwell auto-fix (wave 9.1)**: the `m3-embed-llamacpp` init path detects
 CUDA compute capability via `nvidia-smi` and sets
 `GGML_CUDA_DISABLE_GRAPHS=1` automatically when sm_120+ is detected, before
@@ -299,28 +335,36 @@ machine-level env vars you have set explicitly).
 
 ### Recovery actions
 
-The `windows-service` 0.8 crate does not expose `ChangeServiceConfig2`, so
-restart-on-failure is a one-time manual step after `install` (elevated):
+Configured automatically by `install`: the installer shells out to
+`sc.exe failure` to set restart-on-failure (3 restarts, 5 s delay, 60 s
+reset window). If the `sc.exe` call fails (typically because `install` was
+run unelevated and only succeeded partially), the installer prints a WARN
+with the exact one-liner to run by hand:
 
 ```powershell
 sc.exe failure m3-embed-server reset= 60 actions= restart/5000/restart/5000/restart/5000
 ```
 
-This restarts the service up to 3 times in 60 s with 5 s delays. The
-equivalent GUI path is `services.msc` -> M3 Embed Server -> Recovery tab.
+Equivalent GUI path: `services.msc` -> M3 Embed Server -> Recovery tab.
 
 ### Logs
 
-Service-mode logs append to `%PROGRAMDATA%\m3-embed-server\service.log`
-(`env_logger` format). There is **no built-in rotation** — for long-running
-deployments use Task Scheduler + `Compress-Archive` weekly, or similar.
-This is a tracked follow-up in the crate README; an `M3_EMBED_LOG_MAX_MB`
-env var is a TODO, not yet implemented.
+Service-mode logs land in `%PROGRAMDATA%\m3-embed-server\service.log.YYYY-MM-DD`,
+rotated daily (UTC) via `tracing-appender`. The active day's file is the
+newest one in the directory. Foreground / dev mode keeps the original
+`env_logger` stderr behaviour — only the Windows Service path uses the
+rolling-file appender.
 
-Tail live:
+Old rolled files are pruned on service startup: anything older than 14 days
+is deleted. No external rotator needed.
+
+Tail the most recent day's log:
 
 ```powershell
-Get-Content -Wait $env:PROGRAMDATA\m3-embed-server\service.log
+Get-ChildItem $env:PROGRAMDATA\m3-embed-server\service.log.* |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1 |
+    Get-Content -Wait
 ```
 
 ### Non-Windows
