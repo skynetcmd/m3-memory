@@ -172,3 +172,11 @@ benchmarks/longmemeval/*
 # is pending and the harness lives on private/locomo until results land.
 benchmarks/locomo/*
 !benchmarks/locomo/README.md
+
+# Project Oxidation wave 0-9 bench artifacts. Per CLAUDE.md, bench data does
+# not ship to public origin — these scripts hardcode local paths, capture
+# host-specific timings, and reveal the test GGUF layout. Private only.
+reports/
+tests/bench_embed_path.py
+tests/bench_e2e_retrieval_lme_m.py
+tests/repro_concurrent_hang.py
