@@ -163,6 +163,22 @@ Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-
 | `M3_ROUTE_SHADOW_MODE` | `off` | Shadow-mode gate for the Rust route decider in `bin/auto_route.py`. `log` runs `m3_core_rs.decide_route` alongside the authoritative Python `decide_branch` and logs branch agreement/disagreement (Python result is always returned). `off` disables the shadow. `enforce` is reserved but not implemented — there is no Rust route cutover. |
 | `M3_EMBED_GGUF` | (empty) | Path to a bge-m3 GGUF file. When set (and `m3_core_rs` is built with the `embedded` feature), `_embed` / `_embed_many` produce embeddings **in-process via llama.cpp** instead of POSTing to a llama-server. Unset (default) keeps the HTTP embed path. Guarded: a GGUF whose embedding dimension ≠ `EMBED_DIM` is rejected and HTTP is used. |
 | `M3_EMBED_GGUF_MODEL_TAG` | `bge-m3-GGUF-Q4_K_M.gguf` | The `embed_model` tag applied to vectors produced by the in-process path (above). Defaults to the llama.cpp-served bge-m3 tag the embedded backend is parity-verified against (cosine ≈ 0.996 vs stored rows with that tag). This is a distinct content-hash cache namespace from LM Studio's `text-embedding-bge-m3` rows. |
+| `M3_EMBED_FALLBACK_URL` | `http://127.0.0.1:8082` | URL of the CPU HTTP fallback embed server (m3-embed-server). When `M3_EMBED_GGUF` is set but the in-process `EmbeddedEmbedder` fails to construct (GGUF missing, CUDA OOM, wheel built without `--features embedded`) or raises mid-call, `_embed` / `_embed_many` POST to `{this URL}/embedding` (singular path) before falling through to `M3_EMBED_URL`. The fallback must serve bge-m3 (or a model with matching `EMBED_DIM`) to remain vector-compatible with rows tagged `M3_EMBED_GGUF_MODEL_TAG`. Vectors produced via this fallback are tagged with `M3_EMBED_GGUF_MODEL_TAG`, sharing the in-process cache namespace. |
+
+### Observable backend selection
+
+`bin/memory_core.py` exposes process-global counters so callers can see which
+embed path actually served each call:
+
+- `get_embed_backend_stats() -> dict[str, int]` — snapshot of served-call
+  counts keyed by label: `'cuda-inprocess'`, `'vulkan-inprocess'`,
+  `'metal-inprocess'`, `'cpu-inprocess'`, `'cpu-http-fallback'`,
+  `'http-primary'`. The dict is a copy; mutate freely.
+- `reset_embed_backend_stats()` — clear the counters between phases (handy
+  in benchmarks that want to attribute embeds to a particular query workload).
+
+Both helpers are thread-safe. `_embed()` increments by 1; `_embed_many()`
+increments by the number of inputs served along that path.
 | `M3_TEST_GGUF` | (empty) | Test-only. Points the `m3-embed-llamacpp` crate's opt-in real-inference test at a GGUF model. Unset → that test is skipped. Not read by m3-memory at runtime. |
 
 > **Note — the `M3_MMR_SHADOW` var has been retired.** An earlier build added a shadow-mode flag for the MMR reranker; the Rust MMR (`mmr_rerank_scored`) is now authoritative when `m3_core_rs` is loaded (it replicates the Python loop's selection sequence exactly, verified by `tests/test_oxidation_parity.py`). No env var gates it — `M3_CORE_RS_DISABLE` is the only override.

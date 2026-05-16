@@ -1928,6 +1928,68 @@ def _get_embed_client() -> _httpx.AsyncClient:
 _EMBED_URL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_URL") or "").strip() or None
 _EMBED_MODEL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_MODEL") or "").strip() or None
 
+# CPU fallback embed server (m3-embed-server, port 8082 by default). Used when
+# M3_EMBED_GGUF is set but the in-process EmbeddedEmbedder fails to construct
+# (GGUF missing, CUDA OOM, wheel built without --features embedded, etc.) or
+# when the in-process path raises mid-call. The fallback must be byte-compatible
+# with the in-process bge-m3 model — same GGUF recommended. Posts to
+# `{_EMBED_FALLBACK_URL}/embedding` (singular path, m3-embed-server primary route).
+_EMBED_FALLBACK_URL: str = (
+    os.environ.get("M3_EMBED_FALLBACK_URL") or "http://127.0.0.1:8082"
+).rstrip("/")
+
+
+# --- Observable embed-backend stats ---------------------------------------
+# Process-global counter of which embed path served each call. Labels:
+#   'cuda-inprocess' / 'vulkan-inprocess' / 'metal-inprocess' / 'cpu-inprocess'
+#       — the in-process llama.cpp path (M3_EMBED_GGUF set, EmbeddedEmbedder live)
+#   'cpu-http-fallback'
+#       — POST to _EMBED_FALLBACK_URL after in-process construction or call failed
+#   'http-primary'
+#       — the legacy M3_EMBED_URL / get_best_embed path (LM Studio, llama-server)
+# Each call increments the counter by the number of inputs served (so _embed_many
+# attributes one bump per text). Snapshot with get_embed_backend_stats() and
+# clear between phases with reset_embed_backend_stats() — both thread-safe.
+from threading import Lock as _ThreadLock
+_EMBED_BACKEND_STATS: dict[str, int] = {}
+_EMBED_BACKEND_STATS_LOCK = _ThreadLock()
+
+
+def _record_embed_backend(label: str, call_count: int = 1) -> None:
+    """Increment the served-call counter for one embed-path label."""
+    with _EMBED_BACKEND_STATS_LOCK:
+        _EMBED_BACKEND_STATS[label] = _EMBED_BACKEND_STATS.get(label, 0) + call_count
+
+
+def get_embed_backend_stats() -> dict[str, int]:
+    """Snapshot of which embed paths have served calls in this process.
+
+    Labels: 'cuda-inprocess', 'vulkan-inprocess', 'metal-inprocess',
+    'cpu-inprocess', 'cpu-http-fallback', 'http-primary'.
+
+    Returned dict is a COPY; mutate freely.
+    """
+    with _EMBED_BACKEND_STATS_LOCK:
+        return dict(_EMBED_BACKEND_STATS)
+
+
+def reset_embed_backend_stats() -> None:
+    """Clear the served-call stats dict — useful between benchmark phases."""
+    with _EMBED_BACKEND_STATS_LOCK:
+        _EMBED_BACKEND_STATS.clear()
+
+
+def _embedded_label() -> str:
+    """Return the in-process backend-label string for stats, e.g.
+    'cuda-inprocess'. Falls back to 'cpu-inprocess' when the m3_core_rs
+    wheel predates the `embed_backend_label` pyfunction."""
+    try:
+        import m3_core_rs as _m3
+        bk = getattr(_m3, "embed_backend_label", lambda: "cpu")()
+    except Exception:
+        bk = "cpu"
+    return f"{bk}-inprocess"
+
 
 def set_embed_override(url: str | None, model: str | None = None) -> None:
     """Set or clear the embedder endpoint override at runtime.
@@ -1970,7 +2032,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
 
     # In-process llama.cpp path (opt-in, dimension-guarded). Bypasses the HTTP
     # semaphore — EmbeddedBackend serializes via its own blocking pool. On any
-    # failure, fall through to the HTTP path rather than returning None.
+    # failure, fall through to the CPU HTTP fallback, then the primary HTTP path.
     if embedded is not None:
         try:
             _track_cost("embed_calls", len(text.split()) * 2)
@@ -1979,9 +2041,34 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                 if len(vec) != EMBED_DIM:
                     logger.error(f"Embedded embedding dim {len(vec)} != EMBED_DIM {EMBED_DIM}")
                 _EMBED_DIM_VALIDATED = True
+            _record_embed_backend(_embedded_label(), 1)
             return vec, _EMBED_GGUF_MODEL_TAG
         except Exception as e:
-            logger.warning(f"Embedded embed failed ({e}) — falling back to HTTP")
+            logger.warning(f"Embedded embed failed ({e}) — falling back to CPU HTTP")
+
+    # CPU HTTP fallback (m3-embed-server at _EMBED_FALLBACK_URL). Only attempted
+    # when M3_EMBED_GGUF is set (signalling the operator wants an in-process-like
+    # path) but the in-process embedder is unavailable or just failed. If this
+    # also fails, fall through to the legacy M3_EMBED_URL / discovery path.
+    if _EMBED_GGUF_PATH is not None:
+        try:
+            client = _get_embed_client()
+            resp = await client.post(
+                f"{_EMBED_FALLBACK_URL}/embedding",
+                json={"input": [text]},
+                timeout=_httpx.Timeout(CHROMA_CONNECT_T, read=EMBED_TIMEOUT_READ),
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            emb = payload["data"][0]["embedding"]
+            if not _EMBED_DIM_VALIDATED:
+                if len(emb) != EMBED_DIM:
+                    logger.error(f"CPU fallback embedding dim {len(emb)} != EMBED_DIM {EMBED_DIM}")
+                _EMBED_DIM_VALIDATED = True
+            _record_embed_backend("cpu-http-fallback", 1)
+            return emb, _EMBED_GGUF_MODEL_TAG
+        except Exception as e:
+            logger.warning(f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) failed ({e}) — using primary HTTP")
 
     # Acquire semaphore with timeout to prevent deadlock under load
     try:
@@ -2022,6 +2109,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                         logger.error(f"Embedding dimension mismatch: got {len(emb)}, expected EMBED_DIM={EMBED_DIM}. Update EMBED_DIM env var.")
                     _EMBED_DIM_VALIDATED = True
 
+                _record_embed_backend("http-primary", 1)
                 return emb, model
             except Exception as e:
                 last_exc = e
@@ -2093,16 +2181,47 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         return out  # type: ignore[return-value]
 
     # In-process llama.cpp path (opt-in, dimension-guarded). Embeds all misses
-    # in one Rust call. On failure, fall through to the HTTP path below.
+    # in one Rust call. On failure, fall through to the CPU HTTP fallback, then
+    # the legacy HTTP path below.
     if embedded is not None:
         try:
             _track_cost("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
             vecs = await asyncio.to_thread(lambda: embedded.embed(miss_texts))
             for idx, vec in zip(miss_indices, vecs):
                 out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
+            _record_embed_backend(_embedded_label(), len(miss_texts))
             return out  # type: ignore[return-value]
         except Exception as e:
-            logger.warning(f"Embedded bulk embed failed ({e}) — falling back to HTTP")
+            logger.warning(f"Embedded bulk embed failed ({e}) — falling back to CPU HTTP")
+
+    # CPU HTTP fallback (m3-embed-server). Only attempted when M3_EMBED_GGUF is
+    # set; routes via _EMBED_FALLBACK_URL/embedding. Sends all misses in one
+    # request (m3-embed-server batches internally). On failure, fall through.
+    if _EMBED_GGUF_PATH is not None:
+        try:
+            _track_cost("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
+            client = _get_embed_client()
+            resp = await client.post(
+                f"{_EMBED_FALLBACK_URL}/embedding",
+                json={"input": miss_texts},
+                timeout=_httpx.Timeout(CHROMA_CONNECT_T, read=EMBED_TIMEOUT_READ * 4),
+            )
+            resp.raise_for_status()
+            data = resp.json()["data"]
+            ordered = sorted(data, key=lambda d: d.get("index", 0))
+            vecs = [d["embedding"] for d in ordered]
+            if len(vecs) != len(miss_texts):
+                raise RuntimeError(
+                    f"CPU fallback returned {len(vecs)} vectors for {len(miss_texts)} inputs"
+                )
+            for idx, vec in zip(miss_indices, vecs):
+                out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
+            _record_embed_backend("cpu-http-fallback", len(miss_texts))
+            return out  # type: ignore[return-value]
+        except Exception as e:
+            logger.warning(
+                f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) bulk failed ({e}) — using primary HTTP"
+            )
 
     _track_cost("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
@@ -2198,6 +2317,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     flat: list[list[float] | None] = []
     for cr in chunk_results:
         flat.extend(cr)
+    _primary_served = 0
     for local_i, vec in enumerate(flat):
         if vec is not None and not _EMBED_DIM_VALIDATED:
             if len(vec) != EMBED_DIM:
@@ -2206,6 +2326,10 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
                 )
             _EMBED_DIM_VALIDATED = True
         out[miss_indices[local_i]] = (vec, model)
+        if vec is not None:
+            _primary_served += 1
+    if _primary_served:
+        _record_embed_backend("http-primary", _primary_served)
 
     return out  # type: ignore[return-value]
 
