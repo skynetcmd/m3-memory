@@ -92,7 +92,8 @@ subagent verification passes.
     `VALID_ENTITY_PREDICATES`, `VALID_ENTITY_TYPES`, `load_entity_vocab`,
     `_run_entity_extractor`, `_link_entity_relationship`,
     `entity_search_impl`, `entity_get_impl`, `_create_entity`.
-- [ ] **0.5** Commit: `chore(memory): bootstrap migration safety nets`.
+- [x] **0.5** Commit: `chore(memory): bootstrap migration safety nets`.
+  Local-only (not yet pushed). 4 files, 590 insertions.
 
 **Checkpoint 0 PASSED:** Inventory is manageable (132 symbols, 47 private,
 zero star-imports, both worktrees mapped). Proceeding to Phase 1.
@@ -233,6 +234,11 @@ Plan designed so that any phase end leaves codebase strictly better:
 | 2026-05-16 18:46 | Phase 0.3 | done | Three baseline artifacts captured (embedder_status, embed_smoke, search_smoke); embed 15.3/s, search 13.9/s with live Chroma. Script fix: `k=` not `limit=`. |
 | 2026-05-16 18:50 | Phase 0.4 | scope-expanded | Subagent prompt updated to scan m3-memory-bench too — that worktree's bin/ cross-imports memory_core. |
 | 2026-05-16 18:52 | Phase 0.4 | done | Explore subagent finished. CSV at `.scratch/migration_baseline/import_inventory.csv` (2058 rows, 132 unique symbols, 47 private). Zero star-imports. m3-memory + m3-memory-bench roughly evenly co-dependent. Two `importlib.reload(memory_core)` calls in `test_memory_bridge.py` flagged. Checkpoint 0 PASSED. |
+| 2026-05-16 18:54 | Phase 0.5 | done | Committed locally as Phase 0 bootstrap. |
+| 2026-05-16 18:54 | Phase 1 | starting | Extract `config.py` + `util.py`. |
+| 2026-05-16 18:55 | Phase 1 | paused | Tight entanglement between embed-state and embed-config constants in first 150 lines; spawning Plan subagent. |
+| 2026-05-16 18:58 | Plan subagent | done | ~55 pure config constants safe to move. ~12 mutable globals identified, each tagged with owning phase. Two mutable config-shapes that ARE shared across phase boundaries: `_EMBED_URL_OVERRIDE`, `_EMBED_MODEL_OVERRIDE` (env-seeded, written by `set_embed_override`, read by `_embed`). Also: `m3_core_rs` module reference (set-once at import, read everywhere). Decision: those three move to `config.py`. The 4-tuple (`_EMBED_GGUF_PATH`, `_EMBED_GGUF_MODEL_TAG`, `_embedded_embedder`, `_embedded_embed_checked`) **stays in memory_core.py** until Phase 3 extracts them all together. Risks flagged: `ctx` is import-time singleton used 20+ places, leave alone; `_initialized_dbs` and `_GATE_CACHE` are externally imported AND mutable, must preserve identity through shim. |
+| 2026-05-16 19:01 | Phase 1 | design-locked | Refined plan per audit: `config.py` gets `m3_core_rs` ref + the two `_EMBED_*_OVERRIDE` mutables + ~55 pure constants. `util.py` gets `_sha256_hex`, `_content_hash`, `_token_jaccard`, byte-packing, sentinels (`_UNSET`), pure regexes. **Skipped intentionally:** the 4-tuple `_EMBED_GGUF_PATH/MODEL_TAG/embedded_embedder/checked`; `ctx`; `_initialized_dbs`/`_GATE_CACHE`. Pausing for user gate before executing — Phase 1 is now bigger than the original 45-min estimate due to ~55 constants needing line-by-line lifting. |
 
 ## Cross-references
 
