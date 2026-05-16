@@ -50,6 +50,40 @@ def unpack(blob: bytes) -> list[float]:
     return list(struct.unpack(f"{n}f", blob))
 
 
+def unpack_many(blobs, dim: int | None = None):
+    """Batched unpack of N float-32 blobs into a 2-D numpy array.
+
+    Returns an (N, dim) np.ndarray when numpy is available and blobs are
+    dimension-homogeneous. Falls back to list[list[float]] otherwise (e.g.
+    ragged input or numpy unavailable).
+
+    `dim` is optional — if omitted, inferred from the first non-empty blob.
+    A None blob is treated as a zero-vector row in the homogeneous case.
+    """
+    if not blobs:
+        return _np.empty((0, dim or 0), dtype=_np.float32) if HAS_NUMPY else []
+    # Infer dim if not provided
+    if dim is None:
+        for b in blobs:
+            if b:
+                dim = len(b) // 4
+                break
+        if dim is None:
+            return _np.empty((0, 0), dtype=_np.float32) if HAS_NUMPY else []
+    expected_bytes = dim * 4
+    homogeneous = all((b is not None) and (len(b) == expected_bytes) for b in blobs)
+    if HAS_NUMPY and homogeneous:
+        # Single zero-copy concat: join blobs and view as float32, reshape.
+        # bytes(...) handles memoryview/bytearray inputs uniformly.
+        return _np.frombuffer(b"".join(blobs), dtype=_np.float32).reshape(len(blobs), dim)
+    # Ragged / None-bearing fallback — return per-row lists; callers that need
+    # an array can vstack with zero-fill themselves.
+    return [
+        list(struct.unpack(f"{len(b) // 4}f", b)) if b else [0.0] * dim
+        for b in blobs
+    ]
+
+
 # ── Cosine similarity ────────────────────────────────────────────────────────
 def cosine(a: list[float], b: list[float]) -> float:
     """Cosine similarity between two vectors. Uses numpy if available."""
@@ -64,47 +98,54 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (mag_a * mag_b) if (mag_a and mag_b) else 0.0
 
 
-def batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
+def batch_cosine(query, matrix):
     """
-    Cosine similarity of one query vector against a list of vectors.
-    Robustly handles inhomogeneous dimensions by filtering out non-matching vectors.
+    Cosine similarity of one query vector against a list / 2-D array of vectors.
+
+    Fast path: when `matrix` is a numpy ndarray (homogeneous by construction),
+    skips the per-row dimension check entirely — one BLAS gemv + one norm pass.
+
+    Slow path: list[list[float]]; falls back to per-row filtering for ragged
+    inputs to preserve callers that pass mixed-dim vectors.
     """
+    if matrix is None:
+        return []
+    # ndarray fast path
+    if HAS_NUMPY and isinstance(matrix, _np.ndarray):
+        if matrix.size == 0:
+            return []
+        q = _np.asarray(query, dtype=_np.float32)
+        m = matrix if matrix.dtype == _np.float32 else matrix.astype(_np.float32, copy=False)
+        q_norm = _np.linalg.norm(q)
+        if q_norm == 0.0:
+            return [0.0] * m.shape[0]
+        m_norms = _np.linalg.norm(m, axis=1)
+        # Avoid div-by-zero without branching
+        m_norms = _np.where(m_norms == 0, 1e-10, m_norms)
+        return (m @ q / (m_norms * q_norm)).tolist()
+    # list / tuple path (legacy)
     if not matrix:
         return []
-
     q_dim = len(query)
-    # Filter out vectors with different dimensions to prevent numpy ValueError
     valid_indices = [i for i, v in enumerate(matrix) if len(v) == q_dim]
-
     if not valid_indices:
         return [0.0] * len(matrix)
-
     if HAS_NUMPY:
         try:
-            q = _np.array(query, dtype=_np.float32)
-            # Create a full results array initialized to 0.0
+            q = _np.asarray(query, dtype=_np.float32)
             results = [0.0] * len(matrix)
-
-            # Perform batch operation on valid subset
             valid_matrix = [matrix[i] for i in valid_indices]
-            m = _np.array(valid_matrix, dtype=_np.float32)
-
+            m = _np.asarray(valid_matrix, dtype=_np.float32)
             q_norm = _np.linalg.norm(q)
             m_norms = _np.linalg.norm(m, axis=1)
-
             norms = m_norms * q_norm
-            # Avoid division by zero
             norms = _np.where(norms == 0, 1e-10, norms)
-
             subset_scores = (m @ q / norms).tolist()
-
-            # Map subset scores back to original indices
             for i, score in zip(valid_indices, subset_scores):
                 results[i] = score
             return results
         except Exception as exc:
             logger.warning(f"numpy batch_cosine failed: {exc}. Falling back to list comprehension.")
-
     return [cosine(query, v) if len(v) == q_dim else 0.0 for v in matrix]
 
 

@@ -147,16 +147,141 @@ def _get_embedded_embedder():
         return None
 
 
-def _batch_cosine(query: list[float], matrix: list[list[float]]) -> list[float]:
-    """Cosine of one query against many vectors. Routes through the Rust core
-    when available, but only on a dimension-homogeneous corpus — the Rust path
-    raises on ragged input where the Python path silently zero-fills, so a
-    ragged matrix falls back to Python to preserve that behavior."""
-    if m3_core_rs is not None and matrix:
+def _batch_cosine(query, matrix) -> list[float]:
+    """Cosine of one query against many vectors.
+
+    Fast paths, in order:
+      1. ndarray input -> hand to `embedding_utils.batch_cosine` (numpy gemv).
+      2. Rust core + homogeneous list-of-lists -> `cosine_batch` (rayon).
+      3. Python+numpy fallback.
+
+    The previous always-O(N) homogeneity scan is skipped on the ndarray path
+    where homogeneity is guaranteed by the array shape.
+    """
+    if matrix is None:
+        return []
+    # ndarray fast path — no per-row dim check, numpy does gemv in one shot.
+    if _HAS_NUMPY and isinstance(matrix, _np.ndarray):
+        return _batch_cosine_py(query, matrix)  # routes to ndarray branch inside
+    if not matrix:
+        return []
+    if m3_core_rs is not None:
         q_dim = len(query)
         if all(len(v) == q_dim for v in matrix):
             return m3_core_rs.cosine_batch(query, matrix)
     return _batch_cosine_py(query, matrix)
+
+
+def _cosine_batch_packed(query, blobs, dim: int) -> list[float]:
+    """Score `query` against a list of packed-blob embeddings (the raw SQLite
+    BLOB bytes). Single FFI hop when m3_core_rs is loaded; numpy zero-copy
+    `frombuffer` fallback when not; pure-Python last-ditch fallback.
+
+    A blob with the wrong byte length scores 0.0 in every path (Rust returns
+    0.0; numpy/Python paths zero-fill via `_unpack_many`'s ragged branch).
+    """
+    if not blobs:
+        return []
+    if m3_core_rs is not None:
+        try:
+            return m3_core_rs.cosine_batch_packed(query, blobs, dim)
+        except Exception as e:  # noqa: BLE001 — fall back rather than fail retrieval
+            logger.debug(f"cosine_batch_packed Rust path failed, falling back: {e}")
+    matrix = _unpack_many(blobs, dim=dim)
+    return _batch_cosine(query, matrix)
+
+
+def _hybrid_score_batch(
+    vector_scores,
+    bm25_scores,
+    content_lens,
+    importances,
+    title_overlaps,
+    vector_weight: float,
+    importance_weight: float,
+    title_match_boost: float,
+    short_turn_threshold: int,
+) -> list[float]:
+    """Compute the per-row hybrid score for a batch of candidates.
+
+    Equivalent to the body of the original per-row scoring loop:
+        raw = vector * vw + bm25_norm * (1 - vw)
+        penalty = max(0.3, len/STT) if len < STT else 1.0
+        final = raw * penalty + title_match_boost * title_overlap + iw * importance
+
+    Rust path: rayon-parallel SIMD-friendly arithmetic. Python fallback:
+    numpy-vectorized when available, else pure-Python loop.
+    """
+    n = len(vector_scores)
+    if n == 0:
+        return []
+    if m3_core_rs is not None:
+        try:
+            return m3_core_rs.hybrid_score_batch(
+                [float(v) for v in vector_scores],
+                [float(v) for v in bm25_scores],
+                [int(v) for v in content_lens],
+                [float(v) for v in importances],
+                [float(v) for v in title_overlaps],
+                float(vector_weight),
+                float(importance_weight),
+                float(title_match_boost),
+                int(max(1, short_turn_threshold)),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"hybrid_score_batch Rust path failed, falling back: {e}")
+    if _HAS_NUMPY:
+        vec = _np.asarray(vector_scores, dtype=_np.float32)
+        bm = _np.asarray(bm25_scores, dtype=_np.float32)
+        lens = _np.asarray(content_lens, dtype=_np.float32)
+        imp = _np.asarray(importances, dtype=_np.float32)
+        tit = _np.asarray(title_overlaps, dtype=_np.float32)
+        bm25_norm = 1.0 / (1.0 + _np.abs(bm))
+        raw = vec * vector_weight + bm25_norm * (1.0 - vector_weight)
+        stt = float(max(1, short_turn_threshold))
+        penalty = _np.where(lens < stt, _np.maximum(0.3, lens / stt), 1.0)
+        out = raw * penalty + title_match_boost * tit + importance_weight * imp
+        return out.tolist()
+    # Pure-Python fallback
+    stt = float(max(1, short_turn_threshold))
+    out = []
+    for i in range(n):
+        bm25_norm = 1.0 / (1.0 + abs(bm25_scores[i]))
+        raw = vector_scores[i] * vector_weight + bm25_norm * (1.0 - vector_weight)
+        clen = float(content_lens[i])
+        penalty = max(0.3, clen / stt) if clen < stt else 1.0
+        out.append(
+            raw * penalty
+            + title_match_boost * title_overlaps[i]
+            + importance_weight * float(importances[i])
+        )
+    return out
+
+
+def _recency_bonus_ranks(valid_froms, bias: float) -> list[float]:
+    """Linear rank-based recency bonus aligned to ``valid_froms``.
+
+    Same semantics as the legacy `_apply_recency_bonus`: empty / missing
+    `valid_from` -> 0.0; dated items get `bias * rank / (n_dated - 1)` after
+    lex-sort. When fewer than two dated items exist, all zeros.
+    """
+    n = len(valid_froms)
+    if bias <= 0 or n < 2:
+        return [0.0] * n
+    if m3_core_rs is not None:
+        try:
+            return m3_core_rs.recency_bonus_ranks([(v or None) for v in valid_froms], float(bias))
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"recency_bonus_ranks Rust path failed, falling back: {e}")
+    dated_idx = [i for i, v in enumerate(valid_froms) if v]
+    if len(dated_idx) < 2:
+        return [0.0] * n
+    dated_idx.sort(key=lambda i: valid_froms[i])
+    denom = len(dated_idx) - 1
+    out = [0.0] * n
+    for rank, orig in enumerate(dated_idx):
+        out[orig] = bias * (rank / denom)
+    return out
 
 
 
@@ -274,6 +399,13 @@ from embedding_utils import (
 from embedding_utils import (
     unpack as _unpack,
 )
+from embedding_utils import (
+    unpack_many as _unpack_many,
+)
+from embedding_utils import HAS_NUMPY as _HAS_NUMPY
+
+if _HAS_NUMPY:
+    import numpy as _np  # type: ignore
 
 logger = logging.getLogger("memory_core")
 # Default context (memory/agent_memory.db unless M3_DATABASE overrides at
@@ -772,6 +904,47 @@ def _sanitize_fts(query: str, max_len: int = 500) -> str:
     return _FTS_OPERATORS.sub(' ', query).strip()
 
 
+# LRU cache keyed by (raw_query, mode) — same input shape that
+# memory_search_scored_impl saw inline pre-refactor. Mode is "hybrid" or "fts5".
+# Returns the FTS5 MATCH-token string and a flag telling the caller whether the
+# search should bail out (empty sanitized query in "fts5"-only mode).
+from functools import lru_cache as _lru_cache
+
+@_lru_cache(maxsize=2048)
+def _compile_fts_query(query: str, mode: str) -> tuple[str, bool]:
+    """Compile a raw user query into an FTS5 MATCH string.
+
+    Returns ``(fts_query, ok)``. When ``ok`` is False the caller should treat
+    this as "no matchable tokens"; in ``mode == "fts5"`` that means return
+    no results, in any other mode that means fall back to semantic-only.
+
+    Same logic the inline code used pre-refactor (see memory_search_scored_impl
+    pre-2026-05): exact-mode preserves the quoted phrase as-is; otherwise the
+    query is depunctuated to match the FTS trigger's normalized storage, then
+    either wildcarded (single-token alnum) or OR-joined (multi-token in
+    ``fts5`` mode) or passed straight through.
+    """
+    is_exact_query = (query.startswith('"') and query.endswith('"')) or (
+        query.startswith("'") and query.endswith("'")
+    )
+    if is_exact_query:
+        return f'"{query[1:-1]}"', True
+    clean = _sanitize_fts(query)
+    clean = _sanitize_for_searchable(clean)
+    if not clean.strip():
+        return "", False
+    clean = clean.strip()
+    if mode == "fts5":
+        toks = [t for t in clean.split() if t]
+        if len(toks) > 1:
+            return " OR ".join(toks), True
+        return (f"{clean}*" if clean.isalnum() else clean), True
+    # hybrid / semantic fallback path
+    if " " not in clean and clean.isalnum():
+        return f"{clean}*", True
+    return clean, True
+
+
 # Mirror of the SQLite mi_fts_insert trigger sanitization. The trigger lowercases
 # and replaces these 8 punctuation chars with spaces before storing in
 # content_searchable / title_searchable. Query-side text must apply the same
@@ -813,21 +986,39 @@ def _augment_title_with_role(title: str, metadata: str | dict | None) -> str:
     return f"[{role}] {t}".strip()
 
 
-def _query_title_overlap(query: str, title: str) -> float:
-    """Fraction of query tokens that also appear in title. 0.0 when no overlap.
+def _query_title_token_set(query: str) -> frozenset[str]:
+    """Tokenize a query into the set used for title-overlap scoring.
 
-    Used as a small ranker boost for titles that literally echo query terms.
+    Hoisted out of ``_query_title_overlap`` so callers in a hot loop can
+    compute it once and reuse it across many titles. Returns ``frozenset``
+    for safe sharing.
     """
-    if not query or not title:
-        return 0.0
-    q_tokens = {t for t in _TOKEN_SPLIT.split(query.lower()) if len(t) > 2}
-    if not q_tokens:
+    if not query:
+        return frozenset()
+    return frozenset(t for t in _TOKEN_SPLIT.split(query.lower()) if len(t) > 2)
+
+
+def _title_overlap_from_qset(q_tokens: frozenset[str], title: str) -> float:
+    """Same as ``_query_title_overlap`` but with the query token set precomputed."""
+    if not q_tokens or not title:
         return 0.0
     t_tokens = {t for t in _TOKEN_SPLIT.split(title.lower()) if len(t) > 2}
     if not t_tokens:
         return 0.0
     overlap = q_tokens & t_tokens
-    return len(overlap) / len(q_tokens)
+    return len(overlap) / len(q_tokens) if q_tokens else 0.0
+
+
+def _query_title_overlap(query: str, title: str) -> float:
+    """Fraction of query tokens that also appear in title. 0.0 when no overlap.
+
+    Used as a small ranker boost for titles that literally echo query terms.
+    Kept for back-compat with single-call callers; hot loops should use
+    ``_query_title_token_set`` once + ``_title_overlap_from_qset`` per title.
+    """
+    if not query or not title:
+        return 0.0
+    return _title_overlap_from_qset(_query_title_token_set(query), title)
 
 
 # Always-on: lift resolved temporal anchors into embed_text so FTS and vector
@@ -914,6 +1105,18 @@ _TEMPORAL_QUERY_RE = re.compile(
     r"\b(when|what\s+date|which\s+day|on\s+what)\b", re.IGNORECASE
 )
 
+# Hoisted out of _apply_temporal_boost so it isn't re-compiled per search call.
+# These match ISO `YYYY-MM-DD` and `D Month YYYY` shapes inside the query.
+_DATE_RE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_DATE_RE_LONG = re.compile(
+    r"\b(\d+)\s+(january|february|march|april|may|june|july|august|"
+    r"september|october|november|december)\s+(\d{4})\b"
+)
+_DATE_MONTHS = (
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+)
+
 
 def _pull_predecessor_turns(scored: list) -> None:
     """Append turn N-1 to ``scored`` when turn N is already present.
@@ -946,31 +1149,45 @@ def _pull_predecessor_turns(scored: list) -> None:
             continue
     if not candidates:
         return
-    # Single query per candidate keeps the code simple; at top-10 * 1 row
-    # each that's 10 point-lookups on an indexed table, well under 10ms.
+    # Single batched query: pull all turns from the affected conversations in
+    # one round-trip, then filter to the exact (cid, turn_index) pairs and the
+    # per-candidate parent_score in Python. The previous N-query loop did
+    # json_extract on every row in each conversation N times.
+    cids: set[str] = {c for c, _, _ in candidates}
+    wanted: dict[tuple[str, int], float] = {}
+    for cid, t_idx, p_score in candidates:
+        key = (cid, t_idx)
+        # Multiple top-10 hits in the same conv may share a target_idx; keep
+        # the parent_score of the higher-ranked hit (first occurrence wins).
+        wanted.setdefault(key, p_score)
     try:
         with _db() as db:
-            for cid, target_idx, parent_score in candidates:
-                row = db.execute(
-                    "SELECT id, content, title, type, importance, metadata_json, conversation_id "
-                    "FROM memory_items "
-                    "WHERE conversation_id = ? AND is_deleted = 0 "
-                    "  AND json_extract(metadata_json, '$.turn_index') = ?",
-                    (cid, target_idx),
-                ).fetchone()
-                if row is None or row["id"] in seen_ids:
-                    continue
-                seen_ids.add(row["id"])
-                pre_item = {
-                    "id": row["id"],
-                    "content": row["content"],
-                    "title": row["title"],
-                    "type": row["type"],
-                    "importance": row["importance"],
-                    "metadata_json": row["metadata_json"],
-                    "conversation_id": row["conversation_id"],
-                }
-                scored.append((parent_score * 0.85, pre_item))
+            placeholders = ",".join("?" * len(cids))
+            rows = db.execute(
+                f"SELECT id, content, title, type, importance, metadata_json, "
+                f"  conversation_id, "
+                f"  CAST(json_extract(metadata_json, '$.turn_index') AS INTEGER) AS turn_index "
+                f"FROM memory_items "
+                f"WHERE conversation_id IN ({placeholders}) AND is_deleted = 0",
+                tuple(cids),
+            ).fetchall()
+        for row in rows:
+            tkey = (row["conversation_id"], row["turn_index"])
+            if tkey not in wanted:
+                continue
+            if row["id"] in seen_ids:
+                continue
+            seen_ids.add(row["id"])
+            pre_item = {
+                "id": row["id"],
+                "content": row["content"],
+                "title": row["title"],
+                "type": row["type"],
+                "importance": row["importance"],
+                "metadata_json": row["metadata_json"],
+                "conversation_id": row["conversation_id"],
+            }
+            scored.append((wanted[tkey] * 0.85, pre_item))
     except Exception as e:  # defensive — predecessor pull is best-effort
         logger.debug(f"predecessor pull skipped: {type(e).__name__}: {e}")
 
@@ -3041,6 +3258,29 @@ async def _try_extract_or_enqueue(
     task.add_done_callback(lambda t: _PENDING_ENTITY_TASKS.discard(t))
 
 
+_CHROMA_COLLECTION_ID_CACHE: dict[tuple[str, str], str] = {}
+
+
+async def _resolve_chroma_collection_id(client, base_url: str, collection: str) -> str | None:
+    """Resolve and cache a Chroma collection UUID for the process lifetime.
+
+    A missing / 4xx response invalidates the cache slot so the next call
+    re-resolves. The previous code paid one extra round-trip per federated
+    search — meaningful when the local pool is weak and federation fires on
+    every other query.
+    """
+    key = (base_url, collection)
+    cached = _CHROMA_COLLECTION_ID_CACHE.get(key)
+    if cached:
+        return cached
+    resp = await client.get(f"{base_url}{CHROMA_V2_PREFIX}/{collection}", timeout=CHROMA_CONNECT_T)
+    resp.raise_for_status()
+    col_id = resp.json().get("id")
+    if col_id:
+        _CHROMA_COLLECTION_ID_CACHE[key] = col_id
+    return col_id
+
+
 async def _query_chroma(
     query_vec: list[float],
     k: int = 5,
@@ -3059,11 +3299,9 @@ async def _query_chroma(
         return []
     try:
         client = _get_embed_client()
-        # 1. Resolve collection ID
-        resp = await client.get(f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{CHROMA_COLLECTION}", timeout=CHROMA_CONNECT_T)
-        resp.raise_for_status()
-        col_data = resp.json()
-        col_id = col_data.get("id")
+        # 1. Resolve collection ID (cached for the process lifetime; invalidated
+        #    on any error below).
+        col_id = await _resolve_chroma_collection_id(client, CHROMA_BASE_URL, CHROMA_COLLECTION)
         if not col_id:
             logger.warning("ChromaDB collection response missing 'id' field")
             return []
@@ -3112,6 +3350,9 @@ async def _query_chroma(
         return results
     except Exception as e:
         logger.debug(f"ChromaDB federated query failed: {e}")
+        # Drop any cached collection UUID — a 404/connection error may mean
+        # the collection was recreated with a new id.
+        _CHROMA_COLLECTION_ID_CACHE.pop((CHROMA_BASE_URL, CHROMA_COLLECTION), None)
         return []
 
 def _apply_recency_bonus(scored, recency_bias, explain=False):
@@ -3173,49 +3414,125 @@ def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -
 
 
 def _apply_temporal_boost(scored, query, explain=False):
-    """Detects dates in query and boosts items with matching or nearby valid_from dates."""
-    # 1. Extract potential dates from query (YYYY-MM-DD)
-    date_patterns = [
-        r"\b(\d{4})-(\d{2})-(\d{2})\b",
-        r"\b(\d+)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\b",
-    ]
-    query_dates = []
-    for pattern in date_patterns:
-        for match in re.finditer(pattern, query.lower()):
-            try:
-                if "-" in match.group(0):
-                    query_dates.append(datetime.fromisoformat(match.group(0)).date())
-                else:
-                    d, m, y = match.groups()
-                    months = ["january", "february", "march", "april", "may", "june",
-                              "july", "august", "september", "october", "november", "december"]
-                    query_dates.append(date(int(y), months.index(m) + 1, int(d)))
-            except Exception:
-                continue
+    """Detects dates in query and boosts items with matching or nearby valid_from dates.
 
+    Compiled regexes are module-level; `query.lower()` runs once; each unique
+    `valid_from` string is parsed at most once per call via a small dict cache
+    (typical retrieval pool has many turns from the same conversation/day, so
+    cache hit-rate is high).
+    """
+    if not scored or not query:
+        return scored
+    q_lower = query.lower()
+    query_dates: list = []
+    for mobj in _DATE_RE_ISO.finditer(q_lower):
+        try:
+            query_dates.append(date(int(mobj.group(1)), int(mobj.group(2)), int(mobj.group(3))))
+        except Exception:
+            continue
+    for mobj in _DATE_RE_LONG.finditer(q_lower):
+        try:
+            d_, mo, y_ = mobj.groups()
+            query_dates.append(date(int(y_), _DATE_MONTHS.index(mo) + 1, int(d_)))
+        except Exception:
+            continue
     if not query_dates:
         return scored
+
+    vf_cache: dict[str, "date | None"] = {}
+
+    def _parse_vf(vf_str: str):
+        cached = vf_cache.get(vf_str)
+        if cached is not None or vf_str in vf_cache:
+            return cached
+        try:
+            parsed = datetime.fromisoformat(vf_str.split("T")[0]).date()
+        except Exception:
+            parsed = None
+        vf_cache[vf_str] = parsed
+        return parsed
 
     rescored = []
     for s, it in scored:
         boost = 0.0
         vf_str = it.get("valid_from", "")
         if vf_str:
-            try:
-                vf_date = datetime.fromisoformat(vf_str.split("T")[0]).date()
+            vf_date = _parse_vf(vf_str)
+            if vf_date is not None:
                 for qd in query_dates:
                     diff = abs((vf_date - qd).days)
-                    if diff == 0: boost = max(boost, 0.25)
-                    elif diff <= 2: boost = max(boost, 0.15)
-                    elif diff <= 7: boost = max(boost, 0.05)
-            except Exception:
-                pass
-
+                    if diff == 0:
+                        boost = 0.25
+                        break  # max possible -> short-circuit
+                    if diff <= 2 and boost < 0.15:
+                        boost = 0.15
+                    elif diff <= 7 and boost < 0.05:
+                        boost = 0.05
         if explain and boost > 0:
-            if "_explanation" not in it: it["_explanation"] = {}
+            if "_explanation" not in it:
+                it["_explanation"] = {}
             it["_explanation"]["temporal_boost"] = boost
         rescored.append((s + boost, it))
     return rescored
+
+
+# ── Fire-and-forget access-stamp batcher ─────────────────────────────────────
+# Updating last_accessed_at / access_count on every search hit used to add a
+# WAL-fsync write transaction to the read path. We now buffer the ids per event
+# loop and flush them in a single UPDATE every _ACCESS_FLUSH_INTERVAL seconds.
+# Telemetry drift (a few seconds of latency on last_accessed_at) is acceptable;
+# the read path's median latency is not.
+_ACCESS_FLUSH_INTERVAL = 0.25  # seconds
+_access_pending: set[str] = set()
+_access_flusher_task: "asyncio.Task | None" = None
+_access_lock = asyncio.Lock()
+
+
+async def _access_stamp_flusher() -> None:
+    """Drains _access_pending into a single batched UPDATE on a fixed cadence.
+
+    Lives for the lifetime of the running event loop. Per-loop singleton —
+    created lazily by ``_enqueue_access_stamp``. Catches its own errors so a
+    transient DB lock can't kill the long-lived task.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_ACCESS_FLUSH_INTERVAL)
+            async with _access_lock:
+                if not _access_pending:
+                    continue
+                batch = list(_access_pending)
+                _access_pending.clear()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            try:
+                with _db() as db:
+                    placeholders = ",".join("?" * len(batch))
+                    db.execute(
+                        f"UPDATE memory_items "
+                        f"SET last_accessed_at = ?, access_count = access_count + 1 "
+                        f"WHERE id IN ({placeholders})",
+                        (now_iso, *batch),
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"access-stamp flush failed (batch={len(batch)}): {e}")
+        except asyncio.CancelledError:
+            return
+        except Exception as e:  # noqa: BLE001 — keep the task alive
+            logger.debug(f"access-stamp flusher recoverable error: {e}")
+
+
+def _enqueue_access_stamps(ids) -> None:
+    """Buffer hit-ids for a fire-and-forget UPDATE. Idempotent / dedup'd."""
+    global _access_flusher_task
+    if not ids:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no loop -> skip; sync callers don't need this
+    _access_pending.update(i for i in ids if i)
+    if _access_flusher_task is None or _access_flusher_task.done():
+        _access_flusher_task = loop.create_task(_access_stamp_flusher())
 
 
 async def memory_search_scored_impl(
@@ -3428,25 +3745,11 @@ async def memory_search_scored_impl(
                     ORDER BY bm25_score ASC
                     LIMIT {sql_row_limit}
                 """
-                is_exact_query = (query.startswith('"') and query.endswith('"')) or (query.startswith("'") and query.endswith("'"))
-                clean_query = query[1:-1] if is_exact_query else query
-                if is_exact_query:
-                    fts_query = f'"{clean_query}"'
-                else:
-                    clean_query = _sanitize_fts(clean_query)
-                    clean_query = _sanitize_for_searchable(clean_query)
-                    if not clean_query.strip():
-                        if search_mode != "fts5":
-                            return await _recurse_semantic()
-                        return []
-                    clean_query = clean_query.strip()
-                    if search_mode == "fts5":
-                        toks = [t for t in clean_query.split() if t]
-                        fts_query = " OR ".join(toks) if len(toks) > 1 else (
-                            f"{clean_query}*" if clean_query.isalnum() else clean_query
-                        )
-                    else:
-                        fts_query = f"{clean_query}*" if " " not in clean_query and clean_query.isalnum() else clean_query
+                fts_query, ok = _compile_fts_query(query, search_mode)
+                if not ok:
+                    if search_mode != "fts5":
+                        return await _recurse_semantic()
+                    return []
 
                 if os.environ.get("M3_DEBUG"):
                     print(f"DEBUG SQL (hybrid):\n{sql}")
@@ -3470,8 +3773,14 @@ async def memory_search_scored_impl(
     # to avoid an unnecessary cosine batch.
     if vector_kind_strategy != "max" and len(rows) > SEARCH_ROW_CAP:
         rows = rows[:SEARCH_ROW_CAP]
-    page_matrix = [_unpack(r["embedding"]) for r in rows]
-    page_scores = _batch_cosine(q_vec, page_matrix)
+
+    # Batched vector scoring: pass raw blobs straight to the Rust packed-cosine
+    # primitive (single FFI hop, rayon-parallel) or the numpy fallback. This
+    # replaces the per-row `struct.unpack` + per-row `cosine` from the legacy
+    # code path. Embeddings are only materialized as a list when MMR needs them
+    # (lazy `_get_page_matrix` below).
+    page_blobs = [r["embedding"] for r in rows]
+    page_scores = _cosine_batch_packed(q_vec, page_blobs, EMBED_DIM)
 
     # Max-kind fusion: when the SQL let through multiple vector_kind rows
     # per memory_id, keep the row with the highest vector similarity so
@@ -3487,69 +3796,102 @@ async def memory_search_scored_impl(
         keep_idx = sorted(best.values())
         rows = [rows[i] for i in keep_idx]
         page_scores = [page_scores[i] for i in keep_idx]
+        page_blobs = [page_blobs[i] for i in keep_idx]
         # Now trim to the cap — count unique items, not kind-duplicated rows.
         if len(rows) > SEARCH_ROW_CAP:
             rows = rows[:SEARCH_ROW_CAP]
             page_scores = page_scores[:SEARCH_ROW_CAP]
+            page_blobs = page_blobs[:SEARCH_ROW_CAP]
 
     if _capture_dict is not None:
         _capture_dict["pre_seen_content_filter_rows"] = len(rows)
 
-    for i, row in enumerate(rows):
-        item = dict(row)
-        del item["embedding"]
-        vector_score = page_scores[i]
-        bm25_norm = (1.0 / (1.0 + abs(row["bm25_score"])))
-        final_score = vector_score * vector_weight + bm25_norm * (1.0 - vector_weight)
+    # ── Vectorized per-row scoring ──────────────────────────────────────────
+    # Pull bm25 / content_len / importance / title-overlap as parallel arrays,
+    # then hand the whole batch to `_hybrid_score_batch` (Rust rayon / numpy
+    # vectorized / pure-Python loop, in that order of preference).
+    bm25_arr: list = []
+    content_lens: list = []
+    importances: list = []
+    title_overlaps: list = []
+    q_title_set = _query_title_token_set(query)
+    title_boost_const = TITLE_MATCH_BOOST
+    importance_w = IMPORTANCE_WEIGHT
+    short_turn_t = SHORT_TURN_THRESHOLD
+    for row in rows:
+        bm25_arr.append(row["bm25_score"])
+        content_lens.append(len(row["content"] or ""))
+        importances.append(float(row["importance"] or 0.0))
+        title_overlaps.append(_title_overlap_from_qset(q_title_set, row["title"] or ""))
 
-        # Short-turn length penalty: stubs like "ok cool" rank identically to
-        # substantive content under FTS+vector alone. Scale by length up to the
-        # threshold, full-weight beyond.
-        content_len = len(row["content"] or "")
-        length_penalty = 1.0
-        if content_len < SHORT_TURN_THRESHOLD:
-            length_penalty = max(0.3, content_len / SHORT_TURN_THRESHOLD)
-        final_score *= length_penalty
+    final_scores = _hybrid_score_batch(
+        page_scores,
+        bm25_arr,
+        content_lens,
+        importances,
+        title_overlaps,
+        vector_weight=vector_weight,
+        importance_weight=importance_w,
+        title_match_boost=title_boost_const,
+        short_turn_threshold=short_turn_t,
+    )
 
-        # Title-match boost: titles that echo query tokens are high-signal.
-        title_overlap = _query_title_overlap(query, row["title"] or "")
-        title_boost = TITLE_MATCH_BOOST * title_overlap
-        final_score += title_boost
-
-        # Importance blend: caller-supplied importance nudges ranking.
-        importance_boost = IMPORTANCE_WEIGHT * (float(row["importance"] or 0.0))
-        final_score += importance_boost
-
-        # Role-biased boost (Piece 2 of intent routing). When the caller
-        # signals "user-fact" intent, bump user-authored turns so the
-        # user's original statement outranks the assistant's echo. Needs
-        # metadata_json available — `extra_columns` must include it or
-        # the boost silently no-ops.
-        role_boost = 0.0
-        if INTENT_ROUTING and intent_hint == "user-fact":
+    # Role-biased boost (Piece 2 of intent routing). Sparse — most queries
+    # don't have intent_hint set, so the loop body is fully skipped. When
+    # active, do a cheap substring pre-check on metadata_json before parsing
+    # JSON, since `'"role":"user"'` is what the boost looks for.
+    intent_user_fact_active = INTENT_ROUTING and intent_hint == "user-fact"
+    role_boosts: list = [0.0] * len(rows)
+    if intent_user_fact_active:
+        for i, row in enumerate(rows):
             try:
                 meta_raw = row["metadata_json"] if "metadata_json" in row.keys() else None
-                if meta_raw:
-                    meta = json.loads(meta_raw)
-                    if isinstance(meta, dict) and meta.get("role") == "user":
-                        role_boost = INTENT_USER_FACT_BOOST
-                        final_score += role_boost
-            except (json.JSONDecodeError, TypeError, IndexError, KeyError):
+            except (IndexError, KeyError):
+                meta_raw = None
+            if not meta_raw:
+                continue
+            # Cheap pre-check: skip JSON parsing when "user" role isn't even
+            # mentioned. Avoids `json.loads` on every row in the pool.
+            if '"role"' not in meta_raw or '"user"' not in meta_raw:
+                continue
+            try:
+                meta = json.loads(meta_raw)
+                if isinstance(meta, dict) and meta.get("role") == "user":
+                    role_boosts[i] = INTENT_USER_FACT_BOOST
+            except (json.JSONDecodeError, TypeError):
                 pass
 
+    # Build the final (score, item) pairs. `item` is constructed by enumerating
+    # the row mapping rather than `dict(row); del item["embedding"]` so the
+    # 4-8KB embedding blob is never reassigned into a Python object.
+    bm25_w_complement = 1.0 - vector_weight
+    for i, row in enumerate(rows):
+        item: dict = {}
+        for key in row.keys():
+            if key == "embedding":
+                continue
+            item[key] = row[key]
+        final_score = final_scores[i] + role_boosts[i]
         if explain:
+            vector_score = page_scores[i]
+            bm25_norm = 1.0 / (1.0 + abs(row["bm25_score"]))
+            length_penalty = (
+                max(0.3, content_lens[i] / short_turn_t)
+                if content_lens[i] < short_turn_t
+                else 1.0
+            )
             item["_explanation"] = {
                 "vector": vector_score,
                 "bm25": bm25_norm,
                 "importance": row["importance"],
-                "raw_hybrid": vector_score * vector_weight + bm25_norm * (1.0 - vector_weight),
+                "raw_hybrid": vector_score * vector_weight + bm25_norm * bm25_w_complement,
                 "length_penalty": length_penalty,
-                "title_overlap": title_overlap,
-                "title_boost": title_boost,
-                "importance_boost": importance_boost,
+                "title_overlap": title_overlaps[i],
+                "title_boost": title_boost_const * title_overlaps[i],
+                "importance_boost": importance_w * importances[i],
                 "vector_weight": vector_weight,
                 "intent_hint": intent_hint,
-                "role_boost": role_boost,
+                "role_boost": role_boosts[i],
             }
         scored.append((final_score, item))
 
@@ -3604,7 +3946,14 @@ async def memory_search_scored_impl(
             break
     if _capture_dict is not None:
         _capture_dict["post_seen_content_dedup_rows"] = len(pre_ranked)
-    if mmr and len(pre_ranked) > k and len(page_matrix) > 0:
+    if mmr and len(pre_ranked) > k and page_blobs:
+        # Lazy-materialize the embedding lookup only when MMR needs it. With
+        # the packed-cosine path the embeddings stayed in their bytes form
+        # until this point; unpack now (one batched numpy.frombuffer reshape).
+        page_matrix = _unpack_many(page_blobs, dim=EMBED_DIM)
+        # When _unpack_many returns ndarray, indexing yields a 1-D ndarray row;
+        # when it falls back to list-of-lists, indexing yields list[float].
+        # Both are valid inputs to m3_core_rs and to numpy cosine.
         _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
         # Rust path: authoritative when every candidate has an embedding and
         # explanations aren't requested. The Rust mmr_rerank_scored needs a
@@ -3613,27 +3962,50 @@ async def memory_search_scored_impl(
         _mmr_vecs = [_emb_lookup.get(it["id"]) for _, it in pre_ranked]
         if m3_core_rs is not None and not explain and all(v is not None for v in _mmr_vecs):
             relevance = [float(s) for s, _ in pre_ranked]
-            sel_idx = m3_core_rs.mmr_rerank_scored(relevance, _mmr_vecs, _MMR_LAMBDA, k, True)
+            # Rust wants list[list[float]] — convert ndarray rows on the way out.
+            _mmr_vecs_lists = [
+                (v.tolist() if hasattr(v, "tolist") else list(v)) for v in _mmr_vecs
+            ]
+            sel_idx = m3_core_rs.mmr_rerank_scored(relevance, _mmr_vecs_lists, _MMR_LAMBDA, k, True)
             ranked = [pre_ranked[i] for i in sel_idx]
         else:
+            # Python fallback. Pre-stash selected-vector stack so we can compute
+            # `max_sim` against all selected at once (one numpy gemv per round)
+            # instead of one FFI hop per (candidate, selected) pair.
             selected = [pre_ranked[0]]
             candidates = list(pre_ranked[1:])
+            sel_vecs: list = []
+            first_vec = _emb_lookup.get(pre_ranked[0][1]["id"])
+            if first_vec is not None:
+                sel_vecs.append(first_vec)
             while candidates and len(selected) < k:
                 best_idx, best_mmr = 0, -float('inf')
+                # Build the selected-vector matrix once per outer iteration.
+                if _HAS_NUMPY and sel_vecs:
+                    try:
+                        sel_mat = _np.asarray(sel_vecs, dtype=_np.float32)
+                    except Exception:
+                        sel_mat = None
+                else:
+                    sel_mat = None
                 for ci, (c_score, c_item) in enumerate(candidates):
                     c_vec = _emb_lookup.get(c_item["id"])
-                    if c_vec is None:
-                        # Candidate has no embedding in the lookup (e.g. vector-side hit
-                        # not represented in `rows`). Treat as max_sim=0 — neutral on the
-                        # diversification term — so the MMR score reduces to lambda*c_score.
-                        # Earlier code break-selected on this branch, which collapsed MMR
-                        # to "first-non-embedded-candidate-wins" pop ordering whenever any
-                        # candidate lacked an embedding.
+                    if c_vec is None or not sel_vecs:
+                        # Candidate has no embedding (vector-side hit absent
+                        # from `rows`) OR nothing selected yet. Treat as
+                        # max_sim=0 -> MMR reduces to lambda*c_score.
                         max_sim = 0.0
+                    elif sel_mat is not None:
+                        # One batched cosine across all already-selected vectors.
+                        sims = _batch_cosine(c_vec, sel_mat)
+                        max_sim = max(sims, default=0.0)
                     else:
-                        similarities = [_batch_cosine(c_vec, [_emb_lookup[s[1]["id"]]])[0]
-                                        for s in selected if s[1]["id"] in _emb_lookup]
-                        max_sim = max(similarities, default=0.0)
+                        # Pure-Python last-resort: per-pair cosine. Slow but
+                        # only hit when numpy is absent AND Rust is absent.
+                        max_sim = max(
+                            (_cosine(c_vec, sv) for sv in sel_vecs),
+                            default=0.0,
+                        )
                     mmr_score = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
                     if mmr_score > best_mmr:
                         best_mmr = mmr_score
@@ -3643,7 +4015,11 @@ async def memory_search_scored_impl(
                             c_item["_explanation"] = {}
                         c_item["_explanation"]["max_sim_to_selected"] = max_sim
                         c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
-                selected.append(candidates.pop(best_idx))
+                chosen = candidates.pop(best_idx)
+                selected.append(chosen)
+                chosen_vec = _emb_lookup.get(chosen[1]["id"])
+                if chosen_vec is not None:
+                    sel_vecs.append(chosen_vec)
             ranked = selected
     else:
         ranked = pre_ranked
@@ -3672,17 +4048,11 @@ async def memory_search_scored_impl(
                 ranked.append((fr["score"], fr))
 
     if ranked:
-        ids = [item[1]["id"] for item in ranked if "bm25_score" in item[1]]
-        if ids:
-            try:
-                with _db() as db:
-                    placeholders = ",".join(["?"] * len(ids))
-                    db.execute(
-                        f"UPDATE memory_items SET last_accessed_at = ?, access_count = access_count + 1 WHERE id IN ({placeholders})",
-                        (datetime.now(timezone.utc).isoformat(), *ids),
-                    )
-            except Exception as e:
-                logger.debug(f"Search result timestamp update failed: {e}")
+        # Fire-and-forget access stamps: buffered for ~250ms then flushed in a
+        # single batched UPDATE off the read path. See `_access_stamp_flusher`.
+        _enqueue_access_stamps(
+            [item[1]["id"] for item in ranked if "bm25_score" in item[1]]
+        )
 
     # Time-aware boost + neighbor-session expansion. Both are off unless the
     # caller opts in with smart_time_boost > 0 or smart_neighbor_sessions > 0.
@@ -4037,6 +4407,12 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
     item in `seed_ids` via memory_relationships, excluding the seeds themselves.
 
     Used by memory_search_routed_impl when graph_depth > 0. Returns set[str].
+
+    SQL note: `WHERE from_id IN (...) OR to_id IN (...)` defeats SQLite's
+    per-column indexes (idx_mr_from / idx_mr_to in migration 001) and forces a
+    table scan. The UNION form below lets the planner use each index
+    independently, which scales with `len(frontier)` rather than with table
+    size.
     """
     if depth <= 0 or not seed_ids:
         return set()
@@ -4047,19 +4423,22 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
         for _ in range(depth):
             if not frontier:
                 break
-            placeholders = ",".join(["?"] * len(frontier))
+            frontier_list = list(frontier)
+            placeholders = ",".join("?" * len(frontier_list))
             rows = db.execute(
-                f"SELECT from_id, to_id FROM memory_relationships "
-                f"WHERE from_id IN ({placeholders}) OR to_id IN ({placeholders})",
-                list(frontier) + list(frontier),
+                f"SELECT to_id AS nid FROM memory_relationships "
+                f"WHERE from_id IN ({placeholders}) "
+                f"UNION "
+                f"SELECT from_id AS nid FROM memory_relationships "
+                f"WHERE to_id IN ({placeholders})",
+                frontier_list + frontier_list,
             ).fetchall()
             next_frontier: set = set()
             for r in rows:
-                a, b = r["from_id"], r["to_id"]
-                for nid in (a, b):
-                    if nid not in seen:
-                        seen.add(nid)
-                        next_frontier.add(nid)
+                nid = r["nid"]
+                if nid not in seen:
+                    seen.add(nid)
+                    next_frontier.add(nid)
             frontier = next_frontier
     seen.difference_update(seed_ids)
     return seen
@@ -4205,19 +4584,33 @@ async def _entity_graph_neighbor_ids(
     )
 
     matched_entity_ids: set[str] = set()
+    # Tier 1 (batched): one query for all candidate exact-matches.
+    # idx_entities_canonical_type covers the equality predicate. We learn which
+    # candidates resolved so we know which need the Tier-2 LIKE fallback.
+    resolved_cands: set[str] = set()
+    try:
+        cand_ph = ",".join("?" * len(candidates))
+        tier1_rows = db.execute(
+            f"SELECT id, canonical_name FROM entities "
+            f"WHERE canonical_name IN ({cand_ph}){_type_clause}{_stop_clause}",
+            list(candidates) + _type_params + _stop_params,
+        ).fetchall()
+        for r in tier1_rows:
+            matched_entity_ids.add(r["id"])
+            resolved_cands.add(r["canonical_name"])
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Tier 2 (per-candidate LIKE): only run for candidates that didn't resolve
+    # in Tier 1, capped at 5 hits each — matches the legacy LIMIT 5.
     for candidate in candidates:
+        if candidate in resolved_cands:
+            continue
         try:
-            # Tier 1: exact canonical_name match
             rows = db.execute(
-                f"SELECT id FROM entities WHERE canonical_name = ?{_type_clause}{_stop_clause} LIMIT 5",
-                [candidate] + _type_params + _stop_params,
+                f"SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?){_type_clause}{_stop_clause} LIMIT 5",
+                [f"%{candidate}%"] + _type_params + _stop_params,
             ).fetchall()
-            if not rows:
-                # Tier 2: case-insensitive LIKE match
-                rows = db.execute(
-                    f"SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?){_type_clause}{_stop_clause} LIMIT 5",
-                    [f"%{candidate}%"] + _type_params + _stop_params,
-                ).fetchall()
             for r in rows:
                 matched_entity_ids.add(r["id"])
         except Exception:  # noqa: BLE001
@@ -4238,38 +4631,41 @@ async def _entity_graph_neighbor_ids(
         _pred_clause = f" AND predicate IN ({_pred_ph})"
         _pred_params = list(valid_predicates)
 
-    # Step 3 — BFS over entity_relationships up to `depth` hops
+    # Step 3 — BFS over entity_relationships up to `depth` hops.
+    # SQL note: same OR-of-IN antipattern fix as `_graph_neighbor_ids`. The
+    # idx_er_from / idx_er_to indexes are (from_entity, predicate) and
+    # (to_entity, predicate); the UNION form lets each index serve its half.
     seen_entities: set[str] = set(matched_entity_ids)
     frontier: set[str] = set(matched_entity_ids)
     frontier_dropped = 0
     for _ in range(depth):
         if not frontier or len(seen_entities) >= max_neighbors:
             break
-        placeholders = ",".join(["?"] * len(frontier))
+        frontier_list = list(frontier)
+        placeholders = ",".join("?" * len(frontier_list))
         try:
-            frontier_list = list(frontier)
             rel_rows = db.execute(
-                f"SELECT from_entity, to_entity FROM entity_relationships "
-                f"WHERE (from_entity IN ({placeholders}) OR to_entity IN ({placeholders}))"
-                f"{_pred_clause}",
-                frontier_list + frontier_list + _pred_params,
+                f"SELECT to_entity AS neighbor FROM entity_relationships "
+                f"WHERE from_entity IN ({placeholders}){_pred_clause} "
+                f"UNION "
+                f"SELECT from_entity AS neighbor FROM entity_relationships "
+                f"WHERE to_entity IN ({placeholders}){_pred_clause}",
+                frontier_list + _pred_params + frontier_list + _pred_params,
             ).fetchall()
         except Exception:  # noqa: BLE001
             break
         next_frontier: set[str] = set()
         for r in rel_rows:
-            for eid in (r["from_entity"], r["to_entity"]):
-                if eid in _stoplisted_eids:
-                    if eid not in seen_entities:
-                        frontier_dropped += 1
-                    continue
+            eid = r["neighbor"]
+            if eid in _stoplisted_eids:
                 if eid not in seen_entities:
-                    seen_entities.add(eid)
-                    next_frontier.add(eid)
-                    if len(seen_entities) >= max_neighbors:
-                        break
-            if len(seen_entities) >= max_neighbors:
-                break
+                    frontier_dropped += 1
+                continue
+            if eid not in seen_entities:
+                seen_entities.add(eid)
+                next_frontier.add(eid)
+                if len(seen_entities) >= max_neighbors:
+                    break
         frontier = next_frontier
 
     if _capture_dict is not None:
@@ -4308,28 +4704,23 @@ async def _score_extra_rows(query: str, rows_by_id: dict, base_score: float = 0.
         return out
     with _db() as db:
         ids = list(rows_by_id.keys())
-        placeholders = ",".join(["?"] * len(ids))
+        placeholders = ",".join("?" * len(ids))
         emb_rows = db.execute(
             f"SELECT memory_id, embedding FROM memory_embeddings "
             f"WHERE memory_id IN ({placeholders})",
             ids,
         ).fetchall()
-        emb_by_id: dict = {}
-        for er in emb_rows:
-            try:
-                emb_by_id[er["memory_id"]] = _unpack(er["embedding"])
-            except Exception:  # noqa: BLE001
-                continue
+    # Batched packed-cosine: aligned by id so scoring is one parallel pass.
+    fetched_ids: list = [er["memory_id"] for er in emb_rows]
+    fetched_blobs: list = [er["embedding"] for er in emb_rows]
+    fetched_scores = _cosine_batch_packed(qvec, fetched_blobs, EMBED_DIM) if fetched_blobs else []
+    score_by_id: dict = dict(zip(fetched_ids, fetched_scores))
     for rid, item in rows_by_id.items():
-        vec = emb_by_id.get(rid)
-        if vec is None:
+        s = score_by_id.get(rid)
+        if s is None:
             out.append((base_score, item))
-            continue
-        try:
-            score = _cosine(qvec, vec)
-        except Exception:  # noqa: BLE001
-            score = base_score
-        out.append((float(score), item))
+        else:
+            out.append((float(s), item))
     return out
 
 
@@ -4451,16 +4842,27 @@ async def memory_search_routed_impl(
     # AUTO routing layer (opt-in, default off — invariant: off = byte-identical to today)
     auto_metadata = None
     resolved = None
+    overshoot_candidates: list = []  # captured for possible reuse as base_hits
+    _overshoot_k = 20                 # the fixed overshoot pool size
+    # The overshoot's job is signal-extraction (top_1, slope_at_3, conv_id
+    # diversity). We deliberately align its `vector_kind_strategy` with the
+    # branch the primary call would use — temporal -> "default", non-temporal
+    # -> "max" — so the overshoot pool can also serve as the primary candidate
+    # pool when eligibility (see _try_reuse_overshoot below) is met. Branch
+    # decision is unaffected; the signals dominate over the vector_kind choice.
+    _overshoot_strategy = "default" if is_temporal_query(query) else "max"
     if auto_route:
-        # Run a quick overshoot to obtain post-retrieval signals for branch decision.
-        # Pre-retrieval signals (temporal cue regex) may short-circuit this — but we
-        # always run the overshoot to keep the code path simple and branch_values
-        # consistent across all branches.
-        overshoot_candidates = await memory_search_scored_impl(query, mmr=mmr, k=20, user_id=user_id, scope=scope,
+        # `_capture_dict` is forwarded so the overshoot's retrieval-pool
+        # telemetry (pre_seen_content_filter_rows, etc.) is written even when
+        # the overshoot doubles as the primary pool. When reuse doesn't fire,
+        # the primary call below overwrites these keys — both writes describe
+        # the same family of values (pool sizes for the candidate retrieval).
+        overshoot_candidates = await memory_search_scored_impl(query, mmr=mmr, k=_overshoot_k, user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
             search_mode=search_mode, variant=variant, as_of=as_of,
             conversation_id=conversation_id, extra_columns=extra_columns,
-            vector_kind_strategy=vector_kind_strategy,
+            vector_kind_strategy=_overshoot_strategy,
+            _capture_dict=_capture_dict,
         )
 
         # Signature defaults for all overridable retrieval knobs.
@@ -4575,8 +4977,62 @@ async def memory_search_routed_impl(
     # Read env-var override for the bump
     bump = int(os.environ.get("M3_ROUTER_TEMPORAL_K_BUMP", str(temporal_k_bump)))
 
+    # ── AUTO overshoot reuse ─────────────────────────────────────────────────
+    # When AUTO already ran the overshoot retrieval, the overshoot result can
+    # double as the primary candidate pool — skipping a second full retrieval —
+    # IFF every divergence axis between the overshoot and primary calls is
+    # neutralized. The overshoot uses retrieval-time defaults; eligibility
+    # therefore requires the primary call to also be on those defaults.
+    #
+    # Divergence axes (must all be aligned):
+    #  - `vector_kind_strategy`: overshoot ran with the same strategy the
+    #    primary would (temporal -> "default", non-temporal -> "max"); set
+    #    above just before the overshoot call.
+    #  - `k`: overshoot pool is 20 rows; the effective primary `k` (k+bump for
+    #    temporal, k*2 for fact_variant, else k) must fit.
+    #  - `explain`: overshoot doesn't compute _explanation.
+    #  - `recency_bias`: overshoot uses 0; if caller / AUTO branch set non-zero,
+    #    the primary scores differ.
+    #  - `vector_weight`: overshoot uses 0.7; AUTO temporal/multi don't touch
+    #    it, so anything other than 0.7 must be a caller override.
+    #  - `adaptive_k` / `smart_time_boost` / `smart_neighbor_sessions`: all
+    #    off in the overshoot.
+    #  - `intent_hint`: overshoot passes "" — caller must too.
+    #  - `_capture_dict`: the primary call writes retrieval-pool telemetry; if
+    #    the caller is reading it, we can't shortcut.
+    #  - `fact_variant`: handled by computing effective_primary_k including
+    #    the *2 factor.
+    def _can_reuse_overshoot() -> bool:
+        if not auto_route or not overshoot_candidates:
+            return False
+        if explain or intent_hint:
+            return False
+        if recency_bias or adaptive_k or adaptive_k_min or adaptive_k_max:
+            return False
+        if smart_time_boost or smart_neighbor_sessions:
+            return False
+        if abs(float(vector_weight) - 0.7) > 1e-9:
+            return False
+        effective_primary_k = (
+            (k + bump) if is_temporal_query(query)
+            else (k * 2 if fact_variant else k)
+        )
+        if effective_primary_k > _overshoot_k:
+            return False
+        return True
+
+    _reuse_overshoot = _can_reuse_overshoot()
+    if _reuse_overshoot:
+        if auto_metadata is not None:
+            auto_metadata["overshoot_reused"] = True
+        if _capture_dict is not None:
+            _capture_dict["overshoot_reused"] = True
+
     if is_temporal_query(query):
-        primary = await memory_search_scored_impl(query, mmr=mmr, k=k + bump, user_id=user_id, scope=scope,
+        if _reuse_overshoot:
+            primary = overshoot_candidates[: (k + bump)]
+        else:
+            primary = await memory_search_scored_impl(query, mmr=mmr, k=k + bump, user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
             search_mode=search_mode, variant=variant, as_of=as_of,
             conversation_id=conversation_id, explain=explain,
@@ -4602,7 +5058,10 @@ async def memory_search_routed_impl(
         )
     else:
         # Non-temporal path
-        base_hits = await memory_search_scored_impl(query, mmr=mmr, k=k * 2 if fact_variant else k,
+        if _reuse_overshoot:
+            base_hits = overshoot_candidates[: (k * 2 if fact_variant else k)]
+        else:
+            base_hits = await memory_search_scored_impl(query, mmr=mmr, k=k * 2 if fact_variant else k,
             user_id=user_id, scope=scope, type_filter=type_filter,
             agent_filter=agent_filter, search_mode=search_mode,
             variant=variant, as_of=as_of, conversation_id=conversation_id,
