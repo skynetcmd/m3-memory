@@ -66,36 +66,83 @@ from crypto_provider import get_sha256 as _sha256_hex_py
 from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
 
-# ── Project Oxidation: optional Rust compute core ────────────────────────────
-# m3_core_rs is an optional dependency (pip install m3-memory[oxidation]).
-# M3_CORE_RS_DISABLE=1 forces the Python path even when the wheel is installed
-# — the load-bearing kill-switch from the oxidation plan §9.6. Import failure
-# is non-fatal: m3-memory runs fully on the Python path without the core.
-_OXIDATION_DISABLED = os.environ.get("M3_CORE_RS_DISABLE", "0").lower() in ("1", "true", "yes")
-m3_core_rs = None
-if not _OXIDATION_DISABLED:
-    try:
-        import m3_core_rs  # type: ignore
-        logging.getLogger(__name__).info(
-            "m3_core_rs loaded (hash provider: %s)", m3_core_rs.hash_provider()
-        )
-    except ImportError:
-        m3_core_rs = None  # extra not installed — Python path is the default
-
-
-def _sha256_hex(data: bytes) -> str:
-    """SHA-256 hex digest.
-
-    Deliberately NOT routed through m3_core_rs. Benchmarking (tests/
-    bench_oxidation.py) showed the Rust path is slower for every realistic
-    input size: hashlib is already OpenSSL C with SHA-NI, and the PyO3 FFI
-    crossing adds fixed overhead that the hashing work never amortizes on
-    turn-sized content (~bytes to low KB). ring and hashlib only tie above
-    ~64KB. FIPS is unaffected — when CPython is built against a FIPS-validated
-    OpenSSL, hashlib.sha256 IS the validated path; the ring-based m3-hash
-    crate stays FIPS-gated in the workspace for any Rust-side hashing.
-    """
-    return _sha256_hex_py(data)
+# ── Modularization shim (Phase 1) ─────────────────────────────────────────────
+# The constants and Rust-core reference below now live in bin/memory/config.py.
+# This module re-exports them to preserve back-compat for callers that import
+# directly from memory_core. See docs/MEMORY_CORE_MODULARIZATION.md.
+#
+# Mutable config-shapes (`_EMBED_URL_OVERRIDE`, `_EMBED_MODEL_OVERRIDE`) live
+# on `memory.config` as module attributes. Code that WRITES them must do so
+# through the module attribute (e.g. `config._EMBED_URL_OVERRIDE = url`), not
+# via a local binding here, or the writes won't be observable to other
+# modules importing through `memory.config`.
+from memory import config as _mc_config  # noqa: F401 — used for mutable attrs
+from memory.config import (  # noqa: F401 — re-exports
+    _OXIDATION_DISABLED,
+    m3_core_rs,
+    _EMBED_URL_OVERRIDE,
+    _EMBED_MODEL_OVERRIDE,
+    BASE_DIR,
+    DB_PATH,
+    ARCHIVE_DB_PATH,
+    EMBED_MODEL,
+    EMBED_DIM,
+    EMBED_TIMEOUT_READ,
+    ORIGIN_DEVICE,
+    DEDUP_LIMIT,
+    DEDUP_THRESHOLD,
+    CONTRADICTION_THRESHOLD,
+    SUPERSEDES_PENALTY,
+    CONTRADICTION_TITLE_GATE,
+    CONTRADICTION_TYPE_EXCLUSIONS,
+    AUTO_RELATED_LINK,
+    AUTO_RELATED_LINK_SCOPE_BY_VARIANT,
+    SEARCH_ROW_CAP,
+    LLM_TIMEOUT,
+    SPEAKER_IN_TITLE,
+    SHORT_TURN_THRESHOLD,
+    TITLE_MATCH_BOOST,
+    IMPORTANCE_WEIGHT,
+    ELBOW_MIN_INPUT,
+    ELBOW_MIN_RETURN,
+    ELBOW_ABS_THRESHOLD,
+    EXPANSION_DISPLACEMENT_MARGIN,
+    EXPANSION_PROTECTED_RANKS,
+    ENTITY_SEED_STOPLIST,
+    INGEST_WINDOW_CHUNKS,
+    INGEST_GIST_ROWS,
+    INGEST_EVENT_ROWS,
+    QUERY_TYPE_ROUTING,
+    INTENT_ROUTING,
+    INTENT_USER_FACT_BOOST,
+    INGEST_WINDOW_SIZE,
+    INGEST_GIST_MIN_TURNS,
+    INGEST_GIST_STRIDE,
+    ENABLE_FACT_ENRICHED,
+    FACT_ENRICH_CONCURRENCY,
+    FACT_ENRICH_MAX_ATTEMPTS,
+    ENABLE_ENTITY_GRAPH,
+    ENTITY_EXTRACT_CONCURRENCY,
+    ENTITY_EXTRACT_MAX_ATTEMPTS,
+    ENTITY_RESOLVE_FUZZY_MIN,
+    ENTITY_RESOLVE_COSINE_MIN,
+    _DEFAULT_VALID_ENTITY_TYPES,
+    _DEFAULT_VALID_ENTITY_PREDICATES,
+    DEFAULT_ENTITY_VOCAB_YAML,
+    _ENV_ENTITY_VOCAB_YAML,
+    DEFAULT_RERANK_MODEL,
+    DEFAULT_CHANGE_AGENT,
+    CHROMA_BASE_URL,
+    CHROMA_COLLECTION,
+    CHROMA_COLLECTIONS,
+    CHROMA_V2_PREFIX,
+    CHROMA_CONNECT_T,
+    CHROMA_READ_T,
+    CHROMA_PULL_PAGE_SIZE,
+    CHROMA_CONTENT_MAX,
+    FEDERATION_LOW_SCORE_THRESHOLD,
+)
+from memory.util import sha256_hex as _sha256_hex  # noqa: F401 — re-export
 
 
 # In-process llama.cpp embedding backend. Opt-in: set M3_EMBED_GGUF to the
