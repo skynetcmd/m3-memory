@@ -7,7 +7,9 @@
 This document is operator-facing: build, install, configure, and troubleshoot
 the m3 embedder stack on a single host. For environment-variable details,
 cross-reference `docs/ENVIRONMENT_VARIABLES.md` — entries are not duplicated
-here.
+here. For the input-side recipe (what text actually gets embedded — cascade,
+anchor augmentation, variants, model-tag namespacing, pooling/BOS triplet)
+see `docs/EMBED_INPUT_RECIPE.md`.
 
 ---
 
@@ -550,6 +552,7 @@ that combined report — do not infer numbers from this document.
 
 ## Cross-references
 
+- Input-side recipe (what text gets embedded): `C:\Users\<USER>\m3-memory\docs\EMBED_INPUT_RECIPE.md`
 - m3-embed-llamacpp crate docs: `C:\Users\<USER>\m3-core-rs\crates\m3-embed-llamacpp\README.md`
 - m3-embed-server crate docs: `C:\Users\<USER>\m3-core-rs\crates\m3-embed-server\README.md`
 - CPU build-tools bootstrap: `C:\Users\<USER>\m3-memory\install_oxidation_buildtools.ps1`
