@@ -471,265 +471,30 @@ def _current_ctx() -> M3Context:
     return M3Context.for_db(resolve_db_path(None))
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-BASE_DIR            = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH             = os.path.join(BASE_DIR, "memory", "agent_memory.db")
-ARCHIVE_DB_PATH     = os.path.join(BASE_DIR, "memory", "agent_memory_archive.db")
-EMBED_MODEL         = os.environ.get("EMBED_MODEL", "qwen3-embedding")
-EMBED_DIM           = int(os.environ.get("EMBED_DIM", "1024"))
-EMBED_TIMEOUT_READ  = 30.0
-ORIGIN_DEVICE       = os.environ.get("ORIGIN_DEVICE", platform.node())
+# All ~25 constants formerly defined here moved to bin/memory/config.py in
+# Phase 1; the re-export shim at the top of this file makes them available
+# under their legacy names (BASE_DIR, EMBED_MODEL, DEDUP_LIMIT,
+# CONTRADICTION_*, AUTO_RELATED_LINK*, SEARCH_ROW_CAP, LLM_TIMEOUT,
+# SPEAKER_IN_TITLE, SHORT_TURN_THRESHOLD, TITLE_MATCH_BOOST,
+# IMPORTANCE_WEIGHT, ELBOW_*).
 
-# Task 1: Configurable Dedup/Search Limits (#46)
-DEDUP_LIMIT            = int(os.environ.get("DEDUP_LIMIT", "1000"))
-DEDUP_THRESHOLD        = float(os.environ.get("DEDUP_THRESHOLD", "0.92"))
-CONTRADICTION_THRESHOLD = float(os.environ.get("CONTRADICTION_THRESHOLD", "0.92"))
-# SUPERSEDES_PENALTY: at retrieval time, hits that appear as the to_id of a
-# 'supersedes' edge (i.e., their newer version exists) get score multiplied
-# by this factor. 0.5 = visible but ranked below newer fact. 0.0 = hide.
-# 1.0 = disable demotion (legacy pre-2026-04-27 behavior).
-SUPERSEDES_PENALTY = float(os.environ.get("SUPERSEDES_PENALTY", "0.5"))
-# CONTRADICTION_TITLE_GATE: 'strict' = require title substring match (legacy
-# 2026-04 and earlier behavior); 'loose' = use cosine ≥ threshold + same type
-# + content-differs only (default since 2026-04-27, after KU-50% diagnostic
-# revealed the title gate blocked 98% of would-be supersedences on bench
-# corpora with empty/generic titles); 'off' = treat ALL high-cosine same-type
-# pairs as supersedence regardless of title or content (research mode only).
-CONTRADICTION_TITLE_GATE = os.environ.get("CONTRADICTION_TITLE_GATE", "loose").lower()
-# CONTRADICTION_TYPE_EXCLUSIONS: comma-separated memory types skipped during
-# contradiction-check (Phase 20 fix 2026-04-27). Default skips 'conversation'
-# (whole-thread containers should never supersede each other) but ALLOWS
-# 'message' so chat turns can contradict each other when contradiction-check
-# is explicitly enabled. Set to 'conversation,message' to restore the
-# legacy pre-2026-04-27 behavior. Empty string = check all types.
-CONTRADICTION_TYPE_EXCLUSIONS = frozenset(
-    t.strip() for t in os.environ.get("CONTRADICTION_TYPE_EXCLUSIONS", "conversation").split(",")
-    if t.strip()
-)
-# Auto-related-edge writer (single-insert path only; bulk path never auto-links).
-# `M3_AUTO_RELATED_LINK=0` disables the writer entirely — every newly inserted
-# memory_item just gets stored, no `related` edge follow-up. Default ON for
-# back-compat. `M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT=0` restores legacy
-# variant-blind candidate scan; default ON restricts contradiction/related
-# candidates to items of the same `variant` value. This prevents cross-variant
-# contamination — an INSERT under one variant linking to twins under a
-# different variant that happens to share content. When `variant` is None on
-# the inserted item, the scope filter degrades to "no variant filter applied"
-# — that is, legacy behavior is preserved for callers that don't use variants
-# at all.
-AUTO_RELATED_LINK              = os.environ.get("M3_AUTO_RELATED_LINK", "1").lower() in ("1", "true", "yes")
-AUTO_RELATED_LINK_SCOPE_BY_VARIANT = os.environ.get("M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT", "1").lower() in ("1", "true", "yes")
-SEARCH_ROW_CAP         = int(os.environ.get("SEARCH_ROW_CAP", "5000"))
-LLM_TIMEOUT            = float(os.environ.get("LLM_TIMEOUT", "120.0"))
+# Expansion/ingest/intent/fact-enrich/entity-graph constants formerly defined
+# here moved to bin/memory/config.py in Phase 1 (EXPANSION_*, ENTITY_SEED_STOPLIST,
+# INGEST_*, INTENT_*, ENABLE_FACT_ENRICHED, FACT_ENRICH_*, ENABLE_ENTITY_GRAPH,
+# ENTITY_EXTRACT_*, ENTITY_RESOLVE_*). The re-export shim at the top of this
+# file makes them available under their legacy names.
 
-# Ranker/write-path tuning. See _augment_title_with_role and the scoring loop
-# in memory_search_scored_impl. These are safe defaults; override via env var
-# to disable or tune per deployment.
-SPEAKER_IN_TITLE       = os.environ.get("M3_SPEAKER_IN_TITLE", "1").lower() in ("1", "true", "yes")
-SHORT_TURN_THRESHOLD   = int(os.environ.get("M3_SHORT_TURN_THRESHOLD", "20"))
-TITLE_MATCH_BOOST      = float(os.environ.get("M3_TITLE_MATCH_BOOST", "0.05"))
-IMPORTANCE_WEIGHT      = float(os.environ.get("M3_IMPORTANCE_WEIGHT", "0.05"))
-
-# Adaptive-K (_trim_by_elbow) safety knobs. The naive elbow heuristic can
-# collapse a 5000-row pool to 1 result when the top hit dominates the avg
-# diff (LME-M @ 2.4M-row haystack). These three knobs keep the trimmer
-# scale-aware:
-#   - MIN_INPUT (default 20): need ~20 samples for the avg-diff estimate
-#     to be stable. On smaller pools the elbow is too noise-driven.
-#   - MIN_RETURN (default 8): preserve headroom for downstream MMR /
-#     cross-encoder rerank diversity ops. Below ~8 those become no-ops.
-#   - ABS_THRESHOLD (default 0.05): cosine-score drops below this are
-#     within ranking-noise on a hybrid FTS+vector blend; not real elbows.
-# Production callers wanting the legacy behavior can set:
-#   M3_ELBOW_MIN_INPUT=3 M3_ELBOW_MIN_RETURN=1 M3_ELBOW_ABS_THRESHOLD=0.0
-ELBOW_MIN_INPUT        = int(os.environ.get("M3_ELBOW_MIN_INPUT", "20"))
-ELBOW_MIN_RETURN       = int(os.environ.get("M3_ELBOW_MIN_RETURN", "8"))
-ELBOW_ABS_THRESHOLD    = float(os.environ.get("M3_ELBOW_ABS_THRESHOLD", "0.05"))
-
-# Expansion-displacement guard. At small k, expansion-sourced rows (entity_graph,
-# graph, session, neighbor) win rank-1 from the hybrid primary far more often
-# than they deserve to. The fusion step compares expansion and primary rows on a
-# single score, but the two pools are not calibrated against each other — an
-# expansion row's score against the query is not directly comparable to a
-# primary row's hybrid score, and the resulting rank-1 promotion is wrong much
-# more often than right at small k.
+# Entity vocab defaults (`_DEFAULT_VALID_ENTITY_TYPES`,
+# `_DEFAULT_VALID_ENTITY_PREDICATES`, `DEFAULT_ENTITY_VOCAB_YAML`,
+# `_ENV_ENTITY_VOCAB_YAML`) and the reranker default model name
+# (`DEFAULT_RERANK_MODEL`) moved to bin/memory/config.py in Phase 1. The
+# re-export shim at the top of this file makes them available under their
+# legacy names.
 #
-# Rule: at ranks 1..M3_EXPANSION_PROTECTED_RANKS, an expansion row may only
-# displace the highest-scoring primary row if expansion_score >=
-# M3_EXPANSION_DISPLACEMENT_MARGIN * primary_score. Otherwise the primary takes
-# precedence at that rank. Beyond protected ranks, normal score-based ordering
-# applies — expansion is still free to contribute candidates at higher k.
-#
-# Defaults: 2.0x margin at the top 3 ranks. Override via env var; not exposed
-# as a per-call parameter (deliberate — this is an engine invariant, not a
-# tuning knob for callers).
-EXPANSION_DISPLACEMENT_MARGIN  = float(os.environ.get("M3_EXPANSION_DISPLACEMENT_MARGIN", "2.0"))
-EXPANSION_PROTECTED_RANKS      = int(os.environ.get("M3_EXPANSION_PROTECTED_RANKS", "3"))
-
-# Entity-graph seed stoplist. Persona/role tokens like "User" co-occur with
-# essentially every turn in conversational corpora, so when an NER pass
-# materializes them as entities they become hub nodes that hub-out the BFS
-# expansion and pull in the whole haystack. Stoplisted canonical_names are
-# dropped at two points in _entity_graph_neighbor_ids: (1) the seed lookup,
-# so they never become a starting node, and (2) the BFS frontier, so they
-# aren't expanded to even as 1-hop neighbors of legitimate seeds.
-#
-# Comma-separated, case-insensitive. Empty string disables filtering.
-# Per-call override: pass entity_stoplist=[] to _entity_graph_neighbor_ids.
-ENTITY_SEED_STOPLIST = tuple(
-    s.strip().lower()
-    for s in os.environ.get("M3_ENTITY_SEED_STOPLIST", "User,user,assistant").split(",")
-    if s.strip()
-)
-
-# Phase 1 ingestion optimizations. Three opt-in emitters (off by default) and
-# one retrieval-side router. All safe-no-op when gated off. See the helpers
-# _maybe_emit_event_rows / _maybe_emit_window_chunk / _maybe_emit_gist_row
-# and _maybe_route_query for behavior.
-INGEST_WINDOW_CHUNKS   = os.environ.get("M3_INGEST_WINDOW_CHUNKS", "0").lower() in ("1", "true", "yes")
-INGEST_GIST_ROWS       = os.environ.get("M3_INGEST_GIST_ROWS", "0").lower() in ("1", "true", "yes")
-INGEST_EVENT_ROWS      = os.environ.get("M3_INGEST_EVENT_ROWS", "0").lower() in ("1", "true", "yes")
-QUERY_TYPE_ROUTING     = os.environ.get("M3_QUERY_TYPE_ROUTING", "0").lower() in ("1", "true", "yes")
-# Intent-driven retrieval routing. When on, memory_search_scored_impl honors
-# the intent_hint kwarg and applies two extras:
-#   1. Role-biased score boost for user-authored turns when intent=user-fact.
-#   2. Predecessor-turn pull (fetch turn N-1 when N was matched) so the user
-#      statement behind an assistant echo lands in the result set.
-# The hint is produced by bin/slm_intent.classify_intent() when its own gate
-# is on; callers that already know the intent can pass it directly. Dormant
-# otherwise — no caller, no cost. See the gate rationale in the SLM docstring.
-INTENT_ROUTING         = os.environ.get("M3_INTENT_ROUTING", "0").lower() in ("1", "true", "yes")
-INTENT_USER_FACT_BOOST = float(os.environ.get("M3_INTENT_USER_FACT_BOOST", "0.1"))
-INGEST_WINDOW_SIZE     = int(os.environ.get("M3_INGEST_WINDOW_SIZE", "3"))
-INGEST_GIST_MIN_TURNS  = int(os.environ.get("M3_INGEST_GIST_MIN_TURNS", "8"))
-INGEST_GIST_STRIDE     = int(os.environ.get("M3_INGEST_GIST_STRIDE", "8"))
-
-# Fact enrichment pipeline (Phase 4-5). Gated off by default.
-ENABLE_FACT_ENRICHED   = os.environ.get("M3_ENABLE_FACT_ENRICHED", "false").lower() in ("1", "true", "yes")
-FACT_ENRICH_CONCURRENCY = int(os.environ.get("M3_FACT_ENRICH_CONCURRENCY", "2"))
-FACT_ENRICH_MAX_ATTEMPTS = int(os.environ.get("M3_FACT_ENRICH_MAX_ATTEMPTS", "5"))
-
-# Entity-relation graph pipeline (Phase 4-5). Gated off by default.
-ENABLE_ENTITY_GRAPH          = os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() in ("1", "true", "yes")
-ENTITY_EXTRACT_CONCURRENCY   = int(os.environ.get("M3_ENTITY_EXTRACT_CONCURRENCY", "2"))
-# Canonical name wins; M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS is a legacy typo-alias
-# kept as fallback only (its precedence used to be inverted).
-ENTITY_EXTRACT_MAX_ATTEMPTS  = int(os.environ.get("M3_ENTITY_EXTRACT_MAX_ATTEMPTS",
-                                   os.environ.get("M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS", "3")))
-ENTITY_RESOLVE_FUZZY_MIN     = float(os.environ.get("M3_ENTITY_RESOLVE_FUZZY_MIN", "0.8"))
-ENTITY_RESOLVE_COSINE_MIN    = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MIN", "0.85"))
-
-# Entity/predicate enums — kept local to avoid circular import
-# (mcp_tool_catalog imports memory_core; memory_core must not import mcp_tool_catalog).
-# Wave 3 will re-export these from mcp_tool_catalog.py and memory_bridge.py.
-
-# Bootstrap hardcoded defaults for when YAML is unavailable or malformed.
-# These are mirrored exactly in config/lists/entity_graph_default.yaml.
-#
-# This is the SCHEMA-VALIDATION DEFAULT — the SUPERSET of two narrower
-# domain vocabs:
-#
-#   * entity_graph_v2.yaml  — human-life vocab (chatlog, persona-grounded
-#                              benchmarks). Four-layer model:
-#       Layer 1 — provenance/aliasing:    mentions, same_as, source_of
-#       Layer 2 — stable person attrs:    located_in, works_at, family_of,
-#                                         knows, prefers, owns
-#       Layer 3 — event/object attrs:     has_participant, has_location,
-#                                         has_time, has_quantity
-#       Layer 4 — change:                 supersedes
-#   * entity_graph_m3.yaml  — technical-domain vocab (homelab + code +
-#                              bench/ML).
-#
-# At EXTRACTION time, callers select a narrower domain vocab via
-# M3_ENTITY_VOCAB_YAML so the LLM extractor sees a focused, relevant set.
-# At VALIDATION time (this superset), both domains' types/predicates are
-# valid so a single DB can hold rows extracted under either vocab without
-# rejection.
-#
-# Legacy entries (preserved-but-deprecated): kept VALID in the schema so
-# data migrated from v1 vocab continues to read/write without validation
-# errors. Legacy types: legacy_concept, legacy_object. Legacy predicates:
-# before, after. The bin/migrate_entity_vocab.py script performs the
-# in-place rename of v1 rows: 'concept'->'legacy_concept',
-# 'object'->'legacy_object', 'relates_to'->'mentions',
-# 'contradicts'->'supersedes' (the latter affects both default and m3
-# vocab rows since 'contradicts' is dropped from m3 alongside v2).
-#
-# Role metadata convention: family_of and knows edges carry a {"role": "..."}
-# key. Family roles: son, daughter, mother, father, wife, husband, sibling,
-# etc. Non-family roles (knows): friend, neighbor, coworker, doctor, etc.
-# Roles are guidance for the extractor, not enforced by validation.
-_DEFAULT_VALID_ENTITY_TYPES = frozenset({
-    # Human-life active (v2)
-    "person", "place", "organization", "event", "date",
-    "quantity", "preference", "product", "topic",
-    # Human-life legacy (preserved-but-deprecated)
-    "legacy_concept", "legacy_object",
-    # Technical: homelab infrastructure (m3)
-    "host", "container", "service", "device", "ip_address", "vlan",
-    "port", "mac_address", "endpoint_url", "firewall_rule",
-    # Technical: code + software engineering (m3)
-    "file_path", "function", "class_or_table", "cli_flag", "env_var",
-    "module", "commit_or_branch", "migration",
-    # Technical: benchmark + ML (m3)
-    "benchmark", "model", "variant", "metric", "dataset_field",
-    "bench_artifact", "task_category", "bench_run_id",
-    # Technical: memory-system primitives (m3)
-    "memory_id", "memory_type", "task_id",
-    # Technical: misc (m3)
-    "protocol", "datetime",
-})
-_DEFAULT_VALID_ENTITY_PREDICATES = frozenset({
-    # Cross-domain: provenance/aliasing
-    "mentions", "same_as", "source_of",
-    # Cross-domain: change
-    "supersedes",
-    # Human-life Layer 2: stable person attributes
-    "located_in", "works_at", "family_of", "knows", "prefers", "owns",
-    # Human-life Layer 3: event/object attributes
-    "has_participant", "has_location", "has_time", "has_quantity",
-    # Human-life legacy (preserved-but-deprecated)
-    "before", "after",
-    # Technical: infrastructure topology (m3)
-    "runs_on", "hosts", "listens_on", "assigned_ip", "on_vlan",
-    "fails_over_to",
-    # Technical: code structure (m3)
-    "defined_in", "imports", "calls",
-    # Technical: provenance (m3)
-    "references", "introduced_in", "deprecates",
-    # Technical: bench/ML (m3)
-    "measured_on", "uses_model", "judged_by", "produced_artifact",
-    "affects_category",
-    # Technical: human signals (m3)
-    "authorizes_budget",
-})
-
-DEFAULT_ENTITY_VOCAB_YAML = Path(__file__).parent.parent / "config" / "lists" / "entity_graph_default.yaml"
-# Env override: when set, load_entity_vocab(None) reads this YAML instead of
-# DEFAULT_ENTITY_VOCAB_YAML. Production callers that import VALID_ENTITY_TYPES /
-# VALID_ENTITY_PREDICATES at module load (e.g., _link_entity_relationship's
-# validation) pick up the override automatically. Use config/lists/entity_graph_lme.yaml
-# for LME-tuned vocab (adds 'attended' and 'purchased' predicates).
-_ENV_ENTITY_VOCAB_YAML = os.environ.get("M3_ENTITY_VOCAB_YAML", "").strip() or None
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Cross-encoder reranker (lazy-loaded)
-# ──────────────────────────────────────────────────────────────────────────────
-# Module-level singleton — pays the model-load cost only when rerank=True is
-# first hit. Default model is the canonical ms-marco distilled cross-encoder
-# (~120MB on disk, ~12MB resident weights), small + fast enough for per-query
-# reranking at bench scale (~50ms / pair on GPU, ~200ms / pair on CPU).
-#
-# Alternative model: BAAI/bge-reranker-v2-m3 (~568MB, higher accuracy on
-# multilingual; slower). Pass via rerank_model kwarg or M3_RERANK_MODEL env.
-#
-# CONTRACT: importing memory_core does NOT import sentence_transformers —
-# only the first call to _get_reranker(...) does. This keeps cold-start fast
-# for all callers that don't use rerank.
+# `_RERANKER_MODEL` / `_RERANKER_MODEL_NAME` are search-state mutables that
+# `_get_reranker` writes to. They stay here until Phase 4 extracts search.py.
 _RERANKER_MODEL = None  # CrossEncoder | None — lazy-init
 _RERANKER_MODEL_NAME = ""
-DEFAULT_RERANK_MODEL = os.environ.get(
-    "M3_RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"
-).strip()
 
 
 def _get_reranker(model_name: str):
@@ -1552,20 +1317,8 @@ def _check_content_safety(content: str) -> str | None:
             return f"Error: content rejected — matches safety pattern: {pattern.pattern[:50]}"
     return None
 
-DEFAULT_CHANGE_AGENT = "unknown"
-
-CHROMA_BASE_URL     = os.environ.get("CHROMA_BASE_URL")
-CHROMA_COLLECTION   = "agent_memory"
-CHROMA_COLLECTIONS  = ["agent_memory", "home_memory", "user_facts"]
-CHROMA_V2_PREFIX    = "/api/v2/tenants/default_tenant/databases/default_database/collections"
-CHROMA_CONNECT_T    = 3.0
-CHROMA_READ_T       = 10.0
-CHROMA_PULL_PAGE_SIZE = 100
-CHROMA_CONTENT_MAX    = 10_000
-# Federation fires when the best local hit scores below this threshold.
-# Lower = less federation; higher = more aggressive cross-peer supplementation.
-# Override via M3_FEDERATION_LOW_SCORE_THRESHOLD env var (float, default 0.65).
-FEDERATION_LOW_SCORE_THRESHOLD = float(os.environ.get("M3_FEDERATION_LOW_SCORE_THRESHOLD", "0.65"))
+# DEFAULT_CHANGE_AGENT, CHROMA_*, FEDERATION_LOW_SCORE_THRESHOLD moved to
+# bin/memory/config.py in Phase 1. Re-exported via the shim at the top.
 
 _local = threading.local()
 _init_lock = threading.RLock()
@@ -2171,8 +1924,10 @@ def _get_embed_client() -> _httpx.AsyncClient:
 # endpoint becomes nondeterministic across runs. The override is the
 # escape hatch when callers need pinned routing (multi-server LM Studio
 # + llama.cpp setups, CI, benchmarks where one endpoint is reserved).
-_EMBED_URL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_URL") or "").strip() or None
-_EMBED_MODEL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_MODEL") or "").strip() or None
+# _EMBED_URL_OVERRIDE and _EMBED_MODEL_OVERRIDE are mutable config-shapes
+# that live on bin/memory/config.py. The re-export at the top of this file
+# pulls in the import-time values. set_embed_override() below writes to
+# the canonical attribute on `_mc_config` so other modules see updates.
 
 # CPU fallback embed server (m3-embed-server, port 8082 by default). Used when
 # M3_EMBED_GGUF is set but the in-process EmbeddedEmbedder fails to construct
@@ -2249,9 +2004,17 @@ def set_embed_override(url: str | None, model: str | None = None) -> None:
     after parsing args, before any embedding-producing operation. It is
     process-global; do not toggle mid-run.
     """
+    # Write to the canonical attribute on memory.config so every module
+    # importing through it sees the update. We also rebind the local
+    # module-level name so legacy callers that read it via memory_core
+    # (e.g. `memory_core._EMBED_URL_OVERRIDE`) get the fresh value.
+    new_url = (url or "").strip() or None
+    new_model = (model or "").strip() or None
+    _mc_config._EMBED_URL_OVERRIDE = new_url
+    _mc_config._EMBED_MODEL_OVERRIDE = new_model
     global _EMBED_URL_OVERRIDE, _EMBED_MODEL_OVERRIDE
-    _EMBED_URL_OVERRIDE = (url or "").strip() or None
-    _EMBED_MODEL_OVERRIDE = (model or "").strip() or None
+    _EMBED_URL_OVERRIDE = new_url
+    _EMBED_MODEL_OVERRIDE = new_model
     # Drop any cached endpoint from prior discovery so subsequent calls
     # cannot land on a stale route.
     try:
@@ -2327,12 +2090,14 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         _track_cost("embed_calls", len(text.split()) * 2)
         token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
         client = _get_embed_client()
-        if _EMBED_URL_OVERRIDE:
-            base_url = _EMBED_URL_OVERRIDE.rstrip("/")
+        # Read through _mc_config so we see live updates from
+        # set_embed_override(). Local _EMBED_URL_OVERRIDE binding may be stale.
+        if _mc_config._EMBED_URL_OVERRIDE:
+            base_url = _mc_config._EMBED_URL_OVERRIDE.rstrip("/")
             # Default model: llama.cpp's bge-m3 GGUF id. LM Studio rejects
             # this and needs 'text-embedding-bge-m3' — set M3_EMBED_MODEL
             # explicitly when overriding to a different server type.
-            model = _EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
+            model = _mc_config._EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
         else:
             result = await get_best_embed(client, token)
             if not result: return None, EMBED_MODEL
@@ -2478,9 +2243,10 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     # llm_failover discovery (which prefers LMS:1234) instead of the pinned
     # endpoint. Bench/CI workloads with M3_EMBED_URL set landed on the
     # wrong server. Now bulk-path matches singular-path semantics.
-    if _EMBED_URL_OVERRIDE:
-        base_url = _EMBED_URL_OVERRIDE.rstrip("/")
-        model = _EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
+    # Read through _mc_config (live updates from set_embed_override).
+    if _mc_config._EMBED_URL_OVERRIDE:
+        base_url = _mc_config._EMBED_URL_OVERRIDE.rstrip("/")
+        model = _mc_config._EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
     else:
         result = await get_best_embed(client, token)
         if not result:
