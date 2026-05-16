@@ -1905,10 +1905,102 @@ def _content_hash(content: str) -> str:
 # Shared Async Client
 import httpx as _httpx
 
+# Embed-dedicated httpx client (wave 9.7 follow-up).
+#
+# Why a dedicated client (not ctx.get_async_client()):
+#   The shared SDK client in m3_sdk.M3Context.get_async_client() enables
+#   http2=True and uses httpx's default connection-pool Limits
+#   (max_connections=10, max_keepalive_connections=5, keepalive_expiry=5s).
+#   For embed traffic specifically those defaults under-pool: bulk-ingest
+#   fans out EMBED_BULK_CONCURRENCY (default 4) chunks at once and per-call
+#   embed() can be hit by many concurrent retrieval requests. A 5s keepalive
+#   means warm pools die between phases and every "warm_single" call eats a
+#   fresh TCP+TLS handshake — the bench measured ~45ms for the CPU HTTP
+#   fallback on localhost, the bulk of which is connect, not embedding.
+#
+# Pool sizing rationale:
+#   max_connections=32       — covers EMBED_BULK_CONCURRENCY × a few
+#                              concurrent search/write paths with headroom.
+#   max_keepalive_connections=16 — keeps the hottest half alive between
+#                              phases without leaking sockets in idle CLIs.
+#   keepalive_expiry=60.0    — bench/ingest phases routinely have 5-30s
+#                              gaps; 5s default kills the pool between
+#                              every test. 60s holds across phase gaps
+#                              without holding sockets for full sessions.
+#   http2=False              — m3-embed-server is built on cpp-httplib
+#                              (HTTP/1.1 only) and llama-server / LM Studio
+#                              have no documented HTTP/2 support. Forcing
+#                              http2 either ALPN-negotiates down or errors.
+#                              Stay on /1.1 — keepalive across /1.1 still
+#                              gives us the connect-handshake savings.
+#
+# If real-world load shows different bottlenecks, tune in env first
+# (M3_EMBED_HTTP_MAX_CONNS / M3_EMBED_HTTP_MAX_KEEPALIVE / M3_EMBED_HTTP_KEEPALIVE_EXPIRY)
+# rather than editing these constants.
+_EMBED_HTTP_MAX_CONNS = int(os.environ.get("M3_EMBED_HTTP_MAX_CONNS", "32"))
+_EMBED_HTTP_MAX_KEEPALIVE = int(os.environ.get("M3_EMBED_HTTP_MAX_KEEPALIVE", "16"))
+_EMBED_HTTP_KEEPALIVE_EXPIRY = float(
+    os.environ.get("M3_EMBED_HTTP_KEEPALIVE_EXPIRY", "60.0")
+)
+
+_EMBED_CLIENT: _httpx.AsyncClient | None = None
+_EMBED_CLIENT_LOOP_ID: int | None = None
+_EMBED_CLIENT_LOCK = threading.Lock()
+
+# Backwards-compatible alias for any external probe that referenced the old name.
 _shared_embed_client: _httpx.AsyncClient | None = None
 
+
 def _get_embed_client() -> _httpx.AsyncClient:
-    return ctx.get_async_client()
+    """Return a process-wide, pool-tuned httpx.AsyncClient for embed traffic.
+
+    Loop-aware: if the running event loop changed (CLI re-entry, test
+    harness), rebuild — httpx clients are bound to the loop that opened them.
+    Singleton inside one loop so connection pooling actually pools.
+    """
+    global _EMBED_CLIENT, _EMBED_CLIENT_LOOP_ID, _shared_embed_client
+    try:
+        loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        loop_id = None
+    if (
+        _EMBED_CLIENT is None
+        or _EMBED_CLIENT.is_closed
+        or loop_id != _EMBED_CLIENT_LOOP_ID
+    ):
+        with _EMBED_CLIENT_LOCK:
+            if (
+                _EMBED_CLIENT is None
+                or _EMBED_CLIENT.is_closed
+                or loop_id != _EMBED_CLIENT_LOOP_ID
+            ):
+                limits = _httpx.Limits(
+                    max_connections=_EMBED_HTTP_MAX_CONNS,
+                    max_keepalive_connections=_EMBED_HTTP_MAX_KEEPALIVE,
+                    keepalive_expiry=_EMBED_HTTP_KEEPALIVE_EXPIRY,
+                )
+                # Per-call timeouts are still passed via client.post(timeout=)
+                # so callers can override per request; this is just the default.
+                timeout = _httpx.Timeout(
+                    connect=CHROMA_CONNECT_T,
+                    read=EMBED_TIMEOUT_READ,
+                    write=10.0,
+                    pool=5.0,
+                )
+                _EMBED_CLIENT = _httpx.AsyncClient(
+                    limits=limits,
+                    timeout=timeout,
+                    http2=False,
+                )
+                _EMBED_CLIENT_LOOP_ID = loop_id
+                _shared_embed_client = _EMBED_CLIENT
+                logger.debug(
+                    f"Initialized embed httpx.AsyncClient "
+                    f"(max_conns={_EMBED_HTTP_MAX_CONNS}, "
+                    f"keepalive={_EMBED_HTTP_MAX_KEEPALIVE}, "
+                    f"expiry={_EMBED_HTTP_KEEPALIVE_EXPIRY}s, http/1.1)"
+                )
+    return _EMBED_CLIENT  # type: ignore[return-value]
 
 
 # Hard override for the embedder endpoint. When set, bypasses
