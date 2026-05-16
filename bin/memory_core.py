@@ -242,6 +242,16 @@ from memory.embed import (  # noqa: F401 — re-exports
     _embed_canonical_cached,
     embedder_status_impl,
 )
+# Phase 4.A: Chroma federation helpers (queue insert, collection-id cache,
+# federated query) moved to bin/memory/chroma.py. _CHROMA_COLLECTION_ID_CACHE
+# preserves identity through this re-export.
+from memory import chroma as _mc_chroma  # noqa: F401
+from memory.chroma import (  # noqa: F401
+    _CHROMA_COLLECTION_ID_CACHE,
+    _queue_chroma,
+    _resolve_chroma_collection_id,
+    _query_chroma,
+)
 
 
 # In-process llama.cpp embedding backend. Opt-in: set M3_EMBED_GGUF to the
@@ -1801,12 +1811,8 @@ async def memory_write_bulk_impl(
     return [p["id"] for p in prepared]
 
 
-def _queue_chroma(memory_id: str, operation: str) -> None:
-    try:
-        with _db() as db:
-            db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (memory_id, operation))
-    except Exception as e:
-        logger.debug(f"ChromaDB queue insert failed: {e}")
+# _queue_chroma moved to bin/memory/chroma.py in Phase 4.A.
+# Re-exported via the shim at the top.
 
 async def _check_contradictions(
     item_id: str,
@@ -2392,102 +2398,8 @@ async def _try_extract_or_enqueue(
     task.add_done_callback(lambda t: _PENDING_ENTITY_TASKS.discard(t))
 
 
-_CHROMA_COLLECTION_ID_CACHE: dict[tuple[str, str], str] = {}
-
-
-async def _resolve_chroma_collection_id(client, base_url: str, collection: str) -> str | None:
-    """Resolve and cache a Chroma collection UUID for the process lifetime.
-
-    A missing / 4xx response invalidates the cache slot so the next call
-    re-resolves. The previous code paid one extra round-trip per federated
-    search — meaningful when the local pool is weak and federation fires on
-    every other query.
-    """
-    key = (base_url, collection)
-    cached = _CHROMA_COLLECTION_ID_CACHE.get(key)
-    if cached:
-        return cached
-    resp = await client.get(f"{base_url}{CHROMA_V2_PREFIX}/{collection}", timeout=CHROMA_CONNECT_T)
-    resp.raise_for_status()
-    col_id = resp.json().get("id")
-    if col_id:
-        _CHROMA_COLLECTION_ID_CACHE[key] = col_id
-    return col_id
-
-
-async def _query_chroma(
-    query_vec: list[float],
-    k: int = 5,
-    scope_filter: dict | None = None,
-) -> list[dict]:
-    """Queries the remote ChromaDB instance for federated results.
-
-    Args:
-        query_vec: Embedding vector for the query.
-        k: Maximum number of results to return.
-        scope_filter: Optional dict of {field: value} pairs to filter results
-            by metadata (e.g. {'user_id': ..., 'scope': ..., 'agent_id': ...}).
-            Empty/None values are skipped. Translated to ChromaDB v2 where syntax.
-    """
-    if not CHROMA_BASE_URL or not CHROMA_BASE_URL.startswith("http"):
-        return []
-    try:
-        client = _get_embed_client()
-        # 1. Resolve collection ID (cached for the process lifetime; invalidated
-        #    on any error below).
-        col_id = await _resolve_chroma_collection_id(client, CHROMA_BASE_URL, CHROMA_COLLECTION)
-        if not col_id:
-            logger.warning("ChromaDB collection response missing 'id' field")
-            return []
-
-        # 2. Build query payload
-        col_path = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{col_id}"
-        payload: dict = {
-            "query_embeddings": [query_vec],
-            "n_results": k,
-            "include": ["documents", "metadatas", "distances"],
-        }
-
-        # Translate scope_filter to ChromaDB v2 where-clause syntax
-        source_tag = "federated_chroma_unscoped"
-        if scope_filter:
-            where_clauses = []
-            for field, value in scope_filter.items():
-                if value:  # skip empty strings / None
-                    where_clauses.append({field: {"$eq": value}})
-            if where_clauses:
-                payload["where"] = (
-                    where_clauses[0]
-                    if len(where_clauses) == 1
-                    else {"$and": where_clauses}
-                )
-                source_tag = "federated_chroma_scoped"
-
-        # 3. Perform query
-        query_resp = await client.post(f"{col_path}/query", json=payload, timeout=CHROMA_READ_T)
-        query_resp.raise_for_status()
-
-        data = query_resp.json()
-        results = []
-        if data["ids"] and data["ids"][0]:
-            for i in range(len(data["ids"][0])):
-                # Chroma distance is often squared L2, but we'll treat it as a score component
-                score = 1.0 - (data["distances"][0][i] / 2.0) if data["distances"] else 0.5
-                results.append({
-                    "id": data["ids"][0][i],
-                    "content": data["documents"][0][i],
-                    "title": data["metadatas"][0][i].get("title", ""),
-                    "type": data["metadatas"][0][i].get("type", "federated"),
-                    "score": score,
-                    "_explanation": {"source": source_tag},
-                })
-        return results
-    except Exception as e:
-        logger.debug(f"ChromaDB federated query failed: {e}")
-        # Drop any cached collection UUID — a 404/connection error may mean
-        # the collection was recreated with a new id.
-        _CHROMA_COLLECTION_ID_CACHE.pop((CHROMA_BASE_URL, CHROMA_COLLECTION), None)
-        return []
+# _CHROMA_COLLECTION_ID_CACHE, _resolve_chroma_collection_id, _query_chroma
+# moved to bin/memory/chroma.py in Phase 4.A. Re-exported via the shim.
 
 def _apply_recency_bonus(scored, recency_bias, explain=False):
     """Add a rank-based recency bonus to each (score, item) pair.
