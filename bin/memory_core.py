@@ -1021,6 +1021,58 @@ def _query_title_overlap(query: str, title: str) -> float:
     return _title_overlap_from_qset(_query_title_token_set(query), title)
 
 
+# Sliding-window chunking for long passages. bge-m3 has an 8192-token ceiling;
+# inputs above that get silently truncated by llama.cpp at embed time. For
+# rows shorter than MAX_CHARS_PER_CHUNK we emit a single 'default' vector_kind
+# row (back-compat). For longer rows we emit N overlapping windows tagged
+# 'window_0', 'window_1', ... The overlap (= MIN_OVERLAP_CHARS) guarantees
+# any contiguous fact up to ~2000 tokens is wholly contained in at least
+# one window; the same value also serves as the minimum last-window size so
+# the tail is never embedded as a thin chunk. See docs/EMBED_INPUT_RECIPE.md
+# for the full recipe.
+#
+# Char-based (not token-based) by design — see EMBED_INPUT_RECIPE.md "Why
+# char-based is almost-as-safe as a tokenizer." Conservative defaults: 28000
+# chars ~ 7000 tokens for English prose, well under the 8192 ceiling even
+# for dense content (JSON, code, base64).
+MAX_CHARS_PER_CHUNK = int(os.environ.get("M3_EMBED_CHUNK_MAX_CHARS", 28000))   # ~7000 tokens
+MIN_OVERLAP_CHARS   = int(os.environ.get("M3_EMBED_CHUNK_OVERLAP_CHARS", 8000)) # ~2000 tokens (== min tail size)
+STRIDE_CHARS        = MAX_CHARS_PER_CHUNK - MIN_OVERLAP_CHARS
+
+
+def _chunk_for_sliding_window(text: str) -> list[tuple[str, int]]:
+    """Split text into overlapping windows for embedding.
+
+    Returns a list of (chunk_text, window_index) pairs. Short inputs return
+    a single (text, 0) — the caller can detect "no chunking happened" by
+    checking len(result) == 1 and tag the embedding row as 'default'.
+
+    Invariants (proofs in docs/EMBED_INPUT_RECIPE.md or in tests/):
+      - Every chunk is at most MAX_CHARS_PER_CHUNK chars.
+      - Consecutive windows overlap by exactly MIN_OVERLAP_CHARS chars.
+      - The last window is at least MIN_OVERLAP_CHARS chars long. Because
+        STRIDE = MAX - OVL, whenever a naive tail would be shorter than
+        OVL the previous iteration would have absorbed it (since the
+        previous iteration's window already extends past the tail's start
+        by MAX - STRIDE = OVL chars). No explicit shift-back is needed.
+      - text[-1] is always present in some window (no tail loss).
+    """
+    n = len(text or "")
+    if n <= MAX_CHARS_PER_CHUNK:
+        return [(text or "", 0)]
+    out: list[tuple[str, int]] = []
+    idx = 0
+    start = 0
+    while True:
+        end = start + MAX_CHARS_PER_CHUNK
+        if end >= n:
+            out.append((text[start:n], idx))
+            return out
+        out.append((text[start:end], idx))
+        idx += 1
+        start += STRIDE_CHARS
+
+
 # Always-on: lift resolved temporal anchors into embed_text so FTS and vector
 # search can match on absolute dates even when the original text says
 # "yesterday" or "last month". Caller supplies anchors via
@@ -6328,21 +6380,47 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         _et = _augment_embed_text_with_anchors(
             embed_text or content or title, metadata
         )
-        vec, m = await _embed(_et)
-        if vec:
+        # Sliding window: short inputs return a single (text, 0) and produce
+        # one vector_kind='default' row (back-compat). Long inputs return N
+        # windows and produce N vector_kind='window_<idx>' rows. Retrieval
+        # picks across kinds with vector_kind_strategy='max'.
+        chunks = _chunk_for_sliding_window(_et)
+        first_vec: list[float] | None = None
+        any_inserted = False
+        for chunk_text, chunk_idx in chunks:
+            cvec, m = await _embed(chunk_text)
+            if not cvec:
+                logger.warning(
+                    f"memory_write_impl: embed failed for {item_id} chunk {chunk_idx}; skipping that window"
+                )
+                continue
+            kind = "default" if len(chunks) == 1 else f"window_{chunk_idx}"
             with _db() as db:
                 db.execute(
-                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
-                    "VALUES (?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), item_id, _pack(vec), m, len(vec), now, _content_hash(_et))
+                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), item_id, _pack(cvec), m, len(cvec), now, _content_hash(chunk_text), kind),
                 )
+            any_inserted = True
+            if first_vec is None:
+                first_vec = cvec
+        if any_inserted:
+            with _db() as db:
+                # One chroma_sync_queue entry per memory_id, not per window.
+                # Chroma sync replays whatever's currently in memory_embeddings
+                # for the memory_id.
                 db.execute(
                     "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
                     (item_id, "upsert"),
                 )
+            # Downstream code (contradiction check, MMR, etc.) needs *a*
+            # vector for this memory. The first window's vector is the
+            # closest analogue to the legacy single-vector behavior — it
+            # represents the head of the augmented embed text.
+            vec = first_vec
         else:
             logger.warning(
-                f"memory_write_impl: embed failed for {item_id}; "
+                f"memory_write_impl: all embed calls failed for {item_id}; "
                 f"skipping memory_embeddings + chroma_sync_queue insert"
             )
 
