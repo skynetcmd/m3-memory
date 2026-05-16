@@ -160,6 +160,37 @@ from memory.fts import (  # noqa: F401 — re-exports
 # re-export because the API snapshot captured it as a public symbol —
 # something external imports it. Pure alias for functools.lru_cache.
 from functools import lru_cache as _lru_cache  # noqa: F401 — re-export
+# Phase 2.B: SQLite primitives, schema lifecycle, history, gate cache, and
+# the access-stamp batcher live on bin/memory/db.py. The mutable sets/dicts
+# (_initialized_dbs, _GATE_CACHE, _access_pending) are externally imported;
+# the shim preserves their identity by re-exporting the references rather
+# than re-assigning them.
+from memory import db as _mc_db  # noqa: F401
+from memory.db import (  # noqa: F401 — re-exports
+    _local,
+    _init_lock,
+    _initialized,
+    _initialized_dbs,
+    _GATE_CACHE,
+    _GATE_CACHE_TTL,
+    _OBS_COUNT_QUERY,
+    _ENTITY_COUNT_QUERY,
+    _ACCESS_FLUSH_INTERVAL,
+    _access_pending,
+    _access_flusher_task,
+    _access_lock,
+    _db,
+    _conn,
+    _ensure_sync_tables,
+    _backfill_change_agent,
+    _lazy_init,
+    _record_history,
+    memory_history_impl,
+    _gate_count_query,
+    _gate_active,
+    _access_stamp_flusher,
+    _enqueue_access_stamps,
+)
 
 
 # In-process llama.cpp embedding backend. Opt-in: set M3_EMBED_GGUF to the
@@ -1219,9 +1250,8 @@ def _check_content_safety(content: str) -> str | None:
 # DEFAULT_CHANGE_AGENT, CHROMA_*, FEDERATION_LOW_SCORE_THRESHOLD moved to
 # bin/memory/config.py in Phase 1. Re-exported via the shim at the top.
 
-_local = threading.local()
-_init_lock = threading.RLock()
-_initialized = False
+# _local / _init_lock / _initialized moved to bin/memory/db.py in Phase 2.B.
+# Re-exported via the shim at the top.
 _EMBED_SEM = asyncio.Semaphore(4)
 _FACT_ENRICH_SEM = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
 _ENTITY_EXTRACT_SEM = asyncio.Semaphore(ENTITY_EXTRACT_CONCURRENCY)
@@ -1307,44 +1337,9 @@ def _ingest_llm_enabled(flag: str) -> bool:
 # so users don't have to remember to flip env vars + restart after enrichment
 # data lands. Escape hatch: M3_DISABLE_AUTO_ACTIVATION=1 falls back to
 # explicit-env-only (used by bench harnesses for reproducibility).
-_GATE_CACHE: dict[str, tuple[bool, float]] = {}
-_GATE_CACHE_TTL = 300  # seconds; counts can change as drains run
-
-def _gate_count_query(query: str) -> int:
-    """Run a COUNT(*) query against the active SQLite DB. Returns 0 on error."""
-    try:
-        with _db() as db:
-            row = db.execute(query).fetchone()
-            if row is None:
-                return 0
-            return int(row[0] if not hasattr(row, "keys") else list(row)[0])
-    except Exception:
-        return 0
-
-def _gate_active(env_var: str, count_query: str, threshold: int = 1) -> bool:
-    """True if env var is explicitly on, or auto-activated by data presence.
-
-    Cached per (env_var, count_query) for ~5 min; the cache is invalidated by
-    process restart or natural TTL expiry. Single-process; no thread lock —
-    a stampede on first miss would just run COUNT(*) twice, harmless.
-    """
-    if os.environ.get(env_var, "").strip().lower() in ("1", "true", "yes", "on"):
-        return True
-    if os.environ.get("M3_DISABLE_AUTO_ACTIVATION", "").strip().lower() in ("1", "true", "yes", "on"):
-        return False
-    import time as _time
-    cache_key = f"{env_var}::{count_query}"
-    cached = _GATE_CACHE.get(cache_key)
-    now = _time.monotonic()
-    if cached is not None and (now - cached[1]) < _GATE_CACHE_TTL:
-        return cached[0]
-    count = _gate_count_query(count_query)
-    active = count >= threshold
-    _GATE_CACHE[cache_key] = (active, now)
-    return active
-
-_OBS_COUNT_QUERY = "SELECT COUNT(*) FROM memory_items WHERE type='observation' AND COALESCE(is_deleted,0)=0"
-_ENTITY_COUNT_QUERY = "SELECT COUNT(*) FROM entities"
+# Gate cache (_GATE_CACHE, _GATE_CACHE_TTL, _gate_count_query, _gate_active,
+# _OBS_COUNT_QUERY, _ENTITY_COUNT_QUERY) moved to bin/memory/db.py in Phase 2.B.
+# Re-exported via the shim at the top.
 
 def _prefer_observations_gate() -> bool:
     return _gate_active("M3_PREFER_OBSERVATIONS", _OBS_COUNT_QUERY, threshold=100)
@@ -1488,222 +1483,9 @@ def _track_cost(operation: str, tokens_est: int = 0):
     if tokens_est:
         _COST_COUNTERS["embed_tokens_est"] += tokens_est
 
-def _ensure_sync_tables(db_path: str | None = None) -> None:
-    """Run pending migrations against the active DB.
-
-    Fast path: if the schema is already at the latest version on disk
-    (compared against the migration files in memory/migrations/ or
-    memory/chatlog_migrations/), skip the subprocess entirely. The
-    `migrate_memory.py up` invocation triggers a backup-then-apply
-    cycle that takes a noticeable amount of time on multi-GB DBs
-    (#46) and timed out at 300s on the 41 GB agent_test_bench.db.
-    A cheap `SELECT MAX(version) FROM schema_versions` against the
-    target file lets us skip when there's nothing to apply.
-
-    Belt-and-braces: when the active DB is a chatlog DB (path matches
-    the chatlog config OR schema fingerprint says so), pass --target
-    chatlog so the runner doesn't try to apply main-stack migrations
-    to it. The runner now also refuses such mismatches in F1 hardening,
-    but invoking the right --target up-front avoids a noisy refusal
-    log line on every chatlog-context call.
-    """
-    import re
-    import sqlite3
-    import subprocess
-    try:
-        migration_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
-
-        # Detect chatlog context via schema fingerprint. Path equality with
-        # chatlog_config.chatlog_db_path() is unreliable here because
-        # chatlog_config inherits from M3_DATABASE, so a misdirected
-        # M3_DATABASE makes both paths agree without telling us anything
-        # about the file's actual schema. The classifier reads the file.
-        active = db_path or resolve_db_path(None)
-        target_flag: list[str] = []
-        target_kind = "main"
-        try:
-            sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
-            from migrate_memory import _classify_db
-            if _classify_db(active) == "chatlog":
-                target_flag = ["--target", "chatlog"]
-                target_kind = "chatlog"
-        except Exception:
-            pass
-
-        # Fast path: compare DB's applied version vs. the highest .up.sql file
-        # number for the resolved target. If equal, no migrations to apply,
-        # skip the subprocess + backup + load entirely. Failure to read either
-        # side falls through to the subprocess (which is what we'd do anyway).
-        try:
-            mig_dir = os.path.join(
-                BASE_DIR, "memory",
-                "chatlog_migrations" if target_kind == "chatlog" else "migrations",
-            )
-            file_versions = []
-            pattern = re.compile(r"^(\d+)_.*\.up\.sql$")
-            for fn in os.listdir(mig_dir):
-                m = pattern.match(fn)
-                if m:
-                    file_versions.append(int(m.group(1)))
-            latest_on_disk = max(file_versions) if file_versions else -1
-
-            db_latest = -1
-            conn = sqlite3.connect(f"file:{active}?mode=ro", uri=True, timeout=2.0)
-            try:
-                cur = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' "
-                    "AND name IN ('schema_versions','schema_migrations')"
-                ).fetchall()
-                tables = {r[0] for r in cur}
-                # CAST to INTEGER so a TEXT-affinity column with mixed
-                # numeric markers ('9' vs '34') returns the numeric max
-                # rather than the lexicographic max. Bench DBs imported
-                # without migration markers may have version stored as
-                # TEXT — see lme_m_bench_v1 origin.
-                if "schema_versions" in tables:
-                    row = conn.execute(
-                        "SELECT MAX(CAST(version AS INTEGER)) FROM schema_versions "
-                        "WHERE typeof(CAST(version AS INTEGER))='integer' "
-                        "  AND CAST(version AS INTEGER) > 0"
-                    ).fetchone()
-                    db_latest = int(row[0]) if row and row[0] is not None else -1
-                elif "schema_migrations" in tables:
-                    row = conn.execute(
-                        "SELECT MAX(CAST(version AS INTEGER)) FROM schema_migrations "
-                        "WHERE typeof(CAST(version AS INTEGER))='integer' "
-                        "  AND CAST(version AS INTEGER) > 0"
-                    ).fetchone()
-                    db_latest = int(row[0]) if row and row[0] is not None else -1
-            finally:
-                conn.close()
-
-            if latest_on_disk >= 0 and db_latest >= latest_on_disk:
-                # Already at latest — nothing to do. Avoids the multi-GB
-                # backup-then-noop subprocess.
-                return
-        except Exception:
-            # Any failure here just means we fall through to the full
-            # subprocess path; never block the caller because the
-            # fast-path check tripped.
-            pass
-
-        # "up --yes" + stdin=DEVNULL are both required: without --yes the prompt
-        # would EOF-read an empty string and silently skip migrations, leaving
-        # the DB missing tasks/chatlog tables. DEVNULL belt-and-braces in case
-        # any future code path still reaches input(). Timeout 300s handles
-        # backups of multi-GB databases (#46).
-        env = os.environ.copy()
-        if target_flag:
-            # Pin the runner at the chatlog file we resolved, so a misdirected
-            # M3_DATABASE in the parent env doesn't repoint it elsewhere.
-            env["M3_DATABASE"] = active
-        # CREATE_NO_WINDOW (via no_window_kwargs) so this migration subprocess
-        # never flashes a console window when reached from a scheduled task.
-        try:
-            from _task_runtime import no_window_kwargs
-            _nw = no_window_kwargs()
-        except Exception:
-            _nw = {}
-        subprocess.run(
-            [sys.executable, migration_script, "up", "--yes", *target_flag],
-            check=True,
-            timeout=300,
-            stdin=subprocess.DEVNULL,
-            env=env,
-            **_nw,
-        )
-    except Exception as e:
-        logger.exception(f"_ensure_sync_tables failed: {e}")
-
-def _backfill_change_agent() -> None:
-    try:
-        with _db() as db:
-            rows = db.execute("SELECT id, agent_id, model_id FROM memory_items WHERE change_agent IS NULL").fetchall()
-            for row in rows:
-                agent = _infer_change_agent_util(row["agent_id"] or "", row["model_id"] or "", default="legacy")
-                db.execute("UPDATE memory_items SET change_agent = ? WHERE id = ?", (agent, row["id"]))
-    except Exception as e:
-        logger.warning(f"Backfill failed: {e}")
-
-_initialized_dbs: set[str] = set()
-
-def _lazy_init(db_path: str | None = None) -> None:
-    """Run one-time schema + backfill per DB path.
-
-    Previously a single module flag guarded init; multi-DB requires per-path
-    tracking so a fresh test/benchmark DB gets its sync tables created on
-    first touch. Uses _init_lock for cross-thread safety.
-    """
-    global _initialized  # kept for backward compat with any external probes
-    key = db_path or resolve_db_path(None)
-    with _init_lock:
-        if key in _initialized_dbs:
-            return
-        _initialized_dbs.add(key)
-        _initialized = True  # legacy flag — once true, stays true
-        try:
-            _ensure_sync_tables(key)
-            _backfill_change_agent()
-        except Exception:
-            # Do not trap init in a permanently-failed state — let the next
-            # caller retry (removes the key so it's reattempted).
-            _initialized_dbs.discard(key)
-            raise
-
-@contextmanager
-def _db():
-    active_ctx = _current_ctx()
-    if os.environ.get("M3_DEBUG"):
-        print(f"DEBUG DB PATH: {active_ctx.db_path}")
-    _lazy_init(active_ctx.db_path)
-    with active_ctx.get_sqlite_conn() as conn:
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-
-@contextmanager
-def _conn():
-    """Legacy alias for _db context manager (C7)."""
-    with _db() as db:
-        yield db
-
-def _record_history(memory_id: str, event: str, prev_value: str = None, new_value: str = None, field: str = "content", actor_id: str = "", db=None):
-    """Records a change event in the memory_history audit trail.
-
-    Pass ``db`` when the caller already holds an open connection (e.g. inside
-    a ``with _db() as db:`` block). Opening a second pool connection while
-    the outer one has an uncommitted writer causes SQLite WAL writer
-    contention, which burns the full ``busy_timeout`` per call.
-    """
-    row = (str(uuid.uuid4()), memory_id, event, prev_value, new_value, field, actor_id)
-    sql = "INSERT INTO memory_history (id, memory_id, event, prev_value, new_value, field, actor_id) VALUES (?,?,?,?,?,?,?)"
-    try:
-        if db is not None:
-            db.execute(sql, row)
-        else:
-            with _db() as inner:
-                inner.execute(sql, row)
-    except Exception as e:
-        logger.debug(f"History recording failed: {e}")
-
-def memory_history_impl(memory_id: str, limit: int = 20) -> str:
-    """Returns the change history for a memory item."""
-    with _db() as db:
-        rows = db.execute(
-            "SELECT event, field, prev_value, new_value, actor_id, created_at FROM memory_history WHERE memory_id = ? ORDER BY created_at DESC LIMIT ?",
-            (memory_id, limit)
-        ).fetchall()
-    if not rows:
-        return f"No history found for {memory_id}"
-    lines = [f"History for {memory_id} ({len(rows)} events):"]
-    for r in rows:
-        prev = (r["prev_value"] or "")[:80]
-        new = (r["new_value"] or "")[:80]
-        lines.append(f"  [{r['created_at']}] {r['event']} ({r['field']}) by {r['actor_id'] or 'unknown'}: {prev!r} -> {new!r}")
-    return "\n".join(lines)
+# Phase 2.B: _ensure_sync_tables, _backfill_change_agent, _initialized_dbs,
+# _lazy_init, _db, _conn, _record_history, memory_history_impl all moved to
+# bin/memory/db.py. Re-exported via the shim at the top.
 
 def _content_hash(content: str) -> str:
     return _sha256_hex((content or "").encode("utf-8"))
@@ -3517,57 +3299,10 @@ def _apply_temporal_boost(scored, query, explain=False):
 # loop and flush them in a single UPDATE every _ACCESS_FLUSH_INTERVAL seconds.
 # Telemetry drift (a few seconds of latency on last_accessed_at) is acceptable;
 # the read path's median latency is not.
-_ACCESS_FLUSH_INTERVAL = 0.25  # seconds
-_access_pending: set[str] = set()
-_access_flusher_task: "asyncio.Task | None" = None
-_access_lock = asyncio.Lock()
-
-
-async def _access_stamp_flusher() -> None:
-    """Drains _access_pending into a single batched UPDATE on a fixed cadence.
-
-    Lives for the lifetime of the running event loop. Per-loop singleton —
-    created lazily by ``_enqueue_access_stamp``. Catches its own errors so a
-    transient DB lock can't kill the long-lived task.
-    """
-    while True:
-        try:
-            await asyncio.sleep(_ACCESS_FLUSH_INTERVAL)
-            async with _access_lock:
-                if not _access_pending:
-                    continue
-                batch = list(_access_pending)
-                _access_pending.clear()
-            now_iso = datetime.now(timezone.utc).isoformat()
-            try:
-                with _db() as db:
-                    placeholders = ",".join("?" * len(batch))
-                    db.execute(
-                        f"UPDATE memory_items "
-                        f"SET last_accessed_at = ?, access_count = access_count + 1 "
-                        f"WHERE id IN ({placeholders})",
-                        (now_iso, *batch),
-                    )
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"access-stamp flush failed (batch={len(batch)}): {e}")
-        except asyncio.CancelledError:
-            return
-        except Exception as e:  # noqa: BLE001 — keep the task alive
-            logger.debug(f"access-stamp flusher recoverable error: {e}")
-
-
-def _enqueue_access_stamps(ids) -> None:
-    """Buffer hit-ids for a fire-and-forget UPDATE. Idempotent / dedup'd."""
-    global _access_flusher_task
-    if not ids:
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return  # no loop -> skip; sync callers don't need this
-    _access_pending.update(i for i in ids if i)
-    if _access_flusher_task is None or _access_flusher_task.done():
-        _access_flusher_task = loop.create_task(_access_stamp_flusher())
+# Access-stamp batcher (_ACCESS_FLUSH_INTERVAL, _access_pending,
+# _access_flusher_task, _access_lock, _access_stamp_flusher,
+# _enqueue_access_stamps) moved to bin/memory/db.py in Phase 2.B.
+# Re-exported via the shim at the top.
 
 
 async def memory_search_scored_impl(
