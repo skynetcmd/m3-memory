@@ -1073,6 +1073,61 @@ def _chunk_for_sliding_window(text: str) -> list[tuple[str, int]]:
         start += STRIDE_CHARS
 
 
+# Dense-content recovery: when the in-process Rust embedder rejects a chunk
+# with "input too long: NNNN tokens > n_ctx 8192", we know:
+#   1. The chunk is under MAX_CHARS_PER_CHUNK (we just produced it).
+#   2. The actual char/token ratio for THIS content is unusually dense
+#      (CJK, base64, very dense code, etc.). The conservative char limit
+#      was based on ~4 chars/token English; this row needs tighter sizing.
+# Recovery: re-split this one chunk using the OBSERVED chars/token ratio
+# and a target of 7000 tokens (15% headroom under the 8192 ceiling). The
+# sub-chunks are guaranteed to fit. Sub-chunks tag themselves
+# 'window_<i>_dense_<j>' (or 'default_dense_<j>' if the original chunking
+# produced a single window) so retrieval's vector_kind_strategy='max'
+# treats them as siblings of the original window.
+DENSE_TARGET_TOKENS = 7000      # ~85% of bge-m3's 8192-token ceiling
+DENSE_TOKEN_OVERLAP = 500       # small overlap; dense content is rare, save embed compute
+DENSE_MIN_SUB_CHARS = 2000      # never subdivide below this; degenerate case
+_DENSE_ERR_RE = re.compile(r"(\d+)\s*tokens\s*>\s*n_ctx")
+
+
+def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
+    """Re-split a chunk that overflowed the bge-m3 token ceiling.
+
+    `observed_tokens` is the count llama.cpp reported for this chunk's
+    actual content. We compute the row's true chars/token ratio and
+    size sub-chunks to fit ~DENSE_TARGET_TOKENS each. Sub-chunks are
+    sequential with a small overlap to avoid losing facts at boundaries.
+
+    Returns a list of sub-chunk strings, all guaranteed under the
+    inferred safe char count.
+    """
+    if observed_tokens <= 0 or not text:
+        return [text]
+    chars_per_token = len(text) / observed_tokens
+    # Sub-chunk char target: DENSE_TARGET_TOKENS worth of THIS density,
+    # times a 10% safety margin to absorb tokenizer variance.
+    sub_chars = int(DENSE_TARGET_TOKENS * chars_per_token * 0.90)
+    sub_chars = max(sub_chars, DENSE_MIN_SUB_CHARS)
+    if sub_chars >= len(text):
+        # Density was so light that one sub-chunk still fits in the
+        # original; nothing useful to do. (Shouldn't happen given we
+        # only got here from an overflow error, but guard anyway.)
+        return [text]
+    overlap_chars = int(DENSE_TOKEN_OVERLAP * chars_per_token)
+    stride = max(sub_chars - overlap_chars, sub_chars // 2)
+    out: list[str] = []
+    start = 0
+    n = len(text)
+    while True:
+        end = start + sub_chars
+        if end >= n:
+            out.append(text[start:n])
+            return out
+        out.append(text[start:end])
+        start += stride
+
+
 # Always-on: lift resolved temporal anchors into embed_text so FTS and vector
 # search can match on absolute dates even when the original text says
 # "yesterday" or "last month". Caller supplies anchors via
@@ -6385,25 +6440,102 @@ async def memory_write_impl(type, content, title="", metadata="{}", agent_id="",
         # windows and produce N vector_kind='window_<idx>' rows. Retrieval
         # picks across kinds with vector_kind_strategy='max'.
         chunks = _chunk_for_sliding_window(_et)
+
+        # Dense-content recovery uses the in-process Rust embedder directly
+        # to keep error context (the "input too long: NNNN tokens" message
+        # is what we parse). Falls back to _embed() if the in-process
+        # embedder isn't configured for this deployment.
+        _direct_embedder = _get_embedded_embedder()
+
+        async def _embed_chunk_with_dense_recovery(
+            txt: str, base_kind: str,
+        ) -> list[tuple[str, str, list[float], str]]:
+            """Embed one chunk, recovering from dense-overflow if needed.
+
+            Returns list of (sub_text, kind_suffix, vector, model_tag).
+            kind_suffix is empty string for the no-recovery case, or
+            '_dense_<j>' for sub-chunks created by recovery. Caller
+            appends suffix to base_kind for vector_kind on insert.
+            """
+            # Fast path: caller has no in-process embedder configured —
+            # fall through to _embed (which itself tries in-process first;
+            # any error there will produce None and we just skip the chunk).
+            if _direct_embedder is None:
+                cvec, mm = await _embed(txt)
+                if cvec:
+                    return [(txt, "", cvec, mm)]
+                return []
+            # In-process path: catch input-too-long, recurse with smaller
+            # sub-chunks sized by the observed chars/token ratio.
+            try:
+                cvec = await asyncio.to_thread(
+                    lambda: _direct_embedder.embed([txt])[0]
+                )
+                if cvec:
+                    _record_embed_backend(_embedded_label(), 1)
+                    return [(txt, "", cvec, _EMBED_GGUF_MODEL_TAG)]
+                return []
+            except Exception as e:
+                err = str(e)
+                rmatch = _DENSE_ERR_RE.search(err)
+                if not rmatch:
+                    # Non-dense error: log and skip; this chunk won't get
+                    # a vector. memory_items row is already persisted, so
+                    # FTS-only retrieval still finds it.
+                    logger.warning(
+                        f"memory_write_impl: non-dense embed failure for {item_id} "
+                        f"chunk base_kind={base_kind}: {err}"
+                    )
+                    return []
+                observed_tokens = int(rmatch.group(1))
+                subs = _subdivide_dense_chunk(txt, observed_tokens)
+                logger.info(
+                    f"memory_write_impl: dense overflow on {item_id} chunk base_kind={base_kind} "
+                    f"({observed_tokens} tokens for {len(txt)} chars => "
+                    f"{len(txt)/observed_tokens:.2f} c/t); subdividing into {len(subs)} sub-chunks"
+                )
+                results: list[tuple[str, str, list[float], str]] = []
+                for j, sub in enumerate(subs):
+                    try:
+                        sv = await asyncio.to_thread(
+                            lambda s=sub: _direct_embedder.embed([s])[0]
+                        )
+                        if sv:
+                            results.append((sub, f"_dense_{j}", sv, _EMBED_GGUF_MODEL_TAG))
+                            _record_embed_backend(_embedded_label(), 1)
+                    except Exception as se:
+                        # Second-level failure: log and skip this sub-chunk.
+                        # Don't recurse further — would mean truly pathological
+                        # content where our chars/token estimate is wrong by
+                        # >10%, which our 10% safety margin should already
+                        # cover. Logging is sufficient.
+                        logger.warning(
+                            f"memory_write_impl: dense sub-chunk {j} of {len(subs)} still "
+                            f"failed for {item_id}: {se}"
+                        )
+                return results
+
         first_vec: list[float] | None = None
         any_inserted = False
         for chunk_text, chunk_idx in chunks:
-            cvec, m = await _embed(chunk_text)
-            if not cvec:
+            base_kind = "default" if len(chunks) == 1 else f"window_{chunk_idx}"
+            sub_results = await _embed_chunk_with_dense_recovery(chunk_text, base_kind)
+            if not sub_results:
                 logger.warning(
                     f"memory_write_impl: embed failed for {item_id} chunk {chunk_idx}; skipping that window"
                 )
                 continue
-            kind = "default" if len(chunks) == 1 else f"window_{chunk_idx}"
-            with _db() as db:
-                db.execute(
-                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), item_id, _pack(cvec), m, len(cvec), now, _content_hash(chunk_text), kind),
-                )
-            any_inserted = True
-            if first_vec is None:
-                first_vec = cvec
+            for sub_text, kind_suffix, cvec, m in sub_results:
+                kind = base_kind + kind_suffix
+                with _db() as db:
+                    db.execute(
+                        "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
+                        "VALUES (?,?,?,?,?,?,?,?)",
+                        (str(uuid.uuid4()), item_id, _pack(cvec), m, len(cvec), now, _content_hash(sub_text), kind),
+                    )
+                any_inserted = True
+                if first_vec is None:
+                    first_vec = cvec
         if any_inserted:
             with _db() as db:
                 # One chroma_sync_queue entry per memory_id, not per window.
