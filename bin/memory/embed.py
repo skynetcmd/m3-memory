@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import threading
+from functools import lru_cache as _lru_cache
 from threading import Lock as _ThreadLock
 
 import httpx as _httpx
@@ -188,7 +189,17 @@ def _augment_embed_text_with_anchors(embed_text: str, metadata: str | dict | Non
     return "[" + ", ".join(tags) + "] " + embed_text
 
 
+@_lru_cache(maxsize=512)
 def _content_hash(content: str) -> str:
+    """sha256 of (content or "") UTF-8 bytes, lru-cached at 512 entries.
+
+    Called once per embed (line 322 below) and N times per chatlog write
+    pass; sees frequent repeats during bulk re-embed and chatlog drain.
+    Cache key is the raw content string — modest memory footprint for
+    typical memory bodies (under a few KB each). 512 entries is enough
+    to absorb repeats within a single chatlog drain without unbounded
+    growth.
+    """
     return _sha256_hex((content or "").encode("utf-8"))
 
 
