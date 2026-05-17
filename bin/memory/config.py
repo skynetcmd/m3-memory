@@ -85,6 +85,40 @@ EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "1024"))
 EMBED_TIMEOUT_READ: float = 30.0
 ORIGIN_DEVICE: str = os.environ.get("ORIGIN_DEVICE", platform.node())
 
+# Per-backend circuit-breaker thresholds for the embed cascade in
+# `bin/memory/embed.py`. Each backend gets its own m3_core_rs.CircuitBreaker;
+# after `_THRESHOLD` consecutive failures the breaker opens and skips that
+# tier entirely (no FFI / HTTP attempt) for `_RESET_SECS` seconds. A single
+# probe is then allowed (half-open); success closes the breaker, failure
+# re-opens it. Defaults tuned for typical home-lab + production shapes:
+#   - embedded: 5 failures / 30s reset — kernel hiccups recover fast,
+#     and a stale CUDA context usually clears itself on the next call.
+#   - cpu_fallback: 3 / 30s — when the local llama-server is down,
+#     every call burns its full ~30s timeout. 3 strikes catches it quick.
+#   - primary: 3 / 60s — primary outages are usually upstream
+#     (LM Studio / Ollama crash), longer reset to avoid retry storms
+#     during a real outage.
+# Set any to 0 to disable that breaker (Python fallback retains the
+# pre-breaker behavior — try every call, eat the timeout).
+EMBED_BREAKER_EMBEDDED_THRESHOLD: int = int(
+    os.environ.get("M3_EMBED_BREAKER_EMBEDDED_THRESHOLD", "5")
+)
+EMBED_BREAKER_EMBEDDED_RESET_SECS: float = float(
+    os.environ.get("M3_EMBED_BREAKER_EMBEDDED_RESET_SECS", "30.0")
+)
+EMBED_BREAKER_CPU_FALLBACK_THRESHOLD: int = int(
+    os.environ.get("M3_EMBED_BREAKER_CPU_FALLBACK_THRESHOLD", "3")
+)
+EMBED_BREAKER_CPU_FALLBACK_RESET_SECS: float = float(
+    os.environ.get("M3_EMBED_BREAKER_CPU_FALLBACK_RESET_SECS", "30.0")
+)
+EMBED_BREAKER_PRIMARY_THRESHOLD: int = int(
+    os.environ.get("M3_EMBED_BREAKER_PRIMARY_THRESHOLD", "3")
+)
+EMBED_BREAKER_PRIMARY_RESET_SECS: float = float(
+    os.environ.get("M3_EMBED_BREAKER_PRIMARY_RESET_SECS", "60.0")
+)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dedup, contradiction, supersede
