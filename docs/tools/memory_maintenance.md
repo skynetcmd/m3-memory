@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: ba3d613fb9d7
-mtime_utc: 2026-05-14T05:25:36.033320+00:00
-generated_utc: 2026-05-14T05:37:12.908575+00:00
+sha1: ceb1b5405423
+mtime_utc: 2026-05-17T02:40:21.663329+00:00
+generated_utc: 2026-05-17T15:50:17.767454+00:00
 private: false
 ---
 
@@ -36,7 +36,7 @@ _(none detected)_
 
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `memory_core`
-- `memory_core (ARCHIVE_DB_PATH, DEDUP_LIMIT, DEDUP_THRESHOLD, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, memory_link_impl)`
+- `memory_core (ARCHIVE_DB_PATH, DEDUP_LIMIT, DEDUP_THRESHOLD, EMBED_DIM, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, m3_core_rs, memory_link_impl)`
 
 ---
 
@@ -44,8 +44,8 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `ARCHIVE_DB_PATH`` (line 31)
-- `sqlite3.connect()  → `active_path`` (line 211)
+- `sqlite3.connect()  → `ARCHIVE_DB_PATH`` (line 33)
+- `sqlite3.connect()  → `active_path`` (line 312)
 
 
 ---

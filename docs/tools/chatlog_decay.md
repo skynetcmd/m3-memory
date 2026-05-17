@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_decay.py
-sha1: 2fb2b7eb2a3e
-mtime_utc: 2026-05-07T23:03:27.726547+00:00
-generated_utc: 2026-05-09T18:07:57.403198+00:00
+sha1: a9c0adb06319
+mtime_utc: 2026-05-16T19:21:14.061779+00:00
+generated_utc: 2026-05-17T15:50:17.511498+00:00
 private: false
 ---
 
@@ -82,7 +82,7 @@ ephemeral regime entirely.
 
 ## Entry points
 
-- `def main()` (line 323)
+- `def main()` (line 330)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -100,6 +100,7 @@ ephemeral regime entirely.
 ## Environment variables read
 
 - `CHATLOG_DB`
+- `CHATLOG_DB_PATH`
 - `M3_DATABASE`
 
 ---
@@ -114,7 +115,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 230)
+- `sqlite3.connect()  → `db_path`` (line 237)
 
 
 ---
