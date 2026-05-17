@@ -71,10 +71,23 @@ orchestrator:
 
 
 def _example_dir() -> Path:
-    """Locate examples/multi-agent-team relative to this installed package."""
+    """Locate examples/multi-agent-team.
+
+    Checks the package root first (developer clone), then falls back to the
+    cloned system repo at ~/.m3-memory/repo if the package is a bare wheel.
+    """
     pkg_dir = Path(__file__).resolve().parent
     repo_root = pkg_dir.parent
-    return repo_root / "examples" / "multi-agent-team"
+    local_example = repo_root / "examples" / "multi-agent-team"
+    if local_example.exists():
+        return local_example
+
+    from m3_memory.installer import find_bridge
+    bridge = find_bridge()
+    if bridge:
+        return bridge.parent.parent / "examples" / "multi-agent-team"
+
+    return local_example
 
 
 def _add_orchestrator_to_path() -> None:

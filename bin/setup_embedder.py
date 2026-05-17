@@ -210,8 +210,28 @@ def main():
 
     # 2. Sovereign Install Path
     if not ASSETS_DIR.exists():
-        log("Error: _assets/embedder directory not found. Are you running from a full checkout?")
-        sys.exit(1)
+        log("Sovereign assets not found locally.")
+        try:
+            choice = input("Would you like to download the embedder binaries and models now (~1.5GB)? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(1)
+
+        if choice == 'y':
+            log("Fetching assets...")
+            hydrator = pathlib.Path(__file__).parent / "fetch_sovereign_assets.py"
+            if hydrator.exists():
+                try:
+                    subprocess.run([sys.executable, str(hydrator)], check=True)
+                except subprocess.CalledProcessError as e:
+                    log(f"Error: Hydrator failed: {e}")
+                    sys.exit(1)
+            else:
+                log(f"Error: Hydrator script {hydrator} not found.")
+                sys.exit(1)
+        else:
+            log("Error: _assets/embedder directory not found. Are you running from a full checkout?")
+            sys.exit(1)
 
     os_type = platform.system()
     arch = platform.machine().lower()
