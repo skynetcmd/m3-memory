@@ -277,6 +277,15 @@ from memory.search import (  # noqa: F401
     _get_reranker,
     _enforce_expansion_displacement_guard,
     _apply_rerank,
+    _TEMPORAL_ROUTER_PATTERNS,
+    _TEMPORAL_ROUTER_RE,
+    _ENTITY_MENTION_PATTERNS,
+    _ENTITY_MENTION_RE,
+    _UNSET,
+    _extract_caller_overrides,
+    _apply_auto_layer,
+    _apply_sharp_trim,
+    is_temporal_query,
 )
 
 
@@ -2780,124 +2789,10 @@ async def memory_search_scored_impl(
     return ranked
 
 
-# Module-level temporal regex - same patterns memory 2d1d5812 documented;
-# 100% recall on LongMemEval temporal-reasoning, low FPR on others.
-_TEMPORAL_ROUTER_PATTERNS = (
-    r"\bwhen\b", r"\bhow long\b", r"\bwhat\s+(?:date|day|month|year|time)\b",
-    r"\bbefore\b", r"\bafter\b", r"\bsince\b", r"\buntil\b",
-    r"\b(?:days?|weeks?|months?|years?)\s+ago\b",
-    r"\bfirst\b", r"\blast\b", r"\brecent(?:ly)?\b",
-    r"\bearliest\b", r"\blatest\b",
-    r"\bwhich\s+\w+\s+first\b", r"\bin\s+what\s+order\b",
-    r"\b(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\b",
-    r"\bvalentine'?s?\s+day\b", r"\bchristmas\b", r"\bthanksgiving\b", r"\bnew\s+year'?s?\b",
-)
-_TEMPORAL_ROUTER_RE = re.compile("|".join(_TEMPORAL_ROUTER_PATTERNS), re.IGNORECASE)
-
-# Module-level entity mention patterns for question-time parsing (Phase 6).
-# Regex-only, no SLM — same compilation style as _TEMPORAL_ROUTER_PATTERNS.
-_ENTITY_MENTION_PATTERNS = (
-    r'"[^"]+"',                            # double-quoted strings
-    r"'[^']+'",                            # single-quoted strings
-    r"\b(?:19|20)\d{2}\b",                # 4-digit years (1900–2099)
-    r"\b(?:January|February|March|April|May|June|July|August|September|"
-    r"October|November|December)\s+\d{1,2}\b",   # Month Day
-    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*",   # Capitalized noun phrases
-)
-_ENTITY_MENTION_RE = re.compile("|".join(_ENTITY_MENTION_PATTERNS))
-
-
-# ---------------------------------------------------------------------------
-# AUTO routing helpers — Phase 1 refactor.  auto_route=False (default) is a
-# strict no-op; the helpers below are only invoked when auto_route=True.
-# ---------------------------------------------------------------------------
-
-_UNSET = object()  # module-level sentinel distinguishing "not passed" from "passed default"
-
-
-def _extract_caller_overrides(local_args: dict, sig_defaults: dict) -> dict:
-    """Return only params the caller actually changed from function-signature defaults.
-
-    local_args: the dict of param names → values actually in use (e.g. a subset of locals())
-    sig_defaults: dict of param_name -> default_value from the function's signature
-
-    A value is considered an override when it differs from the signature default by
-    identity or equality.  String/numeric/bool comparisons use ==; object sentinels
-    use `is not`.
-    """
-    overrides = {}
-    for k, v in local_args.items():
-        if k not in sig_defaults:
-            continue
-        default = sig_defaults[k]
-        # Use identity check first (catches sentinel objects), then equality.
-        if v is not default and v != default:
-            overrides[k] = v
-    return overrides
-
-
-def _apply_auto_layer(
-    query: str,
-    primary_candidates: list,
-    current_params: dict,
-    sig_defaults: dict,
-) -> tuple:
-    """Apply AUTO branch values to params. Caller overrides are always preserved.
-
-    current_params: the kwargs dict reflecting what the caller actually passed
-    sig_defaults: function-signature defaults (for override detection)
-
-    Resolution order (lowest → highest priority):
-      1. sig_defaults         — function-signature concrete defaults
-      2. branch_vals          — AUTO branch values for the chosen branch
-      3. caller_overrides     — what the caller explicitly changed from defaults
-
-    Returns:
-        (resolved_params: dict, auto_metadata: dict)
-
-    auto_metadata contains: auto_branch, auto_branch_values, caller_overrides, auto_signals
-    """
-    import auto_route  # local import avoids circular; auto_route has no memory_core deps
-
-    branch = auto_route.decide_branch(query, primary_candidates, current_params)
-    branch_vals = auto_route.branch_values(branch, current_params)
-    caller_overrides = _extract_caller_overrides(current_params, sig_defaults)
-
-    # Merge layers: defaults → AUTO branch values → caller overrides
-    resolved = {**sig_defaults, **branch_vals, **caller_overrides}
-
-    return resolved, {
-        "auto_branch": branch,
-        "auto_branch_values": branch_vals,
-        "caller_overrides": caller_overrides,
-        "auto_signals": auto_route.signals_summary(query, primary_candidates),
-    }
-
-
-def _apply_sharp_trim(hits, *, threshold_ratio, k_min, k_max):
-    """Sharp-branch post-process: keep hits within threshold_ratio of top score, bounded [k_min, k_max].
-
-    hits: list of (score, item_dict) tuples (the canonical routed_impl output shape)
-    """
-    if not hits:
-        return hits
-    if k_max and len(hits) > k_max:
-        hits = hits[:k_max]
-    top_score = hits[0][0] if hits else 0.0
-    if top_score <= 0:
-        return hits[:max(k_min, 1)]
-    threshold = top_score * threshold_ratio
-    kept = [h for h in hits if h[0] >= threshold]
-    if k_min and len(kept) < k_min:
-        kept = hits[:k_min]
-    return kept
-
-
-def is_temporal_query(query: str) -> bool:
-    """Returns True if the query uses temporal vocabulary (regex-based, no LLM)."""
-    if not query:
-        return False
-    return bool(_TEMPORAL_ROUTER_RE.search(query))
+# Route helpers (_TEMPORAL_ROUTER_*, _ENTITY_MENTION_*, _UNSET,
+# _extract_caller_overrides, _apply_auto_layer, _apply_sharp_trim,
+# is_temporal_query) moved to bin/memory/search.py in Phase 4.B sub-5.
+# Re-exported via the shim at the top.
 
 
 def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
