@@ -26,7 +26,13 @@ logger = logging.getLogger("files_memory.index")
 
 @dataclass
 class IndexEntry:
-    """One entry in the wiki-index — file-level summary + metadata only."""
+    """One entry in the wiki-index — file-level summary + metadata only.
+
+    `original_path` is the user-facing source-of-truth path (e.g. the
+    .pdf for an ingested .pdf.txt). None if the file is its own
+    original — `path` is then the right reference to surface to the
+    user.
+    """
     file_node_uuid: str
     filename: str
     filetype: str
@@ -34,6 +40,7 @@ class IndexEntry:
     version_label: str
     date_modified: str
     summary: Optional[str]
+    original_path: Optional[str] = None
 
 
 def files_index(
@@ -58,7 +65,7 @@ def files_index(
     """
     sql_parts = [
         "SELECT uuid, filename, filetype, path_absolute, version_label, "
-        "       date_modified, file_summary "
+        "       date_modified, file_summary, metadata "
         "FROM file_nodes WHERE 1 = 1"
     ]
     params: list = []
@@ -87,6 +94,7 @@ def files_index(
         conn.row_factory = sqlite3.Row
         rows = conn.execute(" ".join(sql_parts), params).fetchall()
 
+    from .provenance import original_path_for_metadata
     out: list[IndexEntry] = []
     for r in rows:
         out.append(IndexEntry(
@@ -97,6 +105,7 @@ def files_index(
             version_label=r["version_label"],
             date_modified=r["date_modified"],
             summary=r["file_summary"],
+            original_path=original_path_for_metadata(r["metadata"]),
         ))
     return out
 
@@ -179,9 +188,14 @@ def files_stats(
 def files_get(uuid: str, *, db_path: Optional[str] = None) -> Optional[dict]:
     """Fetch a single record by UUID. Tries file_nodes, then leaves.
 
-    Returns a dict view of the row plus a `_kind` field
-    ('file_node' | 'leaf'). Returns None if no match.
+    Returns a dict view of the row plus:
+      _kind:         'file_node' | 'leaf'
+      original_path: surfaced from file_nodes.metadata.provenance for
+                     convenience. None if the file is its own original.
+
+    Returns None if no UUID match.
     """
+    from .provenance import original_path_for_metadata
     with _db(db_path) as conn:
         conn.row_factory = sqlite3.Row
         # Try file_nodes first
@@ -191,9 +205,11 @@ def files_get(uuid: str, *, db_path: Optional[str] = None) -> Optional[dict]:
         if r:
             d = dict(r)
             d["_kind"] = "file_node"
+            d["original_path"] = original_path_for_metadata(d.get("metadata"))
             return d
         r = conn.execute(
-            "SELECT l.*, fn.filename, fn.path_absolute, fn.filetype "
+            "SELECT l.*, fn.filename, fn.path_absolute, fn.filetype, "
+            "       fn.metadata AS file_metadata "
             "FROM leaves l JOIN file_nodes fn ON fn.uuid = l.file_node "
             "WHERE l.uuid = ?",
             (uuid,),
@@ -201,5 +217,6 @@ def files_get(uuid: str, *, db_path: Optional[str] = None) -> Optional[dict]:
         if r:
             d = dict(r)
             d["_kind"] = "leaf"
+            d["original_path"] = original_path_for_metadata(d.pop("file_metadata", None))
             return d
     return None

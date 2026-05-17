@@ -1403,3 +1403,75 @@ late-stage decisions:
 - **Per-filetype chunker dispatcher** — three chunkers in phase 1 (md /
   pdf / fallback semantic); more in phase 2.
 - **Semantic chunking for fallback**, not fixed-size sliding window.
+
+---
+
+## Appendix C — Reconciliation with core m3 refactor (Phase 7+8, 2026-05-17)
+
+A parallel refactor (commit `bd07525`, "Phase 7 & 8 modularization") landed
+~1,800 lines of extractions on `bin/memory_core.py` into the modular
+`bin/memory/` package. It is **non-breaking** — 100% symbol-identity parity
+is preserved via re-exports from `memory_core` — but it changes the
+**canonical** import paths the `files_memory` package should use going
+forward.
+
+### Module map (post-refactor)
+
+| Symbol / concern             | Old (still works)            | New canonical home               |
+|------------------------------|------------------------------|----------------------------------|
+| `memory_write_impl`          | `memory_core`                | `memory.write`                   |
+| `memory_write_bulk_impl`     | `memory_core`                | `memory.write`                   |
+| `_check_contradictions`      | `memory_core`                | `memory.write`                   |
+| `_auto_classify`             | `memory_core`                | `memory.enrich`                  |
+| `_maybe_auto_entities`       | `memory_core`                | `memory.enrich`                  |
+| Graph traversal helpers      | `memory_core`                | `memory.graph`                   |
+| Emitter helpers              | `memory_core`                | `memory.emitters`                |
+| `_ENTITY_MENTION_RE`         | `memory_core` / `.search`    | `memory.fts`                     |
+| `_TEMPORAL_QUERY_RE`         | `memory_core`                | `memory.fts`                     |
+| Content-safety guards        | `memory_core`                | `memory.util`                    |
+| ~40 misc constants & gates   | scattered                    | `memory.config`                  |
+
+### What changes in `files_memory/`
+
+1. **`promote.py`** should import `memory_write_impl` from `memory.write`
+   instead of `memory_core`. The current `memory_core` path keeps working
+   but the new path is shorter and survives future deprecations of the
+   shim re-exports.
+2. **`entities.py`** is already correct — it goes directly to the
+   `entities` table in `memory.db` via sqlite3, not through any
+   `memory.*` API.
+3. **`files_memory/config.py`** is already correct — it imports from
+   `memory.config`, which is the canonical store for `FILES_DB_PATH`.
+4. No schema-level changes required. Files-memory's own schema is
+   independent.
+
+### Operational implications
+
+- **The single-DB-per-store invariant still holds.** Phase 7+8 didn't
+  change memory.db's schema; the entities table, memory_items table, etc.
+  are untouched.
+- **Cross-DB writes (ascension)** continue to use `memory_write_impl`.
+  The refactor reorganized where the function lives but not its
+  signature or behavior.
+- **`memory_core_parity` test gates the shim.** That test (added with
+  the refactor) ensures every name files_memory might import from
+  `memory_core` stays available. If a future refactor breaks parity, the
+  test catches it before we do.
+
+### Action items (folded into P3+)
+
+- [ ] P3.x housekeeping: update `promote._write_to_memory_db` to import
+      from `memory.write` (cosmetic; no behavior change).
+- [ ] P3 eval gate: add a smoke check that `files_promote` works under
+      both the old (`memory_core`) and new (`memory.write`) import paths
+      so we catch any future re-export drift.
+- [ ] When OXIDATION_TODO's "Entity Resolution" Rust target lands,
+      revisit `entities.py` — it may need to switch from raw SQL to
+      whatever the new entity-resolution API exposes.
+
+### What didn't change
+
+The three-store architecture, the file-node tree, supersession,
+ascension semantics, the chunker dispatcher, and the staleness helper
+are all unaffected. Phase 7+8 cleaned up core m3's internals; it did
+NOT alter the contracts files-memory relies on.

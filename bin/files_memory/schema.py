@@ -329,3 +329,42 @@ CREATE INDEX IF NOT EXISTS idx_extraction_status ON extraction_attempts(status);
 INSERT OR IGNORE INTO schema_migrations(version, description)
     VALUES (2, 'phase 2: corpus_settings, extraction_attempts, promotion_markers.memory_db_path');
 """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v3 (phase 3): carry-forward telemetry + promotion heuristics + rename hints.
+# Additive only.
+# ─────────────────────────────────────────────────────────────────────────────
+SCHEMA_V3 = r"""
+-- fact_hit_stats: rolling usage counters for promotion suggestions.
+-- One row per fact (1:1 with facts); incremented when files_search
+-- returns the fact's leaf. Promotability_score = hit_count * confidence
+-- * recency_factor (computed in code, not stored — recency depends on
+-- query time).
+CREATE TABLE IF NOT EXISTS fact_hit_stats (
+    fact_uuid    TEXT PRIMARY KEY REFERENCES facts(uuid) ON DELETE CASCADE,
+    hit_count    INTEGER NOT NULL DEFAULT 0,
+    first_hit_at TEXT,
+    last_hit_at  TEXT
+);
+
+-- semantic_dedup_candidates: phase-3.3 output. Pairs of leaves whose
+-- embedding cosine exceeds threshold. Populated by files_dedup; consumed
+-- by an (eventually interactive) review tool.
+CREATE TABLE IF NOT EXISTS semantic_dedup_candidates (
+    uuid          TEXT PRIMARY KEY,
+    leaf_a        TEXT NOT NULL REFERENCES leaves(uuid) ON DELETE CASCADE,
+    leaf_b        TEXT NOT NULL REFERENCES leaves(uuid) ON DELETE CASCADE,
+    cosine        REAL NOT NULL,
+    detected_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at   TEXT,
+    review_action TEXT,              -- 'kept'|'merged'|'ignored'
+    metadata      TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_dedup_pair ON semantic_dedup_candidates(leaf_a, leaf_b);
+CREATE INDEX IF NOT EXISTS idx_dedup_unreviewed ON semantic_dedup_candidates(reviewed_at)
+    WHERE reviewed_at IS NULL;
+
+INSERT OR IGNORE INTO schema_migrations(version, description)
+    VALUES (3, 'phase 3: fact_hit_stats, semantic_dedup_candidates');
+"""
