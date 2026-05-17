@@ -10,7 +10,7 @@ servers over HTTP, not stdio. m3-memory ships with a built-in HTTP transport
 mcp-memory serve --host 127.0.0.1 --port 8080
 ```
 
-This starts the same 66-tool bridge you use locally, on
+This starts the same 96-tool bridge you use locally, on
 `http://127.0.0.1:8080/mcp` (Streamable HTTP transport, the spec Claude
 expects).
 
@@ -72,7 +72,7 @@ section below.
 2. **URL**: paste the tunnel URL with `/mcp` suffix.
 3. **Auth**: configure if your tunnel requires it (Cloudflare Access /
    ngrok-auth / mTLS — claude.ai supports OAuth and bearer-token).
-4. Save. Claude.ai will probe the endpoint and list the 74 tools.
+4. Save. Claude.ai will probe the endpoint and list the 96 tools.
 
 ---
 
@@ -98,7 +98,7 @@ msg = client.messages.create(
 ```
 
 The connector path is **tool-only** — MCP resources / prompts are not
-exposed. All 66 m3-memory tools are tools, so this is fine for our case.
+exposed. All 96 m3-memory tools are tools, so this is fine for our case.
 
 ---
 

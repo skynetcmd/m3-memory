@@ -76,7 +76,8 @@ def _get_device_salt() -> bytes:
     Generates one if it doesn't exist. This ensures consistent key derivation
     on the same device without storing the salt in the DB.
     """
-    salt_path = os.path.join(os.path.expanduser("~"), ".agent_os_salt")
+    from m3_sdk import get_m3_root
+    salt_path = os.path.join(get_m3_root(), ".agent_os_salt")
     if os.path.exists(salt_path):
         try:
             with open(salt_path, "rb") as f:

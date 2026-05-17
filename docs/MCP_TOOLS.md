@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 75 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 96 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
@@ -81,6 +81,27 @@ This document provides a comprehensive inventory of all 75 MCP tools available i
 | `chroma_sync` | Infrastructure Operations | Bi-directional sync between local SQLite and ChromaDB. |
 | `embedder_status` | Infrastructure Operations | Check the status of the local sovereign embedder server (port 8081). |
 | `memory_cost_report` | Infrastructure Operations | Returns current session operation counts and estimated token usage for memory operations. |
+| `files_corpus_create` | Uncategorized | Register a new corpus with optional default overrides. `default=True` marks this corpus as the installation's default (clears the flag on any prior default in the same transaction). |
+| `files_corpus_delete` | Uncategorized | Delete a corpus's settings row. Cascade=True also deletes every file_node in the corpus -- DESTRUCTIVE. Without cascade, refuses when the corpus has file_nodes. |
+| `files_corpus_get` | Uncategorized | Fetch a single corpus's settings + counts. |
+| `files_corpus_list` | Uncategorized | Enumerate corpora with row counts. |
+| `files_corpus_set` | Uncategorized | Update settings for an existing corpus. None args are no-ops. Creates the corpus_settings row if absent. |
+| `files_dedup` | Uncategorized | Scan leaf embeddings for near-duplicates above cosine threshold. Detection only -- pairs land in semantic_dedup_candidates for human review. |
+| `files_dedup_list` | Uncategorized | List near-duplicate candidate pairs with text snippets and paths. |
+| `files_dedup_review` | Uncategorized | Record a review decision on a near-duplicate candidate: 'kept' | 'merged' | 'ignored'. |
+| `files_extract_pending` | Uncategorized | Drain leaves with extraction_status='pending' through the LLM fact extractor. Used after a queue-mode ingest. Safe to call repeatedly. |
+| `files_get` | Uncategorized | Fetch one record by UUID. Tries file_nodes then leaves. |
+| `files_health` | Uncategorized | DB integrity + FTS5 sync check. Set rebuild=True to fix drift. |
+| `files_index` | Uncategorized | Return file-level summaries for triage (wiki-index primitive). Cheap-first retrieval -- no leaf content. Use BEFORE files_search to decide which files are worth deep-reading. |
+| `files_ingest` | Uncategorized | Walk a directory and ingest supported files into files.db. Idempotent: same content_sha256 -> no-op; changed content -> new file_node version supersedes prior. Use extract_mode to opt into fact extraction; use original_path (or a <path>.m3meta.json sidecar) to point search results at a source-of-truth file when the ingested file is a conversion. |
+| `files_link_rename` | Uncategorized | Re-point an existing file_node at a new path (rename / move). NOT a supersession -- content stays identical. Use this only when staleness review surfaces a rename candidate. |
+| `files_promotable` | Uncategorized | List top promotion candidates by usage-weighted heuristic score. Suggestion-only; use files_promote to actually ascend any. |
+| `files_promote` | Uncategorized | Promote (ascend) a fact / leaf / file_summary from files.db to memory.db. Source stays untouched; copy lands in memory.db with a metadata back-pointer. Idempotent. |
+| `files_promotion_list` | Uncategorized | List existing promotions. source_superseded=True surfaces promotions whose source file has since been superseded -- candidates for review. |
+| `files_search` | Uncategorized | Hybrid FTS5 + vector search over file-ingestion leaves. Default: current versions only. Set include_history=True for time-travel queries. Use `corpora` for fan-out across multiple corpora. |
+| `files_staleness_review` | Uncategorized | Compare filesystem against files.db. Surfaces stale, touched-only, missing, new, failed-extraction, drifted-promotion files, and rename candidates. Report-only. |
+| `files_stats` | Uncategorized | Corpus-level counters: file_nodes, leaves, embed coverage, by-filetype. |
+| `files_watch_once` | Uncategorized | Single-pass staleness check + notification dispatch. Suitable for cron / scheduled runners. Notifications are emitted via the memory.db notifications inbox; cooldown suppresses duplicates within the window. |
 
 ---
 
