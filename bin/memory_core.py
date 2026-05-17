@@ -2530,6 +2530,123 @@ def memory_delete_impl(id, hard=False):
             )
     return f"{'Hard' if hard else 'Soft'}-deleted: {id}"
 
+
+# SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 999 on older builds, 32766
+# on 3.32.0+. We chunk well below the conservative cap so bulk deletes work
+# on every shipped Python/SQLite combo without per-host probing.
+_MEMORY_DELETE_BULK_CHUNK = 500
+
+
+def memory_delete_bulk_impl(ids, hard=False):
+    """Delete a list of MemoryItems in one transaction per chunk.
+
+    Behaviorally identical to looping `memory_delete_impl` over `ids`, but
+    with two key differences that make it suitable for curation passes:
+
+    1. **Batched SQL.** Each chunk of up to _MEMORY_DELETE_BULK_CHUNK ids runs
+       a single `IN (?,?,...)` per affected table (memory_items,
+       memory_embeddings, memory_relationships, chroma_sync_queue), inside
+       one `_db()` connection. For 178 deletes this collapses ~712 individual
+       statements + 178 connection-opens into ~8 statements + 1 connection.
+
+    2. **Structured result.** Returns `{succeeded, not_found, mode}` instead
+       of N string lines, so curation callers don't have to parse text.
+
+    History rows are still written per-id via `_record_history` so the
+    audit trail matches `memory_delete_impl` exactly.
+
+    Args:
+        ids: iterable of memory_item UUID strings.
+        hard: if True, cascade-delete (memory_embeddings, memory_relationships,
+              chroma_sync_queue, memory_items). If False (default), soft-delete
+              with the same chroma_sync_queue upsert-pending cleanup that
+              memory_delete_impl performs.
+
+    Returns:
+        dict: {
+          "succeeded": [list of ids successfully deleted],
+          "not_found": [list of ids that did not exist],
+          "mode": "hard" | "soft",
+        }
+
+    Note: this is a destructive tool (default_allowed=False in the MCP
+    catalog). The MCP proxy only exposes it when MCP_PROXY_ALLOW_DESTRUCTIVE
+    is set, matching `memory_delete`'s gating.
+    """
+    id_list = list(dict.fromkeys(ids or []))  # dedupe while preserving order
+    if not id_list:
+        return {"succeeded": [], "not_found": [], "mode": "hard" if hard else "soft"}
+
+    succeeded: list[str] = []
+    not_found: list[str] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    with _db() as db:
+        for start in range(0, len(id_list), _MEMORY_DELETE_BULK_CHUNK):
+            chunk = id_list[start : start + _MEMORY_DELETE_BULK_CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+
+            # Discover which ids exist in this chunk. content is needed for
+            # the history record; the rest is just existence.
+            existing = db.execute(
+                f"SELECT id, content FROM memory_items WHERE id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            existing_ids = [row["id"] for row in existing]
+            existing_set = set(existing_ids)
+            missing = [i for i in chunk if i not in existing_set]
+            not_found.extend(missing)
+
+            if not existing_ids:
+                continue
+
+            # Per-id history rows. Same call shape memory_delete_impl uses.
+            for row in existing:
+                _record_history(row["id"], "delete", row["content"], None, "content", db=db)
+
+            ph_existing = ",".join("?" * len(existing_ids))
+            if hard:
+                db.execute(
+                    f"DELETE FROM memory_embeddings WHERE memory_id IN ({ph_existing})",
+                    existing_ids,
+                )
+                # memory_relationships matches on EITHER from_id or to_id.
+                db.execute(
+                    f"DELETE FROM memory_relationships "
+                    f"WHERE from_id IN ({ph_existing}) OR to_id IN ({ph_existing})",
+                    existing_ids + existing_ids,
+                )
+                db.execute(
+                    f"DELETE FROM chroma_sync_queue WHERE memory_id IN ({ph_existing})",
+                    existing_ids,
+                )
+                db.execute(
+                    f"DELETE FROM memory_items WHERE id IN ({ph_existing})",
+                    existing_ids,
+                )
+            else:
+                db.execute(
+                    f"UPDATE memory_items SET is_deleted = 1, updated_at = ? "
+                    f"WHERE id IN ({ph_existing})",
+                    [now_iso, *existing_ids],
+                )
+                # Mirror memory_delete_impl: drop pending upserts so soft-deleted
+                # rows don't get re-published to chroma after the tombstone.
+                db.execute(
+                    f"DELETE FROM chroma_sync_queue "
+                    f"WHERE memory_id IN ({ph_existing}) AND operation = 'upsert'",
+                    existing_ids,
+                )
+
+            succeeded.extend(existing_ids)
+
+    return {
+        "succeeded": succeeded,
+        "not_found": not_found,
+        "mode": "hard" if hard else "soft",
+    }
+
+
 VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff", "precedes", "follows"}
 
 def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> str:
