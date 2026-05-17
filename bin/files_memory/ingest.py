@@ -60,6 +60,11 @@ class FileIngestResult:
     duration_ms: int = 0
     reason: Optional[str] = None
     superseded_prior: Optional[str] = None  # uuid of prior version, if any
+    # Carry-forward telemetry (meaningful only on supersession).
+    leaves_carried: int = 0
+    leaves_evolved: int = 0
+    embeds_avoided: int = 0
+    facts_carried: int = 0
 
 
 @dataclass
@@ -77,6 +82,10 @@ class IngestResult:
     leaves_written: int = 0
     leaves_embedded: int = 0
     facts_extracted: int = 0
+    leaves_carried: int = 0
+    leaves_evolved: int = 0
+    embeds_avoided: int = 0
+    facts_carried: int = 0
     failures: list[dict] = field(default_factory=list)
     per_file: list[FileIngestResult] = field(default_factory=list)
 
@@ -153,6 +162,7 @@ def ingest_one_file(
     version_label_override: Optional[str] = None,
     record_noops: bool = False,
     extract_mode: str = "none",
+    cli_original_path: Optional[str] = None,
     db_path: Optional[str] = None,
 ) -> FileIngestResult:
     """Ingest a single file. The atomic unit of the pipeline.
@@ -274,6 +284,19 @@ def ingest_one_file(
             except (ValueError, TypeError):
                 pass
 
+        # Resolve original-vs-processed provenance (sidecar > CLI flag).
+        from .provenance import resolve_provenance
+        provenance = resolve_provenance(path, cli_original_path=cli_original_path)
+
+        # Build the metadata blob. Provenance is optional; absent means
+        # the file is its own original.
+        file_metadata: dict = {
+            "file_summary_used_llm": file_summary_used_llm,
+            "ingester_pid": os.getpid(),
+        }
+        if provenance:
+            file_metadata["provenance"] = provenance
+
         # Insert the new file_node.
         conn.execute(
             "INSERT INTO file_nodes("
@@ -291,10 +314,7 @@ def ingest_one_file(
                 _json.dumps(paths_seen),
                 corpus_id,
                 file_summary,
-                _json.dumps({
-                    "file_summary_used_llm": file_summary_used_llm,
-                    "ingester_pid": os.getpid(),
-                }),
+                _json.dumps(file_metadata),
             ),
         )
 
@@ -346,9 +366,19 @@ def ingest_one_file(
         # Inline mode then advances them to 'ok'/'failed' below.
         initial_status = "pending" if extract_mode != "none" else "skipped"
 
-        # Insert leaves. Collect (uuid, text, summary_text) for batch embed.
-        leaf_records: list[tuple[str, str, Optional[str]]] = []
-        for leaf in leaves:
+        # Carry-forward diff (only meaningful when superseding a prior version).
+        # Builds a per-new-leaf classification: carry | evolve | new.
+        # Used below to skip re-embedding unchanged leaves.
+        from .carry_forward import compute_leaf_diffs, CarryForwardStats
+        carry_stats = CarryForwardStats()
+        if prior:
+            leaf_diffs = compute_leaf_diffs(conn, prior["uuid"], leaves)
+        else:
+            leaf_diffs = [None] * len(leaves)
+
+        # Insert leaves. Collect (uuid, text, summary_text, diff) for embed pass.
+        leaf_records: list[tuple[str, str, Optional[str], object]] = []
+        for i, leaf in enumerate(leaves):
             leaf_uuid = str(_uuid.uuid4())
             wants_summary = leaf.division_type in _COARSE_DIVISIONS
             leaf_summary_text = None
@@ -357,13 +387,16 @@ def ingest_one_file(
                 leaf_summary_text = summary_text or None
 
             text_hash = _sha256_short(leaf.text)
+            diff = leaf_diffs[i] if leaf_diffs else None
+            evolved_from = diff.prior_uuid if (diff and diff.kind in ("carry", "evolve")) else None
+
             conn.execute(
                 "INSERT INTO leaves("
                 "uuid, file_node, ingestion_run, division_type, division_id, "
                 "division_label, text, text_sha256, char_range_start, "
                 "char_range_end, leaf_summary, boundary_confidence, truncated, "
-                "extraction_status, metadata) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "extraction_status, evolved_from, metadata) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     leaf_uuid, file_node_uuid, run_uuid,
                     leaf.division_type, leaf.division_id, leaf.division_label,
@@ -373,29 +406,59 @@ def ingest_one_file(
                     leaf.boundary_confidence,
                     1 if leaf.truncated else 0,
                     initial_status,
+                    evolved_from,
                     _json.dumps(leaf.extra or {}),
                 ),
             )
-            leaf_records.append((leaf_uuid, leaf.text, leaf_summary_text))
+            leaf_records.append((leaf_uuid, leaf.text, leaf_summary_text, diff))
 
         # 7. Embed. The expensive step. Done inside the transaction so
-        #    `embedded=1` is consistent with row presence.
+        #    `embedded=1` is consistent with row presence. Carry-forward
+        #    short-circuits this for unchanged leaves — we copy the prior
+        #    version's embedding row + facts instead of re-running the
+        #    embedder.
+        from .carry_forward import apply_carry_forward
+        embedded_count = 0
         if leaf_records:
-            texts_to_embed = [t for _, t, _ in leaf_records]
-            try:
-                vecs = embed_texts(texts_to_embed)
-            except Exception as e:
-                logger.warning("embed batch failed for %s: %s", path, e)
-                vecs = [(None, "")] * len(leaf_records)
+            # Split into carry-able vs embed-required.
+            carry_targets: list[tuple[str, object]] = []  # (new_leaf_uuid, diff)
+            embed_targets: list[tuple[int, str, str, Optional[str]]] = []  # (idx_in_records, uuid, text, summary)
+            for idx, (luuid, ltext, lsum, ldiff) in enumerate(leaf_records):
+                if ldiff is not None and ldiff.kind == "carry":
+                    carry_targets.append((luuid, ldiff))
+                else:
+                    embed_targets.append((idx, luuid, ltext, lsum))
 
-            embedded_count = 0
-            for (luuid, _, _), (vec, model) in zip(leaf_records, vecs):
-                if vec is not None:
-                    write_leaf_embedding(conn, luuid, "text", vec, model)
-                    embedded_count += 1
+            # Apply carry-forward: copy embeddings + facts from prior leaves.
+            for new_uuid, diff in carry_targets:
+                copied_embed, n_facts = apply_carry_forward(
+                    conn, diff, new_uuid,
+                    carry_facts=True,
+                    new_ingestion_run_uuid=run_uuid,
+                )
+                if copied_embed:
+                    carry_stats.embeds_avoided += 1
+                carry_stats.carry += 1
+                carry_stats.facts_carried += n_facts
 
-            # Leaf summaries that exist get a separate embedding.
-            summary_pairs = [(luuid, s) for luuid, _, s in leaf_records if s]
+            # Embed the rest.
+            if embed_targets:
+                texts_to_embed = [t for _, _, t, _ in embed_targets]
+                try:
+                    vecs = embed_texts(texts_to_embed)
+                except Exception as e:
+                    logger.warning("embed batch failed for %s: %s", path, e)
+                    vecs = [(None, "")] * len(embed_targets)
+                for (_, luuid, _, _), (vec, model) in zip(embed_targets, vecs):
+                    if vec is not None:
+                        write_leaf_embedding(conn, luuid, "text", vec, model)
+                        embedded_count += 1
+
+            # Leaf summaries that exist get a separate embedding. We always
+            # embed these fresh (cheap; bounded to coarse leaves) — carry-
+            # forward of summaries would mean stale labels if the summarizer
+            # prompt evolves.
+            summary_pairs = [(luuid, s) for luuid, _, s, _ in leaf_records if s]
             if summary_pairs:
                 try:
                     sum_vecs = embed_texts([s for _, s in summary_pairs])
@@ -406,8 +469,15 @@ def ingest_one_file(
                     logger.warning("leaf-summary embed batch failed: %s", e)
 
             mark_leaves_embedded(conn, [r[0] for r in leaf_records])
-        else:
-            embedded_count = 0
+
+            # Tally evolve/new for stats.
+            for _, _, _, ldiff in leaf_records:
+                if ldiff is None:
+                    carry_stats.new += 1
+                elif ldiff.kind == "evolve":
+                    carry_stats.evolve += 1
+                elif ldiff.kind == "new":
+                    carry_stats.new += 1
 
         # File-summary embedding.
         if file_summary:
@@ -434,10 +504,23 @@ def ingest_one_file(
                         or os.environ.get("M3_FILES_SUMMARY_MODEL")
                         or "unknown"
                     )
-                    for leaf_uuid, leaf_text, _ in leaf_records:
-                        # division_type is the chunker's label; not used by
-                        # the extractor today but passed through for prompt
-                        # specialization later.
+                    for leaf_uuid, leaf_text, _, ldiff in leaf_records:
+                        # Carry-forward fast-path: this leaf is identical
+                        # to the prior version's leaf and we already cloned
+                        # its facts. extraction_status is already 'ok'.
+                        # Skip re-extraction — its only effect would be
+                        # double-counting facts at LLM cost.
+                        if ldiff is not None and ldiff.kind == "carry":
+                            row = conn.execute(
+                                "SELECT extraction_status FROM leaves WHERE uuid = ?",
+                                (leaf_uuid,),
+                            ).fetchone()
+                            if row and row[0] == "ok":
+                                fact_count += conn.execute(
+                                    "SELECT COUNT(*) FROM facts WHERE leaf = ?",
+                                    (leaf_uuid,),
+                                ).fetchone()[0]
+                                continue
                         result = extract_facts_for_leaf(
                             leaf_uuid, leaf_text,
                             file_summary=file_summary,
@@ -453,7 +536,7 @@ def ingest_one_file(
                             fact_count += result.fact_count
                 else:
                     # No LLM: mark every leaf 'failed' with reason logged.
-                    for leaf_uuid, _, _ in leaf_records:
+                    for leaf_uuid, _, _, _ in leaf_records:
                         conn.execute(
                             "UPDATE leaves SET extraction_status = 'failed' "
                             "WHERE uuid = ?", (leaf_uuid,),
@@ -477,9 +560,13 @@ def ingest_one_file(
         status="superseded" if prior else "created",
         leaf_count=len(leaves),
         fact_count=fact_count,
-        chars_embedded=sum(len(t) for _, t, _ in leaf_records) if leaf_records else 0,
+        chars_embedded=sum(len(t) for _, t, _, _ in leaf_records) if leaf_records else 0,
         duration_ms=duration_ms,
         superseded_prior=superseded_prior,
+        leaves_carried=carry_stats.carry,
+        leaves_evolved=carry_stats.evolve,
+        embeds_avoided=carry_stats.embeds_avoided,
+        facts_carried=carry_stats.facts_carried,
     )
 
 
@@ -505,6 +592,32 @@ def _sha256_short(text: str) -> str:
     return _h.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _single_file_entry(path: str, *, repo_root: Optional[str] = None) -> WalkEntry:
+    """Build a WalkEntry for a single-file ingest (bypasses the directory walker).
+
+    Used when ingest_path() receives a file path rather than a directory.
+    Mirrors the per-file fields the walker would populate.
+    """
+    from .identity import filetype_for
+    abs_path = os.path.abspath(path)
+    st = os.stat(abs_path)
+    repo_root_abs = os.path.abspath(repo_root) if repo_root else os.path.dirname(abs_path)
+    try:
+        rel = os.path.relpath(abs_path, repo_root_abs)
+    except ValueError:
+        rel = None
+    ctime = getattr(st, "st_birthtime", None) or st.st_ctime
+    return WalkEntry(
+        path=abs_path,
+        repo_relative=rel,
+        filename=os.path.basename(abs_path),
+        filetype=filetype_for(abs_path),
+        size_bytes=st.st_size,
+        mtime=st.st_mtime,
+        ctime=ctime,
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Whole-directory orchestrator
 # ──────────────────────────────────────────────────────────────────────────────
@@ -520,6 +633,7 @@ def ingest_path(
     force_size: bool = False,
     record_noops: bool = False,
     extract_mode: str | None = None,
+    cli_original_path: str | None = None,
     repo_root: str | None = None,
     progress_cb=None,
     db_path: Optional[str] = None,
@@ -552,7 +666,29 @@ def ingest_path(
                           started_at=time.time(), walk_stats=walk_stats)
     corpus = corpus_id or config.FILES_DEFAULT_CORPUS
 
-    if dry_run:
+    # Single-file mode: root is a file, not a directory. The CLI
+    # original_path flag is ONLY honored in this mode — for a directory
+    # walk, sidecars (.m3meta.json) are the per-file mechanism, since
+    # a single CLI value can't sensibly cover N processed files.
+    is_single_file = os.path.isfile(root)
+    if cli_original_path and not is_single_file:
+        logger.info(
+            "ingest_path: ignoring cli_original_path=%r for directory walk; "
+            "use sidecar .m3meta.json files for per-file provenance",
+            cli_original_path,
+        )
+        cli_original_path = None
+
+    if is_single_file:
+        # Build a single WalkEntry directly — bypasses the directory walker.
+        single_entry = _single_file_entry(root, repo_root=repo_root)
+        if dry_run:
+            walk_stats.files_seen = 1
+            walk_stats.files_yielded = 1
+            result.duration_ms = int((time.perf_counter() - started) * 1000)
+            return result
+        entries_iter = iter([single_entry])
+    elif dry_run:
         for _ in walk(root, include=include, exclude=exclude,
                       max_depth=max_depth, follow_symlinks=follow_symlinks,
                       force_size=force_size, stats=walk_stats,
@@ -560,12 +696,14 @@ def ingest_path(
             pass
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         return result
+    else:
+        entries_iter = walk(root, include=include, exclude=exclude,
+                            max_depth=max_depth, follow_symlinks=follow_symlinks,
+                            force_size=force_size, stats=walk_stats,
+                            repo_root=repo_root)
 
     idx = 0
-    for entry in walk(root, include=include, exclude=exclude,
-                      max_depth=max_depth, follow_symlinks=follow_symlinks,
-                      force_size=force_size, stats=walk_stats,
-                      repo_root=repo_root):
+    for entry in entries_iter:
         idx += 1
         if idx > config.FILES_MAX_FILES_PER_INGEST:
             result.failures.append({
@@ -579,6 +717,7 @@ def ingest_path(
                 entry, run_id, corpus,
                 record_noops=record_noops,
                 extract_mode=extract_mode,
+                cli_original_path=cli_original_path,
                 db_path=db_path,
             )
         except Exception as e:
@@ -601,6 +740,10 @@ def ingest_path(
 
         result.leaves_written += fr.leaf_count
         result.facts_extracted += fr.fact_count
+        result.leaves_carried += fr.leaves_carried
+        result.leaves_evolved += fr.leaves_evolved
+        result.embeds_avoided += fr.embeds_avoided
+        result.facts_carried += fr.facts_carried
         if fr.chars_embedded:
             result.leaves_embedded += fr.leaf_count  # approximation
 

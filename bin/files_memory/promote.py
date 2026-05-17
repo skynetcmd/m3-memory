@@ -313,13 +313,22 @@ def _write_to_memory_db(
     if a caller wraps us in async, get_event_loop().run_until_complete
     would raise — fresh loop avoids that).
     """
+    # Resolve memory_write_impl. After the Phase 7+8 refactor (commit
+    # bd07525) it lives in `memory.write`; the `memory_core` shim still
+    # re-exports it for parity. Try the canonical path first, fall back
+    # to the shim — this keeps us forward-compatible without breaking on
+    # older trees.
+    memory_write_impl = None
     try:
-        # Import lazily so files_memory tests that don't have memory_core
-        # available can still load the rest of the module.
-        from memory_core import memory_write_impl  # type: ignore
-    except ImportError as e:
-        logger.error("memory_core unavailable; cannot promote: %s", e)
-        return None
+        from memory.write import memory_write_impl  # type: ignore
+    except ImportError:
+        try:
+            from memory_core import memory_write_impl  # type: ignore
+        except ImportError as e:
+            logger.error(
+                "neither memory.write nor memory_core exposes memory_write_impl: %s", e,
+            )
+            return None
 
     async def _run():
         return await memory_write_impl(
