@@ -30,7 +30,16 @@ For deletes:
 
 For irreversible PII removal use `gdpr_forget` (single-id only). Use `memory_update` for content edits / supersede notes; `memory_link` for cross-references.
 
-If an MCP tool fails with "not found," fall back to direct sqlite3 via Bash against the resolved DB path — but log this fallback in your report so the user knows the canonical path errored.
+**Direct-sqlite fallback policy:** treat as a last resort. The MCP tools are the canonical surface and almost always have what you need.
+
+- `memory_dedup` returns `{count, groups: [{a, b, title_a, title_b, score}, ...]}` — full pair IDs and titles. **No sqlite expansion needed** for the survey. Prior to 2026-05-17 it returned a bare count string; if you're remembering that old shape from training data, ignore it. The structured return is authoritative.
+- `memory_search` returns title + content + id + metadata. That's what the survey needs.
+- Fall back to direct sqlite3 via Bash ONLY when:
+  1. An MCP tool returns an error (record the error verbatim in your report), or
+  2. You need a field MCP doesn't expose (last_accessed_at, importance — currently exposed; check first), or
+  3. You need an aggregate (`SELECT type, COUNT(*) ...`) the MCP surface doesn't expose.
+
+Every sqlite query you run instead of an MCP call costs the user wait-time and counts against your tool-call cap. The 2026-05-16 sessions hit 30+ tool calls per survey because the dedup impl returned an opaque count and the agent fell back to sqlite to enumerate clusters. That bug is fixed; don't reintroduce the workaround.
 
 ## Visibility — emit progress, run bounded
 
@@ -62,15 +71,19 @@ Each `echo` line costs ~1 second of agent time. Skipping them to "save time" is 
 
 ### Tool-call cap (mandatory)
 
-PLAN mode is bounded:
-- `memory_search` ≤ 3 calls
-- `memory_dedup` ≤ 2 calls
-- Total tool calls (including Bash echoes) ≤ 25
-- Wall-clock soft budget: 5 minutes; emit `[curate-memory] phase=budget_exceeded` and exit if you hit it.
+PLAN mode is bounded — these are hard caps, not goals to approach. The 2026-05-16 baseline survey took 7+ minutes at 33 tool_uses; this cap targets <90 seconds.
+
+- `memory_search` ≤ **2** calls (one broad k=50; optionally one targeted follow-up only if a cluster pattern needs disambiguation)
+- `memory_dedup` ≤ **2** calls (one at threshold 0.95; optionally one at 0.92 if the first was empty)
+- Direct sqlite (Bash) ≤ **2** queries, and ONLY for the three justified reasons above
+- Total tool calls (including Bash echoes) ≤ **12**
+- Wall-clock soft budget: **2 minutes**; emit `[curate-memory] phase=budget_exceeded` and exit with whatever plan you have if you hit it.
+
+If you find yourself wanting to inspect each duplicate pair via individual `memory_get` calls — stop. The dedup output already contains `title_a`, `title_b`, and `score` per pair, which is enough signal for the typical "is this an obvious duplicate?" judgment. Reserve `memory_get` for pairs where you genuinely can't decide from the titles + score alone, and cap those lookups at 5.
 
 APPLY mode is bounded:
-- One MCP call per item in the structured plan; no extra exploration.
-- Total wall-clock soft budget: 10 minutes for plans up to 200 items.
+- One MCP call per **batch** in the structured plan: DELETE >5 ids → ONE `memory_delete_bulk` call. Don't loop the single-id version.
+- Total wall-clock soft budget: **30 seconds for the apply phase** for plans up to 500 items.
 
 ### No-loop self-check (mandatory)
 
@@ -78,15 +91,28 @@ If two consecutive tool calls return identical or near-identical results (same I
 
 ## PLAN mode
 
-1. **Survey scope.** Run `memory_search` with a broad query (e.g., empty string or `"*"`) and `k=50` to get a representative sample. Read titles + first 200 chars.
+Run this sequence in order. Stop as soon as you have enough signal — don't pad the survey "just to be thorough."
 
-2. **Find clusters.** Group results by likely topic. Use `memory_dedup` to surface near-duplicate pairs the system has already detected.
+1. **Heartbeat: `start`.**
 
-3. **Decide actions per cluster:**
-   - **Consolidate**: write a new memory subsuming 2+ overlapping memories, then soft-delete the originals.
-   - **Supersede**: keep the most recent / most accurate; soft-delete the rest via `gdpr_forget` (tombstone) so contradiction history is preserved.
-   - **Hard-delete**: only for unambiguous junk (test fixtures, autogen rows with no real content). Use `memory_delete`.
-   - **Leave alone**: clusters where each memory adds genuinely distinct context.
+2. **Dedup probe (primary signal).** Call `memory_dedup(threshold=0.95, dry_run=True)`. The structured result tells you everything: total count, per-pair ids/titles/scores. Read titles. Any pair where `title_a == title_b` and `score >= 0.98` is a near-certain duplicate; pairs where titles differ but score is high need a closer look.
+
+3. **Heartbeat: `dedup_done` with `n_pairs=<count>`.**
+
+4. **(Optional) Lower-threshold sweep.** If step 2 returned 0 pairs OR you suspect the store has loose-similarity duplicates (paraphrases), call `memory_dedup(threshold=0.92, dry_run=True)`. Otherwise skip.
+
+5. **(Optional) Broad survey.** Call `memory_search(query="", k=50)` ONCE only if you need topical context to classify a pair (e.g., to recognize that two same-title notes are both production-relevant vs one being a test fixture). For pure dedup work this step is usually unnecessary.
+
+6. **Heartbeat: `survey_done` with `n_memories_seen=<count>`.**
+
+7. **Decide actions per pair/cluster:**
+   - **Hard-delete**: only for unambiguous junk (test fixtures, autogen rows with no real content). Use `memory_delete` (or `memory_delete_bulk` if >5 ids).
+   - **Soft-delete the non-canonical of a duplicate pair**: pick the one with lower importance, shorter content, older `updated_at`, or non-load-bearing type. Default: keep the older one (lower UUID prefix breaks ties).
+   - **Consolidate**: write a new memory subsuming 2+ overlapping memories, then soft-delete the originals. Only when pair members carry COMPLEMENTARY content that neither fully covers alone.
+   - **Supersede**: keep the most recent; append a "supersedes <id>" note to it; do NOT delete the older copy if it's tombstone-worthy for contradiction history.
+   - **Leave alone**: pairs where each memory adds genuinely distinct context, or where importance ≥ 0.85, or `last_accessed_at` is within 7 days.
+
+8. **Heartbeat: `clustering_done` with `n_clusters=<n>`.**
 
 4. **Output the apply-prompt.** End your message with this exact structured block:
 
