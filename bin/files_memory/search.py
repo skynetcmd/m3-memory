@@ -51,6 +51,7 @@ class SearchHit:
     fts_rank: Optional[int] = None
     vec_rank: Optional[int] = None
     original_path: Optional[str] = None
+    corpus_id: Optional[str] = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -65,9 +66,32 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+def _corpus_filter_clause(
+    corpus_id: Optional[str],
+    corpora: Optional[list[str]],
+) -> tuple[str, list]:
+    """Build the SQL fragment + params for corpus filtering.
+
+    - corpora (list) takes precedence: emits `fn.corpus_id IN (?,?,...)`.
+    - else corpus_id (single string): emits `fn.corpus_id = ?`.
+    - else: empty filter.
+    Returns ("", []) when no filter applies.
+    """
+    if corpora:
+        clean = [c for c in corpora if c]
+        if not clean:
+            return ("", [])
+        placeholders = ",".join("?" * len(clean))
+        return (f" AND fn.corpus_id IN ({placeholders})", list(clean))
+    if corpus_id:
+        return (" AND fn.corpus_id = ?", [corpus_id])
+    return ("", [])
+
+
 def _fts_query(conn: sqlite3.Connection, query: str, limit: int,
                current_only: bool, corpus_id: Optional[str],
-               filetype: Optional[str]) -> list[tuple[str, float]]:
+               filetype: Optional[str],
+               corpora: Optional[list[str]] = None) -> list[tuple[str, float]]:
     """FTS5 search. Returns [(leaf_uuid, bm25_score)] in rank order.
 
     Note: bm25() returns LOWER = better; we negate so higher = better
@@ -90,9 +114,9 @@ def _fts_query(conn: sqlite3.Connection, query: str, limit: int,
     params: list = [safe]
     if current_only:
         sql += " AND l.superseded_by IS NULL AND fn.superseded_by IS NULL"
-    if corpus_id:
-        sql += " AND fn.corpus_id = ?"
-        params.append(corpus_id)
+    corpus_clause, corpus_params = _corpus_filter_clause(corpus_id, corpora)
+    sql += corpus_clause
+    params.extend(corpus_params)
     if filetype:
         sql += " AND fn.filetype = ?"
         params.append(filetype)
@@ -110,7 +134,8 @@ def _fts_query(conn: sqlite3.Connection, query: str, limit: int,
 
 def _vec_query(conn: sqlite3.Connection, query: str, limit: int,
                current_only: bool, corpus_id: Optional[str],
-               filetype: Optional[str]) -> list[tuple[str, float]]:
+               filetype: Optional[str],
+               corpora: Optional[list[str]] = None) -> list[tuple[str, float]]:
     """Vector cosine search. Returns [(leaf_uuid, cosine_score)].
 
     Embeds the query then scans the text-kind embeddings, computing
@@ -132,9 +157,9 @@ def _vec_query(conn: sqlite3.Connection, query: str, limit: int,
     params: list = [qmodel]
     if current_only:
         sql += " AND l.superseded_by IS NULL AND fn.superseded_by IS NULL"
-    if corpus_id:
-        sql += " AND fn.corpus_id = ?"
-        params.append(corpus_id)
+    corpus_clause, corpus_params = _corpus_filter_clause(corpus_id, corpora)
+    sql += corpus_clause
+    params.extend(corpus_params)
     if filetype:
         sql += " AND fn.filetype = ?"
         params.append(filetype)
@@ -178,6 +203,7 @@ def files_search(
     *,
     limit: int = 10,
     corpus_id: Optional[str] = None,
+    corpora: Optional[list[str]] = None,
     filetype: Optional[str] = None,
     include_history: bool = False,
     channel_limit: int = 50,
@@ -188,7 +214,10 @@ def files_search(
     Args:
         query: free text.
         limit: number of hits to return.
-        corpus_id: scope filter.
+        corpus_id: single-corpus scope filter.
+        corpora: list of corpus IDs to fan out across. When set, overrides
+            corpus_id; results from all listed corpora are fused into one
+            ranked list.
         filetype: filter by file_nodes.filetype.
         include_history: if False (default), filter superseded leaves
             and file_nodes out.
@@ -202,8 +231,8 @@ def files_search(
     current_only = not include_history
     with _db(db_path) as conn:
         conn.row_factory = sqlite3.Row
-        fts = _fts_query(conn, query, channel_limit, current_only, corpus_id, filetype)
-        vec = _vec_query(conn, query, channel_limit, current_only, corpus_id, filetype)
+        fts = _fts_query(conn, query, channel_limit, current_only, corpus_id, filetype, corpora=corpora)
+        vec = _vec_query(conn, query, channel_limit, current_only, corpus_id, filetype, corpora=corpora)
         fused = _rrf_fuse(fts, vec)
 
         if not fused:
@@ -218,7 +247,8 @@ def files_search(
         rows = conn.execute(
             f"SELECT l.uuid AS leaf_uuid, l.file_node, l.division_type, "
             f"  l.division_id, l.division_label, l.text, "
-            f"  fn.filename, fn.path_absolute AS path, fn.metadata AS fn_metadata "
+            f"  fn.filename, fn.path_absolute AS path, fn.metadata AS fn_metadata, "
+            f"  fn.corpus_id AS corpus_id "
             f"FROM leaves l "
             f"JOIN file_nodes fn ON fn.uuid = l.file_node "
             f"WHERE l.uuid IN ({placeholders})",
@@ -245,6 +275,7 @@ def files_search(
                 fts_rank=meta["fts_rank"],
                 vec_rank=meta["vec_rank"],
                 original_path=original_path_for_metadata(row["fn_metadata"]),
+                corpus_id=row["corpus_id"],
             ))
 
         # Promotion-suggestion bookkeeping: record a hit for every fact
