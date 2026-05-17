@@ -42,11 +42,26 @@ SNAPSHOT_PATH = (
 
 
 def _classify_symbol(obj) -> str:
-    """Return a stable label for what kind of symbol this is."""
+    """Return a stable label for what kind of symbol this is.
+
+    `functools._lru_cache_wrapper` instances (produced by `@lru_cache`)
+    fail `inspect.isfunction` but ARE callable wrappers around a real
+    function. Treat them as functions so adding `@lru_cache` to an
+    existing helper doesn't trip parity as a function -> constant drift.
+    """
     if inspect.iscoroutinefunction(obj):
         return "async_function"
     if inspect.isfunction(obj):
         return "function"
+    # lru_cache wraps the original in functools._lru_cache_wrapper.
+    # Detect via the canonical attribute `__wrapped__` + callable + non-class
+    # rather than importing the private class, which moves across versions.
+    if callable(obj) and hasattr(obj, "__wrapped__") and not inspect.isclass(obj):
+        wrapped = obj.__wrapped__
+        if inspect.iscoroutinefunction(wrapped):
+            return "async_function"
+        if inspect.isfunction(wrapped):
+            return "function"
     if inspect.isclass(obj):
         return "class"
     if inspect.isbuiltin(obj):
