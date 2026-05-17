@@ -36,12 +36,32 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 # Schema bootstrap helper
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _skip_migrations_for_template_db(monkeypatch):
+    """Synthesize the post-v031 schema (via conftest's template) and tell
+    `memory.db._ensure_sync_tables` to skip the in-test migration subprocess.
+
+    The template is already at HEAD migrations, so re-running them inside
+    the test process is wasted work that also tends to fail when the test
+    DB lives in tmp (paths differ from the backup-dir defaults).
+    """
+    monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
+
+
 def _create_entity_graph_schema(db_path):
     """Create all tables needed for entity-graph tests.
 
-    Copies the fact_enriched schema verbatim, then adds the 4 entity tables
-    exactly as defined in memory/migrations/024_entity_graph.up.sql.
+    Uses conftest's `create_full_main_schema` (which copies the
+    session-scoped template DB built from migrations) to get the
+    post-v031 canonical layout. The entity-graph tables are part of
+    that layout (migrations 024_entity_graph onward), so no
+    test-specific DDL is needed.
     """
+    from conftest import create_full_main_schema
+    create_full_main_schema(db_path)
+    return  # template already has every table the tests need
+    # Legacy synthetic schema kept below as a fallback if the template
+    # build ever breaks — unreachable in normal runs.
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -1307,7 +1327,9 @@ async def test_extractor_validates_invalid_entity_type(monkeypatch, tmp_path, ca
 
     mid = _insert_memory(db_path, content="SomeEntity is here")
 
-    with caplog.at_level(logging.DEBUG, logger="memory_core"):
+    # Post Phase-7+8 refactor: the rejection-log logger moved from
+    # `memory_core` to `memory.entity` along with the extractor body.
+    with caplog.at_level(logging.DEBUG, logger="memory.entity"):
         await memory_core._run_entity_extractor(mid, "SomeEntity is here", bad_type_extractor)
 
     with sqlite3.connect(str(db_path)) as conn:
@@ -1355,7 +1377,8 @@ async def test_extractor_validates_invalid_predicate(monkeypatch, tmp_path, capl
 
     mid = _insert_memory(db_path, content="Alice and Bob are connected")
 
-    with caplog.at_level(logging.DEBUG, logger="memory_core"):
+    # Post Phase-7+8 refactor: logger name moved from "memory_core" to "memory.entity".
+    with caplog.at_level(logging.DEBUG, logger="memory.entity"):
         await memory_core._run_entity_extractor(mid, "Alice and Bob are connected", bad_predicate_extractor)
 
     with sqlite3.connect(str(db_path)) as conn:
