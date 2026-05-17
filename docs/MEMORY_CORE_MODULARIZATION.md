@@ -146,35 +146,74 @@ during Phase 1 by running the bridge test before/after.
 
 ## Process-loop and reliability findings
 
-To apply inline during extraction.
+Status as of 2026-05-17 audit pass (commit pending).
 
 ### Embed-side (Phase 3)
 - **A. `_embed_many` cache lookup serializes on DB.** Separate "what's cached"
   bulk SQL pass from "embed the misses" batched call. 2-3× on warm cache.
-- **B. `_get_embed_client` lazy init.** Add `asyncio.Lock` to prevent
-  concurrent-first-call doubled clients. Reliability fix.
+  _Status: open. Worth doing — non-trivial refactor (~30 min)._
+- **B. `_get_embed_client` lazy init.** Plan flagged adding `asyncio.Lock`
+  to prevent concurrent-first-call doubled clients.
+  _Status: verified non-issue. `bin/memory/embed.py:210-244` already uses
+  `threading.Lock` with double-checked locking. `asyncio.Lock` would be
+  the WRONG primitive (only protects against tasks on one event loop,
+  not threads). Current impl is strictly better. No change._
 - **C. Dense-recovery second-level retries** capped at depth 2. Already
   correctly skipped — don't add complexity until evidence.
+  _Status: confirmed in `bin/memory/embed.py`. No change._
 - **D. `_embed` cascade catches `Exception` too broadly.** Tag exceptions
   (`BackendError` vs `ConnectionError`) for debuggability.
+  _Status: open. Quality-of-error fix, not a correctness issue._
 - **E. HTTP fallback connection reuse** — verify with existing smoke test.
+  _Status: open. Worth running `tests/capture_migration_baseline.py`
+  with `M3_EMBED_FALLBACK_URL` set and inspecting connection counts._
 
 ### Search-side (Phase 4)
-- **F. `_apply_rerank` batches per-row reranker calls.** If
-  `sentence-transformers/CrossEncoder`, batch via `model.predict(pairs)`.
-  3-10× speedup if applicable.
-- **G. `_query_title_overlap` recomputes query token set per row.** Two
-  forms exist; audit callers; replace inefficient form.
-- **H. `_trim_by_elbow` may have O(n²) accidental slice.** Verify; if true,
-  ~5-min fix.
+- **F. `_apply_rerank` batches per-row reranker calls.**
+  _Status: verified already batched. `bin/memory/search.py:521` calls
+  `reranker.predict(pairs, ...)` with the full pair list (CrossEncoder's
+  `.predict()` is internally SIMD-batched by sentence-transformers).
+  No change._
+- **G. `_query_title_overlap` recomputes query token set per row.**
+  _Status: verified already fixed. The hot loop at
+  `bin/memory/search.py:1087-1095` computes `q_title_set =
+  _query_title_token_set(query)` once and calls
+  `_title_overlap_from_qset(q_title_set, ...)` inside the row loop. The
+  slow single-call form `_query_title_overlap` is kept only for
+  back-compat with non-hot callers. No change in the hot path._
+- **H. `_trim_by_elbow` may have O(n²) accidental slice.**
+  _Status: verified non-issue. `bin/memory/search.py:274-299` is O(n):
+  one list-comp over adjacent diffs, one sum, one linear scan. No
+  nested slicing. The plan's "may have" was speculative; reading the
+  code confirms it's clean. No change._
 
 ### Cross-cutting
 - **J. `_lazy_init` race condition** under concurrent async first-call.
-  Add `asyncio.Lock` for cleanliness.
+  _Status: verified non-issue (same reasoning as B). `bin/memory/db.py:226-241`
+  uses `threading.Lock` with `key in _initialized_dbs` check. Correct.
+  No change._
 - **K. Telemetry counter writes** unlocked. Future-proof for free-threaded
   Python (PEP 703).
+  _Status: open. Defer until free-threaded Python is the runtime
+  default — premature optimization today._
 - **L. Embedder failure circuit-breaker** is per-call not per-backend. Cache
   failure for N seconds to prevent slow-failure retry storms.
+  _Status: open. Worth doing if HTTP fallback storms become a real
+  problem; no evidence yet._
+
+### lru_cache pass (2026-05-17)
+- `_compile_fts_query` — was already lru-cached (`maxsize=2048`) since
+  Phase 2. No change.
+- `_query_title_token_set` — added `@lru_cache(maxsize=1024)`. Frozenset
+  return preserves identity across cache hits so callers can use `is`
+  if needed.
+- `_content_hash` — added `@lru_cache(maxsize=512)`. Caches sha256 of
+  augmented embed text; hit rate is high during bulk re-embed and
+  chatlog drain where the same content is re-hashed.
+- Parity-test classifier updated: `functools._lru_cache_wrapper` objects
+  now classify as `function` (via `__wrapped__` introspection) instead
+  of falling through to `constant`. Without this fix, adding `@lru_cache`
+  to a helper would falsely flag as a function→constant drift.
 
 ## Rust extraction evaluation
 
