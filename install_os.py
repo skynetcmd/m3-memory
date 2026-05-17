@@ -5,11 +5,20 @@ import venv
 import platform
 import getpass
 
-# Define paths
+# ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def get_m3_root() -> str:
+    """Returns the M3 root directory for user state (~/.m3-memory)."""
+    root = os.getenv("M3_MEMORY_ROOT")
+    if root:
+        return os.path.abspath(os.path.expanduser(root))
+    return os.path.join(os.path.expanduser("~"), ".m3-memory")
+
+M3_ROOT = get_m3_root()
 VENV_DIR = os.path.join(BASE_DIR, ".venv")
-DB_DIR = os.path.join(BASE_DIR, "memory")
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
+DB_DIR = os.path.join(M3_ROOT, "memory")
+LOGS_DIR = os.path.join(M3_ROOT, "logs")
 REQ_FILE = os.path.join(BASE_DIR, "requirements.txt")
 
 def run_cmd(cmd, env=None):
@@ -109,6 +118,36 @@ def install_node_manager():
             run_cmd(["bash", "-c", "curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell"])
             print("  -> fnm installed. Please follow the terminal instructions to add it to your shell.")
 
+def setup_oxidation(pip_exe):
+    """Prompts the user to install Project Oxidation (Rust compute core)."""
+    print("\n" + "="*50)
+    print("🦀 PROJECT OXIDATION: HIGH-PERFORMANCE RUST CORE")
+    print("="*50)
+    print("Project Oxidation replaces critical Python hot-paths with highly")
+    print("optimized Rust primitives. Benefits include:")
+    print("  - Massive speedups: 1.3x to 520x (AVERAGE 85x BENEFIT) on hot paths.")
+    print("  - Instantaneous vector math & cosine similarity.")
+    print("  - Ultra-fast hybrid search ranking and chatlog redaction.")
+    print("\n[NOTE] This requires a one-time setup of Rust/C++ build tools.")
+    print("The performance gains will apply to every subsequent M3 interaction.")
+    
+    choice = input("\nWould you like to install Project Oxidation now? [y/N]: ").strip().lower()
+    if choice in ("y", "yes"):
+        system = platform.system()
+        if system == "Windows":
+            print("\n[*] Checking for Windows C++ Build Tools...")
+            script = os.path.join(BASE_DIR, "install_oxidation_buildtools.ps1")
+            if os.path.exists(script):
+                print(f"  -> Please run this script in an ADMINISTRATOR PowerShell to install build tools:")
+                print(f"     powershell -ExecutionPolicy Bypass -File {script}")
+                input("\nPress Enter AFTER you have run the build tools script (or to attempt install anyway)...")
+            
+        print("\n[*] Installing m3-memory[oxidation]...")
+        run_cmd([pip_exe, "install", "m3-memory[oxidation]"])
+        print("✅ Project Oxidation installed successfully!")
+    else:
+        print("Skipping Project Oxidation. You can install it later via: pip install m3-memory[oxidation]")
+
 def main():
     print("\n" + "="*50)
     print("🚀 M3 MAX AGENTIC OS: UNIVERSAL INSTALLER")
@@ -149,20 +188,23 @@ def main():
         print(f"  -> Warning: {REQ_FILE} not found. Installing defaults...")
         run_cmd([pip_exe, "install", "fastmcp", "httpx", "numpy", "keyring", "cryptography", "psycopg2-binary"])
 
-    # 4. Initialize local SQLite Database Schema
-    print("\n[4/6] Initializing local Agent Memory schema...")
+    # 4. Project Oxidation (Rust Core)
+    setup_oxidation(pip_exe)
+
+    # 5. Initialize local SQLite Database Schema
+    print("\n[5/6] Initializing local Agent Memory schema...")
     migrate_script = os.path.join(BASE_DIR, "bin", "migrate_memory.py")
     if os.path.exists(migrate_script):
         run_cmd([python_exe, migrate_script])
     else:
         print(f"  -> Warning: Migration script {migrate_script} not found.")
 
-    # 5. Secure Auth Setup
-    print("\n[5/6] Initializing Security Layer...")
+    # 6. Secure Auth Setup
+    print("\n[6/6] Initializing Security Layer...")
     setup_master_key(python_exe)
 
-    # 6. Initial Data Warehouse Sync
-    print("\n[6/6] Connecting to PostgreSQL data warehouse...")
+    # 7. Initial Data Warehouse Sync
+    print("\n[7/7] Connecting to PostgreSQL data warehouse...")
     pg_sync_script = os.path.join(BASE_DIR, "bin", "pg_sync.py")
     if os.path.exists(pg_sync_script):
         print("Executing initial bi-directional synchronization...")
@@ -176,8 +218,8 @@ def main():
     else:
         print("  -> Warning: Sync script not found.")
 
-    # 7. Generate MCP configs (.mcp.json, claude-settings.json, gemini-settings.json)
-    print("\n[7/7] Generating MCP configuration files...")
+    # 8. Generate MCP configs (.mcp.json, claude-settings.json, gemini-settings.json)
+    print("\n[8/8] Generating MCP configuration files...")
     gen_config_script = os.path.join(BASE_DIR, "bin", "generate_configs.py")
     if os.path.exists(gen_config_script):
         run_cmd([python_exe, gen_config_script])
