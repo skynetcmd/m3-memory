@@ -41,11 +41,13 @@ class IndexEntry:
     date_modified: str
     summary: Optional[str]
     original_path: Optional[str] = None
+    corpus_id: Optional[str] = None
 
 
 def files_index(
     *,
     corpus_id: Optional[str] = None,
+    corpora: Optional[list[str]] = None,
     filetype: Optional[str] = None,
     directory: Optional[str] = None,
     filename_glob: Optional[str] = None,
@@ -56,7 +58,8 @@ def files_index(
     """Return file-level summaries for triage.
 
     Args:
-        corpus_id: scope filter.
+        corpus_id: single-corpus scope filter.
+        corpora: list of corpus IDs to fan out across. Overrides corpus_id.
         filetype: filter to one filetype.
         directory: filter to file_nodes whose path_absolute starts with this.
         filename_glob: SQL GLOB pattern over filename.
@@ -65,13 +68,19 @@ def files_index(
     """
     sql_parts = [
         "SELECT uuid, filename, filetype, path_absolute, version_label, "
-        "       date_modified, file_summary, metadata "
+        "       date_modified, file_summary, metadata, corpus_id "
         "FROM file_nodes WHERE 1 = 1"
     ]
     params: list = []
     if not include_history:
         sql_parts.append("AND superseded_by IS NULL")
-    if corpus_id:
+    if corpora:
+        clean = [c for c in corpora if c]
+        if clean:
+            placeholders = ",".join("?" * len(clean))
+            sql_parts.append(f"AND corpus_id IN ({placeholders})")
+            params.extend(clean)
+    elif corpus_id:
         sql_parts.append("AND corpus_id = ?")
         params.append(corpus_id)
     if filetype:
@@ -106,6 +115,7 @@ def files_index(
             date_modified=r["date_modified"],
             summary=r["file_summary"],
             original_path=original_path_for_metadata(r["metadata"]),
+            corpus_id=r["corpus_id"],
         ))
     return out
 
