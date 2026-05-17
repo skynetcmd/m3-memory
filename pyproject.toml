@@ -72,6 +72,7 @@ dependencies = [
     "python-dotenv>=1.2.2,<2",
     "PyYAML>=6.0.3,<7",
     "psutil>=7.2.2,<8",
+    "tqdm>=4.67.3,<5",
 ]
 
 [project.optional-dependencies]
