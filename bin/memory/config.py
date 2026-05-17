@@ -161,14 +161,24 @@ SHORT_TURN_THRESHOLD: int = int(os.environ.get("SHORT_TURN_THRESHOLD", "20"))
 TITLE_MATCH_BOOST: float = float(os.environ.get("TITLE_MATCH_BOOST", "0.15"))
 IMPORTANCE_WEIGHT: float = float(os.environ.get("IMPORTANCE_WEIGHT", "0.15"))
 
-# Trim-by-elbow (MMR post-filter) params
-ELBOW_MIN_INPUT: int = 5
-ELBOW_MIN_RETURN: int = 3
-ELBOW_ABS_THRESHOLD: float = 0.08
+# Trim-by-elbow (MMR post-filter) params. Pre-Phase-7+8 the safety knobs
+# defaulted to 20/8/0.05 (scale-aware, prevented the "1-result collapse"
+# at large pools); the refactor lowered them to 5/3/0.08, which made the
+# trimmer over-aggressive on small pools. Restored.
+ELBOW_MIN_INPUT: int = int(os.environ.get("M3_ELBOW_MIN_INPUT", "20"))
+ELBOW_MIN_RETURN: int = int(os.environ.get("M3_ELBOW_MIN_RETURN", "8"))
+ELBOW_ABS_THRESHOLD: float = float(os.environ.get("M3_ELBOW_ABS_THRESHOLD", "0.05"))
 
 # Routed-expansion params
-EXPANSION_DISPLACEMENT_MARGIN: float = 0.05
-EXPANSION_PROTECTED_RANKS: int = 5
+# Expansion-displacement guard. Engine invariant, not a per-call tuning knob.
+# Pre-Phase-7+8 default was 1.75x; the refactor accidentally changed this to
+# 0.05 which is <= 1.0, disabling the guard entirely. Restored.
+EXPANSION_DISPLACEMENT_MARGIN: float = float(
+    os.environ.get("M3_EXPANSION_DISPLACEMENT_MARGIN", "2.0")
+)
+EXPANSION_PROTECTED_RANKS: int = int(
+    os.environ.get("M3_EXPANSION_PROTECTED_RANKS", "3")
+)
 
 # Entity stoplist (case-insensitive) for BFS seeding/expansion
 ENTITY_SEED_STOPLIST: frozenset[str] = frozenset(
