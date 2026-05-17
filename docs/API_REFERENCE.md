@@ -1,6 +1,6 @@
 # M3 Memory: API Reference
 
-All 74 MCP tools exposed by the memory bridge (`bin/memory_bridge.py`) and the MCP proxy (`bin/mcp_proxy.py`). For behavioral rules and usage guidance, see [AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md).
+All 96 MCP tools exposed by the memory bridge (`bin/memory_bridge.py`) and the MCP proxy (`bin/mcp_proxy.py`). The most recent additions are the 21 `files_*` tools that ship the files-memory layer (directory ingestion, hierarchical chunking, ascension, staleness review, multi-corpus management). For behavioral rules and usage guidance, see [AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md).
 
 ---
 

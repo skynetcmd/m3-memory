@@ -155,7 +155,7 @@ def add_database_arg(parser: argparse.ArgumentParser) -> None:
 
 class M3Context:
     def __init__(self, db_path: Optional[str] = None):
-        self.m3_memory_root = os.getenv("M3_MEMORY_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.m3_memory_root = get_m3_root()
         dotenv_path = os.path.join(self.m3_memory_root, ".env")
         if os.path.exists(dotenv_path):
             load_dotenv(dotenv_path)

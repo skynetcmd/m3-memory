@@ -483,6 +483,19 @@ def _run_main_migrations(bridge: Path) -> Optional[str]:
         return f"[!] main DB init failed: {last}"
 
 
+def _run_os_install(bridge: Path) -> Optional[str]:
+    """Execute the OS-specific installer (install_os.py) in the payload root."""
+    install_script = bridge.parent.parent / "install_os.py"
+    if not install_script.is_file():
+        return None
+
+    # Run using the same python we're currently in
+    try:
+        subprocess.run([sys.executable, str(install_script)], check=True)
+        return "OS-specific environment setup complete."
+    except subprocess.CalledProcessError as e:
+        return f"OS setup failed (code {e.returncode}). Run it manually from {install_script}."
+
 def _post_install(
     bridge: Path,
     interactive: bool,
@@ -500,6 +513,7 @@ def _post_install(
     # fine, which is a common outcome on well-configured boxes).
     messages = [
         m for m in (
+            _run_os_install(bridge),
             _run_main_migrations(bridge),
             _register_gemini_mcp(),
             _sqlite3_cli_hint(),
