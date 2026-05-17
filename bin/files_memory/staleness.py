@@ -91,6 +91,23 @@ class DriftedPromotion:
 
 
 @dataclass
+class RenameCandidate:
+    """A pair of (missing, new) files that look like a rename / move.
+
+    Phase 3.4: detected by exact sha256 match between an on-disk file
+    that has never been ingested and a file_node whose path is no
+    longer on disk. Always user-confirmed — `files_link_rename` does
+    the explicit linking.
+    """
+    missing_file_node_uuid: str
+    missing_path: str
+    new_path: str
+    content_sha256: str
+    confidence: str  # 'exact_sha' for now; phase 4 may add 'fuzzy'
+    suggested_action: str = "link"
+
+
+@dataclass
 class StalenessReport:
     """Full review output."""
     directory: Optional[str]
@@ -101,6 +118,7 @@ class StalenessReport:
     new: list[NewFile] = field(default_factory=list)
     failed_extraction: list[FailedExtraction] = field(default_factory=list)
     drifted_promotions: list[DriftedPromotion] = field(default_factory=list)
+    rename_candidates: list[RenameCandidate] = field(default_factory=list)
     scanned_disk_files: int = 0
     scanned_db_files: int = 0
     duration_ms: int = 0
@@ -115,6 +133,7 @@ def files_staleness_review(
     corpus_id: Optional[str] = None,
     include_failed_extraction: bool = True,
     include_drifted_promotions: bool = True,
+    include_rename_candidates: bool = True,
     rehash: bool = True,
     db_path: Optional[str] = None,
 ) -> StalenessReport:
@@ -311,8 +330,134 @@ def files_staleness_review(
                     reason=r["reason"],
                 ))
 
+        # 7. Rename heuristic. Pair every `missing` file with a `new` file
+        #    whose on-disk content_sha256 matches. Exact match only; never
+        #    auto-link. User confirms via files_link_rename.
+        if include_rename_candidates and report.missing and report.new:
+            # Index missing files by their (DB-recorded) sha.
+            missing_by_sha: dict[str, MissingFile] = {}
+            for m in report.missing:
+                row = conn.execute(
+                    "SELECT content_sha256 FROM file_nodes WHERE uuid = ?",
+                    (m.file_node_uuid,),
+                ).fetchone()
+                if row:
+                    missing_by_sha[row["content_sha256"]] = m
+
+            # Hash each new file once; match against the missing set.
+            seen_missing: set[str] = set()
+            for n in report.new:
+                try:
+                    sha = file_content_sha256(n.path)
+                except OSError as e:
+                    logger.debug("rename: hash failed for %s: %s", n.path, e)
+                    continue
+                m = missing_by_sha.get(sha)
+                if m is None or m.file_node_uuid in seen_missing:
+                    continue
+                seen_missing.add(m.file_node_uuid)
+                report.rename_candidates.append(RenameCandidate(
+                    missing_file_node_uuid=m.file_node_uuid,
+                    missing_path=m.path,
+                    new_path=n.path,
+                    content_sha256=sha,
+                    confidence="exact_sha",
+                ))
+
     report.duration_ms = int((time.perf_counter() - t0) * 1000)
     return report
+
+
+def link_rename(
+    missing_file_node_uuid: str,
+    new_path: str,
+    *,
+    expect_sha256: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> dict:
+    """Re-point an existing file_node at a new path (rename / move).
+
+    NOT a supersession — the content_sha256 stays identical. The file_node's
+    path_absolute is updated, paths_seen is appended with the old path,
+    metadata records the rename event. Idempotent: calling with the same
+    new_path twice is a no-op (path_absolute already matches).
+
+    Args:
+        missing_file_node_uuid: the file_node whose path is being updated.
+        new_path: the new on-disk location.
+        expect_sha256: if set, the new file's sha256 MUST match. Defends
+            against the user pointing at the wrong file.
+        db_path: target files.db.
+    """
+    import json as _json
+    new_abs = os.path.abspath(new_path)
+    if not os.path.isfile(new_abs):
+        raise FileNotFoundError(f"new_path is not a file: {new_abs}")
+
+    actual_sha = file_content_sha256(new_abs)
+    if expect_sha256 and actual_sha != expect_sha256:
+        raise ValueError(
+            f"sha mismatch: expected {expect_sha256!r}, got {actual_sha!r}"
+        )
+
+    with _db(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT uuid, path_absolute, content_sha256, paths_seen, metadata "
+            "FROM file_nodes WHERE uuid = ?",
+            (missing_file_node_uuid,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no file_node {missing_file_node_uuid!r}")
+        if row["content_sha256"] != actual_sha:
+            raise ValueError(
+                f"file_node content_sha256 differs from on-disk sha; "
+                f"cannot link a rename (content has changed too). "
+                f"Re-ingest the file instead, which will properly supersede."
+            )
+        if row["path_absolute"] == new_abs:
+            return {
+                "file_node_uuid": missing_file_node_uuid,
+                "action": "noop",
+                "path": new_abs,
+            }
+
+        # Build the updated paths_seen list (prepend new, keep old).
+        try:
+            paths_seen = _json.loads(row["paths_seen"] or "[]")
+        except (ValueError, TypeError):
+            paths_seen = []
+        if row["path_absolute"] not in paths_seen:
+            paths_seen.append(row["path_absolute"])
+        paths_seen = [new_abs] + [p for p in paths_seen if p != new_abs]
+
+        # Annotate metadata with the rename event.
+        try:
+            md = _json.loads(row["metadata"] or "{}")
+        except (ValueError, TypeError):
+            md = {}
+        renames = md.get("rename_history") or []
+        import datetime as _dt
+        renames.append({
+            "from": row["path_absolute"],
+            "to": new_abs,
+            "at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "method": "files_link_rename",
+        })
+        md["rename_history"] = renames
+
+        conn.execute(
+            "UPDATE file_nodes SET path_absolute = ?, paths_seen = ?, metadata = ? "
+            "WHERE uuid = ?",
+            (new_abs, _json.dumps(paths_seen), _json.dumps(md), missing_file_node_uuid),
+        )
+
+    return {
+        "file_node_uuid": missing_file_node_uuid,
+        "action": "linked",
+        "old_path": row["path_absolute"],
+        "new_path": new_abs,
+    }
 
 
 def _fact_and_promotion_counts(conn: sqlite3.Connection, file_node_uuid: str) -> tuple[int, int]:
