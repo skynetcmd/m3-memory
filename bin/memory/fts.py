@@ -115,11 +115,19 @@ def _augment_title_with_role(title: str, metadata: str | dict | None) -> str:
     return f"[{role}] {t}".strip()
 
 
+@lru_cache(maxsize=1024)
 def _query_title_token_set(query: str) -> frozenset[str]:
     """Tokenize a query into the set used for title-overlap scoring.
 
-    Hoisted out of `_query_title_overlap` so callers in a hot loop can compute
-    it once and reuse it across many titles. Returns frozenset for safe sharing.
+    Hoisted out of `_query_title_overlap` so callers in a hot loop can
+    compute it once and reuse it across many titles. Returns frozenset
+    for safe sharing.
+
+    lru-cached at 1024 entries: searches frequently repeat the same query
+    (bench harnesses, redo-typed-query flows, paginated search), and
+    tokenization is pure-Python regex+split work — cache hit avoids it
+    entirely. Frozenset return makes the cached value safe to share
+    across concurrent callers.
     """
     if not query:
         return frozenset()
