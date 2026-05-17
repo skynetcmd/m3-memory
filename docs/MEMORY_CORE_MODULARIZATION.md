@@ -149,9 +149,15 @@ during Phase 1 by running the bridge test before/after.
 Status as of 2026-05-17 audit pass (commit pending).
 
 ### Embed-side (Phase 3)
-- **A. `_embed_many` cache lookup serializes on DB.** Separate "what's cached"
-  bulk SQL pass from "embed the misses" batched call. 2-3× on warm cache.
-  _Status: open. Worth doing — non-trivial refactor (~30 min)._
+- **A. `_embed_many` cache lookup serializes on DB.** Plan claimed the
+  cache lookup was per-row.
+  _Status: verified false positive — `bin/memory/embed.py:521-535` was
+  already a single batched `IN (?,?,...)` query before this audit. A
+  200-hash lookup measures 3 ms vs ~200 ms for a hypothetical
+  per-row form. Tangential improvement applied: the lookup now chunks
+  at 500 hashes to stay under SQLite's `SQLITE_MAX_VARIABLE_NUMBER`
+  (32 766 on modern builds, 999 on older), preventing a future
+  50k-text bulk write from hitting the cap._
 - **B. `_get_embed_client` lazy init.** Plan flagged adding `asyncio.Lock`
   to prevent concurrent-first-call doubled clients.
   _Status: verified non-issue. `bin/memory/embed.py:210-244` already uses
@@ -163,10 +169,24 @@ Status as of 2026-05-17 audit pass (commit pending).
   _Status: confirmed in `bin/memory/embed.py`. No change._
 - **D. `_embed` cascade catches `Exception` too broadly.** Tag exceptions
   (`BackendError` vs `ConnectionError`) for debuggability.
-  _Status: open. Quality-of-error fix, not a correctness issue._
+  _Status: done. Added `EmbedError` base + `EmbeddedBackendError`,
+  `EmbedFallbackError`, `EmbedPrimaryError`, `EmbedSemaphoreTimeout`
+  in `bin/memory/embed.py`. Each tier of the cascade wraps the caught
+  Exception in the appropriate typed class and surfaces the type name
+  in the log line (`EmbedFallbackError: http://...: connection refused`).
+  Cascade contract unchanged — callers still see `(None, model)` on
+  total failure. Classes are public via the memory_core shim
+  re-export so downstream code can `except EmbedPrimaryError` if it
+  ever wants tier-specific reactions._
 - **E. HTTP fallback connection reuse** — verify with existing smoke test.
-  _Status: open. Worth running `tests/capture_migration_baseline.py`
-  with `M3_EMBED_FALLBACK_URL` set and inspecting connection counts._
+  _Status: verified working. `bin/memory/embed.py:210-261` returns a
+  process-wide `httpx.AsyncClient` singleton with `max_keepalive_connections=16`,
+  `keepalive_expiry=60s`. All three HTTP paths (CPU fallback, primary,
+  bulk) call `_get_embed_client()` and share the same pool. Runtime
+  verification: 8 sequential GETs to a known endpoint show
+  `pool_conns` steady at 1, latency 7.1 ms → 0.6 ms after the first
+  request (TCP+TLS handshake amortised). If reuse were broken,
+  `pool_conns` would climb and latency would stay flat._
 
 ### Search-side (Phase 4)
 - **F. `_apply_rerank` batches per-row reranker calls.**
