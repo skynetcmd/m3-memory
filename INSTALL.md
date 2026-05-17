@@ -45,9 +45,7 @@ sudo apt update && sudo apt install -y pipx python3-venv git sqlite3 curl
 pipx ensurepath
 exec $SHELL -l                        # pick up ~/.local/bin in PATH
 pipx install m3-memory
-mcp-memory install-m3 --cognitive-loop --capture-mode both
-mcp-memory install-embedder           # optional: self-contained local embedder
-mcp-memory doctor                     # verify
+m3 setup                              # one-command wizard — install + agent wiring + embedder
 ```
 
 ### macOS
@@ -57,9 +55,7 @@ brew install pipx git sqlite          # python3 ships; pipx isolates the install
 pipx ensurepath
 exec $SHELL -l
 pipx install m3-memory
-mcp-memory install-m3 --capture-mode both
-mcp-memory install-embedder           # optional: self-contained local embedder
-mcp-memory doctor
+m3 setup
 ```
 
 ### Windows 11
@@ -67,9 +63,7 @@ mcp-memory doctor
 ```powershell
 winget install Python.Python.3.12 Git.Git SQLite.SQLite
 pip install m3-memory
-mcp-memory install-m3 --capture-mode both
-mcp-memory install-embedder           # optional: self-contained local embedder
-mcp-memory doctor
+m3 setup
 ```
 
 ### Older Linux (no PEP 668)
@@ -77,9 +71,15 @@ mcp-memory doctor
 ```bash
 sudo yum install -y python3-pip git sqlite       # or apt on pre-Bookworm
 pip install --user m3-memory
-mcp-memory install-m3 --capture-mode both
-mcp-memory doctor
+m3 setup
 ```
+
+`m3 setup` is the recommended path. It detects your agents (Claude Code,
+Gemini CLI, OpenCode, OpenClaw), asks a few questions, then drives every
+install step end-to-end: install-m3, sovereign CPU embedder, per-agent MCP
+wiring, chatlog hooks, and a final `doctor` verification. Power users can
+still run each step manually with `m3 install-m3`, `m3 embedder install`,
+etc. — see `m3 --help`.
 
 If the TL;DR worked, stop here. The rest of this file explains why and what
 gets installed.
@@ -149,7 +149,9 @@ step is additive and idempotent — safe to re-run via `mcp-memory update`:
    exists and the line isn't already there. Fixes `gemini` being missing from
    cron and non-login sshd shells. No-op on Windows.
 4. **Interactive prompts** (TTY only):
-   - LLM endpoint: LM Studio (:1234), Ollama (:11434), or probe both.
+   - LLM endpoint: probe local OpenAI-compatible servers (Ollama :11434 etc.),
+     or pin a custom URL. m3's own embedder is sovereign-by-default and runs
+     on :8082; this endpoint is only for *generation* (enrichment, SLM passes).
    - Chatlog capture hooks: both, PreCompact-only, Stop-only, or none.
 
 All four are skippable:
@@ -233,8 +235,8 @@ Quick installers for each OS:
 - [docs/install_macos.md](docs/install_macos.md) — `curl … | bash` via Homebrew
 - [docs/install_linux.md](docs/install_linux.md) — `curl … | bash` (apt / dnf / pacman / zypper / apk)
 
-Full homelab walkthroughs covering optional Postgres + ChromaDB + LM Studio
-wiring (not required for a local-only setup):
+Full homelab walkthroughs covering optional Postgres + ChromaDB + external
+generation endpoints (not required for a local-only setup):
 
 - [docs/install_windows_homelab.md](docs/install_windows_homelab.md)
 - [docs/install_macos_homelab.md](docs/install_macos_homelab.md)

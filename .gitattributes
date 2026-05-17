@@ -13,5 +13,11 @@
 *.jpeg     binary
 *.ico      binary
 *.gguf     binary
+
+# GGUF model assets under _assets/models/ are tracked via Git LFS — they're
+# hundreds of MB each. Cloning without LFS yields a small pointer file;
+# `git lfs pull` materializes the real bytes. `m3 embedder install` detects
+# unmaterialized pointers and prints actionable guidance.
+_assets/models/*.gguf filter=lfs diff=lfs merge=lfs -text
 *.tar.gz   binary
 *.zip      binary
