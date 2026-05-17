@@ -32,7 +32,13 @@ logger = logging.getLogger("files_memory.search")
 
 @dataclass
 class SearchHit:
-    """One ranked result from files_search."""
+    """One ranked result from files_search.
+
+    `path` is the ingested path (what we mined). `original_path` is the
+    user-facing source path when set via sidecar or --original-path;
+    None means the ingested file is its own original. UIs should prefer
+    `original_path` for citations and fall back to `path` when None.
+    """
     leaf_uuid: str
     file_node_uuid: str
     filename: str
@@ -44,6 +50,7 @@ class SearchHit:
     score: float
     fts_rank: Optional[int] = None
     vec_rank: Optional[int] = None
+    original_path: Optional[str] = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -211,7 +218,7 @@ def files_search(
         rows = conn.execute(
             f"SELECT l.uuid AS leaf_uuid, l.file_node, l.division_type, "
             f"  l.division_id, l.division_label, l.text, "
-            f"  fn.filename, fn.path_absolute AS path "
+            f"  fn.filename, fn.path_absolute AS path, fn.metadata AS fn_metadata "
             f"FROM leaves l "
             f"JOIN file_nodes fn ON fn.uuid = l.file_node "
             f"WHERE l.uuid IN ({placeholders})",
@@ -219,6 +226,7 @@ def files_search(
         ).fetchall()
         row_map = {r["leaf_uuid"]: r for r in rows}
 
+        from .provenance import original_path_for_metadata
         hits: list[SearchHit] = []
         for uid, meta in top:
             row = row_map.get(uid)
@@ -236,5 +244,17 @@ def files_search(
                 score=meta["score"],
                 fts_rank=meta["fts_rank"],
                 vec_rank=meta["vec_rank"],
+                original_path=original_path_for_metadata(row["fn_metadata"]),
             ))
+
+        # Promotion-suggestion bookkeeping: record a hit for every fact
+        # whose leaf surfaced. Skipped in include_history mode (those
+        # are explicit history queries, not "what's promotable now").
+        if hits and not include_history:
+            try:
+                from .promotability import record_leaf_hits
+                record_leaf_hits(conn, [h.leaf_uuid for h in hits])
+            except Exception as e:
+                logger.debug("record_leaf_hits failed (non-fatal): %s", e)
+
         return hits
