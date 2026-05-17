@@ -1,12 +1,24 @@
 # File Ingestion Plan — `files.db` + Ascension
 
-> Status: design (2026-05-17). Pre-implementation. Phasing in §11.
+> **Status:** P1 – P4 shipped (2026-05-17). Phasing detail in §11.
 >
-> This document consolidates the design discussion of 2026-05-17 (Claude Code
-> session). It is the working spec for adding directory-walking, hierarchical
-> file ingestion to m3-memory, with a separate `files.db` store, append-only
-> version history, file- and leaf-level supersession, fact extraction, entity
-> graph integration, and a "promotion to core memory" (ascension) path.
+> | Phase | State | Eval gate |
+> |---|---|---|
+> | P1 walker + schema + chunkers + summary-first index | ✅ shipped | `tests/eval_files_ingest.py` (22 Q-A, 100% recall) |
+> | P2 extraction + ascension + staleness review | ✅ shipped | `tests/eval_files_phase2.py` |
+> | P3 provenance + carry-forward + dedup + rename + promotability | ✅ shipped | `tests/eval_files_phase3.py` |
+> | P4 watch daemon + multi-corpus + cross-corpus search | ✅ shipped | `tests/eval_files_phase4.py` |
+> | P5+ candidates | open | see `to_be_deleted/Files_DB_Next_Steps.md` |
+>
+> The pipeline lives under `bin/files_memory/` with 21 MCP tools registered
+> via `bin/mcp_tool_catalog.py`. Total m3 tool count after this layer landed:
+> **85** (was 64 before files-memory).
+>
+> This document consolidates the design discussion of 2026-05-17. It is the
+> working spec for adding directory-walking, hierarchical file ingestion to
+> m3-memory, with a separate `files.db` store, append-only version history,
+> file- and leaf-level supersession, fact extraction, entity graph
+> integration, and a "promotion to core memory" (ascension) path.
 >
 > Companion documents (existing): `EMBED_DEPLOYMENT.md`, `EMBED_INPUT_RECIPE.md`,
 > `MEMORY_ENTITY_EXTRACTION_PLAN.md`, `ARCHITECTURE.md`, `AGENT_INSTRUCTIONS.md`.

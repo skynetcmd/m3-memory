@@ -58,20 +58,23 @@ _EMBED_MODEL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_MODEL") or "").str
 # ──────────────────────────────────────────────────────────────────────────────
 # Paths
 # ──────────────────────────────────────────────────────────────────────────────
-# BASE_DIR is the m3-memory repo root. Resolved from THIS file's location:
-# bin/memory/config.py -> .. -> bin -> .. -> repo root.
+from m3_sdk import get_m3_root
+
+# BASE_DIR remains the m3-memory repo root for internal assets (e.g. config lists).
 BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_PATH: str = os.path.join(BASE_DIR, "memory", "agent_memory.db")
-ARCHIVE_DB_PATH: str = os.path.join(BASE_DIR, "memory", "agent_memory_archive.db")
+
+# Default state (DBs) now lives in the unified M3 root (~/.m3-memory/memory/).
+# Precedence: M3_DATABASE env > get_m3_root()/memory/agent_memory.db.
+_M3_ROOT = get_m3_root()
+DB_PATH: str = os.environ.get("M3_DATABASE") or os.path.join(_M3_ROOT, "memory", "agent_memory.db")
+ARCHIVE_DB_PATH: str = os.path.join(_M3_ROOT, "memory", "agent_memory_archive.db")
 
 # files.db (FILE_INGESTION_PLAN.md). Separate physical store with its own
-# lifecycle (high-volume, regeneratable, version-tracked, promotable). Default
-# lives under the user's home, NOT under the repo, so the same install can
-# ingest from anywhere without polluting the source tree.
-# Resolution order: M3_FILES_DB_PATH env > ~/.m3/files_database.db.
+# lifecycle (high-volume, regeneratable, version-tracked, promotable).
+# Resolution order: M3_FILES_DB_PATH env > get_m3_root()/memory/files_database.db.
 FILES_DB_PATH: str = os.path.abspath(
     os.environ.get("M3_FILES_DB_PATH")
-    or os.path.join(os.path.expanduser("~"), ".m3", "files_database.db")
+    or os.path.join(_M3_ROOT, "memory", "files_database.db")
 )
 # When true, the ingester prompts on first-ever invocation to confirm the
 # files.db path (and offers to write M3_FILES_DB_PATH to a user-shell env

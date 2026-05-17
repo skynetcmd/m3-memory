@@ -50,14 +50,18 @@ from sqlite_pragmas import apply_pragmas
 logger = logging.getLogger("chatlog_config")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
+from m3_sdk import get_m3_root
+_M3_ROOT = get_m3_root()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(BASE_DIR, "memory", ".chatlog_config.json")
-DEFAULT_DB_PATH = os.path.join(BASE_DIR, "memory", "agent_chatlog.db")
-MAIN_DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
-STATE_FILE = os.path.join(BASE_DIR, "memory", ".chatlog_state.json")
-SPILL_DIR = os.path.join(BASE_DIR, "memory", "chatlog_spill")
-INGEST_CURSOR = os.path.join(BASE_DIR, "memory", ".chatlog_ingest_cursor.json")
-CHATLOG_MIGRATIONS_DIR = os.path.join(BASE_DIR, "memory", "chatlog_migrations")
+
+# Config and state files move to the unified root.
+CONFIG_PATH = os.path.join(_M3_ROOT, "memory", ".chatlog_config.json")
+DEFAULT_DB_PATH = os.path.join(_M3_ROOT, "memory", "agent_chatlog.db")
+MAIN_DB_PATH = os.environ.get("M3_DATABASE") or os.path.join(_M3_ROOT, "memory", "agent_memory.db")
+STATE_FILE = os.path.join(_M3_ROOT, "memory", ".chatlog_state.json")
+SPILL_DIR = os.path.join(_M3_ROOT, "memory", "chatlog_spill")
+INGEST_CURSOR = os.path.join(_M3_ROOT, "memory", ".chatlog_ingest_cursor.json")
+CHATLOG_MIGRATIONS_DIR = os.path.join(_M3_ROOT, "memory", "chatlog_migrations")
 
 VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "opencode", "aider"))
 VALID_PROVIDERS: frozenset[str] = frozenset((

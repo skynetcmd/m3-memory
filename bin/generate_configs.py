@@ -1,10 +1,20 @@
 import json
 import os
+import sys
 
+# Add bin to path for m3_sdk
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from m3_sdk import get_m3_root
+except ImportError:
+    def get_m3_root():
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def generate_configs():
     """Updates gemini-settings.json and claude-settings.json with current project paths."""
     m3_memory_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # For tool wiring, we always use the actual repo root where bin/ lives.
+    # But for state, the code now defaults to get_m3_root().
     config_dir = os.path.join(m3_memory_root, "config")
 
     # Detect the working python command for this platform.
@@ -34,6 +44,12 @@ def generate_configs():
             for server_name, server_config in data["mcpServers"].items():
                 if "command" in server_config and server_config["command"] in ("python", "python3"):
                     server_config["command"] = python_cmd
+                
+                # Inject M3_MEMORY_ROOT into the env block
+                if "env" not in server_config:
+                    server_config["env"] = {}
+                server_config["env"]["M3_MEMORY_ROOT"] = get_m3_root().replace("\\", "/")
+
                 if "args" in server_config and len(server_config["args"]) > 0:
                     script_path = server_config["args"][0]
                     script_name = os.path.basename(script_path)
