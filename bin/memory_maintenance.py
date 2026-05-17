@@ -124,6 +124,12 @@ def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
                     j = i + 1 + k
                     if ids[j] in seen:
                         continue
+                    # Skip self-pairs: when a memory has multiple embedding
+                    # rows (e.g. v022 dual-embed default+enriched), the same
+                    # memory_id shows up at multiple indices. Without this
+                    # guard the scan emits {a: X, b: X, score: 1.0} pairs.
+                    if ids[i] == ids[j]:
+                        continue
                     if score >= threshold:
                         duplicates.append(
                             (ids[i], ids[j], titles[i], titles[j], float(score))
@@ -147,6 +153,10 @@ def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
             for j in range(i + 1, len(items)):
                 mid_b, vec_b, title_b = items[j]
                 if mid_b in seen:
+                    continue
+                # Skip self-pairs (same memory_id at two indices when a
+                # memory has multiple embedding rows — see Rust path note).
+                if mid_a == mid_b:
                     continue
                 score = _cosine(vec_a, vec_b)
                 if score >= threshold:
