@@ -1,0 +1,98 @@
+# Eval Q-A pairs for the files_memory phase-1 retrieval gate.
+#
+# Each entry:
+#   q             — the user question
+#   expect_text   — a phrase that MUST appear in the top-N leaf result text
+#   expect_file   — optionally, the filename that should hold the answer
+#   topn          — how many results to check (default 5)
+#
+# Pass criterion: ≥ 80% of questions return a top-N hit containing
+# `expect_text`. Used by tests/eval_files_ingest.py.
+
+- q: How much do small widgets weigh?
+  expect_text: "1.2 kilograms"
+  expect_file: widgets.md
+
+- q: What is the duty cycle for medium widgets?
+  expect_text: "70 percent"
+  expect_file: widgets.md
+
+- q: What colors do small widgets come in?
+  expect_text: "red, blue, and green"
+  expect_file: widgets.md
+
+- q: Can large widgets run continuously?
+  expect_text: "100 percent"
+  expect_file: widgets.md
+
+- q: How long is the default cable?
+  expect_text: "2.5 meters"
+  expect_file: widgets.md
+
+- q: What mounting bracket do widgets use?
+  expect_text: "MX-9"
+  expect_file: widgets.md
+
+- q: How many vacation days do full-time employees get?
+  expect_text: "20 days"
+  expect_file: policies.md
+
+- q: How often can engineers work remotely?
+  expect_text: "3 days per week"
+  expect_file: policies.md
+
+- q: What is the home office stipend?
+  expect_text: "$500"
+  expect_file: policies.md
+
+- q: When are laptops replaced?
+  expect_text: "3 years"
+  expect_file: policies.md
+
+- q: How long is the laptop replacement cycle?
+  expect_text: "3 years"
+  expect_file: policies.md
+
+- q: How long must new hires be in-office?
+  expect_text: "6 weeks"
+  expect_file: policies.md
+
+- q: What changed in v2.4.0?
+  expect_text: "MX-9 mounting bracket"
+  expect_file: release_notes.md
+
+- q: When was the medium widget introduced?
+  expect_text: "v2.2.0"
+  expect_file: release_notes.md
+
+- q: What was the old name for small widgets?
+  expect_text: "Tiny"
+  expect_file: release_notes.md
+
+- q: When was v2.3.0 released?
+  expect_text: "2026-01-08"
+  expect_file: release_notes.md
+
+- q: What is the warranty period for widgets?
+  expect_text: "2-year"
+  expect_file: faq.txt
+
+- q: How long does express shipping take?
+  expect_text: "1-2 business days"
+  expect_file: faq.txt
+
+- q: What is the bulk discount for 200 units?
+  expect_text: "18 percent"
+  expect_file: faq.txt
+
+- q: What payment methods do you accept?
+  expect_text: "wire transfer"
+  expect_file: faq.txt
+
+- q: Do you accept American Express?
+  expect_text: "American Express"
+  expect_file: faq.txt
+
+- q: How much do large widgets weigh?
+  expect_text: "12.5 kilograms"
+  expect_file: widgets.md
