@@ -1,12 +1,13 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 74 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 75 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
 | Name | Category | Description |
 | --- | --- | --- |
 | `memory_delete` | Memory Operations | Deletes a MemoryItem (soft or hard). |
+| `memory_delete_bulk` | Memory Operations | Deletes a list of MemoryItems (soft or hard) in one transaction per chunk. Use for curation/dedup passes deleting many items; falls back to per-id memory_delete behavior with the same hard-cascade semantics. Returns a structured {succeeded, not_found, mode} dict. |
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
 | `memory_get` | Memory Operations | Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
@@ -70,7 +71,7 @@ This document provides a comprehensive inventory of all 74 MCP tools available i
 | `debug_report` | Debug Agent | Generate and persist a structured debugging report to memory. |
 | `debug_trace` | Debug Agent | Execution flow analysis - reads source, finds callers, identifies failure points. |
 | `memory_consolidate` | Lifecycle & Maintenance | Consolidate old memories of the same type into summaries using the local LLM. Reduces clutter while preserving knowledge. |
-| `memory_dedup` | Lifecycle & Maintenance | Find and merge near-duplicate memory items. |
+| `memory_dedup` | Lifecycle & Maintenance | Find (and optionally soft-delete) near-duplicate memory items by cosine similarity over embeddings. Returns {count, groups: [{a, b, title_a, title_b, score}, ...], threshold, scanned, applied}. Use dry_run=True (default) for a preview; dry_run=False soft-deletes the second item of each pair. |
 | `memory_maintenance` | Lifecycle & Maintenance | Runs maintenance tasks on the memory store. |
 | `memory_set_retention` | Lifecycle & Maintenance | Set or update per-agent memory retention policy. Controls max memory count, TTL expiry, and auto-archival. |
 | `gdpr_export` | Data Governance | Export all memories for a data subject (GDPR data portability). Returns JSON with all memory items for the given user_id. |
@@ -96,6 +97,20 @@ Deletes a MemoryItem (soft or hard).
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `id` | `string` | Yes | Memory item UUID. | `-` |
+| `hard` | `boolean` | No | Hard delete (permanent). | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+### `memory_delete_bulk`
+
+Deletes a list of MemoryItems (soft or hard) in one transaction per chunk. Use for curation/dedup passes deleting many items; falls back to per-id memory_delete behavior with the same hard-cascade semantics. Returns a structured {succeeded, not_found, mode} dict.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `ids` | `array` | Yes | List of memory item UUIDs to delete. | `-` |
 | `hard` | `boolean` | No | Hard delete (permanent). | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
@@ -1166,7 +1181,7 @@ Consolidate old memories of the same type into summaries using the local LLM. Re
 
 ### `memory_dedup`
 
-Find and merge near-duplicate memory items.
+Find (and optionally soft-delete) near-duplicate memory items by cosine similarity over embeddings. Returns {count, groups: [{a, b, title_a, title_b, score}, ...], threshold, scanned, applied}. Use dry_run=True (default) for a preview; dry_run=False soft-deletes the second item of each pair.
 
 **Source:** mcp_tool_catalog.py
 
@@ -1174,8 +1189,9 @@ Find and merge near-duplicate memory items.
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
-| `threshold` | `number` | No | Similarity threshold (0-1). | `0.92` |
+| `threshold` | `number` | No | Cosine similarity threshold in [0, 1]. Higher = stricter near-duplicate. | `0.92` |
 | `dry_run` | `boolean` | No | Preview without applying. | `True` |
+| `limit` | `integer` | No | Cap on returned groups (0 = no cap). count reflects true total regardless. | `0` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ### `memory_maintenance`
