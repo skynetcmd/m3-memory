@@ -42,6 +42,8 @@ Restart your agent and you're done. The rest of this doc covers the features.
 
 > **On Apple Silicon?** The wizard asks once whether to add Metal GPU acceleration on top of the default embedder for ~10-50× faster embeddings. You can also add it later with `m3 embedder install-gpu`.
 
+> **Tool catalog stays small in your context.** m3 ships 87 MCP tools but groups them into 8 domains (memory, chatlog, files, entity, agent, tasks, conversations, admin). Only ~6 essentials load at MCP startup (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
+
 ---
 
 ## 2. Connect M3 to your agent
