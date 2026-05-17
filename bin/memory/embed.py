@@ -37,6 +37,55 @@ from .util import sha256_hex as _sha256_hex
 logger = logging.getLogger("memory.embed")
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Typed exceptions — for log-line clarity, not for callers
+# ──────────────────────────────────────────────────────────────────────────────
+# The `_embed` and `_embed_many` cascades catch broadly (`except Exception`)
+# and either fall through to the next tier or return None/EMBED_MODEL on
+# total failure. That contract is unchanged by these classes — callers
+# still get `(None, model)` on failure.
+#
+# What changes: log lines now carry a specific exception type
+# (`EmbeddedBackendError`, `EmbedFallbackError`, `EmbedPrimaryError`,
+# `EmbedSemaphoreTimeout`) instead of a generic `Exception`. Grep-ability
+# improves materially — "what kind of failure is filling the warning
+# stream" was previously a manual `e.__cause__` chain inspection.
+#
+# These classes are public via the memory_core shim re-export (the
+# `from memory.embed import ...` block in memory_core.py picks up
+# anything not prefixed with _underscore that the module exports).
+# Downstream code is free to `except EmbeddedBackendError` if it
+# eventually wants tier-specific reactions — but no existing code does,
+# and the cascade itself keeps catching `Exception` to preserve
+# fall-through behavior.
+class EmbedError(Exception):
+    """Base class for all embed-pipeline errors. Internal: callers see
+    `(None, model)` on the public surface, not these exceptions."""
+
+
+class EmbeddedBackendError(EmbedError):
+    """In-process llama.cpp embedder failed (GGUF load, kernel error,
+    OOM, dim mismatch). Cascade falls through to CPU HTTP fallback."""
+
+
+class EmbedFallbackError(EmbedError):
+    """CPU HTTP fallback (M3_EMBED_FALLBACK_URL) failed — connection
+    refused, timeout, malformed JSON, dim mismatch. Cascade falls
+    through to primary HTTP."""
+
+
+class EmbedPrimaryError(EmbedError):
+    """Primary HTTP embedder (LM Studio / llama-server / Ollama via
+    llm_failover) failed after all retry attempts. Cascade returns
+    `(None, model)`."""
+
+
+class EmbedSemaphoreTimeout(EmbedError):
+    """`_EMBED_SEM.acquire()` timed out after 30 s. Indicates the
+    process is saturated by in-flight embed calls, not a backend
+    health issue. Cascade returns `(None, EMBED_MODEL)`."""
+
+
 def _ctx() -> M3Context:
     """Resolve the active M3Context lazily (mirrors memory_core._current_ctx)."""
     return M3Context.for_db(resolve_db_path(None))
@@ -358,7 +407,13 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
             _record_embed_backend(_embedded_label(), 1)
             return vec, _EMBED_GGUF_MODEL_TAG
         except Exception as e:
-            logger.warning(f"Embedded embed failed ({e}) — falling back to CPU HTTP")
+            # Wrap as EmbeddedBackendError purely for log-line clarity;
+            # cascade still falls through (we don't re-raise).
+            wrapped = EmbeddedBackendError(str(e))
+            wrapped.__cause__ = e
+            logger.warning(
+                f"{type(wrapped).__name__}: {wrapped} — falling back to CPU HTTP"
+            )
 
     if _EMBED_GGUF_PATH is not None:
         try:
@@ -380,14 +435,20 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
             _record_embed_backend("cpu-http-fallback", 1)
             return emb, _EMBED_GGUF_MODEL_TAG
         except Exception as e:
+            wrapped = EmbedFallbackError(f"{_EMBED_FALLBACK_URL}: {e}")
+            wrapped.__cause__ = e
             logger.warning(
-                f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) failed ({e}) — using primary HTTP"
+                f"{type(wrapped).__name__}: {wrapped} — using primary HTTP"
             )
 
     try:
         await asyncio.wait_for(_EMBED_SEM.acquire(), timeout=30.0)
-    except asyncio.TimeoutError:
-        logger.error("Embedding semaphore acquire timed out after 30s")
+    except asyncio.TimeoutError as e:
+        wrapped = EmbedSemaphoreTimeout("30s")
+        wrapped.__cause__ = e
+        logger.error(
+            f"{type(wrapped).__name__}: {wrapped} — process saturated by in-flight embed calls"
+        )
         return None, config.EMBED_MODEL
 
     try:
@@ -434,7 +495,12 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     )
                     await asyncio.sleep(wait)
 
-        logger.error(f"Embedding generation failed after 3 attempts: {last_exc}")
+        # All 3 attempts exhausted — wrap the last for clarity.
+        wrapped = EmbedPrimaryError(f"{base_url}: {last_exc}")
+        wrapped.__cause__ = last_exc
+        logger.error(
+            f"{type(wrapped).__name__}: {wrapped} after 3 attempts"
+        )
         from llm_failover import clear_embed_cache
         clear_embed_cache()
         return None, model
@@ -455,16 +521,29 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     hashes = [_content_hash(t) for t in texts]
     uniq_hashes = list(set(hashes))
     cached_vecs: dict[str, tuple[list[float], str]] = {}
+    # Audit item A: cache lookup is single-query batched within each chunk
+    # (one SQL round-trip, not per-row). Chunked at 500 to stay safely under
+    # SQLite's SQLITE_MAX_VARIABLE_NUMBER (32766 on modern builds, 999 on
+    # older). A 50k-item bulk write would otherwise hit the cap on the
+    # IN(...) clause. Same chunk size memory_delete_bulk uses (commit
+    # 249b4b2). With 1000 unique hashes we typically do 2 round-trips
+    # instead of one; the wall-time difference is dominated by network/disk
+    # round-trip latency (~3-5ms each on local SQLite), not the IN-clause
+    # parse cost, so this is effectively free relative to a 5-20s embed
+    # batch.
+    _CACHE_LOOKUP_CHUNK = 500
     try:
         with _db() as db:
-            placeholders = ",".join("?" * len(uniq_hashes))
-            rows = db.execute(
-                f"SELECT content_hash, embedding, embed_model FROM memory_embeddings "
-                f"WHERE embed_model = ? AND content_hash IN ({placeholders})",
-                (cache_model, *uniq_hashes),
-            ).fetchall()
-            for r in rows:
-                cached_vecs[r["content_hash"]] = (_unpack(r["embedding"]), r["embed_model"])
+            for start in range(0, len(uniq_hashes), _CACHE_LOOKUP_CHUNK):
+                chunk = uniq_hashes[start : start + _CACHE_LOOKUP_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                rows = db.execute(
+                    f"SELECT content_hash, embedding, embed_model FROM memory_embeddings "
+                    f"WHERE embed_model = ? AND content_hash IN ({placeholders})",
+                    (cache_model, *chunk),
+                ).fetchall()
+                for r in rows:
+                    cached_vecs[r["content_hash"]] = (_unpack(r["embedding"]), r["embed_model"])
     except Exception as e:
         logger.debug(f"Bulk embed cache lookup failed: {e}")
 

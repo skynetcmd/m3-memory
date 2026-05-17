@@ -241,6 +241,14 @@ from memory.embed import (  # noqa: F401 — re-exports
     ENTITY_NAME_EMBED_CACHE_MAX,
     _embed_canonical_cached,
     embedder_status_impl,
+    # Typed exceptions for log-line clarity (D in the perf audit). Cascade
+    # contract unchanged — callers still see (None, model) on total failure;
+    # these classes only surface in log lines via their type names.
+    EmbedError,
+    EmbeddedBackendError,
+    EmbedFallbackError,
+    EmbedPrimaryError,
+    EmbedSemaphoreTimeout,
 )
 # Phase 4.A: Chroma federation helpers (queue insert, collection-id cache,
 # federated query) moved to bin/memory/chroma.py. _CHROMA_COLLECTION_ID_CACHE
