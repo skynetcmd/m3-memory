@@ -13,17 +13,26 @@ def trim_legacy(monkeypatch):
     fires on the 5-element pools these tests use. Defaults (MIN_INPUT=20)
     skip trimming for pools under 20; the legacy override (=3) restores the
     pre-scale-fix behavior. See commit ca33b7278 for the rationale.
+
+    Post Phase-7+8 refactor: `_trim_by_elbow` reads `config.ELBOW_MIN_INPUT`
+    at call time from `memory.config`, so we must reload that module too
+    (the fixture used to only reload memory_core, which left a stale
+    config-bound copy of the override in memory.config — causing
+    test_default_min_input_skips_small_pools to fail when run AFTER any
+    fixture-using test in the same session).
     """
     monkeypatch.setenv("M3_ELBOW_MIN_INPUT", "3")
     monkeypatch.setenv("M3_ELBOW_MIN_RETURN", "1")
     monkeypatch.setenv("M3_ELBOW_ABS_THRESHOLD", "0.0")
     import memory_core
+    from memory import config as _mem_config
+    importlib.reload(_mem_config)
     importlib.reload(memory_core)
     yield memory_core._trim_by_elbow
-    # Reload once more under no overrides so other tests see defaults.
     monkeypatch.delenv("M3_ELBOW_MIN_INPUT", raising=False)
     monkeypatch.delenv("M3_ELBOW_MIN_RETURN", raising=False)
     monkeypatch.delenv("M3_ELBOW_ABS_THRESHOLD", raising=False)
+    importlib.reload(_mem_config)
     importlib.reload(memory_core)
 
 
