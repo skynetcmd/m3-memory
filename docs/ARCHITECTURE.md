@@ -20,6 +20,35 @@ PostgreSQL (cross-device sync)    ChromaDB (federated vector search)
 
 ---
 
+## 🧩 Module Layout
+
+The core memory engine lives in `bin/`. As of 2026-05-17, `bin/memory_core.py` was modularized from **7,725 → 4,429 lines (-44%)** across 11 commits, splitting tightly-cohesive concerns into a `bin/memory/` package while preserving the legacy module as a shim plus owner of the write/link/enrich/graph paths.
+
+```
+bin/
+  memory_core.py         # 4,429-line shim + write / entity-link / enrichment / graph code
+  memory/
+    __init__.py          # eager re-exports
+    config.py            # env vars, constants, m3_core_rs ref, _EMBED_*_OVERRIDE mutables
+    util.py              # sha256_hex, _batch_cosine (write + search shared)
+    fts.py               # FTS5 helpers, title overlap
+    db.py                # _db, _conn, _lazy_init, schema, history, gates, access-stamp batcher
+    embed.py             # cascade, in-process Rust embedder, HTTP client, sliding window + dense recovery
+    chroma.py            # federation, _queue_chroma, _query_chroma
+    search.py            # scoring + ranker + reranker + query routing + the four retrieval impls
+```
+
+**Cycle-breaking pattern.** `memory_core` imports its submodules near the top, so submodules cannot top-level-import `memory_core`. Two patterns resolve back-references:
+
+1. **Lazy import inside function bodies** (used in `db.py` and `embed.py` for `_track_cost`) — the import happens on first call, after both modules have finished loading.
+2. **`_resolve_mc_callbacks()` globals-binding shim** (used in `search.py`) — the 9 callback symbols `memory_core` owns (graph neighbors, session expansion, entity-graph walks, score-extra-rows, etc.) are bound into `search`'s globals at first use, then reused.
+
+**What `memory_core` still owns.** The write path (`memory_write_bulk_impl`, `_check_contradictions`), entity extraction + linking, graph helpers (`_graph_neighbor_ids`, `_session_neighbor_ids`, `_entity_graph_neighbor_ids`, `_score_extra_rows`), conversation impls, agent/task/notification CRUD, and the enrichment queue runners.
+
+See [MEMORY_CORE_MODULARIZATION.md](MEMORY_CORE_MODULARIZATION.md) for the per-commit log and [MEMORY_CORE_MODULARIZATION_LESSONS.md](MEMORY_CORE_MODULARIZATION_LESSONS.md) for the design notes.
+
+---
+
 ## 💾 Storage Hierarchy
 
 Three layers, only the first is required.
