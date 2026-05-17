@@ -463,6 +463,26 @@ def _run_chatlog_init(bridge: Path, capture_mode: str) -> Optional[str]:
     return f"[+] chatlog wired ({capture_mode}): {tail}"
 
 
+def _run_main_migrations(bridge: Path) -> Optional[str]:
+    """Run `migrate_memory.py up --yes --target main` to initialize the main DB.
+
+    Ensures that a fresh install has a valid agent_memory.db so `doctor`
+    reports [OK] instead of [ERROR] Database not found.
+    """
+    migrate_script = bridge.parent / "migrate_memory.py"
+    if not migrate_script.is_file():
+        return f"[!] migrate_memory.py missing under {bridge.parent}; skipping main DB init"
+
+    cmd = [sys.executable, str(migrate_script), "up", "--yes", "--target", "main"]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return "[+] main memory DB initialized (migrations applied)"
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").strip()
+        last = stderr.splitlines()[-1] if stderr else str(e)
+        return f"[!] main DB init failed: {last}"
+
+
 def _post_install(
     bridge: Path,
     interactive: bool,
@@ -480,6 +500,7 @@ def _post_install(
     # fine, which is a common outcome on well-configured boxes).
     messages = [
         m for m in (
+            _run_main_migrations(bridge),
             _register_gemini_mcp(),
             _sqlite3_cli_hint(),
             _fix_npm_global_path(),
