@@ -95,6 +95,43 @@ Restart your agent. Done!
 
 ---
 
+## 🎚️ 87 tools, but they don't all crowd your context — domain gating keeps the catalog small
+
+M3 exposes 87 MCP tools so power users can customize at fine granularity —
+single-id deletes, bulk variants, per-store searches, KG traversals, GDPR
+primitives, agent handoffs, watch-mode admin, the lot. Most agents never
+touch most of them in a typical session.
+
+To avoid burning context space on tool schemas you won't use, m3 groups
+its catalog into **8 domains** (`memory`, `chatlog`, `files`, `entity`,
+`agent`, `tasks`, `conversations`, `admin`) and **loads them lazily**.
+At MCP startup only 6 essentials register (memory + chatlog + files
+search/write); the rest expose on demand when the agent calls
+`tools_load_domain(domain="…")`.
+
+Measured on m3 main with the gpt-4o tokenizer:
+
+| Mode | Tools at startup | Tokens at startup | % of 200 K window |
+|---|---:|---:|---:|
+| **Lazy (default)** | **8** | **~2,400** | **1.2 %** |
+| Typical session (lazy + agent loads files + memory) | 48 | ~11,400 | 5.7 % |
+| Eager (`M3_TOOLS_LAZY=0` — legacy) | 87 | ~16,100 | 8.0 % |
+
+For comparison, common alternatives: a 40-tool GitHub MCP server
+≈ 12,000 tokens; the full 93-tool GitHub MCP server ≈ 55,000 tokens
+([MCP Token Counter](https://mcpplaygroundonline.com/blog/mcp-token-counter-optimize-context-window)).
+m3's lazy default keeps the always-on surface ~6× smaller than a stock
+GitHub server while giving the agent the full 87 tools whenever it
+actually needs them.
+
+Disable with `M3_TOOLS_LAZY=0` if your client doesn't support
+[dynamic tool registration](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
+or you want every tool at startup. Direct Python imports
+(`from memory_bridge import memory_write`) always expose every tool —
+this only gates the MCP wire surface.
+
+---
+
 ## 🛡️ Air-gapped deployment
 
 M3 is sovereign **by default** — the baseline install needs no external
@@ -153,6 +190,8 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 **Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal. Entity extraction (`entity_search`, `entity_get`) supplements the graph with first-class people / places / things resolution.
 
 **Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `m3 setup` for a one-command wizard that detects agents, wires settings.json + hooks, installs the sovereign CPU embedder, and verifies with `doctor` in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
+
+**Context-frugal tool catalog** — 87 MCP tools grouped into 8 domains, loaded lazily. Startup surface is **~2,400 tokens** (~1.2% of a 200K window) vs ~16,100 if every tool registered eagerly. Agent expands a domain when it needs the rest. See [§ 87 tools, domain-gated](#-87-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small).
 
 **Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB, with manifest-driven multi-DB support for fleet deployments. Set one environment variable and your memories follow you across machines.
 
