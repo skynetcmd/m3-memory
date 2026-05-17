@@ -31,9 +31,13 @@ from . import walker  # noqa: F401
 from . import chunkers  # noqa: F401
 from . import summarize  # noqa: F401
 from . import embed  # noqa: F401
+from . import entities  # noqa: F401
+from . import extract  # noqa: F401
 from . import ingest  # noqa: F401
 from . import search  # noqa: F401
 from . import index  # noqa: F401
+from . import promote  # noqa: F401
+from . import staleness  # noqa: F401
 
 # `tools` is the MCP/CLI entry point. NOT imported eagerly because it's a
 # `python -m files_memory.tools …` target — eager import here would
@@ -43,5 +47,6 @@ from . import index  # noqa: F401
 
 __all__ = [
     "config", "db", "identity", "walker", "chunkers",
-    "summarize", "embed", "ingest", "search", "index",
+    "summarize", "embed", "entities", "extract",
+    "ingest", "search", "index", "promote", "staleness",
 ]
