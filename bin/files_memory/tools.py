@@ -41,6 +41,10 @@ def _serialize_ingest_result(r: IngestResult) -> dict:
         "files_failed": r.files_failed,
         "leaves_written": r.leaves_written,
         "facts_extracted": r.facts_extracted,
+        "leaves_carried": r.leaves_carried,
+        "leaves_evolved": r.leaves_evolved,
+        "embeds_avoided": r.embeds_avoided,
+        "facts_carried": r.facts_carried,
         "walk": {
             "files_seen": r.walk_stats.files_seen if r.walk_stats else 0,
             "files_yielded": r.walk_stats.files_yielded if r.walk_stats else 0,
@@ -65,6 +69,7 @@ def files_ingest_impl(
     record_noops: bool = False,
     follow_symlinks: Optional[bool] = None,
     extract_mode: Optional[str] = None,
+    original_path: Optional[str] = None,
 ) -> dict:
     """Walk PATH and ingest every supported file.
 
@@ -81,6 +86,10 @@ def files_ingest_impl(
       extract_mode: 'none' | 'inline' | 'queue'. Default 'none'.
         'inline' extracts facts synchronously inside the ingest txn.
         'queue' marks leaves pending; drain with files_extract_pending.
+      original_path: optional pointer at the user-facing source artifact
+        (e.g. the .pdf for an ingested .pdf.txt). Applied to every file
+        in the walk; per-file overrides via a sidecar <path>.m3meta.json.
+        See files_memory.provenance for the sidecar shape.
 
     Returns:
       JSON-safe dict with run summary and walk stats. See plan §10.
@@ -91,6 +100,7 @@ def files_ingest_impl(
         corpus_id=corpus, dry_run=dry_run, force_size=force_size,
         record_noops=record_noops, follow_symlinks=follow_symlinks,
         extract_mode=extract_mode,
+        cli_original_path=original_path,
     )
     return _serialize_ingest_result(result)
 
@@ -140,24 +150,92 @@ def files_promotion_list_impl(
     )
 
 
+def files_promotable_impl(
+    limit: int = 20,
+    min_score: float = 0.30,
+    corpus: Optional[str] = None,
+    include_already_promoted: bool = False,
+) -> list[dict]:
+    """Surface top promotion candidates by usage-weighted heuristic score.
+
+    Lists facts that have been hit by files_search often enough that the
+    user might want to promote them to memory.db. NEVER auto-promotes —
+    this is suggestion-only.
+    """
+    from .promotability import files_promotable
+    return files_promotable(
+        limit=limit, min_score=min_score, corpus_id=corpus,
+        include_already_promoted=include_already_promoted,
+    )
+
+
+def files_dedup_impl(
+    threshold: float = 0.92,
+    max_pairs: int = 500,
+    leaf_limit: int = 10000,
+    corpus: Optional[str] = None,
+    include_already_detected: bool = False,
+) -> dict:
+    """Scan leaf embeddings for near-duplicates above cosine threshold.
+
+    Detection-only — pairs land in semantic_dedup_candidates for review.
+    No automatic merging. Use files_dedup_list to inspect candidates and
+    files_dedup_review to record decisions.
+    """
+    from .dedup import files_dedup as _impl
+    return _impl(
+        threshold=threshold, max_pairs=max_pairs, leaf_limit=leaf_limit,
+        corpus_id=corpus, include_already_detected=include_already_detected,
+    )
+
+
+def files_dedup_list_impl(
+    reviewed: Optional[bool] = False,
+    limit: int = 100,
+    min_cosine: Optional[float] = None,
+) -> list[dict]:
+    """List near-duplicate candidate pairs detected by files_dedup."""
+    from .dedup import list_dedup_candidates
+    return list_dedup_candidates(
+        reviewed=reviewed, limit=limit, min_cosine=min_cosine,
+    )
+
+
+def files_dedup_review_impl(
+    candidate_uuid: str,
+    action: str,
+    note: str = "",
+) -> dict:
+    """Record a review decision for a near-duplicate candidate.
+
+    Action must be 'kept' | 'merged' | 'ignored'. 'merged' is intent-only
+    in phase 3; actual leaf merging is a future-phase operation.
+    """
+    from .dedup import review_dedup_candidate
+    return review_dedup_candidate(candidate_uuid, action, note=note)
+
+
 def files_staleness_review_impl(
     directory: Optional[str] = None,
     corpus: Optional[str] = None,
     include_failed_extraction: bool = True,
     include_drifted_promotions: bool = True,
+    include_rename_candidates: bool = True,
     rehash: bool = True,
     limit: int = 200,
 ) -> dict:
-    """Report which files need attention: stale, missing, new, failed, drifted.
+    """Report which files need attention: stale, missing, new, failed, drifted,
+    plus rename candidates (missing files whose content reappeared at a new path).
 
-    Returns a JSON-safe dict with five lists and a summary block.
-    The caller (interactive tool, batch script, etc.) decides what to do.
+    Returns a JSON-safe dict with six lists and a summary block. The caller
+    (interactive tool, batch script, etc.) decides what to do.
     """
     from .staleness import files_staleness_review
     rpt = files_staleness_review(
         directory=directory, corpus_id=corpus,
         include_failed_extraction=include_failed_extraction,
         include_drifted_promotions=include_drifted_promotions,
+        include_rename_candidates=include_rename_candidates,
         rehash=rehash,
     )
     return {
@@ -173,6 +251,7 @@ def files_staleness_review_impl(
             "new_count": len(rpt.new),
             "failed_extraction_count": len(rpt.failed_extraction),
             "drifted_promotion_count": len(rpt.drifted_promotions),
+            "rename_candidate_count": len(rpt.rename_candidates),
         },
         "stale": [
             {
@@ -210,7 +289,37 @@ def files_staleness_review_impl(
                 "reason": d.reason,
             } for d in rpt.drifted_promotions[:limit]
         ],
+        "rename_candidates": [
+            {
+                "missing_file_node": r.missing_file_node_uuid,
+                "missing_path": r.missing_path,
+                "new_path": r.new_path,
+                "content_sha256": r.content_sha256[:16] + "...",
+                "confidence": r.confidence,
+                "action": r.suggested_action,
+            } for r in rpt.rename_candidates[:limit]
+        ],
     }
+
+
+def files_link_rename_impl(
+    missing_file_node_uuid: str,
+    new_path: str,
+    expect_sha256: Optional[str] = None,
+) -> dict:
+    """Re-point an existing file_node at a new path (rename / move).
+
+    The content_sha256 must still match (it's a rename, not a content
+    change). Use files_ingest with the new path to handle a content
+    change instead — that path will properly supersede the prior
+    file_node.
+    """
+    from .staleness import link_rename
+    return link_rename(
+        missing_file_node_uuid=missing_file_node_uuid,
+        new_path=new_path,
+        expect_sha256=expect_sha256,
+    )
 
 
 def files_index_impl(
@@ -246,6 +355,7 @@ def files_index_impl(
             "filename": e.filename,
             "filetype": e.filetype,
             "path": e.path,
+            "original_path": e.original_path,
             "version": e.version_label,
             "date_modified": e.date_modified,
             "summary": e.summary,
@@ -279,6 +389,7 @@ def files_search_impl(
             "file_node_uuid": h.file_node_uuid,
             "filename": h.filename,
             "path": h.path,
+            "original_path": h.original_path,
             "division": f"{h.division_type}:{h.division_id}",
             "division_label": h.division_label,
             "text": h.text,
@@ -334,14 +445,21 @@ def register(mcp) -> None:
         dry_run: bool = False,
         force_size: bool = False,
         record_noops: bool = False,
+        extract_mode: Optional[str] = None,
+        original_path: Optional[str] = None,
     ) -> dict:
         """Walk a directory and ingest supported files into files.db.
         Idempotent: same content_sha256 → no-op; changed content →
-        new file_node version supersedes prior."""
+        new file_node version supersedes prior. Use extract_mode to
+        opt into fact extraction; use original_path (or a
+        <path>.m3meta.json sidecar) to point search results at a
+        source-of-truth file when the ingested file is a conversion."""
         return files_ingest_impl(
             path=path, include=include, exclude=exclude, max_depth=max_depth,
             corpus=corpus, dry_run=dry_run, force_size=force_size,
             record_noops=record_noops,
+            extract_mode=extract_mode,
+            original_path=original_path,
         )
 
     @mcp.tool()
@@ -429,6 +547,57 @@ def register(mcp) -> None:
         )
 
     @mcp.tool()
+    def files_promotable(
+        limit: int = 20,
+        min_score: float = 0.30,
+        corpus: Optional[str] = None,
+        include_already_promoted: bool = False,
+    ) -> list[dict]:
+        """List top promotion candidates by usage-weighted heuristic score.
+        Suggestion-only; use files_promote to actually ascend any."""
+        return files_promotable_impl(
+            limit=limit, min_score=min_score, corpus=corpus,
+            include_already_promoted=include_already_promoted,
+        )
+
+    @mcp.tool()
+    def files_dedup(
+        threshold: float = 0.92,
+        max_pairs: int = 500,
+        leaf_limit: int = 10000,
+        corpus: Optional[str] = None,
+        include_already_detected: bool = False,
+    ) -> dict:
+        """Scan leaf embeddings for near-duplicates. Detection only —
+        pairs land in semantic_dedup_candidates for human review."""
+        return files_dedup_impl(
+            threshold=threshold, max_pairs=max_pairs, leaf_limit=leaf_limit,
+            corpus=corpus, include_already_detected=include_already_detected,
+        )
+
+    @mcp.tool()
+    def files_dedup_list(
+        reviewed: Optional[bool] = False,
+        limit: int = 100,
+        min_cosine: Optional[float] = None,
+    ) -> list[dict]:
+        """List near-duplicate candidate pairs with text snippets and paths."""
+        return files_dedup_list_impl(
+            reviewed=reviewed, limit=limit, min_cosine=min_cosine,
+        )
+
+    @mcp.tool()
+    def files_dedup_review(
+        candidate_uuid: str,
+        action: str,
+        note: str = "",
+    ) -> dict:
+        """Record a review decision: 'kept' | 'merged' | 'ignored'."""
+        return files_dedup_review_impl(
+            candidate_uuid=candidate_uuid, action=action, note=note,
+        )
+
+    @mcp.tool()
     def files_staleness_review(
         directory: Optional[str] = None,
         corpus: Optional[str] = None,
@@ -436,10 +605,26 @@ def register(mcp) -> None:
         limit: int = 200,
     ) -> dict:
         """Compare filesystem against files.db. Surfaces stale, touched-only,
-        missing, new, failed-extraction, and drifted-promotion files.
+        missing, new, failed-extraction, drifted-promotion files, and rename
+        candidates (missing files whose content reappeared elsewhere on disk).
         Report-only: does not modify anything."""
         return files_staleness_review_impl(
             directory=directory, corpus=corpus, rehash=rehash, limit=limit,
+        )
+
+    @mcp.tool()
+    def files_link_rename(
+        missing_file_node_uuid: str,
+        new_path: str,
+        expect_sha256: Optional[str] = None,
+    ) -> dict:
+        """Re-point an existing file_node at a new path (rename / move).
+        NOT a supersession — content stays identical. Use this only when
+        staleness review surfaces a rename candidate."""
+        return files_link_rename_impl(
+            missing_file_node_uuid=missing_file_node_uuid,
+            new_path=new_path,
+            expect_sha256=expect_sha256,
         )
 
 
@@ -480,6 +665,15 @@ def main() -> int:
         dest="extract_mode",
         help="extract mode: none=no facts, inline=sync, queue=defer (drain with `extract`)",
     )
+    p_ing.add_argument(
+        "--original-path", dest="original_path", default=None,
+        help=(
+            "pointer to the user-facing source artifact when the ingested "
+            "file is a conversion (e.g. .pdf for an ingested .pdf.txt). "
+            "Applied to every file in the walk; per-file overrides via "
+            "a sidecar <path>.m3meta.json."
+        ),
+    )
 
     p_ext = sub.add_parser("extract", help="drain leaves with extraction_status='pending'")
     p_ext.add_argument("--limit", type=int, default=100)
@@ -498,12 +692,43 @@ def main() -> int:
                       help="only promotions whose source has been superseded")
     p_pl.add_argument("--limit", type=int, default=100)
 
+    p_dd = sub.add_parser("dedup", help="scan for near-duplicate leaves")
+    p_dd.add_argument("--threshold", type=float, default=0.92)
+    p_dd.add_argument("--max-pairs", type=int, default=500)
+    p_dd.add_argument("--leaf-limit", type=int, default=10000)
+    p_dd.add_argument("--corpus", default=None)
+    p_dd.add_argument("--include-already-detected", action="store_true")
+
+    p_dl = sub.add_parser("dedup-list", help="list near-duplicate candidates")
+    p_dl.add_argument("--reviewed", action="store_true")
+    p_dl.add_argument("--all", dest="reviewed_all", action="store_true",
+                      help="include both reviewed and unreviewed")
+    p_dl.add_argument("--limit", type=int, default=100)
+    p_dl.add_argument("--min-cosine", type=float, default=None)
+
+    p_dr = sub.add_parser("dedup-review", help="record a review decision")
+    p_dr.add_argument("candidate_uuid")
+    p_dr.add_argument("--action", required=True, choices=["kept", "merged", "ignored"])
+    p_dr.add_argument("--note", default="")
+
+    p_pr = sub.add_parser("promotable", help="list top promotion candidates by usage")
+    p_pr.add_argument("--limit", type=int, default=20)
+    p_pr.add_argument("--min-score", type=float, default=0.30)
+    p_pr.add_argument("--corpus", default=None)
+    p_pr.add_argument("--include-promoted", action="store_true",
+                      help="include facts that have already been promoted")
+
     p_sr = sub.add_parser("staleness", help="report stale / missing / new / failed files")
     p_sr.add_argument("--directory", default=None)
     p_sr.add_argument("--corpus", default=None)
     p_sr.add_argument("--no-rehash", action="store_true",
                       help="mtime-only classification (cheaper but less accurate)")
     p_sr.add_argument("--limit", type=int, default=200)
+
+    p_lr = sub.add_parser("link-rename", help="re-point a file_node at a new path")
+    p_lr.add_argument("file_node_uuid")
+    p_lr.add_argument("new_path")
+    p_lr.add_argument("--expect-sha256", default=None)
 
     p_sea = sub.add_parser("search", help="hybrid search over leaves")
     p_sea.add_argument("query")
@@ -541,6 +766,7 @@ def main() -> int:
             dry_run=args.dry_run, force_size=args.force_size,
             record_noops=args.record_noops,
             extract_mode=args.extract_mode,
+            original_path=args.original_path,
         )
     elif args.cmd == "extract":
         r = files_extract_pending_impl(limit=args.limit)
@@ -556,10 +782,40 @@ def main() -> int:
             source_superseded=(True if args.source_superseded else None),
             limit=args.limit,
         )
+    elif args.cmd == "dedup":
+        r = files_dedup_impl(
+            threshold=args.threshold, max_pairs=args.max_pairs,
+            leaf_limit=args.leaf_limit, corpus=args.corpus,
+            include_already_detected=args.include_already_detected,
+        )
+    elif args.cmd == "dedup-list":
+        reviewed_arg: Optional[bool] = False
+        if args.reviewed_all:
+            reviewed_arg = None
+        elif args.reviewed:
+            reviewed_arg = True
+        r = files_dedup_list_impl(
+            reviewed=reviewed_arg, limit=args.limit, min_cosine=args.min_cosine,
+        )
+    elif args.cmd == "dedup-review":
+        r = files_dedup_review_impl(
+            candidate_uuid=args.candidate_uuid, action=args.action, note=args.note,
+        )
+    elif args.cmd == "promotable":
+        r = files_promotable_impl(
+            limit=args.limit, min_score=args.min_score, corpus=args.corpus,
+            include_already_promoted=args.include_promoted,
+        )
     elif args.cmd == "staleness":
         r = files_staleness_review_impl(
             directory=args.directory, corpus=args.corpus,
             rehash=(not args.no_rehash), limit=args.limit,
+        )
+    elif args.cmd == "link-rename":
+        r = files_link_rename_impl(
+            missing_file_node_uuid=args.file_node_uuid,
+            new_path=args.new_path,
+            expect_sha256=args.expect_sha256,
         )
     elif args.cmd == "search":
         r = files_search_impl(

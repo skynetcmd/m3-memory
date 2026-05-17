@@ -26,7 +26,7 @@ from memory.config import (
 # Bumped when the SQL DDL changes. files_memory.db._lazy_init compares this
 # against schema_migrations.version and applies migrations in order. The
 # initial schema is v1.
-SCHEMA_VERSION: int = 2
+SCHEMA_VERSION: int = 3
 
 
 # ──────────────────────────────────────────────────────────────────────────────
