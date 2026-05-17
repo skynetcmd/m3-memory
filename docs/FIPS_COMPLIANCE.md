@@ -49,7 +49,7 @@ export M3_FIPS_MODE=1
 ### Verified Hardening
 Run the M3 Doctor to verify the FIPS boundary:
 ```bash
-mcp-memory doctor
+m3 doctor
 ```
 Look for: `✓ FIPS Hardened TLS 1.3 Context Active`.
 

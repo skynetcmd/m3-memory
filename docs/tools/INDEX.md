@@ -84,7 +84,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/run_reflector.py](run_reflector.md) | Phase D Mastra-style Reflector drainer. |  |
 | [bin/secret_rotator.py](secret_rotator.md) | (no docstring) |  |
 | [bin/session_handoff.py](session_handoff.md) | (no docstring) |  |
-| [bin/setup_embedder.py](setup_embedder.md) | setup_embedder.py — Sovereign, air-gapped installation of local embedder (LM Studio + BGE-M3). |  |
 | [bin/setup_secret.py](setup_secret.md) | Interactive CLI for adding API keys to the m3-memory encrypted vault. |  |
 | [bin/setup_test_db.py](setup_test_db.md) | Seed a fresh SQLite DB with the full m3-memory schema for test isolation. |  |
 | [bin/slm_intent.py](slm_intent.md) | Small-Language-Model intent classifier with named-profile configs. |  |

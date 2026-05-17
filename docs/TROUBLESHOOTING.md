@@ -54,12 +54,12 @@
 
 ## Installation Issues
 
-### "mcp-memory: command not found"
+### "m3: command not found"
 - **Cause**: The package isn't installed or isn't on your PATH.
 - **Solution**:
   ```bash
   pip install m3-memory
-  which mcp-memory  # should return a path
+  which m3  # should return a path (the older `mcp-memory` alias also works)
   ```
 
 ### Memory server doesn't appear in agent
@@ -68,8 +68,10 @@
 - Restart the agent completely (not just a new session).
 
 ### Agent can't find previous memories
-- Memories are stored in `memory/agent_memory.db` relative to where `mcp-memory` runs.
-- Check that you're running from the same directory, or set `M3_MEMORY_ROOT`.
+- Memories are stored in `~/.m3-memory/memory/agent_memory.db` by default
+  (override with `M3_MEMORY_ROOT`).
+- The bridge resolves the DB from `M3_MEMORY_ROOT` regardless of the
+  directory `m3` was launched from.
 
 ---
 

@@ -12,10 +12,9 @@ The script:
    only what isn't already there. Tools needed: `pipx`, `git`, `sqlite3`,
    `curl`, plus `python3-venv` on Debian-family.
 3. `pipx install m3-memory`.
-4. `mcp-memory install-m3 --capture-mode both` — fetches the system payload
-   from GitHub, auto-wires Claude / Gemini settings.json if either CLI is
-   already installed.
-5. `mcp-memory doctor` — prints a verification summary.
+4. `m3 setup` — one-command wizard: fetches the system payload, installs the
+   sovereign CPU embedder, wires every agent it finds on PATH (Claude / Gemini /
+   OpenCode / OpenClaw), installs chatlog hooks, runs `m3 doctor`.
 
 Refuses to run as root. Sudo is invoked individually for the package install
 step so you see what's being elevated.
@@ -140,7 +139,7 @@ working local install.
 ## Verifying
 
 ```bash
-mcp-memory doctor
+m3 doctor
 ```
 
 Should show:
