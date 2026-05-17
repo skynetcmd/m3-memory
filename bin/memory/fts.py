@@ -13,7 +13,96 @@ import json
 import re
 from functools import lru_cache
 
+__all__ = [
+    "_sanitize_fts",
+    "_sanitize_for_searchable",
+    "_compile_fts_query",
+    "_augment_title_with_role",
+    "_query_title_token_set",
+    "_title_overlap_from_qset",
+    "_query_title_overlap",
+    "_TEMPORAL_QUERY_RE",
+    "_DATE_RE_ISO",
+    "_DATE_RE_LONG",
+    "_DATE_MONTHS",
+    "_TEMPORAL_ROUTER_PATTERNS",
+    "_TEMPORAL_ROUTER_RE",
+    "_ENTITY_MENTION_PATTERNS",
+    "_ENTITY_MENTION_RE",
+    "_EVENT_VERB_LIST",
+    "_EVENT_SENT_SPLIT",
+    "_EVENT_DATE_HINT",
+    "_EVENT_VERB_RE",
+    "_EVENT_PROPER_NOUN",
+]
+import logging
+logger = logging.getLogger("memory.fts")
+
+
 from . import config
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Temporal & Entity patterns (hoisted from search.py to break cycles)
+# ──────────────────────────────────────────────────────────────────────────────
+_DATE_RE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_DATE_RE_LONG = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|"
+    r"apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)(?:\s+,?\s*(\d{4}))?\b",
+    re.IGNORECASE
+)
+_DATE_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "september": 9, "oct": 10, "october": 10,
+    "nov": 11, "november": 11, "dec": 12, "december": 12
+}
+
+_TEMPORAL_QUERY_RE = re.compile(
+    r"\b(?:last|next|past|this|current|previous)\b|\b(?:today|yesterday|tomorrow)\b|"
+    r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|"
+    r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b|"
+    r"\d{4}-\d{2}-\d{2}|"  # ISO date
+    r"\b(?:morning|afternoon|evening|night|week|month|year|ago|recently|lately)\b",
+    re.IGNORECASE
+)
+
+_TEMPORAL_ROUTER_PATTERNS = (
+    r"\bwhen\b", r"\bdate\b", r"\btime\b", r"\bday\b", r"\bweek\b", r"\bmonth\b", r"\byear\b",
+    r"\bago\b", r"\blast\b", r"\bfirst\b", r"\brecent(?:ly)?\b",
+    r"\bearliest\b", r"\blatest\b",
+    r"\bwhich\s+\w+\s+first\b", r"\bin\s+what\s+order\b",
+    r"\b(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\b",
+    r"\bvalentine'?s?\s+day\b", r"\bchristmas\b", r"\bthanksgiving\b", r"\bnew\s+year'?s?\b",
+)
+_TEMPORAL_ROUTER_RE = re.compile("|".join(_TEMPORAL_ROUTER_PATTERNS), re.IGNORECASE)
+
+_ENTITY_MENTION_PATTERNS = (
+    r'"[^"]+"',                            # double-quoted strings
+    r"'[^']+'",                            # single-quoted strings
+    r"\b(?:19|20)\d{2}\b",                # 4-digit years (1900–2099)
+    r"\b(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+\d{1,2}\b",   # Month Day
+    r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*",   # Capitalized noun phrases
+)
+_ENTITY_MENTION_RE = re.compile("|".join(_ENTITY_MENTION_PATTERNS))
+
+# Event extraction patterns
+_EVENT_VERB_LIST = (
+    "decided", "started", "finished", "completed", "installed", "configured",
+    "updated", "removed", "fixed", "bought", "purchased", "booked", "traveled",
+    "met", "attended", "presented", "wrote", "released", "launched", "deployed",
+)
+_EVENT_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_EVENT_DATE_HINT = re.compile(
+    r"\b(?:today|yesterday|tomorrow|last|next|this|on|at|in|ago|from|to)\b|\d{4}-\d{2}-\d{2}",
+    re.IGNORECASE
+)
+_EVENT_VERB_RE = re.compile(
+    r"\b(" + "|".join(_EVENT_VERB_LIST) + r")\b", re.IGNORECASE
+)
+_EVENT_PROPER_NOUN = re.compile(r"\b([A-Z][a-z]{2,})\b")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
