@@ -7,7 +7,7 @@
 
 # M3 Memory
 
-Local-first Agentic Memory Layer Framework for MCP Agents • 74 tools • Hybrid search (FTS5 + vector + MMR) • GDPR • FIPS 140-3 ready • 100% local
+Local-first Agentic Memory Layer Framework for MCP Agents • 96 tools • Hybrid search (FTS5 + vector + MMR) • Directory ingestion & file-memory • GDPR • FIPS 140-3 ready • 100% local
 
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
@@ -25,6 +25,8 @@ Local-first Agentic Memory Layer Framework for MCP Agents • 74 tools • Hybri
 </p>
 
 Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agent. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
+
+> 👉 **I've read enough, I just want to install it on [Windows](docs/QUICKSTART_WINDOWS.md), [macOS](docs/QUICKSTART_MACOS.md), or [Linux](docs/QUICKSTART_LINUX.md).**
 
 ---
 
@@ -52,72 +54,73 @@ Add to your MCP config:
 ```json
 {
   "mcpServers": {
-    "memory": { "command": "mcp-memory" }
+    "memory": { "command": "m3" }
   }
 }
 ```
 
-An embedder is **optional but highly recommended**. M3 functions as a pure keyword-search (FTS5/BM25) memory without one, but adding an embedder enables semantic retrieval and high-performance **hybrid search**.
-
-### 🚀 Recommended: Integrated Sovereign Setup
-For the best experience (Windows, Linux, or Apple Silicon), use our integrated, self-contained installer. It sets up a private instance of **LM Studio** and our preferred model, **BGE-M3**, directly in your project folder.
+### 🚀 One-command setup
 
 ```bash
-mcp-memory install-embedder
+pip install m3-memory
+m3 setup
 ```
 
-### 🍎 Older Intel Macs
-If you are on an older Intel-based Mac, **LM Studio is not supported**. We recommend using **Ollama** instead:
+`m3 setup` is an interactive wizard. It detects every agent on PATH (Claude
+Code, Gemini CLI, OpenCode, OpenClaw), asks a handful of questions, then
+drives the full install end-to-end: system payload, sovereign CPU embedder
+(BGE-M3 on port 8082), per-agent MCP wiring, chatlog hooks, and a `doctor`
+verification. Restart your agent — that's it.
 
-```bash
-ollama pull qwen3-embedding:0.6b && ollama serve
-```
+### 🛡️ Sovereign by default
 
-### Other Options
-You can also use a standalone [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) instance. Qwen3-Embedding-0.6B (1024-dim) and BGE-M3 are the models M3 Memory is tuned for. If you use a different model, set `EMBED_MODEL` in your environment. If no embedder is detected at startup, M3 will automatically fall back to keyword-only mode.
+The embedder ships **in the repo**. Our own BGE-M3 CPU embedder runs as a
+small always-on service on `127.0.0.1:8082` after `m3 setup`. **No LM
+Studio, no Ollama, no GPU, no internet** required for embedding to work.
 
-Want auto-classification, summarization, and consolidation? Load a small chat model alongside the embedder (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B instruct GGUF in LM Studio / llama.cpp). M3 auto-selects it; embedding-only features work without it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
+| Embedder path | When it's used | What you do |
+|---|---|---|
+| **Sovereign CPU (port 8082)** | Always installed by `m3 setup`. Concurrency=2 BGE-M3, GGUF bundled via Git LFS at `_assets/models/bge-m3-Q4_K_M.gguf`. | Nothing — it's the default. |
+| **GPU in-process** | Optional opt-in for ~10-50× faster embedding. CUDA / Vulkan / Metal auto-detected. | `m3 embedder install-gpu` (needs the matching GPU toolchain). |
+| **External (Ollama, LM Studio, vLLM, …)** | Power users who want a different model or shared host service. | Set `EMBED_BASE_URL` to your endpoint; m3 falls back to it if the sovereign service is down. |
 
-> **Optional — Rust core (`m3-memory[oxidation]`).** A Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) can take over hot-path work — hashing, cosine/MMR ranking, redaction, and in-process llama.cpp embeddings. Install with `pip install m3-memory[oxidation]` (needs a Rust toolchain + maturin). Every path falls back to pure Python when the extra is absent, and `M3_CORE_RS_DISABLE=1` forces the Python path at runtime. See [docs/ENVIRONMENT_VARIABLES.md → Project Oxidation](docs/ENVIRONMENT_VARIABLES.md).
+Want auto-classification, summarization, and consolidation? Load a small
+chat model for generation (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B
+instruct GGUF). M3 auto-selects it; embedding-only features work without
+it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
+
+> **Optional — Rust core (`m3-memory[oxidation]`).** A Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) takes over hot-path work — hashing, cosine/MMR ranking, redaction, and the in-process llama.cpp embeddings (CPU + optional GPU). `m3 setup` installs this automatically. Set `M3_CORE_RS_DISABLE=1` at runtime to force the Python path. See [docs/ENVIRONMENT_VARIABLES.md → Project Oxidation](docs/ENVIRONMENT_VARIABLES.md).
 
 Restart your agent. Done!
 
 ---
 
-## 🛡️ Sovereign Embedder (Air-gapped / Offline)
+## 🛡️ Air-gapped deployment
 
-M3-Memory can be installed as a completely self-contained "memory appliance" for secure or air-gapped environments. This mode includes the embedding engine (LM Studio) and the BGE-M3 model directly in the project folder—no internet connection required after the initial clone.
-
-**See the [🛡️ Sovereign & Air-Gapped Deployment Guide](docs/SOVEREIGN_DEPLOYMENT.md) for full instructions.**
-
-### 1. Unified Setup
-If you are installing from a USB drive or in an offline room, run:
+M3 is sovereign **by default** — the baseline install needs no external
+services. For fully air-gapped environments, the only extra step is to
+pre-stage the repo (with the LFS-tracked GGUF materialized) on a connected
+machine and transfer it to the target.
 
 ```bash
-mcp-memory install-embedder
+# On a connected machine:
+git lfs install                                              # one-time
+git clone https://github.com/skynetcmd/m3-memory.git
+cd m3-memory && git lfs pull                                  # ~438MB
+pip download m3-memory[oxidation] -d _assets/python_wheels    # pre-fetch wheels
+
+# On the air-gapped target (after sneakernet-copying the folder):
+pip install --no-index --find-links=_assets/python_wheels 'm3-memory[oxidation]'
+m3 setup --non-interactive --capture-mode both
 ```
 
-**Need a clean slate?** You can wipe and reinstall the system payload at any time with:
+That's it. No `curl`, no LM Studio, no third-party model server.
 
-```bash
-mcp-memory reinstall
-```
+**See the [Sovereign & Air-Gapped Deployment Guide](docs/SOVEREIGN_DEPLOYMENT.md)
+for full instructions, FIPS-mode hardening, and GPU-on-air-gap details.**
 
-### 2. Configuration
-By default, M3-Memory stores its configuration, repository payload, and backups in `~/.m3-memory`. You can override this by setting the `M3_MEMORY_ROOT` environment variable.
-
-### 3. What it does:
-*   **Zero-Dependency:** Operates entirely via file-system migration. No `curl`, `pip`, or external calls.
-*   **Hardware Optimized:** Automatically detects your OS and architecture (Apple Silicon, Windows x64, Linux x64, or Linux ARM64) and moves the matching binaries.
-*   **Surgical Purge:** Once you choose your mode (CPU vs. GPU), it permanently deletes all unused OS binaries and model variants. It will report exactly how many **MB of unneeded setup files were deleted**.
-*   **Stealth Portability:** Installs into a hidden `.m3-lmstudio` directory. If you move the project folder, M3 **self-heals** its absolute paths in Windows Startup, macOS LaunchAgents, or Linux Systemd units.
-*   **Clean Integration:** Locks the local server to `127.0.0.1:8081` and auto-wires your `.env` file.
-
-### 3. Existing LM Studio instances
-If a local instance of LM Studio is already detected, the installer will:
-1.  Offer to link to your existing server instead of installing a separate one.
-2.  Warn if a different embedder is loaded (e.g., `nomic-embed-text`) and explain that **re-embedding** (`mcp-memory re-embed`) only applies to M3-owned data.
-3.  Instruct you on how to manually load **bge-m3** for optimal retrieval.
+By default, m3 stores its configuration, payload, and backups under
+`~/.m3-memory`. Override with `M3_MEMORY_ROOT`.
 
 ---
 
@@ -149,7 +152,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 **Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal. Entity extraction (`entity_search`, `entity_get`) supplements the graph with first-class people / places / things resolution.
 
-**Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `mcp-memory install-m3` for a one-command setup that wires settings.json, hooks, and the chatlog subsystem in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
+**Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `m3 setup` for a one-command wizard that detects agents, wires settings.json + hooks, installs the sovereign CPU embedder, and verifies with `doctor` in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 
 **Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB, with manifest-driven multi-DB support for fleet deployments. Set one environment variable and your memories follow you across machines.
 
@@ -163,7 +166,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | ✨ **[Core features](docs/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](examples/multi-agent-team/README.md)** |
 | 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[Compare M3 to alternatives](docs/COMPARISON.md)** ([sovereign substrates table](docs/M3_Comparison_Table.md)) |
 | 🔧 **[Implementation details](docs/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](docs/ENVIRONMENT_VARIABLES.md)** |
-| 🤖 **[Agent rules + all 74 tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
+| 🤖 **[Agent rules + all 96 tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
 | 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
 | 🗺️ **[Roadmap](docs/ROADMAP.md)** | |
 
@@ -196,8 +199,8 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| **74 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, entity graph, fact enrichment, and chat-log capture for multi-agent orchestration |
-| **193 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, and orchestration paths |
+| **96 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, entity graph, fact enrichment, chat-log capture, and a 21-tool files-memory layer (directory ingestion, hierarchical chunking, ascension to core memory, watch-mode staleness review) |
+| **563 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, orchestration, and the files-memory pipeline |
 | **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
 | **GDPR compliance** | `gdpr_forget` (Article 17) and `gdpr_export` (Article 20) as built-in tools — see [compliance & assurance](docs/COMPLIANCE.md) for FISMA / CMMC alignment too |
@@ -242,13 +245,13 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 74 tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md) and the full inventory lives in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
+All 96 tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md) and the full inventory lives in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 
 ---
 
 ## 🤖 For AI agents
 
-M3 Memory exposes 74 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, entity-graph extraction, fact enrichment, and chat-log capture for multi-agent orchestration. Any MCP-compatible agent can use them automatically.
+M3 Memory exposes 96 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, entity-graph extraction, fact enrichment, chat-log capture for multi-agent orchestration, and a files-memory layer that ingests entire directories (markdown, PDF, plain text) into a hierarchical store with hybrid search, fact extraction, ascension to core memory, and watch-mode staleness review. Any MCP-compatible agent can use them automatically.
 
 To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
 
@@ -267,7 +270,7 @@ Already inside Claude Code or Gemini CLI? Paste one of these prompts:
 **Claude Code:**
 ```
 Install m3-memory for persistent memory. Run: pip install m3-memory
-Then add {"mcpServers":{"memory":{"command":"mcp-memory"}}} to my
+Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
 ~/.claude/settings.json under "mcpServers". For best retrieval, ensure 
 Ollama is running with qwen3-embedding:0.6b (optional, falls back 
 to keyword search without it). Then use /mcp to verify the memory server loaded.
@@ -276,7 +279,7 @@ to keyword search without it). Then use /mcp to verify the memory server loaded.
 **Gemini CLI:**
 ```
 Install m3-memory for persistent memory. Run: pip install m3-memory
-Then add {"mcpServers":{"memory":{"command":"mcp-memory"}}} to my
+Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
 ~/.gemini/settings.json under "mcpServers". For best retrieval, ensure 
 Ollama is running with qwen3-embedding:0.6b (optional, falls back 
 to keyword search without it).
