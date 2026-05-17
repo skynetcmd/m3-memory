@@ -86,6 +86,71 @@ class EmbedSemaphoreTimeout(EmbedError):
     health issue. Cascade returns `(None, EMBED_MODEL)`."""
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-backend circuit breakers (audit item L)
+# ──────────────────────────────────────────────────────────────────────────────
+# Three breakers, one per cascade tier. After `threshold` consecutive
+# failures a breaker opens and the cascade skips that tier entirely until
+# `reset_after_secs` elapse, at which point one half-open probe is allowed.
+#
+# Rationale: prior to this change, every embed call to a dead backend paid
+# its full timeout (~30s CPU fallback; up to 6s+ on the primary's 3-retry
+# loop with exponential backoff). A 100-call burst against a dead llama-
+# server would burn ~3000s of wall-clock with no useful work. The breaker
+# bounds total wasted time to roughly `threshold * timeout` before all
+# subsequent calls in the window short-circuit to the next tier.
+#
+# When `m3_core_rs` is None or a threshold is 0, the breaker is None and
+# the call sites fall through to the pre-breaker "try every call" behavior.
+# This preserves the Python-only fallback path for ops who disable Rust.
+def _maybe_make_breaker(threshold: int, reset_after_secs: float):
+    """Construct a Rust CircuitBreaker if Rust is available and threshold > 0."""
+    if config.m3_core_rs is None or threshold <= 0:
+        return None
+    return config.m3_core_rs.CircuitBreaker(
+        threshold=int(threshold),
+        reset_after_secs=float(reset_after_secs),
+    )
+
+
+_EMBEDDED_BREAKER = _maybe_make_breaker(
+    config.EMBED_BREAKER_EMBEDDED_THRESHOLD,
+    config.EMBED_BREAKER_EMBEDDED_RESET_SECS,
+)
+_CPU_FALLBACK_BREAKER = _maybe_make_breaker(
+    config.EMBED_BREAKER_CPU_FALLBACK_THRESHOLD,
+    config.EMBED_BREAKER_CPU_FALLBACK_RESET_SECS,
+)
+_PRIMARY_BREAKER = _maybe_make_breaker(
+    config.EMBED_BREAKER_PRIMARY_THRESHOLD,
+    config.EMBED_BREAKER_PRIMARY_RESET_SECS,
+)
+
+
+def get_embed_breaker_state() -> dict:
+    """Return current state of all three embed breakers.
+
+    Useful for diagnostics and surfacing via `embedder_status_impl`.
+    Returns `{embedded, cpu_fallback, primary}` each mapped to a state
+    string (`"closed"` / `"open"` / `"half_open"`) or `"disabled"` when
+    the breaker isn't constructed (Rust unavailable or threshold=0).
+    """
+    return {
+        "embedded": _EMBEDDED_BREAKER.state() if _EMBEDDED_BREAKER else "disabled",
+        "cpu_fallback": _CPU_FALLBACK_BREAKER.state() if _CPU_FALLBACK_BREAKER else "disabled",
+        "primary": _PRIMARY_BREAKER.state() if _PRIMARY_BREAKER else "disabled",
+    }
+
+
+def reset_embed_breakers() -> dict:
+    """Force-close all breakers (test/debug helper). Returns prior state."""
+    prior = get_embed_breaker_state()
+    for breaker in (_EMBEDDED_BREAKER, _CPU_FALLBACK_BREAKER, _PRIMARY_BREAKER):
+        if breaker is not None:
+            breaker.record_success()
+    return prior
+
+
 def _ctx() -> M3Context:
     """Resolve the active M3Context lazily (mirrors memory_core._current_ctx)."""
     return M3Context.for_db(resolve_db_path(None))
@@ -394,7 +459,11 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
     except Exception as e:
         logger.debug(f"Embedding cache lookup failed: {e}")
 
-    if embedded is not None:
+    # Tier 1: in-process Rust embedder. Gated by _EMBEDDED_BREAKER so a
+    # storm of CUDA/OOM failures doesn't cost ~ms each call indefinitely.
+    if embedded is not None and (
+        _EMBEDDED_BREAKER is None or _EMBEDDED_BREAKER.allow_request()
+    ):
         try:
             _track_cost_lazy("embed_calls", len(text.split()) * 2)
             vec = await asyncio.to_thread(lambda: embedded.embed([text])[0])
@@ -404,6 +473,8 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                         f"Embedded embedding dim {len(vec)} != EMBED_DIM {config.EMBED_DIM}"
                     )
                 _EMBED_DIM_VALIDATED = True
+            if _EMBEDDED_BREAKER is not None:
+                _EMBEDDED_BREAKER.record_success()
             _record_embed_backend(_embedded_label(), 1)
             return vec, _EMBED_GGUF_MODEL_TAG
         except Exception as e:
@@ -411,11 +482,18 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
             # cascade still falls through (we don't re-raise).
             wrapped = EmbeddedBackendError(str(e))
             wrapped.__cause__ = e
+            if _EMBEDDED_BREAKER is not None:
+                _EMBEDDED_BREAKER.record_failure()
             logger.warning(
                 f"{type(wrapped).__name__}: {wrapped} — falling back to CPU HTTP"
             )
 
-    if _EMBED_GGUF_PATH is not None:
+    # Tier 2: local CPU HTTP fallback. Storm risk is high here — a dead
+    # llama-server eats the full 30s read timeout per call. Breaker bounds
+    # that to `threshold` strikes before short-circuiting to primary.
+    if _EMBED_GGUF_PATH is not None and (
+        _CPU_FALLBACK_BREAKER is None or _CPU_FALLBACK_BREAKER.allow_request()
+    ):
         try:
             client = _get_embed_client()
             resp = await client.post(
@@ -432,14 +510,29 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                         f"CPU fallback embedding dim {len(emb)} != EMBED_DIM {config.EMBED_DIM}"
                     )
                 _EMBED_DIM_VALIDATED = True
+            if _CPU_FALLBACK_BREAKER is not None:
+                _CPU_FALLBACK_BREAKER.record_success()
             _record_embed_backend("cpu-http-fallback", 1)
             return emb, _EMBED_GGUF_MODEL_TAG
         except Exception as e:
             wrapped = EmbedFallbackError(f"{_EMBED_FALLBACK_URL}: {e}")
             wrapped.__cause__ = e
+            if _CPU_FALLBACK_BREAKER is not None:
+                _CPU_FALLBACK_BREAKER.record_failure()
             logger.warning(
                 f"{type(wrapped).__name__}: {wrapped} — using primary HTTP"
             )
+
+    # Tier 3: primary HTTP via llm_failover. Three-attempt internal retry
+    # with exponential backoff (2s, 4s). The breaker gates the WHOLE tier,
+    # not each retry — one tick per _embed call. When open, short-circuit
+    # to the final "return None" without attempting any of the 3 retries
+    # (saving up to ~6s wall-clock per call during a primary outage).
+    if _PRIMARY_BREAKER is not None and not _PRIMARY_BREAKER.allow_request():
+        logger.warning(
+            "EmbedPrimaryError: primary breaker open — short-circuiting (state=open)"
+        )
+        return None, config.EMBED_MODEL
 
     try:
         await asyncio.wait_for(_EMBED_SEM.acquire(), timeout=30.0)
@@ -484,6 +577,8 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                         )
                     _EMBED_DIM_VALIDATED = True
 
+                if _PRIMARY_BREAKER is not None:
+                    _PRIMARY_BREAKER.record_success()
                 _record_embed_backend("http-primary", 1)
                 return emb, model
             except Exception as e:
@@ -495,7 +590,10 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     )
                     await asyncio.sleep(wait)
 
-        # All 3 attempts exhausted — wrap the last for clarity.
+        # All 3 attempts exhausted — tick the breaker once for the whole
+        # call, then wrap the last exception for log clarity.
+        if _PRIMARY_BREAKER is not None:
+            _PRIMARY_BREAKER.record_failure()
         wrapped = EmbedPrimaryError(f"{base_url}: {last_exc}")
         wrapped.__cause__ = last_exc
         logger.error(
