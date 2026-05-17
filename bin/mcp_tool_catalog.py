@@ -700,12 +700,19 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="memory_dedup",
-        description="Find and merge near-duplicate memory items.",
+        description=(
+            "Find (and optionally soft-delete) near-duplicate memory items by "
+            "cosine similarity over embeddings. Returns "
+            "{count, groups: [{a, b, title_a, title_b, score}, ...], threshold, "
+            "scanned, applied}. Use dry_run=True (default) for a preview; "
+            "dry_run=False soft-deletes the second item of each pair."
+        ),
         parameters={
             "type": "object",
             "properties": {
-                "threshold": {"type": "number", "description": "Similarity threshold (0-1).", "default": 0.92},
+                "threshold": {"type": "number", "description": "Cosine similarity threshold in [0, 1]. Higher = stricter near-duplicate.", "default": 0.92},
                 "dry_run":   {"type": "boolean", "description": "Preview without applying.", "default": True},
+                "limit":     {"type": "integer", "description": "Cap on returned groups (0 = no cap). count reflects true total regardless.", "default": 0},
             },
             "required": [],
         },
