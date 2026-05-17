@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Iterator
 
 from . import config
-from .schema import SCHEMA_V1, SCHEMA_V2
+from .schema import SCHEMA_V1, SCHEMA_V2, SCHEMA_V3
 
 logger = logging.getLogger("files_memory.db")
 
@@ -82,6 +82,12 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(r[1] == column for r in rows)
 
 
+def _apply_v3(conn: sqlite3.Connection) -> None:
+    """Apply v3 schema additions: fact_hit_stats + semantic_dedup_candidates.
+    Pure CREATE-IF-NOT-EXISTS, no ALTER guards needed."""
+    conn.executescript(SCHEMA_V3)
+
+
 def _apply_v2(conn: sqlite3.Connection) -> None:
     """Apply the v2 schema additions. Fully idempotent.
 
@@ -116,6 +122,8 @@ def init_db(path: str | None = None) -> None:
                 # statements use IF NOT EXISTS; ALTER TABLE is guarded
                 # by a PRAGMA check.
                 _apply_v2(conn)
+                # V3 (phase 3 additions). Idempotent.
+                _apply_v3(conn)
                 # Migration version check: if a future version exists in
                 # the DB but our code is older, log a warning.
                 cur = conn.execute(
