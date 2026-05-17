@@ -2,8 +2,8 @@
 # m3-memory installer — Linux + macOS.
 #
 # Detects the OS, installs the OS-level prerequisites (pipx, git, sqlite3),
-# then runs `pipx install m3-memory && mcp-memory install-m3` as the calling
-# user. Idempotent: safe to re-run.
+# then runs `pipx install m3-memory && m3 setup` as the calling user.
+# Idempotent: safe to re-run.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
@@ -15,24 +15,24 @@
 #   --capture-mode {both|stop|precompact|none}   default: both
 #   --endpoint URL                               pin LLM_ENDPOINTS_CSV
 #   --skip-prereqs                               assume pipx/git/sqlite3 already present
-#   --no-install-m3                              stop after pipx install (don't fetch payload)
-#   --install-embedder                           run sovereign embedder setup after install
+#   --no-setup                                   stop after pipx install (skip the wizard)
+#   --install-gpu-embedder                       also build the in-process GPU embedder (CUDA/Vulkan/Metal)
 
 set -euo pipefail
 
 CAPTURE_MODE="both"
 ENDPOINT=""
 SKIP_PREREQS=0
-RUN_INSTALL_M3=1
-RUN_INSTALL_EMBEDDER=0
+RUN_SETUP=1
+INSTALL_GPU_EMBEDDER=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --capture-mode)     CAPTURE_MODE="$2"; shift 2 ;;
-        --endpoint)         ENDPOINT="$2"; shift 2 ;;
-        --skip-prereqs)     SKIP_PREREQS=1; shift ;;
-        --no-install-m3)    RUN_INSTALL_M3=0; shift ;;
-        --install-embedder) RUN_INSTALL_EMBEDDER=1; shift ;;
+        --capture-mode)         CAPTURE_MODE="$2"; shift 2 ;;
+        --endpoint)             ENDPOINT="$2"; shift 2 ;;
+        --skip-prereqs)         SKIP_PREREQS=1; shift ;;
+        --no-setup)             RUN_SETUP=0; shift ;;
+        --install-gpu-embedder) INSTALL_GPU_EMBEDDER=1; shift ;;
         -h|--help)
             sed -n '2,19p' "$0" | sed 's/^# \?//'
             exit 0
@@ -190,41 +190,23 @@ else
     pipx install m3-memory
 fi
 
-# ── mcp-memory install-m3 ─────────────────────────────────────────────────────
+# ── m3 setup (one-command wizard, non-interactive) ────────────────────────────
 
-if [[ $RUN_INSTALL_M3 -eq 0 ]]; then
-    color_ok "Installed m3-memory. Skipping install-m3 (--no-install-m3)."
+if [[ $RUN_SETUP -eq 0 ]]; then
+    color_ok "Installed m3-memory. Skipping setup (--no-setup)."
     exit 0
 fi
 
-INSTALL_M3_ARGS=(--non-interactive --capture-mode "$CAPTURE_MODE")
+SETUP_ARGS=(--non-interactive --capture-mode "$CAPTURE_MODE")
 if [[ -n "$ENDPOINT" ]]; then
-    INSTALL_M3_ARGS+=(--endpoint "$ENDPOINT")
+    SETUP_ARGS+=(--endpoint "$ENDPOINT")
 fi
-if [[ $COGNITIVE_LOOP -eq 1 ]]; then
-    INSTALL_M3_ARGS+=(--cognitive-loop)
-fi
-
-# install-m3 is idempotent only with --force when a previous install exists.
-# Detect and force, since this script is the "fresh install" entrypoint.
-M3_ROOT="${M3_MEMORY_ROOT:-$HOME/.m3-memory}"
-if [[ -d "$M3_ROOT/repo" ]]; then
-    INSTALL_M3_ARGS+=(--force)
+if [[ $INSTALL_GPU_EMBEDDER -eq 1 ]]; then
+    SETUP_ARGS+=(--install-gpu-embedder)
 fi
 
-say "Running: mcp-memory install-m3 ${INSTALL_M3_ARGS[*]}"
-mcp-memory install-m3 "${INSTALL_M3_ARGS[@]}"
-
-if [[ $RUN_INSTALL_EMBEDDER -eq 1 ]]; then
-    say "Running: mcp-memory install-embedder"
-    mcp-memory install-embedder
-fi
-
-# ── doctor summary ────────────────────────────────────────────────────────────
-
-echo
-say "Verifying with mcp-memory doctor:"
-mcp-memory doctor || true
+say "Running: m3 setup ${SETUP_ARGS[*]}"
+m3 setup "${SETUP_ARGS[@]}"
 
 echo
 color_ok "Done. m3-memory is installed."
@@ -232,10 +214,7 @@ echo
 cat <<EOF
 Next steps:
   1. Open a new terminal (or run: exec \$SHELL -l) so PATH picks up ~/.local/bin.
-  2. (Optional) Install a self-contained local embedder for Hybrid Search:
-       mcp-memory install-embedder
-  3. Wire your AI agent to call mcp-memory:
-       Claude Code: claude mcp add memory mcp-memory
-       Gemini CLI:  already configured by install-m3 if gemini was on PATH.
+  2. Restart any agent (Claude Code, Gemini CLI, OpenCode) so it picks up the m3 MCP server.
+  3. (Optional) Add GPU acceleration to the embedder: m3 embedder install-gpu
   4. Re-run this script anytime to upgrade and re-verify.
 EOF

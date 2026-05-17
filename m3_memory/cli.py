@@ -471,60 +471,41 @@ def _cmd_chatlog(args: argparse.Namespace) -> int:
     return 2
 
 
-def _cmd_install_embedder(args: argparse.Namespace) -> int:
-    """Execute the setup_embedder.py script."""
-    return _run_bin_script("setup_embedder.py", args.rest)
-
-
 def _cmd_embedder(args: argparse.Namespace) -> int:
-    """Manage the local embedder subsystem (start|stop|status|install)."""
+    """Manage the sovereign m3 CPU embedder (BGE-M3 on port 8082)."""
     sub = args.embedder_cmd
-    if sub == "install":
-        return _run_bin_script("setup_embedder.py", args.rest)
-
-    from m3_memory.installer import find_bridge
-    bridge = find_bridge()
-    if not bridge:
-        return 1
-
-    # Target directory is sibling to ~/.m3-memory/repo/bin/
-    target_dir = bridge.parent.parent / ".m3-lmstudio"
-    lms_bin = target_dir / "bin" / ("lms.exe" if sys.platform == "win32" else "lms")
-
-    if not lms_bin.exists():
-        print("Error: Local embedder not installed. Run `mcp-memory install-embedder`.", file=sys.stderr)
-        return 1
-
-    if sub == "start":
-        return subprocess.run([str(lms_bin), "server", "start", "--port", "8081"]).returncode
-    if sub == "stop":
-        return subprocess.run([str(lms_bin), "server", "stop"]).returncode
-    if sub == "status":
-        return subprocess.run([str(lms_bin), "server", "status"]).returncode
-
-    return 0
+    if sub is None:
+        print("Error: `m3 embedder` requires a subcommand (install, start, stop, status, "
+              "uninstall, install-gpu). Run `m3 embedder --help`.", file=sys.stderr)
+        return 2
+    # Each subcommand registered its own func= via embedder_admin.add_arguments.
+    return args.func(args)
 
 
 def main() -> None:
     from m3_memory import __version__
 
     parser = argparse.ArgumentParser(
-        prog="mcp-memory",
+        prog="m3",
         description=(
             "M3 Memory - local-first agentic memory MCP server.\n"
-            "Add to your agent's MCP config to get persistent, private memory."
+            "Add to your agent's MCP config to get persistent, private memory.\n"
+            "(Also installed as `mcp-memory` for backwards compatibility.)"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # First-time setup after `pip install m3-memory`:
-  mcp-memory install-m3
+  # First-time one-command setup (interactive wizard):
+  m3 setup
 
-  # Install a self-contained local embedder (Sovereign/Air-gapped):
-  mcp-memory install-embedder
+  # Install the sovereign CPU embedder (BGE-M3 on port 8082):
+  m3 embedder install
+
+  # Add GPU acceleration to the in-process embedder (CUDA/Vulkan/Metal):
+  m3 embedder install-gpu
 
   # Start the MCP server (used by Claude Code / Gemini CLI / Aider):
-  mcp-memory
+  m3
 """,
     )
     parser.add_argument("--version", action="version", version=f"m3-memory {__version__}")
@@ -561,17 +542,21 @@ Examples:
     )
     p_install.set_defaults(func=_cmd_install_m3)
 
+    # One-command interactive wizard: detects agents, asks a handful of
+    # questions, then runs install-m3 + CPU-fallback service + per-agent
+    # wiring + chatlog hooks + doctor end-to-end.
+    p_setup = subparsers.add_parser(
+        "setup",
+        help="Interactive one-command setup. Run after `pip install m3-memory`.",
+    )
+    from m3_memory import setup_wizard as _setup_wizard
+    _setup_wizard.add_arguments(p_setup)
+
     p_reinstall = subparsers.add_parser(
         "reinstall",
         help="Wipe and reinstall the system payload (alias for install-m3 --force).",
     )
     p_reinstall.set_defaults(func=_cmd_reinstall)
-
-    p_embedder = subparsers.add_parser(
-        "install-embedder",
-        help="Install a self-contained local embedder (Sovereign/Air-gapped).",
-    )
-    p_embedder.set_defaults(func=_cmd_install_embedder)
 
     p_update = subparsers.add_parser(
         "update",
@@ -671,20 +656,17 @@ Examples:
 
     p_embedder_mgmt = subparsers.add_parser(
         "embedder",
-        help="Manage the local embedder subsystem (start|stop|status|install).",
+        help="Manage the sovereign m3 CPU embedder (install|start|stop|status|uninstall|install-gpu).",
     )
-    embedder_sub = p_embedder_mgmt.add_subparsers(dest="embedder_cmd", metavar="<subcommand>")
-    embedder_sub.add_parser("install", help="Interactive setup for local embedder.")
-    embedder_sub.add_parser("start",   help="Start the local embedder server.")
-    embedder_sub.add_parser("stop",    help="Stop the local embedder server.")
-    embedder_sub.add_parser("status",  help="Check the status of the local embedder.")
+    from m3_memory import embedder_admin as _embedder_admin
+    _embedder_admin.add_arguments(p_embedder_mgmt)
     p_embedder_mgmt.set_defaults(func=_cmd_embedder)
 
-    # Use parse_known_args so flags after `chatlog <sub>`, `install-embedder`
-    # or `embedder` aren't fought over by the outer parser — they're passed
-    # through to the child script. args.rest carries them.
+    # Use parse_known_args so flags after `chatlog <sub>` aren't fought over
+    # by the outer parser — they're passed through to the child script.
+    # args.rest carries them.
     args, extras = parser.parse_known_args()
-    if getattr(args, "command", None) in ("chatlog", "install-embedder", "embedder", "doctor"):
+    if getattr(args, "command", None) in ("chatlog", "doctor"):
         args.rest = extras
     elif extras:
         # For any other subcommand, unknown flags are genuine errors.
