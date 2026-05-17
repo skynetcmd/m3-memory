@@ -48,13 +48,27 @@ from .config import (
 )
 from .chroma import _query_chroma
 from .db import _db, _enqueue_access_stamps
+from .graph import _graph_neighbor_ids, _session_neighbor_ids, _entity_graph_neighbor_ids, _score_extra_rows, memory_graph_impl
 from .embed import _embed
-from .fts import _compile_fts_query, _query_title_token_set, _title_overlap_from_qset
+from .fts import (
+    _DATE_MONTHS,
+    _DATE_RE_ISO,
+    _DATE_RE_LONG,
+    _ENTITY_MENTION_RE,
+    _EVENT_PROPER_NOUN,
+    _TEMPORAL_QUERY_RE,
+    _TEMPORAL_ROUTER_RE,
+    _compile_fts_query,
+    _query_title_token_set,
+    _title_overlap_from_qset,
+)
 from .util import (
-    _batch_cosine_py,
-    _unpack_many,
     _HAS_NUMPY,
+    _batch_cosine_py,
+    _cosine,
+    _cosine_batch_packed,
     _np,
+    _unpack_many,
 )
 
 logger = logging.getLogger("memory.search")
@@ -64,12 +78,9 @@ logger = logging.getLogger("memory.search")
 # below reference them as bare names; we bind them into this module's globals
 # on first call via `_resolve_mc_callbacks()`. The list covers:
 #
-#   - graph helpers: `_graph_neighbor_ids`, `_session_neighbor_ids`,
-#     `_entity_graph_neighbor_ids`, `_score_extra_rows`, `memory_graph_impl`
 #   - DB-state gate predicates: `_prefer_observations_gate`,
 #     `_two_stage_observations_gate`
 #   - telemetry hook: `_track_cost`
-#   - pure-Python cosine fallback: `_cosine`
 #
 # Why deferred binding rather than `from memory_core import ...` at top:
 # memory_core's import path runs `from memory import search` near its top, so
@@ -79,15 +90,9 @@ logger = logging.getLogger("memory.search")
 # actually called, memory_core is fully loaded — so resolving at first call
 # always succeeds. See docs/MEMORY_CORE_MODULARIZATION_LESSONS.md §5.
 _MC_CALLBACK_NAMES = (
-    "_cosine",
     "_prefer_observations_gate",
     "_two_stage_observations_gate",
     "_track_cost",
-    "_graph_neighbor_ids",
-    "_session_neighbor_ids",
-    "_entity_graph_neighbor_ids",
-    "_score_extra_rows",
-    "memory_graph_impl",
 )
 _MC_CALLBACKS_BOUND = False
 
@@ -115,22 +120,13 @@ def _resolve_mc_callbacks() -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 # Used by event-extraction (in memory_core for now). Re-exported through the
 # memory_core shim so legacy callers continue to find it under memory_core.
-_EVENT_PROPER_NOUN = re.compile(r"\b([A-Z][a-z]{2,})\b")
 
 # Query-type routing for retrieval. When QUERY_TYPE_ROUTING is on and a query
 # looks like "When/what date ... <ProperNoun>", shift vector_weight toward
 # BM25 so proper-noun signal doesn't get diluted by embedding similarity.
-_TEMPORAL_QUERY_RE = re.compile(
-    r"\b(when|what\s+date|which\s+day|on\s+what)\b", re.IGNORECASE,
-)
 
 # Hoisted out of _apply_temporal_boost so it isn't re-compiled per search call.
 # These match ISO `YYYY-MM-DD` and `D Month YYYY` shapes inside the query.
-_DATE_RE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
-_DATE_RE_LONG = re.compile(
-    r"\b(\d+)\s+(january|february|march|april|may|june|july|august|"
-    r"september|october|november|december)\s+(\d{4})\b",
-)
 _DATE_MONTHS = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
@@ -550,7 +546,6 @@ _TEMPORAL_ROUTER_PATTERNS = (
     r"\b(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\b",
     r"\bvalentine'?s?\s+day\b", r"\bchristmas\b", r"\bthanksgiving\b", r"\bnew\s+year'?s?\b",
 )
-_TEMPORAL_ROUTER_RE = re.compile("|".join(_TEMPORAL_ROUTER_PATTERNS), re.IGNORECASE)
 
 # Module-level entity mention patterns for question-time parsing (Phase 6).
 # Regex-only, no SLM — same compilation style as _TEMPORAL_ROUTER_PATTERNS.
@@ -664,25 +659,6 @@ def is_temporal_query(query: str) -> bool:
 # via `from .util import _batch_cosine` if a future block needs to.
 
 
-def _cosine_batch_packed(query, blobs, dim: int) -> list[float]:
-    """Score `query` against a list of packed-blob embeddings (the raw SQLite
-    BLOB bytes). Single FFI hop when m3_core_rs is loaded; numpy zero-copy
-    `frombuffer` fallback when not; pure-Python last-ditch fallback.
-
-    A blob with the wrong byte length scores 0.0 in every path (Rust returns
-    0.0; numpy/Python paths zero-fill via `_unpack_many`'s ragged branch).
-    """
-    if not blobs:
-        return []
-    if config.m3_core_rs is not None:
-        try:
-            return config.m3_core_rs.cosine_batch_packed(query, blobs, dim)
-        except Exception as e:  # noqa: BLE001 — fall back rather than fail retrieval
-            logger.debug(f"cosine_batch_packed Rust path failed, falling back: {e}")
-    matrix = _unpack_many(blobs, dim=dim)
-    # Lazy: avoid the circular by importing the writer-shared helper here.
-    from .util import _batch_cosine
-    return _batch_cosine(query, matrix)
 
 
 def _hybrid_score_batch(
