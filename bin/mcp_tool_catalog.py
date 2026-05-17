@@ -545,6 +545,32 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_delete_bulk",
+        description=(
+            "Deletes a list of MemoryItems (soft or hard) in one transaction per chunk. "
+            "Use for curation/dedup passes deleting many items; falls back to per-id "
+            "memory_delete behavior with the same hard-cascade semantics. Returns a "
+            "structured {succeeded, not_found, mode} dict."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "ids":  {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of memory item UUIDs to delete.",
+                },
+                "hard": {"type": "boolean", "description": "Hard delete (permanent).", "default": False},
+            },
+            "required": ["ids"],
+        },
+        impl=memory_core.memory_delete_bulk_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=False,  # destructive — gated by MCP_PROXY_ALLOW_DESTRUCTIVE
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="conversation_start",
         description="Starts a new conversation thread.",
         parameters={
