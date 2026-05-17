@@ -20,6 +20,8 @@ mcp = FastMCP("Memory Bridge")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mcp_tool_catalog
 import memory_core
+import tool_domains
+import tool_loader
 
 # Re-export internal helpers for legacy compatibility (C7, H11)
 _conn = memory_core._conn
@@ -172,35 +174,108 @@ def _build_typed_function(spec):
     return fn
 
 # ── Catalog-driven MCP tool registration ──────────────────────────────────────
-def _register_catalog_tools():
-    """Register every ToolSpec in mcp_tool_catalog.TOOLS as a FastMCP tool.
+# Lazy mode (default): only the essentials + the two meta-tools register at
+# startup. Other tools register on demand when the agent calls
+# `tools_load_domain(domain=…)`. Set M3_TOOLS_LAZY=0 to disable and expose
+# every tool at startup (legacy behavior).
+_LAZY_MODE = os.environ.get("M3_TOOLS_LAZY", "1") != "0"
 
-    The catalog is the single source of truth for tool name, schema, validators,
-    and impl callable. This loop preserves the existing MCP-facing surface
-    (55 tools) while making the bridge a thin shim.
-    """
-    for spec in mcp_tool_catalog.TOOLS:
-        _register_one(spec)
+# Tracks which tools are currently registered with FastMCP. Starts with the
+# essentials + the two meta-tools, grows as domains are loaded.
+_REGISTERED: set[str] = set()
+
 
 def _register_one(spec):
     """Register a single ToolSpec with FastMCP. Builds a typed function per spec
     so FastMCP can introspect the schema and each registered function has the
-    right name and docstring."""
+    right name and docstring. Idempotent — registering the same spec twice is
+    a no-op."""
+    if spec.name in _REGISTERED:
+        return False
     fn = _build_typed_function(spec)
     mcp.tool(name=spec.name, description=spec.description)(fn)
+    _REGISTERED.add(spec.name)
+    return True
 
-_register_catalog_tools()
+
+def _register_initial_tools():
+    """Initial registration set, called once at startup.
+
+    Lazy mode: meta-tools + essentials only (~6 tools, ~2.8 K tokens).
+    Eager mode: every ToolSpec (~85 tools, ~15.8 K tokens — pre-2026-05 behavior).
+    """
+    _META_TOOLS = {"tools_list_domains", "tools_load_domain"}
+    for spec in mcp_tool_catalog.TOOLS:
+        if not _LAZY_MODE:
+            _register_one(spec)
+            continue
+        if spec.name in _META_TOOLS or tool_domains.is_essential(spec.name):
+            _register_one(spec)
+
+
+def _register_domain_callback(domain: str) -> dict:
+    """Register every ToolSpec belonging to the given domain.
+
+    Called by `tool_loader.load_domain()` when the agent invokes the
+    `tools_load_domain` MCP tool. Returns a summary dict the meta-tool
+    serializes back to the agent.
+
+    The MCP `notifications/tools/list_changed` notification is emitted by
+    FastMCP automatically whenever `mcp.tool(...)` registers a new tool
+    after the session is live — clients that advertise the `tools.listChanged`
+    capability will re-fetch the catalog. For clients that don't, the
+    returned dict carries the full schema list as a fallback the agent can
+    use in-band.
+    """
+    newly_registered: list[str] = []
+    schemas: list[dict] = []
+    for spec in mcp_tool_catalog.TOOLS:
+        if tool_domains.domain_of_tool(spec.name) != domain:
+            continue
+        if _register_one(spec):
+            newly_registered.append(spec.name)
+            schemas.append({
+                "name": spec.name,
+                "description": spec.description,
+                "inputSchema": spec.parameters,
+            })
+
+    return {
+        "domain": domain,
+        "tools_now_available": newly_registered,
+        "tools_total_registered": len(_REGISTERED),
+        # Always return schemas — clients with listChanged support will ignore
+        # them; clients without it use them in-band. Small payload either way.
+        "schemas": schemas,
+    }
+
+
+# Wire the meta-tool callback BEFORE we register tools, so the meta-tools
+# work the moment they go live.
+tool_loader.set_register_domain_callback(_register_domain_callback)
+
+_register_initial_tools()
+
 
 # ── Module-level function exposure for test/direct imports ───────────────────
 # Each tool is also exposed as a module-level callable so tests and other modules
 # can call them directly (e.g. `from memory_bridge import memory_write`).
+# We expose EVERY tool here regardless of lazy mode — tests bypass MCP and
+# need direct access to all impls.
 for _spec in mcp_tool_catalog.TOOLS:
     globals()[_spec.name] = _build_typed_function(_spec)
 
 if __name__ == "__main__":
     import os as _os
     logger.info("Memory Bridge (catalog-driven) starting...")
-    logger.info(f"Registered {len(mcp_tool_catalog.TOOLS)} MCP tools from mcp_tool_catalog.")
+    if _LAZY_MODE:
+        logger.info(
+            f"Lazy mode: registered {len(_REGISTERED)} essentials+meta tools at startup "
+            f"(out of {len(mcp_tool_catalog.TOOLS)} total). "
+            f"Use `tools_load_domain` to expose more. Set M3_TOOLS_LAZY=0 to disable."
+        )
+    else:
+        logger.info(f"Eager mode: registered all {len(_REGISTERED)} MCP tools at startup.")
 
     # Transport selection.
     #   stdio (default): MCP client launches us as a subprocess and pipes JSON-RPC
