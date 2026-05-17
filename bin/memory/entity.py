@@ -42,6 +42,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -59,9 +60,57 @@ from .config import (
     _DEFAULT_VALID_ENTITY_TYPES,
     _ENV_ENTITY_VOCAB_YAML,
 )
-from .db import _db
+from . import config as _config
+from .db import _db, _gate_active, _ENTITY_COUNT_QUERY
 from .embed import _embed_canonical_cached
 from .util import sha256_hex as _sha256_hex
+
+
+def _enable_entity_graph_gate() -> bool:
+    """Auto-activate the entity graph when EITHER the env var is set OR
+    enough entity rows exist for the feature to be useful.
+
+    Resolution order (each consulted at call time):
+      1. memory_core.ENABLE_ENTITY_GRAPH — set by test monkeypatch.
+      2. M3_ENABLE_ENTITY_GRAPH env var — set by tests via setenv.
+         Explicit false here vetoes the count-based gate.
+      3. Count-based gate: `entities` table size >= threshold.
+      4. memory.config.ENABLE_ENTITY_GRAPH — the import-time default.
+
+    Definition lives here (post Phase 7+8 refactor) rather than in
+    memory_core because entity.py is the only caller that matters; the
+    function was inadvertently dropped during the extraction.
+    """
+    # (1) env-var explicit override — wins because tests use monkeypatch.setenv
+    env = os.environ.get("M3_ENABLE_ENTITY_GRAPH")
+    if env is not None:
+        return env.lower() in ("1", "true", "yes")
+    # (2) monkeypatched attribute on the shim
+    try:
+        import memory_core as _mc  # type: ignore
+        if hasattr(_mc, "ENABLE_ENTITY_GRAPH"):
+            return bool(_mc.ENABLE_ENTITY_GRAPH)
+    except ImportError:
+        pass
+    # (3) count-based gate
+    if _gate_active("M3_ENABLE_ENTITY_GRAPH", _ENTITY_COUNT_QUERY, threshold=1):
+        return True
+    # (4) import-time default
+    return bool(getattr(_config, "ENABLE_ENTITY_GRAPH", False))
+
+
+def _read_gate(name: str):
+    """Same lazy-lookup pattern as memory.enrich._read_gate.
+
+    Tests patch memory_core.<NAME>; production reads memory.config.<NAME>.
+    """
+    try:
+        import memory_core  # type: ignore
+        if hasattr(memory_core, name):
+            return getattr(memory_core, name)
+    except ImportError:
+        pass
+    return getattr(_config, name, False)
 
 logger = logging.getLogger("memory.entity")
 
@@ -565,7 +614,10 @@ def _select_pending_entity_extraction(
     if limit is not None:
         sql += f" LIMIT {int(limit)}"
 
-    params = variant_params + [ENTITY_EXTRACT_MAX_ATTEMPTS]
+    # Resolve max-attempts via memory_core for legacy tests that
+    # monkeypatch the value; production reads the import-time constant.
+    _max_attempts = _read_gate("ENTITY_EXTRACT_MAX_ATTEMPTS") or ENTITY_EXTRACT_MAX_ATTEMPTS
+    params = variant_params + [_max_attempts]
     return list(db.execute(sql, params).fetchall())
 
 
