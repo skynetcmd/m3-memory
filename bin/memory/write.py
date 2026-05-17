@@ -26,7 +26,33 @@ from embedding_utils import (
     pack as _pack,
     unpack as _unpack,
 )
-from .db import _db
+from . import db as _db_mod
+from . import embed as _embed_mod
+from .db import _db as _canonical_db
+
+
+def _db(*args, **kwargs):
+    """Connection context manager — dynamic-lookup wrapper.
+
+    Tests monkeypatch `memory_core._db` (pre-refactor pattern) to inject
+    a fake DB; honor that override at call time. If no patch is in
+    place, route to the canonical `memory.db._db`.
+
+    This wrapper lives in memory.write specifically (not all consumers
+    need it) because the bulk + write impls moved here in the Phase 7+8
+    refactor and a handful of regression tests pin patching behavior
+    that pre-dated the move.
+    """
+    try:
+        import memory_core as _mc  # type: ignore
+        override = getattr(_mc, "_db", None)
+        # Avoid infinite recursion if memory_core._db is the canonical
+        # `with` shim that simply re-exports us.
+        if override is not None and override is not _db:
+            return override(*args, **kwargs)
+    except ImportError:
+        pass
+    return _canonical_db(*args, **kwargs)
 from .embed import (
     _embed,
     _embed_many,
@@ -666,7 +692,19 @@ async def memory_write_bulk_impl(
             else:
                 _schedule(p, "default", p["embed_text"])
 
-        unique_vecs = await _embed_many(unique_texts)
+        # Dynamic lookup so tests that monkeypatch memory_core._embed_many
+        # (pre-refactor pattern) or memory.embed._embed_many still flow
+        # through. memory_core re-exports memory.embed._embed_many; we
+        # check memory_core first for back-compat with patched shim tests.
+        _emb = None
+        try:
+            import memory_core as _mc  # type: ignore
+            _emb = getattr(_mc, "_embed_many", None)
+        except ImportError:
+            pass
+        if _emb is None:
+            _emb = _embed_mod._embed_many
+        unique_vecs = await _emb(unique_texts)
         # Track per-item default-kind embed success so we only enqueue once.
         default_ok: set[str] = set()
         default_fail: set[str] = set()
@@ -863,7 +901,16 @@ async def _check_contradictions(
             if agent_id:
                 where += " AND mi.agent_id = ?"
                 params.append(agent_id)
-            if variant is not None and AUTO_RELATED_LINK_SCOPE_BY_VARIANT:
+            # Resolve scope gate at call time so tests that monkeypatch
+            # memory_core.AUTO_RELATED_LINK_SCOPE_BY_VARIANT take effect.
+            _scope_on = AUTO_RELATED_LINK_SCOPE_BY_VARIANT
+            try:
+                import memory_core as _mc  # type: ignore
+                if hasattr(_mc, "AUTO_RELATED_LINK_SCOPE_BY_VARIANT"):
+                    _scope_on = _mc.AUTO_RELATED_LINK_SCOPE_BY_VARIANT
+            except ImportError:
+                pass
+            if variant is not None and _scope_on:
                 where += " AND mi.variant = ?"
                 params.append(variant)
             rows = db.execute(
