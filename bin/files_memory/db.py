@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Iterator
 
 from . import config
-from .schema import SCHEMA_V1
+from .schema import SCHEMA_V1, SCHEMA_V2
 
 logger = logging.getLogger("files_memory.db")
 
@@ -73,6 +73,29 @@ def _new_connection(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Test whether a column exists on a table. Used to guard idempotent ALTERs."""
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    except sqlite3.Error:
+        return False
+    return any(r[1] == column for r in rows)
+
+
+def _apply_v2(conn: sqlite3.Connection) -> None:
+    """Apply the v2 schema additions. Fully idempotent.
+
+    ALTER TABLE statements live here (rather than inline in SCHEMA_V2)
+    because SQLite has no ADD COLUMN IF NOT EXISTS — we have to check
+    PRAGMA table_info first.
+    """
+    conn.executescript(SCHEMA_V2)
+    if not _has_column(conn, "promotion_markers", "memory_db_path"):
+        conn.execute("ALTER TABLE promotion_markers ADD COLUMN memory_db_path TEXT")
+    if not _has_column(conn, "promotion_markers", "mapped_type"):
+        conn.execute("ALTER TABLE promotion_markers ADD COLUMN mapped_type TEXT")
+
+
 def init_db(path: str | None = None) -> None:
     """Initialize the schema if not already done for this path.
 
@@ -87,12 +110,14 @@ def init_db(path: str | None = None) -> None:
         try:
             conn = _new_connection(db_path)
             try:
-                # executescript runs all statements with implicit commits;
-                # IF NOT EXISTS makes this safe to repeat.
+                # V1 (base schema). IF NOT EXISTS makes this safe to repeat.
                 conn.executescript(SCHEMA_V1)
-                # Migration version check: if a future version exists in the
-                # DB but our code is older, log a warning. Inverse (DB old,
-                # code new) requires real migrations — phase 1 only has v1.
+                # V2 (phase 2 additions). Idempotent: all CREATE TABLE
+                # statements use IF NOT EXISTS; ALTER TABLE is guarded
+                # by a PRAGMA check.
+                _apply_v2(conn)
+                # Migration version check: if a future version exists in
+                # the DB but our code is older, log a warning.
                 cur = conn.execute(
                     "SELECT MAX(version) FROM schema_migrations"
                 )

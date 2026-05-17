@@ -55,6 +55,7 @@ class FileIngestResult:
     file_node_uuid: Optional[str]
     status: str           # 'created'|'unchanged_skipped'|'superseded'|'failed'
     leaf_count: int = 0
+    fact_count: int = 0
     chars_embedded: int = 0
     duration_ms: int = 0
     reason: Optional[str] = None
@@ -75,6 +76,7 @@ class IngestResult:
     files_failed: int = 0
     leaves_written: int = 0
     leaves_embedded: int = 0
+    facts_extracted: int = 0
     failures: list[dict] = field(default_factory=list)
     per_file: list[FileIngestResult] = field(default_factory=list)
 
@@ -150,6 +152,7 @@ def ingest_one_file(
     *,
     version_label_override: Optional[str] = None,
     record_noops: bool = False,
+    extract_mode: str = "none",
     db_path: Optional[str] = None,
 ) -> FileIngestResult:
     """Ingest a single file. The atomic unit of the pipeline.
@@ -164,6 +167,16 @@ def ingest_one_file(
         for audit).
       - Different content → new file_node, prior superseded.
 
+    Extraction modes:
+      - 'none'   — no fact extraction; leaves left with status='pending'
+                   only if the caller plans a later queue drain. Default.
+      - 'inline' — extract per-leaf sync inside the same transaction.
+                   Slower but immediately queryable. Falls back to
+                   marking failed/skipped leaves if LLM is unavailable.
+      - 'queue'  — leaves get status='pending'; a separate drain pass
+                   (files_extract_pending) processes them. The walk
+                   itself stays fast.
+
     Args:
         entry: WalkEntry from the walker.
         run_id: shared across all files in this ingest invocation.
@@ -171,6 +184,7 @@ def ingest_one_file(
         version_label_override: explicit label; usually None.
         record_noops: write a no-op ingestion_run row even for unchanged
             files. Off by default — keeps tables clean.
+        extract_mode: 'none' | 'inline' | 'queue'.
         db_path: target files.db (None = use config.FILES_DB_PATH).
     """
     t_start = time.perf_counter()
@@ -305,19 +319,32 @@ def ingest_one_file(
         # Ingestion run record.
         run_uuid = str(_uuid.uuid4())
         chunker_ver = chunker_version(entry.filetype)
+        # extractor_version is recorded ONLY if we actually plan to extract.
+        # For mode='none' we leave it NULL — staleness review then knows
+        # these leaves haven't been considered for extraction yet.
+        run_extractor_version = (
+            config.EXTRACTOR_VERSION if extract_mode != "none" else None
+        )
         conn.execute(
             "INSERT INTO ingestion_runs("
             "uuid, file_node, run_id, ingest_date, ingester_version, "
             "chunker_version, extractor_version, extract_mode, model_id, "
             "chunk_count, leaf_count, status, metadata) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, 'none', NULL, ?, ?, 'ok', ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'ok', ?)",
             (
                 run_uuid, file_node_uuid, run_id, _iso_utc(),
-                config.INGESTER_VERSION, chunker_ver, config.EXTRACTOR_VERSION,
+                config.INGESTER_VERSION, chunker_ver, run_extractor_version,
+                extract_mode,
                 len(leaves), len(leaves),
                 _json.dumps({"filetype": entry.filetype}),
             ),
         )
+
+        # Per-leaf extraction_status starts as:
+        #   'skipped'  if extract_mode == 'none' (don't queue-drain these)
+        #   'pending'  if extract_mode in {'inline', 'queue'} (work to do)
+        # Inline mode then advances them to 'ok'/'failed' below.
+        initial_status = "pending" if extract_mode != "none" else "skipped"
 
         # Insert leaves. Collect (uuid, text, summary_text) for batch embed.
         leaf_records: list[tuple[str, str, Optional[str]]] = []
@@ -335,8 +362,8 @@ def ingest_one_file(
                 "uuid, file_node, ingestion_run, division_type, division_id, "
                 "division_label, text, text_sha256, char_range_start, "
                 "char_range_end, leaf_summary, boundary_confidence, truncated, "
-                "metadata) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "extraction_status, metadata) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     leaf_uuid, file_node_uuid, run_uuid,
                     leaf.division_type, leaf.division_id, leaf.division_label,
@@ -345,6 +372,7 @@ def ingest_one_file(
                     leaf_summary_text,
                     leaf.boundary_confidence,
                     1 if leaf.truncated else 0,
+                    initial_status,
                     _json.dumps(leaf.extra or {}),
                 ),
             )
@@ -392,10 +420,55 @@ def ingest_one_file(
             except Exception as e:
                 logger.warning("file-summary embed failed for %s: %s", path, e)
 
+        # 8. Inline extraction (mode='inline' only). For mode='queue' the
+        #    leaves stay 'pending' and a separate drain handles them.
+        fact_count = 0
+        if extract_mode == "inline" and leaf_records:
+            try:
+                from .extract import (
+                    extract_facts_for_leaf, write_extraction_result, llm_available
+                )
+                if llm_available():
+                    model_id = (
+                        os.environ.get("M3_FILES_EXTRACT_MODEL")
+                        or os.environ.get("M3_FILES_SUMMARY_MODEL")
+                        or "unknown"
+                    )
+                    for leaf_uuid, leaf_text, _ in leaf_records:
+                        # division_type is the chunker's label; not used by
+                        # the extractor today but passed through for prompt
+                        # specialization later.
+                        result = extract_facts_for_leaf(
+                            leaf_uuid, leaf_text,
+                            file_summary=file_summary,
+                        )
+                        write_extraction_result(
+                            conn, result,
+                            file_node_uuid=file_node_uuid,
+                            ingestion_run_uuid=run_uuid,
+                            extractor_version=config.EXTRACTOR_VERSION or "p2.0.0",
+                            model_id=model_id,
+                        )
+                        if result.status == "ok":
+                            fact_count += result.fact_count
+                else:
+                    # No LLM: mark every leaf 'failed' with reason logged.
+                    for leaf_uuid, _, _ in leaf_records:
+                        conn.execute(
+                            "UPDATE leaves SET extraction_status = 'failed' "
+                            "WHERE uuid = ?", (leaf_uuid,),
+                        )
+                    logger.warning(
+                        "inline extraction requested but no LLM endpoint configured; "
+                        "leaves marked extraction_status='failed' for %s", path,
+                    )
+            except Exception as e:
+                logger.exception("inline extraction step failed for %s: %s", path, e)
+
         duration_ms = int((time.perf_counter() - t_start) * 1000)
         conn.execute(
-            "UPDATE ingestion_runs SET duration_ms = ? WHERE uuid = ?",
-            (duration_ms, run_uuid),
+            "UPDATE ingestion_runs SET duration_ms = ?, fact_count = ? WHERE uuid = ?",
+            (duration_ms, fact_count, run_uuid),
         )
 
     return FileIngestResult(
@@ -403,6 +476,7 @@ def ingest_one_file(
         file_node_uuid=file_node_uuid,
         status="superseded" if prior else "created",
         leaf_count=len(leaves),
+        fact_count=fact_count,
         chars_embedded=sum(len(t) for _, t, _ in leaf_records) if leaf_records else 0,
         duration_ms=duration_ms,
         superseded_prior=superseded_prior,
@@ -445,6 +519,7 @@ def ingest_path(
     dry_run: bool = False,
     force_size: bool = False,
     record_noops: bool = False,
+    extract_mode: str | None = None,
     repo_root: str | None = None,
     progress_cb=None,
     db_path: Optional[str] = None,
@@ -458,6 +533,7 @@ def ingest_path(
         corpus_id: scope tag (default config.FILES_DEFAULT_CORPUS).
         dry_run: walk + count but DO NOT write to DB.
         record_noops: log unchanged-file ingestion records for audit.
+        extract_mode: 'none' | 'inline' | 'queue'. None → config default.
         repo_root: alternate root for repo_relative computation.
         progress_cb: optional callable(idx, total_so_far, FileIngestResult).
         db_path: target files.db.
@@ -465,6 +541,10 @@ def ingest_path(
     Returns:
         IngestResult with counts and per-file results.
     """
+    if extract_mode is None:
+        extract_mode = config.DEFAULT_EXTRACT_MODE
+    if extract_mode not in {"none", "inline", "queue"}:
+        raise ValueError(f"extract_mode must be 'none'|'inline'|'queue', got: {extract_mode!r}")
     run_id = f"run_{int(time.time())}_{_uuid.uuid4().hex[:8]}"
     started = time.perf_counter()
     walk_stats = WalkStats()
@@ -498,6 +578,7 @@ def ingest_path(
             fr = ingest_one_file(
                 entry, run_id, corpus,
                 record_noops=record_noops,
+                extract_mode=extract_mode,
                 db_path=db_path,
             )
         except Exception as e:
@@ -519,6 +600,7 @@ def ingest_path(
             result.files_failed += 1
 
         result.leaves_written += fr.leaf_count
+        result.facts_extracted += fr.fact_count
         if fr.chars_embedded:
             result.leaves_embedded += fr.leaf_count  # approximation
 
