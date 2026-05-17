@@ -2,17 +2,23 @@
 
 Claude.ai web/desktop and the Anthropic API's MCP Connector talk to MCP
 servers over HTTP, not stdio. m3-memory ships with a built-in HTTP transport
-(`mcp-memory serve`) plus instructions to expose it safely.
+(`m3 serve`) plus instructions to expose it safely.
+
+> Prerequisite: install m3 first via `pip install m3-memory && m3 setup`
+> (or the [one-line installer](../install.sh)). The wizard sets up the
+> embedder and bridge before you expose the HTTP transport.
 
 ## TL;DR
 
 ```bash
-mcp-memory serve --host 127.0.0.1 --port 8080
+m3 serve --host 127.0.0.1 --port 8080
 ```
 
-This starts the same 96-tool bridge you use locally, on
+This starts the same 87-tool bridge you use locally on
 `http://127.0.0.1:8080/mcp` (Streamable HTTP transport, the spec Claude
-expects).
+expects). Domain-gated by default — only ~6 essentials register at session
+start, rest expand on demand via `tools_load_domain` (see the
+[lazy-loading note](../README.md#-87-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small)).
 
 You then need to make `127.0.0.1:8080` reachable by Claude's servers.
 Pick **one** of the tunnel options below.
@@ -72,7 +78,9 @@ section below.
 2. **URL**: paste the tunnel URL with `/mcp` suffix.
 3. **Auth**: configure if your tunnel requires it (Cloudflare Access /
    ngrok-auth / mTLS — claude.ai supports OAuth and bearer-token).
-4. Save. Claude.ai will probe the endpoint and list the 96 tools.
+4. Save. Claude.ai will probe the endpoint and list the active tool set
+   — by default ~6 essentials plus the two `tools_*` meta-tools (the
+   agent expands more domains as needed).
 
 ---
 
@@ -98,7 +106,7 @@ msg = client.messages.create(
 ```
 
 The connector path is **tool-only** — MCP resources / prompts are not
-exposed. All 96 m3-memory tools are tools, so this is fine for our case.
+exposed. All 87 m3-memory tools are tools, so this is fine for our case.
 
 ---
 
@@ -106,7 +114,7 @@ exposed. All 96 m3-memory tools are tools, so this is fine for our case.
 
 ### systemd (Linux)
 
-`/etc/systemd/system/mcp-memory.service`:
+`/etc/systemd/system/m3-memory.service`:
 
 ```ini
 [Unit]
@@ -117,7 +125,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=youruser
-ExecStart=/home/youruser/.local/bin/mcp-memory serve --host 127.0.0.1 --port 8080
+ExecStart=/home/youruser/.local/bin/m3 serve --host 127.0.0.1 --port 8080
 Restart=on-failure
 RestartSec=5
 
@@ -130,8 +138,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now mcp-memory
-journalctl -u mcp-memory -f
+sudo systemctl enable --now m3-memory
+journalctl -u m3-memory -f
 ```
 
 ### launchd (macOS)
@@ -146,7 +154,7 @@ journalctl -u mcp-memory -f
     <key>Label</key><string>dev.m3-memory.serve</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/youruser/.local/bin/mcp-memory</string>
+        <string>/Users/youruser/.local/bin/m3</string>
         <string>serve</string>
         <string>--host</string><string>127.0.0.1</string>
         <string>--port</string><string>8080</string>
@@ -177,8 +185,8 @@ your memory store. Always front it with one of:
 - A reverse proxy with `Authorization` header check.
 - mTLS.
 
-**Logs.** `mcp-memory serve` logs incoming requests to stderr at INFO
-level. Tail the journalctl/launchctl output if anything misbehaves.
+**Logs.** `m3 serve` logs incoming requests to stderr at INFO level. Tail
+the journalctl/launchctl output if anything misbehaves.
 
 **Resource limits.** The bridge uses one SQLite connection pool (5
 connections by default) and processes requests sequentially. For
@@ -193,10 +201,10 @@ balancer with shared storage.
 - **Claude.ai connector probe times out**: most often the tunnel isn't
   forwarding `/mcp` correctly. Curl `https://your-tunnel/mcp` from
   another box — you should see an MCP protocol error (not a 404).
-- **`mcp-memory serve` crashes on startup with `cannot import name 'streamable_http_path'`**:
+- **`m3 serve` crashes on startup with `cannot import name 'streamable_http_path'`**:
   your installed `mcp` Python package is older than fastmcp 3.x's HTTP
   support. `pipx upgrade m3-memory` will pull a recent enough version.
-- **Tools work but writes don't persist**: check `mcp-memory doctor` —
-  the server may be writing to a different `~/.m3-memory/` than your
-  local CLI uses (e.g. when running under a different `HOME` in
-  systemd). Set `HOME=` explicitly in the unit file.
+- **Tools work but writes don't persist**: check `m3 doctor` — the server
+  may be writing to a different `~/.m3-memory/` than your local CLI uses
+  (e.g. when running under a different `HOME` in systemd). Set `HOME=`
+  explicitly in the unit file.
