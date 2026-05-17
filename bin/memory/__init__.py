@@ -25,5 +25,6 @@ from . import fts  # noqa: F401
 from . import db  # noqa: F401
 from . import embed  # noqa: F401
 from . import chroma  # noqa: F401
+from . import search  # noqa: F401
 
-__all__ = ["config", "util", "fts", "db", "embed", "chroma"]
+__all__ = ["config", "util", "fts", "db", "embed", "chroma", "search"]
