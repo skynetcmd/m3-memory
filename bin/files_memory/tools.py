@@ -322,8 +322,124 @@ def files_link_rename_impl(
     )
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Multi-corpus impls (phase 4)
+# ──────────────────────────────────────────────────────────────────────────────
+def _corpus_info_to_dict(info) -> dict:
+    return {
+        "corpus_id": info.corpus_id,
+        "settings": info.settings,
+        "file_node_count": info.file_node_count,
+        "leaf_count": info.leaf_count,
+        "created_at": info.created_at,
+        "is_default": info.is_default,
+    }
+
+
+def files_corpus_create_impl(
+    corpus_id: str,
+    description: Optional[str] = None,
+    extract_mode: Optional[str] = None,
+    scope: Optional[str] = None,
+    default: bool = False,
+) -> dict:
+    """Register a new corpus."""
+    from .corpora import corpus_create
+    info = corpus_create(
+        corpus_id=corpus_id, description=description,
+        extract_mode=extract_mode, scope=scope, default=default,
+    )
+    return _corpus_info_to_dict(info)
+
+
+def files_corpus_list_impl() -> list[dict]:
+    """Enumerate corpora with row counts."""
+    from .corpora import corpus_list
+    return [_corpus_info_to_dict(i) for i in corpus_list()]
+
+
+def files_corpus_get_impl(corpus_id: str) -> Optional[dict]:
+    """Fetch a single corpus's settings + counts. None if unknown."""
+    from .corpora import corpus_get
+    info = corpus_get(corpus_id)
+    return _corpus_info_to_dict(info) if info else None
+
+
+def files_corpus_set_impl(
+    corpus_id: str,
+    description: Optional[str] = None,
+    extract_mode: Optional[str] = None,
+    scope: Optional[str] = None,
+    default: Optional[bool] = None,
+    retention_days: Optional[int] = None,
+) -> dict:
+    """Update settings on an existing corpus (creates settings row if absent)."""
+    from .corpora import corpus_set
+    info = corpus_set(
+        corpus_id=corpus_id, description=description,
+        extract_mode=extract_mode, scope=scope, default=default,
+        retention_days=retention_days,
+    )
+    return _corpus_info_to_dict(info)
+
+
+def files_corpus_delete_impl(corpus_id: str, cascade: bool = False) -> dict:
+    """Delete a corpus (and its contents when cascade=True)."""
+    from .corpora import corpus_delete
+    return corpus_delete(corpus_id=corpus_id, cascade=cascade)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Watch-mode impls (phase 4)
+# ──────────────────────────────────────────────────────────────────────────────
+def files_watch_once_impl(
+    directory: Optional[str] = None,
+    corpus: Optional[str] = None,
+    agent_id: str = "files_memory.watch",
+    cooldown_seconds: float = 3600.0,
+) -> dict:
+    """Single staleness-review + notify pass; returns counters."""
+    from .watch import watch_once
+    result = watch_once(
+        directory=directory, corpus_id=corpus,
+        agent_id=agent_id, cooldown_seconds=cooldown_seconds,
+    )
+    return {
+        "duration_ms": result.duration_ms,
+        "stale_count": result.stale_count,
+        "new_count": result.new_count,
+        "missing_count": result.missing_count,
+        "failed_extraction_count": result.failed_extraction_count,
+        "rename_candidate_count": result.rename_candidate_count,
+        "drifted_promotion_count": result.drifted_promotion_count,
+        "notifications_emitted": result.notifications_emitted,
+        "notifications_suppressed_by_cooldown": result.notifications_suppressed_by_cooldown,
+        "errors": result.errors,
+    }
+
+
+def files_watch_loop_impl(
+    directory: Optional[str] = None,
+    corpus: Optional[str] = None,
+    interval_seconds: float = 300.0,
+    agent_id: str = "files_memory.watch",
+    cooldown_seconds: float = 3600.0,
+    max_cycles: Optional[int] = None,
+) -> dict:
+    """Blocking polling loop. Long-running; suitable for `python -m … watch`.
+    Returns the cycle count after KeyboardInterrupt or max_cycles."""
+    from .watch import watch_loop
+    cycles = watch_loop(
+        directory=directory, corpus_id=corpus,
+        interval_seconds=interval_seconds, agent_id=agent_id,
+        cooldown_seconds=cooldown_seconds, max_cycles=max_cycles,
+    )
+    return {"cycles_completed": cycles}
+
+
 def files_index_impl(
     corpus: Optional[str] = None,
+    corpora: Optional[list[str]] = None,
     filetype: Optional[str] = None,
     directory: Optional[str] = None,
     filename_glob: Optional[str] = None,
@@ -337,7 +453,8 @@ def files_index_impl(
     deep-reading. Default sort: date_modified DESC.
 
     Args:
-      corpus: scope filter.
+      corpus: single-corpus scope filter.
+      corpora: list of corpus IDs to fan out across. Overrides corpus.
       filetype: filter to one filetype (e.g. 'markdown', 'pdf').
       directory: filter to files whose absolute path starts here.
       filename_glob: SQL GLOB pattern over filename ('*.md', 'README*').
@@ -345,7 +462,7 @@ def files_index_impl(
       limit: max entries.
     """
     entries = files_index(
-        corpus_id=corpus, filetype=filetype, directory=directory,
+        corpus_id=corpus, corpora=corpora, filetype=filetype, directory=directory,
         filename_glob=filename_glob, include_history=include_history,
         limit=limit,
     )
@@ -359,6 +476,7 @@ def files_index_impl(
             "version": e.version_label,
             "date_modified": e.date_modified,
             "summary": e.summary,
+            "corpus_id": e.corpus_id,
         }
         for e in entries
     ]
@@ -368,6 +486,7 @@ def files_search_impl(
     query: str,
     limit: int = 10,
     corpus: Optional[str] = None,
+    corpora: Optional[list[str]] = None,
     filetype: Optional[str] = None,
     include_history: bool = False,
 ) -> list[dict]:
@@ -376,11 +495,15 @@ def files_search_impl(
     Default filters to current (non-superseded) leaves. Pass
     include_history=True for time-travel queries.
 
+    Args:
+      corpus: single-corpus scope filter.
+      corpora: list of corpus IDs to fan out across. Overrides corpus.
+
     Returns ranked SearchHit records with text, provenance (file +
     division), and per-channel rank info for debugging.
     """
     hits = _files_search(
-        query, limit=limit, corpus_id=corpus,
+        query, limit=limit, corpus_id=corpus, corpora=corpora,
         filetype=filetype, include_history=include_history,
     )
     return [
@@ -390,6 +513,7 @@ def files_search_impl(
             "filename": h.filename,
             "path": h.path,
             "original_path": h.original_path,
+            "corpus_id": h.corpus_id,
             "division": f"{h.division_type}:{h.division_id}",
             "division_label": h.division_label,
             "text": h.text,
@@ -627,6 +751,73 @@ def register(mcp) -> None:
             expect_sha256=expect_sha256,
         )
 
+    # ── Multi-corpus management (phase 4) ────────────────────────────────
+    @mcp.tool()
+    def files_corpus_create(
+        corpus_id: str,
+        description: Optional[str] = None,
+        extract_mode: Optional[str] = None,
+        scope: Optional[str] = None,
+        default: bool = False,
+    ) -> dict:
+        """Register a new corpus with optional default overrides.
+        `default=True` marks this corpus as the installation's default
+        (clears the flag on any prior default in the same transaction)."""
+        return files_corpus_create_impl(
+            corpus_id=corpus_id, description=description,
+            extract_mode=extract_mode, scope=scope, default=default,
+        )
+
+    @mcp.tool()
+    def files_corpus_list() -> list[dict]:
+        """Enumerate corpora with row counts."""
+        return files_corpus_list_impl()
+
+    @mcp.tool()
+    def files_corpus_get(corpus_id: str) -> Optional[dict]:
+        """Fetch a single corpus's settings + counts."""
+        return files_corpus_get_impl(corpus_id=corpus_id)
+
+    @mcp.tool()
+    def files_corpus_set(
+        corpus_id: str,
+        description: Optional[str] = None,
+        extract_mode: Optional[str] = None,
+        scope: Optional[str] = None,
+        default: Optional[bool] = None,
+        retention_days: Optional[int] = None,
+    ) -> dict:
+        """Update settings for an existing corpus. None args are no-ops.
+        Creates the corpus_settings row if absent."""
+        return files_corpus_set_impl(
+            corpus_id=corpus_id, description=description,
+            extract_mode=extract_mode, scope=scope, default=default,
+            retention_days=retention_days,
+        )
+
+    @mcp.tool()
+    def files_corpus_delete(corpus_id: str, cascade: bool = False) -> dict:
+        """Delete a corpus's settings row. Cascade=True also deletes its
+        file_nodes and all dependent rows — DESTRUCTIVE. Without cascade,
+        refuses when the corpus has file_nodes."""
+        return files_corpus_delete_impl(corpus_id=corpus_id, cascade=cascade)
+
+    # ── Watch-mode daemon (phase 4) ──────────────────────────────────────
+    @mcp.tool()
+    def files_watch_once(
+        directory: Optional[str] = None,
+        corpus: Optional[str] = None,
+        agent_id: str = "files_memory.watch",
+        cooldown_seconds: float = 3600.0,
+    ) -> dict:
+        """Single-pass staleness check + notification dispatch. Suitable
+        for cron / scheduled runners. Notifications are emitted via the
+        memory.db notifications inbox; cooldown suppresses duplicates."""
+        return files_watch_once_impl(
+            directory=directory, corpus=corpus,
+            agent_id=agent_id, cooldown_seconds=cooldown_seconds,
+        )
+
 
 def _build_standalone_server():
     """Build a FastMCP server exposing only files_* tools."""
@@ -733,12 +924,19 @@ def main() -> int:
     p_sea = sub.add_parser("search", help="hybrid search over leaves")
     p_sea.add_argument("query")
     p_sea.add_argument("--limit", type=int, default=10)
-    p_sea.add_argument("--corpus", default=None)
+    p_sea.add_argument("--corpus", default=None,
+                       help="single-corpus filter (default: all current)")
+    p_sea.add_argument("--corpora", default=None,
+                       help="comma-separated corpus IDs for fan-out search "
+                            "(overrides --corpus)")
     p_sea.add_argument("--filetype", default=None)
     p_sea.add_argument("--include-history", action="store_true")
 
     p_idx = sub.add_parser("index", help="file-level summary triage")
     p_idx.add_argument("--corpus", default=None)
+    p_idx.add_argument("--corpora", default=None,
+                       help="comma-separated corpus IDs for fan-out index "
+                            "(overrides --corpus)")
     p_idx.add_argument("--filetype", default=None)
     p_idx.add_argument("--directory", default=None)
     p_idx.add_argument("--glob", dest="filename_glob", default=None)
@@ -756,6 +954,56 @@ def main() -> int:
     p_h.add_argument("--rebuild", action="store_true")
 
     sub.add_parser("serve", help="run FastMCP stdio server")
+
+    # ── Multi-corpus subcommands (phase 4) ───────────────────────────────
+    p_cc = sub.add_parser("corpus-create", help="register a new corpus")
+    p_cc.add_argument("corpus_id")
+    p_cc.add_argument("--description", default=None)
+    p_cc.add_argument("--extract-mode", choices=["none", "inline", "queue"], default=None,
+                      dest="extract_mode")
+    p_cc.add_argument("--scope", default=None)
+    p_cc.add_argument("--default", action="store_true",
+                      help="mark this corpus as the installation default")
+
+    sub.add_parser("corpus-list", help="enumerate corpora with row counts")
+
+    p_cg = sub.add_parser("corpus-get", help="show one corpus's settings + counts")
+    p_cg.add_argument("corpus_id")
+
+    p_cs = sub.add_parser("corpus-set", help="update a corpus's settings")
+    p_cs.add_argument("corpus_id")
+    p_cs.add_argument("--description", default=None)
+    p_cs.add_argument("--extract-mode", choices=["none", "inline", "queue"], default=None,
+                      dest="extract_mode")
+    p_cs.add_argument("--scope", default=None)
+    p_cs.add_argument("--default", dest="set_default", action="store_true",
+                      help="set as installation default")
+    p_cs.add_argument("--no-default", dest="unset_default", action="store_true",
+                      help="clear the default flag")
+    p_cs.add_argument("--retention-days", type=int, default=None)
+
+    p_cd = sub.add_parser("corpus-delete", help="remove a corpus")
+    p_cd.add_argument("corpus_id")
+    p_cd.add_argument("--cascade", action="store_true",
+                      help="also delete every file_node in the corpus (DESTRUCTIVE)")
+
+    # ── Watch-mode subcommands (phase 4) ─────────────────────────────────
+    p_wo = sub.add_parser("watch-once", help="single staleness + notify pass")
+    p_wo.add_argument("--directory", default=None)
+    p_wo.add_argument("--corpus", default=None)
+    p_wo.add_argument("--agent-id", default="files_memory.watch", dest="agent_id")
+    p_wo.add_argument("--cooldown-seconds", type=float, default=3600.0,
+                      dest="cooldown_seconds")
+
+    p_wl = sub.add_parser("watch", help="long-running staleness poller")
+    p_wl.add_argument("--directory", default=None)
+    p_wl.add_argument("--corpus", default=None)
+    p_wl.add_argument("--interval-seconds", type=float, default=300.0,
+                      dest="interval_seconds")
+    p_wl.add_argument("--agent-id", default="files_memory.watch", dest="agent_id")
+    p_wl.add_argument("--cooldown-seconds", type=float, default=3600.0,
+                      dest="cooldown_seconds")
+    p_wl.add_argument("--max-cycles", type=int, default=None, dest="max_cycles")
 
     args = p.parse_args()
 
@@ -818,13 +1066,23 @@ def main() -> int:
             expect_sha256=args.expect_sha256,
         )
     elif args.cmd == "search":
+        corpora_list = (
+            [c.strip() for c in args.corpora.split(",") if c.strip()]
+            if getattr(args, "corpora", None) else None
+        )
         r = files_search_impl(
             query=args.query, limit=args.limit, corpus=args.corpus,
+            corpora=corpora_list,
             filetype=args.filetype, include_history=args.include_history,
         )
     elif args.cmd == "index":
+        corpora_list = (
+            [c.strip() for c in args.corpora.split(",") if c.strip()]
+            if getattr(args, "corpora", None) else None
+        )
         r = files_index_impl(
-            corpus=args.corpus, filetype=args.filetype,
+            corpus=args.corpus, corpora=corpora_list,
+            filetype=args.filetype,
             directory=args.directory, filename_glob=args.filename_glob,
             include_history=args.include_history, limit=args.limit,
         )
@@ -838,6 +1096,45 @@ def main() -> int:
         mcp = _build_standalone_server()
         mcp.run()
         return 0
+    elif args.cmd == "corpus-create":
+        r = files_corpus_create_impl(
+            corpus_id=args.corpus_id, description=args.description,
+            extract_mode=args.extract_mode, scope=args.scope,
+            default=args.default,
+        )
+    elif args.cmd == "corpus-list":
+        r = files_corpus_list_impl()
+    elif args.cmd == "corpus-get":
+        r = files_corpus_get_impl(corpus_id=args.corpus_id)
+    elif args.cmd == "corpus-set":
+        # --default and --no-default are mutually exclusive; treat both
+        # off as "don't touch the default flag".
+        default_arg: Optional[bool] = None
+        if args.set_default and args.unset_default:
+            raise SystemExit("--default and --no-default are mutually exclusive")
+        if args.set_default:
+            default_arg = True
+        elif args.unset_default:
+            default_arg = False
+        r = files_corpus_set_impl(
+            corpus_id=args.corpus_id, description=args.description,
+            extract_mode=args.extract_mode, scope=args.scope,
+            default=default_arg, retention_days=args.retention_days,
+        )
+    elif args.cmd == "corpus-delete":
+        r = files_corpus_delete_impl(corpus_id=args.corpus_id, cascade=args.cascade)
+    elif args.cmd == "watch-once":
+        r = files_watch_once_impl(
+            directory=args.directory, corpus=args.corpus,
+            agent_id=args.agent_id, cooldown_seconds=args.cooldown_seconds,
+        )
+    elif args.cmd == "watch":
+        r = files_watch_loop_impl(
+            directory=args.directory, corpus=args.corpus,
+            interval_seconds=args.interval_seconds,
+            agent_id=args.agent_id, cooldown_seconds=args.cooldown_seconds,
+            max_cycles=args.max_cycles,
+        )
     else:
         p.print_help()
         return 2
