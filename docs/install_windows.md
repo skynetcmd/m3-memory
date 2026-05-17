@@ -16,9 +16,7 @@ winget install -e --id SQLite.SQLite
 
 # 2. As your normal user, install m3-memory:
 pip install m3-memory
-mcp-memory install-m3 --capture-mode both
-mcp-memory install-embedder           # optional: self-contained local embedder
-mcp-memory doctor
+m3 setup                              # one-command wizard
 ```
 
 That's it. Windows pip doesn't have the PEP 668 issue Linux does, so plain
@@ -28,21 +26,22 @@ That's it. Windows pip doesn't have the PEP 668 issue Linux does, so plain
 
 ## Adding to an MCP client
 
+`m3 setup` wires every agent it detects on PATH. If you skipped the wizard or
+add an agent later, run these by hand:
+
 ```powershell
 # Claude Code
-claude mcp add memory mcp-memory
+claude mcp add memory m3
 
-# Gemini CLI (if you have it installed)
-# install-m3's post-install phase auto-writes the entry into
-# %USERPROFILE%\.gemini\settings.json — re-run mcp-memory install-m3 if you
-# install Gemini CLI later.
+# Gemini CLI (auto-wired by m3 setup; re-run if Gemini was installed AFTER m3)
+m3 chatlog init --apply-gemini
 ```
 
 ---
 
 ## Common gotchas
 
-- **`mcp-memory: command not found` after `pip install --user`** — `pip install --user`
+- **`m3: command not found` after `pip install --user`** — `pip install --user`
   puts script shims at `%APPDATA%\Python\Python<NN>\Scripts` (e.g.
   `C:\Users\you\AppData\Roaming\Python\Python314\Scripts`), and that
   directory is NOT on PATH by default on most Windows systems. Two fixes:
@@ -66,10 +65,10 @@ claude mcp add memory mcp-memory
      `m3_memory` package is importable):
      ```
      python -m m3_memory.cli doctor
-     python -m m3_memory.cli install-m3 --capture-mode both
+     python -m m3_memory.cli setup
      ```
      The `/m3:*` slash commands fall back to this automatically when
-     `mcp-memory.exe` isn't on PATH.
+     `m3.exe` isn't on PATH.
 
   Alternative: `pip install` (without `--user`) puts the script at
   `C:\PythonNN\Scripts\` which IS on PATH on most Windows Python installs.
@@ -86,18 +85,17 @@ claude mcp add memory mcp-memory
 
 ## Advanced setup
 
-The full homelab walkthrough — Postgres sync, ChromaDB, LM Studio embedding
-server, multi-machine federation — lives at
-[install_windows_homelab.md](install_windows_homelab.md). Most users
-don't need any of that; the quickstart above is enough for a working local
-install.
+The full homelab walkthrough — Postgres sync, ChromaDB, multi-machine
+federation — lives at [install_windows_homelab.md](install_windows_homelab.md).
+Most users don't need any of that; the quickstart above is enough for a
+working local install.
 
 ---
 
 ## Verifying
 
 ```powershell
-mcp-memory doctor
+m3 doctor
 ```
 
 Should show:

@@ -1,116 +1,195 @@
-# 🛡️ Sovereign & Air-Gapped Deployment Guide
+# Sovereign & Air-Gapped Deployment Guide
 
-This guide explains how to deploy M3-Memory as a completely self-contained "memory appliance" in secure, offline, or air-gapped environments.
+This guide explains how to deploy M3-Memory as a completely self-contained
+"memory appliance" in secure, offline, or air-gapped environments.
 
----
-
-## 🛠️ The Architecture
-
-A sovereign deployment consists of three parts:
-1.  **M3-Memory Core:** The MCP server and tools.
-2.  **Sovereign Payload:** OS-native LM Studio binaries and the BGE-M3 model.
-3.  **Self-Healing Persistence:** OS-level autostart logic that repairs itself if the folder is moved.
+m3 is sovereign **by default**. The baseline install needs **zero external
+services** — no LM Studio, no Ollama, no HuggingFace, no model server. Our
+own BGE-M3 CPU embedder ships with the repo and runs on port 8082.
 
 ---
 
-## 🛰️ Phase 1: Preparation (Online)
+## The architecture
 
-Before moving to the air-gapped machine, you must "hydrate" the repository with the required binary assets.
+A sovereign deployment is:
 
-1.  **Clone the Repository:**
-    ```bash
-    git clone https://github.com/skynetcmd/m3-memory.git
-    cd m3-memory
-    ```
+1. **M3-Memory core** — the MCP server, CLI, and tools (`pip install m3-memory`).
+2. **Bundled BGE-M3 GGUF** — ships with the repo via Git LFS at
+   `_assets/models/bge-m3-Q4_K_M.gguf` (~438 MB).
+3. **m3-embed-server** — Rust binary from the `oxidation` extra; serves an
+   OpenAI-compatible `/embedding` endpoint on `127.0.0.1:8082`. Runs as a
+   systemd / launchd / Windows Service with `concurrency=2`.
+4. **OS service registration** — auto-managed by `m3 embedder install`;
+   self-heals on next run if the binary is moved.
 
-2.  **Fetch Sovereign Assets:**
-    Run the hydrator script. This will download ~1.5GB of binaries and models into the `_assets/embedder/` folder and generate an integrity manifest.
-    ```bash
-    python bin/fetch_sovereign_assets.py
-    ```
-
-3.  **Bundle for Transfer:**
-    Copy the entire `m3-memory` folder to your offline media (USB drive, optical disc, etc.). Ensure the hidden `.env` and `_assets/` folders are included.
+No internet, no third-party model server, no LM Studio.
 
 ---
 
-## 🔒 Phase 2: Deployment (Offline)
+## Phase 1 — preparation (on a connected machine)
 
-On the target air-gapped machine:
+Before moving to the air-gapped target, hydrate the repository with the
+LFS-tracked model file and any extra wheels you'll need offline.
 
-1.  **Copy the Folder:**
-    Move the `m3-memory` folder from your USB drive to its permanent home on the secure machine.
+1. **Clone with LFS:**
 
-2.  **Install the Core:**
-    If you bundled dependencies in Phase 0, install them using the local wheels:
-    ```bash
-    pip install --no-index --find-links=_assets/python_wheels m3-memory
-    ```
-    Otherwise, ensure the target machine has internet access and run:
-    ```bash
-    pip install m3-memory
-    ```
-    Finally, initialize the project:
-    ```bash
-    mcp-memory install-m3 --capture-mode both
-    ```
+   ```bash
+   git lfs install      # one-time per machine
+   git clone https://github.com/skynetcmd/m3-memory.git
+   cd m3-memory
+   git lfs pull         # materialize _assets/models/bge-m3-Q4_K_M.gguf
+   ```
 
-3.  **Run the Sovereign Installer:**
-    This command operates entirely offline. It verifies file integrity, migrates the correct assets for the target hardware, and automatically configures your local environment:
-    *   **Auto-Configures `.env`**: Sets `EMBED_BASE_URL` and `LLM_ENDPOINTS_CSV` to point to the local instance (port 8081).
-    *   **Surgical Migration**: Moves the required binary and model to a hidden `.m3-lmstudio` folder.
-    *   **Space Saved**: Reports exactly how many MB of unused setup files were deleted.
-    
-    ```bash
-    mcp-memory install-embedder
-    ```
+   After `git lfs pull`, `_assets/models/bge-m3-Q4_K_M.gguf` is a real ~438MB
+   file (not a 130-byte pointer). Verify with `ls -lh _assets/models/`.
+
+2. **Pre-download pip dependencies:**
+
+   ```bash
+   mkdir -p _assets/python_wheels
+   pip download m3-memory[oxidation] -d _assets/python_wheels
+   ```
+
+   This fetches the m3-memory wheel **plus** the `oxidation` extra, which
+   includes the `m3-embed-server` binary. The wheels go under
+   `_assets/python_wheels/`.
+
+3. **Bundle for transfer:**
+
+   Copy the entire `m3-memory` folder (including hidden `_assets/`) to your
+   offline media — USB, optical, or sneakernet.
 
 ---
 
-## 🔄 Phase 3: Portability & Maintenance
+## Phase 2 — deployment (on the air-gapped target)
 
-### Relocation Resilience
-If you move the `m3-memory` folder later, the system will **self-heal**. The next time any M3 command is run, it will detect the new absolute path and automatically update the Windows Startup shortcut, macOS LaunchAgent, or Linux Systemd unit.
+1. **Copy the folder** to its permanent home on the secure machine.
 
-### Managing the Embedder
-Use the unified dashboard to manage your local engine:
+2. **Install m3-memory from local wheels:**
+
+   ```bash
+   pip install --no-index --find-links=_assets/python_wheels 'm3-memory[oxidation]'
+   ```
+
+   `[oxidation]` brings in the `m3-embed-server` binary alongside the
+   Python package.
+
+3. **Run the sovereign installer:**
+
+   `m3 setup` orchestrates the full install. In an air-gapped context, you
+   want non-interactive mode with no GPU embedder build (no toolchain
+   present) and a known capture mode:
+
+   ```bash
+   m3 setup --non-interactive --capture-mode both
+   ```
+
+   What happens:
+   - `m3 install-m3` fetches the system payload from the local cache (or git
+     mirror) — see "Air-gapped install-m3" below if you need to skip GitHub.
+   - `m3 embedder install` locates the bundled GGUF at
+     `_assets/models/bge-m3-Q4_K_M.gguf`, registers `m3-embed-server` as an
+     OS service with `concurrency=2`, and starts it on port 8082.
+   - Per-agent MCP wiring runs for any of Claude Code / Gemini CLI /
+     OpenCode detected on PATH.
+   - Chatlog hooks are installed.
+   - `m3 doctor` verifies everything.
+
+### Air-gapped install-m3
+
+`m3 install-m3` normally clones the system payload from GitHub. For
+fully-offline installs, set `M3_BRIDGE_PATH` to point at a pre-staged
+payload directory (the contents of the m3-memory repo on disk):
+
 ```bash
-mcp-memory embedder status
-mcp-memory embedder stop
-mcp-memory embedder start
+export M3_BRIDGE_PATH=/srv/m3-memory/bin/memory_bridge.py
+m3 setup --non-interactive --capture-mode both
 ```
 
-### Integrity Verification
-To manually verify that your "brain" hasn't been corrupted or tampered with:
+`find_bridge()` resolves `M3_BRIDGE_PATH` first, so this skips the GitHub
+fetch entirely.
+
+---
+
+## Phase 3 — portability & maintenance
+
+### Embedder lifecycle
+
 ```bash
-python bin/setup_embedder.py --verify
+m3 embedder status     # is the service up?
+m3 embedder stop
+m3 embedder start
+m3 embedder uninstall  # remove the OS service registration
+```
+
+### Optional: GPU acceleration
+
+The CPU embedder is the sovereign baseline. If the target machine has a
+supported GPU **and** the necessary toolchain (CUDA Toolkit / Vulkan SDK /
+macOS Xcode CLT), you can add ~10-50× faster in-process embedding:
+
+```bash
+m3 embedder install-gpu
+```
+
+This auto-detects CUDA / Vulkan / Metal and rebuilds the `m3-core-rs`
+component with the matching `embedded-<gpu>` feature. CPU embedder on :8082
+continues to serve as the fallback if the GPU path fails (e.g. GPU OOM).
+
+For fully air-gapped GPU builds you need the GPU toolchain pre-staged too —
+that's a heavier dance documented in [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md).
+
+### Integrity verification
+
+The GGUF, m3-embed-server binary, and all m3 Python code are in the repo
+under version control. To verify nothing has been tampered with:
+
+```bash
+git status              # any modified files?
+git lfs fsck             # GGUF SHA256s match LFS manifest?
+m3 doctor                # all subsystems healthy?
 ```
 
 ---
 
-## 🛡️ FIPS-Ready Deployment (Hardened)
+## FIPS-ready deployment (hardened)
 
-For environments requiring **FIPS 140-3** compliance, M3-Memory can be configured to use a validated cryptographic module (e.g., wolfSSL/wolfCrypt).
+For environments requiring **FIPS 140-3** compliance, M3-Memory can be
+configured to use a validated cryptographic module (e.g. wolfSSL/wolfCrypt).
 
-1.  **Enable FIPS Mode:**
-    Set the backend and mode in your environment:
-    ```bash
-    export M3_CRYPTO_BACKEND=WOLFSSL
-    export M3_FIPS_MODE=1
-    ```
+1. **Enable FIPS mode:**
 
-2.  **Hardened TLS:**
-    In FIPS mode, M3 restricts all internal communication (e.g., to the embedder on port 8081) to **TLS 1.3 only** with FIPS-approved ciphersuites.
+   ```bash
+   export M3_CRYPTO_BACKEND=WOLFSSL
+   export M3_FIPS_MODE=1
+   ```
 
-3.  **Key Access Management:**
-    The secrets vault automatically transitions to **AES-256-GCM** and enforces mandatory `PRIVATE_KEY_UNLOCK`/`LOCK` sequences.
+2. **Hardened TLS:**
 
-See the [🛡️ FIPS Compliance Guide](FIPS_COMPLIANCE.md) for deep technical details and control mappings.
+   In FIPS mode, M3 restricts all internal communication (e.g. to the
+   embedder on port 8082) to **TLS 1.3 only** with FIPS-approved
+   ciphersuites.
+
+3. **Key access management:**
+
+   The secrets vault automatically transitions to **AES-256-GCM** and
+   enforces mandatory `PRIVATE_KEY_UNLOCK` / `LOCK` sequences.
+
+See the [FIPS Compliance Guide](FIPS_COMPLIANCE.md) for deep technical
+details and control mappings.
 
 ---
 
-## 🍎 Hardware Notes
+## Hardware notes
 
-*   **Apple Silicon (M1-M4):** The installer defaults to the high-performance native MLX embedder.
-*   **Intel Macs:** LM Studio is not supported for sovereign installs on Intel. We recommend side-loading an Ollama binary and the `qwen3-embedding` GGUF manually.
-*   **Linux ARM64:** Fully supported for low-power sovereign nodes (Raspberry Pi 5, etc.).
+- **Apple Silicon (M1-M4):** Sovereign baseline (CPU :8082) works out of the
+  box. For Metal acceleration, opt in with `m3 embedder install-gpu` —
+  builds with `embedded-metal`.
+- **Intel Macs:** CPU baseline runs fine. No GPU acceleration path
+  (`embedded-metal` is macOS-on-ARM only).
+- **Linux ARM64:** Fully supported for low-power sovereign nodes
+  (Raspberry Pi 5, Jetson, etc.). CPU baseline only.
+- **Linux / Windows with NVIDIA:** Opt-in CUDA via `m3 embedder install-gpu`
+  (needs CUDA Toolkit ≥12.0 + nvcc on PATH).
+- **Linux / Windows with non-NVIDIA GPU:** Opt-in Vulkan via
+  `m3 embedder install-gpu` (needs Vulkan SDK ≥1.3 + `VULKAN_SDK` env var).
