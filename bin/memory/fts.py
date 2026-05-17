@@ -68,9 +68,15 @@ _TEMPORAL_QUERY_RE = re.compile(
     re.IGNORECASE
 )
 
+# Module-level temporal regex — same patterns memory `2d1d5812` documented;
+# 100% recall on LongMemEval temporal-reasoning, low FPR on others.
+# (Restored from pre-Phase-7+8 search.py; the refactor lost ~10 patterns
+# when consolidating into fts.py — see test_memory_search_routed.py.)
 _TEMPORAL_ROUTER_PATTERNS = (
-    r"\bwhen\b", r"\bdate\b", r"\btime\b", r"\bday\b", r"\bweek\b", r"\bmonth\b", r"\byear\b",
-    r"\bago\b", r"\blast\b", r"\bfirst\b", r"\brecent(?:ly)?\b",
+    r"\bwhen\b", r"\bhow long\b", r"\bwhat\s+(?:date|day|month|year|time)\b",
+    r"\bbefore\b", r"\bafter\b", r"\bsince\b", r"\buntil\b",
+    r"\b(?:days?|weeks?|months?|years?)\s+ago\b",
+    r"\bfirst\b", r"\blast\b", r"\brecent(?:ly)?\b",
     r"\bearliest\b", r"\blatest\b",
     r"\bwhich\s+\w+\s+first\b", r"\bin\s+what\s+order\b",
     r"\b(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\b",
