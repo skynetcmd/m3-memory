@@ -287,3 +287,45 @@ CREATE INDEX IF NOT EXISTS idx_memory_links_dst ON memory_links(dst_uuid, edge_t
 INSERT OR IGNORE INTO schema_migrations(version, description)
     VALUES (1, 'phase 1: file_nodes, ingestion_runs, leaves, embeddings, FTS5, empty fact/promotion scaffolding');
 """
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v2 (phase 2): activate extraction, ascension, staleness paths.
+# All ADDITIVE. No table renames or column drops.
+# ─────────────────────────────────────────────────────────────────────────────
+SCHEMA_V2 = r"""
+-- corpus_settings: per-corpus defaults (extract mode, scope, etc).
+-- Free-form JSON; readers fall back to global defaults when unset.
+CREATE TABLE IF NOT EXISTS corpus_settings (
+    corpus_id    TEXT PRIMARY KEY,
+    settings     TEXT NOT NULL DEFAULT '{}',     -- JSON
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- extraction_attempts: per-leaf attempt log. Lets staleness review
+-- surface leaves that failed extraction with their reasons. Many-to-one
+-- with leaves so retries don't overwrite prior attempt history.
+CREATE TABLE IF NOT EXISTS extraction_attempts (
+    uuid               TEXT PRIMARY KEY,
+    leaf_uuid          TEXT NOT NULL REFERENCES leaves(uuid) ON DELETE CASCADE,
+    ingestion_run      TEXT NOT NULL REFERENCES ingestion_runs(uuid) ON DELETE CASCADE,
+    extractor_version  TEXT NOT NULL,
+    model_id           TEXT,
+    attempted_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    status             TEXT NOT NULL,            -- 'ok'|'failed'|'skipped_size'|'skipped_type'
+    fact_count         INTEGER NOT NULL DEFAULT 0,
+    duration_ms        INTEGER NOT NULL DEFAULT 0,
+    error              TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_extraction_leaf ON extraction_attempts(leaf_uuid, attempted_at);
+CREATE INDEX IF NOT EXISTS idx_extraction_status ON extraction_attempts(status);
+
+-- promotion_markers gets a 'memory_db_path' column so we can find the
+-- target across multi-DB setups. Falls back to NULL = the active M3Context's
+-- default DB. ALTER TABLE ADD COLUMN works in SQLite without trickery.
+-- The column might already exist if v2 ran before; guard via PRAGMA check
+-- in db._apply_v2.
+
+INSERT OR IGNORE INTO schema_migrations(version, description)
+    VALUES (2, 'phase 2: corpus_settings, extraction_attempts, promotion_markers.memory_db_path');
+"""

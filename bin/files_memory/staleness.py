@@ -1,0 +1,336 @@
+"""Staleness review — surface files that need re-ingestion attention.
+
+For a given directory or scope, walks the filesystem and compares
+against files.db. Surfaces:
+
+  - stale       : mtime > last ingestion AND sha256 changed → re-ingest
+  - touched     : mtime > last ingestion, sha256 UNCHANGED  → skip (touch only)
+  - missing     : in files.db but no longer on disk           → mark retired?
+  - new         : on disk but never ingested                  → ingest
+  - failed      : files with failed-extraction leaves         → retry
+  - drifted-promos: promoted memories whose source is superseded
+                    → review with files_promotion_review
+
+The helper is a SEPARATE concern from the core ingester. It just
+inspects. Acting on its output is the caller's job (interactive UI,
+batch flags, or just a report).
+
+Public API:
+    files_staleness_review(directory, ...) -> StalenessReport
+"""
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+from . import config
+from .db import _db
+from .identity import file_content_sha256, resolve_identity_key
+
+logger = logging.getLogger("files_memory.staleness")
+
+
+@dataclass
+class StaleFile:
+    """One file flagged as stale (changed since last ingest)."""
+    path: str
+    identity_key: str
+    last_ingested_version: str          # e.g. "ingest-2"
+    last_ingest_date: str               # ISO 8601
+    last_sha256: str
+    current_sha256: str
+    mtime: str                          # ISO 8601
+    fact_count: int
+    promoted_count: int                 # facts/leaves/summary already promoted
+    suggested_action: str               # "re-ingest" | "skip-touched" | etc.
+
+
+@dataclass
+class MissingFile:
+    """File in files.db, no longer on disk."""
+    path: str
+    file_node_uuid: str
+    last_ingest_date: str
+    fact_count: int
+    promoted_count: int
+    suggested_action: str = "mark_retired"
+
+
+@dataclass
+class NewFile:
+    """File on disk, never ingested."""
+    path: str
+    size_bytes: int
+    mtime: str
+    filetype: str
+
+
+@dataclass
+class FailedExtraction:
+    """File with at least one extraction_status='failed' leaf."""
+    path: str
+    file_node_uuid: str
+    failed_leaf_count: int
+    total_leaf_count: int
+    last_error: Optional[str]
+
+
+@dataclass
+class DriftedPromotion:
+    """Promoted memory whose source has been superseded."""
+    marker_uuid: str
+    promoted_to: str
+    source_memory: str
+    source_path: str
+    source_superseded_at: str
+    reason: Optional[str]
+
+
+@dataclass
+class StalenessReport:
+    """Full review output."""
+    directory: Optional[str]
+    corpus_id: Optional[str]
+    stale: list[StaleFile] = field(default_factory=list)
+    touched_only: list[StaleFile] = field(default_factory=list)
+    missing: list[MissingFile] = field(default_factory=list)
+    new: list[NewFile] = field(default_factory=list)
+    failed_extraction: list[FailedExtraction] = field(default_factory=list)
+    drifted_promotions: list[DriftedPromotion] = field(default_factory=list)
+    scanned_disk_files: int = 0
+    scanned_db_files: int = 0
+    duration_ms: int = 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Implementation
+# ──────────────────────────────────────────────────────────────────────────────
+def files_staleness_review(
+    directory: Optional[str] = None,
+    *,
+    corpus_id: Optional[str] = None,
+    include_failed_extraction: bool = True,
+    include_drifted_promotions: bool = True,
+    rehash: bool = True,
+    db_path: Optional[str] = None,
+) -> StalenessReport:
+    """Compare filesystem state against files.db.
+
+    Args:
+        directory: if set, restrict review to files under this directory.
+            Otherwise scan all file_nodes in the DB (and the directories
+            their paths_seen records mention).
+        corpus_id: scope filter.
+        include_failed_extraction: surface extraction-failure files.
+        include_drifted_promotions: surface promoted-memory drift.
+        rehash: when True, recompute sha256 for candidate stale files
+            (slow but accurate). When False, mtime alone classifies —
+            cheap but may flag touched-only as stale.
+        db_path: target files.db.
+    """
+    import time
+    t0 = time.perf_counter()
+    report = StalenessReport(directory=directory, corpus_id=corpus_id)
+
+    with _db(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+
+        # 1. Load current file_nodes scoped by corpus + directory.
+        sql_parts = [
+            "SELECT uuid, path_absolute, identity_key, content_sha256, "
+            "       date_modified, version_label, "
+            "       (SELECT MAX(ingest_date) FROM ingestion_runs "
+            "        WHERE file_node = fn.uuid) AS last_ingest_date "
+            "FROM file_nodes fn "
+            "WHERE superseded_by IS NULL"
+        ]
+        params: list = []
+        if corpus_id:
+            sql_parts.append("AND corpus_id = ?")
+            params.append(corpus_id)
+        if directory:
+            sql_parts.append("AND path_absolute LIKE ?")
+            params.append(os.path.abspath(directory).replace("%", "[%]") + "%")
+        db_rows = conn.execute(" ".join(sql_parts), params).fetchall()
+        report.scanned_db_files = len(db_rows)
+
+        # Index db rows by path for set-difference later.
+        db_by_path: dict[str, sqlite3.Row] = {r["path_absolute"]: r for r in db_rows}
+
+        # 2. Scan the filesystem for `directory`. If no directory given,
+        #    use the parent dirs of every db_by_path entry — bounds the scan.
+        disk_paths: set[str] = set()
+        scan_roots: list[str] = []
+        if directory:
+            scan_roots.append(os.path.abspath(directory))
+        else:
+            seen_parents: set[str] = set()
+            for p in db_by_path:
+                parent = os.path.dirname(p)
+                if parent and parent not in seen_parents:
+                    seen_parents.add(parent)
+                    if os.path.isdir(parent):
+                        scan_roots.append(parent)
+
+        for root in scan_roots:
+            # Use the walker so we get the same filtering as the ingester.
+            try:
+                from .walker import walk
+                for entry in walk(root):
+                    disk_paths.add(entry.path)
+            except Exception as e:
+                logger.debug("walker failed at %s: %s", root, e)
+        report.scanned_disk_files = len(disk_paths)
+
+        # 3. Classify each db_row.
+        for db_row in db_rows:
+            path = db_row["path_absolute"]
+            db_sha = db_row["content_sha256"]
+            last_ingest = db_row["last_ingest_date"] or ""
+
+            if not os.path.isfile(path):
+                # Missing.
+                fact_n, promoted_n = _fact_and_promotion_counts(conn, db_row["uuid"])
+                report.missing.append(MissingFile(
+                    path=path,
+                    file_node_uuid=db_row["uuid"],
+                    last_ingest_date=last_ingest,
+                    fact_count=fact_n,
+                    promoted_count=promoted_n,
+                ))
+                continue
+
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            disk_mtime_iso = _iso_utc(st.st_mtime)
+            mtime_changed = disk_mtime_iso > (db_row["date_modified"] or "")
+
+            if not mtime_changed:
+                continue  # not stale, not touched — quiet good.
+
+            # mtime bumped — confirm with sha256.
+            if rehash:
+                try:
+                    current_sha = file_content_sha256(path)
+                except OSError as e:
+                    logger.debug("hash failed for %s: %s", path, e)
+                    continue
+            else:
+                current_sha = ""
+
+            fact_n, promoted_n = _fact_and_promotion_counts(conn, db_row["uuid"])
+            stale_record = StaleFile(
+                path=path,
+                identity_key=db_row["identity_key"],
+                last_ingested_version=db_row["version_label"],
+                last_ingest_date=last_ingest,
+                last_sha256=db_sha,
+                current_sha256=current_sha,
+                mtime=disk_mtime_iso,
+                fact_count=fact_n,
+                promoted_count=promoted_n,
+                suggested_action="re-ingest" if rehash else "re-ingest (unverified)",
+            )
+            if rehash and current_sha == db_sha:
+                stale_record.suggested_action = "skip (touched-only)"
+                report.touched_only.append(stale_record)
+            else:
+                report.stale.append(stale_record)
+
+        # 4. New files: on disk, not in db.
+        for path in sorted(disk_paths - set(db_by_path.keys())):
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            from .identity import filetype_for
+            report.new.append(NewFile(
+                path=path,
+                size_bytes=st.st_size,
+                mtime=_iso_utc(st.st_mtime),
+                filetype=filetype_for(path),
+            ))
+
+        # 5. Failed extractions.
+        if include_failed_extraction:
+            sql = (
+                "SELECT fn.uuid, fn.path_absolute, "
+                "       COUNT(*) AS failed_count, "
+                "       (SELECT COUNT(*) FROM leaves WHERE file_node = fn.uuid) AS total_count, "
+                "       (SELECT error FROM extraction_attempts ea "
+                "        WHERE ea.leaf_uuid = l.uuid AND ea.status = 'failed' "
+                "        ORDER BY attempted_at DESC LIMIT 1) AS last_error "
+                "FROM leaves l "
+                "JOIN file_nodes fn ON fn.uuid = l.file_node "
+                "WHERE l.extraction_status = 'failed' "
+                "  AND fn.superseded_by IS NULL "
+            )
+            extra_params: list = []
+            if corpus_id:
+                sql += "  AND fn.corpus_id = ? "
+                extra_params.append(corpus_id)
+            if directory:
+                sql += "  AND fn.path_absolute LIKE ? "
+                extra_params.append(os.path.abspath(directory).replace("%", "[%]") + "%")
+            sql += "GROUP BY fn.uuid, fn.path_absolute"
+            for r in conn.execute(sql, extra_params).fetchall():
+                report.failed_extraction.append(FailedExtraction(
+                    path=r["path_absolute"],
+                    file_node_uuid=r["uuid"],
+                    failed_leaf_count=r["failed_count"],
+                    total_leaf_count=r["total_count"],
+                    last_error=r["last_error"],
+                ))
+
+        # 6. Drifted promotions (source superseded after promotion).
+        if include_drifted_promotions:
+            sql = (
+                "SELECT pm.uuid AS marker_uuid, pm.promoted_to, pm.source_memory, "
+                "       pm.reason, fn.path_absolute, fn.superseded_at "
+                "FROM promotion_markers pm "
+                "JOIN file_nodes fn ON ( "
+                "    fn.uuid = pm.source_memory "
+                "    OR fn.uuid = (SELECT file_node FROM facts WHERE uuid = pm.source_memory) "
+                "    OR fn.uuid = (SELECT file_node FROM leaves WHERE uuid = pm.source_memory) "
+                ") "
+                "WHERE fn.superseded_by IS NOT NULL"
+            )
+            for r in conn.execute(sql).fetchall():
+                report.drifted_promotions.append(DriftedPromotion(
+                    marker_uuid=r["marker_uuid"],
+                    promoted_to=r["promoted_to"],
+                    source_memory=r["source_memory"],
+                    source_path=r["path_absolute"],
+                    source_superseded_at=r["superseded_at"],
+                    reason=r["reason"],
+                ))
+
+    report.duration_ms = int((time.perf_counter() - t0) * 1000)
+    return report
+
+
+def _fact_and_promotion_counts(conn: sqlite3.Connection, file_node_uuid: str) -> tuple[int, int]:
+    """Return (fact_count, promoted_count) for a file_node."""
+    facts = conn.execute(
+        "SELECT COUNT(*) FROM facts WHERE file_node = ?", (file_node_uuid,),
+    ).fetchone()[0]
+    # Promoted = anything in promotion_markers whose source is owned by this file_node.
+    promoted = conn.execute(
+        "SELECT COUNT(*) FROM promotion_markers pm "
+        "WHERE pm.source_memory = ? "
+        "   OR pm.source_memory IN (SELECT uuid FROM leaves WHERE file_node = ?) "
+        "   OR pm.source_memory IN (SELECT uuid FROM facts WHERE file_node = ?)",
+        (file_node_uuid, file_node_uuid, file_node_uuid),
+    ).fetchone()[0]
+    return (facts, promoted)
+
+
+def _iso_utc(ts: float) -> str:
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc).isoformat()
