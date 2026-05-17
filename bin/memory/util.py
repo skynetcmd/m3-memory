@@ -26,7 +26,26 @@ else:
 
 from . import config
 
-__all__ = ["sha256_hex", "_batch_cosine"]
+__all__ = ["sha256_hex", "_batch_cosine", "_cosine", "_cosine_batch_packed", "_check_content_safety"]
+import logging
+import re
+logger = logging.getLogger("memory.util")
+
+_POISON_PATTERNS = [
+    re.compile(r"<script.*?>", re.IGNORECASE),
+    re.compile(r"javascript:", re.IGNORECASE),
+]
+
+
+def _check_content_safety(content: str) -> str | None:
+    """Returns error message if content appears malicious, None if safe."""
+    if not content:
+        return None
+    for pattern in _POISON_PATTERNS:
+        if pattern.search(content):
+            return f"Error: content rejected — matches safety pattern: {pattern.pattern[:50]}"
+    return None
+
 
 
 def sha256_hex(data: bytes) -> str:
@@ -70,3 +89,30 @@ def _batch_cosine(query, matrix) -> list[float]:
         if all(len(v) == q_dim for v in matrix):
             return config.m3_core_rs.cosine_batch(query, matrix)
     return _batch_cosine_py(query, matrix)
+
+
+def _cosine(v1: list[float], v2: list[float]) -> float:
+    """Cosine similarity. Routes through the Rust core when available."""
+    if config.m3_core_rs is not None and len(v1) == len(v2):
+        return config.m3_core_rs.cosine(v1, v2)
+    from embedding_utils import cosine
+    return cosine(v1, v2)
+
+
+def _cosine_batch_packed(query, blobs, dim: int) -> list[float]:
+    """Score `query` against a list of packed-blob embeddings (the raw SQLite
+    BLOB bytes). Single FFI hop when m3_core_rs is loaded; numpy zero-copy
+    `frombuffer` fallback when not; pure-Python last-ditch fallback.
+
+    A blob with the wrong byte length scores 0.0 in every path (Rust returns
+    0.0; numpy/Python paths zero-fill via `_unpack_many`'s ragged branch).
+    """
+    if not blobs:
+        return []
+    if config.m3_core_rs is not None:
+        try:
+            return config.m3_core_rs.cosine_batch_packed(query, blobs, dim)
+        except Exception as e:  # noqa: BLE001 — fall back rather than fail retrieval
+            logger.debug(f"cosine_batch_packed Rust path failed, falling back: {e}")
+    matrix = _unpack_many(blobs, dim=dim)
+    return _batch_cosine(query, matrix)
