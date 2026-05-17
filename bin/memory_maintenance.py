@@ -47,29 +47,75 @@ def _transfer_to_archive(item_id, reason, db):
         return False
     finally: adb.close()
 
-def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True):
+def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
+    """Find near-duplicate memory items by cosine similarity over embeddings.
+
+    Returns a structured dict:
+      {
+        "count": <int total groups found>,
+        "groups": [
+            {"a": <id>, "b": <id>, "title_a": <str>, "title_b": <str>, "score": <float>},
+            ...
+        ],
+        "threshold": <float>,
+        "scanned": <int rows scanned>,
+        "applied": <bool — True if dry_run=False and duplicates were soft-deleted>,
+      }
+
+    Why structured: prior to 2026-05-17 this returned the bare string
+    "Found N duplicate groups." which is information-free for any caller
+    that wanted to act on the duplicates. The curate-memory agent had to
+    fall back to direct sqlite queries to enumerate the pairs, ballooning
+    survey-phase tool calls from ~2 to 30+. The structured return gives
+    the caller everything it needs from one round-trip.
+
+    `limit`: cap the returned `groups` list at this many entries (0 = no cap).
+    `count` always reflects the true total found, even when groups is trimmed.
+    Use this to keep payloads tractable on stores with many duplicates.
+
+    Soft-delete behavior on dry_run=False is unchanged from the legacy impl.
+    """
     with _db() as db:
-        rows = db.execute(f"SELECT me.memory_id, me.embedding, mi.title FROM memory_embeddings me JOIN memory_items mi ON me.memory_id = mi.id WHERE mi.is_deleted = 0 ORDER BY mi.created_at DESC LIMIT {DEDUP_LIMIT}").fetchall()
+        rows = db.execute(
+            f"SELECT me.memory_id, me.embedding, mi.title FROM memory_embeddings me "
+            f"JOIN memory_items mi ON me.memory_id = mi.id "
+            f"WHERE mi.is_deleted = 0 ORDER BY mi.created_at DESC LIMIT {DEDUP_LIMIT}"
+        ).fetchall()
 
     items = [(r["memory_id"], _unpack(r["embedding"]), r["title"]) for r in rows]
-    duplicates = []
+    duplicates: list[tuple] = []  # (id_a, id_b, title_a, title_b, score)
     seen = set()
 
     for i, (mid_a, vec_a, title_a) in enumerate(items):
-        if mid_a in seen: continue
+        if mid_a in seen:
+            continue
         for j in range(i + 1, len(items)):
             mid_b, vec_b, title_b = items[j]
-            if mid_b in seen: continue
-            if _cosine(vec_a, vec_b) >= threshold:
-                duplicates.append((mid_a, mid_b, title_a, title_b))
+            if mid_b in seen:
+                continue
+            score = _cosine(vec_a, vec_b)
+            if score >= threshold:
+                duplicates.append((mid_a, mid_b, title_a, title_b, float(score)))
                 seen.add(mid_b)
 
-    if not dry_run:
+    applied = False
+    if not dry_run and duplicates:
         with _db() as db:
-            for _, mid_b, _, _ in duplicates:
+            for _, mid_b, _, _, _ in duplicates:
                 db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (mid_b,))
+        applied = True
 
-    return f"Found {len(duplicates)} duplicate groups."
+    groups = duplicates if not limit else duplicates[: int(limit)]
+    return {
+        "count": len(duplicates),
+        "groups": [
+            {"a": a, "b": b, "title_a": ta, "title_b": tb, "score": round(sc, 4)}
+            for a, b, ta, tb, sc in groups
+        ],
+        "threshold": float(threshold),
+        "scanned": len(items),
+        "applied": applied,
+    }
 
 def memory_feedback_impl(memory_id, feedback="useful"):
     fb = feedback.lower()
