@@ -262,6 +262,21 @@ from memory.search import (  # noqa: F401
     _cosine_batch_packed,
     _hybrid_score_batch,
     _recency_bonus_ranks,
+    _EVENT_PROPER_NOUN,
+    _TEMPORAL_QUERY_RE,
+    _DATE_RE_ISO,
+    _DATE_RE_LONG,
+    _DATE_MONTHS,
+    _pull_predecessor_turns,
+    _maybe_route_query,
+    _apply_recency_bonus,
+    _trim_by_elbow,
+    _apply_temporal_boost,
+    _RERANKER_MODEL,
+    _RERANKER_MODEL_NAME,
+    _get_reranker,
+    _enforce_expansion_displacement_guard,
+    _apply_rerank,
 )
 
 
@@ -415,172 +430,9 @@ def _current_ctx() -> M3Context:
 #
 # `_RERANKER_MODEL` / `_RERANKER_MODEL_NAME` are search-state mutables that
 # `_get_reranker` writes to. They stay here until Phase 4 extracts search.py.
-_RERANKER_MODEL = None  # CrossEncoder | None — lazy-init
-_RERANKER_MODEL_NAME = ""
-
-
-def _get_reranker(model_name: str):
-    """Lazy-load + cache cross-encoder reranker.
-
-    Reuses the cached instance if model_name matches the previously-loaded one;
-    otherwise loads the new model (and discards the prior). GPU is used if
-    available; falls back to CPU silently.
-
-    Raises RuntimeError with a clear install hint if sentence-transformers is
-    not importable (it is a hard dep in requirements.txt; missing import means
-    the user has a broken install).
-    """
-    global _RERANKER_MODEL, _RERANKER_MODEL_NAME
-    if _RERANKER_MODEL is not None and _RERANKER_MODEL_NAME == model_name:
-        return _RERANKER_MODEL
-    try:
-        from sentence_transformers import CrossEncoder
-    except ImportError as e:
-        raise RuntimeError(
-            f"rerank=True requires sentence-transformers (declared in "
-            f"requirements.txt). Install/repair via: "
-            f"pip install -r requirements.txt. Original error: {e}"
-        ) from e
-    try:
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    except ImportError:
-        device = "cpu"
-    _RERANKER_MODEL = CrossEncoder(model_name, device=device)
-    _RERANKER_MODEL_NAME = model_name
-    return _RERANKER_MODEL
-
-
-def _enforce_expansion_displacement_guard(
-    hits: list,
-    *,
-    protected_ranks: int = EXPANSION_PROTECTED_RANKS,
-    margin: float = EXPANSION_DISPLACEMENT_MARGIN,
-) -> list:
-    """Enforce: at ranks 1..protected_ranks, expansion rows may only outrank a
-    primary row if expansion_score >= margin * primary_score.
-
-    Operates on a list[tuple[score, dict]] in current ranked order. Items are
-    classified as "expansion" if dict["_expanded_via"] is set and != "primary";
-    everything else (including missing tag, "primary") is treated as primary.
-
-    The pass walks rank 1..protected_ranks. At each protected rank, if the row
-    is an expansion that fails the margin test against the next primary row in
-    the list, swap them. The same primary is then locked at that rank; we move
-    on to the next protected rank. Beyond protected_ranks, the original order
-    is preserved.
-
-    Idempotent on already-conforming lists. No-op if protected_ranks <= 0 or
-    margin <= 1.0 (treating margin <= 1.0 as "no displacement allowed at all"
-    would be too strict; instead we treat it as "feature disabled, score-only").
-    """
-    if not hits or protected_ranks <= 0 or margin <= 1.0:
-        return hits
-
-    def _is_expansion(item) -> bool:
-        if not isinstance(item, dict):
-            return False
-        tag = item.get("_expanded_via")
-        return bool(tag) and tag != "primary"
-
-    # Rust path: classification stays here (it knows _expanded_via); the Rust
-    # core computes the reordering permutation, which we apply to the original
-    # (score, item) rows.
-    if m3_core_rs is not None:
-        typed = [(float(s), _is_expansion(it)) for s, it in hits]
-        perm = m3_core_rs.enforce_displacement_guard(typed, protected_ranks, margin)
-        return [hits[i] for i in perm]
-
-    work = list(hits)
-    n = len(work)
-    limit = min(protected_ranks, n)
-    for rank in range(limit):
-        score, item = work[rank]
-        if not _is_expansion(item):
-            continue
-        # Find the next primary candidate at rank+1..end
-        next_primary_idx = None
-        for j in range(rank + 1, n):
-            if not _is_expansion(work[j][1]):
-                next_primary_idx = j
-                break
-        if next_primary_idx is None:
-            # No primary below — leave the expansion in place (no replacement available).
-            continue
-        primary_score, _ = work[next_primary_idx]
-        # Displacement allowed only when expansion overwhelmingly outscores primary.
-        # Sign handling: if either score is non-positive, "overwhelmingly larger"
-        # has no clean ratio interpretation, so fall back to "primary wins" —
-        # consistent with the calibration evidence that expansion-rank-1 is
-        # usually wrong.
-        if score > 0 and primary_score > 0 and score >= margin * primary_score:
-            continue  # expansion earned its rank
-        # Swap: primary comes up to `rank`, expansion drops to where primary was.
-        work[rank], work[next_primary_idx] = work[next_primary_idx], work[rank]
-    return work
-
-
-def _apply_rerank(
-    hits: list,
-    query: str,
-    *,
-    pool_k: int,
-    final_k: int,
-    model_name: str,
-    blend: float,
-) -> list:
-    """Re-score top-pool_k hits with cross-encoder; blend with hybrid score.
-
-    Args:
-        hits: list[tuple[float, dict]] — output shape of memory_search_*_impl
-        query: user query string
-        pool_k: how many top hits to rescore (rest are dropped if pool_k < len)
-        final_k: how many top hits to return after rerank+blend
-        model_name: cross-encoder model id (e.g. "cross-encoder/ms-marco-MiniLM-L-6-v2")
-        blend: blend factor — final = blend * ce_score + (1 - blend) * hybrid_score
-               1.0 = pure CE replacement (default), 0.5 = average, 0.0 = no-op
-
-    Returns hits in same shape as input, sorted by blended score descending,
-    truncated to final_k.
-
-    CONTRACT: when blend=0.0, this is a no-op — returns input hits[:final_k]
-    unmodified. Callers that pass rerank=True with blend=0.0 get the same
-    behavior as rerank=False (no CE call made).
-    """
-    if not hits or final_k <= 0 or blend <= 0.0:
-        return hits[:final_k]
-    pool = hits[:max(pool_k, final_k)]  # never truncate below final_k
-    if not pool:
-        return []
-    reranker = _get_reranker(model_name)
-    # Build (query, content) pairs. Skip rows with empty content (rerank can't
-    # score them; they fall back to hybrid score via blend).
-    pairs = []
-    pair_indices = []  # indices into pool that have content
-    for i, (_, item) in enumerate(pool):
-        content = (item.get("content") or "") if isinstance(item, dict) else ""
-        if content:
-            pairs.append([query, content])
-            pair_indices.append(i)
-    if not pairs:
-        return pool[:final_k]
-    ce_scores = reranker.predict(pairs, show_progress_bar=False)
-    # Map ce_scores back to pool indices; rows with no content keep ce_score=0.
-    pool_ce: list = [0.0] * len(pool)
-    for idx, ce in zip(pair_indices, ce_scores):
-        pool_ce[idx] = float(ce)
-    # Blend
-    blended: list = []
-    for (hybrid_score, item), ce in zip(pool, pool_ce):
-        new_score = blend * ce + (1.0 - blend) * hybrid_score
-        blended.append((new_score, item))
-    blended.sort(key=lambda t: t[0], reverse=True)
-    # Enforce expansion-displacement guard at top ranks so the CE step cannot
-    # promote an expansion row past a primary at rank <= protected unless the
-    # CE-blended score overwhelmingly outscores the next primary. Without this,
-    # rerank with blend=1.0 freely undoes the same invariant applied at fusion.
-    blended = _enforce_expansion_displacement_guard(blended)
-    return blended[:final_k]
+# Reranker family (_RERANKER_MODEL, _RERANKER_MODEL_NAME, _get_reranker,
+# _enforce_expansion_displacement_guard, _apply_rerank) moved to
+# bin/memory/search.py in Phase 4.B sub-4. Re-exported via the shim at the top.
 
 
 def load_entity_vocab(yaml_path: str | Path | None = None) -> tuple[frozenset[str], frozenset[str]]:
@@ -653,7 +505,9 @@ _EVENT_VERB_LIST = (
     "traveled", "arrived", "left", "returned", "called", "texted", "married",
     "graduated", "quit", "hired", "adopted", "painted",
 )
-_EVENT_PROPER_NOUN = re.compile(r"\b([A-Z][a-z]{2,})\b")
+# _EVENT_PROPER_NOUN moved to bin/memory/search.py in Phase 4.B sub-2
+# (its hot reader is _maybe_route_query). _extract_event_sentences below
+# imports it via the shim re-export at the top of this file.
 _EVENT_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 _EVENT_DATE_HINT = re.compile(
     r"\b(yesterday|today|tomorrow|last|this|next|ago|on\s+\d|"
@@ -690,126 +544,9 @@ def _extract_event_sentences(content: str) -> list[tuple[str, str]]:
     return out
 
 
-# Query-type routing for retrieval. When QUERY_TYPE_ROUTING is on and a query
-# looks like "When/what date ... <ProperNoun>", shift vector_weight toward
-# BM25 so proper-noun signal doesn't get diluted by embedding similarity.
-_TEMPORAL_QUERY_RE = re.compile(
-    r"\b(when|what\s+date|which\s+day|on\s+what)\b", re.IGNORECASE
-)
-
-# Hoisted out of _apply_temporal_boost so it isn't re-compiled per search call.
-# These match ISO `YYYY-MM-DD` and `D Month YYYY` shapes inside the query.
-_DATE_RE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
-_DATE_RE_LONG = re.compile(
-    r"\b(\d+)\s+(january|february|march|april|may|june|july|august|"
-    r"september|october|november|december)\s+(\d{4})\b"
-)
-_DATE_MONTHS = (
-    "january", "february", "march", "april", "may", "june",
-    "july", "august", "september", "october", "november", "december",
-)
-
-
-def _pull_predecessor_turns(scored: list) -> None:
-    """Append turn N-1 to ``scored`` when turn N is already present.
-
-    Used under M3_INTENT_ROUTING with intent_hint="user-fact" — bridges
-    the gap where the assistant echo is the best FTS match but the
-    user's original statement (one turn earlier) carries the actual
-    fact. Mutates the list in-place with the predecessor scored at
-    ~85% of the original turn's score so it competes but doesn't
-    automatically displace.
-
-    Caps at the top 10 current hits to bound extra DB work; most
-    user-fact queries only need a few predecessors, not a bulk pull.
-    Items without ``conversation_id`` or ``metadata_json.turn_index``
-    are skipped.
-    """
-    candidates: list[tuple[str, int, float]] = []  # (cid, target_idx, parent_score)
-    seen_ids = {item.get("id") for _, item in scored if item.get("id")}
-    for score, item in scored[:10]:
-        cid = item.get("conversation_id")
-        meta_raw = item.get("metadata_json")
-        if not cid or not meta_raw:
-            continue
-        try:
-            meta = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
-            t_idx = meta.get("turn_index")
-            if isinstance(t_idx, int) and t_idx > 0:
-                candidates.append((cid, t_idx - 1, score))
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            continue
-    if not candidates:
-        return
-    # Single batched query: pull all turns from the affected conversations in
-    # one round-trip, then filter to the exact (cid, turn_index) pairs and the
-    # per-candidate parent_score in Python. The previous N-query loop did
-    # json_extract on every row in each conversation N times.
-    cids: set[str] = {c for c, _, _ in candidates}
-    wanted: dict[tuple[str, int], float] = {}
-    for cid, t_idx, p_score in candidates:
-        key = (cid, t_idx)
-        # Multiple top-10 hits in the same conv may share a target_idx; keep
-        # the parent_score of the higher-ranked hit (first occurrence wins).
-        wanted.setdefault(key, p_score)
-    try:
-        with _db() as db:
-            placeholders = ",".join("?" * len(cids))
-            rows = db.execute(
-                f"SELECT id, content, title, type, importance, metadata_json, "
-                f"  conversation_id, "
-                f"  CAST(json_extract(metadata_json, '$.turn_index') AS INTEGER) AS turn_index "
-                f"FROM memory_items "
-                f"WHERE conversation_id IN ({placeholders}) AND is_deleted = 0",
-                tuple(cids),
-            ).fetchall()
-        for row in rows:
-            tkey = (row["conversation_id"], row["turn_index"])
-            if tkey not in wanted:
-                continue
-            if row["id"] in seen_ids:
-                continue
-            seen_ids.add(row["id"])
-            pre_item = {
-                "id": row["id"],
-                "content": row["content"],
-                "title": row["title"],
-                "type": row["type"],
-                "importance": row["importance"],
-                "metadata_json": row["metadata_json"],
-                "conversation_id": row["conversation_id"],
-            }
-            scored.append((wanted[tkey] * 0.85, pre_item))
-    except Exception as e:  # defensive — predecessor pull is best-effort
-        logger.debug(f"predecessor pull skipped: {type(e).__name__}: {e}")
-
-
-def _maybe_route_query(query: str, vector_weight: float, intent_hint: str = "") -> float:
-    """Decide whether to shift vector_weight toward BM25 based on query shape.
-
-    Two triggers — an SLM-supplied intent hint takes precedence, then the
-    heuristic fires as a fallback:
-      - intent_hint in {"temporal-reasoning", "multi-session"} → 0.3
-      - QUERY_TYPE_ROUTING on AND query starts with "when/what date/..."
-        AND contains a proper noun → 0.3
-    Both require the M3_QUERY_TYPE_ROUTING env gate. intent-hint path
-    ALSO works standalone when M3_INTENT_ROUTING is on (so bench callers
-    can opt in without touching both knobs).
-    """
-    # Intent-hint path: trusted signal from an upstream classifier.
-    if intent_hint and (QUERY_TYPE_ROUTING or INTENT_ROUTING):
-        if intent_hint in ("temporal-reasoning", "multi-session"):
-            return 0.3
-    # Heuristic path: unchanged from before.
-    if not QUERY_TYPE_ROUTING:
-        return vector_weight
-    if not query:
-        return vector_weight
-    if not _TEMPORAL_QUERY_RE.search(query):
-        return vector_weight
-    if not _EVENT_PROPER_NOUN.search(query):
-        return vector_weight
-    return 0.3
+# Temporal query regexes (_TEMPORAL_QUERY_RE, _DATE_RE_ISO, _DATE_RE_LONG,
+# _DATE_MONTHS), _pull_predecessor_turns, and _maybe_route_query moved to
+# bin/memory/search.py in Phase 4.B sub-2. Re-exported via the shim at the top.
 
 
 async def _maybe_emit_event_rows(
@@ -2280,125 +2017,8 @@ async def _try_extract_or_enqueue(
 # _CHROMA_COLLECTION_ID_CACHE, _resolve_chroma_collection_id, _query_chroma
 # moved to bin/memory/chroma.py in Phase 4.A. Re-exported via the shim.
 
-def _apply_recency_bonus(scored, recency_bias, explain=False):
-    """Add a rank-based recency bonus to each (score, item) pair.
-
-    Items are ranked lexicographically by `valid_from` (ISO-8601 sorts
-    correctly as strings). The oldest dated item receives bonus 0, the
-    newest receives `recency_bias`, with linear interpolation between.
-    Items with empty `valid_from` receive bonus 0. If fewer than two dated
-    items exist, the input is returned unchanged.
-
-    Used to break ties in favor of supersession evidence for "what is my
-    current X" queries without parsing timestamps.
-    """
-    if not scored or recency_bias <= 0:
-        return scored
-    with_vf = [(i, (it.get("valid_from") or "")) for i, (_, it) in enumerate(scored)]
-    dated = [(i, v) for i, v in with_vf if v]
-    if len(dated) < 2:
-        return scored
-    dated.sort(key=lambda x: x[1])
-    n = len(dated) - 1
-    rank_of = {idx: rank for rank, (idx, _) in enumerate(dated)}
-    rescored = []
-    for i, (s, it) in enumerate(scored):
-        bonus = recency_bias * (rank_of[i] / n) if i in rank_of else 0.0
-        if explain and "_explanation" in it:
-            it["_explanation"]["recency_bonus"] = bonus
-        rescored.append((s + bonus, it))
-    return rescored
-
-
-def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -> list[tuple[float, dict]]:
-    """Trims results where the score drop-off is significantly higher than average.
-
-    Scale-aware (see M3_ELBOW_* env vars):
-      * skip pools smaller than ELBOW_MIN_INPUT (default 5) — too few points to estimate avg
-      * require the drop to exceed ELBOW_ABS_THRESHOLD in absolute terms
-        (default 0.01) — guards against floating-point noise in big haystacks
-      * always return at least ELBOW_MIN_RETURN (default 3) — prevents
-        catastrophic 1-hit collapse when the top item dominates the average
-    """
-    if len(ranked) < ELBOW_MIN_INPUT:
-        return ranked
-
-    # Calculate score differences between consecutive results
-    diffs = [ranked[i][0] - ranked[i+1][0] for i in range(len(ranked) - 1)]
-    avg_diff = sum(diffs) / len(diffs)
-    threshold = max(ELBOW_ABS_THRESHOLD, avg_diff * sensitivity)
-
-    # Find the first 'elbow' where the drop is significantly larger than the average,
-    # subject to the absolute-threshold guard.
-    for i, d in enumerate(diffs):
-        if d > threshold:
-            # We found an elbow, trim here. Preserve at least ELBOW_MIN_RETURN items.
-            return ranked[:max(ELBOW_MIN_RETURN, i+1)]
-
-    return ranked
-
-
-def _apply_temporal_boost(scored, query, explain=False):
-    """Detects dates in query and boosts items with matching or nearby valid_from dates.
-
-    Compiled regexes are module-level; `query.lower()` runs once; each unique
-    `valid_from` string is parsed at most once per call via a small dict cache
-    (typical retrieval pool has many turns from the same conversation/day, so
-    cache hit-rate is high).
-    """
-    if not scored or not query:
-        return scored
-    q_lower = query.lower()
-    query_dates: list = []
-    for mobj in _DATE_RE_ISO.finditer(q_lower):
-        try:
-            query_dates.append(date(int(mobj.group(1)), int(mobj.group(2)), int(mobj.group(3))))
-        except Exception:
-            continue
-    for mobj in _DATE_RE_LONG.finditer(q_lower):
-        try:
-            d_, mo, y_ = mobj.groups()
-            query_dates.append(date(int(y_), _DATE_MONTHS.index(mo) + 1, int(d_)))
-        except Exception:
-            continue
-    if not query_dates:
-        return scored
-
-    vf_cache: dict[str, "date | None"] = {}
-
-    def _parse_vf(vf_str: str):
-        cached = vf_cache.get(vf_str)
-        if cached is not None or vf_str in vf_cache:
-            return cached
-        try:
-            parsed = datetime.fromisoformat(vf_str.split("T")[0]).date()
-        except Exception:
-            parsed = None
-        vf_cache[vf_str] = parsed
-        return parsed
-
-    rescored = []
-    for s, it in scored:
-        boost = 0.0
-        vf_str = it.get("valid_from", "")
-        if vf_str:
-            vf_date = _parse_vf(vf_str)
-            if vf_date is not None:
-                for qd in query_dates:
-                    diff = abs((vf_date - qd).days)
-                    if diff == 0:
-                        boost = 0.25
-                        break  # max possible -> short-circuit
-                    if diff <= 2 and boost < 0.15:
-                        boost = 0.15
-                    elif diff <= 7 and boost < 0.05:
-                        boost = 0.05
-        if explain and boost > 0:
-            if "_explanation" not in it:
-                it["_explanation"] = {}
-            it["_explanation"]["temporal_boost"] = boost
-        rescored.append((s + boost, it))
-    return rescored
+# _apply_recency_bonus, _trim_by_elbow, _apply_temporal_boost moved to
+# bin/memory/search.py in Phase 4.B sub-3. Re-exported via the shim at the top.
 
 
 # ── Fire-and-forget access-stamp batcher ─────────────────────────────────────
