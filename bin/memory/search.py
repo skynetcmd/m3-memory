@@ -1217,80 +1217,125 @@ async def memory_search_scored_impl(
     if _capture_dict is not None:
         _capture_dict["post_seen_content_dedup_rows"] = len(pre_ranked)
     if mmr and len(pre_ranked) > k and page_blobs:
-        # Lazy-materialize the embedding lookup only when MMR needs it. With
-        # the packed-cosine path the embeddings stayed in their bytes form
-        # until this point; unpack now (one batched numpy.frombuffer reshape).
-        page_matrix = _unpack_many(page_blobs, dim=EMBED_DIM)
-        # When _unpack_many returns ndarray, indexing yields a 1-D ndarray row;
-        # when it falls back to list-of-lists, indexing yields list[float].
-        # Both are valid inputs to m3_core_rs and to numpy cosine.
-        _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
-        # Rust path: authoritative when every candidate has an embedding and
-        # explanations aren't requested. The Rust mmr_rerank_scored needs a
-        # vector per candidate (it can't express the max_sim=0 missing-vector
-        # case), and only the Python loop writes per-item _explanation rows.
-        _mmr_vecs = [_emb_lookup.get(it["id"]) for _, it in pre_ranked]
-        if m3_core_rs is not None and not explain and all(v is not None for v in _mmr_vecs):
+        # Tier-A perf: try the zero-unpack Rust path first. `page_blobs` is
+        # already the raw bytes from SQL — `mmr_rerank_scored_packed` takes
+        # one contiguous bytes buffer and slices internally via PyO3
+        # zero-copy borrow, releasing the GIL while MMR runs. Skips the
+        # `_unpack_many` reshape entirely when:
+        #   - every candidate has a blob (no missing vectors), AND
+        #   - the blobs are in pre_ranked order (we can assume so because
+        #     pre_ranked rows were derived from `rows`, which is the same
+        #     order as `page_blobs`), AND
+        #   - explanations aren't requested.
+        # Fall through to the unpacked path when any of those don't hold.
+        _bytes_per_row = EMBED_DIM * 4
+        _id_to_blob_idx = {rows[i]["id"]: i for i in range(len(rows))}
+        _packed_blob_indices = [_id_to_blob_idx.get(it["id"]) for _, it in pre_ranked]
+        _packed_ok = (
+            m3_core_rs is not None
+            and not explain
+            and all(idx is not None for idx in _packed_blob_indices)
+            and all(
+                isinstance(page_blobs[idx], (bytes, bytearray))
+                and len(page_blobs[idx]) == _bytes_per_row
+                for idx in _packed_blob_indices
+            )
+        )
+
+        if _packed_ok:
+            # Reassemble blobs in pre_ranked order (rows order may differ
+            # from pre_ranked order after content-dedup). One bytes.join().
             relevance = [float(s) for s, _ in pre_ranked]
-            # Rust wants list[list[float]] — convert ndarray rows on the way out.
-            _mmr_vecs_lists = [
-                (v.tolist() if hasattr(v, "tolist") else list(v)) for v in _mmr_vecs
-            ]
-            sel_idx = m3_core_rs.mmr_rerank_scored(relevance, _mmr_vecs_lists, _MMR_LAMBDA, k, True)
+            ordered_flat = b"".join(
+                bytes(page_blobs[idx]) if isinstance(page_blobs[idx], bytearray)
+                else page_blobs[idx]
+                for idx in _packed_blob_indices
+            )
+            sel_idx = m3_core_rs.mmr_rerank_scored_packed(
+                relevance, ordered_flat, EMBED_DIM, _MMR_LAMBDA, k, True
+            )
             ranked = [pre_ranked[i] for i in sel_idx]
+            _emb_lookup = None  # not built; downstream uses ranked only
         else:
-            # Python fallback. Pre-stash selected-vector stack so we can compute
-            # `max_sim` against all selected at once (one numpy gemv per round)
-            # instead of one FFI hop per (candidate, selected) pair.
-            selected = [pre_ranked[0]]
-            candidates = list(pre_ranked[1:])
-            sel_vecs: list = []
-            first_vec = _emb_lookup.get(pre_ranked[0][1]["id"])
-            if first_vec is not None:
-                sel_vecs.append(first_vec)
-            while candidates and len(selected) < k:
-                best_idx, best_mmr = 0, -float('inf')
-                # Build the selected-vector matrix once per outer iteration.
-                if _HAS_NUMPY and sel_vecs:
-                    try:
-                        sel_mat = _np.asarray(sel_vecs, dtype=_np.float32)
-                    except Exception:
-                        sel_mat = None
-                else:
-                    sel_mat = None
-                for ci, (c_score, c_item) in enumerate(candidates):
-                    c_vec = _emb_lookup.get(c_item["id"])
-                    if c_vec is None or not sel_vecs:
-                        # Candidate has no embedding (vector-side hit absent
-                        # from `rows`) OR nothing selected yet. Treat as
-                        # max_sim=0 -> MMR reduces to lambda*c_score.
-                        max_sim = 0.0
-                    elif sel_mat is not None:
-                        # One batched cosine across all already-selected vectors.
-                        sims = _batch_cosine(c_vec, sel_mat)
-                        max_sim = max(sims, default=0.0)
+            # Unpacked path. _unpack_many is one batched numpy.frombuffer
+            # reshape (or list-of-lists fallback when numpy is absent).
+            page_matrix = _unpack_many(page_blobs, dim=EMBED_DIM)
+            # When _unpack_many returns ndarray, indexing yields a 1-D ndarray row;
+            # when it falls back to list-of-lists, indexing yields list[float].
+            # Both are valid inputs to m3_core_rs and to numpy cosine.
+            _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
+            # Rust path (unpacked variant): authoritative when every candidate
+            # has an embedding and explanations aren't requested. Same gate as
+            # the packed path; only used as a fallback when one of the packed
+            # preconditions failed (typically: a row's blob has the wrong
+            # length due to a partially-migrated corpus).
+            _mmr_vecs = [_emb_lookup.get(it["id"]) for _, it in pre_ranked]
+            _unpacked_rust_ok = (
+                m3_core_rs is not None
+                and not explain
+                and all(v is not None for v in _mmr_vecs)
+            )
+            if _unpacked_rust_ok:
+                relevance = [float(s) for s, _ in pre_ranked]
+                # Rust wants list[list[float]] — convert ndarray rows on the way out.
+                _mmr_vecs_lists = [
+                    (v.tolist() if hasattr(v, "tolist") else list(v)) for v in _mmr_vecs
+                ]
+                sel_idx = m3_core_rs.mmr_rerank_scored(relevance, _mmr_vecs_lists, _MMR_LAMBDA, k, True)
+                ranked = [pre_ranked[i] for i in sel_idx]
+            else:
+                # Python fallback. Pre-stash selected-vector stack so we can compute
+                # `max_sim` against all selected at once (one numpy gemv per round)
+                # instead of one FFI hop per (candidate, selected) pair.
+                selected = [pre_ranked[0]]
+                candidates = list(pre_ranked[1:])
+                sel_vecs: list = []
+                first_vec = _emb_lookup.get(pre_ranked[0][1]["id"])
+                if first_vec is not None:
+                    sel_vecs.append(first_vec)
+                while candidates and len(selected) < k:
+                    best_idx, best_mmr = 0, -float('inf')
+                    # Build the selected-vector matrix once per outer iteration.
+                    if _HAS_NUMPY and sel_vecs:
+                        try:
+                            sel_mat = _np.asarray(sel_vecs, dtype=_np.float32)
+                        except Exception:
+                            sel_mat = None
                     else:
-                        # Pure-Python last-resort: per-pair cosine. Slow but
-                        # only hit when numpy is absent AND Rust is absent.
-                        max_sim = max(
-                            (_cosine(c_vec, sv) for sv in sel_vecs),
-                            default=0.0,
-                        )
-                    mmr_score = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
-                    if mmr_score > best_mmr:
-                        best_mmr = mmr_score
-                        best_idx = ci
-                    if explain:
-                        if "_explanation" not in c_item:
-                            c_item["_explanation"] = {}
-                        c_item["_explanation"]["max_sim_to_selected"] = max_sim
-                        c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
-                chosen = candidates.pop(best_idx)
-                selected.append(chosen)
-                chosen_vec = _emb_lookup.get(chosen[1]["id"])
-                if chosen_vec is not None:
-                    sel_vecs.append(chosen_vec)
-            ranked = selected
+                        sel_mat = None
+                    for ci, (c_score, c_item) in enumerate(candidates):
+                        c_vec = _emb_lookup.get(c_item["id"])
+                        if c_vec is None or not sel_vecs:
+                            # Candidate has no embedding (vector-side hit absent
+                            # from `rows`) OR nothing selected yet. Treat as
+                            # max_sim=0 -> MMR reduces to lambda*c_score.
+                            max_sim = 0.0
+                        elif sel_mat is not None:
+                            # One batched cosine across all already-selected vectors.
+                            sims = _batch_cosine(c_vec, sel_mat)
+                            max_sim = max(sims, default=0.0)
+                        else:
+                            # Pure-Python last-resort: per-pair cosine. Slow but
+                            # only hit when numpy is absent AND Rust is absent.
+                            max_sim = max(
+                                (_cosine(c_vec, sv) for sv in sel_vecs),
+                                default=0.0,
+                            )
+                        mmr_score = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
+                        if mmr_score > best_mmr:
+                            best_mmr = mmr_score
+                            best_idx = ci
+                        if explain:
+                            if "_explanation" not in c_item:
+                                c_item["_explanation"] = {}
+                            c_item["_explanation"]["max_sim_to_selected"] = max_sim
+                            c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
+                    chosen = candidates.pop(best_idx)
+                    selected.append(chosen)
+                    chosen_vec = _emb_lookup.get(chosen[1]["id"])
+                    if chosen_vec is not None:
+                        sel_vecs.append(chosen_vec)
+                ranked = selected
     else:
         ranked = pre_ranked
 
