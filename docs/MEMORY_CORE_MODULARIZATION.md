@@ -218,8 +218,18 @@ Status as of 2026-05-17 audit pass (commit pending).
   default — premature optimization today._
 - **L. Embedder failure circuit-breaker** is per-call not per-backend. Cache
   failure for N seconds to prevent slow-failure retry storms.
-  _Status: open. Worth doing if HTTP fallback storms become a real
-  problem; no evidence yet._
+  _Status: done. Three per-backend `m3_core_rs.CircuitBreaker` instances
+  (`_EMBEDDED_BREAKER`, `_CPU_FALLBACK_BREAKER`, `_PRIMARY_BREAKER`) in
+  `bin/memory/embed.py`. Each cascade tier consults `allow_request()`
+  before attempting, then records success/failure on the outcome. Tunable
+  via `M3_EMBED_BREAKER_*_THRESHOLD` / `_RESET_SECS` env vars; set
+  threshold=0 or disable Rust to bypass entirely (Python falls through to
+  pre-breaker behaviour). Storm-tested with a dead fallback URL: 5 sequential
+  calls dropped from 2 s each (raw connect-timeout) to 50 ms after the
+  third failure tripped the breaker — ~97 % per-call wall-time
+  reduction during a backend outage. Diagnostics via
+  `get_embed_breaker_state()` / `reset_embed_breakers()` (both
+  re-exported through the memory_core shim)._
 
 ### lru_cache pass (2026-05-17)
 - `_compile_fts_query` — was already lru-cached (`maxsize=2048`) since
