@@ -31,46 +31,53 @@ brew install pipx git sqlite
 pipx ensurepath
 exec $SHELL -l                         # pick up ~/.local/bin in PATH
 pipx install m3-memory
-mcp-memory install-m3 --capture-mode both
-mcp-memory install-embedder           # optional: self-contained local embedder (M1-M4)
-mcp-memory doctor
+m3 setup                               # one-command wizard
 ```
 
-> 🍎 **Note for Intel Macs:** The integrated `install-embedder` path is optimized for Apple Silicon (M-series). If you are on an Intel Mac, we recommend using **Ollama** for embeddings instead.
+> 🍎 **Apple Silicon vs Intel:** the sovereign baseline (BGE-M3 CPU on :8082)
+> runs on both. The wizard offers an opt-in GPU in-process embedder; on Apple
+> Silicon it builds with `embedded-metal` for ~10-50× faster embeddings.
+> Intel Macs stay on CPU (still plenty fast for typical use).
 
 ---
 
 ## Adding to an MCP client
 
+`m3 setup` wires every agent it detects on PATH. If you skipped the wizard or
+add an agent later, run these by hand:
+
 ```bash
 # Claude Code
-claude mcp add memory mcp-memory
+claude mcp add memory m3
 
-# Gemini CLI (if installed)
-# install-m3 auto-wires ~/.gemini/settings.json when gemini is on PATH.
-# If you install Gemini AFTER m3-memory, run:
-mcp-memory chatlog init --apply-gemini
+# Gemini CLI (auto-wired by m3 setup; re-run if Gemini was installed AFTER m3)
+m3 chatlog init --apply-gemini
 ```
 
 ---
 
 ## Common gotchas
 
-- **`mcp-memory: command not found` after `pipx install`** — pipx adds
+- **`m3: command not found` after `pipx install`** — pipx adds
   `~/.local/bin` to PATH via `pipx ensurepath`, but you need a new shell
   for it to take effect. `exec $SHELL -l` works without closing the terminal.
+  (`mcp-memory` is also installed as a backwards-compatible alias.)
 - **Homebrew Python is PEP 668** — that's fine, it's why we use pipx.
 - **macOS-shipped Python (`/usr/bin/python3`) is old and externally managed** —
   don't try to `pip install` against it. Always use brew Python via pipx.
+- **`m3 embedder install` says GGUF is an LFS pointer** — the bundled bge-m3
+  model file is tracked via Git LFS. If you cloned m3-memory directly without
+  LFS, run `git lfs install && git lfs pull` inside the checkout
+  (`pipx`/`pip` users don't hit this — the wizard handles it).
 
 ---
 
 ## Advanced setup
 
-The full homelab walkthrough — Postgres sync, ChromaDB, LM Studio embedding
-server, multi-machine federation — lives at
-[install_macos_homelab.md](install_macos_homelab.md). Most users don't need
-any of that; the one-liner above is enough for a working local install.
+The full homelab walkthrough — Postgres sync, ChromaDB, multi-machine
+federation — lives at [install_macos_homelab.md](install_macos_homelab.md).
+Most users don't need any of that; the one-liner above is enough for a
+working local install.
 
 ---
 

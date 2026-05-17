@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "m3-memory"
 version = "2026.5.6.3"
-description = "Local-first Agentic Memory Layer Framework for MCP Agents • 74 tools • Hybrid search (FTS5 + vector + MMR) • GDPR • FIPS 140-3 ready • 100% local"
+description = "Local-first Agentic Memory Layer Framework for MCP Agents • 96 tools • Hybrid search (FTS5 + vector + MMR) • Directory ingestion & file-memory • GDPR • FIPS 140-3 ready • 100% local"
 
 readme = "README.md"
 license = "Apache-2.0"
@@ -97,6 +97,7 @@ dev = [
 ]
 
 [project.scripts]
+m3 = "m3_memory.cli:main"
 mcp-memory = "m3_memory.cli:main"
 m3-team = "m3_memory.team_cli:main"
 

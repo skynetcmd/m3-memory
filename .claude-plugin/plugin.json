@@ -39,7 +39,7 @@
 
   "mcpServers": {
     "m3": {
-      "command": "mcp-memory",
+      "command": "m3",
       "env": {
         "LLM_ENDPOINTS_CSV": "${user_config.endpoint}",
         "M3_AUTO_INSTALL": "1"
