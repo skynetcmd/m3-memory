@@ -249,6 +249,16 @@ from memory.embed import (  # noqa: F401 — re-exports
     EmbedFallbackError,
     EmbedPrimaryError,
     EmbedSemaphoreTimeout,
+    # Per-backend circuit breakers (audit item L). Each breaker is a
+    # m3_core_rs.CircuitBreaker (or None when Rust is unavailable or the
+    # operator set the threshold env var to 0). Re-exported through the
+    # shim so external diagnostics (`embedder_status_impl`, ops scripts)
+    # can read breaker state without importing memory.embed directly.
+    _EMBEDDED_BREAKER,
+    _CPU_FALLBACK_BREAKER,
+    _PRIMARY_BREAKER,
+    get_embed_breaker_state,
+    reset_embed_breakers,
 )
 # Phase 4.A: Chroma federation helpers (queue insert, collection-id cache,
 # federated query) moved to bin/memory/chroma.py. _CHROMA_COLLECTION_ID_CACHE
