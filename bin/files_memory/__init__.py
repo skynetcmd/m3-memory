@@ -42,6 +42,8 @@ from . import provenance  # noqa: F401
 from . import carry_forward  # noqa: F401
 from . import promotability  # noqa: F401
 from . import dedup  # noqa: F401
+from . import corpora  # noqa: F401
+from . import watch  # noqa: F401
 
 # `tools` is the MCP/CLI entry point. NOT imported eagerly because it's a
 # `python -m files_memory.tools …` target — eager import here would
@@ -54,4 +56,5 @@ __all__ = [
     "summarize", "embed", "entities", "extract",
     "ingest", "search", "index", "promote", "staleness",
     "provenance", "carry_forward", "promotability", "dedup",
+    "corpora", "watch",
 ]
