@@ -266,8 +266,53 @@ async def _conversation_search_impl(query, k=8):
 def _memory_verify_impl(id):
     return memory_core.memory_verify_impl(id)
 
+import tool_loader as _tool_loader  # provides lazy domain-expansion impls
+
 # ── TOOLS catalog ────────────────────────────────────────────────────────────
 TOOLS: list[ToolSpec] = [
+    # ── Meta-tools: lazy domain loading ──────────────────────────────────────
+    # These two ALWAYS register at MCP startup. Every other tool may be hidden
+    # behind a domain — the agent calls `tools_load_domain` to expose them.
+    # Set M3_TOOLS_LAZY=0 to opt out and expose all tools eagerly.
+    ToolSpec(
+        name="tools_list_domains",
+        description=(
+            "List m3 tool domains (memory, chatlog, files, entity, agent, tasks, "
+            "conversations, admin) and their tool counts. Call `tools_load_domain` "
+            "to expose a domain's full tool surface."
+        ),
+        parameters={"type": "object", "properties": {}, "required": []},
+        impl=_tool_loader.list_domains,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="tools_load_domain",
+        description=(
+            "Register a tool domain's full surface for the current MCP session. "
+            "Use when you need tools beyond the essentials (memory_search, "
+            "memory_write, memory_get, chatlog_search, chatlog_write, files_search). "
+            "Valid domains: memory, chatlog, files, entity, agent, tasks, "
+            "conversations, admin."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Domain to expose. See `tools_list_domains`.",
+                },
+            },
+            "required": ["domain"],
+        },
+        impl=_tool_loader.load_domain,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
     ToolSpec(
         name="memory_write",
         description=(
