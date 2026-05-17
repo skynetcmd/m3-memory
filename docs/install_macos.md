@@ -39,6 +39,13 @@ m3 setup                               # one-command wizard
 > Silicon it builds with `embedded-metal` for ~10-50× faster embeddings.
 > Intel Macs stay on CPU (still plenty fast for typical use).
 
+> **Tool catalog stays small in your context.** m3 ships 87 MCP tools but
+> groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
+> conversations, admin). Only ~6 essentials load at MCP startup
+> (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in a
+> domain on demand — just say "load the files tools" and it does. Set
+> `M3_TOOLS_LAZY=0` to disable.
+
 ---
 
 ## Adding to an MCP client
