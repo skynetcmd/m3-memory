@@ -877,7 +877,25 @@ async def memory_search_scored_impl(
         per turn, so a turn wins its bucket on whichever representation
         the query favors.
     """
-    _resolve_mc_callbacks()  # bind memory_core callbacks on first call
+    # Floor: bind every callable to its module-global default FIRST, so that
+    # any subsequent step (callback resolution, test-shim lookup) can fail
+    # without leaving these names unbound. Python's compile-time scope
+    # analysis sees these as locals (because of the assignment), so a
+    # missing assignment would make line ~1350 raise NameError on the
+    # bare `_batch_cosine(...)` call. The 2026-05-17 chatlog curator hit
+    # exactly this when `_resolve_mc_callbacks()` raised before the
+    # original try-block ran.
+    _embed = globals()["_embed"]
+    _db = globals()["_db"]
+    _batch_cosine = globals()["_batch_cosine"]
+    _query_chroma = globals()["_query_chroma"]
+
+    # Best-effort: callback resolution + test-shim rebinding. Any failure
+    # here just leaves the floor bindings above in place.
+    try:
+        _resolve_mc_callbacks()  # bind memory_core callbacks on first call
+    except Exception as e:  # noqa: BLE001 — fail-open is the point
+        logger.debug("memory_search_scored_impl: callback resolution failed (%s); using module defaults", e)
 
     # Test-shim resolution: legacy regression tests monkeypatch these on
     # `memory_core`. Without local rebinding the module-global imports
@@ -885,15 +903,12 @@ async def memory_search_scored_impl(
     # path pays effectively zero overhead.
     try:
         import memory_core as _mc  # type: ignore
-        _embed = getattr(_mc, "_embed", globals()["_embed"])
-        _db = getattr(_mc, "_db", globals()["_db"])
-        _batch_cosine = getattr(_mc, "_batch_cosine", globals()["_batch_cosine"])
-        _query_chroma = getattr(_mc, "_query_chroma", globals()["_query_chroma"])
+        _embed = getattr(_mc, "_embed", _embed)
+        _db = getattr(_mc, "_db", _db)
+        _batch_cosine = getattr(_mc, "_batch_cosine", _batch_cosine)
+        _query_chroma = getattr(_mc, "_query_chroma", _query_chroma)
     except ImportError:
-        _embed = globals()["_embed"]
-        _db = globals()["_db"]
-        _batch_cosine = globals()["_batch_cosine"]
-        _query_chroma = globals()["_query_chroma"]
+        pass  # already have floor bindings
 
     try:
         k = int(k)
