@@ -20,8 +20,26 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 
+@pytest.fixture(autouse=True)
+def _skip_migrations_for_template_db(monkeypatch):
+    """Use conftest's template DB (post-v031 schema) and skip the
+    in-test migration subprocess — it would be a no-op against the
+    already-current template and the subprocess startup is wasted
+    overhead. See test_entity_graph for full rationale.
+    """
+    monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
+
+
 def _create_fact_enriched_schema(db_path):
-    """Create memory_items + memory_relationships + fact_enrichment_queue tables."""
+    """Create memory_items + fact_enrichment_queue + relationships tables.
+
+    Uses the session-scoped template DB from conftest, which has the
+    full post-v031 layout (including fact_enrichment_queue from
+    migration 023). No test-specific DDL needed.
+    """
+    from conftest import create_full_main_schema
+    create_full_main_schema(db_path)
+    return  # template covers everything; legacy fallback below
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
 
