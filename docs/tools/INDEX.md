@@ -1,12 +1,13 @@
 # Tool inventory index
 
-_Generated 2026-05-14T14:05:31.648925+00:00._
+_Generated 2026-05-17T15:50:18.012021+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
 
 | Tool | Summary | Private |
 |---|---|---|
+| [bin/_task_runtime.py](_task_runtime.md) | _task_runtime — shared runtime setup for m3-memory scheduled-task entrypoints. |  |
 | [bin/agent_protocol.py](agent_protocol.md) | (no docstring) |  |
 | [bin/ai-audit.sh](ai-audit.sh.md) | (no docstring) |  |
 | [bin/ai_mechanic.py](ai_mechanic.md) | (no docstring) |  |
