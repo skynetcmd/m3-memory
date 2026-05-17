@@ -76,6 +76,23 @@ BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 DB_PATH: str = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 ARCHIVE_DB_PATH: str = os.path.join(BASE_DIR, "memory", "agent_memory_archive.db")
 
+# files.db (FILE_INGESTION_PLAN.md). Separate physical store with its own
+# lifecycle (high-volume, regeneratable, version-tracked, promotable). Default
+# lives under the user's home, NOT under the repo, so the same install can
+# ingest from anywhere without polluting the source tree.
+# Resolution order: M3_FILES_DB_PATH env > ~/.m3/files_database.db.
+FILES_DB_PATH: str = os.path.abspath(
+    os.environ.get("M3_FILES_DB_PATH")
+    or os.path.join(os.path.expanduser("~"), ".m3", "files_database.db")
+)
+# When true, the ingester prompts on first-ever invocation to confirm the
+# files.db path (and offers to write M3_FILES_DB_PATH to a user-shell env
+# file). Off in non-interactive contexts (CI, MCP server). The ingester
+# auto-disables this when stdin is not a TTY.
+FILES_DB_PROMPT_ON_FIRST_USE: bool = os.environ.get(
+    "M3_FILES_DB_PROMPT_ON_FIRST_USE", "1"
+).lower() in ("1", "true", "yes")
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Embedding model + transport
