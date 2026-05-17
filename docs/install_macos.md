@@ -10,9 +10,9 @@ That's all you need. The script:
 1. Detects macOS, checks for Homebrew (installs from https://brew.sh if missing).
 2. `brew install pipx git sqlite` — only what isn't already there.
 3. `pipx install m3-memory`.
-4. `mcp-memory install-m3 --capture-mode both` — fetches the system payload,
-   auto-wires Claude / Gemini settings.json if either CLI is installed.
-5. `mcp-memory doctor` — prints a verification summary.
+4. `m3 setup` — one-command wizard: fetches the system payload, installs the
+   sovereign CPU embedder, wires every agent it finds on PATH (Claude / Gemini /
+   OpenCode / OpenClaw), installs chatlog hooks, runs `m3 doctor`.
 
 **Cautious version** (audit before running):
 
@@ -91,7 +91,7 @@ working local install.
 ## Verifying
 
 ```bash
-mcp-memory doctor
+m3 doctor
 ```
 
 Should show:

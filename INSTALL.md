@@ -105,7 +105,7 @@ afterward runs as your normal user:
 | `python3` ≥ 3.11 | runtime | `sudo apt install python3` (usually preinstalled) |
 | `pipx` | recommended installer for PEP 668 distros (Debian 12+, Ubuntu 24.04+, Fedora 38+, Arch) | `sudo apt install pipx` |
 | `python3-venv` | dependency of pipx on Debian/Ubuntu | `sudo apt install python3-venv` |
-| `git` | `mcp-memory install-m3` clones the system payload from GitHub (falls back to tarball if missing, but git is faster) | `sudo apt install git` |
+| `git` | `m3 setup` clones the system payload from GitHub (falls back to tarball if missing, but git is faster) | `sudo apt install git` |
 | `sqlite3` CLI | for ad-hoc DB inspection — Python's `sqlite3` stdlib still works without it | `sudo apt install sqlite3` |
 | `curl` | not strictly required, but the troubleshooting docs assume it | `sudo apt install curl` |
 
@@ -134,40 +134,57 @@ Everything below this point runs as your normal user. No more sudo needed.
 | `pipx` bootstrap | — | `brew install pipx` | `sudo apt install pipx` / `sudo dnf install pipx` | `pip install --user pipx` |
 | `sqlite3` CLI | `winget install SQLite.SQLite` or [sqlite.org/download](https://sqlite.org/download.html) | ships in `/usr/bin/sqlite3` | `sudo apt install sqlite3` / `sudo dnf install sqlite` | `sudo yum install sqlite` |
 | Python stdlib sqlite | built-in | built-in | built-in | built-in |
-| `git` (for install-m3) | `winget install Git.Git` | ships with Xcode CLT | `sudo apt install git` | distro `git` |
-| npm-global PATH (if using Gemini CLI) | handled by Node installer | `~/.npm-global/bin` — added to `.zshrc` by npm | `~/.npm-global/bin` — `install-m3` appends to `~/.profile` for non-interactive shells | same as Debian |
-| Gemini CLI auto-register | `install-m3` writes `%USERPROFILE%\.gemini\settings.json` | `install-m3` writes `~/.gemini/settings.json` | same | same |
-| Claude Code hooks | `install-m3` expects `~/.claude/settings.json` | same | same | same |
+| `git` (for `m3 setup`) | `winget install Git.Git` | ships with Xcode CLT | `sudo apt install git` | distro `git` |
+| npm-global PATH (if using Gemini CLI) | handled by Node installer | `~/.npm-global/bin` — added to `.zshrc` by npm | `~/.npm-global/bin` — `m3 setup` appends to `~/.profile` for non-interactive shells | same as Debian |
+| Gemini CLI auto-register | `m3 setup` writes `%USERPROFILE%\.gemini\settings.json` | `m3 setup` writes `~/.gemini/settings.json` | same | same |
+| Claude Code hooks | `m3 setup` expects `~/.claude/settings.json` | same | same | same |
 
 ---
 
-## What `install-m3` does for you
+## What `m3 setup` does for you
 
-Post-install phase runs once at the end of `mcp-memory install-m3`. Every
-step is additive and idempotent — safe to re-run via `mcp-memory update`:
+`m3 setup` is the one-command wizard. It runs `m3 install-m3` to fetch the
+system payload, then orchestrates every other install step. All steps are
+additive and idempotent — safe to re-run via `m3 update` or `m3 setup`
+again:
 
-1. **Gemini CLI** — if `gemini` is on PATH (or at `~/.npm-global/bin/gemini`),
-   writes a `memory` MCP entry to `~/.gemini/settings.json`. Skips if already
-   registered. Does nothing if Gemini isn't installed.
-2. **sqlite3 CLI check** — prints a per-OS install hint if `sqlite3` isn't on
-   PATH. Advisory only; we don't invoke sudo.
-3. **npm-global PATH** — on Linux / macOS, appends
+1. **System payload** — `m3 install-m3` clones (or downloads as a tarball)
+   the repo into `~/.m3-memory/repo`, pinned to the wheel version.
+2. **Sovereign embedder** — `m3 embedder install` brings up the BGE-M3
+   CPU service on `127.0.0.1:8082` using the GGUF bundled at
+   `_assets/models/bge-m3-Q4_K_M.gguf` (Git LFS). No LM Studio / Ollama /
+   GPU required.
+3. **Optional GPU embedder** — the wizard offers `m3 embedder install-gpu`
+   if you want CUDA / Vulkan / Metal acceleration on top of the CPU
+   baseline. Auto-detects toolchain.
+4. **Per-agent MCP wiring** — writes `memory` MCP entries for any of
+   Claude Code / Gemini CLI / OpenCode / OpenClaw it detects on PATH.
+5. **Chatlog hooks** — installs the `PreCompact` (and optionally `Stop`)
+   hooks in Claude Code, and the `SessionEnd` hook in Gemini CLI.
+6. **sqlite3 CLI check** — prints a per-OS install hint if `sqlite3` isn't
+   on PATH. Advisory only; we don't invoke sudo.
+7. **npm-global PATH** — on Linux / macOS, appends
    `export PATH="$HOME/.npm-global/bin:$PATH"` to `~/.profile` if that dir
-   exists and the line isn't already there. Fixes `gemini` being missing from
-   cron and non-login sshd shells. No-op on Windows.
-4. **Interactive prompts** (TTY only):
-   - LLM endpoint: probe local OpenAI-compatible servers (Ollama :11434 etc.),
-     or pin a custom URL. m3's own embedder is sovereign-by-default and runs
-     on :8082; this endpoint is only for *generation* (enrichment, SLM passes).
+   exists and the line isn't already there. Fixes `gemini` being missing
+   from cron and non-login sshd shells. No-op on Windows.
+8. **Interactive prompts** (TTY only):
+   - LLM endpoint: probe local OpenAI-compatible servers (Ollama :11434
+     etc.), or pin a custom URL. m3's own embedder is sovereign and runs
+     on :8082; this endpoint is only for *generation* (enrichment, SLM
+     passes).
    - Chatlog capture hooks: both, PreCompact-only, Stop-only, or none.
 
-All four are skippable:
+All prompts are skippable:
 
 ```bash
-mcp-memory install-m3 --non-interactive          # silent defaults
-mcp-memory install-m3 --endpoint http://localhost:11434/v1
-mcp-memory install-m3 --capture-mode precompact
+m3 setup --non-interactive --capture-mode both                       # silent defaults
+m3 setup --non-interactive --endpoint http://localhost:11434/v1
+m3 setup --non-interactive --capture-mode precompact --install-gpu-embedder
 ```
+
+Power users can also run any single step directly: `m3 install-m3`,
+`m3 embedder install`, `m3 chatlog init --apply-claude`, etc. — see
+`m3 --help`.
 
 ---
 
@@ -193,7 +210,7 @@ clean path there too. System Python on macOS is even older; don't use it.
 ## Diagnosing a broken install
 
 ```bash
-mcp-memory doctor
+m3 doctor
 ```
 
 Reports:
@@ -201,11 +218,12 @@ Reports:
 - chatlog DB path + captured-row count + last-capture timestamp
 - Claude Stop/PreCompact hook state (on/off)
 - Gemini `memory` MCP registration state
+- sovereign embedder service status
 
-`mcp-memory chatlog status` drills into the chatlog subsystem (queue depth,
+`m3 chatlog status` drills into the chatlog subsystem (queue depth,
 spill files, per-agent capture timestamps).
 
-`mcp-memory chatlog doctor` is the same but exits nonzero on any warning —
+`m3 chatlog doctor` is the same but exits nonzero on any warning —
 suitable for CI / health checks.
 
 ---
@@ -228,9 +246,9 @@ Interactive shells can trust the directory once via Gemini's TUI prompt and
 the choice persists; only headless contexts need the explicit opt-out.
 
 The `memory` MCP entry in `~/.gemini/settings.json` is written automatically
-by `mcp-memory install-m3` post-install. The `SessionEnd` chatlog hook is
-written by `mcp-memory chatlog init --apply-gemini` (or automatically when
-you pass `--capture-mode both` to `install-m3`).
+by `m3 setup` (when Gemini is on PATH). The `SessionEnd` chatlog hook is
+written by `m3 chatlog init --apply-gemini` (or automatically by `m3 setup`
+when you accept the default capture mode).
 
 ---
 

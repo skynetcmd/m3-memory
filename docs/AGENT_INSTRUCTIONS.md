@@ -91,7 +91,7 @@ entities.
 - **Provide raw data:** Continue to `memory_write` your observations. The loop
   uses these as raw material for its refinement passes.
 - **Check loop status:** If the user asks about the "state of my memory," call
-  `mcp-memory doctor` or `chatlog_status` to confirm the background workers
+  `m3 doctor` or `chatlog_status` to confirm the background workers
   are healthy.
 
 ### Quick Reference Flow

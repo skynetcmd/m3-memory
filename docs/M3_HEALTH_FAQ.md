@@ -1,11 +1,11 @@
-# M3 Health FAQ — Understanding `/m3:health` and `mcp-memory doctor`
+# M3 Health FAQ — Understanding `/m3:health` and `m3 doctor`
 
 ## What is `/m3:health`?
 
-`/m3:health` is a slash command in Claude Code that runs the m3-memory diagnostic tool. It wraps `mcp-memory doctor`, which prints the status of your m3-memory installation, database, and hook configuration.
+`/m3:health` is a slash command in Claude Code that runs the m3-memory diagnostic tool. It wraps `m3 doctor`, which prints the status of your m3-memory installation, database, and hook configuration.
 
 The command uses a three-fallback resolver chain:
-1. `mcp-memory` CLI (if on PATH)
+1. `m3` CLI (if on PATH — or its `mcp-memory` backwards-compat alias)
 2. `python -m m3_memory.cli doctor` (direct module invocation)
 3. Developer sibling bridge (if running inside the m3-memory repo)
 
@@ -20,7 +20,7 @@ Output is the doctor's diagnostic text plus one interpretation line at the end. 
 ```
 m3-memory package version: 2026.4.24.12
 config file:               <home>/.m3-memory/config.json
-  (no config - system not installed via `mcp-memory install-m3`)
+  (no config - system not installed via `m3 setup`)
 ```
 
 (Paths in this doc use `<home>` and `<repo>` as placeholders; your output will show actual paths like `/home/alice/...` on Linux/macOS or `C:\Users\Alice\...` on Windows.)
@@ -28,7 +28,7 @@ config file:               <home>/.m3-memory/config.json
 **What it means:**
 - `package version` — the m3-memory package you have installed.
 - `config file` — absolute path to the system config file.
-- `(no config ...)` — config.json doesn't exist. This is **expected for developers** working in the m3-memory repo. General users who ran `mcp-memory install-m3` will have this file.
+- `(no config ...)` — config.json doesn't exist. This is **expected for developers** working in the m3-memory repo. General users who ran `m3 setup` will have this file.
 
 **Actionable?** No. Both states are normal.
 
@@ -97,7 +97,7 @@ Everything is healthy. Nothing to do.
 
 ---
 
-### `mcp-memory: command not found`
+### `m3: command not found` (or `mcp-memory: command not found`)
 
 Your PATH doesn't have the m3-memory CLI installed. However, the `/m3:health` slash command **automatically falls back** to `python -m m3_memory.cli doctor`, so this isn't blocking.
 
@@ -113,7 +113,7 @@ Then add `<user_base>/Scripts` to your PATH. On Windows, this is typically `C:\U
 
 ### `(no config - system not installed...)` plus `developer sibling bridge:`
 
-You're working in a development clone of m3-memory. This is **expected and correct**. The `config.json` file is created by `mcp-memory install-m3` for production users only.
+You're working in a development clone of m3-memory. This is **expected and correct**. The `config.json` file is created by `m3 setup` for production users only.
 
 If you're editing the m3-memory source code or testing changes locally, you don't need config.json. The doctor will resolve the bridge via the sibling walk.
 
@@ -139,13 +139,13 @@ The chatlog database exists but has never captured a turn. This means:
 Check if you've run any Claude Code or Gemini sessions since installing hooks. If yes, the hooks are broken. Run:
 
 ```bash
-mcp-memory chatlog init --reconfigure
+m3 chatlog init --reconfigure
 ```
 
 This re-wires the hooks. For Claude Code specifically:
 
 ```bash
-mcp-memory chatlog init --apply-claude
+m3 chatlog init --apply-claude
 ```
 
 ---
@@ -156,12 +156,12 @@ Your hooks stopped firing. Run a Claude Code session and check again. If still s
 
 1. Check the `claude hooks:` line. If either shows `[off]`, re-apply:
    ```bash
-   mcp-memory chatlog init --apply-claude
+   m3 chatlog init --apply-claude
    ```
 
 2. Check the `gemini mcp (memory):` line. If either shows `[off]`:
    ```bash
-   mcp-memory chatlog init --apply-gemini
+   m3 chatlog init --apply-gemini
    ```
 
 3. Verify that `~/.claude/settings.json` and `~/.gemini/settings.json` exist and are readable.
@@ -173,7 +173,7 @@ Your hooks stopped firing. Run a Claude Code session and check again. If still s
 One or both hooks are not wired. Re-apply:
 
 ```bash
-mcp-memory chatlog init --apply-claude
+m3 chatlog init --apply-claude
 ```
 
 This merges the hooks into your `~/.claude/settings.json` (creates the file if missing; backs up before writing). It's safe to run multiple times.
@@ -184,16 +184,16 @@ This merges the hooks into your `~/.claude/settings.json` (creates the file if m
 
 Gemini doesn't have the memory MCP server registered, or the SessionEnd hook is missing.
 
-First, ensure the memory MCP is registered. If you haven't run `mcp-memory install-m3` yet, do that:
+First, ensure the memory MCP is registered. If you haven't run `m3 setup` yet, do that:
 
 ```bash
-mcp-memory install-m3
+m3 setup
 ```
 
 Then wire the SessionEnd hook:
 
 ```bash
-mcp-memory chatlog init --apply-gemini
+m3 chatlog init --apply-gemini
 ```
 
 (Requires Gemini CLI to be installed first.)
@@ -205,7 +205,7 @@ mcp-memory chatlog init --apply-gemini
 The bridge can't be located. Check:
 
 1. **Are you inside the m3-memory repo?** If yes, the developer sibling walk should find it.
-2. **Did you run `mcp-memory install-m3`?** If no, run it now.
+2. **Did you run `m3 setup`?** If no, run it now.
 3. **Is M3_BRIDGE_PATH set to a path that exists?** If set, verify the file is readable.
 4. **Is your config.json (if you have one) pointing to a valid path?** Edit it if needed.
 
@@ -215,7 +215,7 @@ The bridge can't be located. Check:
 
 | Aspect | Developer (working in repo) | General user (pip installed) |
 |---|---|---|
-| **Install command** | `git clone` then `pip install -e .` or just clone | `pip install m3-memory` then `mcp-memory install-m3` |
+| **Install command** | `git clone` then `pip install -e .` or just clone | `pip install m3-memory` then `m3 setup` |
 | **config.json present** | NO (expected) | YES |
 | **M3_BRIDGE_PATH** | usually unset | usually set |
 | **Bridge resolution** | developer sibling walk | config.json or env var |
@@ -228,13 +228,13 @@ The bridge can't be located. Check:
 ## When to Actually Worry
 
 **Take action if you see:**
-- `captured rows: 0` — run `mcp-memory chatlog init` to wire hooks.
-- Any hook showing `[off]` — run `mcp-memory chatlog init --apply-claude` or `--apply-gemini`.
+- `captured rows: 0` — run `m3 chatlog init` to wire hooks.
+- Any hook showing `[off]` — run `m3 chatlog init --apply-claude` or `--apply-gemini`.
 - `last capture at` more than 24 hours old **and** your chatlog DB shows recent activity in an editor — hooks are broken, re-run init.
 - `[X] no bridge found` — check your installation, config.json, or M3_BRIDGE_PATH.
 
 **Don't worry about:**
-- `mcp-memory: command not found` — PATH plumbing only; fallback chain handles it.
+- `m3: command not found` (or `mcp-memory: command not found`) — PATH plumbing only; fallback chain handles it.
 - `(no config - system not installed...)` — expected for developers.
 - `M3_BRIDGE_PATH (env): (unset)` — expected for developers and standard installs.
 
@@ -242,7 +242,7 @@ The bridge can't be located. Check:
 
 ## Cross-References
 
-- `mcp-memory chatlog --help` — full list of chatlog subcommands.
-- `mcp-memory doctor --help` — doctor-specific flags (if any).
+- `m3 chatlog --help` — full list of chatlog subcommands.
+- `m3 doctor --help` — doctor-specific flags (if any).
 - [docs/SYNC.md](SYNC.md) — warehouse sync (separate concern, uses same database).
 - [docs/AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md) — memory best practices for agents.
