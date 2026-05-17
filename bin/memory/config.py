@@ -4,50 +4,30 @@ Two kinds of names live here:
 
 1. **Pure constants** read once at import time from environment variables or
    literals. Read-only after import. Other modules `from .config import X`
-   and treat X as immutable.
+   to get them.
+2. **Mutable state** (singletons, caches) that live here to avoid circular
+   imports. These are prefixed with `_` and other modules should import the
+   `config` module and access them as `config._X`.
 
-2. **Mutable config-shapes** that are env-seeded at import but rewritten at
-   runtime by setter functions (e.g. `set_embed_override` flips
-   `_EMBED_URL_OVERRIDE`). Other modules read these through the module
-   attribute every time — DO NOT bind them into local names at import time,
-   or you'll see a stale value after a setter writes them.
-
-Also exposes a single module-level reference to `m3_core_rs` (the optional
-Rust core wheel), set once at import time. All Rust-routed compute paths
-check `config.m3_core_rs is not None` before dispatching.
-
-This module has **no dependencies on any other m3-memory module** —
-everything here is read at import. Phases 2-5 can import from this freely
-without circular import risk.
-
-See `docs/MEMORY_CORE_MODULARIZATION.md` for the broader migration plan.
+Phase 1 extracted basic paths/names.
+Phase 3 moved the HTTP-client singleton and backend stats to `embed.py` but
+kept the thresholds here.
+Phase 5 introduced circuit-breaker thresholds.
 """
 from __future__ import annotations
 
-import logging
 import os
 import platform
 from pathlib import Path
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Project Oxidation: optional Rust compute core
-# ──────────────────────────────────────────────────────────────────────────────
-# m3_core_rs is an optional dependency (pip install m3-memory[oxidation]).
-# M3_CORE_RS_DISABLE=1 forces the Python path even when the wheel is installed
-# — the load-bearing kill-switch from the oxidation plan §9.6. Import failure
-# is non-fatal: m3-memory runs fully on the Python path without the core.
-_OXIDATION_DISABLED: bool = os.environ.get("M3_CORE_RS_DISABLE", "0").lower() in (
-    "1", "true", "yes"
-)
-m3_core_rs = None
-if not _OXIDATION_DISABLED:
-    try:
-        import m3_core_rs  # type: ignore
-        logging.getLogger("memory.config").info(
-            "m3_core_rs loaded (hash provider: %s)", m3_core_rs.hash_provider()
-        )
-    except ImportError:
-        m3_core_rs = None  # extra not installed — Python path is the default
+# Oxidation / Rust availability
+try:
+    import m3_core_rs
+    _OXIDATION_DISABLED = os.environ.get("M3_CORE_RS_DISABLE", "0") == "1"
+    if _OXIDATION_DISABLED:
+        m3_core_rs = None
+except ImportError:
+    m3_core_rs = None  # extra not installed — Python path is the default
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -148,131 +128,81 @@ CONTRADICTION_THRESHOLD: float = float(os.environ.get("CONTRADICTION_THRESHOLD",
 # by this factor. 0.5 = visible but ranked below newer fact. 0.0 = hide.
 # 1.0 = disable demotion (legacy pre-2026-04-27 behavior).
 SUPERSEDES_PENALTY: float = float(os.environ.get("SUPERSEDES_PENALTY", "0.5"))
+
 # CONTRADICTION_TITLE_GATE: 'strict' = require title substring match (legacy);
-# 'loose' = cosine ≥ threshold + same type + content-differs only (default
+# 'loose' = cosine >= threshold + same type + content-differs only (default
 # since 2026-04-27); 'off' = treat ALL high-cosine same-type pairs as
 # supersedence regardless of title or content (research mode only).
 CONTRADICTION_TITLE_GATE: str = os.environ.get("CONTRADICTION_TITLE_GATE", "loose").lower()
+
 # CONTRADICTION_TYPE_EXCLUSIONS: comma-separated memory types skipped during
 # contradiction-check. Default skips 'conversation'; set to
 # 'conversation,message' to restore the legacy pre-2026-04-27 behavior. Empty
 # string = check all types.
 CONTRADICTION_TYPE_EXCLUSIONS: frozenset[str] = frozenset(
-    t.strip()
-    for t in os.environ.get("CONTRADICTION_TYPE_EXCLUSIONS", "conversation").split(",")
-    if t.strip()
+    (os.environ.get("CONTRADICTION_TYPE_EXCLUSIONS") or "conversation").lower().split(",")
 )
 
-
 # ──────────────────────────────────────────────────────────────────────────────
-# Auto-related-edge writer (single-insert path only)
-# ──────────────────────────────────────────────────────────────────────────────
-AUTO_RELATED_LINK: bool = os.environ.get("M3_AUTO_RELATED_LINK", "1").lower() in (
-    "1", "true", "yes"
-)
-AUTO_RELATED_LINK_SCOPE_BY_VARIANT: bool = os.environ.get(
-    "M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT", "1"
-).lower() in ("1", "true", "yes")
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Retrieval / ranking
+# Retrieval params
 # ──────────────────────────────────────────────────────────────────────────────
 SEARCH_ROW_CAP: int = int(os.environ.get("SEARCH_ROW_CAP", "5000"))
-LLM_TIMEOUT: float = float(os.environ.get("LLM_TIMEOUT", "120.0"))
+LLM_TIMEOUT: float = float(os.environ.get("LLM_TIMEOUT", "45.0"))
+SPEAKER_IN_TITLE: bool = os.environ.get("SPEAKER_IN_TITLE", "1") == "1"
+SHORT_TURN_THRESHOLD: int = int(os.environ.get("SHORT_TURN_THRESHOLD", "20"))
+TITLE_MATCH_BOOST: float = float(os.environ.get("TITLE_MATCH_BOOST", "0.15"))
+IMPORTANCE_WEIGHT: float = float(os.environ.get("IMPORTANCE_WEIGHT", "0.15"))
 
-# Ranker/write-path tuning. Override via env var to disable or tune per
-# deployment.
-SPEAKER_IN_TITLE: bool = os.environ.get("M3_SPEAKER_IN_TITLE", "1").lower() in (
-    "1", "true", "yes"
+# Trim-by-elbow (MMR post-filter) params
+ELBOW_MIN_INPUT: int = 5
+ELBOW_MIN_RETURN: int = 3
+ELBOW_ABS_THRESHOLD: float = 0.08
+
+# Routed-expansion params
+EXPANSION_DISPLACEMENT_MARGIN: float = 0.05
+EXPANSION_PROTECTED_RANKS: int = 5
+
+# Entity stoplist (case-insensitive) for BFS seeding/expansion
+ENTITY_SEED_STOPLIST: frozenset[str] = frozenset(
+    (os.environ.get("M3_ENTITY_SEED_STOPLIST") or "yes,no,ok,okay,thanks,thank,hi,hello,the,this,that,there,their,they,them,it,its").lower().split(",")
 )
-SHORT_TURN_THRESHOLD: int = int(os.environ.get("M3_SHORT_TURN_THRESHOLD", "20"))
-TITLE_MATCH_BOOST: float = float(os.environ.get("M3_TITLE_MATCH_BOOST", "0.05"))
-IMPORTANCE_WEIGHT: float = float(os.environ.get("M3_IMPORTANCE_WEIGHT", "0.05"))
-
-# Adaptive-K (_trim_by_elbow) safety knobs. Defaults keep the trimmer
-# scale-aware on large candidate pools; legacy behavior is reachable via
-# M3_ELBOW_MIN_INPUT=3 M3_ELBOW_MIN_RETURN=1 M3_ELBOW_ABS_THRESHOLD=0.0.
-ELBOW_MIN_INPUT: int = int(os.environ.get("M3_ELBOW_MIN_INPUT", "20"))
-ELBOW_MIN_RETURN: int = int(os.environ.get("M3_ELBOW_MIN_RETURN", "8"))
-ELBOW_ABS_THRESHOLD: float = float(os.environ.get("M3_ELBOW_ABS_THRESHOLD", "0.05"))
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Expansion-displacement guard. Engine invariant, not a per-call tuning knob.
-# ──────────────────────────────────────────────────────────────────────────────
-EXPANSION_DISPLACEMENT_MARGIN: float = float(
-    os.environ.get("M3_EXPANSION_DISPLACEMENT_MARGIN", "2.0")
-)
-EXPANSION_PROTECTED_RANKS: int = int(
-    os.environ.get("M3_EXPANSION_PROTECTED_RANKS", "3")
-)
-
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Entity-graph seed stoplist
+# Ingestion emitters
 # ──────────────────────────────────────────────────────────────────────────────
-# Persona/role tokens that, if materialized as entities, would hub-out the BFS
-# expansion. Comma-separated, case-insensitive. Empty string disables filtering.
-ENTITY_SEED_STOPLIST: tuple[str, ...] = tuple(
-    s.strip().lower()
-    for s in os.environ.get("M3_ENTITY_SEED_STOPLIST", "User,user,assistant").split(",")
-    if s.strip()
-)
+INGEST_WINDOW_CHUNKS: bool = os.environ.get("M3_INGEST_WINDOW_CHUNKS", "1") == "1"
+INGEST_GIST_ROWS: bool = os.environ.get("M3_INGEST_GIST_ROWS", "1") == "1"
+INGEST_EVENT_ROWS: bool = os.environ.get("M3_INGEST_EVENT_ROWS", "1") == "1"
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Phase 1 ingestion optimizations (opt-in emitters) + retrieval router
-# ──────────────────────────────────────────────────────────────────────────────
-INGEST_WINDOW_CHUNKS: bool = os.environ.get("M3_INGEST_WINDOW_CHUNKS", "0").lower() in (
-    "1", "true", "yes"
-)
-INGEST_GIST_ROWS: bool = os.environ.get("M3_INGEST_GIST_ROWS", "0").lower() in (
-    "1", "true", "yes"
-)
-INGEST_EVENT_ROWS: bool = os.environ.get("M3_INGEST_EVENT_ROWS", "0").lower() in (
-    "1", "true", "yes"
-)
-QUERY_TYPE_ROUTING: bool = os.environ.get("M3_QUERY_TYPE_ROUTING", "0").lower() in (
-    "1", "true", "yes"
-)
-INTENT_ROUTING: bool = os.environ.get("M3_INTENT_ROUTING", "0").lower() in (
-    "1", "true", "yes"
-)
-INTENT_USER_FACT_BOOST: float = float(os.environ.get("M3_INTENT_USER_FACT_BOOST", "0.1"))
 INGEST_WINDOW_SIZE: int = int(os.environ.get("M3_INGEST_WINDOW_SIZE", "3"))
-INGEST_GIST_MIN_TURNS: int = int(os.environ.get("M3_INGEST_GIST_MIN_TURNS", "8"))
-INGEST_GIST_STRIDE: int = int(os.environ.get("M3_INGEST_GIST_STRIDE", "8"))
-
+INGEST_GIST_MIN_TURNS: int = int(os.environ.get("M3_INGEST_GIST_MIN_TURNS", "10"))
+INGEST_GIST_STRIDE: int = int(os.environ.get("M3_INGEST_GIST_STRIDE", "5"))
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Fact enrichment pipeline (Phase 4-5). Gated off by default.
+# Query Routing
 # ──────────────────────────────────────────────────────────────────────────────
-ENABLE_FACT_ENRICHED: bool = os.environ.get("M3_ENABLE_FACT_ENRICHED", "false").lower() in (
-    "1", "true", "yes"
-)
+QUERY_TYPE_ROUTING: bool = os.environ.get("M3_QUERY_TYPE_ROUTING", "1") == "1"
+INTENT_ROUTING: bool = os.environ.get("M3_INTENT_ROUTING", "1") == "1"
+INTENT_USER_FACT_BOOST: float = float(os.environ.get("M3_INTENT_USER_FACT_BOOST", "0.20"))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Fact Enrichment & Entities
+# ──────────────────────────────────────────────────────────────────────────────
+ENABLE_FACT_ENRICHED: bool = os.environ.get("M3_ENABLE_FACT_ENRICHED", "1").lower() in ("1", "true", "yes")
 FACT_ENRICH_CONCURRENCY: int = int(os.environ.get("M3_FACT_ENRICH_CONCURRENCY", "2"))
-FACT_ENRICH_MAX_ATTEMPTS: int = int(os.environ.get("M3_FACT_ENRICH_MAX_ATTEMPTS", "5"))
+FACT_ENRICH_MAX_ATTEMPTS: int = int(os.environ.get("M3_FACT_ENRICH_MAX_ATTEMPTS", "3"))
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Entity-relation graph pipeline (Phase 4-5). Gated off by default.
-# ──────────────────────────────────────────────────────────────────────────────
-ENABLE_ENTITY_GRAPH: bool = os.environ.get("M3_ENABLE_ENTITY_GRAPH", "false").lower() in (
-    "1", "true", "yes"
-)
+ENABLE_ENTITY_GRAPH: bool = os.environ.get("M3_ENABLE_ENTITY_GRAPH", "1").lower() in ("1", "true", "yes")
 ENTITY_EXTRACT_CONCURRENCY: int = int(os.environ.get("M3_ENTITY_EXTRACT_CONCURRENCY", "2"))
-# Canonical name wins; M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS is a legacy typo-alias
-# kept as fallback only.
-ENTITY_EXTRACT_MAX_ATTEMPTS: int = int(
-    os.environ.get(
-        "M3_ENTITY_EXTRACT_MAX_ATTEMPTS",
-        os.environ.get("M3_ENTITY_EXTRACTOR_MAX_ATTEMPTS", "3"),
-    )
-)
-ENTITY_RESOLVE_FUZZY_MIN: float = float(os.environ.get("M3_ENTITY_RESOLVE_FUZZY_MIN", "0.8"))
-ENTITY_RESOLVE_COSINE_MIN: float = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MIN", "0.85"))
+ENTITY_EXTRACT_MAX_ATTEMPTS: int = int(os.environ.get("M3_ENTITY_EXTRACT_MAX_ATTEMPTS", "3"))
 
+ENTITY_RESOLVE_FUZZY_MIN: float = float(os.environ.get("M3_ENTITY_RESOLVE_FUZZY_MIN", "0.85"))
+ENTITY_RESOLVE_COSINE_MIN: float = float(os.environ.get("M3_ENTITY_RESOLVE_COSINE_MIN", "0.92"))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Misc
+# ──────────────────────────────────────────────────────────────────────────────
+VALID_SCOPES: set[str] = {"user", "session", "agent", "org"}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Entity vocab bootstrap defaults (mirrored in config/lists/entity_graph_default.yaml)
@@ -357,3 +287,6 @@ CHROMA_CONTENT_MAX: int = 10_000
 FEDERATION_LOW_SCORE_THRESHOLD: float = float(
     os.environ.get("M3_FEDERATION_LOW_SCORE_THRESHOLD", "0.65")
 )
+
+AUTO_RELATED_LINK: bool = os.environ.get("M3_AUTO_RELATED_LINK", "1") == "1"
+AUTO_RELATED_LINK_SCOPE_BY_VARIANT: bool = os.environ.get("M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT", "1") == "1"

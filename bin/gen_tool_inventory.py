@@ -84,6 +84,7 @@ CORE_LIBRARIES = {
     "memory_core.py", "memory_bridge.py", "mcp_tool_catalog.py", "mcp_proxy.py",
     "m3_sdk.py", "auth_utils.py", "temporal_utils.py", "agent_protocol.py",
     "embedding_utils.py", "custom_tool_bridge.py", "debug_agent_bridge.py",
+    "_task_runtime.py",
     # Post-2026-04-21 refactor additions: chatlog + maintenance + sync + LLM
     # failover are load-bearing even without a CLI surface.
     "chatlog_config.py", "chatlog_core.py", "chatlog_redaction.py",
