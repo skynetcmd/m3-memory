@@ -126,7 +126,14 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
     Fast path: if the schema is already at the latest version on disk
     (compared against the migration files in memory/migrations/ or
     memory/chatlog_migrations/), skip the subprocess entirely.
+
+    Test escape hatch: when M3_SKIP_MIGRATIONS=1 is set, return without
+    doing anything. Test fixtures that pre-create the full post-v031
+    schema (via tests/conftest.py's `create_full_main_schema`) set this
+    so the migration subprocess doesn't re-run on an already-current DB.
     """
+    if os.environ.get("M3_SKIP_MIGRATIONS", "").lower() in ("1", "true", "yes"):
+        return
     try:
         migration_script = os.path.join(config.BASE_DIR, "bin", "migrate_memory.py")
 
@@ -318,6 +325,10 @@ def _gate_active(env_var: str, count_query: str, threshold: int = 1) -> bool:
     Cached per (env_var, count_query) for ~5 min; the cache is invalidated by
     process restart or natural TTL expiry. Single-process; no thread lock — a
     stampede on first miss would just run COUNT(*) twice, harmless.
+
+    The count-query function is resolved at call time so tests that
+    monkeypatch `memory_core._gate_count_query` (legacy pattern) take
+    effect. Production reads the module-local `_gate_count_query`.
     """
     if os.environ.get(env_var, "").strip().lower() in ("1", "true", "yes", "on"):
         return True
@@ -326,9 +337,19 @@ def _gate_active(env_var: str, count_query: str, threshold: int = 1) -> bool:
     cache_key = f"{env_var}::{count_query}"
     cached = _GATE_CACHE.get(cache_key)
     now = time.monotonic()
-    if cached is not None and (now - cached[1]) < _GATE_CACHE_TTL:
+    # Resolve TTL via memory_core for legacy tests that monkeypatch it
+    # (test_phase_l_auto_activation::test_cache_expires_after_ttl).
+    _ttl = _GATE_CACHE_TTL
+    _count_fn = _gate_count_query
+    try:
+        import memory_core as _mc  # type: ignore
+        _ttl = getattr(_mc, "_GATE_CACHE_TTL", _ttl)
+        _count_fn = getattr(_mc, "_gate_count_query", _count_fn)
+    except ImportError:
+        pass
+    if cached is not None and (now - cached[1]) < _ttl:
         return cached[0]
-    count = _gate_count_query(count_query)
+    count = _count_fn(count_query)
     active = count >= threshold
     _GATE_CACHE[cache_key] = (active, now)
     return active

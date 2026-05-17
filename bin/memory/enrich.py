@@ -4,12 +4,39 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
 
 from m3_sdk import M3Context, resolve_db_path
 from llm_failover import get_best_llm, get_smallest_llm, clear_failover_caches
 
-from .config import EMBED_DIM
+from .config import EMBED_DIM, ORIGIN_DEVICE
+from . import config as _config
+from .util import sha256_hex as _sha256_hex
+from .db import _record_history
+
+
+def _read_gate(name: str):
+    """Read a runtime-mutable gate flag.
+
+    Tests monkeypatch `memory_core.<NAME>` (the public shim) — see
+    test_fact_enriched, test_entity_graph. Production sets these via
+    env vars at import time, which `memory.config` binds to constants.
+
+    Resolution order at call time:
+      1. memory_core.<NAME>          — what tests patch
+      2. memory.config.<NAME>        — the canonical source
+
+    Lazy import so this module loads cleanly without memory_core (e.g.
+    in early-bootstrap unit tests that don't pull the shim).
+    """
+    try:
+        import memory_core  # type: ignore
+        if hasattr(memory_core, name):
+            return getattr(memory_core, name)
+    except ImportError:
+        pass
+    return getattr(_config, name)
 from .db import _db
 from .embed import _embed, _content_hash, _get_embed_client
 from .entity import _run_entity_extractor
@@ -23,6 +50,16 @@ _CLASSIFY_CACHE = {}
 
 
 _AUTO_TITLE_CACHE: dict[str, str] = {}
+
+
+# Fact-enrichment dispatch primitives. Defined here (in the module that
+# uses them) because the Phase 7+8 refactor moved the consumers from
+# memory_core but left these module-level objects behind. memory_core
+# now re-exports the names through `_resolve_mc_callbacks()` so legacy
+# patching still works.
+from .config import FACT_ENRICH_CONCURRENCY
+_FACT_ENRICH_SEM: asyncio.Semaphore = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
+_PENDING_FACT_TASKS: set[asyncio.Task] = set()
 
 
 def _ingest_llm_enabled(flag: str) -> bool:
@@ -216,26 +253,39 @@ async def _try_enrich_or_enqueue(memory_id: str, content: str, fact_enricher, db
     Variant-skip rule: if variant is not None and (allowlist is None or variant not in allowlist),
     return without doing anything.
     """
-    if not ENABLE_FACT_ENRICHED or fact_enricher is None:
+    if not _read_gate("ENABLE_FACT_ENRICHED") or fact_enricher is None:
         return
 
     # Skip variant rows unless explicitly allowed
     if variant is not None and (allowlist is None or variant not in allowlist):
         return
 
+    # Resolve the semaphore + pending-set at call time so tests that
+    # monkeypatch memory_core._FACT_ENRICH_SEM (with a fresh-capacity
+    # asyncio.Semaphore) take effect. Tests in test_fact_enriched rely
+    # on this to constrain concurrency to 1.
+    sem = _FACT_ENRICH_SEM
+    pending = _PENDING_FACT_TASKS
+    try:
+        import memory_core as _mc  # type: ignore
+        sem = getattr(_mc, "_FACT_ENRICH_SEM", sem)
+        pending = getattr(_mc, "_PENDING_FACT_TASKS", pending)
+    except ImportError:
+        pass
+
     # Try non-blocking acquire with very short timeout
     try:
         async with asyncio.timeout(0.001):  # try-acquire only
-            await _FACT_ENRICH_SEM.acquire()
+            await sem.acquire()
     except (asyncio.TimeoutError, Exception):
         # Semaphore full or error — enqueue and return immediately
         _enqueue_fact_enrichment(memory_id, db)
         return
 
     # Acquired semaphore — spawn task and track it
-    task = asyncio.create_task(_run_fact_enricher(memory_id, content, fact_enricher))
-    _PENDING_FACT_TASKS.add(task)
-    task.add_done_callback(lambda t: _PENDING_FACT_TASKS.discard(t))
+    task = asyncio.create_task(_run_fact_enricher(memory_id, content, fact_enricher, sem=sem))
+    pending.add(task)
+    task.add_done_callback(lambda t: pending.discard(t))
 
 
 def _enqueue_fact_enrichment(memory_id: str, db) -> None:
@@ -249,8 +299,16 @@ def _enqueue_fact_enrichment(memory_id: str, db) -> None:
         logger.debug(f"Failed to enqueue fact enrichment for {memory_id}: {e}")
 
 
-async def _run_fact_enricher(memory_id: str, content: str, fact_enricher) -> None:
-    """Run the actual fact extractor with error handling and retries."""
+async def _run_fact_enricher(memory_id: str, content: str, fact_enricher,
+                              sem: "asyncio.Semaphore | None" = None) -> None:
+    """Run the actual fact extractor with error handling and retries.
+
+    `sem` is the semaphore that was acquired in the caller; we release
+    the same instance here. None falls back to the module-level
+    `_FACT_ENRICH_SEM` (legacy behavior).
+    """
+    if sem is None:
+        sem = _FACT_ENRICH_SEM
     try:
         facts = await fact_enricher(content)
         if facts:
@@ -266,7 +324,7 @@ async def _run_fact_enricher(memory_id: str, content: str, fact_enricher) -> Non
         except Exception as db_err:
             logger.debug(f"Failed to record enrichment error for {memory_id}: {db_err}")
     finally:
-        _FACT_ENRICH_SEM.release()
+        sem.release()
 
 
 async def _write_fact_rows(memory_id: str, facts: list[dict]) -> None:
@@ -369,7 +427,7 @@ def _select_pending_fact_enrichment(db, limit: int | None = None, allowed_varian
     if limit is not None:
         sql += f" LIMIT {int(limit)}"
 
-    params = variant_params + [FACT_ENRICH_MAX_ATTEMPTS]
+    params = variant_params + [_read_gate("FACT_ENRICH_MAX_ATTEMPTS")]
     return list(db.execute(sql, params).fetchall())
 
 

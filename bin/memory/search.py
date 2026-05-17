@@ -48,7 +48,48 @@ from .config import (
 )
 from .chroma import _query_chroma
 from .db import _db, _enqueue_access_stamps
+from . import graph as _graph_mod
 from .graph import _graph_neighbor_ids, _session_neighbor_ids, _entity_graph_neighbor_ids, _score_extra_rows, memory_graph_impl
+
+
+def _resolve_graph_helper(name: str):
+    """Resolve a graph helper at call time so tests that monkeypatch
+    `memory_core.<name>` (pre-refactor pattern, e.g. test_entity_graph
+    and test_memory_search_routed) take effect.
+
+    Checks memory_core first (where tests patch), falls back to the
+    canonical `memory.graph` module.
+    """
+    try:
+        import memory_core as _mc  # type: ignore
+        fn = getattr(_mc, name, None)
+        if fn is not None:
+            return fn
+    except ImportError:
+        pass
+    return getattr(_graph_mod, name)
+
+
+def _resolve_search_callable(name: str):
+    """Same pattern as _resolve_graph_helper but for callables within
+    this module that tests monkeypatch through the memory_core shim
+    (e.g. memory_search_scored_impl).
+
+    Necessary because Python binds module-local function names at the
+    `def` site — once a function `f` is defined inside this module,
+    referring to `f` inside another function `g` resolves to *this*
+    module's `f`, even if `memory_core.f` has been patched by a test.
+    Going through this helper picks up the patched version at call time.
+    """
+    try:
+        import memory_core as _mc  # type: ignore
+        fn = getattr(_mc, name, None)
+        if fn is not None:
+            return fn
+    except ImportError:
+        pass
+    # Resolve via the current module's globals — the canonical local copy.
+    return globals()[name]
 from .embed import _embed
 from .fts import (
     _DATE_MONTHS,
@@ -64,6 +105,7 @@ from .fts import (
 )
 from .util import (
     _HAS_NUMPY,
+    _batch_cosine,
     _batch_cosine_py,
     _cosine,
     _cosine_batch_packed,
@@ -836,6 +878,23 @@ async def memory_search_scored_impl(
         the query favors.
     """
     _resolve_mc_callbacks()  # bind memory_core callbacks on first call
+
+    # Test-shim resolution: legacy regression tests monkeypatch these on
+    # `memory_core`. Without local rebinding the module-global imports
+    # win, defeating the patches. Resolve once per call so the production
+    # path pays effectively zero overhead.
+    try:
+        import memory_core as _mc  # type: ignore
+        _embed = getattr(_mc, "_embed", globals()["_embed"])
+        _db = getattr(_mc, "_db", globals()["_db"])
+        _batch_cosine = getattr(_mc, "_batch_cosine", globals()["_batch_cosine"])
+        _query_chroma = getattr(_mc, "_query_chroma", globals()["_query_chroma"])
+    except ImportError:
+        _embed = globals()["_embed"]
+        _db = globals()["_db"]
+        _batch_cosine = globals()["_batch_cosine"]
+        _query_chroma = globals()["_query_chroma"]
+
     try:
         k = int(k)
     except (TypeError, ValueError):
@@ -1707,7 +1766,7 @@ async def memory_search_routed_impl(
         # the overshoot doubles as the primary pool. When reuse doesn't fire,
         # the primary call below overwrites these keys — both writes describe
         # the same family of values (pool sizes for the candidate retrieval).
-        overshoot_candidates = await memory_search_scored_impl(query, mmr=mmr, k=_overshoot_k, user_id=user_id, scope=scope,
+        overshoot_candidates = await _resolve_search_callable("memory_search_scored_impl")(query, mmr=mmr, k=_overshoot_k, user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
             search_mode=search_mode, variant=variant, as_of=as_of,
             conversation_id=conversation_id, extra_columns=extra_columns,
@@ -1882,7 +1941,7 @@ async def memory_search_routed_impl(
         if _reuse_overshoot:
             primary = overshoot_candidates[: (k + bump)]
         else:
-            primary = await memory_search_scored_impl(query, mmr=mmr, k=k + bump, user_id=user_id, scope=scope,
+            primary = await _resolve_search_callable("memory_search_scored_impl")(query, mmr=mmr, k=k + bump, user_id=user_id, scope=scope,
             type_filter=type_filter, agent_filter=agent_filter,
             search_mode=search_mode, variant=variant, as_of=as_of,
             conversation_id=conversation_id, explain=explain,
@@ -1894,7 +1953,7 @@ async def memory_search_routed_impl(
             intent_hint=intent_hint, vector_kind_strategy="default",
             _capture_dict=_capture_dict,
         )
-        final_hits = await _maybe_expand_routed(
+        final_hits = await _resolve_search_callable("_maybe_expand_routed")(
             query, primary, k=k + bump,
             graph_depth=graph_depth,
             expand_sessions=expand_sessions, session_cap=session_cap,
@@ -1911,7 +1970,7 @@ async def memory_search_routed_impl(
         if _reuse_overshoot:
             base_hits = overshoot_candidates[: (k * 2 if fact_variant else k)]
         else:
-            base_hits = await memory_search_scored_impl(query, mmr=mmr, k=k * 2 if fact_variant else k,
+            base_hits = await _resolve_search_callable("memory_search_scored_impl")(query, mmr=mmr, k=k * 2 if fact_variant else k,
             user_id=user_id, scope=scope, type_filter=type_filter,
             agent_filter=agent_filter, search_mode=search_mode,
             variant=variant, as_of=as_of, conversation_id=conversation_id,
@@ -1925,7 +1984,7 @@ async def memory_search_routed_impl(
         )
 
         if not fact_variant:
-            final_hits = await _maybe_expand_routed(
+            final_hits = await _resolve_search_callable("_maybe_expand_routed")(
                 query, base_hits[:k], k=k,
                 graph_depth=graph_depth,
                 expand_sessions=expand_sessions, session_cap=session_cap,
@@ -1939,7 +1998,7 @@ async def memory_search_routed_impl(
             )
         else:
             # Fuse with fact_variant hits (client-side max-fusion by memory_id, top-k)
-            fact_hits = await memory_search_scored_impl(query, mmr=mmr, k=k * 2, user_id=user_id, scope=scope,
+            fact_hits = await _resolve_search_callable("memory_search_scored_impl")(query, mmr=mmr, k=k * 2, user_id=user_id, scope=scope,
                 type_filter=type_filter, agent_filter=agent_filter,
                 search_mode=search_mode, variant=fact_variant, as_of=as_of,
                 conversation_id=conversation_id, explain=explain,
@@ -1960,7 +2019,7 @@ async def memory_search_routed_impl(
                 if mid not in best or s > best[mid][0]:
                     best[mid] = (s, item)
             fused = sorted(best.values(), key=lambda x: x[0], reverse=True)[:k]
-            final_hits = await _maybe_expand_routed(
+            final_hits = await _resolve_search_callable("_maybe_expand_routed")(
                 query, fused, k=k,
                 graph_depth=graph_depth,
                 expand_sessions=expand_sessions, session_cap=session_cap,
@@ -2071,6 +2130,15 @@ async def _maybe_expand_routed(
     list. If all are off (the default), returns primary unchanged.
     """
     _resolve_mc_callbacks()  # bind memory_core callbacks on first call
+
+    # Test-shim resolution: tests patch `memory_core._db` to feed a fake
+    # connection into this expansion path. Resolve at call entry so the
+    # patches take effect; production reads memory.db._db.
+    try:
+        import memory_core as _mc  # type: ignore
+        _db = getattr(_mc, "_db", globals()["_db"])
+    except ImportError:
+        _db = globals()["_db"]
     if graph_depth <= 0 and not expand_sessions and not entity_graph:
         return primary
     seed_ids = [item.get("id") for _, item in primary if isinstance(item, dict) and item.get("id")]
@@ -2084,7 +2152,7 @@ async def _maybe_expand_routed(
     extra_row_source: dict = {}  # memory_id -> "graph" | "session" | "entity_graph"
 
     if graph_depth > 0 and seed_ids:
-        neighbor_ids = _graph_neighbor_ids(seed_ids, depth=int(graph_depth))
+        neighbor_ids = _resolve_graph_helper("_graph_neighbor_ids")(seed_ids, depth=int(graph_depth))
         if neighbor_ids:
             with _db() as db:
                 placeholders = ",".join(["?"] * len(neighbor_ids))
@@ -2099,7 +2167,7 @@ async def _maybe_expand_routed(
                     extra_row_source[r["id"]] = "graph"
 
     if expand_sessions and seed_ids:
-        session_rows = _session_neighbor_ids(seed_ids, session_cap=int(session_cap))
+        session_rows = _resolve_graph_helper("_session_neighbor_ids")(seed_ids, session_cap=int(session_cap))
         for rid, item in session_rows.items():
             if rid not in extra_rows:
                 extra_rows[rid] = item
@@ -2108,7 +2176,7 @@ async def _maybe_expand_routed(
     if entity_graph:
         try:
             with _db() as db:
-                eg_memory_ids = await _entity_graph_neighbor_ids(
+                eg_memory_ids = await _resolve_graph_helper("_entity_graph_neighbor_ids")(
                     query,
                     depth=int(entity_graph_depth),
                     max_neighbors=int(entity_graph_max_neighbors),
@@ -2151,7 +2219,7 @@ async def _maybe_expand_routed(
         if isinstance(item, dict) and "_expanded_via" not in item:
             item["_expanded_via"] = "primary"
 
-    scored_extras = await _score_extra_rows(query, extra_rows, base_score=0.0)
+    scored_extras = await _resolve_graph_helper("_score_extra_rows")(query, extra_rows, base_score=0.0)
 
     best: dict = {}
     for s, item in primary + scored_extras:
