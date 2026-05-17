@@ -20,14 +20,22 @@ import os
 import platform
 from pathlib import Path
 
-# Oxidation / Rust availability
-try:
-    import m3_core_rs
-    _OXIDATION_DISABLED = os.environ.get("M3_CORE_RS_DISABLE", "0") == "1"
-    if _OXIDATION_DISABLED:
-        m3_core_rs = None
-except ImportError:
-    m3_core_rs = None  # extra not installed — Python path is the default
+# Oxidation / Rust availability.
+# _OXIDATION_DISABLED must be bound UNCONDITIONALLY — `memory_core.py`
+# re-exports it via `from memory.config import _OXIDATION_DISABLED`, and
+# any deferred reference (chatlog_core, auto_route, chatlog_redaction)
+# crashes at import time on a host without `m3_core_rs` installed. The
+# Phase 7+8 refactor (commit bd07525) inlined this read inside the try/
+# except, which made the symbol conditionally bound — fixed here.
+_OXIDATION_DISABLED: bool = os.environ.get("M3_CORE_RS_DISABLE", "0").lower() in (
+    "1", "true", "yes"
+)
+m3_core_rs = None
+if not _OXIDATION_DISABLED:
+    try:
+        import m3_core_rs  # noqa: F811 — intentional rebind
+    except ImportError:
+        m3_core_rs = None  # extra not installed — Python path is the default
 
 
 # ──────────────────────────────────────────────────────────────────────────────
