@@ -69,7 +69,6 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 | `bin/mission_control.py` | Status dashboard | Uses default resolution only |
 | `bin/re_embed_all.py` | Re-embed every active item | — |
 | `bin/secret_rotator.py` | Rotate vault-stored secrets | — |
-| `bin/setup_embedder.py` | Sovereign/Air-gapped embedder setup | Smoke tests the server before finalizing; calculates space saved |
 | `bin/setup_memory.py` | Bootstrap (venv + deps + migrations) | Reads `M3_DATABASE` or `--database PATH` positionally |
 | `bin/setup_secret.py` | Add/list/delete vault keys | — |
 | `bin/setup_test_db.py` | Seed a scratch DB with the full schema (for test isolation) | `--force` wipes existing file before seeding |
