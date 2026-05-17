@@ -1,7 +1,7 @@
 ---
 name: curate-memory
 description: Curate the m3-memory store — clean, dedupe, supersede stale entries, consolidate overlapping notes. Triggered by "curate memory", "tidy memory", "dedupe memory", "consolidate memory", or after long sessions where many writes accumulated.
-tools: Bash, Read, Grep, mcp__memory__memory_search, mcp__memory__memory_dedup, mcp__memory__memory_delete, mcp__memory__memory_update, mcp__memory__memory_link, mcp__memory__memory_write, mcp__memory__gdpr_forget, mcp__plugin_m3_m3__memory_search, mcp__plugin_m3_m3__memory_dedup, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__memory_link, mcp__plugin_m3_m3__memory_write, mcp__plugin_m3_m3__gdpr_forget
+tools: Bash, Read, Grep, mcp__memory__memory_search, mcp__memory__memory_dedup, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__memory__memory_link, mcp__memory__memory_write, mcp__memory__gdpr_forget, mcp__plugin_m3_m3__memory_search, mcp__plugin_m3_m3__memory_dedup, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__memory_link, mcp__plugin_m3_m3__memory_write, mcp__plugin_m3_m3__gdpr_forget
 model: sonnet
 ---
 
@@ -24,7 +24,11 @@ This is non-negotiable. Don't pretend you can wait for confirmation; you can't.
 
 You have BOTH `mcp__memory__*` and `mcp__plugin_m3_m3__*` registered. Prefer the `mcp__plugin_m3_m3__*` form (current plugin namespace); fall back to `mcp__memory__*` if the plugin form errors. Both call the same backend.
 
-For deletes, use `mcp__plugin_m3_m3__memory_delete` (or `mcp__memory__memory_delete`). For irreversible PII removal use `gdpr_forget`. Use `memory_update` for content edits / supersede notes; `memory_link` for cross-references.
+For deletes:
+- **>5 ids**: use `memory_delete_bulk(ids=[...], hard=False)` — one transaction per 500-id chunk, returns `{succeeded, not_found, mode}`. ~1 MCP round-trip per chunk vs. 1 per id with the single-version. A 178-id delete drops from ~10 minutes to seconds. Preferred for DELETE arrays in apply prompts.
+- **1–5 ids**: `memory_delete(id=..., hard=False)` is fine; not worth a bulk call.
+
+For irreversible PII removal use `gdpr_forget` (single-id only). Use `memory_update` for content edits / supersede notes; `memory_link` for cross-references.
 
 If an MCP tool fails with "not found," fall back to direct sqlite3 via Bash against the resolved DB path — but log this fallback in your report so the user knows the canonical path errored.
 
@@ -112,7 +116,7 @@ If two consecutive tool calls return identical or near-identical results (same I
    - `LINK` first (cheap, no destructive side effects).
    - `CONSOLIDATE` next: `memory_write` for each new memory, capture the returned ID, then `memory_delete` the `from_ids`.
    - `SUPERSEDE`: `memory_update` to append the supersede note to each affected memory's content; do NOT delete.
-   - `DELETE`: `memory_delete` for each ID in the list.
+   - `DELETE`: if the list has >5 ids, send the full list to `memory_delete_bulk(ids=[...])` — one MCP call per 500-id chunk. For ≤5 ids, loop `memory_delete`. Map the structured `{succeeded, not_found}` result onto the per-id heartbeats so progress reporting still shows last_id correctly.
 
 3. **For each operation, capture** (success / failure / not-found). Don't bail on the first failure — record it and continue.
 
