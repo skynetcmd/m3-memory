@@ -17,6 +17,17 @@ The best way to understand M3 is to see it "wake up." Let’s skip the technical
 curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
 ```
 
+The script installs m3, then runs the **one-command wizard** (`m3 setup`)
+which sets up the embedder, wires every agent it detects on PATH, installs
+chatlog hooks, and runs a final `m3 doctor`. Restart your agent — that's it.
+
+**Already have Python/pipx?** Two lines:
+
+```bash
+pipx install m3-memory
+m3 setup
+```
+
 **Claude Code users — install as a plugin instead:**
 
 ```
@@ -26,9 +37,13 @@ curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh
 
 That gets you 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, …) plus auto-wired hooks. See [the plugin reference](./claude_code_plugin.md).
 
-**Windows or manual install:** see the [README](../README.md#-install) and [INSTALL.md](../INSTALL.md).
+**Windows or manual install:** see the [README](../README.md#-install), [INSTALL.md](../INSTALL.md), or the per-OS quickstarts ([Linux](./QUICKSTART_LINUX.md) / [macOS](./QUICKSTART_MACOS.md) / [Windows](./QUICKSTART_WINDOWS.md)).
 
-If you didn't use the plugin path, add M3 Memory to your agent's MCP configuration manually. See [Quick Start](./QUICKSTART.md) for the exact JSON to paste.
+> **Tool catalog stays small in your context.** m3 ships 87 MCP tools but
+> groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
+> conversations, admin). Only ~6 essentials load at MCP startup
+> (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in a
+> domain on demand — just say "load the files tools" and it does.
 
 ### 2. The "Cat Test" (Our Favorite Ritual)
 Open your favorite agent and try this simple experiment:
