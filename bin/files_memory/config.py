@@ -26,7 +26,7 @@ from memory.config import (
 # Bumped when the SQL DDL changes. files_memory.db._lazy_init compares this
 # against schema_migrations.version and applies migrations in order. The
 # initial schema is v1.
-SCHEMA_VERSION: int = 1
+SCHEMA_VERSION: int = 2
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -67,14 +67,41 @@ FILES_DEFAULT_SCOPE: str = os.environ.get("M3_FILES_DEFAULT_SCOPE", "user")
 # Every ingestion_runs row records these so a stale-version sweep can target
 # files ingested under outdated logic. Bump when behavior changes
 # meaningfully — not on cosmetic edits.
-INGESTER_VERSION: str = "p1.0.0"
+INGESTER_VERSION: str = "p2.0.0"
 # Chunker_version is a composite: bump any chunker, bump this. The dispatcher
 # resolves the per-filetype chunker module's CHUNKER_VERSION and combines.
-# In phase 1 we record the dispatcher version directly.
-CHUNKER_DISPATCHER_VERSION: str = "p1.0.0"
-# Extractor lands in phase 2. In phase 1 every leaf has extractor_version
-# left NULL (no extraction performed).
-EXTRACTOR_VERSION: str | None = None
+CHUNKER_DISPATCHER_VERSION: str = "p2.0.0"
+# Extractor version: bumped any time the extraction prompt OR the post-
+# processing logic changes meaningfully. Used by staleness review to find
+# leaves extracted under outdated logic. None = no extraction yet.
+EXTRACTOR_VERSION: str | None = "p2.0.0"
+
+# Default extract mode when none is passed: 'none' = no extraction (P1
+# behavior), 'inline' = sync per-leaf, 'queue' = defer to extract_pending.
+# We keep 'none' as default so a fresh ingest doesn't surprise the user
+# with a long LLM run. Pass --mode inline (or queue) explicitly.
+DEFAULT_EXTRACT_MODE: str = os.environ.get("M3_FILES_DEFAULT_EXTRACT_MODE", "none")
+
+# Per-leaf concurrency for inline extraction. Higher = faster but more
+# memory + more pressure on the LLM endpoint. 2 is conservative; 4 fine
+# on a local LM Studio / Ollama server.
+EXTRACT_CONCURRENCY: int = int(os.environ.get("M3_FILES_EXTRACT_CONCURRENCY", "2"))
+
+# Max attempts per leaf when extraction fails (transient errors). After
+# this many failures the leaf is marked extraction_status='failed' and
+# surfaced in staleness review.
+EXTRACT_MAX_ATTEMPTS: int = int(os.environ.get("M3_FILES_EXTRACT_MAX_ATTEMPTS", "2"))
+
+# Min characters in a leaf for extraction to be attempted. Tiny leaves
+# rarely contain extractable facts; skip them to save LLM calls.
+EXTRACT_MIN_LEAF_CHARS: int = int(os.environ.get("M3_FILES_EXTRACT_MIN_LEAF_CHARS", "120"))
+
+# Promotion default scope when --scope not passed. See plan §14 Q3.
+PROMOTION_DEFAULT_SCOPE: str = os.environ.get("M3_FILES_PROMOTION_SCOPE", "user")
+
+# memory.db path for cross-store operations (entity link + promotion).
+# Resolves via the active M3Context — this is just the default.
+MEMORY_DB_PATH: str | None = os.environ.get("M3_DATABASE")  # None = M3Context default
 
 
 # ──────────────────────────────────────────────────────────────────────────────
