@@ -622,6 +622,78 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="curate_memory_apply",
+        description=(
+            "Deterministically apply a memory.db curator plan in ONE call. "
+            "No LLM in the loop — the apply phase is a pure function over the "
+            "structured plan. Replaces the agent-driven APPLY-mode loop. "
+            "Plan sections: delete (soft, list of UUIDs), delete_hard (cascade, "
+            "list of UUIDs), link (list of {from_id, to_id, relationship_type}), "
+            "update (list of {id, importance, metadata, ...}). Any section may "
+            "be omitted. Returns structured per-section results + summary."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "plan": {
+                    "type": "object",
+                    "description": "Curator plan; see tool description for schema.",
+                    "properties": {
+                        "delete":      {"type": "array", "items": {"type": "string"}},
+                        "delete_hard": {"type": "array", "items": {"type": "string"}},
+                        "link":        {"type": "array", "items": {"type": "object"}},
+                        "update":      {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+            },
+            "required": ["plan"],
+        },
+        impl=lambda plan: __import__("curator_apply").apply_memory_plan(plan),
+        is_async=False,
+        validators=(),
+        default_allowed=False,  # destructive: bulk deletes + writes
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="curate_chatlog_apply",
+        description=(
+            "Deterministically apply a chatlog.db curator plan in ONE call. "
+            "No LLM in the loop. Plan sections: decay (True/dict to run "
+            "chatlog_decay), dedup (list of {keep_id, drop_ids}), promote "
+            "(list of {ids, target_type}), prune (list of {conversation_id, "
+            "reason}). Any section may be omitted. Returns structured per-"
+            "section results + summary."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "plan": {
+                    "type": "object",
+                    "description": "Chatlog curator plan; see tool description for schema.",
+                    "properties": {
+                        "decay":   {"type": "boolean"},
+                        "dedup":   {"type": "array", "items": {"type": "object"}},
+                        "promote": {"type": "array", "items": {"type": "object"}},
+                        "prune":   {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                "db_path": {
+                    "type": "string",
+                    "description": "Optional chatlog DB path override.",
+                    "default": "",
+                },
+            },
+            "required": ["plan"],
+        },
+        impl=lambda plan, db_path="": __import__("curator_apply").apply_chatlog_plan(
+            plan, db_path=db_path or None
+        ),
+        is_async=False,
+        validators=(),
+        default_allowed=False,  # destructive
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="memory_delete",
         description="Deletes a MemoryItem (soft or hard).",
         parameters={
