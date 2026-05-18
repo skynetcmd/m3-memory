@@ -32,8 +32,11 @@ import re
 logger = logging.getLogger("memory.util")
 
 _POISON_PATTERNS = [
-    re.compile(r"<script.*?>", re.IGNORECASE),
+    re.compile(r"<script\b", re.IGNORECASE),
     re.compile(r"javascript:", re.IGNORECASE),
+    re.compile(r"(?:DROP|DELETE|ALTER)\s+TABLE", re.IGNORECASE),
+    re.compile(r"__import__|\bexec\s*\(|\beval\s*\(", re.IGNORECASE),
+    re.compile(r"(?:ignore|disregard)\s+(?:all\s+)?(?:previous|prior)\s+instructions", re.IGNORECASE),
 ]
 
 
