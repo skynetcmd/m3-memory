@@ -1,7 +1,7 @@
 ---
 name: curate-chatlog
 description: Curate the m3-chatlog store — clean, dedupe, decay ephemeral turns, prune abandoned conversations, promote high-signal chunks to long-term memory. Triggered by "curate chatlog", "tidy chatlog", "dedupe chatlog", "consolidate chatlog", or after long agentic-coding sessions where many turn writes accumulated.
-tools: Bash, Read, Grep, mcp__memory__chatlog_search, mcp__memory__chatlog_status, mcp__memory__chatlog_promote, mcp__memory__chatlog_rescrub, mcp__memory__memory_delete, mcp__memory__memory_update, mcp__plugin_m3_m3__chatlog_search, mcp__plugin_m3_m3__chatlog_status, mcp__plugin_m3_m3__chatlog_promote, mcp__plugin_m3_m3__chatlog_rescrub, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_update
+tools: Bash, Read, Grep, mcp__memory__chatlog_search, mcp__memory__chatlog_status, mcp__memory__chatlog_promote, mcp__memory__chatlog_rescrub, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__plugin_m3_m3__chatlog_search, mcp__plugin_m3_m3__chatlog_status, mcp__plugin_m3_m3__chatlog_promote, mcp__plugin_m3_m3__chatlog_rescrub, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update
 model: sonnet
 ---
 
@@ -59,6 +59,11 @@ The user spawning you sees nothing between tool calls. Heartbeats are how you st
 
 Each `echo` line costs ~1 second of agent time. Skipping them to "save time" is exactly wrong — the user time wasted wondering if you're stuck dwarfs the agent time spent emitting them.
 
+**Bash on Windows vs POSIX.** This repo runs on both. If you ever need a scratch file, **don't hard-code `/tmp/`** — it doesn't exist on Windows. Use one of these portable patterns:
+- Prefer in-memory: pipe to stdin / capture stdout. No file needed for most curation tasks.
+- If you must have a path, use Python's `tempfile`: `python -c "import tempfile; print(tempfile.gettempdir())"` and embed the result, or shell out to a one-liner that uses `tempfile.NamedTemporaryFile` directly.
+- Never assume `/tmp` exists. Assuming it has cost real wall-clock time in prior curator runs (2026-05-17: a killed apply run spent its budget reasoning about Windows path mapping instead of doing work).
+
 ### Tool-call cap (mandatory)
 
 PLAN mode is bounded:
@@ -70,8 +75,9 @@ PLAN mode is bounded:
 - Wall-clock soft budget: 5 minutes; emit `[curate-chatlog] phase=budget_exceeded` and exit if you hit it.
 
 APPLY mode is bounded:
-- One MCP call per item in the structured plan; no extra exploration.
-- Total wall-clock soft budget: 10 minutes for plans up to 200 items.
+- One MCP call per **batch** in the structured plan: each DEDUP group with >5 drop_ids → ONE `memory_delete_bulk` call (≤500 ids per call; chunk if larger). Single-id `memory_delete` is only for groups with ≤5 ids.
+- Each PROMOTE / PRUNE op is one MCP call.
+- Total wall-clock soft budget: 2 minutes for plans up to 1,000 deletions. (Bulk delete drops a 486-id plan from ~15 min of single-id loops to ~5 sec.)
 
 ### No-loop self-check (mandatory)
 
@@ -148,7 +154,7 @@ If you find yourself writing a query without `type='chat_log'`, stop and add it.
 2. **Execute in this order:**
    - **DECAY** first (cheapest, deterministic): `Bash: python bin/chatlog_decay.py --apply [--db <path>]`. Capture the `applied_writes` count from the JSON.
    - **PROMOTE** next: `chatlog_promote(ids=..., target_type=...)`. Capture promoted IDs.
-   - **DEDUP**: `memory_delete` for each ID in `drop_ids`.
+   - **DEDUP**: For each group, if `len(drop_ids) > 5`, send the whole list to `memory_delete_bulk(ids=drop_ids, hard=False)` — one MCP call per 500-id chunk, returns `{succeeded, not_found, mode}`. Map the structured result into your `apply_progress` heartbeats. For groups with ≤5 ids, single-id `memory_delete` is fine. **Never loop `memory_delete` for a large group** — the 2026-05-17 memory-curator session documented this taking ~10 minutes for 178 deletes vs <1 second with the bulk variant (memory `4090f663`).
    - **PRUNE**: tombstone abandoned conversations via `memory_update(id=..., metadata="{is_deleted: true}")` or direct sqlite3 UPDATE — but **always with `type='chat_log'` in the WHERE clause**.
 
 3. **For each operation, capture** (success / failure / not-found). Don't bail on the first failure.

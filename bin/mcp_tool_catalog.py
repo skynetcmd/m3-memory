@@ -577,6 +577,51 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_update_bulk",
+        description=(
+            "Apply many metadata-only updates in one transaction per chunk. "
+            "Designed for curation passes that retroactively set retention, "
+            "importance, or supersession metadata. Per-id reembed is NOT "
+            "supported here (use memory_update for reembed, or re_embed_all "
+            "for the bulk reembed case). Returns structured "
+            "{succeeded, not_found, no_change, total}."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "updates": {
+                    "type": "array",
+                    "description": (
+                        "List of update specs. Each MUST include `id`. "
+                        "Any subset of {content, title, importance, metadata, "
+                        "refresh_on, refresh_reason, conversation_id} may be "
+                        "set. Field semantics match memory_update."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id":              {"type": "string"},
+                            "content":         {"type": "string"},
+                            "title":           {"type": "string"},
+                            "importance":      {"type": "number"},
+                            "metadata":        {"type": "string", "description": "JSON-encoded."},
+                            "refresh_on":      {"type": "string"},
+                            "refresh_reason":  {"type": "string"},
+                            "conversation_id": {"type": "string"},
+                        },
+                        "required": ["id"],
+                    },
+                },
+            },
+            "required": ["updates"],
+        },
+        impl=memory_core.memory_update_bulk_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="memory_delete",
         description="Deletes a MemoryItem (soft or hard).",
         parameters={
@@ -818,6 +863,46 @@ TOOLS: list[ToolSpec] = [
             "required": ["from_id", "to_id"],
         },
         impl=memory_core.memory_link_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_link_bulk",
+        description=(
+            "Create many memory_relationships rows in one transaction per chunk. "
+            "Use for curation passes adding many LINK edges (device pairs, "
+            "supersession chains, etc.). Validates existence of every referenced "
+            "memory_id; skips duplicates without raising. Returns a structured "
+            "{created, skipped_missing, skipped_duplicate, total} dict."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "links": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "from_id":           {"type": "string"},
+                            "to_id":             {"type": "string"},
+                            "relationship_type": {"type": "string", "enum": ["related", "supports", "contradicts", "extends", "supersedes", "references", "consolidates", "message", "handoff"]},
+                        },
+                        "required": ["from_id", "to_id"],
+                    },
+                    "description": "List of link specs. relationship_type per entry overrides the outer default.",
+                },
+                "relationship_type": {
+                    "type": "string",
+                    "enum": ["related", "supports", "contradicts", "extends", "supersedes", "references", "consolidates", "message", "handoff"],
+                    "description": "Default link type for entries that omit it.",
+                    "default": "related",
+                },
+            },
+            "required": ["links"],
+        },
+        impl=memory_core.memory_link_bulk_impl,
         is_async=False,
         validators=(),
         default_allowed=True,
