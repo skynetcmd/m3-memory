@@ -19,6 +19,29 @@ forward-going only.
 
 ---
 
+## [2026.5.18.1] — May 18, 2026 — Security: harden content-safety regex (CodeQL #29)
+
+**Security fix.** The content-safety filter on `memory_write` had two issues
+introduced by the Phase 7/8 modularization (924d6d3): a regex that missed
+`<script\n>` / `<script\t>` / `<script foo='bar'>` style bypasses (CodeQL
+`py/bad-tag-filter` alert #29), and a duplicate definition that let the two
+copies drift in pattern coverage.
+
+- `bin/memory/util.py` — `<script.*?>` → `<script\b`; ported the full pattern
+  set (SQL DDL, `eval`/`exec`/`__import__`, prompt-injection phrases) that
+  previously lived only in `memory_core.py`.
+- `bin/memory_core.py` — duplicate `_POISON_PATTERNS` + `_check_content_safety`
+  collapsed into a re-export from `memory.util`. One source of truth.
+- `tests/test_content_safety.py` — import switched to `memory.util` (the
+  actual runtime path used by `memory.write`); added the 5 CodeQL bypass
+  cases plus a `test_single_source_of_truth` guard that fails fast if the
+  two import paths ever diverge again.
+
+No API or behavior change for benign content. Malicious content that
+previously slipped past via the newline/tab/attribute bypass is now rejected.
+
+---
+
 ## [2026.5.18.0] — May 18, 2026 — Files-memory, Project Oxidation, modular core, one-command setup
 
 The largest release since launch. Two new memory surfaces (Files-Memory and the deterministic Curator), a Rust compute core that lands measurable speedups on the hot path, a fully modularized `memory_core`, an 85% reduction in startup tool-catalog size via domain-gated lazy loading, and a one-command `m3 setup` wizard that wires m3 into Claude Code, Gemini CLI, OpenCode, and the OpenClaw proxy in a single step.
