@@ -576,21 +576,11 @@ VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "gro
 
 
 
-_POISON_PATTERNS = [
-    re.compile(r'<script\b', re.I),
-    re.compile(r'(?:DROP|DELETE|ALTER)\s+TABLE', re.I),
-    re.compile(r'__import__|\bexec\s*\(|\beval\s*\(', re.I),
-    re.compile(r'(?:ignore|disregard)\s+(?:all\s+)?(?:previous|prior)\s+instructions', re.I),
-]
-
-def _check_content_safety(content: str) -> str | None:
-    """Returns error message if content appears malicious, None if safe."""
-    if not content:
-        return None
-    for pattern in _POISON_PATTERNS:
-        if pattern.search(content):
-            return f"Error: content rejected — matches safety pattern: {pattern.pattern[:50]}"
-    return None
+# _POISON_PATTERNS + _check_content_safety moved to bin/memory/util.py as the
+# single source of truth. Re-exported here so external callers importing from
+# memory_core keep working. Do NOT redefine the patterns here — fix the regex
+# bug in util.py once and both call sites benefit (CodeQL alert #29 history).
+from memory.util import _POISON_PATTERNS, _check_content_safety  # noqa: F401
 
 # DEFAULT_CHANGE_AGENT, CHROMA_*, FEDERATION_LOW_SCORE_THRESHOLD moved to
 # bin/memory/config.py in Phase 1. Re-exported via the shim at the top.
