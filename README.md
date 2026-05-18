@@ -89,7 +89,7 @@ chat model for generation (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B
 instruct GGUF). M3 auto-selects it; embedding-only features work without
 it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
-> **Optional — Rust core (`m3-memory[oxidation]`).** A Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) takes over hot-path work — hashing, cosine/MMR ranking, redaction, and the in-process llama.cpp embeddings (CPU + optional GPU). `m3 setup` installs this automatically. Set `M3_CORE_RS_DISABLE=1` at runtime to force the Python path. See [docs/ENVIRONMENT_VARIABLES.md → Project Oxidation](docs/ENVIRONMENT_VARIABLES.md).
+> **Optional — Rust core (`m3-core-rs`).** A Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) takes over hot-path work — hashing, cosine/MMR ranking, redaction, and the in-process llama.cpp embeddings (CPU + optional GPU). Until `m3-core-rs` ships wheels to PyPI, install it manually: `pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"` (needs a Rust toolchain ≥1.94 + maturin). Set `M3_CORE_RS_DISABLE=1` at runtime to force the Python path. See [docs/ENVIRONMENT_VARIABLES.md → Project Oxidation](docs/ENVIRONMENT_VARIABLES.md).
 
 Restart your agent. Done!
 
@@ -144,10 +144,10 @@ machine and transfer it to the target.
 git lfs install                                              # one-time
 git clone https://github.com/skynetcmd/m3-memory.git
 cd m3-memory && git lfs pull                                  # ~438MB
-pip download m3-memory[oxidation] -d _assets/python_wheels    # pre-fetch wheels
+pip download m3-memory -d _assets/python_wheels               # pre-fetch wheels
 
 # On the air-gapped target (after sneakernet-copying the folder):
-pip install --no-index --find-links=_assets/python_wheels 'm3-memory[oxidation]'
+pip install --no-index --find-links=_assets/python_wheels m3-memory
 m3 setup --non-interactive --capture-mode both
 ```
 

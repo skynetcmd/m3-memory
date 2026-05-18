@@ -155,7 +155,7 @@ Optional SLM-extraction pipeline to build a typed knowledge graph of entities an
 
 ## Project Oxidation — Rust Core (`m3_core_rs`)
 
-Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)), installed via `pip install m3-memory[oxidation]`. When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, and chat-log redaction — route through Rust. **Every path falls back to the pure-Python implementation when the wheel is absent**, so the extra is genuinely optional. See `~/m3_oxidation_plan.md` for the full design.
+Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)). Until wheels are published to PyPI, install it manually with `pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"` (needs a Rust toolchain ≥1.94 + maturin). When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, and chat-log redaction — route through Rust. **Every path falls back to the pure-Python implementation when the wheel is absent**, so the Rust core is genuinely optional. See `~/m3_oxidation_plan.md` for the full design.
 
 | Variable | Default | Purpose |
 |---|---|---|

@@ -142,11 +142,15 @@ def setup_oxidation(pip_exe):
                 print(f"     powershell -ExecutionPolicy Bypass -File {script}")
                 input("\nPress Enter AFTER you have run the build tools script (or to attempt install anyway)...")
             
-        print("\n[*] Installing m3-memory[oxidation]...")
-        run_cmd([pip_exe, "install", "m3-memory[oxidation]"])
+        print("\n[*] Installing m3-core-rs from git...")
+        run_cmd([pip_exe, "install",
+                 "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"])
         print("✅ Project Oxidation installed successfully!")
     else:
-        print("Skipping Project Oxidation. You can install it later via: pip install m3-memory[oxidation]")
+        print(
+            "Skipping Project Oxidation. You can install it later via:\n"
+            "  pip install 'm3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py'"
+        )
 
 def main():
     print("\n" + "="*50)
