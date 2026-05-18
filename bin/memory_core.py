@@ -1018,7 +1018,276 @@ def memory_delete_bulk_impl(ids, hard=False):
     }
 
 
+_MEMORY_UPDATE_BULK_CHUNK = 500
+
+
+def memory_update_bulk_impl(updates):
+    """Apply a list of metadata-only updates in one transaction per chunk.
+
+    Designed for curation passes that retroactively set retention, importance,
+    or supersession metadata on many rows. Does NOT support re-embedding —
+    re-embed is a separate concern (use `re_embed_all.py` or per-id
+    `memory_update(reembed=True)`).
+
+    Each update entry may set any subset of:
+        content, title, importance, metadata, refresh_on, refresh_reason,
+        conversation_id
+
+    Field semantics match `memory_update_impl` exactly:
+      - empty string for a field → no change to that column
+      - `"clear"` for refresh_on/refresh_reason/conversation_id → set to NULL
+      - importance < 0 → no change
+      - metadata: dict is JSON-encoded; empty string → no change
+
+    Per-id history rows are written for content/title/refresh_on/refresh_reason/
+    conversation_id changes, matching `memory_update_impl`'s audit behavior.
+    importance/metadata changes are silent (no history row) — same as singleton.
+
+    Args:
+        updates: iterable of dicts. Each dict MUST include `id` plus at least
+                 one field to change.
+
+    Returns:
+        dict: {
+          "succeeded": [id, ...],          # updates that applied (≥1 column changed)
+          "not_found": [id, ...],
+          "no_change": [id, ...],          # row exists but every field was empty/sentinel
+          "total":     <int total input rows after dedupe on id>,
+        }
+    """
+    # Dedupe on id while preserving order (last entry per id wins).
+    by_id: dict[str, dict] = {}
+    for u in updates or []:
+        if not isinstance(u, dict):
+            continue
+        mid = u.get("id")
+        if not mid:
+            continue
+        by_id[mid] = u
+
+    if not by_id:
+        return {"succeeded": [], "not_found": [], "no_change": [], "total": 0}
+
+    succeeded: list[str] = []
+    not_found: list[str] = []
+    no_change: list[str] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    id_list = list(by_id.keys())
+
+    with _db() as db:
+        for start in range(0, len(id_list), _MEMORY_UPDATE_BULK_CHUNK):
+            chunk_ids = id_list[start : start + _MEMORY_UPDATE_BULK_CHUNK]
+            placeholders = ",".join("?" * len(chunk_ids))
+            rows = db.execute(
+                f"SELECT id, content, title, refresh_on, refresh_reason, conversation_id "
+                f"FROM memory_items WHERE id IN ({placeholders})",
+                chunk_ids,
+            ).fetchall()
+            existing_by_id = {row["id"]: row for row in rows}
+
+            for mid in chunk_ids:
+                if mid not in existing_by_id:
+                    not_found.append(mid)
+                    continue
+                old = existing_by_id[mid]
+                u = by_id[mid]
+                changed_any = False
+
+                content = u.get("content", "")
+                if content:
+                    _record_history(mid, "update", old["content"], content, "content", db=db)
+                    db.execute("UPDATE memory_items SET content = ? WHERE id = ?", (content, mid))
+                    changed_any = True
+
+                title = u.get("title", "")
+                if title:
+                    _record_history(mid, "update", old["title"], title, "title", db=db)
+                    db.execute("UPDATE memory_items SET title = ? WHERE id = ?", (title, mid))
+                    changed_any = True
+
+                importance = u.get("importance", -1.0)
+                try:
+                    importance = float(importance)
+                except (TypeError, ValueError):
+                    importance = -1.0
+                if importance >= 0:
+                    db.execute("UPDATE memory_items SET importance = ? WHERE id = ?", (importance, mid))
+                    changed_any = True
+
+                metadata = u.get("metadata", "")
+                if isinstance(metadata, dict):
+                    metadata = json.dumps(metadata)
+                if metadata:
+                    db.execute("UPDATE memory_items SET metadata_json = ? WHERE id = ?", (metadata, mid))
+                    changed_any = True
+
+                refresh_on = u.get("refresh_on", "")
+                if refresh_on:
+                    new_val = None if refresh_on == "clear" else refresh_on
+                    _record_history(mid, "update", old["refresh_on"], new_val, "refresh_on", db=db)
+                    db.execute("UPDATE memory_items SET refresh_on = ? WHERE id = ?", (new_val, mid))
+                    changed_any = True
+
+                refresh_reason = u.get("refresh_reason", "")
+                if refresh_reason:
+                    new_val = None if refresh_reason == "clear" else refresh_reason
+                    _record_history(mid, "update", old["refresh_reason"], new_val, "refresh_reason", db=db)
+                    db.execute("UPDATE memory_items SET refresh_reason = ? WHERE id = ?", (new_val, mid))
+                    changed_any = True
+
+                conversation_id = u.get("conversation_id", "")
+                if conversation_id:
+                    new_val = None if conversation_id == "clear" else conversation_id
+                    _record_history(mid, "update", old["conversation_id"], new_val, "conversation_id", db=db)
+                    db.execute("UPDATE memory_items SET conversation_id = ? WHERE id = ?", (new_val, mid))
+                    changed_any = True
+
+                if changed_any:
+                    db.execute("UPDATE memory_items SET updated_at = ? WHERE id = ?", (now_iso, mid))
+                    succeeded.append(mid)
+                else:
+                    no_change.append(mid)
+
+    return {
+        "succeeded": succeeded,
+        "not_found": not_found,
+        "no_change": no_change,
+        "total": len(by_id),
+    }
+
+
 VALID_RELATIONSHIP_TYPES = {"related", "supports", "contradicts", "extends", "supersedes", "references", "message", "consolidates", "handoff", "precedes", "follows"}
+
+_MEMORY_LINK_BULK_CHUNK = 500
+
+
+def memory_link_bulk_impl(links, relationship_type: str = "related"):
+    """Create many memory_relationships rows in one transaction per chunk.
+
+    Behaviorally identical to looping `memory_link_impl` over each pair, but
+    with the same two wins as `memory_delete_bulk_impl`:
+
+    1. **Batched SQL.** Validate existence of all referenced memory_ids in one
+       `SELECT ... WHERE id IN (?,?,...)` per chunk, then INSERT every valid
+       link in one prepared-statement loop inside the same connection. For
+       100 links this collapses ~400 statements + 100 connection-opens into
+       ~2 statements + 1 connection.
+    2. **Structured result.** Returns
+       `{created, skipped_missing, skipped_duplicate, total}` instead of N
+       text lines, so curation callers can act on the result without parsing.
+
+    Args:
+        links: iterable of either:
+                 - {"from_id": str, "to_id": str, "relationship_type"?: str}  (preferred)
+                 - (from_id, to_id) tuples (uses outer relationship_type)
+        relationship_type: default link type if a dict entry omits it (or for
+            tuple entries). Must be in VALID_RELATIONSHIP_TYPES.
+
+    Returns:
+        dict: {
+          "created":           [{from_id, to_id, relationship_type, id}, ...],
+          "skipped_missing":   [{from_id, to_id, relationship_type, missing: [id, ...]}, ...],
+          "skipped_duplicate": [{from_id, to_id, relationship_type, existing_id}, ...],
+          "total":             <int total input rows after dedupe>,
+        }
+    """
+    # Normalize input: every entry becomes a (from_id, to_id, rel_type) triple.
+    normalized: list[tuple[str, str, str]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for entry in links or []:
+        if isinstance(entry, dict):
+            f = entry.get("from_id", "")
+            t = entry.get("to_id", "")
+            r = entry.get("relationship_type") or relationship_type
+        elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+            f, t = entry[0], entry[1]
+            r = entry[2] if len(entry) > 2 else relationship_type
+        else:
+            continue
+        if not f or not t:
+            continue
+        if r not in VALID_RELATIONSHIP_TYPES:
+            # Treat invalid relationship_type as a missing-target equivalent —
+            # surface it as skipped, don't silently drop or raise mid-batch.
+            normalized.append((f, t, r))
+            continue
+        key = (f, t, r)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        normalized.append(key)
+
+    if not normalized:
+        return {"created": [], "skipped_missing": [], "skipped_duplicate": [], "total": 0}
+
+    created: list[dict] = []
+    skipped_missing: list[dict] = []
+    skipped_duplicate: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    with _db() as db:
+        for start in range(0, len(normalized), _MEMORY_LINK_BULK_CHUNK):
+            chunk = normalized[start : start + _MEMORY_LINK_BULK_CHUNK]
+
+            # Collect every distinct memory_id referenced in this chunk to do
+            # a single existence check.
+            all_ids = list({mid for triple in chunk for mid in (triple[0], triple[1])})
+            placeholders = ",".join("?" * len(all_ids))
+            existing_rows = db.execute(
+                f"SELECT id FROM memory_items WHERE id IN ({placeholders})",
+                all_ids,
+            ).fetchall()
+            existing_ids = {row["id"] for row in existing_rows}
+
+            for from_id, to_id, rel_type in chunk:
+                if rel_type not in VALID_RELATIONSHIP_TYPES:
+                    skipped_missing.append({
+                        "from_id": from_id, "to_id": to_id,
+                        "relationship_type": rel_type,
+                        "missing": [],  # invalid rel_type, not missing ids
+                        "reason": f"invalid relationship_type '{rel_type}'",
+                    })
+                    continue
+                missing = [m for m in (from_id, to_id) if m not in existing_ids]
+                if missing:
+                    skipped_missing.append({
+                        "from_id": from_id, "to_id": to_id,
+                        "relationship_type": rel_type,
+                        "missing": missing,
+                    })
+                    continue
+                # Duplicate check — same (from, to, type) already linked?
+                existing = db.execute(
+                    "SELECT id FROM memory_relationships "
+                    "WHERE from_id=? AND to_id=? AND relationship_type=?",
+                    (from_id, to_id, rel_type),
+                ).fetchone()
+                if existing:
+                    skipped_duplicate.append({
+                        "from_id": from_id, "to_id": to_id,
+                        "relationship_type": rel_type,
+                        "existing_id": existing["id"],
+                    })
+                    continue
+                rid = str(uuid.uuid4())
+                db.execute(
+                    "INSERT INTO memory_relationships "
+                    "(id, from_id, to_id, relationship_type, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (rid, from_id, to_id, rel_type, now_iso),
+                )
+                created.append({
+                    "id": rid, "from_id": from_id, "to_id": to_id,
+                    "relationship_type": rel_type,
+                })
+
+    return {
+        "created": created,
+        "skipped_missing": skipped_missing,
+        "skipped_duplicate": skipped_duplicate,
+        "total": len(normalized),
+    }
+
 
 def _memory_link_inner(from_id: str, to_id: str, relationship_type: str, db) -> str:
     # Verify both items exist
