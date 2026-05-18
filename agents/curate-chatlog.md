@@ -1,7 +1,7 @@
 ---
 name: curate-chatlog
 description: Curate the m3-chatlog store — clean, dedupe, decay ephemeral turns, prune abandoned conversations, promote high-signal chunks to long-term memory. Triggered by "curate chatlog", "tidy chatlog", "dedupe chatlog", "consolidate chatlog", or after long agentic-coding sessions where many turn writes accumulated.
-tools: Bash, Read, Grep, mcp__memory__chatlog_search, mcp__memory__chatlog_status, mcp__memory__chatlog_promote, mcp__memory__chatlog_rescrub, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__plugin_m3_m3__chatlog_search, mcp__plugin_m3_m3__chatlog_status, mcp__plugin_m3_m3__chatlog_promote, mcp__plugin_m3_m3__chatlog_rescrub, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update
+tools: Bash, Read, Grep, mcp__memory__chatlog_search, mcp__memory__chatlog_status, mcp__memory__chatlog_promote, mcp__memory__chatlog_rescrub, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__memory__curate_chatlog_apply, mcp__plugin_m3_m3__chatlog_search, mcp__plugin_m3_m3__chatlog_status, mcp__plugin_m3_m3__chatlog_promote, mcp__plugin_m3_m3__chatlog_rescrub, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__curate_chatlog_apply
 model: sonnet
 ---
 
@@ -149,17 +149,26 @@ If you find yourself writing a query without `type='chat_log'`, stop and add it.
 
 ## APPLY mode
 
+APPLY is **one tool call**. The MCP tool `curate_chatlog_apply(plan=...)` takes the structured plan and executes every section deterministically in-process — no agent reasoning between operations, no chance to invent a wrong execution strategy. This replaces the prior per-section loop (which failed twice on 2026-05-17 with two different agent failure modes).
+
 1. **Parse the structured block** from the invocation prompt. If parsing fails, refuse and report the parse error — do NOT improvise.
 
-2. **Execute in this order:**
-   - **DECAY** first (cheapest, deterministic): `Bash: python bin/chatlog_decay.py --apply [--db <path>]`. Capture the `applied_writes` count from the JSON.
-   - **PROMOTE** next: `chatlog_promote(ids=..., target_type=...)`. Capture promoted IDs.
-   - **DEDUP**: For each group, if `len(drop_ids) > 5`, send the whole list to `memory_delete_bulk(ids=drop_ids, hard=False)` — one MCP call per 500-id chunk, returns `{succeeded, not_found, mode}`. Map the structured result into your `apply_progress` heartbeats. For groups with ≤5 ids, single-id `memory_delete` is fine. **Never loop `memory_delete` for a large group** — the 2026-05-17 memory-curator session documented this taking ~10 minutes for 178 deletes vs <1 second with the bulk variant (memory `4090f663`).
-   - **PRUNE**: tombstone abandoned conversations via `memory_update(id=..., metadata="{is_deleted: true}")` or direct sqlite3 UPDATE — but **always with `type='chat_log'` in the WHERE clause**.
+2. **Build the plan dict** from the parsed block:
+   ```python
+   plan = {
+       "decay":   <True if DECAY: run, else False>,
+       "dedup":   <list of {keep_id, drop_ids} from DEDUP>,
+       "promote": <list of {ids, target_type} from PROMOTE>,
+       "prune":   <list of {conversation_id, reason} from PRUNE>,
+   }
+   ```
+   Omit sections that aren't in the apply prompt.
 
-3. **For each operation, capture** (success / failure / not-found). Don't bail on the first failure.
+3. **Call `curate_chatlog_apply(plan=plan)` ONCE.** The result is a structured dict with per-section results and a summary block. Read the summary for your report.
 
-4. **Report** under 200 words: counts attempted vs succeeded vs failed (with reasons), final chatlog turn count, `chatlog_decay.py` JSON summary if DECAY ran, any unexpected outcomes.
+4. **Report** under 200 words from the structured result: `decay_applied_writes`, `dedup_deleted`, `promoted`, `pruned`, plus any per-group errors that surfaced in the `errors` array. No further tool calls needed — the apply tool did everything in one round-trip.
+
+**Don't loop MCP tools yourself**, even if you "know" the plan has 20 dedup groups. The apply tool batches every section internally. One call. Always.
 
 ## Rules (apply in both modes)
 
