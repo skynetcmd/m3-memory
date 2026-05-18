@@ -69,6 +69,11 @@ The user spawning you sees nothing between tool calls. Heartbeats are how you st
 
 Each `echo` line costs ~1 second of agent time. Skipping them to "save time" is exactly wrong — the user time wasted wondering if you're stuck dwarfs the agent time spent emitting them.
 
+**Bash on Windows vs POSIX.** This repo runs on both. If you ever need a scratch file, **don't hard-code `/tmp/`** — it doesn't exist on Windows. Use one of these portable patterns:
+- Prefer in-memory: pipe to stdin / capture stdout. No file needed for most curation tasks.
+- If you must have a path, use Python's `tempfile`: `python -c "import tempfile; print(tempfile.gettempdir())"` and embed the result, or shell out to a one-liner that uses `tempfile.NamedTemporaryFile` directly.
+- Never assume `/tmp` exists. Assuming it has cost real wall-clock time in prior curator runs (2026-05-17: a killed apply run spent its budget reasoning about Windows path mapping instead of doing work).
+
 ### Tool-call cap (mandatory)
 
 PLAN mode is bounded — these are hard caps, not goals to approach. The 2026-05-16 baseline survey took 7+ minutes at 33 tool_uses; this cap targets <90 seconds.
