@@ -169,7 +169,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not binary:
         print(
             "Error: m3-embed-server binary not found.\n"
-            "  Install the oxidation extra: pip install 'm3-memory[oxidation]'\n"
+            "  Install m3-core-rs from git (Rust >=1.94 + maturin required):\n"
+            "    pip install 'm3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py'\n"
             "  Or set M3_EMBED_SERVER_BIN to point at a prebuilt binary.",
             file=sys.stderr,
         )
@@ -266,14 +267,14 @@ def cmd_install_gpu(args: argparse.Namespace) -> int:
         return 1
 
     print(f"[~] building m3-core-rs with feature={feature}")
-    # The oxidation extra resolves to a git+https install, so pip install --force
-    # re-builds with whatever PIP_EXTRA_INDEX_URL / feature env we set. We use
-    # the conventional env var that m3-core-rs's build.rs reads.
+    # m3-core-rs isn't on PyPI yet, so we pip-install it directly from git.
+    # M3_CORE_RS_BUILD_FEATURES is the conventional env var that the crate's
+    # build.rs reads to pick the GPU backend (CUDA / Vulkan / Metal).
     env = os.environ.copy()
     env["M3_CORE_RS_BUILD_FEATURES"] = feature
     rc = subprocess.run(
         [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps",
-         "m3-memory[oxidation]"],
+         "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"],
         env=env,
     ).returncode
     if rc != 0:
