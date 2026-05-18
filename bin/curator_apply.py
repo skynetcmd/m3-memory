@@ -159,9 +159,13 @@ def apply_chatlog_plan(plan: dict, db_path: Optional[str] = None) -> dict:
         except Exception as e:  # noqa: BLE001
             out["errors"].append({"section": "decay", "error": f"{type(e).__name__}: {e}"})
 
-    # DEDUP — for each group, drop_ids → memory_delete_bulk
+    # DEDUP — for each group, drop_ids → memory_delete_bulk routed to the
+    # chatlog DB (not the main memory.db, which is what `memory_core._db()`
+    # resolves to by default). `active_database()` is a context manager from
+    # m3_sdk that overrides the resolver for the scope of the `with`.
     dedup_groups = plan.get("dedup") or []
     if dedup_groups:
+        from m3_sdk import active_database
         dedup_results = []
         for group in dedup_groups:
             keep = group.get("keep_id")
@@ -170,7 +174,8 @@ def apply_chatlog_plan(plan: dict, db_path: Optional[str] = None) -> dict:
                 dedup_results.append({"keep_id": keep, "succeeded": [], "not_found": [], "skipped": "no_drops"})
                 continue
             try:
-                r = memory_core.memory_delete_bulk_impl(drops, hard=False)
+                with active_database(resolved_db):
+                    r = memory_core.memory_delete_bulk_impl(drops, hard=False)
                 dedup_results.append({"keep_id": keep, **r})
             except Exception as e:  # noqa: BLE001
                 dedup_results.append({"keep_id": keep, "error": f"{type(e).__name__}: {e}"})
