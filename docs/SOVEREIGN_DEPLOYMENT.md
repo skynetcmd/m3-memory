@@ -47,12 +47,15 @@ LFS-tracked model file and any extra wheels you'll need offline.
 
    ```bash
    mkdir -p _assets/python_wheels
-   pip download m3-memory[oxidation] -d _assets/python_wheels
+   pip download m3-memory -d _assets/python_wheels
    ```
 
-   This fetches the m3-memory wheel **plus** the `oxidation` extra, which
-   includes the `m3-embed-server` binary. The wheels go under
-   `_assets/python_wheels/`.
+   Until `m3-core-rs` publishes wheels to PyPI, the optional Rust core is
+   not bundled with m3-memory. If you want it on the air-gapped target,
+   also build `m3-core-rs` (Rust ≥1.94 + maturin) from a git checkout of
+   `github.com/skynetcmd/m3-core-rs@v0.9.0` and stage the resulting wheel
+   under `_assets/python_wheels/`. The base m3-memory install works
+   without it.
 
 3. **Bundle for transfer:**
 
@@ -68,11 +71,12 @@ LFS-tracked model file and any extra wheels you'll need offline.
 2. **Install m3-memory from local wheels:**
 
    ```bash
-   pip install --no-index --find-links=_assets/python_wheels 'm3-memory[oxidation]'
+   pip install --no-index --find-links=_assets/python_wheels m3-memory
    ```
 
-   `[oxidation]` brings in the `m3-embed-server` binary alongside the
-   Python package.
+   If you also staged a locally-built `m3-core-rs` wheel, the same
+   `pip install --no-index --find-links=…` command picks it up — the
+   Rust core is auto-detected at runtime when importable.
 
 3. **Run the sovereign installer:**
 
