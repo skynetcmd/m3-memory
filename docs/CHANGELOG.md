@@ -35,7 +35,7 @@ A new first-class subsystem (`bin/files_memory/`, 21 MCP tools) for memory that 
 
 ### Added — Project Oxidation: opt-in Rust compute core
 
-Hot-path numerical operations now have a Rust implementation via the optional `oxidation` extra (`pip install m3-memory[oxidation]`). Python remains the default path; `M3_CORE_RS_DISABLE` forces it back even when installed.
+Hot-path numerical operations now have a Rust implementation in [`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs). The core is installed manually until wheels reach PyPI: `pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"` (needs Rust ≥1.94 + maturin). Python remains the default path; `M3_CORE_RS_DISABLE` forces it back even when installed.
 
 - **In-process llama.cpp embeddings** routed through `m3_core_rs` for the embed path; tuned httpx client halves CPU-fallback p95 latency on the HTTP path.
 - **`memory_dedup` Rust hot path** — 40× speedup on a 1,000-row scan.
