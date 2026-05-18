@@ -93,10 +93,17 @@ def _detect_agents() -> AgentTargets:
         or (Path.home() / ".npm-global" / "bin" / "gemini").exists()
     )
     opencode = bool(shutil.which("opencode"))
-    # OpenClaw has no native MCP support — wired via local proxy.
-    # Treat as 'detected' if either the CLI is present or the user later
-    # opts in explicitly; never auto-enable.
-    return AgentTargets(claude=claude, gemini=gemini, opencode=opencode, openclaw=False)
+    # OpenClaw has no native MCP, so detection drives the proxy default rather
+    # than direct wiring. Signals: openclaw CLI on PATH (npm-global), the
+    # well-known npm-global fallback, the user's workspace dir, or the gateway
+    # token env var from a prior setup.
+    openclaw = bool(
+        shutil.which("openclaw")
+        or (Path.home() / ".npm-global" / "bin" / "openclaw").exists()
+        or (Path.home() / ".openclaw").is_dir()
+        or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
+    )
+    return AgentTargets(claude=claude, gemini=gemini, opencode=opencode, openclaw=openclaw)
 
 
 # ── plan dataclass ────────────────────────────────────────────────────────────
@@ -141,7 +148,7 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     print(f"    {'[x]' if detected.claude   else '[ ]'} Claude Code  (claude)")
     print(f"    {'[x]' if detected.gemini   else '[ ]'} Gemini CLI   (gemini)")
     print(f"    {'[x]' if detected.opencode else '[ ]'} OpenCode     (opencode)")
-    print(f"    [ ] OpenClaw     (no native MCP; manual proxy if wanted)")
+    print(f"    {'[x]' if detected.openclaw else '[ ]'} OpenClaw     (no native MCP; wired via local proxy)")
     print()
 
     if detected.claude:
@@ -151,7 +158,7 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     if detected.opencode:
         plan.targets.opencode = _ask_yes_no("  Wire m3 into OpenCode?", default=True)
     plan.targets.openclaw = _ask_yes_no(
-        "  Set up OpenClaw proxy (localhost:9000)?", default=False
+        "  Set up OpenClaw proxy (localhost:9000)?", default=detected.openclaw
     )
 
     print()

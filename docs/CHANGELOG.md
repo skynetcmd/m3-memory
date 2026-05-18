@@ -19,6 +19,129 @@ forward-going only.
 
 ---
 
+## [2026.5.18.0] — May 18, 2026 — Files-memory, Project Oxidation, modular core, one-command setup
+
+The largest release since launch. Two new memory surfaces (Files-Memory and the deterministic Curator), a Rust compute core that lands measurable speedups on the hot path, a fully modularized `memory_core`, an 85% reduction in startup tool-catalog size via domain-gated lazy loading, and a one-command `m3 setup` wizard that wires m3 into Claude Code, Gemini CLI, OpenCode, and the OpenClaw proxy in a single step.
+
+### Added — Files-Memory: ingest, watch, and ascend whole corpora
+
+A new first-class subsystem (`bin/files_memory/`, 21 MCP tools) for memory that originates from files rather than chat turns. Lives in its own `files.db` alongside `memory.db` with explicit promotion paths between them.
+
+- **Phase 1 — walker + hybrid search.** Corpus walker with per-format chunkers (markdown, PDF, text), schema, FTS5 + vector hybrid search, and a 22-question fixed-corpus eval harness as the regression gate.
+- **Phase 2 — extraction + ascension.** Per-chunk observation extraction; "ascension" promotes high-signal chunks into the main memory store. Staleness review keeps the file index honest as files change on disk.
+- **Phase 3 — provenance, carry-forward, dedup, rename detection, promotability scoring.** Files moved or renamed retain their ingest history; near-duplicate content is collapsed; only chunks that score above the promotability threshold are eligible for ascension.
+- **Phase 4 — watch daemon + multi-corpus.** Persistent watcher reconciles edits incrementally; multiple corpora can coexist with independent configs. A five-smoke acceptance harness exercises the full pipeline (walk → extract → ascend → reconcile → search).
+- **21 MCP tools** added to the catalog under the `files` domain, covering ingest, search, corpus management, watch control, and the ascension lifecycle.
+
+### Added — Project Oxidation: opt-in Rust compute core
+
+Hot-path numerical operations now have a Rust implementation via the optional `oxidation` extra (`pip install m3-memory[oxidation]`). Python remains the default path; `M3_CORE_RS_DISABLE` forces it back even when installed.
+
+- **In-process llama.cpp embeddings** routed through `m3_core_rs` for the embed path; tuned httpx client halves CPU-fallback p95 latency on the HTTP path.
+- **`memory_dedup` Rust hot path** — 40× speedup on a 1,000-row scan.
+- **MMR rerank** uses the Rust packed-bytes path with zero-unpack; cosine and batch cosine routed through `m3_core_rs`.
+- **Scrub** (chatlog redaction) and the auto-route shadow comparator are both Rust-backed behind kill-switches.
+- **Per-backend circuit breakers** in the embed cascade; typed embed exceptions; chunked cache lookup; `@lru_cache` on `_content_hash` and `_query_title_token_set`.
+- Pinned to `m3-core-rs v0.9.0`. Parity harnesses (cosine, MMR, policy-aware MMR) keep Python and Rust outputs bit-for-bit equivalent inside the swap gate.
+
+### Added — `m3 setup`: one-command wizard
+
+`m3 setup` (in `m3_memory/setup_wizard.py`) probes for installed agents and wires m3 into each in a single guided run.
+
+- **Auto-detection** of Claude Code, Gemini CLI, OpenCode, and OpenClaw on PATH (plus the npm-global fallback for Gemini and OpenClaw). Each detected agent defaults to ON.
+- **OpenClaw** has no native MCP, so detection drives the proxy default: present `openclaw` CLI, `~/.npm-global/bin/openclaw`, `~/.openclaw/` workspace, or an `OPENCLAW_GATEWAY_TOKEN` env var all flip the proxy prompt (`localhost:9000`) to default-ON.
+- **Sovereign baseline embedder** (BGE-M3 CPU on port 8082) installs unconditionally — works with no LM Studio, no Ollama, no GPU, no internet.
+- **Optional GPU embedder** auto-detects CUDA / Vulkan / Metal and builds the in-process accelerator from `m3-core-rs`.
+- Chatlog capture mode (`both` / `stop` / `precompact` / `none`) is selected once and threaded through to every agent's hook config.
+- Every interactive prompt has a `--flag` equivalent, so `install.sh` / `install.ps1` drive the same logic with `--non-interactive`.
+
+### Added — Domain-gated lazy tool loading
+
+The MCP startup tool catalog now ships with a minimal core set; specialist domains load on first reference.
+
+- **Startup catalog: 16K → 2.4K tokens** (~85% reduction). Models see the small, always-loaded surface; the long tail of tools is described by domain name only until needed.
+- **`tools_list_domains` / `tools_load_domain`** discover and pull a domain in one call.
+- Domain boundaries documented in `bin/tool_domains.py`. Files-memory's 21 tools, the entity-graph tools, and the chatlog tools all live behind their domain gates.
+
+### Added — Deterministic Curator (one-call apply)
+
+Curation is no longer a multi-step "survey then apply" dance.
+
+- **`curator_apply` module** plus two MCP tools (`memory_dedup` apply variant and the chatlog dedup apply) execute a full curation pass in a single call with deterministic ordering.
+- **`bin/chatlog_decay.py`** — deterministic ephemeral-content decay independent of LLM-driven curation.
+- **`m3:memory-curator` and `m3:chatlog-curator` subagents** (renamed from `curate-{memory,chatlog}` to verb-subject form). Both emit per-call APPLY heartbeats so progress is visible during long passes, with bounded tool calls per pass to keep them tractable.
+- **Bulk MCP variants** for `memory_link` and `memory_update` cut curator wallclock on large passes.
+- **`memory_delete_bulk`** for curation passes that need to drop many rows in one transaction.
+
+### Changed — `memory_core` fully modularized
+
+The monolithic `bin/memory_core.py` is now a thin facade over a package of focused modules. Behavior is preserved; every phase shipped with its own regression baseline.
+
+- **Phase 1–2** — config, util, FTS5 helpers, and DB primitives extracted into `bin/memory/{config,util,fts,db}.py`.
+- **Phase 3** — embed pipeline → `bin/memory/embed.py`.
+- **Phase 4.A** — Chroma federation → `bin/memory/chroma.py`.
+- **Phase 4.B** — scoring helpers, query routing, ranker post-processing, reranker, route helpers, and four retrieval implementations split out across `search.py` and friends.
+- **Phase 6** — entity graph → `bin/memory/entity.py`, with a full per-tool doc set.
+- **Phase 7–8** — emitters, graph, and write isolation → `emitters.py`, `graph.py`, `write.py`.
+- **Submodules now honor `memory_core` monkeypatches**, so tests that swap embedders or fakes at the top-level still work end-to-end.
+
+### Added — Retrieval quality and observability
+
+- **Sliding-window chunking** for long passages, with dense-content recovery on the write path.
+- **Scale-aware elbow trim** with retrieval telemetry plumbing.
+- **Entity-graph seed/frontier stoplist** for persona/role tokens — prevents the graph from over-expanding on generic identity terms.
+- **Expansion-displacement guard** with per-tool toggles, so expansion rows can't displace high-confidence top results.
+- **Auto-related-link candidates** are now scoped to the same variant, eliminating cross-corpus link drift.
+- **MCP tool inventory** regenerated to reflect the modular structure; CodeQL-clean across the new module boundary.
+
+### Added — Onboarding and install polish
+
+- **Sovereign embedder by default** in `m3 setup` — no LM Studio dependency for first-run users.
+- **Smoother fresh-install path** in `bin/install*` covering embedder and main DB setup.
+- **Domain-gated tool callout** in install docs, quickstarts, plugin docs, connector docs, and `SOVEREIGN_DEPLOYMENT.md` — operators see the lazy-loading model up front.
+- **`m3 setup` migration** across 13 entry-point docs (QUICKSTART, GETTING_STARTED, plugin, connector, install_* family) so every install path leads to the wizard.
+
+### Added — Documentation
+
+- **`EMBED_INPUT_RECIPE.md`** — operator recipe for the input-side embed pipeline.
+- **`EMBED_DEPLOYMENT.md`** — deployment guide including Windows build-tools bootstrap.
+- **`FILE_INGESTION_PLAN.md`** — files.db architecture and the ascension design.
+- **`ARCHITECTURE.md`** refreshed for the modularized `memory_core`.
+- **Project Oxidation env vars** documented end-to-end; env-var reconcile report covers the M3_* surface plus non-prefixed and auth groups.
+
+### Fixed
+
+- **Scheduler console-window flashes eliminated** on Windows; cross-OS single-instance guard added for the cognitive loop.
+- **Credential-store subprocess** no longer pops a console window.
+- **FTS5-only retrieval** uses an OR-style query with a soft-fail fallback so empty FTS results don't kill a hybrid search.
+- **MMR rerank** no longer collapses to a no-op when candidate vectors are missing from the lookup.
+- **`mention_offset` threading** in the entity-link write path.
+- **`_ensure_sync_tables` fast-path** handles TEXT-affinity `schema_versions` correctly.
+- **`migrate_memory.py`** coerces `schema_versions.version` to int and skips non-numeric markers — recovers older deployments that wrote string markers.
+- **`_OXIDATION_DISABLED`** is now safe to import from any path, preventing a circular-import edge case on cold start.
+- **Chatlog curator dedup** routes at the chatlog DB rather than the main DB (regression caught by the 2026-05-17 curator pass).
+- **Two memory bugs** surfaced by the 2026-05-17 curator pass: routed-expansion defaults retuned; temporal patterns broadened so day-of-week and relative-date queries hit consistently.
+
+### Performance
+
+- **Retrieval hot path vectorized**; AUTO overshoot pool is reused across phases.
+- **MMR Python fallback** capped on iteration count to prevent hangs on very large pools.
+- **Phase 11 supersede demotion** moved post-reranker so demoted rows can't pollute the rerank input set.
+- **Reranking knobs exposed** for gating expansion-row displacement at top ranks.
+
+### Schema
+
+- **`files.db`** — new database for Files-Memory (walker state, chunks, provenance, promotability scores, ascension links).
+- **Entity-graph stoplist** persisted; expansion-displacement margin default raised to 2.0×.
+
+### Notes
+
+- All CI checks (Lint, Mypy, Bandit + pip-audit, ubuntu/macos/windows tests) pass on the bump.
+- The `oxidation` extra requires a Rust toolchain (≥1.94) and `maturin`; without it, m3 runs entirely on the Python path with no functional gaps.
+- `m3-core-rs` source lives at `github.com/skynetcmd/m3-core-rs`, pinned to `v0.9.0`.
+
+---
+
 ## [2026.5.6.3] — May 7, 2026 — GH Actions Node-24 upgrade + banner refresh
 
 Pure infrastructure + asset bump; no library behavior changes.
