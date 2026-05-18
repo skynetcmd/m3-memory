@@ -1,7 +1,7 @@
 ---
 name: curate-memory
 description: Curate the m3-memory store — clean, dedupe, supersede stale entries, consolidate overlapping notes. Triggered by "curate memory", "tidy memory", "dedupe memory", "consolidate memory", or after long sessions where many writes accumulated.
-tools: Bash, Read, Grep, mcp__memory__memory_search, mcp__memory__memory_dedup, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__memory__memory_link, mcp__memory__memory_write, mcp__memory__gdpr_forget, mcp__plugin_m3_m3__memory_search, mcp__plugin_m3_m3__memory_dedup, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__memory_link, mcp__plugin_m3_m3__memory_write, mcp__plugin_m3_m3__gdpr_forget
+tools: Bash, Read, Grep, mcp__memory__memory_search, mcp__memory__memory_dedup, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__memory__memory_link, mcp__memory__memory_link_bulk, mcp__memory__memory_update_bulk, mcp__memory__memory_write, mcp__memory__gdpr_forget, mcp__memory__curate_memory_apply, mcp__plugin_m3_m3__memory_search, mcp__plugin_m3_m3__memory_dedup, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__memory_link, mcp__plugin_m3_m3__memory_link_bulk, mcp__plugin_m3_m3__memory_update_bulk, mcp__plugin_m3_m3__memory_write, mcp__plugin_m3_m3__gdpr_forget, mcp__plugin_m3_m3__curate_memory_apply
 model: sonnet
 ---
 
@@ -141,17 +141,26 @@ Run this sequence in order. Stop as soon as you have enough signal — don't pad
 
 ## APPLY mode
 
-1. **Parse the structured block** from the invocation prompt. If parsing fails or the block is malformed, refuse and report the parse error — do NOT improvise.
+APPLY is **one tool call**. The MCP tool `curate_memory_apply(plan=...)` takes the structured plan and executes every section deterministically in-process — no agent reasoning between operations, no chance to invent a wrong execution strategy. This replaces the prior per-section loop.
 
-2. **Execute in this order** (atomic-ish: each operation independent):
-   - `LINK` first (cheap, no destructive side effects).
-   - `CONSOLIDATE` next: `memory_write` for each new memory, capture the returned ID, then `memory_delete` the `from_ids`.
-   - `SUPERSEDE`: `memory_update` to append the supersede note to each affected memory's content; do NOT delete.
-   - `DELETE`: if the list has >5 ids, send the full list to `memory_delete_bulk(ids=[...])` — one MCP call per 500-id chunk. For ≤5 ids, loop `memory_delete`. Map the structured `{succeeded, not_found}` result onto the per-id heartbeats so progress reporting still shows last_id correctly.
+1. **Parse the structured block** from the invocation prompt. If parsing fails, refuse and report the parse error — do NOT improvise.
 
-3. **For each operation, capture** (success / failure / not-found). Don't bail on the first failure — record it and continue.
+2. **Build the plan dict** from the parsed block:
+   ```python
+   plan = {
+       "delete":      <list of UUIDs from DELETE — soft-deletes>,
+       "delete_hard": <list of UUIDs from DELETE_HARD — cascades>,
+       "link":        <list of {from_id, to_id, relationship_type} from LINK>,
+       "update":      <list of {id, importance/metadata/content/...} from UPDATE/SUPERSEDE>,
+   }
+   ```
+   Omit sections that aren't in the apply prompt. CONSOLIDATE plans (write-new + delete-old) currently still need a `memory_write` per new memory FIRST, then the resulting ids go into the `delete` section of the plan — `curate_memory_apply` doesn't write new memories yet.
 
-4. **Report** under 200 words: counts attempted vs succeeded vs failed (with reasons), final store size, any unexpected outcomes.
+3. **Call `curate_memory_apply(plan=plan)` ONCE.** The result is a structured dict with per-section results and a summary block: `{deleted_soft, deleted_hard, linked, updated}`.
+
+4. **Report** under 200 words from the structured result: counts from the summary, plus any per-section errors that surfaced in the `errors` array. No further tool calls needed — the apply tool did everything in one round-trip.
+
+**Don't loop MCP tools yourself.** The apply tool batches every section internally via `memory_delete_bulk`, `memory_link_bulk`, `memory_update_bulk`. One call. Always.
 
 ## Rules (apply in both modes)
 
