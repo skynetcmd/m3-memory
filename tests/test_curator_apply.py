@@ -291,6 +291,47 @@ def test_chatlog_plan_empty_is_noop():
     assert out["errors"] == []
 
 
+def test_chatlog_dedup_uses_active_database_for_routing():
+    """Regression for the 2026-05-17 routing bug.
+
+    When a chatlog plan's `dedup` section ran, it called
+    memory_delete_bulk_impl WITHOUT first activating the chatlog DB
+    path. `memory_core._db()` then resolved to the main memory.db
+    (because M3_DATABASE points there), found none of the chatlog rows,
+    and returned every drop_id as `not_found`. 486-id apply against the
+    real chatlog DB silently no-op'd.
+
+    Fix: wrap the bulk call in `with active_database(resolved_db): ...`.
+
+    A full end-to-end test against a separate-layout (chatlog DB ≠ main
+    DB) requires standing up the full m3 schema in two DBs and is gated
+    by the template-DB conftest machinery — not worth duplicating here.
+    Instead this is a source-level guard: assert curator_apply imports
+    active_database and uses it inside the dedup branch.
+    """
+    import inspect
+    import curator_apply
+
+    src = inspect.getsource(curator_apply.apply_chatlog_plan)
+    assert "active_database" in src, (
+        "apply_chatlog_plan must import + use active_database to route "
+        "bulk-delete to the chatlog DB. See the 2026-05-17 regression "
+        "where every drop_id came back not_found because the bulk call "
+        "ran against the main DB instead."
+    )
+    # And confirm it's specifically wrapped around the dedup branch, not
+    # somewhere irrelevant. A loose check: `active_database(resolved_db)`
+    # must appear between `dedup_groups` and the result-summary section.
+    dedup_section_start = src.find("dedup_groups")
+    summary_section_start = src.find("PROMOTE")
+    assert dedup_section_start >= 0 and summary_section_start > dedup_section_start
+    dedup_section = src[dedup_section_start:summary_section_start]
+    assert "active_database(resolved_db)" in dedup_section, (
+        "active_database(resolved_db) must wrap the dedup bulk-delete call, "
+        "not just appear somewhere in the function."
+    )
+
+
 # ── catalog registration ─────────────────────────────────────────────────────
 
 
