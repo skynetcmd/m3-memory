@@ -67,6 +67,8 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("memory_refresh",      "memory"),
     ("memory_set_retention","memory"),
     ("memory_cost",         "memory"),
+    ("curate_memory",       "memory"),
+    ("curate_chatlog",      "chatlog"),
     ("chatlog",             "chatlog"),
     ("files",               "files"),
     ("entity",              "entity"),
