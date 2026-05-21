@@ -45,7 +45,7 @@ logger = logging.getLogger("memory.enrich")
 def _ctx() -> M3Context:
     return M3Context.for_db(resolve_db_path(None))
 
-_CLASSIFY_CACHE = {}
+_CLASSIFY_CACHE: dict[str, str] = {}
 
 
 _AUTO_TITLE_CACHE: dict[str, str] = {}

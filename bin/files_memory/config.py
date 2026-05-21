@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 
 # Re-exports from memory.config — single source of truth.
+from memory.config import FILES_DB_PATH  # noqa: F401 — re-export
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Schema version

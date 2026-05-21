@@ -480,7 +480,9 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         except Exception as e:
             # Wrap as EmbeddedBackendError purely for log-line clarity;
             # cascade still falls through (we don't re-raise).
-            wrapped = EmbeddedBackendError(str(e))
+            # Annotated with the common base so the other except blocks below
+            # can rebind it to sibling EmbedError subclasses.
+            wrapped: EmbedError = EmbeddedBackendError(str(e))
             wrapped.__cause__ = e
             if _EMBEDDED_BREAKER is not None:
                 _EMBEDDED_BREAKER.record_failure()

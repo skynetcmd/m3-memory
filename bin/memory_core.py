@@ -221,6 +221,7 @@ from memory.embed import (  # noqa: F401 — re-exports
     reset_embed_breakers,
     set_embed_override,
 )
+from memory.enrich import enrich_pending_impl  # noqa: F401 — re-export
 from memory.entity import (  # noqa: F401 — re-exports
     _ENTITY_EXTRACT_SEM,
     _PENDING_ENTITY_TASKS,
@@ -260,6 +261,7 @@ from memory.fts import (  # noqa: F401 — re-exports
     _sanitize_fts,
     _title_overlap_from_qset,
 )
+from memory.graph import memory_graph_impl  # noqa: F401 — re-export
 from memory.search import (  # noqa: F401
     _DATE_MONTHS,
     _DATE_RE_ISO,
@@ -300,10 +302,12 @@ from memory.search import (  # noqa: F401
 # co-tenant).
 from memory.util import (
     _batch_cosine,  # noqa: F401 — re-export
-    )
+    _cosine,  # noqa: F401 — re-export for memory_maintenance
+)
 from memory.util import sha256_hex as _sha256_hex  # noqa: F401 — re-export
-from memory.write import (
+from memory.write import (  # noqa: F401 — re-exports
     memory_link_impl,
+    memory_write_bulk_impl,
     memory_write_impl,
 )
 
@@ -445,6 +449,9 @@ from embedding_utils import (
 )
 from embedding_utils import (
     pack as _pack,
+)
+from embedding_utils import (
+    unpack as _unpack,  # noqa: F401 — re-export for memory_sync / memory_maintenance
 )
 
 if _HAS_NUMPY:
