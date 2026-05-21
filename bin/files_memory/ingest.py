@@ -368,7 +368,7 @@ def ingest_one_file(
         # Carry-forward diff (only meaningful when superseding a prior version).
         # Builds a per-new-leaf classification: carry | evolve | new.
         # Used below to skip re-embedding unchanged leaves.
-        from .carry_forward import CarryForwardStats, compute_leaf_diffs
+        from .carry_forward import CarryForwardStats, LeafDiff, compute_leaf_diffs
         carry_stats = CarryForwardStats()
         if prior:
             leaf_diffs = compute_leaf_diffs(conn, prior["uuid"], leaves)
@@ -376,7 +376,7 @@ def ingest_one_file(
             leaf_diffs = [None] * len(leaves)
 
         # Insert leaves. Collect (uuid, text, summary_text, diff) for embed pass.
-        leaf_records: list[tuple[str, str, Optional[str], object]] = []
+        leaf_records: list[tuple[str, str, Optional[str], Optional[LeafDiff]]] = []
         for i, leaf in enumerate(leaves):
             leaf_uuid = str(_uuid.uuid4())
             wants_summary = leaf.division_type in _COARSE_DIVISIONS
@@ -420,7 +420,7 @@ def ingest_one_file(
         embedded_count = 0
         if leaf_records:
             # Split into carry-able vs embed-required.
-            carry_targets: list[tuple[str, object]] = []  # (new_leaf_uuid, diff)
+            carry_targets: list[tuple[str, LeafDiff]] = []  # (new_leaf_uuid, diff)
             embed_targets: list[tuple[int, str, str, Optional[str]]] = []  # (idx_in_records, uuid, text, summary)
             for idx, (luuid, ltext, lsum, ldiff) in enumerate(leaf_records):
                 if ldiff is not None and ldiff.kind == "carry":

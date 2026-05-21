@@ -253,7 +253,7 @@ def corpus_set(
             (corpus_id,),
         ).fetchone()
         if row is None:
-            settings = {"created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+            settings: dict[str, object] = {"created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
             is_insert = True
         else:
             settings = _safe_json(row["settings"]) or {}

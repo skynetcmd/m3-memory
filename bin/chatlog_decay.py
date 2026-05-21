@@ -78,6 +78,7 @@ import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 
 # ── DB resolution ──────────────────────────────────────────────────────────
@@ -223,7 +224,7 @@ def run_sweep(db_path: str, *, apply: bool, batch_size: int = 1000) -> dict:
         return {"error": f"DB not found: {db_path}"}
 
     now_ts = time.time()
-    summary = {
+    summary: dict[str, Any] = {
         "db_path": db_path,
         "apply": apply,
         "scanned": 0,
