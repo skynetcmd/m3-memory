@@ -24,9 +24,17 @@ def test_fernet_encryption_decryption():
     assert decrypted == original_text
     assert encrypted != original_text.encode()
 
-def test_device_salt_persistence():
-    """Test that device salt is persistent across calls."""
-    salt1 = auth_utils._get_device_salt()
-    salt2 = auth_utils._get_device_salt()
+def test_device_salt_persistence(tmp_path):
+    """Test that device salt is persistent across calls.
+
+    _get_device_salt() persists the salt under get_m3_root()/.agent_os_salt.
+    Pin get_m3_root() to a writable tmp dir so the test exercises the
+    persistence logic instead of depending on the runner's filesystem
+    (CI runners may resolve m3_root to a non-writable path, which makes
+    each call fall back to a fresh os.urandom and the salts diverge).
+    """
+    with patch("m3_sdk.get_m3_root", return_value=str(tmp_path)):
+        salt1 = auth_utils._get_device_salt()
+        salt2 = auth_utils._get_device_salt()
     assert salt1 == salt2
     assert len(salt1) == 16
