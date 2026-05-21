@@ -92,8 +92,10 @@ _MC_CALLBACK_NAMES = (
 # Forward declarations for the deferred-bound callbacks above. These None
 # placeholders are overwritten by `_resolve_mc_callbacks()` before any impl
 # runs; they exist so static analysis sees the names defined at module scope.
-_track_cost = None
-_record_history = None
+# Typed as Callable (the runtime binding is always a function) so callers
+# are not flagged as calling None.
+_track_cost: Callable[..., object] = None  # type: ignore[assignment]
+_record_history: Callable[..., object] = None  # type: ignore[assignment]
 
 def _resolve_mc_callbacks() -> None:
     global _MC_CALLBACKS_BOUND
@@ -291,9 +293,9 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                 results: list[tuple[str, str, list[float], str]] = []
                 for j, sub in enumerate(subs):
                     try:
-                        sv = await asyncio.to_thread(
-                            lambda s=sub: _direct_embedder.embed([s])[0]
-                        )
+                        def _embed_one(s: str = sub) -> list[float]:
+                            return _direct_embedder.embed([s])[0]
+                        sv = await asyncio.to_thread(_embed_one)
                         if sv:
                             results.append((sub, f"_dense_{j}", sv, _EMBED_GGUF_MODEL_TAG))
                             _record_embed_backend(_embedded_label(), 1)
@@ -376,7 +378,7 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     # `variant` is threaded into _check_contradictions so candidates respect the
     # M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT scope rule (default ON: same-variant
     # only when variant is set on the inserted item).
-    superseded_ids = []
+    superseded_ids: list[str] = []
     if vec and type not in ("conversation", "message"):
         superseded_ids, related_candidates = await _check_contradictions(
             item_id, content, title, vec, type, agent_id, variant=variant,
@@ -894,8 +896,8 @@ async def _check_contradictions(
     (default), candidate scan is restricted to memories of the same variant.
     This prevents cross-variant contamination during obs INSERT.
     """
-    superseded = []
-    related = []
+    superseded: list[str] = []
+    related: list[tuple[str, float]] = []
     try:
         with _db() as db:
             # Find top-5 similar memories of the same type

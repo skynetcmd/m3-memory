@@ -1005,6 +1005,9 @@ def main() -> int:
 
     args = p.parse_args()
 
+    # The CLI dispatch below binds `r` to whatever the chosen *_impl returns;
+    # some return a dict, others a list of dicts. Declare the union up front.
+    r: "dict | list"
     if args.cmd == "ingest":
         r = files_ingest_impl(
             path=args.path, include=args.include, exclude=args.exclude,

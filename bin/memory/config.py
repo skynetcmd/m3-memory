@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import platform
 from pathlib import Path
+from typing import Any
 
 # Oxidation / Rust availability.
 # _OXIDATION_DISABLED must be bound UNCONDITIONALLY — `memory_core.py`
@@ -30,10 +31,13 @@ from pathlib import Path
 _OXIDATION_DISABLED: bool = os.environ.get("M3_CORE_RS_DISABLE", "0").lower() in (
     "1", "true", "yes"
 )
-m3_core_rs = None
+# Typed `Any` so callers can access the Rust extension's attributes without
+# mypy flagging every use as "None has no attribute ..."; the None case is a
+# real runtime fallback (extension not installed / disabled).
+m3_core_rs: "Any" = None
 if not _OXIDATION_DISABLED:
     try:
-        import m3_core_rs  # noqa: F811 — intentional rebind
+        import m3_core_rs  # type: ignore[no-redef]  # noqa: F811 — intentional rebind
     except ImportError:
         m3_core_rs = None  # extra not installed — Python path is the default
 
