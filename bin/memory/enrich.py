@@ -52,6 +52,9 @@ _CLASSIFY_CACHE = {}
 _AUTO_TITLE_CACHE: dict[str, str] = {}
 
 
+_AUTO_ENTITIES_CACHE: dict[str, list[str]] = {}
+
+
 # Fact-enrichment dispatch primitives. Defined here (in the module that
 # uses them) because the Phase 7+8 refactor moved the consumers from
 # memory_core but left these module-level objects behind. memory_core

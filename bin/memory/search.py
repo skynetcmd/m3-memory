@@ -138,6 +138,13 @@ _MC_CALLBACK_NAMES = (
 )
 _MC_CALLBACKS_BOUND = False
 
+# Forward declarations for the deferred-bound callbacks above. These None
+# placeholders are overwritten by `_resolve_mc_callbacks()` before any impl
+# runs; they exist so static analysis sees the names defined at module scope.
+_prefer_observations_gate = None
+_two_stage_observations_gate = None
+_track_cost = None
+
 
 def _resolve_mc_callbacks() -> None:
     """Bind memory_core callback symbols into this module's globals.
@@ -1547,6 +1554,9 @@ async def memory_search_scored_impl(
     #
     # Off by default; bench harness opts in via --observer-variant flag
     # (Phase D Task 8) or callers set M3_PREFER_OBSERVATIONS=1 directly.
+    # `_prefer_observations_gate` / `_two_stage_observations_gate` are bound
+    # into module globals by the `_resolve_mc_callbacks()` call at the top of
+    # this function — see the callback registry near the module header.
     if ranked and _prefer_observations_gate():
         try:
             obs_budget = int(os.environ.get("M3_OBSERVATION_BUDGET_TOKENS", "4000"))
@@ -2261,6 +2271,7 @@ async def memory_search_multi_db_impl(
     query: str,
     databases: "list[str] | str",
     k: int = 8,
+    mmr: bool = True,
     type_filter: str = "",
     agent_filter: str = "",
     search_mode: str = "hybrid",
