@@ -65,7 +65,13 @@ def _write_windows(value: str | None) -> None:
     # reg.exe / setx.exe are console binaries; CREATE_NO_WINDOW keeps them
     # from flashing a window. (Standalone copy of _task_runtime.no_window_kwargs
     # — this module has no sibling imports and stays dependency-free.)
-    no_window: dict[str, Any] = {"creationflags": subprocess.CREATE_NO_WINDOW} if _is_windows() else {}
+    # getattr: CREATE_NO_WINDOW is Windows-only; on non-Windows the `else {}`
+    # branch wins so the value is never used, but getattr keeps a Linux-based
+    # type checker (CI runs on Ubuntu) from flagging the attribute.
+    no_window: dict[str, Any] = (
+        {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        if _is_windows() else {}
+    )
     if value is None:
         subprocess.run(
             ["reg", "delete", "HKCU\\Environment", "/F", "/V", VAR],
