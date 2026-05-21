@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from m3_sdk import M3Context, resolve_db_path
@@ -17,6 +18,9 @@ from .config import (
     DEFAULT_CHANGE_AGENT,
     EMBED_DIM,
     ENABLE_FACT_ENRICHED,
+    INGEST_EVENT_ROWS,
+    INGEST_GIST_ROWS,
+    INGEST_WINDOW_CHUNKS,
     ORIGIN_DEVICE,
     SUPERSEDES_PENALTY,
     VALID_SCOPES,
@@ -63,6 +67,8 @@ from .embed import (
     _subdivide_dense_chunk,
     _chunk_for_sliding_window,
     _augment_embed_text_with_anchors,
+    _DENSE_ERR_RE,
+    _EMBED_GGUF_MODEL_TAG,
 )
 from .emitters import (
     _maybe_emit_event_rows,
@@ -91,6 +97,12 @@ _MC_CALLBACK_NAMES = (
     "_track_cost",
     "_record_history",
 )
+
+# Forward declarations for the deferred-bound callbacks above. These None
+# placeholders are overwritten by `_resolve_mc_callbacks()` before any impl
+# runs; they exist so static analysis sees the names defined at module scope.
+_track_cost = None
+_record_history = None
 
 def _resolve_mc_callbacks() -> None:
     global _MC_CALLBACKS_BOUND
