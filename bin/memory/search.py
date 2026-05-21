@@ -34,6 +34,13 @@ from m3_sdk import resolve_db_path
 
 from . import config
 from . import graph as _graph_mod
+
+# `_query_chroma` / `_embed` / `_batch_cosine` (in the .util block below) are
+# imported here purely to populate this module's globals(). The retrieval
+# impls bind them via `globals()["_embed"]` etc. (the floor-binding pattern in
+# memory_search_scored_impl) so a test that monkeypatches memory_core can be
+# picked up. They have no static call site, hence the F401 suppression.
+from .chroma import _query_chroma  # noqa: F401 — runtime globals() lookup
 from .config import (
     DEFAULT_RERANK_MODEL,
     EMBED_DIM,
@@ -48,6 +55,7 @@ from .config import (
     m3_core_rs,
 )
 from .db import _db, _enqueue_access_stamps
+from .embed import _embed  # noqa: F401 — runtime globals() lookup
 
 
 def _resolve_graph_helper(name: str):
@@ -100,6 +108,7 @@ from .fts import (
 )
 from .util import (
     _HAS_NUMPY,
+    _batch_cosine,  # noqa: F401 — runtime globals() lookup
     _cosine,
     _cosine_batch_packed,
     _np,
@@ -887,10 +896,10 @@ async def memory_search_scored_impl(
     # bare `_batch_cosine(...)` call. The 2026-05-17 chatlog curator hit
     # exactly this when `_resolve_mc_callbacks()` raised before the
     # original try-block ran.
-    _embed = globals()["_embed"]
+    _embed = globals()["_embed"]  # noqa: F811 — floor-bind module global as local
     _db = globals()["_db"]
-    _batch_cosine = globals()["_batch_cosine"]
-    _query_chroma = globals()["_query_chroma"]
+    _batch_cosine = globals()["_batch_cosine"]  # noqa: F811 — floor-bind module global
+    _query_chroma = globals()["_query_chroma"]  # noqa: F811 — floor-bind module global
 
     # Best-effort: callback resolution + test-shim rebinding. Any failure
     # here just leaves the floor bindings above in place.
