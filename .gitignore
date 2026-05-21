@@ -180,3 +180,6 @@ reports/
 tests/bench_embed_path.py
 tests/bench_e2e_retrieval_lme_m.py
 tests/repro_concurrent_hang.py
+
+# Local security tooling (TruffleHog binary etc.) — not committed
+.tooling/
