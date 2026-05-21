@@ -221,7 +221,11 @@ from memory.embed import (  # noqa: F401 — re-exports
     reset_embed_breakers,
     set_embed_override,
 )
-from memory.enrich import enrich_pending_impl  # noqa: F401 — re-export
+from memory.enrich import (  # noqa: F401 — re-exports
+    _select_pending_fact_enrichment,
+    _try_enrich_or_enqueue,
+    enrich_pending_impl,
+)
 from memory.entity import (  # noqa: F401 — re-exports
     _ENTITY_EXTRACT_SEM,
     _PENDING_ENTITY_TASKS,
@@ -261,7 +265,13 @@ from memory.fts import (  # noqa: F401 — re-exports
     _sanitize_fts,
     _title_overlap_from_qset,
 )
-from memory.graph import memory_graph_impl  # noqa: F401 — re-export
+from memory.graph import (  # noqa: F401 — re-exports
+    _entity_graph_neighbor_ids,
+    _graph_neighbor_ids,
+    _score_extra_rows,
+    _session_neighbor_ids,
+    memory_graph_impl,
+)
 from memory.search import (  # noqa: F401
     _DATE_MONTHS,
     _DATE_RE_ISO,
@@ -306,6 +316,7 @@ from memory.util import (
 )
 from memory.util import sha256_hex as _sha256_hex  # noqa: F401 — re-export
 from memory.write import (  # noqa: F401 — re-exports
+    _check_contradictions,
     memory_link_impl,
     memory_write_bulk_impl,
     memory_write_impl,
