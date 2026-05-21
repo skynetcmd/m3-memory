@@ -8,11 +8,11 @@ and MOVES configuration files. It does NOT modify system-wide tool settings
 manually to point to the new bridge paths.
 """
 
+import logging
 import os
-import sys
 import shutil
 import sqlite3
-import logging
+import sys
 from pathlib import Path
 
 # Add bin to path for m3_sdk
@@ -72,7 +72,7 @@ def backup_db(src, dst):
 def main():
     target_root = get_m3_root()
     logger.info(f"Homecoming Target Root: {target_root}")
-    
+
     assets = get_legacy_assets()
     if not assets:
         logger.info("No legacy assets found in repository. Current configuration is already standard.")
@@ -83,16 +83,16 @@ def main():
 
     # Ensure target directory structure
     os.makedirs(os.path.join(target_root, "memory"), exist_ok=True)
-    
+
     for key, src in assets.items():
         dst_name = os.path.basename(src)
-        
+
         # Salt goes in the root; everything else goes in memory/
         if "salt" in key:
             dst = os.path.join(target_root, dst_name)
         else:
             dst = os.path.join(target_root, "memory", dst_name)
-            
+
         if os.path.exists(dst):
             logger.warning(f"Destination {dst} already exists. Skipping.")
             continue
@@ -109,7 +109,7 @@ def main():
                 logger.info(f"Successfully copied {dst_name}")
             except Exception as e:
                 logger.error(f"Failed to copy {dst_name}: {e}")
-    
+
     logger.info("\nMigration Step 1 (Data) completed.")
     logger.info("Next Step: Update your Gemini/Claude/Aider settings to use the new bridge paths.")
     logger.info(f"New data root: {target_root}")

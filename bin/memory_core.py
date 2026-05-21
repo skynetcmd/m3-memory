@@ -50,21 +50,267 @@ import asyncio
 import json
 import logging
 import os
-import platform
-import re
-import sqlite3
-import sys
-import threading
 import uuid
-from contextlib import contextmanager
-from datetime import date, datetime, timezone
-from pathlib import Path
+from datetime import datetime, timezone
+
+# Legacy back-compat: `_lru_cache` was imported inline in the FTS block
+# (used internally by `_compile_fts_query`'s @decorator). Preserved as a
+# re-export because the API snapshot captured it as a public symbol —
+# something external imports it. Pure alias for functools.lru_cache.
+from functools import lru_cache as _lru_cache  # noqa: F401 — re-export
 from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
-import yaml
-from crypto_provider import get_sha256 as _sha256_hex_py
-from llm_failover import get_best_embed, get_best_llm, get_smallest_llm
+from llm_failover import get_best_llm
 from m3_sdk import M3Context, resolve_db_path
+from memory.chroma import (  # noqa: F401
+    _CHROMA_COLLECTION_ID_CACHE,
+    _query_chroma,
+    _queue_chroma,
+    _resolve_chroma_collection_id,
+)
+from memory.config import (  # noqa: F401 — re-exports
+    _DEFAULT_VALID_ENTITY_PREDICATES,
+    _DEFAULT_VALID_ENTITY_TYPES,
+    _EMBED_MODEL_OVERRIDE,
+    _EMBED_URL_OVERRIDE,
+    _ENV_ENTITY_VOCAB_YAML,
+    _OXIDATION_DISABLED,
+    ARCHIVE_DB_PATH,
+    AUTO_RELATED_LINK,
+    AUTO_RELATED_LINK_SCOPE_BY_VARIANT,
+    BASE_DIR,
+    CHROMA_BASE_URL,
+    CHROMA_COLLECTION,
+    CHROMA_COLLECTIONS,
+    CHROMA_CONNECT_T,
+    CHROMA_CONTENT_MAX,
+    CHROMA_PULL_PAGE_SIZE,
+    CHROMA_READ_T,
+    CHROMA_V2_PREFIX,
+    CONTRADICTION_THRESHOLD,
+    CONTRADICTION_TITLE_GATE,
+    CONTRADICTION_TYPE_EXCLUSIONS,
+    DB_PATH,
+    DEDUP_LIMIT,
+    DEDUP_THRESHOLD,
+    DEFAULT_CHANGE_AGENT,
+    DEFAULT_ENTITY_VOCAB_YAML,
+    DEFAULT_RERANK_MODEL,
+    ELBOW_ABS_THRESHOLD,
+    ELBOW_MIN_INPUT,
+    ELBOW_MIN_RETURN,
+    EMBED_DIM,
+    EMBED_MODEL,
+    EMBED_TIMEOUT_READ,
+    ENABLE_ENTITY_GRAPH,
+    ENABLE_FACT_ENRICHED,
+    ENTITY_EXTRACT_CONCURRENCY,
+    ENTITY_EXTRACT_MAX_ATTEMPTS,
+    ENTITY_RESOLVE_COSINE_MIN,
+    ENTITY_RESOLVE_FUZZY_MIN,
+    ENTITY_SEED_STOPLIST,
+    EXPANSION_DISPLACEMENT_MARGIN,
+    EXPANSION_PROTECTED_RANKS,
+    FACT_ENRICH_CONCURRENCY,
+    FACT_ENRICH_MAX_ATTEMPTS,
+    FEDERATION_LOW_SCORE_THRESHOLD,
+    IMPORTANCE_WEIGHT,
+    INGEST_EVENT_ROWS,
+    INGEST_GIST_MIN_TURNS,
+    INGEST_GIST_ROWS,
+    INGEST_GIST_STRIDE,
+    INGEST_WINDOW_CHUNKS,
+    INGEST_WINDOW_SIZE,
+    INTENT_ROUTING,
+    INTENT_USER_FACT_BOOST,
+    LLM_TIMEOUT,
+    ORIGIN_DEVICE,
+    QUERY_TYPE_ROUTING,
+    SEARCH_ROW_CAP,
+    SHORT_TURN_THRESHOLD,
+    SPEAKER_IN_TITLE,
+    SUPERSEDES_PENALTY,
+    TITLE_MATCH_BOOST,
+    m3_core_rs,
+)
+from memory.db import (  # noqa: F401 — re-exports
+    _ACCESS_FLUSH_INTERVAL,
+    _ENTITY_COUNT_QUERY,
+    _GATE_CACHE,
+    _GATE_CACHE_TTL,
+    _OBS_COUNT_QUERY,
+    _access_flusher_task,
+    _access_lock,
+    _access_pending,
+    _access_stamp_flusher,
+    _backfill_change_agent,
+    _conn,
+    _db,
+    _enqueue_access_stamps,
+    _ensure_sync_tables,
+    _gate_active,
+    _gate_count_query,
+    _init_lock,
+    _initialized,
+    _initialized_dbs,
+    _lazy_init,
+    _local,
+    _record_history,
+    memory_history_impl,
+)
+from memory.embed import (  # noqa: F401 — re-exports
+    _CPU_FALLBACK_BREAKER,
+    _DENSE_ERR_RE,
+    _EMBED_BACKEND_STATS,
+    _EMBED_BACKEND_STATS_LOCK,
+    _EMBED_BULK_SEM,
+    _EMBED_CLIENT,
+    _EMBED_CLIENT_LOCK,
+    _EMBED_CLIENT_LOOP_ID,
+    _EMBED_DIM_VALIDATED,
+    _EMBED_FALLBACK_URL,
+    _EMBED_GGUF_MODEL_TAG,
+    _EMBED_GGUF_PATH,
+    _EMBED_HTTP_KEEPALIVE_EXPIRY,
+    _EMBED_HTTP_MAX_CONNS,
+    _EMBED_HTTP_MAX_KEEPALIVE,
+    _EMBED_SEM,
+    # Per-backend circuit breakers (audit item L). Each breaker is a
+    # m3_core_rs.CircuitBreaker (or None when Rust is unavailable or the
+    # operator set the threshold env var to 0). Re-exported through the
+    # shim so external diagnostics (`embedder_status_impl`, ops scripts)
+    # can read breaker state without importing memory.embed directly.
+    _EMBEDDED_BREAKER,
+    _ENTITY_NAME_EMBED_CACHE,
+    _PRIMARY_BREAKER,
+    DENSE_MIN_SUB_CHARS,
+    DENSE_TARGET_TOKENS,
+    DENSE_TOKEN_OVERLAP,
+    EMBED_BULK_CHUNK,
+    EMBED_BULK_CONCURRENCY,
+    ENTITY_NAME_EMBED_CACHE_MAX,
+    MAX_CHARS_PER_CHUNK,
+    MIN_OVERLAP_CHARS,
+    STRIDE_CHARS,
+    EmbeddedBackendError,
+    # Typed exceptions for log-line clarity (D in the perf audit). Cascade
+    # contract unchanged — callers still see (None, model) on total failure;
+    # these classes only surface in log lines via their type names.
+    EmbedError,
+    EmbedFallbackError,
+    EmbedPrimaryError,
+    EmbedSemaphoreTimeout,
+    _augment_embed_text_with_anchors,
+    _chunk_for_sliding_window,
+    _content_hash,
+    _embed,
+    _embed_canonical_cached,
+    _embed_many,
+    _embedded_embed_checked,
+    _embedded_embedder,
+    _embedded_label,
+    _get_embed_client,
+    _get_embedded_embedder,
+    _record_embed_backend,
+    _shared_embed_client,
+    _subdivide_dense_chunk,
+    embedder_status_impl,
+    get_embed_backend_stats,
+    get_embed_breaker_state,
+    reset_embed_backend_stats,
+    reset_embed_breakers,
+    set_embed_override,
+)
+from memory.entity import (  # noqa: F401 — re-exports
+    _ENTITY_EXTRACT_SEM,
+    _PENDING_ENTITY_TASKS,
+    _TOKEN_PUNCT_RE,
+    VALID_ENTITY_PREDICATES,
+    VALID_ENTITY_TYPES,
+    _create_entity,
+    _enqueue_entity_extraction,
+    _link_entity_relationship,
+    _link_memory_to_entity,
+    _resolve_entity,
+    _resolve_entity_async,
+    _run_entity_extractor,
+    _select_pending_entity_extraction,
+    _token_jaccard,
+    _try_extract_or_enqueue,
+    entity_extractor_health,
+    entity_get_impl,
+    entity_search_impl,
+    extract_pending_impl,
+    load_entity_vocab,
+)
+from memory.fts import (  # noqa: F401 — re-exports
+    _EVENT_DATE_HINT,
+    _EVENT_PROPER_NOUN,
+    _EVENT_SENT_SPLIT,
+    _EVENT_VERB_LIST,
+    _EVENT_VERB_RE,
+    _FTS_OPERATORS,
+    _SEARCHABLE_PUNCT,
+    _TOKEN_SPLIT,
+    _augment_title_with_role,
+    _compile_fts_query,
+    _query_title_overlap,
+    _query_title_token_set,
+    _sanitize_for_searchable,
+    _sanitize_fts,
+    _title_overlap_from_qset,
+)
+from memory.search import (  # noqa: F401
+    _DATE_MONTHS,
+    _DATE_RE_ISO,
+    _DATE_RE_LONG,
+    _ENTITY_MENTION_PATTERNS,
+    _ENTITY_MENTION_RE,
+    _RERANKER_MODEL,
+    _RERANKER_MODEL_NAME,
+    _TEMPORAL_QUERY_RE,
+    _TEMPORAL_ROUTER_PATTERNS,
+    _TEMPORAL_ROUTER_RE,
+    _UNSET,
+    _apply_auto_layer,
+    _apply_recency_bonus,
+    _apply_rerank,
+    _apply_sharp_trim,
+    _apply_temporal_boost,
+    _cosine_batch_packed,
+    _enforce_expansion_displacement_guard,
+    _extract_caller_overrides,
+    _get_reranker,
+    _hybrid_score_batch,
+    _maybe_expand_routed,
+    _maybe_route_query,
+    _pull_predecessor_turns,
+    _recency_bonus_ranks,
+    _trim_by_elbow,
+    is_temporal_query,
+    memory_search_impl,
+    memory_search_multi_db_impl,
+    memory_search_routed_impl,
+    memory_search_scored_impl,
+)
+
+# Phase 4.B (in progress): search/retrieval moves to bin/memory/search.py.
+# Sub-commit 1 brings just the scoring helpers; search-impls land in later
+# sub-commits. _batch_cosine moved to memory.util (write-path + search-path
+# co-tenant).
+from memory.util import (
+    _batch_cosine,  # noqa: F401 — re-export
+    )
+from memory.util import sha256_hex as _sha256_hex  # noqa: F401 — re-export
+from memory.write import (
+    memory_link_impl,
+    memory_write_impl,
+)
+
+# Phase 4.A: Chroma federation helpers (queue insert, collection-id cache,
+# federated query) moved to bin/memory/chroma.py. _CHROMA_COLLECTION_ID_CACHE
+# preserves identity through this re-export.
+from memory import chroma as _mc_chroma  # noqa: F401
 
 # ── Modularization shim (Phase 1) ─────────────────────────────────────────────
 # The constants and Rust-core reference below now live in bin/memory/config.py.
@@ -77,277 +323,21 @@ from m3_sdk import M3Context, resolve_db_path
 # via a local binding here, or the writes won't be observable to other
 # modules importing through `memory.config`.
 from memory import config as _mc_config  # noqa: F401 — used for mutable attrs
-from memory.config import (  # noqa: F401 — re-exports
-    _OXIDATION_DISABLED,
-    m3_core_rs,
-    _EMBED_URL_OVERRIDE,
-    _EMBED_MODEL_OVERRIDE,
-    BASE_DIR,
-    DB_PATH,
-    ARCHIVE_DB_PATH,
-    EMBED_MODEL,
-    EMBED_DIM,
-    EMBED_TIMEOUT_READ,
-    ORIGIN_DEVICE,
-    DEDUP_LIMIT,
-    DEDUP_THRESHOLD,
-    CONTRADICTION_THRESHOLD,
-    SUPERSEDES_PENALTY,
-    CONTRADICTION_TITLE_GATE,
-    CONTRADICTION_TYPE_EXCLUSIONS,
-    AUTO_RELATED_LINK,
-    AUTO_RELATED_LINK_SCOPE_BY_VARIANT,
-    SEARCH_ROW_CAP,
-    LLM_TIMEOUT,
-    SPEAKER_IN_TITLE,
-    SHORT_TURN_THRESHOLD,
-    TITLE_MATCH_BOOST,
-    IMPORTANCE_WEIGHT,
-    ELBOW_MIN_INPUT,
-    ELBOW_MIN_RETURN,
-    ELBOW_ABS_THRESHOLD,
-    EXPANSION_DISPLACEMENT_MARGIN,
-    EXPANSION_PROTECTED_RANKS,
-    ENTITY_SEED_STOPLIST,
-    INGEST_WINDOW_CHUNKS,
-    INGEST_GIST_ROWS,
-    INGEST_EVENT_ROWS,
-    QUERY_TYPE_ROUTING,
-    INTENT_ROUTING,
-    INTENT_USER_FACT_BOOST,
-    INGEST_WINDOW_SIZE,
-    INGEST_GIST_MIN_TURNS,
-    INGEST_GIST_STRIDE,
-    ENABLE_FACT_ENRICHED,
-    FACT_ENRICH_CONCURRENCY,
-    FACT_ENRICH_MAX_ATTEMPTS,
-    ENABLE_ENTITY_GRAPH,
-    ENTITY_EXTRACT_CONCURRENCY,
-    ENTITY_EXTRACT_MAX_ATTEMPTS,
-    ENTITY_RESOLVE_FUZZY_MIN,
-    ENTITY_RESOLVE_COSINE_MIN,
-    _DEFAULT_VALID_ENTITY_TYPES,
-    _DEFAULT_VALID_ENTITY_PREDICATES,
-    DEFAULT_ENTITY_VOCAB_YAML,
-    _ENV_ENTITY_VOCAB_YAML,
-    DEFAULT_RERANK_MODEL,
-    DEFAULT_CHANGE_AGENT,
-    CHROMA_BASE_URL,
-    CHROMA_COLLECTION,
-    CHROMA_COLLECTIONS,
-    CHROMA_V2_PREFIX,
-    CHROMA_CONNECT_T,
-    CHROMA_READ_T,
-    CHROMA_PULL_PAGE_SIZE,
-    CHROMA_CONTENT_MAX,
-    FEDERATION_LOW_SCORE_THRESHOLD,
-)
-from memory.util import sha256_hex as _sha256_hex, _cosine  # noqa: F401 — re-export
-from memory.fts import (  # noqa: F401 — re-exports
-    _FTS_OPERATORS,
-    _sanitize_fts,
-    _SEARCHABLE_PUNCT,
-    _sanitize_for_searchable,
-    _compile_fts_query,
-    _augment_title_with_role,
-    _query_title_token_set,
-    _title_overlap_from_qset,
-    _query_title_overlap,
-    _TOKEN_SPLIT,
-    _EVENT_VERB_LIST,
-    _EVENT_SENT_SPLIT,
-    _EVENT_DATE_HINT,
-    _EVENT_VERB_RE,
-    _EVENT_PROPER_NOUN,
-)
-# Legacy back-compat: `_lru_cache` was imported inline in the FTS block
-# (used internally by `_compile_fts_query`'s @decorator). Preserved as a
-# re-export because the API snapshot captured it as a public symbol —
-# something external imports it. Pure alias for functools.lru_cache.
-from functools import lru_cache as _lru_cache  # noqa: F401 — re-export
+
 # Phase 2.B: SQLite primitives, schema lifecycle, history, gate cache, and
 # the access-stamp batcher live on bin/memory/db.py. The mutable sets/dicts
 # (_initialized_dbs, _GATE_CACHE, _access_pending) are externally imported;
 # the shim preserves their identity by re-exporting the references rather
 # than re-assigning them.
 from memory import db as _mc_db  # noqa: F401
-from memory.emitters import (
-    _extract_event_sentences,
-    _maybe_emit_event_rows,
-    _maybe_emit_window_chunk,
-    _maybe_emit_gist_row,
-)
-from memory.write import (
-    memory_write_impl,
-    memory_write_bulk_impl,
-    memory_link_impl,
-    _check_contradictions,
-)
-from memory.enrich import (
-    _CLASSIFY_CACHE,
-    _AUTO_TITLE_CACHE,
-    _ingest_llm_enabled,
-    _auto_classify,
-    _maybe_auto_title,
-    _maybe_auto_entities,
-    _try_enrich_or_enqueue,
-    _enqueue_fact_enrichment,
-    _run_fact_enricher,
-    _write_fact_rows,
-    _select_pending_fact_enrichment,
-    enrich_pending_impl,
-)
-from memory.graph import (
-    _graph_neighbor_ids,
-    _session_neighbor_ids,
-    _entity_graph_neighbor_ids,
-    _score_extra_rows,
-    memory_graph_impl,
-)
-from memory.db import (  # noqa: F401 — re-exports
-    _local,
-    _init_lock,
-    _initialized,
-    _initialized_dbs,
-    _GATE_CACHE,
-    _GATE_CACHE_TTL,
-    _OBS_COUNT_QUERY,
-    _ENTITY_COUNT_QUERY,
-    _ACCESS_FLUSH_INTERVAL,
-    _access_pending,
-    _access_flusher_task,
-    _access_lock,
-    _db,
-    _conn,
-    _ensure_sync_tables,
-    _backfill_change_agent,
-    _lazy_init,
-    _record_history,
-    memory_history_impl,
-    _gate_count_query,
-    _gate_active,
-    _access_stamp_flusher,
-    _enqueue_access_stamps,
-)
+
 # Phase 3: The embedding pipeline (cascade, in-process embedder lazy-init,
 # sliding-window chunking, dense recovery, anchor augmentation, HTTP-client
 # singleton, backend stats, canonical-name cache) lives in bin/memory/embed.py.
 # The mutable containers (_EMBED_BACKEND_STATS, _ENTITY_NAME_EMBED_CACHE,
 # _embedded_embedder/_checked) preserve identity through these re-exports.
 from memory import embed as _mc_embed  # noqa: F401
-from memory.embed import (  # noqa: F401 — re-exports
-    _EMBED_GGUF_PATH,
-    _EMBED_GGUF_MODEL_TAG,
-    _embedded_embedder,
-    _embedded_embed_checked,
-    _get_embedded_embedder,
-    MAX_CHARS_PER_CHUNK,
-    MIN_OVERLAP_CHARS,
-    STRIDE_CHARS,
-    _chunk_for_sliding_window,
-    DENSE_TARGET_TOKENS,
-    DENSE_TOKEN_OVERLAP,
-    DENSE_MIN_SUB_CHARS,
-    _DENSE_ERR_RE,
-    _subdivide_dense_chunk,
-    _augment_embed_text_with_anchors,
-    _content_hash,
-    _EMBED_HTTP_MAX_CONNS,
-    _EMBED_HTTP_MAX_KEEPALIVE,
-    _EMBED_HTTP_KEEPALIVE_EXPIRY,
-    _EMBED_CLIENT,
-    _EMBED_CLIENT_LOOP_ID,
-    _EMBED_CLIENT_LOCK,
-    _shared_embed_client,
-    _get_embed_client,
-    _EMBED_FALLBACK_URL,
-    _EMBED_BACKEND_STATS,
-    _EMBED_BACKEND_STATS_LOCK,
-    _record_embed_backend,
-    get_embed_backend_stats,
-    reset_embed_backend_stats,
-    _embedded_label,
-    set_embed_override,
-    _EMBED_SEM,
-    _EMBED_DIM_VALIDATED,
-    EMBED_BULK_CHUNK,
-    EMBED_BULK_CONCURRENCY,
-    _EMBED_BULK_SEM,
-    _embed,
-    _embed_many,
-    _ENTITY_NAME_EMBED_CACHE,
-    ENTITY_NAME_EMBED_CACHE_MAX,
-    _embed_canonical_cached,
-    embedder_status_impl,
-    # Typed exceptions for log-line clarity (D in the perf audit). Cascade
-    # contract unchanged — callers still see (None, model) on total failure;
-    # these classes only surface in log lines via their type names.
-    EmbedError,
-    EmbeddedBackendError,
-    EmbedFallbackError,
-    EmbedPrimaryError,
-    EmbedSemaphoreTimeout,
-    # Per-backend circuit breakers (audit item L). Each breaker is a
-    # m3_core_rs.CircuitBreaker (or None when Rust is unavailable or the
-    # operator set the threshold env var to 0). Re-exported through the
-    # shim so external diagnostics (`embedder_status_impl`, ops scripts)
-    # can read breaker state without importing memory.embed directly.
-    _EMBEDDED_BREAKER,
-    _CPU_FALLBACK_BREAKER,
-    _PRIMARY_BREAKER,
-    get_embed_breaker_state,
-    reset_embed_breakers,
-)
-# Phase 4.A: Chroma federation helpers (queue insert, collection-id cache,
-# federated query) moved to bin/memory/chroma.py. _CHROMA_COLLECTION_ID_CACHE
-# preserves identity through this re-export.
-from memory import chroma as _mc_chroma  # noqa: F401
-from memory.chroma import (  # noqa: F401
-    _CHROMA_COLLECTION_ID_CACHE,
-    _queue_chroma,
-    _resolve_chroma_collection_id,
-    _query_chroma,
-)
-# Phase 4.B (in progress): search/retrieval moves to bin/memory/search.py.
-# Sub-commit 1 brings just the scoring helpers; search-impls land in later
-# sub-commits. _batch_cosine moved to memory.util (write-path + search-path
-# co-tenant).
-from memory.util import _batch_cosine  # noqa: F401 — re-export
-from memory import search as _mc_search  # noqa: F401
-from memory.search import (  # noqa: F401
-    _cosine_batch_packed,
-    _hybrid_score_batch,
-    _recency_bonus_ranks,
-    _EVENT_PROPER_NOUN,
-    _TEMPORAL_QUERY_RE,
-    _DATE_RE_ISO,
-    _DATE_RE_LONG,
-    _DATE_MONTHS,
-    _pull_predecessor_turns,
-    _maybe_route_query,
-    _apply_recency_bonus,
-    _trim_by_elbow,
-    _apply_temporal_boost,
-    _RERANKER_MODEL,
-    _RERANKER_MODEL_NAME,
-    _get_reranker,
-    _enforce_expansion_displacement_guard,
-    _apply_rerank,
-    _TEMPORAL_ROUTER_PATTERNS,
-    _TEMPORAL_ROUTER_RE,
-    _ENTITY_MENTION_PATTERNS,
-    _ENTITY_MENTION_RE,
-    _UNSET,
-    _extract_caller_overrides,
-    _apply_auto_layer,
-    _apply_sharp_trim,
-    is_temporal_query,
-    memory_search_scored_impl,
-    memory_search_routed_impl,
-    _maybe_expand_routed,
-    memory_search_multi_db_impl,
-    memory_search_impl,
-)
+
 # Phase 6: entity-extraction subsystem (vocab loading, canonical-name
 # resolution, entity CRUD, queue runner, MCP read-side impls) lives in
 # bin/memory/entity.py. Externally-imported state — VALID_ENTITY_TYPES,
@@ -356,29 +346,7 @@ from memory.search import (  # noqa: F401
 # survives the shim (callers comparing `id(mc.VALID_ENTITY_TYPES)`
 # against `id(memory.entity.VALID_ENTITY_TYPES)` stay equal).
 from memory import entity as _mc_entity  # noqa: F401
-from memory.entity import (  # noqa: F401 — re-exports
-    load_entity_vocab,
-    VALID_ENTITY_TYPES,
-    VALID_ENTITY_PREDICATES,
-    _TOKEN_PUNCT_RE,
-    _token_jaccard,
-    _ENTITY_EXTRACT_SEM,
-    _PENDING_ENTITY_TASKS,
-    _resolve_entity,
-    _resolve_entity_async,
-    _create_entity,
-    _link_memory_to_entity,
-    _link_entity_relationship,
-    _enqueue_entity_extraction,
-    _run_entity_extractor,
-    _try_extract_or_enqueue,
-    _select_pending_entity_extraction,
-    extract_pending_impl,
-    entity_extractor_health,
-    entity_search_impl,
-    entity_get_impl,
-)
-
+from memory import search as _mc_search  # noqa: F401
 
 # In-process llama.cpp embedding backend. Opt-in: set M3_EMBED_GGUF to the
 # bge-m3 GGUF path. Unset (default) -> the HTTP embed path is used unchanged.
@@ -471,25 +439,16 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
 
 # embedder_status_impl moved to bin/memory/embed.py in Phase 3.
 # Re-exported via the shim at the top.
-from embedding_utils import (
-    batch_cosine as _batch_cosine_py,
-)
+from embedding_utils import HAS_NUMPY as _HAS_NUMPY
 from embedding_utils import (
     infer_change_agent as _infer_change_agent_util,
 )
 from embedding_utils import (
     pack as _pack,
 )
-from embedding_utils import (
-    unpack as _unpack,
-)
-from embedding_utils import (
-    unpack_many as _unpack_many,
-)
-from embedding_utils import HAS_NUMPY as _HAS_NUMPY
 
 if _HAS_NUMPY:
-    import numpy as _np  # type: ignore
+    pass  # type: ignore
 
 logger = logging.getLogger("memory_core")
 # Default context (memory/agent_memory.db unless M3_DATABASE overrides at
@@ -646,12 +605,10 @@ def _track_cost(operation: str, tokens_est: int = 0):
 # HTTP-client singleton, fallback URL, backend stats, _embedded_label,
 # and set_embed_override moved to bin/memory/embed.py in Phase 3.
 # Re-exported via the shim at the top.
-import httpx as _httpx  # kept; other memory_core code may reference _httpx
 # Legacy back-compat: `_ThreadLock` was imported inline in the original
 # embed-stats block. The API snapshot captured it as a public symbol;
 # preserve as an explicit re-export. Pure alias for threading.Lock.
 from threading import Lock as _ThreadLock  # noqa: F401
-
 
 # The cascade itself (_embed, _embed_many, EMBED_BULK_CHUNK,
 # EMBED_BULK_CONCURRENCY, _EMBED_BULK_SEM, _EMBED_SEM, _EMBED_DIM_VALIDATED)
