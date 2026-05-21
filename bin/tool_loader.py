@@ -61,8 +61,8 @@ def load_domain(domain: str) -> str:
 
 def list_domains() -> str:
     """Impl for `tools_list_domains` MCP tool."""
-    from tool_domains import DOMAIN_DESCRIPTIONS, group_by_domain
     import mcp_tool_catalog
+    from tool_domains import DOMAIN_DESCRIPTIONS, group_by_domain
 
     all_names = [t.name for t in mcp_tool_catalog.TOOLS]
     grouped = group_by_domain(all_names)

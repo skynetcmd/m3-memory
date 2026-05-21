@@ -6,7 +6,6 @@ and replaces matches with [REDACTED:<group>]. Disabled by default.
 """
 
 import hashlib
-import logging
 import os
 import re
 import threading

@@ -20,11 +20,11 @@ import chatlog_status
 import memory_core
 import memory_maintenance
 import memory_sync
-from m3_sdk import active_database
 
 # files-memory tool impls. Imported lazily-friendly: the package is
 # self-contained and has no circular dependency on memory_core.
 from files_memory import tools as _files_tools
+from m3_sdk import active_database
 
 # ── Validation Constants (hoisted from memory_bridge.py) ─────────────────────
 MAX_CONTENT_SIZE = 50_000

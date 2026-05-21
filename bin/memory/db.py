@@ -39,8 +39,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from m3_sdk import M3Context, resolve_db_path
 from embedding_utils import infer_change_agent as _infer_change_agent_util
+from m3_sdk import M3Context, resolve_db_path
 
 from . import config
 

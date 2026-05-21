@@ -44,24 +44,22 @@ import json
 import logging
 import os
 import re
-import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
+from . import config as _config
 from .config import (
+    _DEFAULT_VALID_ENTITY_PREDICATES,
+    _DEFAULT_VALID_ENTITY_TYPES,
+    _ENV_ENTITY_VOCAB_YAML,
     DEFAULT_ENTITY_VOCAB_YAML,
     ENTITY_EXTRACT_MAX_ATTEMPTS,
     ENTITY_RESOLVE_COSINE_MIN,
     ENTITY_RESOLVE_FUZZY_MIN,
-    _DEFAULT_VALID_ENTITY_PREDICATES,
-    _DEFAULT_VALID_ENTITY_TYPES,
-    _ENV_ENTITY_VOCAB_YAML,
 )
-from . import config as _config
-from .db import _db, _gate_active, _ENTITY_COUNT_QUERY
+from .db import _ENTITY_COUNT_QUERY, _db, _gate_active
 from .embed import _embed_canonical_cached
 from .util import sha256_hex as _sha256_hex
 

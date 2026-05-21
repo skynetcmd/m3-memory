@@ -19,7 +19,6 @@ Public API:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -28,7 +27,7 @@ import sqlite3
 import time
 import uuid as _uuid
 from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from typing import Optional
 
 from embedding_utils import pack
 
@@ -177,7 +176,7 @@ def _parse_facts_json(raw: str) -> list[ExtractedFact]:
 
     try:
         obj = json.loads(obj_text)
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
         # One retry: drop trailing commas (common LLM tic).
         obj_text2 = re.sub(r",(\s*[}\]])", r"\1", obj_text)
         obj = json.loads(obj_text2)  # second failure propagates
