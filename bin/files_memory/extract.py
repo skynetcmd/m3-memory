@@ -27,7 +27,7 @@ import sqlite3
 import time
 import uuid as _uuid
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from embedding_utils import pack
 
@@ -417,7 +417,7 @@ def extract_for_pending_leaves(
     if not llm_available():
         return {"ok": 0, "failed": 0, "skipped": 0, "error": "no LLM endpoint configured"}
 
-    counts = {"ok": 0, "failed": 0, "skipped": 0}
+    counts: dict[str, Any] = {"ok": 0, "failed": 0, "skipped": 0}
     with _db(db_path) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(

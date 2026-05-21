@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 VAR = "M3_AUTO_ENRICH"
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -64,7 +65,7 @@ def _write_windows(value: str | None) -> None:
     # reg.exe / setx.exe are console binaries; CREATE_NO_WINDOW keeps them
     # from flashing a window. (Standalone copy of _task_runtime.no_window_kwargs
     # — this module has no sibling imports and stays dependency-free.)
-    no_window = {"creationflags": subprocess.CREATE_NO_WINDOW} if _is_windows() else {}
+    no_window: dict[str, Any] = {"creationflags": subprocess.CREATE_NO_WINDOW} if _is_windows() else {}
     if value is None:
         subprocess.run(
             ["reg", "delete", "HKCU\\Environment", "/F", "/V", VAR],
