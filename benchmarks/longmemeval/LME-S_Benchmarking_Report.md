@@ -1,5 +1,76 @@
-# LongMemEval-S Benchmark
+# LongMemEval-S (LME-S) Benchmark
+-------------------------
 
+
+2026.05.19 -- Hot off the press
+------------------
+M3's new smart engine has fresh retrieval numbers for LME-S. Throughout this section the metric is **session-hit-rate@k** — the fraction of questions where at least one of the top-k retrieved turns belongs to the question's gold-evidence session. It is the same metric the public LME-S report quotes (stock M3 = 96.8% @ k=10), so the comparison below is like-for-like.
+
+We're doing accuracy (QA) measurements and will publish those soon. But since so many systems highlight retrieval numbers alongside accuracy, we wanted to give you the data to do an apples-to-apples comparison.
+
+**These are raw-retrieval numbers — no knowledge graph.** Retrieval is over the raw conversation turns: hybrid FTS5 keyword + BGE-M3 vector cosine + MMR diversification, nothing more. There is no knowledge-graph construction, no LLM-extracted entities or relations, and no enrichment layer behind these figures. Retrieval is 100% lossless — the system returns verbatim turns, never a compressed or paraphrased summary. A separate **KG-enriched** leg is in progress and will be published as its own table; this report is the raw baseline it will be measured against.
+
+What this means: on LME-S benchmark data, m3 places a correct-session turn as the **#1** result for **~92%** of questions, and within the top 10 for **99%** — that saves you tokens and time.
+
+# Session-hit-rate@k with the new m3 engine
+
+**Engine:** m3-memory v2026.5.18.1 (`a639ee8c`) + m3-core-rs CUDA, BGE-M3 (Q4_K_M) embeddings, hybrid scoring + MMR diversification, per-instance `conversation_id` scoping.
+
+**Leg:** `m3-search` — raw retrieval, no KG. m3-memory's production `memory_search_scored_impl` over raw turns: hybrid FTS5 + BGE-M3 vector + MMR. No knowledge graph, no LLM enrichment, no oracle category knobs, no smart-retrieval, no rerank.
+
+**N:** 500 instances. Source: `lme_s.db` ingested from `longmemeval_s_cleaned.json`.
+
+---
+
+## Session-hit-rate by k
+
+A hit means at least one of the top-k retrieved turns shares a `session_idx` with one of the question's gold-flagged turns. This is the metric the public LME-S report quotes (stock M3 = 96.8% @ k=10).
+
+| Question type             |   N | k=1   | k=2   | k=3   | k=5   | k=10  | k=20   |
+|---------------------------|----:|------:|------:|------:|------:|------:|-------:|
+| knowledge-update          |  78 | 97.4% | 98.7% | 98.7% |100.0% |100.0% | 100.0% |
+| multi-session             | 133 | 94.0% | 95.5% | 97.7% | 98.5% | 99.2% | 100.0% |
+| single-session-assistant  |  56 | 98.2% | 98.2% | 98.2% | 98.2% |100.0% | 100.0% |
+| single-session-preference |  30 | 66.7% | 83.3% | 90.0% | 96.7% |100.0% | 100.0% |
+| single-session-user       |  70 | 92.9% | 92.9% | 95.7% | 98.6% | 98.6% | 100.0% |
+| temporal-reasoning        | 133 | 88.7% | 91.0% | 92.5% | 94.7% | 97.7% | 100.0% |
+| **OVERALL**               | **500** | **91.8%** | **94.0%** | **95.8%** | **97.6%** | **99.0%** | **100.0%** |
+
+---
+
+## Turn-hit-rate by k
+
+A stricter variant counts a hit only when at least one of the top-k retrieved turns is *itself* a gold-flagged turn (not merely a turn from the gold session). On LongMemEval-S every gold turn maps to exactly one session, so a question's "first gold hit" rank is identical under both metrics — the turn-hit-rate table is bit-identical to the session-hit-rate table above. The two would diverge only on a corpus where two distinct sessions can both be gold for the same question. No separate table is shown for that reason.
+
+---
+
+## Comparison to the public LME-S report
+
+| Metric | Public LME-S report (stock M3) | New engine (m3-search, this report) | Delta |
+|---|---:|---:|---:|
+| Session-hit-rate@k=10 | 96.8% | **99.0%** | +2.2pp |
+
+The public report's matched cell is session-hit-rate@k=10 = 96.8%. The new engine reaches **99.0%** at the same (k, metric), and **100%** at k=20.
+
+---
+
+## Method notes
+
+- Retrieval: m3-memory's `memory_search_scored_impl` called per-instance with `conversation_id=instance_id`, k=20, MMR enabled, no recency bias, no adaptive-k, no rerank. All defaults are the m3 production path's defaults except where overridden by the apples-to-apples adapter (`pipeline/m3_search_adapter.py`).
+- Embeddings: in-process BGE-M3 GGUF Q4_K_M via `m3_core_rs.EmbeddedEmbedder` (Rust llama.cpp, CUDA), tag `bge-m3-GGUF-Q4_K_M.gguf`. Query and corpus share the same embedder; no cross-space cosine.
+- Substrate: `lme_s_m3.db` sidecar built from `lme_s.db` by `pipeline/m3_search_adapter.py build`, holding 246,750 items / 500 conversations / FTS5 + embeddings populated.
+- Run wall: ~32 s for 500 instances on a single RTX 5080 at concurrency=1 (the m3-memory search is single-threaded per call).
+- Reproducibility: deterministic at temp=0 / no MMR randomness; same DB + same engine SHA produces bit-identical results.
+
+## Acknowledged gaps
+
+- These numbers are **retrieval hit-rate**, not QA accuracy. The public report's headline 89.0% is QA accuracy with a gpt-4o judge. See the Phase 5/6 follow-up for QA numbers on the same retrieval feed.
+- **This leg uses no knowledge graph and no LLM enrichment.** Retrieval is embedding-only: hybrid FTS5 + BGE-M3 vector cosine + MMR over the raw turns. The numbers above therefore do not depend on any extraction model.
+- A separate **KG-enriched** leg is in progress. To keep the methodology fully local-first, its knowledge graph is being extracted with a local model (Qwen 3.5-9B) rather than a frontier API; those KG-enriched hit-rates will be published as their own table once the extraction completes.
+- No rerank, no chain-of-note, no category-aware knobs, no time-aware expansion. These are the public report's "smart-retrieval" levers; this table is the no-knobs base case.
+
+Original LME-S Benchmark report: April 2026
+-------------------------------------------
 Without retrieval, the answer model scores 6–9%. With M3 Memory's hybrid retrieval, it reaches **89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500) — the 500-question long-horizon conversational memory benchmark from Wu et al., 2024.
 
 The 89.0% result uses oracle category metadata from the dataset. Without oracle metadata, accuracy is **74.8%** (smart retrieval with time-aware expansion) to **68.0%** (fixed-k baseline). Both numbers matter: the first measures the retrieval + answer ceiling; the second measures what the system achieves without privileged information.
