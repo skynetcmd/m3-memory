@@ -7,8 +7,18 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
+from embedding_utils import (
+    infer_change_agent as _infer_change_agent_util,
+)
+from embedding_utils import (
+    pack as _pack,
+)
+from embedding_utils import (
+    unpack as _unpack,
+)
 from m3_sdk import M3Context, resolve_db_path
 
+from . import embed as _embed_mod
 from .config import (
     AUTO_RELATED_LINK,
     AUTO_RELATED_LINK_SCOPE_BY_VARIANT,
@@ -16,22 +26,13 @@ from .config import (
     CONTRADICTION_TITLE_GATE,
     CONTRADICTION_TYPE_EXCLUSIONS,
     DEFAULT_CHANGE_AGENT,
-    EMBED_DIM,
     ENABLE_FACT_ENRICHED,
     INGEST_EVENT_ROWS,
     INGEST_GIST_ROWS,
     INGEST_WINDOW_CHUNKS,
     ORIGIN_DEVICE,
-    SUPERSEDES_PENALTY,
     VALID_SCOPES,
 )
-from embedding_utils import (
-    infer_change_agent as _infer_change_agent_util,
-    pack as _pack,
-    unpack as _unpack,
-)
-from . import db as _db_mod
-from . import embed as _embed_mod
 from .db import _db as _canonical_db
 
 
@@ -58,33 +59,23 @@ def _db(*args, **kwargs):
         pass
     return _canonical_db(*args, **kwargs)
 from .embed import (
-    _embed,
-    _embed_many,
-    _content_hash,
-    _get_embedded_embedder,
-    _record_embed_backend,
-    _embedded_label,
-    _subdivide_dense_chunk,
-    _chunk_for_sliding_window,
-    _augment_embed_text_with_anchors,
     _DENSE_ERR_RE,
     _EMBED_GGUF_MODEL_TAG,
+    _augment_embed_text_with_anchors,
+    _chunk_for_sliding_window,
+    _content_hash,
+    _embed,
+    _embedded_label,
+    _get_embedded_embedder,
+    _record_embed_backend,
+    _subdivide_dense_chunk,
 )
-from .emitters import (
-    _maybe_emit_event_rows,
-    _maybe_emit_window_chunk,
-    _maybe_emit_gist_row
-)
-from .enrich import (
-    _auto_classify,
-    _maybe_auto_title,
-    _maybe_auto_entities,
-    _try_enrich_or_enqueue,
-    _ingest_llm_enabled
-)
-from .entity import _run_entity_extractor, _try_extract_or_enqueue
+from .emitters import _maybe_emit_event_rows, _maybe_emit_gist_row, _maybe_emit_window_chunk
+from .enrich import _auto_classify, _ingest_llm_enabled, _maybe_auto_entities, _maybe_auto_title, _try_enrich_or_enqueue
+from .entity import _try_extract_or_enqueue
 from .fts import _augment_title_with_role
-from .util import _batch_cosine, sha256_hex as _sha256_hex, _check_content_safety
+from .util import _batch_cosine, _check_content_safety
+from .util import sha256_hex as _sha256_hex
 
 logger = logging.getLogger("memory.write")
 

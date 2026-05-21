@@ -21,11 +21,10 @@ import socket
 import time
 import uuid as _uuid
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from . import config
-from .chunkers import Leaf, chunk_file, chunker_version
+from .chunkers import chunk_file, chunker_version
 from .db import _db
 from .embed import (
     embed_texts,
@@ -260,7 +259,7 @@ def ingest_one_file(
 
         # 5. Summarize the file. Use raw text where available; else
         #    concatenate the leaf texts (PDF case).
-        summary_input = text if text else "\n\n".join(l.text for l in leaves[:20])
+        summary_input = text if text else "\n\n".join(leaf.text for leaf in leaves[:20])
         file_summary, file_summary_used_llm = summarize_file(
             summary_input, entry.filename, entry.filetype,
         )
@@ -369,7 +368,7 @@ def ingest_one_file(
         # Carry-forward diff (only meaningful when superseding a prior version).
         # Builds a per-new-leaf classification: carry | evolve | new.
         # Used below to skip re-embedding unchanged leaves.
-        from .carry_forward import compute_leaf_diffs, CarryForwardStats
+        from .carry_forward import CarryForwardStats, compute_leaf_diffs
         carry_stats = CarryForwardStats()
         if prior:
             leaf_diffs = compute_leaf_diffs(conn, prior["uuid"], leaves)
@@ -495,9 +494,7 @@ def ingest_one_file(
         fact_count = 0
         if extract_mode == "inline" and leaf_records:
             try:
-                from .extract import (
-                    extract_facts_for_leaf, write_extraction_result, llm_available
-                )
+                from .extract import extract_facts_for_leaf, llm_available, write_extraction_result
                 if llm_available():
                     model_id = (
                         os.environ.get("M3_FILES_EXTRACT_MODEL")
@@ -598,7 +595,6 @@ def _single_file_entry(path: str, *, repo_root: Optional[str] = None) -> WalkEnt
     Used when ingest_path() receives a file path rather than a directory.
     Mirrors the per-file fields the walker would populate.
     """
-    from .identity import filetype_for
     abs_path = os.path.abspath(path)
     st = os.stat(abs_path)
     repo_root_abs = os.path.abspath(repo_root) if repo_root else os.path.dirname(abs_path)

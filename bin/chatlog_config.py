@@ -51,6 +51,7 @@ logger = logging.getLogger("chatlog_config")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 from m3_sdk import get_m3_root
+
 _M3_ROOT = get_m3_root()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

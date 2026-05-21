@@ -80,7 +80,16 @@ jobs:
       # CVE-2026-3219: pip itself — present because pip is in every venv,
       # but pip is not a shipped runtime dependency of m3-memory. Ignored
       # so the audit signal stays focused on actual shipped-library CVEs.
-      run: /tmp/m3-core/bin/pip-audit --strict -l --ignore-vuln CVE-2026-3219
+      #
+      # PYSEC-2025-183: pyjwt "weak encryption" — affects ALL pyjwt versions
+      # (0.1.1–2.12.1) with no fixed version published, so it cannot be
+      # resolved by upgrading. The advisory is disputed by the pyjwt
+      # maintainers: the concern is the key length chosen by the calling
+      # application, not a flaw in the library. m3-memory's own code never
+      # imports `jwt`; pyjwt is present only transitively via the `mcp`
+      # core dependency, so the weak-key-length path is not reachable
+      # through m3-memory. Ignored; revisit if pyjwt ships a real fix.
+      run: /tmp/m3-core/bin/pip-audit --strict -l --ignore-vuln CVE-2026-3219 --ignore-vuln PYSEC-2025-183
 
   test:
     name: Test on ${{ matrix.os }}

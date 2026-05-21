@@ -17,7 +17,6 @@ PyMuPDF-only mode for layout-aware bbox extraction.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Iterator
 
 from . import Leaf

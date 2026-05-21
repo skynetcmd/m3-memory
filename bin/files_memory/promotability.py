@@ -32,7 +32,6 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from . import config
 from .db import _db
 
 logger = logging.getLogger("files_memory.promotability")

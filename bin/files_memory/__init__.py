@@ -24,26 +24,28 @@ Cross-DB linkage is via UUID references only — never direct table joins.
 # Submodules are imported as they land. The package boots cleanly even
 # during phased construction — each `from . import X` line is added when
 # module X exists, so `import files_memory` always works.
-from . import config  # noqa: F401
-from . import db  # noqa: F401
-from . import identity  # noqa: F401
-from . import walker  # noqa: F401
-from . import chunkers  # noqa: F401
-from . import summarize  # noqa: F401
-from . import embed  # noqa: F401
-from . import entities  # noqa: F401
-from . import extract  # noqa: F401
-from . import ingest  # noqa: F401
-from . import search  # noqa: F401
-from . import index  # noqa: F401
-from . import promote  # noqa: F401
-from . import staleness  # noqa: F401
-from . import provenance  # noqa: F401
-from . import carry_forward  # noqa: F401
-from . import promotability  # noqa: F401
-from . import dedup  # noqa: F401
-from . import corpora  # noqa: F401
-from . import watch  # noqa: F401
+from . import (
+    carry_forward,  # noqa: F401
+    chunkers,  # noqa: F401
+    config,  # noqa: F401
+    corpora,  # noqa: F401
+    db,  # noqa: F401
+    dedup,  # noqa: F401
+    embed,  # noqa: F401
+    entities,  # noqa: F401
+    extract,  # noqa: F401
+    identity,  # noqa: F401
+    index,  # noqa: F401
+    ingest,  # noqa: F401
+    promotability,  # noqa: F401
+    promote,  # noqa: F401
+    provenance,  # noqa: F401
+    search,  # noqa: F401
+    staleness,  # noqa: F401
+    summarize,  # noqa: F401
+    walker,  # noqa: F401
+    watch,  # noqa: F401
+)
 
 # `tools` is the MCP/CLI entry point. NOT imported eagerly because it's a
 # `python -m files_memory.tools …` target — eager import here would

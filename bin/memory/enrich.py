@@ -7,13 +7,13 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+from llm_failover import get_best_llm, get_smallest_llm
 from m3_sdk import M3Context, resolve_db_path
-from llm_failover import get_best_llm, get_smallest_llm, clear_failover_caches
 
-from .config import EMBED_DIM, ORIGIN_DEVICE
 from . import config as _config
-from .util import sha256_hex as _sha256_hex
+from .config import ORIGIN_DEVICE
 from .db import _record_history
+from .util import sha256_hex as _sha256_hex
 
 
 def _read_gate(name: str):
@@ -38,8 +38,7 @@ def _read_gate(name: str):
         pass
     return getattr(_config, name)
 from .db import _db
-from .embed import _embed, _content_hash, _get_embed_client
-from .entity import _run_entity_extractor
+from .embed import _content_hash, _get_embed_client
 
 logger = logging.getLogger("memory.enrich")
 
@@ -61,6 +60,7 @@ _AUTO_ENTITIES_CACHE: dict[str, list[str]] = {}
 # now re-exports the names through `_resolve_mc_callbacks()` so legacy
 # patching still works.
 from .config import FACT_ENRICH_CONCURRENCY
+
 _FACT_ENRICH_SEM: asyncio.Semaphore = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
 _PENDING_FACT_TASKS: set[asyncio.Task] = set()
 

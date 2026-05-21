@@ -26,9 +26,9 @@ from functools import lru_cache as _lru_cache
 from threading import Lock as _ThreadLock
 
 import httpx as _httpx
-from m3_sdk import M3Context, resolve_db_path
-from llm_failover import get_best_embed
 from embedding_utils import unpack as _unpack
+from llm_failover import get_best_embed
+from m3_sdk import M3Context, resolve_db_path
 
 from . import config
 from .db import _db

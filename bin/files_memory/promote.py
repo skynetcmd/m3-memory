@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import sqlite3
 import uuid as _uuid
 from typing import Optional
@@ -348,7 +347,6 @@ def _write_to_memory_db(
     except RuntimeError as e:
         # Already in an event loop — run in a thread.
         if "running event loop" in str(e):
-            import threading
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                 result = ex.submit(lambda: asyncio.run(_run())).result()
