@@ -16,10 +16,9 @@ tool catalog.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 
-from . import config
-from .db import integrity_check, init_db, rebuild_fts
+from .db import integrity_check, rebuild_fts
 from .index import files_get, files_index, files_stats
 from .ingest import IngestResult, ingest_path
 from .search import files_search as _files_search
@@ -837,7 +836,6 @@ def _build_standalone_server():
 def main() -> int:
     import argparse
     import json as _json
-    import sys
 
     p = argparse.ArgumentParser(prog="files-memory")
     sub = p.add_subparsers(dest="cmd", required=True)

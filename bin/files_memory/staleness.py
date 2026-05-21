@@ -24,12 +24,10 @@ import logging
 import os
 import sqlite3
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
-from . import config
 from .db import _db
-from .identity import file_content_sha256, resolve_identity_key
+from .identity import file_content_sha256
 
 logger = logging.getLogger("files_memory.staleness")
 
@@ -411,9 +409,9 @@ def link_rename(
             raise ValueError(f"no file_node {missing_file_node_uuid!r}")
         if row["content_sha256"] != actual_sha:
             raise ValueError(
-                f"file_node content_sha256 differs from on-disk sha; "
-                f"cannot link a rename (content has changed too). "
-                f"Re-ingest the file instead, which will properly supersede."
+                "file_node content_sha256 differs from on-disk sha; "
+                "cannot link a rename (content has changed too). "
+                "Re-ingest the file instead, which will properly supersede."
             )
         if row["path_absolute"] == new_abs:
             return {

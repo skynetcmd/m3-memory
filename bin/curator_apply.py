@@ -131,8 +131,8 @@ def apply_chatlog_plan(plan: dict, db_path: Optional[str] = None) -> dict:
     `db_path` defaults to chatlog_config.chatlog_db_path() (the same resolver
     the chatlog subsystem uses everywhere).
     """
-    import chatlog_decay
     import chatlog_config
+    import chatlog_decay
     import memory_core
 
     resolved_db = db_path or chatlog_config.chatlog_db_path()

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Iterator, Protocol
+from typing import Iterator, Protocol
 
 logger = logging.getLogger("files_memory.chunkers")
 
@@ -60,9 +60,8 @@ class ChunkerProtocol(Protocol):
 # Registry — populated by submodule imports below
 # ──────────────────────────────────────────────────────────────────────────────
 from . import markdown as _markdown_chunker  # noqa: E402
-from . import pdf as _pdf_chunker            # noqa: E402
-from . import text as _text_chunker          # noqa: E402
-
+from . import pdf as _pdf_chunker  # noqa: E402
+from . import text as _text_chunker  # noqa: E402
 
 CHUNKER_REGISTRY: dict[str, object] = {
     "markdown": _markdown_chunker,

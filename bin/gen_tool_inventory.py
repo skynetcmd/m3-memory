@@ -287,7 +287,7 @@ def extract_argparse_sh(source: str) -> list[dict]:
         if default_match:
             default = default_match.group(1).strip()
             help_str = help_str.replace(default_match.group(0), "").strip()
-        
+
         args.append({
             "names": names,
             "help": help_str,
@@ -305,7 +305,7 @@ def is_cli_tool(source: str, name: str = "", tree: ast.Module | None = None) -> 
     """Decide whether a source file belongs in the inventory."""
     if name in CORE_LIBRARIES:
         return True
-    
+
     is_sh = name.endswith(".sh")
     if is_sh:
         # Any .sh file with a shebang or more than 10 lines of code is a tool
@@ -532,7 +532,7 @@ def parse_existing_flag_overrides(path: Path) -> dict[tuple[str, int], tuple[str
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) < 5:
             continue
-        
+
         if len(cells) == 5:
             # Legacy 5-column table migration:
             # | Flag(s) | Help | Default | Type/Action | Impact when set |
@@ -542,7 +542,7 @@ def parse_existing_flag_overrides(path: Path) -> dict[tuple[str, int], tuple[str
             # New 6-column table:
             # | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
             flag_cell, help_text, _default, default_behavior, _type, impact = cells[:6]
-        
+
         # First flag name, stripped of `` and commas.
         first_flag = flag_cell.split(",", 1)[0].strip().strip("`").strip()
         if not first_flag or first_flag == "_positional_":
@@ -755,7 +755,7 @@ def main() -> None:
         if tracked and src.resolve() not in tracked:
             untracked_skipped.append(str(src.relative_to(BASE_DIR)))
             continue
-        
+
         is_sh = src.name.endswith(".sh")
         try:
             source = src.read_text(encoding="utf-8")
@@ -785,7 +785,7 @@ def main() -> None:
             entry_points = extract_entry_points(tree, source)
             intra, external = extract_imports(tree, repo_mods, src.stem)
             external_calls = extract_external_calls(tree)
-            
+
         file_deps = extract_file_deps(source)
         sha1 = file_sha1(src)
         mtime = datetime.fromtimestamp(src.stat().st_mtime, tz=timezone.utc).isoformat()
