@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import json
 import logging
-import uuid
-from datetime import datetime, timezone
-from typing import Any
 
-from .config import ENTITY_SEED_STOPLIST, EMBED_DIM
+from .config import EMBED_DIM, ENTITY_SEED_STOPLIST
 from .db import _db
 from .embed import _embed
-from .entity import VALID_ENTITY_TYPES, VALID_ENTITY_PREDICATES
 from .fts import _ENTITY_MENTION_RE
 from .util import _cosine_batch_packed
 

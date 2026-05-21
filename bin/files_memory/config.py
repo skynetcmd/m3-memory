@@ -13,12 +13,6 @@ from __future__ import annotations
 import os
 
 # Re-exports from memory.config — single source of truth.
-from memory.config import (
-    FILES_DB_PATH,
-    FILES_DB_PROMPT_ON_FIRST_USE,
-    EMBED_DIM,
-    EMBED_MODEL,
-)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Schema version

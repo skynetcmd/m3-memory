@@ -38,7 +38,6 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Iterable
 
-
 # ── Domain partition ─────────────────────────────────────────────────────────
 
 # Order matters: first prefix match wins. Longer/more-specific prefixes go

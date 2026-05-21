@@ -36,11 +36,11 @@ __all__ = [
     "_EVENT_PROPER_NOUN",
 ]
 import logging
+
 logger = logging.getLogger("memory.fts")
 
 
 from . import config
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Temporal & Entity patterns (hoisted from search.py to break cycles)

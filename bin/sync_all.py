@@ -187,8 +187,8 @@ def main():
     parser = argparse.ArgumentParser(description="Hourly sync runner")
     parser.add_argument("--dry-run", action="store_true", help="Check connectivity only")
     sys.path.insert(0, str(BASE / "bin"))
-    from m3_sdk import add_database_arg
     from _task_runtime import add_log_file_arg, setup_task_runtime
+    from m3_sdk import add_database_arg
     add_log_file_arg(parser)
     add_database_arg(parser)
     args = parser.parse_args()

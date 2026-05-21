@@ -38,9 +38,6 @@ import time
 import uuid as _uuid
 from typing import Optional
 
-from embedding_utils import unpack_many
-
-from . import config
 from .db import _db
 
 logger = logging.getLogger("files_memory.dedup")
@@ -50,6 +47,7 @@ logger = logging.getLogger("files_memory.dedup")
 # Tunables
 # ──────────────────────────────────────────────────────────────────────────────
 import os as _os
+
 DEFAULT_THRESHOLD: float = float(_os.environ.get("M3_FILES_DEDUP_THRESHOLD", "0.92"))
 DEFAULT_MAX_PAIRS: int = int(_os.environ.get("M3_FILES_DEDUP_MAX_PAIRS", "500"))
 DEFAULT_LEAF_LIMIT: int = int(_os.environ.get("M3_FILES_DEDUP_LEAF_LIMIT", "10000"))
@@ -301,7 +299,6 @@ def review_dedup_candidate(
     if action not in valid_actions:
         raise ValueError(f"action must be one of {sorted(valid_actions)}; got {action!r}")
 
-    import json as _json
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     with _db(db_path) as conn:
         cur = conn.execute(
