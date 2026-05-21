@@ -19,13 +19,15 @@ defer imports here, because:
   2. Cold-start cost is negligible (~few ms). The original `memory_core`
      paid all of this already.
 """
-from . import config  # noqa: F401
-from . import util  # noqa: F401
-from . import fts  # noqa: F401
-from . import db  # noqa: F401
-from . import embed  # noqa: F401
-from . import chroma  # noqa: F401
-from . import search  # noqa: F401
-from . import entity  # noqa: F401
+from . import (
+    chroma,  # noqa: F401
+    config,  # noqa: F401
+    db,  # noqa: F401
+    embed,  # noqa: F401
+    entity,  # noqa: F401
+    fts,  # noqa: F401
+    search,  # noqa: F401
+    util,  # noqa: F401
+)
 
 __all__ = ["config", "util", "fts", "db", "embed", "chroma", "search", "entity"]

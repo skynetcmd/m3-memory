@@ -32,10 +32,10 @@ from datetime import date, datetime, timezone
 from m3_sdk import resolve_db_path
 
 from . import config
+from . import graph as _graph_mod
 from .config import (
     DEFAULT_RERANK_MODEL,
     EMBED_DIM,
-    ENTITY_SEED_STOPLIST,
     FEDERATION_LOW_SCORE_THRESHOLD,
     IMPORTANCE_WEIGHT,
     INTENT_ROUTING,
@@ -46,10 +46,7 @@ from .config import (
     TITLE_MATCH_BOOST,
     m3_core_rs,
 )
-from .chroma import _query_chroma
 from .db import _db, _enqueue_access_stamps
-from . import graph as _graph_mod
-from .graph import _graph_neighbor_ids, _session_neighbor_ids, _entity_graph_neighbor_ids, _score_extra_rows, memory_graph_impl
 
 
 def _resolve_graph_helper(name: str):
@@ -90,12 +87,9 @@ def _resolve_search_callable(name: str):
         pass
     # Resolve via the current module's globals — the canonical local copy.
     return globals()[name]
-from .embed import _embed
 from .fts import (
-    _DATE_MONTHS,
     _DATE_RE_ISO,
     _DATE_RE_LONG,
-    _ENTITY_MENTION_RE,
     _EVENT_PROPER_NOUN,
     _TEMPORAL_QUERY_RE,
     _TEMPORAL_ROUTER_RE,
@@ -105,8 +99,6 @@ from .fts import (
 )
 from .util import (
     _HAS_NUMPY,
-    _batch_cosine,
-    _batch_cosine_py,
     _cosine,
     _cosine_batch_packed,
     _np,
@@ -2303,7 +2295,7 @@ async def memory_search_multi_db_impl(
     sorted descending and truncated to `k`.
     """
     _resolve_mc_callbacks()  # bind memory_core callbacks on first call
-    from m3_sdk import active_database, resolve_db_path
+    from m3_sdk import active_database
 
     if isinstance(databases, str):
         paths = [p.strip() for p in databases.split(",") if p.strip()]

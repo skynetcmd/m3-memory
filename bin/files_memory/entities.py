@@ -35,7 +35,7 @@ import os
 import sqlite3
 import uuid as _uuid
 from contextlib import contextmanager
-from typing import Iterable, Iterator, Optional
+from typing import Iterator, Optional
 
 from . import config
 

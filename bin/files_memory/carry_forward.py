@@ -26,10 +26,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import sqlite3
-from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 logger = logging.getLogger("files_memory.carry_forward")
 

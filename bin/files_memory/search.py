@@ -23,7 +23,6 @@ from typing import Optional
 
 from embedding_utils import unpack
 
-from . import config
 from .db import _db
 from .embed import embed_texts
 

@@ -44,7 +44,7 @@ def generate_configs():
             for server_name, server_config in data["mcpServers"].items():
                 if "command" in server_config and server_config["command"] in ("python", "python3"):
                     server_config["command"] = python_cmd
-                
+
                 # Inject M3_MEMORY_ROOT into the env block
                 if "env" not in server_config:
                     server_config["env"] = {}

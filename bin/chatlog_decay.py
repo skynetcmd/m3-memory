@@ -75,10 +75,10 @@ import json
 import os
 import re
 import sqlite3
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
 
 # ── DB resolution ──────────────────────────────────────────────────────────
 def resolve_db_path(cli_arg: str | None) -> str:

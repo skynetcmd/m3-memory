@@ -14,9 +14,13 @@ from __future__ import annotations
 
 from crypto_provider import get_sha256 as _sha256_hex_py
 from embedding_utils import (
-    batch_cosine as _batch_cosine_py,
-    unpack_many as _unpack_many,
     HAS_NUMPY as _HAS_NUMPY,
+)
+from embedding_utils import (
+    batch_cosine as _batch_cosine_py,
+)
+from embedding_utils import (
+    unpack_many as _unpack_many,
 )
 
 if _HAS_NUMPY:
@@ -29,6 +33,7 @@ from . import config
 __all__ = ["sha256_hex", "_batch_cosine", "_cosine", "_cosine_batch_packed", "_check_content_safety"]
 import logging
 import re
+
 logger = logging.getLogger("memory.util")
 
 _POISON_PATTERNS = [

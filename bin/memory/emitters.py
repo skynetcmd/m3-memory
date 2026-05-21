@@ -3,19 +3,15 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
 from typing import Any
 
 from .config import (
-    INGEST_EVENT_ROWS,
-    INGEST_WINDOW_SIZE,
-    INGEST_WINDOW_CHUNKS,
     INGEST_GIST_MIN_TURNS,
     INGEST_GIST_STRIDE,
-    INGEST_GIST_ROWS
+    INGEST_WINDOW_SIZE,
 )
 from .db import _db
-from .fts import _EVENT_SENT_SPLIT, _EVENT_DATE_HINT, _EVENT_VERB_RE, _EVENT_PROPER_NOUN
+from .fts import _EVENT_DATE_HINT, _EVENT_PROPER_NOUN, _EVENT_SENT_SPLIT, _EVENT_VERB_RE
 
 logger = logging.getLogger("memory.emitters")
 
@@ -68,10 +64,10 @@ async def _maybe_emit_event_rows(
         except (json.JSONDecodeError, TypeError):
             meta_dict = {}
     session_id = meta_dict.get("session_id", "")
-    
+
     # Lazy import to avoid circularity
-    from .write import memory_write_impl, memory_link_impl
-    
+    from .write import memory_link_impl, memory_write_impl
+
     for sent, verb in events:
         ev_meta = {
             "source_message_id": parent_id,
@@ -127,10 +123,10 @@ async def _maybe_emit_window_chunk(conversation_id: str, user_id: str) -> None:
     joined = "\n".join((r["content"] or "") for r in window_rows if r["content"])
     if not joined.strip():
         return
-        
+
     # Lazy import
     from .write import memory_write_impl
-    
+
     try:
         await memory_write_impl(
             type="summary",
@@ -196,10 +192,10 @@ async def _maybe_emit_gist_row(conversation_id: str, user_id: str) -> None:
     gist = " | ".join(sentences[:12])
     if entities:
         gist = f"[{', '.join(entities[:16])}] {gist}"
-        
+
     # Lazy import
     from .write import memory_write_impl
-    
+
     try:
         await memory_write_impl(
             type="summary",
