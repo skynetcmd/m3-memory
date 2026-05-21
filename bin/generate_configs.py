@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from m3_sdk import get_m3_root
 except ImportError:
-    def get_m3_root():
+    def get_m3_root() -> str:
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def generate_configs():

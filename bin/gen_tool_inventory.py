@@ -775,8 +775,8 @@ def main() -> None:
             argparse_args = extract_argparse_sh(source)
             env_vars = extract_env_vars(source, is_sh=True)
             entry_points = ["Bash execution"]
-            intra = [] # shell script imports are hard to track accurately
-            external = []
+            intra: list[str] = [] # shell script imports are hard to track accurately
+            external: list[str] = []
             external_calls = {}
         else:
             doc = extract_docstring(tree)
