@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import date, datetime, timezone
 
 from m3_sdk import resolve_db_path
@@ -133,9 +134,11 @@ _MC_CALLBACKS_BOUND = False
 # Forward declarations for the deferred-bound callbacks above. These None
 # placeholders are overwritten by `_resolve_mc_callbacks()` before any impl
 # runs; they exist so static analysis sees the names defined at module scope.
-_prefer_observations_gate = None
-_two_stage_observations_gate = None
-_track_cost = None
+# Typed as Callable (the runtime binding is always a function) so callers
+# are not flagged as calling None.
+_prefer_observations_gate: Callable[..., object] = None  # type: ignore[assignment]
+_two_stage_observations_gate: Callable[..., object] = None  # type: ignore[assignment]
+_track_cost: Callable[..., object] = None  # type: ignore[assignment]
 
 
 def _resolve_mc_callbacks() -> None:
@@ -760,9 +763,9 @@ def _hybrid_score_batch(
         bm25_norm = 1.0 / (1.0 + abs(bm25_scores[i]))
         raw = vector_scores[i] * vector_weight + bm25_norm * (1.0 - vector_weight)
         clen = float(content_lens[i])
-        penalty = max(0.3, clen / stt) if clen < stt else 1.0
+        len_penalty: float = max(0.3, clen / stt) if clen < stt else 1.0
         out.append(
-            raw * penalty
+            raw * len_penalty
             + title_match_boost * title_overlaps[i]
             + importance_weight * float(importances[i])
         )

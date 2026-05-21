@@ -47,7 +47,7 @@ import re
 import uuid
 from pathlib import Path
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from . import config as _config
 from .config import (
@@ -756,8 +756,8 @@ def entity_search_impl(
     """
     with _db() as db:
         # Build the WHERE clause
-        where_parts = []
-        params = []
+        where_parts: list[str] = []
+        params: list[object] = []
 
         if query:
             # LIKE %query% on canonical_name (case-insensitive)

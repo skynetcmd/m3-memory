@@ -111,14 +111,14 @@ def chunk(path: str, text: str | None = None) -> Iterator[Leaf]:
 
     # Merge tail chunks that are below MIN_CHARS into previous.
     cleaned: list[tuple[int, int, str]] = []
-    for s, e, t in chunks:
+    for s, end, t in chunks:
         if cleaned and len(t) < MIN_CHARS:
             ps, pe, pt = cleaned[-1]
-            cleaned[-1] = (ps, e, (pt + "\n\n" + t).strip())
+            cleaned[-1] = (ps, end, (pt + "\n\n" + t).strip())
         else:
-            cleaned.append((s, e, t))
+            cleaned.append((s, end, t))
 
-    for i, (s, e, t) in enumerate(cleaned):
+    for i, (s, end, t) in enumerate(cleaned):
         if not t.strip():
             continue
         label = t.replace("\n", " ").strip()[:60]
@@ -130,7 +130,7 @@ def chunk(path: str, text: str | None = None) -> Iterator[Leaf]:
             division_id=str(i),
             division_label=label,
             char_range_start=s,
-            char_range_end=e,
+            char_range_end=end,
             boundary_confidence=0.8,
             extra={"paragraph_merge": True},
         )

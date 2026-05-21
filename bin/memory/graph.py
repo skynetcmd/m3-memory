@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 
 from .config import EMBED_DIM, ENTITY_SEED_STOPLIST
 from .db import _db
@@ -149,7 +150,9 @@ async def _entity_graph_neighbor_ids(
         return set()
 
     # Resolve entity stoplist: caller list (incl. explicit []) > env default.
-    _stoplist_lower: tuple = ()
+    # Frozenset (env default) or tuple (caller-derived) — only iterated and
+    # membership-tested downstream, so the common Collection type is enough.
+    _stoplist_lower: "Collection[str]" = ()
     if entity_stoplist is None:
         _stoplist_lower = ENTITY_SEED_STOPLIST
     else:
