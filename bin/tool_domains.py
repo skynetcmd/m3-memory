@@ -46,6 +46,7 @@ from typing import Iterable
 _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     # (prefix, domain)
     ("memory_search",       "memory"),
+    ("memory_supersede",    "memory"),
     ("memory_write",        "memory"),
     ("memory_get",          "memory"),
     ("memory_update",       "memory"),
@@ -91,6 +92,7 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
 ESSENTIAL_TOOL_NAMES: frozenset[str] = frozenset({
     "memory_search",
     "memory_write",
+    "memory_supersede",
     "memory_get",
     "chatlog_write",
     "chatlog_search",
