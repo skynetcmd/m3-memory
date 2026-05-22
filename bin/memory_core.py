@@ -318,6 +318,7 @@ from memory.util import sha256_hex as _sha256_hex  # noqa: F401 — re-export
 from memory.write import (  # noqa: F401 — re-exports
     _check_contradictions,
     memory_link_impl,
+    memory_supersede_impl,
     memory_write_bulk_impl,
     memory_write_impl,
 )
