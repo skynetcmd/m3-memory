@@ -418,6 +418,220 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     return result
 
 
+def _mark_superseded(
+    old_id: str,
+    new_id: str,
+    *,
+    close_at: str,
+    db,
+    actor_id: str = "",
+    prev_value: str | None = None,
+    require_active: bool = False,
+) -> bool:
+    """Mark ``old_id`` as superseded by ``new_id`` — the shared supersede write.
+
+    Closes ``old_id``'s validity interval (``is_deleted=1``, ``valid_to``),
+    writes a ``supersedes`` relationship edge new -> old, and records a
+    ``supersede`` history event. All writes go through the caller's already-open
+    connection ``db`` so they land in one transaction (and don't open a second
+    pool connection — see ``_record_history``'s note on WAL writer contention).
+
+    ``valid_to`` is set with ``COALESCE(NULLIF(valid_to, ''), ?)``: migration 010
+    declared ``valid_to TEXT DEFAULT ''``, so a normally-created row has
+    ``valid_to=''`` not ``NULL``. A bare ``COALESCE(valid_to, ?)`` would treat
+    ``''`` as already-set and never close the interval; ``NULLIF`` maps ``''``
+    back to ``NULL`` so ``COALESCE`` fills it, while a genuinely earlier
+    ``valid_to`` is preserved.
+
+    When ``require_active`` is True the UPDATE is gated on ``is_deleted = 0`` and
+    the return value reports whether a row was actually closed — callers use it
+    as a concurrency guard (a False means someone else closed ``old_id`` first,
+    so the edge + history are skipped). With ``require_active`` False the close
+    is unconditional and the function always returns True; this is the path for
+    callers (e.g. ``_check_contradictions``) that already hold the writer and
+    selected ``old_id`` from an ``is_deleted=0`` candidate set.
+
+    ``prev_value`` is recorded as the history event's previous value when the
+    caller has the old content cheaply to hand (``_check_contradictions`` does);
+    otherwise leave it None.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    # Two full literal statements rather than an f-string'd WHERE clause: keeps
+    # every SQL string a complete, greppable, parameterized literal (the `where`
+    # token would be module-controlled, not user input, but a static SQL scan
+    # can't know that — don't make it guess).
+    if require_active:
+        cur = db.execute(
+            "UPDATE memory_items SET is_deleted = 1, "
+            "valid_to = COALESCE(NULLIF(valid_to, ''), ?), updated_at = ? "
+            "WHERE id = ? AND is_deleted = 0",
+            (close_at, now_iso, old_id),
+        )
+    else:
+        cur = db.execute(
+            "UPDATE memory_items SET is_deleted = 1, "
+            "valid_to = COALESCE(NULLIF(valid_to, ''), ?), updated_at = ? "
+            "WHERE id = ?",
+            (close_at, now_iso, old_id),
+        )
+    if require_active and cur.rowcount != 1:
+        # old_id was closed concurrently between the caller's pre-check and now.
+        return False
+    db.execute(
+        "INSERT INTO memory_relationships "
+        "(id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+        (str(uuid.uuid4()), new_id, old_id, "supersedes", now_iso),
+    )
+    _record_history(old_id, "supersede", prev_value, new_id, "content", actor_id, db=db)
+    return True
+
+
+async def memory_supersede_impl(
+    old_id: str,
+    content: str,
+    type: str = "",
+    title: str = "",
+    metadata: str = "{}",
+    agent_id: str = "",
+    model_id: str = "",
+    change_agent: str = "",
+    importance: float = -1.0,
+    source: str = "agent",
+    embed: bool = True,
+    user_id: str = "",
+    scope: str = "",
+    valid_from: str = "",
+    variant: str | None = None,
+    embed_text: str | None = None,
+) -> str:
+    """Explicitly supersede memory ``old_id`` with a new memory.
+
+    Unlike ``memory_write``'s automatic contradiction detection — which fires on
+    a cosine + title heuristic and may or may not link the right prior memory —
+    this targets a *specific* ``old_id`` deterministically. Use it to record an
+    intentional update ("this fact replaces that one").
+
+    Non-destructive, mirroring the bi-temporal supersede pattern already used by
+    ``_check_contradictions``: the old row is retained, marked ``is_deleted=1``
+    with ``valid_to`` closed at ``valid_from`` (or now), and a ``supersedes``
+    edge is written new -> old. The old memory stays retrievable by id and via
+    history; it is just excluded from default search. ``as_of``-filtered
+    retrieval still sees it valid before the supersession point.
+
+    Inheritance sentinels (chosen so the value works both when called directly
+    and when delivered by the MCP typed-function layer, which substitutes the
+    catalog's schema default rather than ``None``):
+      * ``type`` / ``title`` / ``scope`` — empty string means "inherit from the
+        old memory".
+      * ``importance`` — any value < 0 (default ``-1.0``) means "inherit"; a
+        real importance is always in ``[0.0, 1.0]``.
+    So the caller passes only what changed.
+
+    Returns ``"Superseded <old_id> -> Created: <new_id>"`` on success, or an
+    ``"Error: ..."`` string (the old row is left untouched on any error).
+
+    Concurrency: the step-4 UPDATE carries ``WHERE is_deleted = 0`` and the
+    supersession is committed only if it changes a row. If a concurrent
+    supersede/delete closed ``old_id`` between the step-1 read and step-4, this
+    detects it, rolls back the just-created replacement, and returns an error —
+    so two racing callers can never both replace the same memory.
+    """
+    _resolve_mc_callbacks()
+
+    # 1. Fast pre-check: exists + active. This is NOT the correctness guard
+    #    (step 4's conditional UPDATE is) — it just fails cheaply, before the
+    #    expensive embed, on the common case, and supplies the fields to
+    #    inherit. A concurrent close after this read is caught at step 4.
+    with _db() as db:
+        row = db.execute(
+            "SELECT type, title, importance, scope, is_deleted "
+            "FROM memory_items WHERE id = ?",
+            (old_id,),
+        ).fetchone()
+    if row is None:
+        return f"Error: memory {old_id} not found — nothing to supersede"
+    if row["is_deleted"]:
+        return (
+            f"Error: memory {old_id} is already deleted/superseded "
+            "(supersede an active memory, or write a fresh one)"
+        )
+
+    # 2. Inherit unspecified fields from the old memory — the caller passes
+    #    only what changed. See the docstring for the sentinel convention:
+    #    empty string for type/title/scope, importance < 0 for importance.
+    new_type = type if type else row["type"]
+    new_title = title if title else (row["title"] or "")
+    new_importance = importance if importance >= 0 else row["importance"]
+    new_scope = scope if scope else (row["scope"] or "agent")
+
+    # 3. Create the replacement via memory_write_impl — reuses embedding,
+    #    history, enrichment, and the size/safety gates. Done BEFORE touching
+    #    the old row so a write failure leaves the old memory fully intact.
+    write_result = await memory_write_impl(
+        type=new_type,
+        content=content,
+        title=new_title,
+        metadata=metadata,
+        agent_id=agent_id,
+        model_id=model_id,
+        change_agent=change_agent,
+        importance=new_importance,
+        source=source,
+        embed=embed,
+        user_id=user_id,
+        scope=new_scope,
+        valid_from=valid_from,
+        variant=variant,
+        embed_text=embed_text,
+    )
+    if not write_result.startswith("Created:"):
+        # memory_write_impl returns "Error: ..." on a rejected write — propagate
+        # it verbatim; the old memory has not been modified.
+        return write_result
+    # memory_write_impl's success string is "Created: <uuid>[ (superseded ...)]".
+    # Extract the uuid defensively rather than trusting the exact format: if the
+    # token isn't UUID-shaped the contract changed underneath us — fail loudly
+    # instead of writing a supersedes edge to a garbage id.
+    new_id = write_result.split("Created:", 1)[1].strip().split()[0]
+    try:
+        uuid.UUID(new_id)
+    except (ValueError, AttributeError):
+        return (
+            f"Error: could not parse new memory id from memory_write result "
+            f"({write_result!r}); supersede aborted"
+        )
+
+    # 4. Close the old memory's validity interval via the shared helper. With
+    #    require_active=True its UPDATE is gated on is_deleted=0 and the return
+    #    value is the real concurrency guard: False means old_id was closed by a
+    #    concurrent supersede/delete after step 1's pre-check.
+    close_at = valid_from or datetime.now(timezone.utc).isoformat()
+    with _db() as db:
+        won_race = _mark_superseded(
+            old_id, new_id, close_at=close_at, db=db,
+            actor_id=agent_id, require_active=True,
+        )
+
+    if not won_race:
+        # The replacement created in step 3 is now orphaned — roll it back
+        # (soft-delete) so a failed supersede leaves no live side effect.
+        try:
+            with _db() as db:
+                db.execute(
+                    "UPDATE memory_items SET is_deleted = 1, updated_at = ? WHERE id = ?",
+                    (datetime.now(timezone.utc).isoformat(), new_id),
+                )
+        except Exception as e:  # pragma: no cover - best-effort cleanup
+            logger.warning(f"failed to roll back orphaned memory {new_id}: {e}")
+        return (
+            f"Error: memory {old_id} was superseded or deleted concurrently; "
+            f"this supersede was rolled back (orphan {new_id} soft-deleted)"
+        )
+
+    logger.info(f"Memory {new_id} explicitly supersedes {old_id} (valid_to={close_at})")
+    return f"Superseded {old_id} -> Created: {new_id}"
+
+
 async def memory_write_bulk_impl(
 
     items: list[dict],
@@ -953,26 +1167,21 @@ async def _check_contradictions(
                     fires = True
 
                 if fires:
-                    # Contradiction detected — supersede old memory.
-                    # Bi-temporal validity (Zep/Graphiti pattern, 2026-04-27):
-                    # close the older memory's validity interval at new memory's
-                    # valid_from. Falls back to now() when caller didn't supply
-                    # a valid_from. Lets retrieval that filters by `as_of` see
-                    # the older fact as still-valid before the supersession point.
-                    _now_iso = datetime.now(timezone.utc).isoformat()
-                    _close_at = new_valid_from or _now_iso
+                    # Contradiction detected — supersede old memory via the
+                    # shared helper. Bi-temporal validity (Zep/Graphiti pattern,
+                    # 2026-04-27): close the older memory's validity interval at
+                    # the new memory's valid_from, falling back to now() when the
+                    # caller supplied none — so `as_of`-filtered retrieval still
+                    # sees the older fact valid before the supersession point.
+                    # require_active=False: the candidate query above already
+                    # filtered is_deleted=0 and we hold the writer, so the close
+                    # is unconditional.
+                    _close_at = new_valid_from or datetime.now(timezone.utc).isoformat()
                     with _db() as db:
-                        db.execute(
-                            "UPDATE memory_items SET is_deleted = 1, "
-                            "valid_to = COALESCE(valid_to, ?), updated_at = ? "
-                            "WHERE id = ?",
-                            (_close_at, _now_iso, row["id"]),
+                        _mark_superseded(
+                            row["id"], item_id, close_at=_close_at, db=db,
+                            prev_value=row["content"],
                         )
-                        db.execute(
-                            "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
-                            (str(uuid.uuid4()), item_id, row["id"], "supersedes", _now_iso)
-                        )
-                    _record_history(row["id"], "supersede", row["content"], item_id, "content")
                     superseded.append(row["id"])
                     logger.info(f"Memory {item_id} supersedes {row['id']} (contradiction detected, valid_to={_close_at})")
             elif score > 0.7:

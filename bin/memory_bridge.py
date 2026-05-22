@@ -201,7 +201,8 @@ def _register_one(spec):
 def _register_initial_tools():
     """Initial registration set, called once at startup.
 
-    Lazy mode: meta-tools + essentials only (~6 tools, ~2.8 K tokens).
+    Lazy mode: meta-tools + essentials only (~9 tools — 2 meta + 7
+    essentials per tool_domains.ESSENTIAL_TOOL_NAMES — ~3.2 K tokens).
     Eager mode: every ToolSpec (~85 tools, ~15.8 K tokens — pre-2026-05 behavior).
     """
     _META_TOOLS = {"tools_list_domains", "tools_load_domain"}
