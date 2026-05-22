@@ -232,11 +232,30 @@ def _step_cpu_sovereign_embedder() -> bool:
         _ok("sovereign CPU embedder registered and running on port 8082")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        _warn(
-            f"CPU embedder install failed: {e}. "
-            "m3 still works (Python-side embed fallback); retry with "
-            "`m3 embedder install` once you've resolved the issue."
-        )
+        _warn(f"CPU embedder install did not complete: {e}")
+        # m3 still works without it (the embed cascade falls through to the
+        # Python/HTTP tier) — so this is non-fatal. But print clear, per-OS
+        # instructions for getting the always-on embedder, because the most
+        # common cause is OS-specific (Windows needs elevation; mac/Linux may
+        # need the m3-embed-server binary or a linger setting).
+        print()
+        print("  To get the always-on CPU embedder, follow the steps for your OS:")
+        if sys.platform == "win32":
+            print("    Windows — the embedder registers as a Windows Service, which")
+            print("    needs Administrator rights. Open an *Administrator* terminal and run:")
+            print("        m3 embedder install")
+        elif sys.platform == "darwin":
+            print("    macOS — the embedder installs as a launchd user agent (no sudo).")
+            print("    Re-run, and if it still fails the m3-embed-server binary is")
+            print("    likely missing — install the Rust core, then retry:")
+            print("        m3 embedder install")
+        else:
+            print("    Linux — the embedder installs as a `systemd --user` unit (no sudo).")
+            print("    Re-run `m3 embedder install`. A `--user` service stops at logout;")
+            print("    to keep it running across logout / on a headless box also run:")
+            print("        loginctl enable-linger \"$USER\"")
+        print()
+        print("  Until then, m3 still embeds via its Python/HTTP fallback tier.")
         return True  # non-fatal
 
 
