@@ -92,7 +92,11 @@ FILES_DB_PROMPT_ON_FIRST_USE: bool = os.environ.get(
 # ──────────────────────────────────────────────────────────────────────────────
 # Embedding model + transport
 # ──────────────────────────────────────────────────────────────────────────────
-EMBED_MODEL: str = os.environ.get("EMBED_MODEL", "qwen3-embedding")
+# BGE-M3 (1024-dim) is the canonical embedder for m3-memory. The store's
+# dominant embeddings are `text-embedding-bge-m3`; Qwen embedding is retired.
+# Mixing models in one store produces semantically incomparable vectors, so
+# the default must name BGE-M3 — an operator can still override via EMBED_MODEL.
+EMBED_MODEL: str = os.environ.get("EMBED_MODEL", "text-embedding-bge-m3")
 EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "1024"))
 EMBED_TIMEOUT_READ: float = 30.0
 ORIGIN_DEVICE: str = os.environ.get("ORIGIN_DEVICE", platform.node())
