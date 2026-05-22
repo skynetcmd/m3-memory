@@ -88,6 +88,31 @@ def _memory_write_validator(args: dict) -> Any:
         args["auto_classify"] = True
     return args
 
+def _memory_supersede_validator(args: dict) -> Any:
+    """Validator for memory_supersede. Like _memory_write_validator but `type`
+    is optional — an empty type means "inherit the old memory's type" (see
+    memory_supersede_impl). `old_id` must be a non-empty string."""
+    old_id = args.get("old_id", "")
+    if not old_id or not str(old_id).strip():
+        return "Error: old_id is required (the id of the memory to supersede)."
+    args["old_id"] = str(old_id).strip()
+    t = args.get("type", "")
+    # Empty type is the inherit-from-old sentinel; only validate a non-empty one.
+    if t and t not in VALID_MEMORY_TYPES:
+        return f"Error: invalid memory type '{t}'. Valid types: {', '.join(sorted(VALID_MEMORY_TYPES))}"
+    content = args.get("content", "") or ""
+    if content and len(content) > MAX_CONTENT_SIZE:
+        return f"Error: content too large ({len(content)} chars). Maximum is {MAX_CONTENT_SIZE}."
+    md = args.get("metadata", "{}")
+    if isinstance(md, dict):
+        args["metadata"] = json.dumps(md)
+    elif isinstance(md, str) and md and md != "{}":
+        try:
+            json.loads(md)
+        except (ValueError, json.JSONDecodeError):
+            return "Error: metadata is not valid JSON."
+    return args
+
 def _memory_search_validator(args: dict) -> Any:
     q = args.get("query", "")
     if not q or not str(q).strip():
@@ -396,6 +421,52 @@ TOOLS: list[ToolSpec] = [
         impl=memory_core.memory_write_from_file_impl,
         is_async=True,
         validators=(_memory_write_validator,),
+        default_allowed=True,
+        inject_agent_id=True,
+    ),
+    ToolSpec(
+        name="memory_supersede",
+        description=(
+            "Explicitly supersede an existing memory with a new one. Use this to "
+            "record an intentional update — 'this fact replaces that specific "
+            "memory' — when you know the old memory's id. Unlike memory_write's "
+            "automatic contradiction detection (a cosine + title heuristic that "
+            "may link the wrong prior memory or none at all), this targets the "
+            "given old_id deterministically. Non-destructive: the old memory is "
+            "retained, its validity interval is closed (is_deleted=1, valid_to "
+            "set), and a 'supersedes' edge is recorded new -> old. The old "
+            "memory stays retrievable by id and via memory_history, and "
+            "as_of-filtered search still sees it valid before the supersession "
+            "point — it is only dropped from default search. Fields you omit "
+            "(type, title, importance, scope) are inherited from the old memory, "
+            "so pass only what changed. To hard-delete instead, that is a "
+            "separate gated tool (memory_delete)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "old_id":       {"type": "string", "description": "Id (full UUID) of the memory being superseded. Must exist and not already be deleted/superseded."},
+                "content":      {"type": "string", "description": "Body of the replacement memory (max 50000 chars)."},
+                "type":         {"type": "string", "description": f"Memory type of the replacement. Omit to inherit the old memory's type. One of: {', '.join(sorted(VALID_MEMORY_TYPES))}.", "default": ""},
+                "title":        {"type": "string", "description": "Title of the replacement. Omit to inherit the old memory's title.", "default": ""},
+                "metadata":     {"type": "string", "description": "JSON-encoded metadata object for the replacement.", "default": "{}"},
+                "agent_id":     {"type": "string", "description": "Owning agent id. Injected by the orchestrator.", "default": ""},
+                "model_id":     {"type": "string", "description": "Originating model id.", "default": ""},
+                "change_agent": {"type": "string", "description": "Agent causing the supersede (audit).", "default": ""},
+                "importance":   {"type": "number", "description": "0.0-1.0 relevance of the replacement. Omit (leave at -1) to inherit the old memory's importance.", "default": -1.0},
+                "source":       {"type": "string", "description": "Provenance tag.", "default": "agent"},
+                "embed":        {"type": "boolean", "description": "Embed the replacement for semantic search.", "default": True},
+                "user_id":      {"type": "string", "description": "Data subject id.", "default": ""},
+                "scope":        {"type": "string", "description": "Isolation scope of the replacement. Omit to inherit the old memory's scope.", "default": ""},
+                "valid_from":   {"type": "string", "description": "ISO-8601 validity start of the replacement; also the point at which the old memory's validity is closed. Defaults to now.", "default": ""},
+                "variant":      {"type": "string", "description": "Pipeline identifier for A/B variant tracking.", "default": ""},
+                "embed_text":   {"type": "string", "description": "Override text used for embedding; falls back to content when empty.", "default": ""},
+            },
+            "required": ["old_id", "content"],
+        },
+        impl=memory_core.memory_supersede_impl,
+        is_async=True,
+        validators=(_memory_supersede_validator,),
         default_allowed=True,
         inject_agent_id=True,
     ),
