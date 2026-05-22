@@ -329,8 +329,13 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
             else:
                 other_models.append(model_id)
 
-        # Prefer embedding model from this endpoint
+        # Prefer embedding model from this endpoint. When the endpoint
+        # advertises several embed models, pick BGE-M3 — it is m3-memory's
+        # canonical embedder; a blind `[0]` could otherwise select a retired
+        # model (e.g. qwen3-embedding), producing vectors that are
+        # semantically incomparable to the rest of the store.
         if embed_models:
+            embed_models.sort(key=lambda m: 0 if "bge-m3" in m.lower() else 1)
             _EMBED_ENDPOINT_CACHE = (endpoint, embed_models[0])
             return _EMBED_ENDPOINT_CACHE
 
