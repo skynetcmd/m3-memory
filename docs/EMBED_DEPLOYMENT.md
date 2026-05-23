@@ -256,19 +256,24 @@ Wired and compiles, but not exercised in this repo.
 | **CPU Sovereign** | `embedded` | 3.11, 3.12, 3.14 |
 
 ---
+## Sovereign HTTP fallback (port 8082)
 
-## CPU HTTP fallback (port 8082)
-
-`m3-embed-server` is a CPU-only HTTP embedder that wraps the same
+`m3-embed-server` is an HTTP embedder that wraps the same
 `m3-embed-llamacpp` in-process backend behind an OpenAI-compatible HTTP API.
-It is the deterministic fallback for the in-process path and is intended to
-run as a Windows Service.
+It is the deterministic fallback for the in-process path.
 
-### Build the binary
+### Build
 
-```powershell
-cd C:\Users\<USER>\m3-core-rs
+```bash
+cd ~/m3-core-rs
+
+# For CPU (Universal)
 cargo build -p m3-embed-server --release --features embedded
+
+# For Metal GPU (macOS Apple Silicon)
+cargo build -p m3-embed-server --release --features embedded-metal
+```
+
 # Binary at: C:\Users\<USER>\m3-core-rs\target\release\m3-embed-server.exe
 ```
 
