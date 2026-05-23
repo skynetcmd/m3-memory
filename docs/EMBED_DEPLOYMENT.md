@@ -237,18 +237,23 @@ Wired and compiles, but not exercised in this repo.
 ### Metal build (macOS only)
 
 1. Install Xcode Command Line Tools: `xcode-select --install`.
-2. Build the wheel:
+2. Install `cmake` via Homebrew: `brew install cmake`.
+3. Build the wheel:
 
    ```bash
    cd ~/m3-core-rs/crates/m3-core-py
-   python -m maturin build --release --features embedded-metal
+   # Build for specific Python versions (e.g., 3.12)
+   python -m maturin build --release --features embedded-metal --interpreter python3.12
    ```
 
    `embed_backend_label()` should return `metal`.
 
-> The `embedded-metal` feature is compile-gated to `target_os = "macos"`.
-> A Linux/Windows wheel built with this feature will fail to compile rather
-> than silently produce a CPU-only artifact.
+> **Pre-compiled macOS Wheels**: If you are using the `skynetcmd/m3-core-rs` repository, check the GitHub Actions "Build macOS Wheels" workflow for pre-compiled artifacts for Python 3.11, 3.12, and 3.14.
+
+| Variant | Build Feature | Target Python |
+| :--- | :--- | :--- |
+| **Metal GPU** | `embedded-metal` | 3.11, 3.12, 3.14 |
+| **CPU Sovereign** | `embedded` | 3.11, 3.12, 3.14 |
 
 ---
 

@@ -10,9 +10,9 @@ Tests the MCP Tool Execution Proxy (localhost:9000) with:
 
 Usage:
   # Start proxy first:
-  bash ~/m3-memory/bin/start_mcp_proxy.sh --background
+  bash ~/m3-memory/repo/bin/start_mcp_proxy.sh --background
   # Then run:
-  python3 ~/m3-memory/bin/test_mcp_proxy.py
+  python3 ~/m3-memory/repo/bin/test_mcp_proxy.py
 """
 
 import asyncio
