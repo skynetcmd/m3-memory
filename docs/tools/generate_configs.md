@@ -1,8 +1,8 @@
 ---
 tool: bin/generate_configs.py
-sha1: 44eb90c6e663
-mtime_utc: 2026-04-22T01:03:02.031002+00:00
-generated_utc: 2026-05-01T13:05:26.800288+00:00
+sha1: 341823509aa2
+mtime_utc: 2026-05-23T12:31:13.381072+00:00
+generated_utc: 2026-05-23T17:51:49.100468+00:00
 private: false
 ---
 
@@ -34,7 +34,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (get_m3_root)`
 
 ---
 

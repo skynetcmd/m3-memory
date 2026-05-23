@@ -1,8 +1,8 @@
 ---
 tool: bin/llm_failover.py
-sha1: 719cf39c5dd9
-mtime_utc: 2026-05-01T03:34:53.532005+00:00
-generated_utc: 2026-05-01T13:05:26.809112+00:00
+sha1: fe1713d825fa
+mtime_utc: 2026-05-23T13:00:03.722021+00:00
+generated_utc: 2026-05-23T17:51:49.110920+00:00
 private: false
 ---
 

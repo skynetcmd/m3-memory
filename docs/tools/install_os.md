@@ -1,8 +1,8 @@
 ---
 tool: install_os.py
-sha1: 079431b99330
-mtime_utc: 2026-05-06T22:48:59.653268+00:00
-generated_utc: 2026-05-06T23:11:45.914444+00:00
+sha1: d79274700cb7
+mtime_utc: 2026-05-23T12:31:13.420240+00:00
+generated_utc: 2026-05-23T17:51:49.355490+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 112)
+- `def main()` (line 155)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -30,6 +30,7 @@ _(no argparse arguments detected)_
 ## Environment variables read
 
 - `AGENT_OS_MASTER_KEY`
+- `M3_MEMORY_ROOT`
 
 ---
 
@@ -43,13 +44,13 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['fnm', '--version']`` (line 106)
-- `subprocess.run()  → `['node', '--version']`` (line 81)
-- `subprocess.run()  → `['nvm', 'version']`` (line 72)
-- `subprocess.run()  → `['winget', '--version']`` (line 91)
-- `subprocess.run()  → `[python_exe, pg_sync_script]`` (line 171)
-- `subprocess.run()  → `cmd`` (line 17)
-- `subprocess.run()` (line 92)
+- `subprocess.run()  → `['fnm', '--version']`` (line 115)
+- `subprocess.run()  → `['node', '--version']`` (line 90)
+- `subprocess.run()  → `['nvm', 'version']`` (line 81)
+- `subprocess.run()  → `['winget', '--version']`` (line 100)
+- `subprocess.run()  → `[python_exe, pg_sync_script]`` (line 217)
+- `subprocess.run()  → `cmd`` (line 26)
+- `subprocess.run()` (line 101)
 
 
 ---

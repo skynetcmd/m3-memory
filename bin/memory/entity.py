@@ -125,11 +125,11 @@ _TOKEN_PUNCT_RE = re.compile(r"[^\w\s]")
 def _token_jaccard(a: str, b: str) -> float:
     """Token-set Jaccard similarity, lowercased, punctuation-stripped, whitespace-tokenized.
 
-    Strips ASCII punctuation before tokenization so that "Alex Johnson,"
-    tokenizes the same way as "Alex Johnson" — important when entity
-    strings come out of an SLM extractor that occasionally emits trailing
-    commas/periods.
+    Tries m3_core_rs.token_jaccard first (Rust), falls back to pure-Python.
     """
+    if _config.m3_core_rs is not None:
+        return _config.m3_core_rs.token_jaccard(a, b)
+
     ta = {t for t in _TOKEN_PUNCT_RE.sub(" ", a.lower()).split() if t}
     tb = {t for t in _TOKEN_PUNCT_RE.sub(" ", b.lower()).split() if t}
     if not ta or not tb:
@@ -236,13 +236,29 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
         "SELECT id, canonical_name FROM entities WHERE entity_type = ?",
         (entity_type,),
     ).fetchall()
-    best_score, best_id = 0.0, None
-    for c in candidates:
-        s = _token_jaccard(canonical_name, c["canonical_name"])
-        if s > best_score:
-            best_score, best_id = s, c["id"]
-    if best_score >= ENTITY_RESOLVE_FUZZY_MIN and best_id is not None:
-        return best_id
+
+    if not candidates:
+        return None
+
+    # Tier-A perf: try the Rust batch path first (rayon parallel).
+    if _config.m3_core_rs is not None:
+        names = [c["canonical_name"] for c in candidates]
+        scores = _config.m3_core_rs.token_jaccard_batch(canonical_name, names)
+        best_score, best_id = 0.0, None
+        for i, s in enumerate(scores):
+            if s > best_score:
+                best_score, best_id = s, candidates[i]["id"]
+        if best_score >= ENTITY_RESOLVE_FUZZY_MIN and best_id is not None:
+            return best_id
+    else:
+        # Python fallback: sequential loop.
+        best_score, best_id = 0.0, None
+        for c in candidates:
+            s = _token_jaccard(canonical_name, c["canonical_name"])
+            if s > best_score:
+                best_score, best_id = s, c["id"]
+        if best_score >= ENTITY_RESOLVE_FUZZY_MIN and best_id is not None:
+            return best_id
 
     return None  # Tiers 1+2 only in sync path
 
@@ -270,18 +286,40 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
     if qvec is None:
         return None
 
-    best_score, best_id = 0.0, None
-    for c in candidates:
-        cvec = await _embed_canonical_cached(c["canonical_name"])
-        if cvec is None:
-            continue
-        s = _cosine(qvec, cvec)
-        if s > best_score:
-            best_score, best_id = s, c["id"]
+    # Tier-A perf: try the batched-cosine path.
+    if _config.m3_core_rs is not None:
+        valid_candidates = []
+        cvecs = []
+        for c in candidates:
+            cvec = await _embed_canonical_cached(c["canonical_name"])
+            if cvec is not None:
+                cvecs.append(cvec)
+                valid_candidates.append(c)
+        if not cvecs:
+            return None
+
+        # Single FFI call to compute all cosine similarities in parallel.
+        scores = _config.m3_core_rs.cosine_batch(qvec, cvecs)
+        best_score, best_id = 0.0, None
+        for i, s in enumerate(scores):
+            if s > best_score:
+                best_score, best_id = s, valid_candidates[i]["id"]
+    else:
+        # Legacy/Python path.
+        from .util import _cosine
+        best_score, best_id = 0.0, None
+        for c in candidates:
+            cvec = await _embed_canonical_cached(c["canonical_name"])
+            if cvec is None:
+                continue
+            s = _cosine(qvec, cvec)
+            if s > best_score:
+                best_score, best_id = s, c["id"]
 
     if best_score >= ENTITY_RESOLVE_COSINE_MIN and best_id is not None:
         return best_id
     return None
+
 
 
 def _create_entity(canonical_name: str, entity_type: str, attributes: dict, db) -> str:
