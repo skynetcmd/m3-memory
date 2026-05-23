@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Aider launcher — injects statusline via aider_patch.py
 # Uses aider's own embedded Python so all aider deps are available.
-# Add ~/m3-memory/bin to PATH before /opt/homebrew/bin to activate.
+# Add ~/m3-memory/repo/bin to PATH before /opt/homebrew/bin to activate.
 set -euo pipefail
 
 AIDER_REAL=/opt/homebrew/bin/aider
