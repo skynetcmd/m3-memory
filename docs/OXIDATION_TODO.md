@@ -110,6 +110,15 @@ is *not* done.
 
 ## Hygiene / smaller items
 
+- [x] **Project Oxidation Master Plan.** Recovered `m3_oxidation_plan.md` from
+  N5 Pro; ported to `docs/OXIDATION_PLAN.md`. (Completed 2026-05-23).
+
+- [x] **Benchmark Runners.** Ported `bench_longmemeval.py` and `bench_memory.py`
+  from the private prototype branch to `bin/`. (Completed 2026-05-23).
+
+- [ ] **Benchmark Datasets.** Restore `repo/data/longmemeval/` datasets for
+  1M+ row evaluations. (Still missing from the primary repositories).
+
 - [ ] **macOS Wheel Automation.** Create a GitHub Actions workflow in `m3-core-rs` to build and publish pre-compiled macOS wheels (Apple Silicon + Intel) with `embedded-metal` support. This removes the Xcode/Rust toolchain requirement for macOS users. See `docs/OXIDATION_FIXES.md` for current status.
 
 - [ ] **Full env-var reconcile re-sweep cadence.** `docs/tools/ENV_VAR_RECONCILE_REPORT.md`
