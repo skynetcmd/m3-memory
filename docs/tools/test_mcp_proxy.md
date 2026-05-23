@@ -1,8 +1,8 @@
 ---
 tool: bin/test_mcp_proxy.py
-sha1: f4828f297b84
-mtime_utc: 2026-04-21T20:59:44.495160+00:00
-generated_utc: 2026-05-01T13:05:27.092410+00:00
+sha1: 346c4299e9ca
+mtime_utc: 2026-05-23T14:11:18.014264+00:00
+generated_utc: 2026-05-23T17:51:49.315116+00:00
 private: false
 ---
 
@@ -20,9 +20,9 @@ Tests the MCP Tool Execution Proxy (localhost:9000) with:
 
 Usage:
   # Start proxy first:
-  bash ~/m3-memory/bin/start_mcp_proxy.sh --background
+  bash ~/m3-memory/repo/bin/start_mcp_proxy.sh --background
   # Then run:
-  python3 ~/m3-memory/bin/test_mcp_proxy.py
+  python3 ~/m3-memory/repo/bin/test_mcp_proxy.py
 
 ---
 

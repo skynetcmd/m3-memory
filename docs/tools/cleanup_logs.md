@@ -1,8 +1,8 @@
 ---
 tool: bin/cleanup_logs.sh
-sha1: 6f994c98eb24
-mtime_utc: 2026-04-11T18:30:33.196467+00:00
-generated_utc: 2026-05-09T18:07:57.439609+00:00
+sha1: 3c29a5b7b302
+mtime_utc: 2026-05-23T12:31:13.375481+00:00
+generated_utc: 2026-05-23T17:51:49.059719+00:00
 private: false
 ---
 

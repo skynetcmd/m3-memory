@@ -1,8 +1,8 @@
 ---
 tool: bin/start_mcp_proxy.sh
-sha1: 6fb29a949ca6
-mtime_utc: 2026-04-07T04:04:58.142071+00:00
-generated_utc: 2026-05-09T18:07:57.849180+00:00
+sha1: 6f0cf6bf3552
+mtime_utc: 2026-05-23T14:11:45.522317+00:00
+generated_utc: 2026-05-23T17:51:49.296023+00:00
 private: false
 ---
 
@@ -11,7 +11,7 @@ private: false
 ## Purpose
 
 start_mcp_proxy.sh — Launch the MCP Tool Execution Proxy on localhost:9000
-Usage: bash ~/m3-memory/bin/start_mcp_proxy.sh [--background]
+Usage: bash ~/m3-memory/repo/bin/start_mcp_proxy.sh [--background]
 
 ---
 
@@ -29,12 +29,15 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
+- `BIN_DIR`
 - `EXISTING_PID`
 - `HOME`
 - `LOG_FILE`
 - `PID_FILE`
 - `PORT`
 - `PROXY_SCRIPT`
+- `PYTHON`
+- `WORKSPACE`
 
 ---
 

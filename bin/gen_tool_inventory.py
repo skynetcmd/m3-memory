@@ -50,7 +50,7 @@ OUT_DIR = BASE_DIR / "docs" / "tools"
 
 SKIP = {"gen_tool_inventory.py", "__init__.py"}
 PRIVATE = {
-    "discord_bot.py", "status_api.py", "embed_server_gpu.py",
+    "discord_bot.py", "status_api.py", "embed_server_gpu.py", "_task_runtime.py",
     # macOS-oriented — runs on Win/Linux too but primary UX is a macOS pulse
     # dashboard. Inventoried so imports show up in the call graph but flagged
     # in INDEX.md's "Private" column to dampen general visibility.
