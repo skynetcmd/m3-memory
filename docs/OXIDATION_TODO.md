@@ -107,6 +107,8 @@ is *not* done.
 
 ## Hygiene / smaller items
 
+- [ ] **macOS Wheel Automation.** Create a GitHub Actions workflow in `m3-core-rs` to build and publish pre-compiled macOS wheels (Apple Silicon + Intel) with `embedded-metal` support. This removes the Xcode/Rust toolchain requirement for macOS users. See `docs/OXIDATION_FIXES.md` for current status.
+
 - [ ] **Full env-var reconcile re-sweep cadence.** `docs/tools/ENV_VAR_RECONCILE_REPORT.md`
   was fully re-swept 2026-05-14 (all three groups). Re-run when new `M3_*` vars are
   added or `INDEX.md` is regenerated — the report's own "Re-running the audit" section
