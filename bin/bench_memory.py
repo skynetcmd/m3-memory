@@ -3,28 +3,20 @@
 Memory system benchmark script.
 Seeds test data, measures latency/throughput, reports pass/fail against targets.
 
-Usage: python bin/bench_memory.py [--database PATH]
-
-Point --database at a scratch DB (e.g. memory/bench.db) to keep benchmark
-data out of your live memory store. Default honors M3_DATABASE then falls
-back to memory/agent_memory.db.
+Usage: python bin/bench_memory.py
 """
-import argparse
-import json
-import os
-import random
 import sqlite3
-import statistics
-import struct
+import os
 import sys
+import json
 import time
 import uuid
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from m3_sdk import add_database_arg, resolve_db_path
-from sqlite_pragmas import apply_pragmas, profile_for_db
+import struct
+import random
+import statistics
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 
 TARGETS = {
     "write_throughput_items_per_sec": 50,
@@ -44,7 +36,7 @@ def _unpack(blob: bytes) -> list[float]:
 
 
 def _random_vec(dim: int = 768) -> list[float]:
-    return [random.gauss(0, 1) for _ in range(dim)]  # nosec B311 - benchmark noise, not cryptographic
+    return [random.gauss(0, 1) for _ in range(dim)]
 
 
 def _cosine(a, b):
@@ -54,11 +46,11 @@ def _cosine(a, b):
     return dot / (ma * mb) if (ma and mb) else 0.0
 
 
-def get_conn(db_path: str):
-    c = sqlite3.connect(db_path, timeout=10)
+def get_conn():
+    c = sqlite3.connect(DB_PATH, timeout=10)
     c.row_factory = sqlite3.Row
-    # Centralised pragma stack — "production" profile for the benchmark helper.
-    apply_pragmas(c, profile_for_db(db_path))
+    c.execute("PRAGMA journal_mode = WAL")
+    c.execute("PRAGMA busy_timeout = 5000")
     return c
 
 
@@ -77,7 +69,7 @@ def bench_write(conn, n=500):
                 origin_device, is_deleted, created_at)
                VALUES (?,?,?,?,?,?,?,?,0,?)""",
             (item_id, "bench_test", f"Bench item {i}",
-             f"Benchmark content for item {i} with random data {random.random()}",  # nosec B311 - benchmark filler, not cryptographic
+             f"Benchmark content for item {i} with random data {random.random()}",
              "{}", 0.5, "bench", "bench_host", ts),
         )
         vec = _random_vec()
@@ -146,7 +138,7 @@ def bench_fts_search(conn, trials=50):
     for i in range(trials):
         q = queries[i % len(queries)]
         t0 = time.perf_counter()
-        conn.execute(
+        rows = conn.execute(
             """SELECT mi.id, rank
                FROM memory_items_fts fts
                JOIN memory_items mi ON mi.rowid = fts.rowid
@@ -204,18 +196,12 @@ def cleanup(conn, ids):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Memory system benchmark.")
-    add_database_arg(parser)
-    args = parser.parse_args()
-
-    db_path = resolve_db_path(args.database)
-    if not os.path.exists(db_path):
-        print(f"Error: Database not found at {db_path}")
+    if not os.path.exists(DB_PATH):
+        print(f"Error: Database not found at {DB_PATH}")
         sys.exit(1)
 
-    print(f"Benchmarking: {db_path}")
-    conn = get_conn(db_path)
-    report = {"database": db_path}
+    conn = get_conn()
+    report = {}
     bench_ids = []
 
     try:
