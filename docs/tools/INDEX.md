@@ -1,13 +1,13 @@
 # Tool inventory index
 
-_Generated 2026-05-17T15:50:18.012021+00:00._
+_Generated 2026-05-23T17:55:30.064639+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
 
 | Tool | Summary | Private |
 |---|---|---|
-| [bin/_task_runtime.py](_task_runtime.md) | _task_runtime — shared runtime setup for m3-memory scheduled-task entrypoints. |  |
+| [bin/_task_runtime.py](_task_runtime.md) | _task_runtime — shared runtime setup for m3-memory scheduled-task entrypoints. | yes |
 | [bin/agent_protocol.py](agent_protocol.md) | (no docstring) |  |
 | [bin/ai-audit.sh](ai-audit.sh.md) | (no docstring) |  |
 | [bin/ai_mechanic.py](ai_mechanic.md) | (no docstring) |  |
@@ -34,6 +34,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/cleanup_logs.sh](cleanup_logs.sh.md) | (no docstring) |  |
 | [bin/cli_kb_browse.py](cli_kb_browse.md) | cli_kb_browse.py — Browse knowledge base entries in rank (importance) order. |  |
 | [bin/cli_knowledge.py](cli_knowledge.md) | (no docstring) |  |
+| [bin/curator_apply.py](curator_apply.md) | Deterministic apply of a curator plan — one entry point, no LLM in the loop. |  |
 | [bin/custom_tool_bridge.py](custom_tool_bridge.md) | (no docstring) |  |
 | [bin/debug_agent_bridge.py](debug_agent_bridge.md) | Debug Agent MCP Bridge — Autonomous debugging tools. |  |
 | [bin/deep_sync.py](deep_sync.md) | (no docstring) |  |
@@ -48,6 +49,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
 | [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
+| [bin/homecoming.py](homecoming.md) | bin/homecoming.py — "Homecoming" migration script for m3-memory. |  |
 | [bin/install_schedules.py](install_schedules.md) | M3 Memory: Cross-Platform Schedule Installer. |  |
 | [bin/llm_failover.py](llm_failover.md) | LLM Failover Module |  |
 | [bin/m3_autoenrich.py](m3_autoenrich.md) | Toggle the M3_AUTO_ENRICH env var on/off, cross-platform. |  |

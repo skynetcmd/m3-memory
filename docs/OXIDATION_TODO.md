@@ -17,12 +17,9 @@ is *not* done.
 
 ## Blocked on external artifacts
 
-- [ ] **GLiNER ONNX model export.** `m3-ner-ort` compiles (the `ort` `load-dynamic`
-  linkage works, `onnxruntime.dll` loads), but it cannot run NER — there is no
-  exported GLiNER `.onnx` model + `tokenizer.json` in the repo. Plan §4b.1 estimates
-  this as a 1–2 day export task. Until it exists, the NER backend is compile-verified
-  only. Owner decision: export the active GLiNER checkpoint, store under
-  `models/gliner/<version>.onnx` with a checksum manifest.
+- [x] **GLiNER ONNX model export.** Exported `urchade/gliner_small-v2.1` to
+  `repo/_assets/models/gliner/v1.onnx` + `tokenizer.json` with checksums.
+  (Completed 2026-05-23).
 
 - [ ] **Route shadow-mode corpus.** `auto_route.py` runs `M3_ROUTE_SHADOW_MODE=log`,
   comparing the Rust `decide_route` against Python `decide_branch`. But there is no
@@ -100,8 +97,14 @@ is *not* done.
 
 ## Future Performance Optimization Targets (Rust)
 
-- [ ] **Candidate-Assembly Loop Oxidation.** `memory_search_scored_impl` is heavily optimized at the math level (MMR, cosine) but still suffers from Python orchestration overhead (looping over up to 5,000 DB rows, building dictionaries). The entire hybrid scoring and filtering loop should be moved to Rust. A Rust function should take the query embedding and a raw buffer of results, performing the hybrid FTS5+vector logic natively to support 5M+ row haystacks at <50ms.
-- [ ] **Entity Resolution Speedup.** The 3-tier entity resolution (Exact → Token-Jaccard → Embedding) in `bin/memory/entity.py` is currently in Python. Fuzzy-matching against thousands of entities would benefit significantly from a Rust implementation.
+- [x] **Candidate-Assembly Loop Oxidation.** Refactored `search.py` to use
+  `rank_hybrid_packed` in Rust, eliminating thousands of dictionary allocations
+  per search and moving content-dedup + MMR to the Rust core.
+  (Completed 2026-05-23).
+
+- [x] **Entity Resolution Speedup.** Moved 3-tier entity resolution (Exact →
+  Token-Jaccard → Embedding) to use Rust-accelerated `token_jaccard_batch` and
+  `cosine_batch`. (Completed 2026-05-23).
 
 ---
 
@@ -114,10 +117,9 @@ is *not* done.
   added or `INDEX.md` is regenerated — the report's own "Re-running the audit" section
   has the trigger conditions.
 
-- [ ] **`bin/_task_runtime.py` not in the tool inventory.** `gen_tool_inventory.py`
-  skips leading-underscore modules, so `_task_runtime.py` (reader of
-  `M3_TASK_LOG_FILE`) has no `docs/tools/` entry. Either rename it, or teach the
-  generator to include underscore-prefixed modules.
+- [x] **`bin/_task_runtime.py` in tool inventory.** Generator tweaked to mark
+  it private; documentation entry now generated correctly.
+  (Completed 2026-05-23).
 
 - [ ] **`m3-core-rs` extraction vs. plan §9.4.** The plan assumed the Rust workspace
   would be extracted to a *public* repo at the Phase 2→3 boundary. It was — but the

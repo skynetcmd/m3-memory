@@ -1156,34 +1156,20 @@ async def memory_search_scored_impl(
         title_overlaps.append(_title_overlap_from_qset(q_title_set, row["title"] or ""))
 
     final_scores = _hybrid_score_batch(
-        page_scores,
-        bm25_arr,
-        content_lens,
-        importances,
-        title_overlaps,
-        vector_weight=vector_weight,
-        importance_weight=importance_w,
-        title_match_boost=title_boost_const,
-        short_turn_threshold=short_turn_t,
+        page_scores, bm25_arr, content_lens, importances, title_overlaps,
+        vector_weight=vector_weight, importance_weight=importance_w,
+        title_match_boost=title_boost_const, short_turn_threshold=short_turn_t,
     )
 
-    # Role-biased boost (Piece 2 of intent routing). Sparse — most queries
-    # don't have intent_hint set, so the loop body is fully skipped. When
-    # active, do a cheap substring pre-check on metadata_json before parsing
-    # JSON, since `'"role":"user"'` is what the boost looks for.
     intent_user_fact_active = INTENT_ROUTING and intent_hint == "user-fact"
-    role_boosts: list = [0.0] * len(rows)
+    role_boosts: list[float] = [0.0] * len(rows)
     if intent_user_fact_active:
         for i, row in enumerate(rows):
             try:
                 meta_raw = row["metadata_json"] if "metadata_json" in row.keys() else None
             except (IndexError, KeyError):
                 meta_raw = None
-            if not meta_raw:
-                continue
-            # Cheap pre-check: skip JSON parsing when "user" role isn't even
-            # mentioned. Avoids `json.loads` on every row in the pool.
-            if '"role"' not in meta_raw or '"user"' not in meta_raw:
+            if not meta_raw or '"role"' not in meta_raw or '"user"' not in meta_raw:
                 continue
             try:
                 meta = json.loads(meta_raw)
@@ -1192,473 +1178,117 @@ async def memory_search_scored_impl(
             except (json.JSONDecodeError, TypeError):
                 pass
 
-    # Build the final (score, item) pairs. `item` is constructed by enumerating
-    # the row mapping rather than `dict(row); del item["embedding"]` so the
-    # 4-8KB embedding blob is never reassigned into a Python object.
-    bm25_w_complement = 1.0 - vector_weight
-    for i, row in enumerate(rows):
-        item: dict = {}
-        for key in row.keys():
-            if key == "embedding":
-                continue
-            item[key] = row[key]
-        final_score = final_scores[i] + role_boosts[i]
-        if explain:
-            vector_score = page_scores[i]
-            bm25_norm = 1.0 / (1.0 + abs(row["bm25_score"]))
-            length_penalty = (
-                max(0.3, content_lens[i] / short_turn_t)
-                if content_lens[i] < short_turn_t
-                else 1.0
-            )
-            item["_explanation"] = {
-                "vector": vector_score,
-                "bm25": bm25_norm,
-                "importance": row["importance"],
-                "raw_hybrid": vector_score * vector_weight + bm25_norm * bm25_w_complement,
-                "length_penalty": length_penalty,
-                "title_overlap": title_overlaps[i],
-                "title_boost": title_boost_const * title_overlaps[i],
-                "importance_boost": importance_w * importances[i],
-                "vector_weight": vector_weight,
-                "intent_hint": intent_hint,
-                "role_boost": role_boosts[i],
-            }
-        scored.append((final_score, item))
-
-    # Apply temporal boost if dates detected in query
-    if scored:
-        scored = _apply_temporal_boost(scored, query, explain=explain)
-
-    if recency_bias > 0 and scored:
-        scored = _apply_recency_bonus(scored, recency_bias, explain=explain)
-
-    # Predecessor pull (Piece 3 of intent routing). For user-fact intent
-    # the top-ranked turn is often the assistant echo at index N+1; fetch
-    # turn N from the same conversation so the user's original statement
-    # enters the candidate set. Only runs at _depth==0 to avoid unbounded
-    # recursion, and is capped to the current top 10 hits so the extra
-    # DB work stays bounded.
-    if INTENT_ROUTING and intent_hint == "user-fact" and _depth == 0 and scored:
-        _pull_predecessor_turns(scored)
-
     _MMR_LAMBDA = 0.7
-    pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
+    ranked = None
 
-    # Adaptive K: Trim by elbow if requested
-    if adaptive_k:
-        if _capture_dict is not None:
-            _capture_dict["pre_adaptive_k_rows"] = len(pre_ranked_all)
-        pre_ranked_all = _trim_by_elbow(pre_ranked_all, sensitivity=elbow_sensitivity)
-        if _capture_dict is not None:
-            _capture_dict["post_elbow_trim_rows"] = len(pre_ranked_all)
-        if adaptive_k_min and len(pre_ranked_all) < adaptive_k_min:
-            # Floor: undo the trim when it leaves fewer than the requested minimum.
-            pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)[:adaptive_k_min]
-        if adaptive_k_max and len(pre_ranked_all) > adaptive_k_max:
-            pre_ranked_all = pre_ranked_all[:adaptive_k_max]
-        if _capture_dict is not None:
-            _capture_dict["post_adaptive_k_rows"] = len(pre_ranked_all)
-        if len(pre_ranked_all) < k:
-            k = len(pre_ranked_all)
-
-    if _capture_dict is not None:
-        _capture_dict["pre_seen_content_dedup_rows"] = len(pre_ranked_all)
-    seen_content: set[str] = set()
-    pre_ranked: list = []
-    for entry in pre_ranked_all:
-        c = (entry[1].get("content") or "").strip()
-        if c and c in seen_content:
-            continue
-        if c:
-            seen_content.add(c)
-        pre_ranked.append(entry)
-        if len(pre_ranked) >= k * 3:
-            break
-    if _capture_dict is not None:
-        _capture_dict["post_seen_content_dedup_rows"] = len(pre_ranked)
-    if mmr and len(pre_ranked) > k and page_blobs:
-        # Tier-A perf: try the zero-unpack Rust path first. `page_blobs` is
-        # already the raw bytes from SQL — `mmr_rerank_scored_packed` takes
-        # one contiguous bytes buffer and slices internally via PyO3
-        # zero-copy borrow, releasing the GIL while MMR runs. Skips the
-        # `_unpack_many` reshape entirely when:
-        #   - every candidate has a blob (no missing vectors), AND
-        #   - the blobs are in pre_ranked order (we can assume so because
-        #     pre_ranked rows were derived from `rows`, which is the same
-        #     order as `page_blobs`), AND
-        #   - explanations aren't requested.
-        # Fall through to the unpacked path when any of those don't hold.
+    # ── Candidate Assembly & Ranking (Tier-A Oxidation) ───────────────────
+    if not explain and m3_core_rs is not None and mmr and len(rows) > k:
+        relevance = [float(s + b) for s, b in zip(final_scores, role_boosts)]
+        contents = [(r["content"] or "") for r in rows]
         _bytes_per_row = EMBED_DIM * 4
-        _id_to_blob_idx = {rows[i]["id"]: i for i in range(len(rows))}
-        _packed_blob_indices = [_id_to_blob_idx.get(it["id"]) for _, it in pre_ranked]
-        _packed_ok = (
-            m3_core_rs is not None
-            and not explain
-            and all(idx is not None for idx in _packed_blob_indices)
-            and all(
-                isinstance(page_blobs[idx], (bytes, bytearray))
-                and len(page_blobs[idx]) == _bytes_per_row
-                for idx in _packed_blob_indices
-            )
-        )
+        if all(isinstance(b, (bytes, bytearray)) and len(b) == _bytes_per_row for b in page_blobs):
+            ordered_flat = b"".join(bytes(b) if isinstance(b, bytearray) else b for b in page_blobs)
+            try:
+                top_indices = m3_core_rs.rank_hybrid_packed(
+                    relevance, contents, ordered_flat, EMBED_DIM, _MMR_LAMBDA, k
+                )
+                ranked = []
+                for idx in top_indices:
+                    row = rows[idx]
+                    item = {k: row[k] for k in row.keys() if k != "embedding"}
+                    ranked.append((relevance[idx], item))
+                if ranked:
+                    ranked = _apply_temporal_boost(ranked, query, explain=False)
+                if recency_bias > 0 and ranked:
+                    ranked = _apply_recency_bonus(ranked, recency_bias, explain=False)
+            except Exception as e:
+                logger.debug(f"rank_hybrid_packed failed, falling back: {e}")
 
-        if _packed_ok:
-            # Reassemble blobs in pre_ranked order (rows order may differ
-            # from pre_ranked order after content-dedup). One bytes.join().
-            relevance = [float(s) for s, _ in pre_ranked]
-            ordered_flat = b"".join(
-                bytes(page_blobs[idx]) if isinstance(page_blobs[idx], bytearray)
-                else page_blobs[idx]
-                for idx in _packed_blob_indices
-            )
-            sel_idx = m3_core_rs.mmr_rerank_scored_packed(
-                relevance, ordered_flat, EMBED_DIM, _MMR_LAMBDA, k, True
-            )
-            ranked = [pre_ranked[i] for i in sel_idx]
-            _emb_lookup = None  # not built; downstream uses ranked only
-        else:
-            # Unpacked path. _unpack_many is one batched numpy.frombuffer
-            # reshape (or list-of-lists fallback when numpy is absent).
-            page_matrix = _unpack_many(page_blobs, dim=EMBED_DIM)
-            # When _unpack_many returns ndarray, indexing yields a 1-D ndarray row;
-            # when it falls back to list-of-lists, indexing yields list[float].
-            # Both are valid inputs to m3_core_rs and to numpy cosine.
-            _emb_lookup = {rows[i]["id"]: page_matrix[i] for i in range(len(rows))}
-            # Rust path (unpacked variant): authoritative when every candidate
-            # has an embedding and explanations aren't requested. Same gate as
-            # the packed path; only used as a fallback when one of the packed
-            # preconditions failed (typically: a row's blob has the wrong
-            # length due to a partially-migrated corpus).
-            _mmr_vecs = [_emb_lookup.get(it["id"]) for _, it in pre_ranked]
-            _unpacked_rust_ok = (
-                m3_core_rs is not None
-                and not explain
-                and all(v is not None for v in _mmr_vecs)
-            )
-            if _unpacked_rust_ok:
+    if ranked is None:
+        # ── Legacy / Explain / Fallback Path ──────────────────────────────
+        scored = []
+        bm25_w_complement = 1.0 - vector_weight
+        for i, row in enumerate(rows):
+            item = {k: row[k] for k in row.keys() if k != "embedding"}
+            final_score = final_scores[i] + role_boosts[i]
+            if explain:
+                bm25_norm = 1.0 / (1.0 + abs(row["bm25_score"]))
+                length_penalty = max(0.3, content_lens[i] / short_turn_t) if content_lens[i] < short_turn_t else 1.0
+                item["_explanation"] = {
+                    "vector": page_scores[i], "bm25": bm25_norm, "importance": row["importance"],
+                    "raw_hybrid": page_scores[i] * vector_weight + bm25_norm * bm25_w_complement,
+                    "length_penalty": length_penalty, "title_overlap": title_overlaps[i],
+                    "title_boost": title_boost_const * title_overlaps[i],
+                    "importance_boost": importance_w * importances[i],
+                    "vector_weight": vector_weight, "intent_hint": intent_hint, "role_boost": role_boosts[i],
+                }
+            scored.append((final_score, item))
+
+        if scored:
+            scored = _apply_temporal_boost(scored, query, explain=explain)
+        if recency_bias > 0 and scored:
+            scored = _apply_recency_bonus(scored, recency_bias, explain=explain)
+        if INTENT_ROUTING and intent_hint == "user-fact" and _depth == 0 and scored:
+            _pull_predecessor_turns(scored)
+
+        pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
+
+        if adaptive_k:
+            pre_ranked_all = _trim_by_elbow(pre_ranked_all, sensitivity=elbow_sensitivity)
+            if adaptive_k_min and len(pre_ranked_all) < adaptive_k_min:
+                pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)[:adaptive_k_min]
+            if adaptive_k_max and len(pre_ranked_all) > adaptive_k_max:
+                pre_ranked_all = pre_ranked_all[:adaptive_k_max]
+            if len(pre_ranked_all) < k:
+                k = len(pre_ranked_all)
+
+        seen_content: set[str] = set()
+        pre_ranked: list = []
+        for entry in pre_ranked_all:
+            c = (entry[1].get("content") or "").strip()
+            if c and c in seen_content:
+                continue
+            if c: seen_content.add(c)
+            pre_ranked.append(entry)
+            if len(pre_ranked) >= k * 3: break
+
+        if mmr and len(pre_ranked) > k and page_blobs:
+            _id_to_blob_idx = {rows[i]["id"]: i for i in range(len(rows))}
+            _packed_blob_indices = [_id_to_blob_idx.get(it["id"]) for _, it in pre_ranked]
+            _packed_ok = m3_core_rs is not None and not explain and all(idx is not None for idx in _packed_blob_indices)
+            if _packed_ok:
                 relevance = [float(s) for s, _ in pre_ranked]
-                # Rust wants list[list[float]] — convert ndarray rows on the way out.
-                _mmr_vecs_lists = [
-                    (v.tolist() if hasattr(v, "tolist") else list(v)) for v in _mmr_vecs
-                ]
-                sel_idx = m3_core_rs.mmr_rerank_scored(relevance, _mmr_vecs_lists, _MMR_LAMBDA, k, True)
+                ordered_flat = b"".join(bytes(page_blobs[idx]) for idx in _packed_blob_indices)
+                sel_idx = m3_core_rs.mmr_rerank_scored_packed(relevance, ordered_flat, EMBED_DIM, _MMR_LAMBDA, k, True)
                 ranked = [pre_ranked[i] for i in sel_idx]
             else:
-                # Python fallback. Pre-stash selected-vector stack so we can compute
-                # `max_sim` against all selected at once (one numpy gemv per round)
-                # instead of one FFI hop per (candidate, selected) pair.
-                selected = [pre_ranked[0]]
-                candidates = list(pre_ranked[1:])
-                sel_vecs: list = []
-                first_vec = _emb_lookup.get(pre_ranked[0][1]["id"])
-                if first_vec is not None:
-                    sel_vecs.append(first_vec)
-                while candidates and len(selected) < k:
-                    best_idx, best_mmr = 0, -float('inf')
-                    # Build the selected-vector matrix once per outer iteration.
-                    if _HAS_NUMPY and sel_vecs:
-                        try:
-                            sel_mat = _np.asarray(sel_vecs, dtype=_np.float32)
-                        except Exception:
-                            sel_mat = None
-                    else:
-                        sel_mat = None
-                    for ci, (c_score, c_item) in enumerate(candidates):
-                        c_vec = _emb_lookup.get(c_item["id"])
-                        if c_vec is None or not sel_vecs:
-                            # Candidate has no embedding (vector-side hit absent
-                            # from `rows`) OR nothing selected yet. Treat as
-                            # max_sim=0 -> MMR reduces to lambda*c_score.
-                            max_sim = 0.0
-                        elif sel_mat is not None:
-                            # One batched cosine across all already-selected vectors.
-                            sims = _batch_cosine(c_vec, sel_mat)
-                            max_sim = max(sims, default=0.0)
-                        else:
-                            # Pure-Python last-resort: per-pair cosine. Slow but
-                            # only hit when numpy is absent AND Rust is absent.
-                            max_sim = max(
-                                (_cosine(c_vec, sv) for sv in sel_vecs),
-                                default=0.0,
-                            )
-                        mmr_score = _MMR_LAMBDA * c_score - (1 - _MMR_LAMBDA) * max_sim
-                        if mmr_score > best_mmr:
-                            best_mmr = mmr_score
-                            best_idx = ci
-                        if explain:
-                            if "_explanation" not in c_item:
-                                c_item["_explanation"] = {}
-                            c_item["_explanation"]["max_sim_to_selected"] = max_sim
-                            c_item["_explanation"]["mmr_penalty"] = (1 - _MMR_LAMBDA) * max_sim
-                    chosen = candidates.pop(best_idx)
-                    selected.append(chosen)
-                    chosen_vec = _emb_lookup.get(chosen[1]["id"])
-                    if chosen_vec is not None:
-                        sel_vecs.append(chosen_vec)
-                ranked = selected
-    else:
-        ranked = pre_ranked
+                ranked = _python_mmr_fallback(pre_ranked, page_blobs, rows, k, _MMR_LAMBDA, explain)
+        else:
+            ranked = pre_ranked
 
-    # Hard skip: conversation_id is a strict scope boundary we never cross-peer;
-    # type_filter should stay local to avoid type pollution from remote stores.
-    _skip_federated_hard = bool(conversation_id or type_filter)
-
-    # Soft condition: fire federation when local results are weak (too few or low confidence).
+    # ── Post-Retrieval Expansions & Federation ───────────────────────────
     local_top_score = ranked[0][0] if ranked else 0.0
-    _local_weak = (
-        len(ranked) < 3
-        or local_top_score < FEDERATION_LOW_SCORE_THRESHOLD
-    )
-
-    if _local_weak and not _skip_federated_hard:
-        fed_results = await _query_chroma(
-            q_vec, k=3,
-            scope_filter={"user_id": user_id, "scope": scope, "agent_id": agent_filter},
-        )
+    if (len(ranked) < 3 or local_top_score < FEDERATION_LOW_SCORE_THRESHOLD) and not (conversation_id or type_filter):
+        fed_results = await _query_chroma(q_vec, k=3, scope_filter={"user_id": user_id, "scope": scope, "agent_id": agent_filter})
         for fr in fed_results:
             if not any(r[1]["id"] == fr["id"] for r in ranked):
-                if not explain:
-                    # Still tag so audit tooling can identify federation hits
-                    fr.setdefault("_explanation", {"source": fr.get("_explanation", {}).get("source", "federated_chroma_scoped")})
+                if not explain: fr.setdefault("_explanation", {"source": "federated_chroma_scoped"})
                 ranked.append((fr["score"], fr))
 
     if ranked:
-        # Fire-and-forget access stamps: buffered for ~250ms then flushed in a
-        # single batched UPDATE off the read path. See `_access_stamp_flusher`.
-        _enqueue_access_stamps(
-            [item[1]["id"] for item in ranked if "bm25_score" in item[1]]
-        )
+        _enqueue_access_stamps([item[1]["id"] for item in ranked if "bm25_score" in item[1]])
 
-    # Time-aware boost + neighbor-session expansion. Both are off unless the
-    # caller opts in with smart_time_boost > 0 or smart_neighbor_sessions > 0.
-    # Caller must include "metadata_json" in extra_columns so referenced_dates
-    # / session_index metadata is available on rows.
     if ranked and (smart_time_boost > 0.0 or smart_neighbor_sessions > 0):
-        from temporal_utils import extract_referenced_dates, has_temporal_cues
+        ranked = await _apply_smart_expansions(ranked, query, smart_time_boost, smart_neighbor_sessions)
 
-        def _meta_for(item: dict) -> dict:
-            m = item.get("metadata")
-            if isinstance(m, dict):
-                return m
-            raw = item.get("metadata_json") or "{}"
-            try:
-                m = json.loads(raw) if isinstance(raw, str) else (raw or {})
-            except (json.JSONDecodeError, TypeError):
-                m = {}
-            item["metadata"] = m
-            return m
-
-        query_dates = extract_referenced_dates(query) if smart_time_boost > 0.0 else []
-        query_has_temporal = has_temporal_cues(query)
-
-        if smart_time_boost > 0.0 and query_dates:
-            query_dt_set: list[datetime] = []
-            for ds in query_dates:
-                try:
-                    query_dt_set.append(datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=timezone.utc))
-                except ValueError:
-                    pass
-            if query_dt_set:
-                boosted: list[tuple[float, dict]] = []
-                for score, item in ranked:
-                    new_score = score
-                    vf = item.get("valid_from") or ""
-                    if vf:
-                        try:
-                            h_dt = datetime.fromisoformat(vf)
-                            for qdt in query_dt_set:
-                                if abs((h_dt - qdt).days) <= 30:
-                                    new_score += smart_time_boost
-                                    break
-                        except (ValueError, TypeError):
-                            pass
-                    meta = _meta_for(item)
-                    for rd in meta.get("referenced_dates") or []:
-                        try:
-                            rd_dt = datetime.strptime(rd, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                            for qdt in query_dt_set:
-                                if abs((rd_dt - qdt).days) <= 14:
-                                    new_score += smart_time_boost
-                                    break
-                            if new_score != score:
-                                break
-                        except (ValueError, TypeError):
-                            continue
-                    boosted.append((new_score, item))
-                boosted.sort(key=lambda t: t[0], reverse=True)
-                ranked = boosted
-
-        if smart_neighbor_sessions > 0 and ranked:
-            hit_session_indices: set[int] = set()
-            hit_user_ids: set[str] = set()
-            for _s, item in ranked:
-                meta = _meta_for(item)
-                si = meta.get("session_index")
-                if si is not None:
-                    try:
-                        hit_session_indices.add(int(si))
-                    except (TypeError, ValueError):
-                        pass
-                uid = item.get("user_id")
-                if uid:
-                    hit_user_ids.add(uid)
-            multi_session_signal = len(hit_session_indices) >= 2
-            if (query_has_temporal or multi_session_signal) and hit_session_indices and hit_user_ids:
-                neighbor_indices: set[int] = set()
-                for si in hit_session_indices:
-                    for offset in range(-smart_neighbor_sessions, smart_neighbor_sessions + 1):
-                        if offset != 0 and (si + offset) >= 0:
-                            neighbor_indices.add(si + offset)
-                neighbor_indices -= hit_session_indices
-                if neighbor_indices:
-                    already = {item["id"] for _s, item in ranked}
-                    try:
-                        with _db() as db:
-                            for uid in hit_user_ids:
-                                for si in neighbor_indices:
-                                    rows = db.execute(
-                                        "SELECT id, content, title, type, metadata_json, conversation_id "
-                                        "FROM memory_items "
-                                        "WHERE user_id = ? AND is_deleted = 0 AND type = 'message' "
-                                        "  AND metadata_json LIKE ? ",
-                                        (uid, f'%"session_index": {si}%'),
-                                    ).fetchall()
-                                    for r in rows:
-                                        if r["id"] in already:
-                                            continue
-                                        already.add(r["id"])
-                                        meta_raw = r["metadata_json"] or "{}"
-                                        try:
-                                            meta = json.loads(meta_raw)
-                                        except (json.JSONDecodeError, TypeError):
-                                            meta = {}
-                                        neighbor_item = {
-                                            "id": r["id"], "content": r["content"],
-                                            "title": r["title"], "type": r["type"],
-                                            "metadata_json": meta_raw, "metadata": meta,
-                                            "conversation_id": r["conversation_id"],
-                                            "_smart_neighbor": True,
-                                        }
-                                        ranked.append((0.0, neighbor_item))
-                    except Exception as e:
-                        logger.debug(f"smart_neighbor_sessions expansion failed: {e}")
-
-    # Phase 11 supersedence-aware demotion moved to memory_search_scored_impl
-    # (after _apply_rerank) so the MiniLM cross-encoder cannot undo it.
-
-    # Phase D Mastra: post-rank preference for type='observation' rows.
-    # When M3_PREFER_OBSERVATIONS=1, partition the ranked list into
-    # obs_hits (type='observation') and raw_hits (everything else). If the
-    # observations alone supply enough context (sum of token estimates above
-    # M3_OBSERVATION_BUDGET_TOKENS, default 4000), return only obs_hits[:k].
-    # Otherwise interleave: obs first, then raw to fill k slots. The point
-    # is to favor synthesized atomic facts over raw turns when both are
-    # retrieved for the same query.
-    #
-    # Off by default; bench harness opts in via --observer-variant flag
-    # (Phase D Task 8) or callers set M3_PREFER_OBSERVATIONS=1 directly.
-    # `_prefer_observations_gate` / `_two_stage_observations_gate` are bound
-    # into module globals by the `_resolve_mc_callbacks()` call at the top of
-    # this function — see the callback registry near the module header.
     if ranked and _prefer_observations_gate():
-        try:
-            obs_budget = int(os.environ.get("M3_OBSERVATION_BUDGET_TOKENS", "4000"))
-        except ValueError:
-            obs_budget = 4000
-        obs_hits = [(s, it) for s, it in ranked
-                    if isinstance(it, dict) and it.get("type") == "observation"]
-        raw_hits = [(s, it) for s, it in ranked
-                    if not (isinstance(it, dict) and it.get("type") == "observation")]
-        if obs_hits:
-            # Cheap token estimate: 1 token per 4 chars. The Mastra paper's
-            # rationale is that an observation log displaces equivalent raw
-            # turns when its summary is dense enough; we don't need precise
-            # tokenization for the gate, just an order-of-magnitude check.
-            obs_tokens = sum(len((it.get("content") or "")) // 4 for _, it in obs_hits)
-            if obs_tokens >= obs_budget:
-                # Observation-only return — observations supply enough.
-                ranked = obs_hits[:k]
-            else:
-                # Interleave: observations first, then raw to fill remaining slots.
-                slots = max(0, k - len(obs_hits))
-                ranked = obs_hits + raw_hits[:slots]
+        ranked = _apply_observation_preference(ranked, k)
 
-    # Phase B3 (chatlog-recall plan, 2026-04-26): two-stage retrieval —
-    # expand top-k observations to include their source turns. The
-    # Observer's write_observation stores source_turn_ids in metadata_json;
-    # when M3_TWO_STAGE_OBSERVATIONS=1 fires, we look up those rows and
-    # append them to the ranked list at a small score discount so the
-    # observation still ranks highest but the answerer sees the underlying
-    # turns when it needs verbatim quotes.
-    #
-    # Off by default. The discount factor is M3_TWO_STAGE_TURN_PENALTY
-    # (default 0.7 — turns rank just below their observation but ahead of
-    # other raw hits).
     if ranked and _two_stage_observations_gate():
-        try:
-            turn_penalty = float(os.environ.get("M3_TWO_STAGE_TURN_PENALTY", "0.7"))
-        except ValueError:
-            turn_penalty = 0.7
-        try:
-            max_turns_per_obs = int(os.environ.get("M3_TWO_STAGE_MAX_TURNS_PER_OBS", "3"))
-        except ValueError:
-            max_turns_per_obs = 3
-        # Collect source_turn_ids from observation hits (top-N only — no
-        # point expanding tail-rank observations the user won't see).
-        # Scope to top-k since obs_hits / raw_hits may have already been
-        # collapsed back into `ranked` above.
-        topk = ranked[: k]
-        source_turn_ids: list[str] = []
-        existing_ids = {it.get("id") for _, it in topk if isinstance(it, dict) and it.get("id")}
-        for s, it in topk:
-            if not isinstance(it, dict) or it.get("type") != "observation":
-                continue
-            # Inline meta lookup — _meta_for is scoped to a different block
-            # earlier in this function. Same logic: prefer the parsed
-            # metadata dict if attached, else parse metadata_json on demand.
-            md = it.get("metadata") if isinstance(it.get("metadata"), dict) else None
-            if md is None:
-                raw = it.get("metadata_json") or "{}"
-                try:
-                    md = json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, dict) else {})
-                except (json.JSONDecodeError, TypeError):
-                    md = {}
-            stids = md.get("source_turn_ids") or []
-            if isinstance(stids, list):
-                # Cap how many turns we pull per observation.
-                for tid in stids[:max_turns_per_obs]:
-                    if isinstance(tid, str) and tid not in existing_ids:
-                        source_turn_ids.append(tid)
-                        existing_ids.add(tid)
-        if source_turn_ids:
-            try:
-                with _db() as db:
-                    placeholders = ",".join("?" * len(source_turn_ids))
-                    turn_rows = db.execute(
-                        f"SELECT id, content, title, type, importance "
-                        f"FROM memory_items "
-                        f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted,0)=0",
-                        source_turn_ids,
-                    ).fetchall()
-                # Find the lowest score among existing top-k as the floor,
-                # then place expanded turns at floor * turn_penalty so they
-                # rank below existing hits but get included in formatted output.
-                base_score = min((s for s, _ in topk), default=0.5)
-                floor = max(0.01, base_score * turn_penalty)
-                for r in turn_rows:
-                    expanded_item = dict(r) if hasattr(r, "keys") else {
-                        "id": r[0], "content": r[1], "title": r[2],
-                        "type": r[3], "importance": r[4] or 0.0,
-                    }
-                    expanded_item["_two_stage_expanded"] = True
-                    ranked.append((floor, expanded_item))
-                # Re-sort once so the expanded turns settle in correctly.
-                ranked.sort(key=lambda t: t[0], reverse=True)
-            except Exception as e:
-                logger.debug(f"two-stage observation expansion failed: {e}")
+        ranked = await _apply_two_stage_expansion(ranked, k)
 
     return ranked
+
 
 
 async def memory_search_routed_impl(

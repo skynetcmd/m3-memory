@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: ee7fccccecff
-mtime_utc: 2026-05-17T02:23:16.593922+00:00
-generated_utc: 2026-05-17T15:50:17.730667+00:00
+sha1: 61d04797a798
+mtime_utc: 2026-05-23T13:00:03.722397+00:00
+generated_utc: 2026-05-23T17:51:49.200714+00:00
 private: false
 ---
 
@@ -47,6 +47,7 @@ _(none detected)_
 - `memory_core`
 - `memory_maintenance`
 - `memory_sync`
+- `tool_loader`
 
 ---
 
@@ -58,7 +59,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `files_memory (tools)`
 
 ---
 

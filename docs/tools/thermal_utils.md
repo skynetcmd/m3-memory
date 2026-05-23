@@ -1,8 +1,8 @@
 ---
 tool: bin/thermal_utils.py
-sha1: 1b35d891dd7f
-mtime_utc: 2026-04-23T20:33:55.981324+00:00
-generated_utc: 2026-05-05T01:49:22.132993+00:00
+sha1: 64a1356098f2
+mtime_utc: 2026-05-23T12:31:13.390210+00:00
+generated_utc: 2026-05-23T17:51:49.338206+00:00
 private: false
 ---
 
