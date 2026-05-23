@@ -1,8 +1,8 @@
 ---
 tool: bin/statusline-command.sh
-sha1: bc5ef63a846f
-mtime_utc: 2026-04-06T00:25:00.988105+00:00
-generated_utc: 2026-05-09T18:07:57.850487+00:00
+sha1: 828a12864727
+mtime_utc: 2026-05-23T12:31:13.388812+00:00
+generated_utc: 2026-05-23T17:51:49.296396+00:00
 private: false
 ---
 

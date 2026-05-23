@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_bridge.py
-sha1: 1392cd9de855
-mtime_utc: 2026-04-25T20:53:17.400731+00:00
-generated_utc: 2026-05-01T13:05:26.889598+00:00
+sha1: bf7d527b6c24
+mtime_utc: 2026-05-23T13:00:03.723163+00:00
+generated_utc: 2026-05-23T17:51:49.204454+00:00
 private: false
 ---
 
@@ -31,6 +31,7 @@ _(no argparse arguments detected)_
 - `M3_HTTP_HOST`
 - `M3_HTTP_PATH`
 - `M3_HTTP_PORT`
+- `M3_TOOLS_LAZY`
 - `M3_TRANSPORT`
 
 ---
@@ -40,6 +41,8 @@ _(no argparse arguments detected)_
 - `m3_sdk (active_database)`
 - `mcp_tool_catalog`
 - `memory_core`
+- `tool_domains`
+- `tool_loader`
 
 ---
 
