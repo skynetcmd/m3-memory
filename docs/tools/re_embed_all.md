@@ -1,8 +1,8 @@
 ---
 tool: bin/re_embed_all.py
-sha1: 747c35141ccf
-mtime_utc: 2026-04-22T01:03:02.049780+00:00
-generated_utc: 2026-05-05T01:50:16.437289+00:00
+sha1: 642efa7df146
+mtime_utc: 2026-05-23T12:31:13.387733+00:00
+generated_utc: 2026-05-23T17:51:49.271525+00:00
 private: false
 ---
 
