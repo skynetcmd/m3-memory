@@ -1,8 +1,8 @@
 ---
 tool: bin/news_fetcher.py
-sha1: 5e16daa75135
-mtime_utc: 2026-04-22T01:03:02.048233+00:00
-generated_utc: 2026-05-01T13:05:27.024267+00:00
+sha1: c5112f2805f6
+mtime_utc: 2026-05-23T12:31:13.387397+00:00
+generated_utc: 2026-05-23T17:51:49.258826+00:00
 private: false
 ---
 

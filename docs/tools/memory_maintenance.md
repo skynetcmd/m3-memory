@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: ceb1b5405423
-mtime_utc: 2026-05-17T02:40:21.663329+00:00
-generated_utc: 2026-05-17T15:50:17.767454+00:00
+sha1: 916179e6ecbc
+mtime_utc: 2026-05-23T12:31:13.386618+00:00
+generated_utc: 2026-05-23T17:51:49.228884+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ _(none detected)_
 **sqlite**
 
 - `sqlite3.connect()  → `ARCHIVE_DB_PATH`` (line 33)
-- `sqlite3.connect()  → `active_path`` (line 312)
+- `sqlite3.connect()  → `active_path`` (line 322)
 
 
 ---
