@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_setup.py
-sha1: cb295d4f27b5
-mtime_utc: 2026-05-23T12:31:13.387479+00:00
-generated_utc: 2026-05-23T17:51:49.259487+00:00
+sha1: b200c2a3ebdb
+mtime_utc: 2026-04-23T20:33:55.966657+00:00
+generated_utc: 2026-05-24T12:09:08.352188+00:00
 private: false
 ---
 

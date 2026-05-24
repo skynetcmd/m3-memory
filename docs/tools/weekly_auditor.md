@@ -1,8 +1,8 @@
 ---
 tool: bin/weekly_auditor.py
-sha1: b05175ce385e
-mtime_utc: 2026-05-23T12:31:13.390679+00:00
-generated_utc: 2026-05-23T17:51:49.347103+00:00
+sha1: 94c02a81769c
+mtime_utc: 2026-05-21T14:41:32.916662+00:00
+generated_utc: 2026-05-24T12:09:08.738440+00:00
 private: false
 ---
 
