@@ -9,6 +9,19 @@ from .embed import _embed
 from .fts import _ENTITY_MENTION_RE
 from .util import _cosine_batch_packed
 
+# Sentence-initial Title-Case common words that the entity-mention regex
+# captures as if they were proper nouns. Skip these as graph-seed candidates
+# to prevent spurious entity lookups on conversational query starters.
+# Kept here (graph.py) rather than config.py because it's specific to the
+# entity-graph BFS seed-extraction and has no other readers.
+_QUERY_STARTER_STOPWORDS: frozenset[str] = frozenset({
+    "Can", "Could", "Would", "Will", "Should", "Shall",
+    "What", "Which", "Where", "When", "Why", "Who", "Whom", "Whose", "How",
+    "Did", "Do", "Does", "Is", "Are", "Was", "Were", "Am",
+    "I", "My", "Me", "Mine", "We", "Our", "Us", "You", "Your", "Yours",
+    "Tell", "Show", "Give", "Help", "Please", "Hi", "Hello", "Hey", "Yes", "No",
+})
+
 logger = logging.getLogger("memory.graph")
 
 
@@ -128,12 +141,18 @@ async def _entity_graph_neighbor_ids(
     depth = min(int(depth), 3)
     max_neighbors = min(int(max_neighbors), 100)
 
-    # Step 1 — extract candidate mention strings
+    # Step 1 — extract candidate mention strings.
+    # Filter out sentence-initial Title-Case common words that the regex
+    # picks up as if they were proper nouns ("Can you recommend...",
+    # "What should I serve...", "How do I..."). These leak into entity
+    # lookups and pull unrelated turns into the top-k via spurious overlap;
+    # see LME-S KG-overlap report 2026-05-23 for the -13.3pp single-session-
+    # preference @k=5 regression this caused.
     candidates: list[str] = []
     seen_cands: set[str] = set()
     for m in _ENTITY_MENTION_RE.finditer(query):
         text = m.group(0).strip("\"'")
-        if text and text not in seen_cands:
+        if text and text not in seen_cands and text not in _QUERY_STARTER_STOPWORDS:
             seen_cands.add(text)
             candidates.append(text)
 
