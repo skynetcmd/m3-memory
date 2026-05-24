@@ -110,9 +110,6 @@ is *not* done.
 
 ## Hygiene / smaller items
 
-- [x] **Project Oxidation Master Plan.** Recovered `m3_oxidation_plan.md` from
-  host-b; ported to `docs/OXIDATION_PLAN.md`. (Completed 2026-05-23).
-
 - [x] **Benchmark Runners.** Ported `bench_longmemeval.py` and `bench_memory.py`
   from the private prototype branch to `bin/`. (Completed 2026-05-23).
 
