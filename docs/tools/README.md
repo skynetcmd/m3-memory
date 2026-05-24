@@ -20,7 +20,7 @@ Inventories the m3-memory environment-variable surface. After the 2026-05-14 reg
 - **32** non-prefixed vars (recommended for `M3_*` namespacing under deprecation alias) — not re-swept in the regeneration
 - **3** auth/credential vars (intentionally unprefixed; touch FIPS path)
 
-Produced as input to Section 9.6 of the Project "Oxidation" Rust transition plan (`~/m3_oxidation_plan.md`). The Rust binding crate (`m3-core-py`) must surface the original `M3_*` vars unchanged for backward compatibility, with typed configs derived from them.
+The Rust binding crate (`m3-core-py`) must surface the original `M3_*` vars unchanged for backward compatibility, with typed configs derived from them.
 
 Cross-checked against [INDEX.md](INDEX.md) — **one known gap**: `bin/_task_runtime.py` (reader of `M3_TASK_LOG_FILE`) is not indexed because `gen_tool_inventory.py` skips leading-underscore modules. Every other env-var reader is indexed.
 
@@ -47,4 +47,6 @@ The env-var report is not auto-regenerated (the search patterns are heuristic an
 Trigger conditions for regeneration:
 - New env vars added to any tool
 - [INDEX.md](INDEX.md) regenerated and adds/removes tools
+- A new oxidation-plan phase introduces additional `M3_*` vars
+ves tools
 - A new oxidation-plan phase introduces additional `M3_*` vars
