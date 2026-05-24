@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_server_gpu.py
-sha1: 5f0af92b08f5
-mtime_utc: 2026-05-23T12:31:13.377072+00:00
-generated_utc: 2026-05-23T17:51:49.086860+00:00
+sha1: bfd0441d26b1
+mtime_utc: 2026-04-23T20:33:55.945484+00:00
+generated_utc: 2026-05-24T12:09:07.821048+00:00
 private: true
 ---
 
