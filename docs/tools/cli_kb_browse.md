@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_kb_browse.py
-sha1: a5494c4176c2
-mtime_utc: 2026-05-23T12:31:13.375612+00:00
-generated_utc: 2026-05-23T17:51:49.062800+00:00
+sha1: 115ed862cb4e
+mtime_utc: 2026-04-23T20:33:55.939798+00:00
+generated_utc: 2026-05-24T12:09:07.701563+00:00
 private: false
 ---
 

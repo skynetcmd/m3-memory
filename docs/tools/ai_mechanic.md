@@ -1,8 +1,8 @@
 ---
 tool: bin/ai_mechanic.py
-sha1: dc0f51694492
-mtime_utc: 2026-05-23T12:31:13.372734+00:00
-generated_utc: 2026-05-23T17:51:48.988226+00:00
+sha1: 2e682de30f76
+mtime_utc: 2026-05-01T09:15:53.143021+00:00
+generated_utc: 2026-05-24T12:09:07.401305+00:00
 private: false
 ---
 

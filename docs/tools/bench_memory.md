@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_memory.py
-sha1: 8594c326eb14
-mtime_utc: 2026-05-23T12:31:13.373680+00:00
-generated_utc: 2026-05-23T17:51:49.008230+00:00
+sha1: 7a892ce10501
+mtime_utc: 2026-05-24T12:05:50.604664+00:00
+generated_utc: 2026-05-24T12:09:07.508126+00:00
 private: false
 ---
 
@@ -13,26 +13,20 @@ private: false
 Memory system benchmark script.
 Seeds test data, measures latency/throughput, reports pass/fail against targets.
 
-Usage: python bin/bench_memory.py [--database PATH]
-
-Point --database at a scratch DB (e.g. memory/bench.db) to keep benchmark
-data out of your live memory store. Default honors M3_DATABASE then falls
-back to memory/agent_memory.db.
+Usage: python bin/bench_memory.py
 
 ---
 
 ## Entry points
 
-- `def main()` (line 206)
+- `def main()` (line 198)
 - `if __name__ == "__main__"` guard
 
 ---
 
 ## CLI flags / arguments
 
-| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
-|---|---|---|---|---|---|
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes this run against PATH for all DB reads/writes. |
+_(no argparse arguments detected)_
 
 ---
 
@@ -44,8 +38,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (add_database_arg, resolve_db_path)`
-- `sqlite_pragmas (apply_pragmas, profile_for_db)`
+_(none detected)_
 
 ---
 
@@ -53,7 +46,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 58)
+- `sqlite3.connect()  → `DB_PATH`` (line 50)
 
 
 ---
@@ -66,6 +59,7 @@ _(none detected)_
 
 ## File dependencies (repo paths referenced)
 
+- `agent_memory.db`
 - `bench_report.json`
 
 ---
