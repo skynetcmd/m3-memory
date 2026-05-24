@@ -248,4 +248,5 @@ This report should be regenerated when:
 - `docs/tools/INDEX.md` is regenerated via `python bin/gen_tool_inventory.py`
 - A new phase of the Project "Oxidation" plan introduces additional `M3_*` vars
 
-The audit can be re-run by spawning a subagent against the same scope (see `~/m3_oxidation_plan.md` §9.6 for the original prompt).
+The audit can be re-run by spawning a subagent against the same scope.
+r the original prompt).
