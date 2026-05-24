@@ -1,8 +1,8 @@
 ---
 tool: bin/test_knowledge.py
-sha1: 049b2cf5254c
-mtime_utc: 2026-05-23T12:31:13.389450+00:00
-generated_utc: 2026-05-23T17:51:49.312326+00:00
+sha1: b3ffa5dd205e
+mtime_utc: 2026-04-23T20:33:55.977060+00:00
+generated_utc: 2026-05-24T12:09:08.600520+00:00
 private: false
 ---
 

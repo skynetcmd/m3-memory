@@ -1,8 +1,8 @@
 ---
 tool: bin/mission_control.py
-sha1: c40a05471a22
-mtime_utc: 2026-05-23T12:31:13.387286+00:00
-generated_utc: 2026-05-23T17:51:49.257163+00:00
+sha1: 4fba6f5f2f37
+mtime_utc: 2026-05-01T09:15:53.153019+00:00
+generated_utc: 2026-05-24T12:09:08.328950+00:00
 private: true
 ---
 

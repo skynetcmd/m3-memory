@@ -1,8 +1,8 @@
 ---
 tool: bin/web_research_bridge.py
-sha1: 0ec1146b2a82
-mtime_utc: 2026-05-23T12:31:13.390595+00:00
-generated_utc: 2026-05-23T17:51:49.342520+00:00
+sha1: 14c86f187cf0
+mtime_utc: 2026-04-23T20:33:55.981941+00:00
+generated_utc: 2026-05-24T12:09:08.724463+00:00
 private: false
 ---
 
