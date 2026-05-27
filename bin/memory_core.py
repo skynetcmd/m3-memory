@@ -248,6 +248,11 @@ from memory.entity import (  # noqa: F401 — re-exports
     extract_pending_impl,
     load_entity_vocab,
 )
+from memory.entity_count import (  # noqa: F401 — re-exports
+    count_entities_impl,
+    count_mentions_impl,
+    list_mentions_impl,
+)
 from memory.fts import (  # noqa: F401 — re-exports
     _EVENT_DATE_HINT,
     _EVENT_PROPER_NOUN,
