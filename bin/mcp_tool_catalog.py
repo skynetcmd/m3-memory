@@ -1859,14 +1859,15 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
-        name="memory_list_mentions",
+        name="entity_mentions",
         description=(
             "List memory_ids that mention a specific entity in a single "
             "conversation. Pass either entity_id (preferred — exact match) or "
             "canonical_name (case-insensitive, optionally disambiguated by "
             "entity_type). Returns {entity_id, canonical_name, entity_type, "
             "total, memory_ids: [...]}. Caller fetches text via existing read "
-            "paths (which carry their own authz)."
+            "paths (which carry their own authz). Companion to entity_search "
+            "and entity_get; lives in the 'entity' domain."
         ),
         parameters={
             "type": "object",
