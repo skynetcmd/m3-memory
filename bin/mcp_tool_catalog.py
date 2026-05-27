@@ -1810,6 +1810,82 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_count_entities",
+        description=(
+            "Count distinct entities mentioned in a single conversation. "
+            "Direct-index aggregation — no LLM, no embedding. Use this for "
+            "'how many distinct X did I mention' inventory questions where "
+            "top-k embedding retrieval would miss instances spread thinly "
+            "across many turns. Returns {count, conversation_id, entity_type, "
+            "pattern}."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "Required. The conversation to scope the count to. Empty / missing → ValueError (cross-conversation scans are not supported)."},
+                "entity_type":     {"type": "string", "default": "", "description": "Optional type filter (e.g. 'product', 'place', 'person'). Empty = all types."},
+                "pattern":         {"type": "string", "default": "", "description": "Optional case-insensitive substring filter on canonical_name. Max length 256."},
+            },
+            "required": ["conversation_id"],
+        },
+        impl=memory_core.count_entities_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_count_mentions",
+        description=(
+            "Per-entity mention frequency within a single conversation, "
+            "sorted DESC by count. Use for 'what are the most-mentioned X' or "
+            "'rank entities by frequency.' Returns {total, rows: [{entity_id, "
+            "canonical_name, entity_type, mention_count}, ...]}."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "Required. The conversation to scope the count to."},
+                "entity_type":     {"type": "string", "default": "", "description": "Optional type filter."},
+                "pattern":         {"type": "string", "default": "", "description": "Optional case-insensitive substring filter on canonical_name. Max length 256."},
+                "limit":           {"type": "integer", "default": 0, "description": "Max rows to return. 0 = default (1000). Hard cap = 10000."},
+            },
+            "required": ["conversation_id"],
+        },
+        impl=memory_core.count_mentions_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_list_mentions",
+        description=(
+            "List memory_ids that mention a specific entity in a single "
+            "conversation. Pass either entity_id (preferred — exact match) or "
+            "canonical_name (case-insensitive, optionally disambiguated by "
+            "entity_type). Returns {entity_id, canonical_name, entity_type, "
+            "total, memory_ids: [...]}. Caller fetches text via existing read "
+            "paths (which carry their own authz)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "conversation_id": {"type": "string", "description": "Required."},
+                "entity_id":       {"type": "string", "default": "", "description": "Preferred lookup — the entities.id. If supplied, canonical_name and entity_type are ignored."},
+                "canonical_name":  {"type": "string", "default": "", "description": "Alternative lookup. Case-insensitive exact match. One of entity_id OR canonical_name is required."},
+                "entity_type":     {"type": "string", "default": "", "description": "Optional disambiguator when canonical_name is ambiguous across types."},
+                "limit":           {"type": "integer", "default": 0, "description": "Max memory_ids to return. 0 = default (1000). Hard cap = 10000."},
+            },
+            "required": ["conversation_id"],
+        },
+        impl=memory_core.list_mentions_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="extract_pending",
         description="Extract pending entities from the queue. Default dry_run=true reports count + ETA; pass dry_run=false to execute.",
         parameters={

@@ -25,9 +25,11 @@ from . import (
     db,  # noqa: F401
     embed,  # noqa: F401
     entity,  # noqa: F401
+    entity_count,  # noqa: F401
     fts,  # noqa: F401
     search,  # noqa: F401
     util,  # noqa: F401
 )
 
-__all__ = ["config", "util", "fts", "db", "embed", "chroma", "search", "entity"]
+__all__ = ["config", "util", "fts", "db", "embed", "chroma", "search",
+            "entity", "entity_count"]

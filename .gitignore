@@ -183,3 +183,6 @@ tests/repro_concurrent_hang.py
 
 # Local security tooling (TruffleHog binary etc.) — not committed
 .tooling/
+
+# Internal design-philosophy digest — kept local, not in public origin
+docs/DESIGN_PHILOSOPHIES.md
