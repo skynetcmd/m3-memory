@@ -80,23 +80,94 @@ async def test_tier1_gguf_missing_reports_error(monkeypatch):
 async def test_doctor_bounded_latency():
     """Doctor must complete fast even when all probes fail.
 
-    Pre-registered SLO: P95 < 3s on the healthy path, with a hard 5s
-    safety cap for the all-tiers-down case (each probe has a 2s timeout
-    + roundtrip wraps at 10s but cancels via gather completion). The
-    15s threshold previously here was a safety net not a real target —
-    the tool exists to diagnose hangs, so it must not itself approach
-    "hang" territory."""
+    Pre-registered SLO contract (B20 explicit):
+      - Healthy corpus (warm cascade, tier-2 up): P95 < 3s
+      - Degraded corpus (one tier down): hard cap 5s
+      - Broken corpus (no tiers): hard cap 5s (probe timeouts respected)
+
+    Each probe has a per-probe 2s timeout (see PROBE_TIMEOUT_S in
+    memory.doctor). The roundtrip probe wraps the embed call at 10s but
+    gather() cancels stragglers when the other probes complete. Total
+    wall-clock must therefore stay under 5s in every state.
+
+    The 15s threshold previously here was a safety net not a real
+    target — the tool exists to diagnose hangs, so it must not itself
+    approach "hang" territory. If this fails, doctor IS the hang it's
+    meant to find."""
     import time
 
     from memory.doctor import memory_doctor_impl
     t0 = time.perf_counter()
     out = await asyncio.wait_for(memory_doctor_impl(), timeout=10.0)
     elapsed = time.perf_counter() - t0
-    # Tighter than the safety-net 15s — this is the effectiveness gate.
-    # If this fails, doctor itself is becoming the hang it's meant to find.
     assert elapsed < 5.0, (
         f"doctor took {elapsed:.1f}s — pre-registered SLO is <5s "
         f"(P95 < 3s on healthy path); regression to fix immediately"
+    )
+    assert out["summary"] in {"healthy", "degraded", "broken"}
+
+
+@pytest.mark.asyncio
+async def test_doctor_cold_cascade_slo(monkeypatch):
+    """B20: explicit COLD-cascade SLO — first call after a fresh import,
+    no tier-1 GGUF set, tier-2 mocked unreachable. Doctor must still
+    return under 5s and classify the state correctly.
+
+    This is the worst-case latency profile (no caches warm, every
+    probe hits its full timeout) — it bounds the upper end of the SLO
+    envelope for users who haven't installed the embedder service yet.
+    """
+    import time
+
+    # Mock tier-2 at a TEST-NET address so the probe times out at 2s
+    # instead of getting a fast ECONNREFUSED.
+    monkeypatch.setenv("M3_EMBED_FALLBACK_URL", "http://198.51.100.1:8082")
+
+    # Force fresh module so M3_EMBED_FALLBACK_URL is picked up
+    for mod in list(sys.modules):
+        if mod.startswith("memory."):
+            del sys.modules[mod]
+
+    from memory.doctor import memory_doctor_impl
+    t0 = time.perf_counter()
+    out = await asyncio.wait_for(memory_doctor_impl(), timeout=10.0)
+    elapsed = time.perf_counter() - t0
+
+    # SLO: 5s hard cap on cold cascade with one tier hung. If we hit
+    # this, the parallel-probe gather isn't working.
+    assert elapsed < 5.0, (
+        f"COLD cascade took {elapsed:.1f}s — pre-registered SLO is <5s. "
+        f"Likely probes ran sequentially, not in parallel."
+    )
+    # Classification: tier_2 must be NOT online; summary either degraded
+    # (if roundtrip somehow worked via tier-1) or broken (typical).
+    assert out["tier_2"]["status"] != "online"
+
+
+@pytest.mark.asyncio
+async def test_doctor_warm_cascade_slo():
+    """B20: explicit WARM-cascade SLO — second call shortly after first,
+    same process. Module-level caches + HTTP client reuse should make
+    this faster than the cold call.
+
+    Target: P50 < 1s on the warm call. Hard fail at 3s (regressions
+    beyond that suggest a cache that's not being reused).
+    """
+    import time
+
+    from memory.doctor import memory_doctor_impl
+
+    # Cold call to warm caches
+    await asyncio.wait_for(memory_doctor_impl(), timeout=10.0)
+
+    # Now the warm call
+    t0 = time.perf_counter()
+    out = await asyncio.wait_for(memory_doctor_impl(), timeout=10.0)
+    elapsed = time.perf_counter() - t0
+
+    assert elapsed < 3.0, (
+        f"WARM cascade took {elapsed:.1f}s — pre-registered SLO is "
+        f"P50<1s with hard fail at 3s. Cache reuse may be broken."
     )
     assert out["summary"] in {"healthy", "degraded", "broken"}
 
