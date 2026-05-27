@@ -1262,7 +1262,26 @@ async def memory_search_scored_impl(
                 sel_idx = m3_core_rs.mmr_rerank_scored_packed(relevance, ordered_flat, EMBED_DIM, _MMR_LAMBDA, k, True)
                 ranked = [pre_ranked[i] for i in sel_idx]
             else:
-                ranked = _python_mmr_fallback(pre_ranked, page_blobs, rows, k, _MMR_LAMBDA, explain)
+                # Fallback path: Rust unavailable, explain=True, or one of
+                # the candidate rows didn't have its embedding in page_blobs.
+                # The original inline Python MMR loop was extracted in
+                # commit 7206899 to `_python_mmr_fallback` but the function
+                # was never defined — referencing it raised NameError on
+                # every fallback call (silently in production until the
+                # one row missing a blob hit the search hot path).
+                #
+                # Safe degraded behavior: skip MMR diversity reranking and
+                # return top-k by relevance score. We lose duplicate
+                # suppression on this slow path but preserve correctness.
+                # See B14 backlog item for the proper python-loop restore.
+                logger.warning(
+                    "MMR fallback path hit (m3_core_rs=%s explain=%s "
+                    "missing_blobs=%s) — returning top-k by score without "
+                    "diversity reranking",
+                    m3_core_rs is not None, explain,
+                    sum(1 for idx in _packed_blob_indices if idx is None),
+                )
+                ranked = pre_ranked[:k]
         else:
             ranked = pre_ranked
 
