@@ -1905,13 +1905,36 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="embedder_status",
-        description="Check the status of the local sovereign embedder server (port 8081).",
+        description="Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_FALLBACK_URL).",
         parameters={
             "type": "object",
             "properties": {},
             "required": [],
         },
         impl=memory_core.embedder_status_impl,
+        is_async=True,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_doctor",
+        description=(
+            "Self-service diagnostic for the m3-memory embedding cascade. "
+            "Probes tier-1 (in-proc GGUF), tier-2 (m3-embed-server :8082), "
+            "DB integrity, and end-to-end embed roundtrip — all concurrently "
+            "with bounded 2s per-probe timeouts. Returns a structured dict "
+            "with status ('healthy' | 'degraded' | 'broken'), per-tier "
+            "details, issues, and actionable recommendations. Use this when "
+            "memory_search hangs, embeddings look wrong, or you're standing "
+            "up a new deployment."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        impl=memory_core.memory_doctor_impl,
         is_async=True,
         validators=(),
         default_allowed=True,

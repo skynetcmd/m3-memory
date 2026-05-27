@@ -23,6 +23,7 @@ from . import (
     chroma,  # noqa: F401
     config,  # noqa: F401
     db,  # noqa: F401
+    doctor,  # noqa: F401
     embed,  # noqa: F401
     entity,  # noqa: F401
     entity_count,  # noqa: F401
@@ -32,4 +33,4 @@ from . import (
 )
 
 __all__ = ["config", "util", "fts", "db", "embed", "chroma", "search",
-            "entity", "entity_count"]
+            "entity", "entity_count", "doctor"]
