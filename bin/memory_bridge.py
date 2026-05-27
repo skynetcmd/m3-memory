@@ -269,6 +269,18 @@ for _spec in mcp_tool_catalog.TOOLS:
 if __name__ == "__main__":
     import os as _os
     logger.info("Memory Bridge (catalog-driven) starting...")
+    # B17: detect version drift between currently-imported package and the
+    # previous boot. Warns (without aborting) if the user upgraded
+    # m3-memory while the old server is still running.
+    try:
+        from version_drift import check_and_record as _check_drift
+        _drift = _check_drift()
+        logger.info(
+            f"version: {_drift.get('current_version')} "
+            f"(prior boot: {_drift.get('prior_version') or 'first run'})"
+        )
+    except Exception as _e:
+        logger.debug(f"version-drift check skipped: {type(_e).__name__}: {_e}")
     if _LAZY_MODE:
         logger.info(
             f"Lazy mode: registered {len(_REGISTERED)} essentials+meta tools at startup "
