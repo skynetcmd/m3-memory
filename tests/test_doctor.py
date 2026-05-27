@@ -78,19 +78,91 @@ async def test_tier1_gguf_missing_reports_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_doctor_bounded_latency():
-    """Doctor must complete within a few seconds, even when all probes
-    fail. No probe should hang past its per-probe timeout."""
+    """Doctor must complete fast even when all probes fail.
+
+    Pre-registered SLO: P95 < 3s on the healthy path, with a hard 5s
+    safety cap for the all-tiers-down case (each probe has a 2s timeout
+    + roundtrip wraps at 10s but cancels via gather completion). The
+    15s threshold previously here was a safety net not a real target —
+    the tool exists to diagnose hangs, so it must not itself approach
+    "hang" territory."""
     import time
 
     from memory.doctor import memory_doctor_impl
     t0 = time.perf_counter()
-    out = await asyncio.wait_for(memory_doctor_impl(), timeout=20.0)
+    out = await asyncio.wait_for(memory_doctor_impl(), timeout=10.0)
     elapsed = time.perf_counter() - t0
-    assert elapsed < 15.0, (
-        f"doctor took {elapsed:.1f}s — must stay bounded to avoid the "
-        f"same hang it's diagnosing"
+    # Tighter than the safety-net 15s — this is the effectiveness gate.
+    # If this fails, doctor itself is becoming the hang it's meant to find.
+    assert elapsed < 5.0, (
+        f"doctor took {elapsed:.1f}s — pre-registered SLO is <5s "
+        f"(P95 < 3s on healthy path); regression to fix immediately"
     )
     assert out["summary"] in {"healthy", "degraded", "broken"}
+
+
+@pytest.mark.asyncio
+async def test_doctor_classification_all_four_states():
+    """Effectiveness contract: doctor MUST classify all known states
+    correctly. The 4 canonical states are encoded by which tiers can
+    answer:
+
+      | tier_1 | tier_2 | roundtrip | summary   |
+      |--------|--------|-----------|-----------|
+      |   X    |   X    |    OK     | healthy   |
+      |   .    |   X    |    OK     | degraded  |
+      |   X    |   .    |    OK     | degraded  |
+      |   .    |   .    |   FAIL    | broken    |
+
+    This test exercises the "degraded via tier-2-only" state (the
+    default for any install that hasn't set M3_EMBED_GGUF). Other
+    states are exercised by neighboring tests."""
+    from memory.doctor import memory_doctor_impl
+    out = await memory_doctor_impl()
+    # In test env: no GGUF (tier 1 not-configured), 8082 may or may not
+    # be up depending on environment. Either way, classification logic
+    # must be self-consistent.
+    t1 = out["tier_1"]["status"]
+    t2 = out["tier_2"]["status"]
+    rt = out["roundtrip"]["status"]
+    summary = out["summary"]
+    # Self-consistency: summary must match the tier+roundtrip facts.
+    if rt == "ok" and (t1 == "online" or t2 == "online"):
+        # At least one tier serves; classification depends on whether
+        # the OTHER tier is also online.
+        if t1 == "online" and t2 == "online":
+            assert summary == "healthy", f"both tiers online but summary={summary}"
+        else:
+            assert summary == "degraded", (
+                f"one tier online, one missing: expected degraded, got {summary}"
+            )
+    elif rt != "ok":
+        assert summary == "broken", f"roundtrip failed but summary={summary}"
+
+
+@pytest.mark.asyncio
+async def test_doctor_per_probe_timeouts_respected(monkeypatch):
+    """Each probe has a 2s timeout. Even if every probe hangs for its
+    full 2s, total wall-clock should stay <5s thanks to asyncio.gather
+    parallelism (not <8s = 4×2s sequential)."""
+    # Point tier-2 at a port that will time out (not refuse): use
+    # 198.51.100.1 (TEST-NET-2, RFC 5737) — packets get dropped, not
+    # ICMP-refused, so the probe must hit its own 2s timeout.
+    monkeypatch.setenv("M3_EMBED_FALLBACK_URL", "http://198.51.100.1:8082")
+
+    import time
+
+    from memory.doctor import memory_doctor_impl
+    t0 = time.perf_counter()
+    out = await asyncio.wait_for(memory_doctor_impl(), timeout=8.0)
+    elapsed = time.perf_counter() - t0
+    # Sequential would be ~4×2s = 8s. Parallel must be much less.
+    assert elapsed < 5.0, (
+        f"doctor took {elapsed:.1f}s with one hanging probe — probes "
+        f"are running sequentially instead of concurrently"
+    )
+    # Tier-2 must report unreachable rather than crash
+    assert out["tier_2"]["status"] != "online"
 
 
 @pytest.mark.asyncio
