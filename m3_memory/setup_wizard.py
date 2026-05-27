@@ -115,6 +115,9 @@ class SetupPlan:
     install_gpu_embedder: bool = False   # CPU fallback always installs; GPU is the choice
     endpoint: Optional[str] = None
     cognitive_loop: bool = False
+    # B15: GGUF path discovered + accepted in preflight. Used by the embedder
+    # install step to pin tier-1 into the service config.toml so it persists.
+    embed_gguf: Optional[str] = None
 
 
 # ── prompt phase ──────────────────────────────────────────────────────────────
@@ -192,6 +195,186 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
     """Shell out, streaming output. Returns the completed process."""
     return subprocess.run(cmd, check=check)
+
+
+def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
+    """B15: pre-install probes that catch the failure modes seen during the
+    2026-05-27 wizard-hardening session.
+
+    Each probe is best-effort and prints a clear warning on detection.
+    Returns False ONLY for fatal issues that would make install-m3 hang
+    (running mcp-memory.exe + non-interactive without --force-kill-mcp).
+    """
+    _say("Step 0/5: pre-install checks (B15)")
+    ok = True
+
+    # ── Probe 1: stale m3_memory/ package shadowing ─────────────────────
+    # If another repo (e.g. an old m3-lme-s clone) has a top-level
+    # `m3_memory/` directory on sys.path BEFORE the venv's installed
+    # m3-memory, Python will resolve `import m3_memory.installer` to the
+    # stale copy. That broke bridge resolution on 2026-05-27.
+    try:
+        import m3_memory as _mm
+        installed_path = Path(_mm.__file__).resolve().parent
+        canonical = Path(__file__).resolve().parent
+        if installed_path != canonical:
+            _warn(
+                f"shadowing: `import m3_memory` resolves to {installed_path} "
+                f"but this wizard is at {canonical}. Stale package copy on "
+                f"sys.path will break bridge resolution. Delete the stale dir."
+            )
+            ok = False
+    except Exception as e:
+        _warn(f"  could not verify package resolution: {type(e).__name__}: {e}")
+    else:
+        _ok(f"  package resolution: {installed_path}")
+
+    # ── Probe 2: running mcp-memory.exe will lock the venv binary ──────
+    # On Windows, pip install -e cannot overwrite mcp-memory.exe if a
+    # process is using it. Detect + offer to kill (interactive) or warn
+    # (non-interactive).
+    if platform.system() == "Windows":
+        running = _find_running_mcp_memory_processes()
+        if running:
+            _warn(f"  {len(running)} mcp-memory.exe process(es) running: {running}")
+            if args.non_interactive:
+                if getattr(args, "force_kill_mcp", False):
+                    for pid in running:
+                        _kill_process_windows(pid)
+                    _ok(f"  killed {len(running)} mcp-memory.exe process(es)")
+                else:
+                    _err("  refusing to install with mcp-memory.exe locked. "
+                         "Re-run with --force-kill-mcp or stop the agent first.")
+                    return False
+            else:
+                if _ask_yes_no("  Kill running mcp-memory.exe so install can proceed?", default=True):
+                    for pid in running:
+                        _kill_process_windows(pid)
+                    _ok(f"  killed {len(running)} mcp-memory.exe process(es)")
+                else:
+                    _warn("  install may fail with 'file in use' until you stop the agent")
+        else:
+            _ok("  no running mcp-memory.exe locks")
+    else:
+        # Unix: rename-into-place during pip install means a running binary
+        # doesn't block reinstall the way Windows file-locking does. Probe
+        # is best-effort informational only.
+        _ok("  Unix: running mcp-memory does not block reinstall (rename-in-place)")
+
+    # ── Probe 3: stale __pycache__ in the repo (developer pip-install -e) ──
+    # When the install is editable and pycache contains .pyc files newer
+    # than .py source from a previous version, Python may load the stale
+    # bytecode. Idempotent wipe — safe to do anytime.
+    canonical_root = Path(__file__).resolve().parent.parent
+    pycache_dirs = list(canonical_root.rglob("__pycache__"))
+    if pycache_dirs:
+        _say(f"  found {len(pycache_dirs)} __pycache__ dirs in {canonical_root}")
+        if getattr(args, "clean_cache", False) or (
+            not args.non_interactive
+            and _ask_yes_no("  Wipe __pycache__ before install? (recommended)", default=True)
+        ):
+            wiped = 0
+            for d in pycache_dirs:
+                try:
+                    shutil.rmtree(d)
+                    wiped += 1
+                except Exception:
+                    pass
+            _ok(f"  wiped {wiped} __pycache__ dirs")
+        else:
+            _warn("  skipped __pycache__ wipe — stale bytecode may load")
+    else:
+        _ok("  no stale __pycache__ to wipe")
+
+    # ── Probe 4: tier-1 GGUF auto-discovery + prompt ────────────────────
+    # If the operator doesn't set M3_EMBED_GGUF, they fall back to tier-2
+    # (the :8082 service) which is slower. Discover a BGE-M3 GGUF and
+    # offer to wire it in.
+    discovered = _discover_bge_m3_gguf()
+    if discovered:
+        env_set = bool(os.environ.get("M3_EMBED_GGUF"))
+        if env_set:
+            _ok(f"  M3_EMBED_GGUF already set: {os.environ['M3_EMBED_GGUF']}")
+        else:
+            _say(f"  discovered BGE-M3 GGUF: {discovered}")
+            _say("  setting it via M3_EMBED_GGUF gives ~10-100x faster embeds "
+                 "on the hot path (tier-1 in-proc vs tier-2 HTTP)")
+            if args.non_interactive or _ask_yes_no(
+                "  Use this GGUF for tier-1 in-proc embedder?", default=True
+            ):
+                # Set for THIS process so cpu_embedder install picks it up,
+                # and stash on the plan so per-agent wiring records it.
+                os.environ["M3_EMBED_GGUF"] = discovered
+                plan.embed_gguf = discovered
+                _ok(f"  M3_EMBED_GGUF set for this session: {discovered}")
+                _say("  (to persist: add to your shell rc OR "
+                     "let the wizard's m3-embed-server install pin it)")
+    else:
+        _say("  no BGE-M3 GGUF auto-discovered; tier-2 (:8082) will serve all embeds")
+        _say("  (set M3_EMBED_GGUF later to enable tier-1; see EMBEDDER_ARCHITECTURE.md)")
+
+    return ok
+
+
+# ── B15 helpers ──────────────────────────────────────────────────────────
+
+def _find_running_mcp_memory_processes() -> list[int]:
+    """Return PIDs of any running mcp-memory.exe processes. Windows only."""
+    if platform.system() != "Windows":
+        return []
+    try:
+        out = subprocess.run(
+            ["tasklist", "/fi", "imagename eq mcp-memory.exe", "/fo", "csv", "/nh"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        pids: list[int] = []
+        for line in out.stdout.splitlines():
+            # CSV: "mcp-memory.exe","PID","...","..."
+            parts = [p.strip('" ') for p in line.split(",")]
+            if len(parts) >= 2:
+                try:
+                    pids.append(int(parts[1]))
+                except ValueError:
+                    pass
+        return pids
+    except Exception:
+        return []
+
+
+def _kill_process_windows(pid: int) -> bool:
+    """Force-kill a process by PID. Returns True on success."""
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _discover_bge_m3_gguf() -> str | None:
+    """Mirror of m3-embed-server's discovery cascade (B5). Probes the same
+    paths so the wizard's auto-discovery matches what `m3-embed-server`
+    will pick up at install time.
+    """
+    home = Path.home()
+    candidate_dirs = [
+        home / ".lmstudio" / "models",
+        home / "Library" / "Application Support" / "LM Studio" / "models",
+        home / ".cache" / "m3" / "models",
+        home / ".m3-memory" / "_assets" / "embedder",
+        home / "models",
+    ]
+    for d in candidate_dirs:
+        if not d.is_dir():
+            continue
+        # Walk up to depth 4 looking for *bge[-_]m3*.gguf (case-insensitive)
+        for path in d.rglob("*.gguf"):
+            name = path.name.lower()
+            if "bge-m3" in name or "bge_m3" in name:
+                return str(path)
+    return None
 
 
 def _step_install_m3(plan: SetupPlan) -> bool:
@@ -425,7 +608,10 @@ def run_setup(args: argparse.Namespace) -> int:
         _warn("aborted by user — no changes made")
         return 1
 
-    # Execute. Step 1 is the only one that can hard-abort.
+    # Execute. Step 0 (preflight) and Step 1 (install-m3) can hard-abort.
+    if not _step_preflight(plan, args):
+        _err("setup aborted by preflight")
+        return 2
     if not _step_install_m3(plan):
         _err("setup aborted")
         return 2
@@ -454,6 +640,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--capture-mode", default=None, choices=("both", "stop", "precompact", "none"),
         help="Chatlog capture mode for Claude Code. Default: both.",
     )
+    # ── B15 preflight flags ─────────────────────────────────────────────
+    parser.add_argument(
+        "--clean-cache", action="store_true",
+        help="Wipe __pycache__ dirs before install (non-interactive default: skip).",
+    )
+    parser.add_argument(
+        "--force-kill-mcp", action="store_true",
+        help="Kill any running mcp-memory.exe before install (Windows only; "
+             "required if MCP is currently in use and you're running "
+             "non-interactively).",
+    )
+
     parser.add_argument(
         "--install-gpu-embedder", action="store_true",
         help="Also build and install the GPU-accelerated in-process embedder "
