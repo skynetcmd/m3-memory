@@ -1262,26 +1262,61 @@ async def memory_search_scored_impl(
                 sel_idx = m3_core_rs.mmr_rerank_scored_packed(relevance, ordered_flat, EMBED_DIM, _MMR_LAMBDA, k, True)
                 ranked = [pre_ranked[i] for i in sel_idx]
             else:
-                # Fallback path: Rust unavailable, explain=True, or one of
-                # the candidate rows didn't have its embedding in page_blobs.
-                # The original inline Python MMR loop was extracted in
-                # commit 7206899 to `_python_mmr_fallback` but the function
-                # was never defined — referencing it raised NameError on
-                # every fallback call (silently in production until the
-                # one row missing a blob hit the search hot path).
+                # Python MMR fallback. Fires when (a) m3_core_rs is None,
+                # (b) explain=True (caller wants per-candidate MMR penalty
+                # annotations), or (c) any candidate is missing its embedding
+                # in page_blobs. Restored from the pre-commit-7206899 inline
+                # loop after that commit replaced it with a call to a
+                # function name that was never defined (NameError on every
+                # fallback hit until 2026-05-27).
                 #
-                # Safe degraded behavior: skip MMR diversity reranking and
-                # return top-k by relevance score. We lose duplicate
-                # suppression on this slow path but preserve correctness.
-                # See B14 backlog item for the proper python-loop restore.
-                logger.warning(
-                    "MMR fallback path hit (m3_core_rs=%s explain=%s "
-                    "missing_blobs=%s) — returning top-k by score without "
-                    "diversity reranking",
-                    m3_core_rs is not None, explain,
-                    sum(1 for idx in _packed_blob_indices if idx is None),
-                )
-                ranked = pre_ranked[:k]
+                # Greedy selection: pick top relevance first, then iteratively
+                # pick the candidate maximizing
+                #   lambda*relevance - (1-lambda)*max(cos_sim to selected)
+                # Candidates with no embedding get max_sim=0 so MMR reduces
+                # to lambda*relevance for them (they still rank, just don't
+                # contribute to the diversity penalty).
+                from embedding_utils import unpack as _unpack
+                _cand_vecs: list = []
+                for _, it in pre_ranked:
+                    idx = _id_to_blob_idx.get(it["id"])
+                    if idx is None:
+                        _cand_vecs.append(None)
+                    else:
+                        try:
+                            _cand_vecs.append(_unpack(bytes(page_blobs[idx])))
+                        except Exception:
+                            _cand_vecs.append(None)
+
+                selected_indices: list[int] = [0]
+                selected_vecs: list = [_cand_vecs[0]] if _cand_vecs[0] is not None else []
+                remaining = list(range(1, len(pre_ranked)))
+
+                while remaining and len(selected_indices) < k:
+                    best_i, best_mmr = remaining[0], -float("inf")
+                    for ci in remaining:
+                        c_score = pre_ranked[ci][0]
+                        c_vec = _cand_vecs[ci]
+                        if c_vec is None or not selected_vecs:
+                            max_sim = 0.0
+                        else:
+                            # max cosine vs all already-selected
+                            sims = [_cosine(c_vec, sv) for sv in selected_vecs]
+                            max_sim = max(sims) if sims else 0.0
+                        mmr_score = _MMR_LAMBDA * c_score - (1.0 - _MMR_LAMBDA) * max_sim
+                        if explain:
+                            _exp = pre_ranked[ci][1].setdefault("_explanation", {})
+                            _exp["max_sim_to_selected"] = max_sim
+                            _exp["mmr_penalty"] = (1.0 - _MMR_LAMBDA) * max_sim
+                        if mmr_score > best_mmr:
+                            best_mmr = mmr_score
+                            best_i = ci
+                    selected_indices.append(best_i)
+                    remaining.remove(best_i)
+                    if _cand_vecs[best_i] is not None:
+                        selected_vecs.append(_cand_vecs[best_i])
+
+                ranked = [pre_ranked[i] for i in selected_indices]
         else:
             ranked = pre_ranked
 
