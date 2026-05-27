@@ -158,6 +158,7 @@ from memory.db import (  # noqa: F401 — re-exports
     _record_history,
     memory_history_impl,
 )
+from memory.doctor import memory_doctor_impl  # noqa: F401 — re-export
 from memory.embed import (  # noqa: F401 — re-exports
     _CPU_FALLBACK_BREAKER,
     _DENSE_ERR_RE,
