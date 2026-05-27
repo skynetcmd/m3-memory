@@ -34,6 +34,18 @@
       "title": "Chatlog capture mode",
       "description": "Which Claude Code hooks fire chatlog ingest. One of: both | stop | precompact | none. 'both' = Stop + PreCompact (recommended). Validated by mcp-memory at runtime; invalid values fall back to 'both'.",
       "default": "both"
+    },
+    "embed_fallback_url": {
+      "type": "string",
+      "title": "Embedder fallback URL (tier-2)",
+      "description": "Always-on HTTP embedder URL — the m3-embed-server CPU service (install via `m3-embed-server.exe install` on Windows, systemd unit on Linux). Default :8082. Leave empty to fall back to llm_failover probes (much slower; not BGE-M3).",
+      "default": "http://127.0.0.1:8082"
+    },
+    "embed_gguf": {
+      "type": "string",
+      "title": "In-proc embedder GGUF path (tier-1)",
+      "description": "Absolute path to a BGE-M3 GGUF file. When set, the MCP server loads it in-process via m3_core_rs for 10-100x faster embeds. Optional — if empty, all embeds go through tier-2 HTTP. Common path: %USERPROFILE%/.lmstudio/models/deepsweet/bge-m3-GGUF-Q4_K_M/bge-m3-GGUF-Q4_K_M.gguf",
+      "default": ""
     }
   },
 
@@ -42,7 +54,9 @@
       "command": "m3",
       "env": {
         "LLM_ENDPOINTS_CSV": "${user_config.endpoint}",
-        "M3_AUTO_INSTALL": "1"
+        "M3_AUTO_INSTALL": "1",
+        "M3_EMBED_FALLBACK_URL": "${user_config.embed_fallback_url}",
+        "M3_EMBED_GGUF": "${user_config.embed_gguf}"
       }
     }
   }
