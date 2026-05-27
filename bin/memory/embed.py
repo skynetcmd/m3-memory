@@ -20,7 +20,6 @@ import json
 import logging
 import os
 import re
-import sys
 import threading
 from functools import lru_cache as _lru_cache
 from threading import Lock as _ThreadLock
@@ -490,12 +489,17 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                 f"{type(wrapped).__name__}: {wrapped} — falling back to CPU HTTP"
             )
 
-    # Tier 2: local CPU HTTP fallback. Storm risk is high here — a dead
-    # llama-server eats the full 30s read timeout per call. Breaker bounds
-    # that to `threshold` strikes before short-circuiting to primary.
-    if _EMBED_GGUF_PATH is not None and (
-        _CPU_FALLBACK_BREAKER is None or _CPU_FALLBACK_BREAKER.allow_request()
-    ):
+    # Tier 2: local CPU HTTP fallback — the m3-embed-server service at
+    # _EMBED_FALLBACK_URL (default http://127.0.0.1:8082). This service is
+    # always-on (Windows service / systemd unit) and serves BGE-M3 over HTTP.
+    # It is INDEPENDENT of tier 1's in-proc GGUF, so we always try it as
+    # long as the breaker allows — formerly this was gated on
+    # _EMBED_GGUF_PATH which caused MCP-server cold cascades (no env var
+    # set) to skip 8082 entirely and fall straight to Ollama.
+    #
+    # Storm risk: a dead server eats the full read timeout per call. Breaker
+    # bounds that to `threshold` strikes before short-circuiting to primary.
+    if (_CPU_FALLBACK_BREAKER is None or _CPU_FALLBACK_BREAKER.allow_request()):
         try:
             client = _get_embed_client()
             resp = await client.post(
@@ -671,31 +675,32 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         except Exception as e:
             logger.warning(f"Embedded bulk embed failed ({e}) — falling back to CPU HTTP")
 
-    if _EMBED_GGUF_PATH is not None:
-        try:
-            _track_cost_lazy("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
-            client = _get_embed_client()
-            resp = await client.post(
-                f"{_EMBED_FALLBACK_URL}/embedding",
-                json={"input": miss_texts},
-                timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 4),
+    # Tier 2 (bulk): same architecture as single-_embed — always try the
+    # always-on 8082 service regardless of tier-1 GGUF configuration.
+    try:
+        _track_cost_lazy("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
+        client = _get_embed_client()
+        resp = await client.post(
+            f"{_EMBED_FALLBACK_URL}/embedding",
+            json={"input": miss_texts},
+            timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 4),
+        )
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        ordered = sorted(data, key=lambda d: d.get("index", 0))
+        vecs = [d["embedding"] for d in ordered]
+        if len(vecs) != len(miss_texts):
+            raise RuntimeError(
+                f"CPU fallback returned {len(vecs)} vectors for {len(miss_texts)} inputs"
             )
-            resp.raise_for_status()
-            data = resp.json()["data"]
-            ordered = sorted(data, key=lambda d: d.get("index", 0))
-            vecs = [d["embedding"] for d in ordered]
-            if len(vecs) != len(miss_texts):
-                raise RuntimeError(
-                    f"CPU fallback returned {len(vecs)} vectors for {len(miss_texts)} inputs"
-                )
-            for idx, vec in zip(miss_indices, vecs):
-                out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
-            _record_embed_backend("cpu-http-fallback", len(miss_texts))
-            return out  # type: ignore[return-value]
-        except Exception as e:
-            logger.warning(
-                f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) bulk failed ({e}) — using primary HTTP"
-            )
+        for idx, vec in zip(miss_indices, vecs):
+            out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
+        _record_embed_backend("cpu-http-fallback", len(miss_texts))
+        return out  # type: ignore[return-value]
+    except Exception as e:
+        logger.warning(
+            f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) bulk failed ({e}) — using primary HTTP"
+        )
 
     _track_cost_lazy("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
     token = _ctx().get_secret("LM_API_TOKEN") or "lm-studio"
@@ -811,35 +816,64 @@ async def _embed_canonical_cached(canonical_name: str) -> list[float] | None:
 # Status probe
 # ──────────────────────────────────────────────────────────────────────────────
 async def embedder_status_impl() -> dict:
-    """Returns the status of the local embedder server (port 8081)."""
+    """Returns the status of the local sovereign embedder server.
+
+    Probes the URL configured by M3_EMBED_FALLBACK_URL (default
+    http://127.0.0.1:8082). This is the always-on CPU BGE-M3 service
+    shipped as the `m3-embed-server` Windows/Unix service. Returns a
+    structured dict with health, metrics, and any error.
+
+    Use `memory_doctor` for a broader cascade health check (tier 1 GGUF +
+    tier 2 service + DB integrity + roundtrip smoke).
+    """
     import http.client
-    import pathlib
+    from urllib.parse import urlparse
+
+    url = os.environ.get("M3_EMBED_FALLBACK_URL") or "http://127.0.0.1:8082"
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8082
 
     res: dict = {
         "status": "offline",
-        "port": 8081,
-        "models": [],
-        "binary_found": False,
+        "url": url,
+        "host": host,
+        "port": port,
+        "health": None,
+        "model": None,
+        "metrics": None,
         "error": None,
     }
 
-    base = pathlib.Path(config.BASE_DIR).resolve()
-    target_dir = base / ".m3-lmstudio"
-    bin_path = target_dir / "bin" / ("lms.exe" if sys.platform == "win32" else "lms")
-    res["binary_found"] = bin_path.exists()
-
     try:
-        conn = http.client.HTTPConnection("127.0.0.1", 8081, timeout=2)
-        conn.request("GET", "/v1/models")
+        conn = http.client.HTTPConnection(host, port, timeout=2)
+        # /health is a fast liveness probe
+        conn.request("GET", "/health")
         resp = conn.getresponse()
-        if resp.status == 200:
-            res["status"] = "online"
-            data = json.loads(resp.read().decode())
-            res["models"] = data.get("data", [])
-        else:
-            res["status"] = f"error-{resp.status}"
+        body = resp.read().decode(errors="replace").strip()
         conn.close()
+        res["health"] = body
+        if resp.status != 200 or body != "OK":
+            res["status"] = f"unhealthy-{resp.status}"
+            return res
+
+        # /metrics returns {in_flight, model, p50_ms, p99_ms, queue_depth}
+        conn = http.client.HTTPConnection(host, port, timeout=2)
+        conn.request("GET", "/metrics")
+        mresp = conn.getresponse()
+        if mresp.status == 200:
+            try:
+                metrics = json.loads(mresp.read().decode())
+                res["metrics"] = metrics
+                res["model"] = metrics.get("model")
+            except json.JSONDecodeError:
+                pass
+        conn.close()
+
+        res["status"] = "online"
+    except (ConnectionRefusedError, OSError, http.client.HTTPException) as e:
+        res["error"] = f"{type(e).__name__}: {e}"
     except Exception as e:
-        res["error"] = str(e)
+        res["error"] = f"{type(e).__name__}: {e}"
 
     return res
