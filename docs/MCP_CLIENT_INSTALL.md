@@ -60,13 +60,15 @@ domains including `diagnostics`. Calling `memory_doctor` returns
 
 ## Client 2 — Gemini CLI
 
-Edit `~/.gemini/settings.json` (or wherever Gemini stores its config):
+Auto-wired by `m3 setup` (writes to `~/.gemini/settings.json`).
+
+Manual config — edit `~/.gemini/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "m3": {
-      "command": "mcp-memory",
+      "command": "m3",
       "env": {
         "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082",
         "M3_EMBED_GGUF": ""
@@ -78,83 +80,108 @@ Edit `~/.gemini/settings.json` (or wherever Gemini stores its config):
 
 Set `M3_EMBED_GGUF` if you have a BGE-M3 GGUF on disk for tier-1.
 
-Restart Gemini CLI. Verify: tool list shows `mcp__m3__memory_search`
-and friends.
+Restart Gemini CLI. Verify: tool list includes the m3 MCP entries.
 
 ---
 
 ## Client 3 — OpenCode
 
-OpenCode (the [sst/opencode](https://github.com/sst/opencode) terminal
-agent) reads MCP servers from `~/.opencode/config.json` or
-`./opencode.config.json` in the project root:
+Auto-wired by `m3 setup` (writes to OS-specific config path).
+
+Manual config — edit:
+
+- **Windows**: `%APPDATA%\opencode\opencode.json`
+- **macOS / Linux**: `~/.config/opencode/opencode.json`
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "servers": {
-      "m3": {
-        "command": "mcp-memory",
-        "args": [],
-        "env": {
-          "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082",
-          "M3_EMBED_GGUF": ""
-        }
-      }
+    "memory": {
+      "type": "local",
+      "command": ["m3"],
+      "enabled": true
     }
   }
 }
 ```
 
-Restart OpenCode. Verify with the in-app tool browser.
+If you need to pass env vars (e.g. `M3_EMBED_GGUF`), set them in the
+shell that launches OpenCode — OpenCode inherits the parent env.
+
+Restart OpenCode. Verify via in-app tool browser.
 
 ---
 
 ## Client 4 — OpenClaw (via the MCP HTTP proxy)
 
-**OpenClaw has no native MCP support** — it talks to an OpenAI-compatible
-chat endpoint. m3 ships an MCP-to-OpenAI proxy that bridges it. See
-memory entry `a18d6a67` (OpenClaw & MCP Proxy Integration
-Architecture) for the protocol details.
+**OpenClaw has no native MCP support.** It talks an OpenAI-compatible
+chat shape; m3 ships an MCP→OpenAI proxy (`bin/mcp_proxy.py`) that
+injects MCP tools into every chat request and executes `tool_calls`
+by calling the bridge functions directly. Memory `a18d6a67`
+documents the proxy architecture in detail.
 
-Setup:
+### Start the proxy
+
+From a clone of m3-memory:
+
 ```bash
-# 1. Install m3 with the proxy extra
-pipx install 'm3-memory[proxy]'
+# foreground
+python3 ./bin/mcp_proxy.py
 
-# 2. Run the proxy (default port 9000)
-m3 proxy start
-# Or run as a service:
-m3 proxy install   # Windows service / systemd unit
+# or via the launcher script (handles env + logging)
+bash ./bin/start_mcp_proxy.sh
 ```
 
-Point OpenClaw at the proxy as its chat endpoint:
-- Endpoint URL: `http://localhost:9000`
-- Auth: token from `OPENCLAW_GATEWAY_TOKEN` env var if set
+Default bind: `localhost:9000`. The proxy is a long-running process —
+keep it in a separate terminal, tmux pane, or supervise it via your OS
+service manager (systemd / launchd / nssm).
 
-The proxy exposes the full 55+ MCP tool catalog with the same domain
+### Point OpenClaw at the proxy
+
+```bash
+export OPENAI_BASE_URL=http://localhost:9000/v1
+export OPENCLAW_GATEWAY_TOKEN=<optional auth token>
+openclaw
+```
+
+The proxy exposes the full MCP tool catalog with the same domain
 grouping as native clients. `tools_load_domain` works through the
 proxy identically.
 
-**Auto-detection by `m3 setup` wizard:** the wizard checks for any of
-`openclaw` on PATH, `~/.npm-global/bin/openclaw`, the `~/.openclaw/`
-workspace dir, or an `OPENCLAW_GATEWAY_TOKEN` env var. Any of those
-flips the proxy default to ON during interactive setup.
+### Sandboxed OpenClaw via Docker
+
+m3-memory ships a reference Docker setup at
+`examples/sandbox-openclaw/` (Dockerfile + docker-compose.yml) that
+runs OpenClaw + the proxy in an isolated container. Useful for
+development or untrusted workloads. Copy `.env.example` to `.env`,
+set `OPENCLAW_GATEWAY_TOKEN` + `OPENAI_API_KEY`, then
+`docker compose up`.
+
+### Auto-detection by `m3 setup`
+
+The wizard flags OpenClaw as detected when any of these is true:
+- `openclaw` on PATH (`shutil.which`)
+- `~/.npm-global/bin/openclaw` exists
+- `~/.openclaw/` workspace directory exists
+- `OPENCLAW_GATEWAY_TOKEN` env var is set
+
+When detected, the wizard defaults the proxy-install prompt to ON.
 
 ---
 
 ## Client 5 — Aider
 
-Same proxy path as OpenClaw — Aider talks OpenAI-shape; the m3 proxy
-adapts:
+Same proxy path as OpenClaw (Aider is also OpenAI-shape):
 
 ```bash
-aider --openai-api-base http://localhost:9000 \
-      --openai-api-key proxy-local
+aider --openai-api-base http://localhost:9000/v1 \
+      --model openai/claude-sonnet-4-6
 ```
 
-Tool catalog parity with native MCP clients (fixed in CHANGELOG_2026
-entry — was 15/44 in early versions, now full 55+).
+Tool catalog parity with native MCP clients (CHANGELOG_2026 records
+the early-version 15/44 gap; current builds expose the full 55+
+catalog via the proxy).
 
 ---
 
