@@ -67,6 +67,15 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("memory_refresh",      "memory"),
     ("memory_set_retention","memory"),
     ("memory_cost",         "memory"),
+    # Aggregation queries (entity-count first-class) — memory-scoped
+    # because they query the curated entity tables.
+    ("memory_count_entities", "memory"),
+    ("memory_count_mentions", "memory"),
+    # System-diagnostic tools — separate from admin (which is GDPR /
+    # notifications / chroma sync) so users grouping "what's wrong with
+    # my install" can load just this bucket.
+    ("memory_doctor",       "diagnostics"),
+    ("embedder_status",     "diagnostics"),
     ("curate_memory",       "memory"),
     ("curate_chatlog",      "chatlog"),
     ("chatlog",             "chatlog"),
@@ -82,7 +91,12 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("extract",             "admin"),
     ("gdpr",                "admin"),
     ("chroma",              "admin"),
-    ("embedder",            "admin"),
+    ("embedder",            "diagnostics"),
+    # entity_mentions is the renamed memory_list_mentions: same impl, but
+    # the natural place to look for "given an entity, what mentions it"
+    # is alongside entity_search / entity_get.
+    ("entity_mentions",     "entity"),
+    ("entity",              "entity"),
 ]
 
 
@@ -107,11 +121,12 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
     "memory":        "Curated long-term memory: write/search/graph/dedup/retention.",
     "chatlog":       "Captured agent-conversation turns with promotion + cost reports.",
     "files":         "Directory ingestion, file-level supersession, hybrid search over docs.",
-    "entity":        "Knowledge-graph entities — search + fetch.",
+    "entity":        "Knowledge-graph entities — search, fetch, list mentions.",
     "agent":         "Multi-agent registration, heartbeat, presence.",
     "tasks":         "Task creation, assignment, tree, results.",
     "conversations": "Conversation start/append/search/summarize.",
-    "admin":         "Notifications, enrichment, GDPR, Chroma sync, embedder status.",
+    "admin":         "Notifications, enrichment, GDPR, Chroma sync.",
+    "diagnostics":   "Self-service health probes: embedder_status, memory_doctor (run when search hangs or embeds look wrong).",
 }
 
 
