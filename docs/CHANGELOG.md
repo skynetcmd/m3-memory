@@ -19,6 +19,18 @@ forward-going only.
 
 ---
 
+## [2026.5.29.3] — May 29, 2026 — Fix Windows installer crash
+
+### Fixed
+
+- **`install_os.py` crashed on Windows** with `UnicodeEncodeError` when the
+  console code page is cp1252 (the default): the banner prints a rocket emoji
+  that cp1252 can't encode, aborting the post-install OS-setup step. Force the
+  stdio streams onto UTF-8 at module load (same `reconfigure(..., errors=
+  "backslashreplace")` guard the `m3` CLI already uses), so the installer runs
+  cleanly regardless of console code page. Caught by a full clean-room
+  `pip install` → `install-m3` test of v2026.5.29.2.
+
 ## [2026.5.29.2] — May 29, 2026 — Tool dispatcher + human CLI + CVE bumps
 
 Two new always-on tools let agents reach the whole catalog without paying for

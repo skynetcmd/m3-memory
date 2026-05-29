@@ -5,6 +5,17 @@ import venv
 import platform
 import getpass
 
+# On Windows the default console code page is cp1252, which can't encode
+# characters outside that 8-bit range (emoji, arrows, box-drawing). A stray
+# non-ASCII char in a print() (e.g. the banner's rocket emoji) crashes the
+# whole installer with UnicodeEncodeError. Force stdio onto UTF-8 so output is
+# safe regardless of console code page. Guard with hasattr: .reconfigure()
+# exists on the real TextIOWrapper but not on substitutes (StringIO under tests).
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
