@@ -17,7 +17,6 @@ Usage:
 
 import argparse
 import os
-import subprocess
 import sys
 from pathlib import Path  # noqa: F401 - used in _auto_install return-type comment
 
@@ -482,6 +481,232 @@ def _cmd_embedder(args: argparse.Namespace) -> int:
     return args.func(args)
 
 
+# ── Generated tool subcommands: `m3 <domain> <tool>` ─────────────────────────
+# The MCP tool catalog (bin/mcp_tool_catalog.py) is the single source of truth.
+# We generate one top-level subcommand per tool domain (memory, files, …) and,
+# under each, one subcommand per tool. Humans reach the full tool surface the
+# same way the LLM reaches it via m3_call — both go through the catalog's
+# execute_tool_structured, so behavior cannot drift. See
+# to_be_deleted/DUAL_SURFACE_TOOL_ACCESS_PLAN.md (PR 2).
+#
+# The chatlog DOMAIN is exposed as `m3 chat <tool>` because the top-level
+# `m3 chatlog` operational command (init/status/doctor/hook-path) predates this
+# and is wired into hooks.json + every install guide — left untouched.
+_DOMAIN_CMD = {"chatlog": "chat"}
+
+# Tools the human CLI must not surface (meta/dispatcher — no human use, and
+# m3_call's object/array args don't map to flat flags).
+_CLI_TOOL_EXCLUDE = frozenset(
+    {"m3_call", "m3_index", "tools_list_domains", "tools_load_domain"}
+)
+
+
+def _bin_on_path() -> bool:
+    """Put bin/ on sys.path so mcp_tool_catalog + siblings import. Returns
+    False if no install/dev checkout is resolvable (tool subcommands are then
+    silently skipped — the operational commands still work)."""
+    core = _resolve_bin_script("memory_core.py")
+    if core is None:
+        return False
+    bin_dir = str(core.parent)
+    if bin_dir not in sys.path:
+        sys.path.insert(0, bin_dir)
+    return True
+
+
+def _json_type_to_argparse(t: str):
+    return {"integer": int, "number": float}.get(t)  # str is the argparse default
+
+
+def _esc(s: str) -> str:
+    """Escape % for argparse help (it %-expands help strings; a bare % in a
+    tool description otherwise raises 'badly formed help string')."""
+    return (s or "").replace("%", "%%")
+
+
+def _spec_is_complex(spec) -> bool:
+    """A tool has a complex arg (object / array-of-object / union) that can't be
+    a flat flag — it takes a single --json blob instead."""
+    props = spec.parameters.get("properties", {}) or {}
+    for name, pdef in props.items():
+        if name == "database":
+            continue
+        typ = pdef.get("type")
+        if typ == "object" or "oneOf" in pdef or "anyOf" in pdef:
+            return True
+        if typ == "array":
+            items = pdef.get("items", {}) or {}
+            if items.get("type") == "object" or "oneOf" in items or "anyOf" in items:
+                return True
+    return False
+
+
+def _add_tool_domain_subcommands(subparsers) -> None:
+    """Register `m3 <domain> <tool>` subcommands generated from the catalog.
+
+    Best-effort: if the catalog can't be imported (no install yet), skip
+    silently — the operational commands above are unaffected.
+    """
+    if not _bin_on_path():
+        return
+    try:
+        import mcp_tool_catalog as _cat
+        import tool_domains as _td
+    except Exception:
+        return
+
+    import argparse as _ap
+    from collections import defaultdict
+
+    by_domain = defaultdict(list)
+    for spec in _cat.TOOLS:
+        if spec.name in _CLI_TOOL_EXCLUDE:
+            continue
+        by_domain[_td.domain_of_tool(spec.name)].append(spec)
+
+    for domain in sorted(by_domain):
+        cmd = _DOMAIN_CMD.get(domain, domain)
+        desc = _td.DOMAIN_DESCRIPTIONS.get(domain, "")
+        dom_parser = subparsers.add_parser(
+            cmd, help=_esc(f"{desc} ({len(by_domain[domain])} tools — run `m3 {cmd} --help`).")
+        )
+        tool_sub = dom_parser.add_subparsers(dest="_tool_cmd", metavar="<tool>")
+        dom_parser.set_defaults(func=_cmd_tool_dispatch, _domain_cmd=cmd)
+
+        # The chatlog domain (`m3 chat`) ALSO carries the operational
+        # subcommands (init/status/doctor/hook-path) so `chat` is the single
+        # chatlog namespace. `m3 chatlog <sub>` remains as a back-compat alias
+        # (registered separately, untouched). These route to _cmd_chatlog via
+        # chatlog_cmd; their flags are forwarded verbatim (parse_known_args).
+        if cmd == "chat":
+            for op, op_help in (
+                ("init", "Interactive setup — wire hooks, choose DB path, configure redaction."),
+                ("status", "Print a summary of chatlog state (row counts, queue, hooks)."),
+                ("doctor", "Same as status, but exits nonzero on warnings."),
+                ("hook-path", "Print absolute path to the chatlog hook script for plugin hooks."),
+            ):
+                op_p = tool_sub.add_parser(op, help=_esc(op_help), add_help=False)
+                op_p.set_defaults(func=_cmd_chatlog, chatlog_cmd=op)
+
+        for spec in sorted(by_domain[domain], key=lambda s: s.name):
+            complex_ = _spec_is_complex(spec)
+            summary = _esc((spec.description or "").split(".")[0].strip()[:75])
+            tp = tool_sub.add_parser(spec.name, help=summary)
+            props = spec.parameters.get("properties", {}) or {}
+            required = set(spec.parameters.get("required", []))
+
+            if complex_:
+                tp.add_argument(
+                    "--json", dest="_json_args", metavar="OBJ",
+                    help="Tool arguments as a single JSON object "
+                         "(this tool has a structured argument).",
+                )
+            else:
+                for pname, pdef in props.items():
+                    if pname == "database":
+                        continue  # added via the shared --database helper below
+                    ptype = pdef.get("type", "string")
+                    phelp = _esc(pdef.get("description", ""))
+                    req = pname in required
+                    if ptype == "boolean":
+                        tp.add_argument(
+                            f"--{pname}", dest=pname,
+                            action=_ap.BooleanOptionalAction,
+                            default=None, help=phelp,
+                        )
+                    else:
+                        tp.add_argument(
+                            f"--{pname}", dest=pname,
+                            type=_json_type_to_argparse(ptype),
+                            required=req, default=None, help=phelp,
+                        )
+
+            # Universal extras on every tool subcommand.
+            tp.add_argument("--database", dest="database", default=None,
+                            help="SQLite DB path. Env: M3_DATABASE. Default: agent_memory.db.")
+            tp.add_argument("--dry-run", dest="_dry_run", action="store_true",
+                            help="Validate args + check the destructive gate without executing.")
+            tp.add_argument("--yes", dest="_yes", action="store_true",
+                            help="Confirm a destructive (mutating) tool. Required for such tools.")
+            tp.set_defaults(func=_cmd_tool_dispatch, _tool_name=spec.name,
+                            _tool_complex=complex_, _tool_destructive=not spec.default_allowed)
+
+
+def _cmd_tool_dispatch(args: argparse.Namespace) -> int:
+    """Run one generated `m3 <domain> <tool>` invocation through the catalog's
+    execute_tool_structured — the same path m3_call uses."""
+    import asyncio
+    import json as _json
+
+    tool = getattr(args, "_tool_name", None)
+    if tool is None:
+        # `m3 <domain>` with no tool — list the domain's tools.
+        cmd = getattr(args, "_domain_cmd", "<domain>")
+        print(f"Error: `m3 {cmd}` requires a tool. Run `m3 {cmd} --help`.",
+              file=sys.stderr)
+        return 2
+
+    if not _bin_on_path():
+        print("Error: tool catalog unavailable. Run `m3 install-m3` first.",
+              file=sys.stderr)
+        return 1
+    import mcp_tool_catalog as _cat
+
+    spec = next((t for t in _cat.TOOLS if t.name == tool), None)
+    if spec is None:
+        print(f"Error: unknown tool {tool!r}.", file=sys.stderr)
+        return 1
+
+    # Destructive confirmation (independent of the MCP env gate).
+    destructive = getattr(args, "_tool_destructive", False)
+    dry_run = getattr(args, "_dry_run", False)
+    if destructive and not dry_run and not getattr(args, "_yes", False):
+        print(f"Error: {tool} mutates/deletes data — pass --yes to confirm "
+              f"(or --dry-run to validate without executing).", file=sys.stderr)
+        return 2
+
+    # Assemble the tool args.
+    if getattr(args, "_tool_complex", False):
+        raw = getattr(args, "_json_args", None)
+        if raw is None:
+            tool_args = {}
+        else:
+            try:
+                tool_args = _json.loads(raw)
+            except (ValueError, _json.JSONDecodeError) as e:
+                print(f"Error: --json is not valid JSON: {e}", file=sys.stderr)
+                return 2
+            if not isinstance(tool_args, dict):
+                print("Error: --json must be a JSON object.", file=sys.stderr)
+                return 2
+    else:
+        props = spec.parameters.get("properties", {}) or {}
+        tool_args = {}
+        for pname in props:
+            if pname == "database":
+                continue
+            val = getattr(args, pname, None)
+            if val is not None:
+                tool_args[pname] = val
+
+    db = getattr(args, "database", None)
+    if db:
+        tool_args["database"] = db
+
+    async def _run():
+        return await _cat.execute_tool_structured(
+            spec, tool_args, agent_id="", dry_run=dry_run)
+
+    try:
+        result = asyncio.run(_run())
+    except Exception as e:  # validation (ValueError) or impl failure
+        print(_json.dumps({"ok": False, "error": "call_failed", "tool": tool,
+                           "detail": f"{type(e).__name__}: {e}"}), file=sys.stderr)
+        return 1
+    print(_json.dumps(result, default=str, indent=2))
+    return 0
+
+
 def main() -> None:
     from m3_memory import __version__
 
@@ -662,11 +887,22 @@ Examples:
     _embedder_admin.add_arguments(p_embedder_mgmt)
     p_embedder_mgmt.set_defaults(func=_cmd_embedder)
 
+    # Generated tool subcommands: `m3 <domain> <tool>` (and `m3 chat <tool>` for
+    # the chatlog domain). Best-effort — skipped if no install/dev checkout.
+    _add_tool_domain_subcommands(subparsers)
+
     # Use parse_known_args so flags after `chatlog <sub>` aren't fought over
     # by the outer parser — they're passed through to the child script.
     # args.rest carries them.
     args, extras = parser.parse_known_args()
-    if getattr(args, "command", None) in ("chatlog", "doctor"):
+    # chatlog (alias) + doctor forward unknown flags verbatim to the child
+    # script. `chat` does too, but ONLY for its operational subcommands
+    # (chatlog_cmd set) — for generated tool subcommands, unknown flags are
+    # real errors just like every other domain.
+    _forward = getattr(args, "command", None) in ("chatlog", "doctor") or (
+        getattr(args, "command", None) == "chat" and getattr(args, "chatlog_cmd", None)
+    )
+    if _forward:
         args.rest = extras
     elif extras:
         # For any other subcommand, unknown flags are genuine errors.
