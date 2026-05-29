@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: 61d04797a798
-mtime_utc: 2026-05-23T13:00:03.722397+00:00
-generated_utc: 2026-05-23T17:51:49.200714+00:00
+sha1: 4cbbc1a640bf
+mtime_utc: 2026-05-29T17:25:04.710162+00:00
+generated_utc: 2026-05-29T17:25:11.430252+00:00
 private: false
 ---
 
@@ -18,6 +18,16 @@ Imported by:
 
 Zero FastMCP dependency. Pure Python + memory_core + memory_sync + memory_maintenance.
 Never import this module from those modules — that would create a cycle.
+
+Mutation-safety invariant (do not regress): mutating memory tools
+(memory_delete, memory_supersede) require the FULL UUID for their target id —
+a prefix is rejected via _is_full_uuid in their validators. Read tools
+(memory_get) accept an 8-char prefix for convenience, but an ambiguous prefix
+on a mutation could close/delete the wrong memory irreversibly. This asymmetry
+is intentional; keep the validators and the "full UUID required" wording in the
+tool descriptions so it survives doc-inventory regeneration. Also note:
+memory_supersede is non-destructive and creates a NEW successor each call — it
+is an update primitive, not a delete; do not chain it to "clean up" clutter.
 
 ---
 
