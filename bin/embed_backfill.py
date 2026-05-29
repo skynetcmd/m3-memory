@@ -22,10 +22,10 @@ Usage:
     # Sweep core memory (default DB) — embeds anything missing
     python bin/embed_backfill.py
 
-    # Bench workspace, only one variant
+    # Alternate workspace, only one variant
     python bin/embed_backfill.py \\
-        --db memory/agent_test_bench.db \\
-        --variant m3-observations-bench-LME-M-ingestion-20260428
+        --db memory/other.db \\
+        --variant my-variant-name
 
     # Smoke test: 100 rows, dry-run
     python bin/embed_backfill.py --limit 100 --dry-run

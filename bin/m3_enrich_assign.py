@@ -11,16 +11,16 @@ explicit assignment rather than by accidental bucket isolation.
 Common patterns:
 
     # Route all groups <= 7 KB to "grok"
-    m3_enrich_assign --db memory/agent_test_bench.db \\
-                     --source-variant LME-M-ingestion \\
-                     --target-variant m3-observations-bench-LME-M-ingestion-20260428 \\
+    m3_enrich_assign --db memory/other.db \\
+                     --source-variant my-source-variant \\
+                     --target-variant my-target-variant \\
                      --max-size-k 7 --send-to grok
 
     # Route the rest (>= 16 KB) to "gemini", leaving the 8-15 KB middle
     # band unassigned (NULL) for later
-    m3_enrich_assign --db memory/agent_test_bench.db \\
-                     --source-variant LME-M-ingestion \\
-                     --target-variant m3-observations-bench-LME-M-ingestion-20260428 \\
+    m3_enrich_assign --db memory/other.db \\
+                     --source-variant my-source-variant \\
+                     --target-variant my-target-variant \\
                      --min-size-k 16 --send-to gemini
 
     # Dry-run first

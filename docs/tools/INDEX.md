@@ -19,7 +19,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. |  |
 | [bin/benchmark_memory.py](benchmark_memory.md) | Retrieval Quality Benchmark for M3 Memory System. |  |
 | [bin/build_kg_variant.py](build_kg_variant.md) | Build a KG-enriched variant from an existing source variant. |  |
-| [bin/build_lme_m_db.py](build_lme_m_db.md) | build_lme_m_db.py — build memory/lme_m.db from longmemeval_m_cleaned.json. |  |
 | [bin/chatlog_config.py](chatlog_config.md) | chatlog_config.py — configuration resolver for the chat log subsystem. |  |
 | [bin/chatlog_core.py](chatlog_core.md) | chatlog_core.py — the load-bearing module for the chat log subsystem. |  |
 | [bin/chatlog_decay.py](chatlog_decay.md) | chatlog_decay — deterministic ephemeral-content decay for chatlog turns. |  |
