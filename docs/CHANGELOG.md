@@ -19,11 +19,22 @@ forward-going only.
 
 ---
 
-## [Unreleased] — Tool dispatcher + generated catalog manifest
+## [2026.5.29.2] — May 29, 2026 — Tool dispatcher + human CLI + CVE bumps
 
 Two new always-on tools let agents reach the whole catalog without paying for
-every schema at startup, plus a generated manifest and a drift test keep the
-documented tool count honest.
+every schema at startup, a generated `m3 <domain> <tool>` human CLI surface,
+a generated manifest + drift test that keep the documented tool count honest,
+and dependency CVE remediation.
+
+### Security — dependency CVE remediation
+
+- **`urllib3` → `>=2.7.0`** (clears PYSEC-2026-141/142) and **`transformers`
+  pinned `>=4.53.0,<5`** (clears 18 of 20 known CVEs). Ceiling is `<5` because
+  transformers 5.x removed `is_torch_fx_available`, which FlagEmbedding imports
+  — verified to break the embedder on 5.9.0. Two CVEs remain accepted +
+  documented (CVE-2026-1839 needs 5.x; PYSEC-2025-217 has no fixed version) —
+  both require loading a malicious checkpoint, and m3 only runs embedding
+  inference on its own trusted local model, so neither is reachable.
 
 ### Added — `m3_call` / `m3_index` dispatcher
 
