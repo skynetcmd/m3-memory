@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.5.21.0"
+version = "2026.5.29.0"
 description = "Local-first Agentic Memory Layer Framework for MCP Agents • 96 tools • Hybrid search (FTS5 + vector + MMR) • Directory ingestion & file-memory • GDPR • FIPS 140-3 ready • 100% local"
 
 readme = "README.md"
