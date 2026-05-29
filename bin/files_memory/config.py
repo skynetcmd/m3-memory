@@ -172,3 +172,19 @@ BUILTIN_EXT_IGNORES: frozenset[str] = frozenset({
     ".otf",
     ".eot",
 })
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# LLM auth headers (extract / summarize / carry-forward share one resolver)
+# ──────────────────────────────────────────────────────────────────────────────
+def llm_auth_headers() -> dict[str, str]:
+    """Authorization headers for the OpenAI-compat LLM endpoint.
+
+    LM Studio with API auth enabled rejects (or silently empties) requests
+    that omit `Authorization: Bearer <token>`. The token lives in env var
+    LM_API_TOKEN (mirrored from the OS keyring at session start). Returns an
+    empty dict when no token is set, so tokenless endpoints (Ollama, an
+    auth-disabled LM Studio) keep working unchanged.
+    """
+    token = (os.environ.get("LM_API_TOKEN") or "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
