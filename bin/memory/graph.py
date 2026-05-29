@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from collections.abc import Collection
 
 from .config import EMBED_DIM, ENTITY_SEED_STOPLIST
@@ -407,3 +408,124 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
             lines.append(f"  {e['from_id'][:8]} --[{e['relationship_type']}]--> {e['to_id'][:8]}")
 
     return "\n".join(lines)
+
+
+def _neighbor_session_ids(seed_ids: list, window: int, cap_per_session: int = 12) -> dict:
+    """For each seed hit, pull turns from sessions within ±`window` of the
+    hit's own session (same conversation_id), excluding the seeds themselves.
+
+    Session order is taken from metadata_json.session_idx; per-instance scope is
+    conversation_id. Used by `_apply_smart_expansions` for the
+    `smart_neighbor_sessions` lever. Returns dict[memory_id -> row_dict].
+
+    `cap_per_session` bounds turns pulled from each neighbor session so a long
+    session can't drown the result. window<=0 returns {} (no-op).
+    """
+    if not seed_ids or window <= 0:
+        return {}
+    out: dict = {}
+    seed_set = set(seed_ids)
+    with _db() as db:
+        placeholders = ",".join(["?"] * len(seed_ids))
+        seed_rows = db.execute(
+            f"SELECT id, conversation_id, "
+            f"  CAST(json_extract(metadata_json, '$.session_idx') AS INTEGER) AS sidx "
+            f"FROM memory_items WHERE id IN ({placeholders})",
+            seed_ids,
+        ).fetchall()
+        wanted_windows: set = set()
+        for sr in seed_rows:
+            cid = sr["conversation_id"]
+            sidx = sr["sidx"]
+            if not cid or sidx is None:
+                continue
+            for s in range(sidx - int(window), sidx + int(window) + 1):
+                if s == sidx or s < 0:
+                    continue  # own session covered by expand_sessions; skip negatives
+                wanted_windows.add((cid, s))
+        if not wanted_windows:
+            return {}
+        cap = max(1, int(cap_per_session))
+        for cid, sidx in wanted_windows:
+            rows = db.execute(
+                "SELECT id, type, title, content, metadata_json, conversation_id, "
+                "valid_from, user_id FROM memory_items "
+                "WHERE conversation_id = ? "
+                "  AND CAST(json_extract(metadata_json, '$.session_idx') AS INTEGER) = ? "
+                "  AND COALESCE(is_deleted, 0) = 0 "
+                "ORDER BY CAST(json_extract(metadata_json, '$.turn_idx') AS INTEGER) "
+                "LIMIT ?",
+                (cid, sidx, cap),
+            ).fetchall()
+            for r in rows:
+                if r["id"] in seed_set or r["id"] in out:
+                    continue
+                out[r["id"]] = dict(r)
+    return out
+
+
+async def _apply_smart_expansions(ranked: list, query: str,
+                                  smart_time_boost: float = 0.0,
+                                  smart_neighbor_sessions: int = 0) -> list:
+    """Post-retrieval expansion for the scored path: pull turns from sessions
+    adjacent to each hit and (optionally) nudge hits toward recency, then re-fuse.
+
+    Called from memory_search_scored_impl when
+    `smart_time_boost > 0 or smart_neighbor_sessions > 0`. Resolved at call time
+    via `_resolve_graph_helper` so it stays out of search.py's import graph.
+
+    - smart_neighbor_sessions (int N>0): pull turns from sessions [sidx-N, sidx+N]
+      around each hit, score them against the query, max-fuse into `ranked`.
+    - smart_time_boost (float>0): additive bonus to existing hits proportional to
+      their recency rank (newest gets full boost, oldest none). Safe no-op at 0.0.
+
+    Returns the re-sorted (score, item) list. A DB error during neighbor lookup
+    degrades safe (returns the input unchanged, logs a warning) so a transient
+    lock can't fail the whole search; contract violations (logic/type errors)
+    propagate — per the fail-loud-on-contract-violation tenet.
+    """
+    if not ranked:
+        return ranked
+    try:
+        if smart_neighbor_sessions and smart_neighbor_sessions > 0:
+            seed_ids = [
+                item.get("id") for _, item in ranked
+                if isinstance(item, dict) and item.get("id")
+            ]
+            neighbor_rows = _neighbor_session_ids(seed_ids, int(smart_neighbor_sessions))
+            existing_ids = {
+                item.get("id") for _, item in ranked
+                if isinstance(item, dict) and item.get("id")
+            }
+            for rid in list(neighbor_rows.keys()):
+                if rid in existing_ids:
+                    neighbor_rows.pop(rid, None)
+            if neighbor_rows:
+                scored_extra = await _score_extra_rows(query, neighbor_rows, base_score=0.0)
+                best: dict = {}
+                for sc, item in list(ranked) + scored_extra:
+                    rid = item.get("id") if isinstance(item, dict) else None
+                    if rid is None:
+                        continue
+                    if rid not in best or sc > best[rid][0]:
+                        best[rid] = (sc, item)
+                ranked = sorted(best.values(), key=lambda t: t[0], reverse=True)
+
+        if smart_time_boost and smart_time_boost > 0.0:
+            def _vf(pair):
+                item = pair[1]
+                return (item.get("valid_from") or "") if isinstance(item, dict) else ""
+            order = sorted(range(len(ranked)), key=lambda i: _vf(ranked[i]), reverse=True)
+            n = max(1, len(order) - 1)
+            boost_for: dict = {}
+            for rank, orig_i in enumerate(order):
+                boost_for[orig_i] = float(smart_time_boost) * (1.0 - rank / n)
+            ranked = [
+                (sc + boost_for.get(i, 0.0), item)
+                for i, (sc, item) in enumerate(ranked)
+            ]
+            ranked.sort(key=lambda t: t[0], reverse=True)
+    except sqlite3.Error as e:  # transient DB error — degrade safe, but visibly
+        logger.warning(f"smart expansions skipped (DB error): {type(e).__name__}: {e}")
+        return ranked
+    return ranked
