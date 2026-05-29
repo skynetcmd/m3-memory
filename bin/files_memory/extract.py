@@ -119,11 +119,14 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
         return None
     import httpx
 
+    from .config import llm_auth_headers
+
     url = endpoint.rstrip("/") + "/v1/chat/completions"
     try:
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(
                 url,
+                headers=llm_auth_headers(),
                 json={
                     "model": _llm_model(),
                     "messages": [
@@ -132,8 +135,11 @@ def _llm_call(content: str, max_tokens: int = 1024) -> Optional[str]:
                     ],
                     "temperature": 0.0,
                     "max_tokens": max_tokens,
-                    # Some endpoints honor a JSON mode hint; harmless if ignored.
-                    "response_format": {"type": "json_object"},
+                    # No response_format hint: some OpenAI-compat servers (e.g.
+                    # LM Studio's ministral build) HARD-REJECT
+                    # {"type":"json_object"} with HTTP 400 rather than ignoring
+                    # it. The prompt already asks for JSON and _parse_facts_json
+                    # is fence-tolerant, so we don't need the hint.
                 },
             )
             resp.raise_for_status()
