@@ -317,3 +317,20 @@ Manual sync with ChromaDB.
 ### `embedder_status`
 Check the status of the local sovereign embedder server (port 8081).
 - **Args**: None
+
+---
+
+## Tool Dispatcher
+
+The dispatcher reaches the full catalog without paying for every schema at
+startup. Pair it with the lazy domain-loading meta-tools (`tools_list_domains`,
+`tools_load_domain`): use the dispatcher for one-off or cross-domain calls,
+load a domain when you'll use several of its tools.
+
+### `m3_index`
+List catalog tools (optionally one domain) as structured rows — name, domain, one-line summary, destructive flag, and arg specs (name/type/required). Read-only; discover a tool's exact signature before calling it via `m3_call`.
+- **Args**: `domain` (str, optional — empty = whole catalog)
+
+### `m3_call`
+Invoke any catalog tool by name without loading its domain — the low-token path to the full tool surface. Destructive tools require `MCP_PROXY_ALLOW_DESTRUCTIVE=1`.
+- **Args**: `tool` (str, e.g. `files_stats`), `args` (object), `batch` (array of `{tool, args}`, isolated, capped at 100), `dry_run` (bool — validate + gate-check only)

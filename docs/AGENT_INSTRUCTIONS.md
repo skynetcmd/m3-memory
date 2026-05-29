@@ -264,6 +264,26 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 
 ---
 
+### Reaching tools that aren't in your startup surface
+
+Only the **essentials** (the main searches + writes) are registered at session
+start; the rest of the 96 tools load on demand. You never need to drop to raw
+`sqlite3` or shell out via Bash to touch a tool — that fallback is a tool-spec
+gap, not a missing capability. Use the dispatcher instead:
+
+| Tool | When to Use |
+|------|-------------|
+| `m3_index(domain)` | List the catalog (or one domain) with each tool's name, summary, destructive flag, and arg specs. Use it to find the exact arguments before you call a tool. |
+| `m3_call(tool, args)` | Invoke any catalog tool by name without loading its domain — the low-token path. Pass `batch=[{tool, args}, ...]` to run several in one round-trip (each isolated; capped at 100), or `dry_run=true` to validate args + the destructive gate without executing. |
+| `tools_load_domain(domain)` | Register a whole domain's tools natively when you'll call several of them — `m3_call` is better for one-off or cross-domain calls. |
+
+Rule of thumb: **known tool, few calls → `m3_call` directly**; **unsure of the
+args → `m3_index` first, then `m3_call`**; **about to use many tools from one
+domain → `tools_load_domain`**. Destructive tools still require
+`MCP_PROXY_ALLOW_DESTRUCTIVE=1` whether reached directly or via `m3_call`.
+
+---
+
 ## 👥 Multi-Agent / Mixed-Fleet Collaboration
 
 M3 is provider-agnostic. A single session can include Claude agents, Gemini

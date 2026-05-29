@@ -22,6 +22,7 @@ is an update primitive, not a delete; do not chain it to "clean up" clutter.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -268,6 +269,157 @@ async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
 
+
+async def execute_tool_structured(
+    spec: ToolSpec, args: dict, agent_id: str, *, dry_run: bool = False
+) -> Any:
+    """Like execute_tool, but returns the impl's NATIVE return value (dict/list/
+    etc.) instead of str()-coercing it, and raises on error instead of returning
+    an "Error: …" string. This is the path the m3_call dispatcher uses so the LLM
+    receives parseable structure (m3_call json.dumps it at the boundary).
+
+    Preserves execute_tool's exact gate order: filter to allowed keys ->
+    _pop_database -> inject_agent_id -> validate_args -> active_database ->
+    async/sync impl dispatch. When dry_run=True, runs everything up to and
+    including validate_args, then returns {"dry_run": True, "ok": True} WITHOUT
+    calling spec.impl (read-only by construction — no side effects).
+    """
+    allowed_keys = set(spec.parameters.get("properties", {}).keys())
+    args = {k: v for k, v in (args or {}).items() if k in allowed_keys}
+    database = _pop_database(args)
+    if spec.inject_agent_id and "agent_id" in allowed_keys:
+        args["agent_id"] = agent_id
+    args, err = validate_args(spec, args)
+    if err:
+        # validate_args signals failure with an "Error: …" string; surface it
+        # as a structured validation error rather than a bare string.
+        raise ValueError(err)
+    if dry_run:
+        return {"dry_run": True, "ok": True, "tool": spec.name}
+    with active_database(database):
+        if spec.is_async:
+            return await spec.impl(**args)
+        return spec.impl(**args)
+
+
+# ── Dispatcher (m3_call / m3_index) ──────────────────────────────────────────
+# A single generic entry point so the LLM can reach every catalog tool by name
+# without each tool's JSON schema being on the MCP wire at startup. Mirrors the
+# `m3 <domain> <tool>` human CLI surface; both go through execute_tool_structured
+# so behavior cannot drift. See docs/DUAL_SURFACE_TOOL_ACCESS_PLAN.md.
+
+_DESTRUCTIVE_ALLOWED = os.environ.get(
+    "MCP_PROXY_ALLOW_DESTRUCTIVE", ""
+).lower() in ("1", "true", "yes")
+
+# Tools the dispatcher must NOT recurse into (would be confusing / cyclic).
+_DISPATCH_EXCLUDE = frozenset({"m3_call", "m3_index", "tools_load_domain", "tools_list_domains"})
+
+
+def _spec_by_name(name: str) -> ToolSpec | None:
+    for t in TOOLS:
+        if t.name == name:
+            return t
+    return None
+
+
+def _did_you_mean(name: str, n: int = 3) -> list[str]:
+    """Cheap prefix/substring suggestions for an unknown tool name."""
+    name = (name or "").lower()
+    if not name:
+        return []
+    scored = []
+    for t in TOOLS:
+        tn = t.name.lower()
+        if tn.startswith(name) or name in tn:
+            scored.append(t.name)
+    return sorted(scored)[:n]
+
+
+async def _dispatch_one(tool: str, args: dict, *, dry_run: bool) -> Any:
+    """Resolve + invoke a single tool by name. Returns the native result or a
+    structured error dict (never raises to the caller — batch needs per-item
+    isolation)."""
+    spec = _spec_by_name(tool)
+    if spec is None:
+        return {"ok": False, "error": "unknown_tool", "tool": tool,
+                "did_you_mean": _did_you_mean(tool)}
+    if tool in _DISPATCH_EXCLUDE:
+        return {"ok": False, "error": "not_dispatchable", "tool": tool,
+                "hint": "Meta/dispatcher tools cannot be called through m3_call."}
+    if not _DESTRUCTIVE_ALLOWED and not spec.default_allowed:
+        return {"ok": False, "error": "destructive_gated", "tool": tool,
+                "hint": "This tool mutates/deletes. Set MCP_PROXY_ALLOW_DESTRUCTIVE=1 to enable."}
+    try:
+        result = await execute_tool_structured(
+            spec, args or {}, agent_id="", dry_run=dry_run)
+        return {"ok": True, "tool": tool, "result": result}
+    except Exception as e:  # validation or impl error — isolate per item
+        return {"ok": False, "error": "call_failed", "tool": tool,
+                "detail": f"{type(e).__name__}: {e}"}
+
+
+async def m3_call_impl(tool: str = "", args: dict | None = None,
+                       batch: list | None = None, dry_run: bool = False) -> str:
+    """Invoke any catalog tool by name. Single: pass tool+args. Batch: pass a
+    list of {tool, args} (each item isolated — one failure doesn't abort the
+    rest; result order matches input). dry_run validates + checks the
+    destructive gate without calling the impl. Returns JSON."""
+    MAX_BATCH = 100
+    if batch is not None:
+        if not isinstance(batch, list):
+            return json.dumps({"ok": False, "error": "bad_batch",
+                               "hint": "batch must be a list of {tool, args}."})
+        if len(batch) > MAX_BATCH:
+            return json.dumps({"ok": False, "error": "batch_too_large",
+                               "hint": f"batch capped at {MAX_BATCH} items."})
+        results = []
+        for item in batch:
+            if not isinstance(item, dict) or "tool" not in item:
+                results.append({"ok": False, "error": "bad_batch_item",
+                                "hint": "each item needs a 'tool' key."})
+                continue
+            results.append(await _dispatch_one(
+                item["tool"], item.get("args") or {},
+                dry_run=bool(item.get("dry_run", dry_run))))
+        return json.dumps({"batch": results}, default=str)
+    if not tool:
+        return json.dumps({"ok": False, "error": "missing_tool",
+                           "hint": "Pass 'tool' (and optional 'args'), or 'batch'."})
+    return json.dumps(await _dispatch_one(tool, args or {}, dry_run=dry_run),
+                      default=str)
+
+
+def _tool_arg_rows(spec: ToolSpec) -> list[dict]:
+    props = spec.parameters.get("properties", {}) or {}
+    required = set(spec.parameters.get("required", []))
+    rows = []
+    for name, pdef in props.items():
+        if name == "database":  # universal injected arg — omit from the index
+            continue
+        rows.append({"name": name, "type": pdef.get("type", "string"),
+                     "required": name in required})
+    return rows
+
+
+def m3_index_impl(domain: str = "") -> str:
+    """List catalog tools (optionally one domain): name, domain, summary, args.
+    Read-only catalog metadata — never tool output. Returns JSON."""
+    import tool_domains
+    rows = []
+    for t in TOOLS:
+        if t.name in _DISPATCH_EXCLUDE:
+            continue
+        d = tool_domains.domain_of_tool(t.name)
+        if domain and d != domain:
+            continue
+        summary = (t.description or "").split(".")[0].strip()[:100]
+        rows.append({"name": t.name, "domain": d, "summary": summary,
+                     "destructive": not t.default_allowed,
+                     "args": _tool_arg_rows(t)})
+    rows.sort(key=lambda r: (r["domain"], r["name"]))
+    return json.dumps({"count": len(rows), "tools": rows}, default=str)
+
 # ── Inline impl wrapper for conversation_search ──────────────────────────────
 async def _conversation_search_impl(query, k=8):
     """Search messages with automatic adjacent-turn pairing.
@@ -385,6 +537,61 @@ TOOLS: list[ToolSpec] = [
         },
         impl=_tool_loader.load_domain,
         is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="m3_index",
+        description=(
+            "List m3 catalog tools (optionally one domain) as structured rows: "
+            "name, domain, one-line summary, destructive flag, and arg specs "
+            "(name/type/required). Use this to discover the exact args for any "
+            "tool before calling it via m3_call — cheaper than a failed call. "
+            "Read-only catalog metadata; never returns tool output. Domains: "
+            "memory, chatlog, files, entity, agent, tasks, conversations, admin."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Filter to one domain (empty = whole catalog).",
+                    "default": "",
+                },
+            },
+            "required": [],
+        },
+        impl=m3_index_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="m3_call",
+        description=(
+            "Invoke ANY m3 catalog tool by name without loading its domain — the "
+            "low-token path to the full tool surface. Single call: pass `tool` "
+            "(e.g. 'files_stats') and `args` (an object). Batch: pass `batch`, a "
+            "list of {tool, args} (each isolated — one failure won't abort the "
+            "rest; capped at 100). Set `dry_run` to validate args + check the "
+            "destructive gate WITHOUT executing. Returns JSON. Call `m3_index` "
+            "first if you don't know a tool's args. Destructive tools require "
+            "MCP_PROXY_ALLOW_DESTRUCTIVE=1."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "tool":    {"type": "string", "description": "Catalog tool name (see m3_index).", "default": ""},
+                "args":    {"type": "object", "description": "Arguments object for the target tool.", "default": {}},
+                "batch":   {"type": "array", "description": "List of {tool, args} for one-round-trip batch dispatch.", "default": None},
+                "dry_run": {"type": "boolean", "description": "Validate + gate-check only; do not execute.", "default": False},
+            },
+            "required": [],
+        },
+        impl=m3_call_impl,
+        is_async=True,
         validators=(),
         default_allowed=True,
         inject_agent_id=False,
