@@ -255,12 +255,15 @@ def judge_material_change(old_text: str, new_text: str) -> tuple[Optional[bool],
 
     import httpx
 
+    from .config import llm_auth_headers
+
     user_content = f"OLD VERSION:\n{old_text[:3000]}\n\nNEW VERSION:\n{new_text[:3000]}"
     url = endpoint.rstrip("/") + "/v1/chat/completions"
     try:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
                 url,
+                headers=llm_auth_headers(),
                 json={
                     "model": _llm_model(),
                     "messages": [
@@ -269,7 +272,8 @@ def judge_material_change(old_text: str, new_text: str) -> tuple[Optional[bool],
                     ],
                     "temperature": 0.0,
                     "max_tokens": 128,
-                    "response_format": {"type": "json_object"},
+                    # No response_format hint — some servers (LM Studio ministral)
+                    # 400 on {"type":"json_object"}. Prompt drives JSON output.
                 },
             )
             resp.raise_for_status()

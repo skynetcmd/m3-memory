@@ -90,11 +90,14 @@ def _llm_call(prompt: str, content: str, max_tokens: int = 256) -> Optional[str]
 
     import httpx
 
+    from .config import llm_auth_headers
+
     url = endpoint.rstrip("/") + "/v1/chat/completions"
     try:
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(
                 url,
+                headers=llm_auth_headers(),
                 json={
                     "model": _summary_model(),
                     "messages": [
