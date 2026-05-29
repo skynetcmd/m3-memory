@@ -95,7 +95,7 @@ Restart your agent. Done!
 
 ---
 
-## 🎚️ 87 tools, but they don't all crowd your context — domain gating keeps the catalog small
+## 🎚️ 96 tools, but they don't all crowd your context — domain gating keeps the catalog small
 
 M3 exposes 87 MCP tools so power users can customize at fine granularity —
 single-id deletes, bulk variants, per-store searches, KG traversals, GDPR
@@ -121,7 +121,7 @@ For comparison, common alternatives: a 40-tool GitHub MCP server
 ≈ 12,000 tokens; the full 93-tool GitHub MCP server ≈ 55,000 tokens
 ([MCP Token Counter](https://mcpplaygroundonline.com/blog/mcp-token-counter-optimize-context-window)).
 m3's lazy default keeps the always-on surface ~6× smaller than a stock
-GitHub server while giving the agent the full 87 tools whenever it
+GitHub server while giving the agent the full 96 tools whenever it
 actually needs them.
 
 Disable with `M3_TOOLS_LAZY=0` if your client doesn't support
@@ -191,7 +191,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 **Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `m3 setup` for a one-command wizard that detects agents, wires settings.json + hooks, installs the sovereign CPU embedder, and verifies with `doctor` in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 
-**Context-frugal tool catalog** — 87 MCP tools grouped into 8 domains, loaded lazily. Startup surface is **~2,400 tokens** (~1.2% of a 200K window) vs ~16,100 if every tool registered eagerly. Agent expands a domain when it needs the rest. See [§ 87 tools, domain-gated](#-87-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small).
+**Context-frugal tool catalog** — 96 MCP tools grouped into 8 domains, loaded lazily. Startup surface is **~2,400 tokens** (~1.2% of a 200K window) vs ~16,100 if every tool registered eagerly. Agent expands a domain when it needs the rest. See [§ 96 tools, domain-gated](#-96-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small).
 
 **Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB, with manifest-driven multi-DB support for fleet deployments. Set one environment variable and your memories follow you across machines.
 

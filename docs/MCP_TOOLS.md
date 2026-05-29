@@ -81,6 +81,8 @@ This document provides a comprehensive inventory of all 96 MCP tools available i
 | `chroma_sync` | Infrastructure Operations | Bi-directional sync between local SQLite and ChromaDB. |
 | `embedder_status` | Infrastructure Operations | Check the status of the local sovereign embedder server (port 8081). |
 | `memory_cost_report` | Infrastructure Operations | Returns current session operation counts and estimated token usage for memory operations. |
+| `m3_call` | Tool Dispatcher | Invoke any catalog tool by name (or batch) without loading its domain — the low-token path to the full tool surface. |
+| `m3_index` | Tool Dispatcher | List catalog tools (optionally one domain) as structured rows with arg specs — discover a tool's signature before calling it via `m3_call`. |
 | `files_corpus_create` | Uncategorized | Register a new corpus with optional default overrides. `default=True` marks this corpus as the installation's default (clears the flag on any prior default in the same transaction). |
 | `files_corpus_delete` | Uncategorized | Delete a corpus's settings row. Cascade=True also deletes every file_node in the corpus -- DESTRUCTIVE. Without cascade, refuses when the corpus has file_nodes. |
 | `files_corpus_get` | Uncategorized | Fetch a single corpus's settings + counts. |
@@ -1345,6 +1347,37 @@ Returns current session operation counts and estimated token usage for memory op
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+## Tool Dispatcher
+
+### `m3_call`
+
+Invoke ANY m3 catalog tool by name without loading its domain — the low-token path to the full tool surface. Single call: pass `tool` (e.g. `files_stats`) and `args` (an object). Batch: pass `batch`, a list of `{tool, args}` (each isolated — one failure won't abort the rest; capped at 100). Set `dry_run` to validate args + check the destructive gate WITHOUT executing. Returns JSON. Call `m3_index` first if you don't know a tool's args. Destructive tools require `MCP_PROXY_ALLOW_DESTRUCTIVE=1`.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `tool` | `string` | No | Catalog tool name (see `m3_index`). | `` |
+| `args` | `object` | No | Arguments object for the target tool. | `{}` |
+| `batch` | `array` | No | List of `{tool, args}` for one-round-trip batch dispatch. | `None` |
+| `dry_run` | `boolean` | No | Validate + gate-check only; do not execute. | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+### `m3_index`
+
+List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, destructive flag, and arg specs (name/type/required). Use this to discover the exact args for any tool before calling it via `m3_call` — cheaper than a failed call. Read-only catalog metadata; never returns tool output. Domains: memory, chatlog, files, entity, agent, tasks, conversations, admin.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `domain` | `string` | No | Filter to one domain (empty = whole catalog). | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ---
