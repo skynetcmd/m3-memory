@@ -7,11 +7,22 @@ Imported by:
 
 Zero FastMCP dependency. Pure Python + memory_core + memory_sync + memory_maintenance.
 Never import this module from those modules — that would create a cycle.
+
+Mutation-safety invariant (do not regress): mutating memory tools
+(memory_delete, memory_supersede) require the FULL UUID for their target id —
+a prefix is rejected via _is_full_uuid in their validators. Read tools
+(memory_get) accept an 8-char prefix for convenience, but an ambiguous prefix
+on a mutation could close/delete the wrong memory irreversibly. This asymmetry
+is intentional; keep the validators and the "full UUID required" wording in the
+tool descriptions so it survives doc-inventory regeneration. Also note:
+memory_supersede is non-destructive and creates a NEW successor each call — it
+is an update primitive, not a delete; do not chain it to "clean up" clutter.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -56,6 +67,20 @@ VALID_MEMORY_TYPES = frozenset({
 VALID_ENTITY_TYPES = memory_core.VALID_ENTITY_TYPES
 VALID_ENTITY_PREDICATES = memory_core.VALID_ENTITY_PREDICATES
 
+# Canonical UUID shape (8-4-4-4-12 hex). Mutating tools (supersede/delete)
+# require a full UUID, not the 8-char prefix that memory_get accepts for reads
+# — an ambiguous prefix on a mutation could close the wrong memory.
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _is_full_uuid(s: str) -> bool:
+    """True iff s is a full canonical UUID (not a prefix). Used to gate
+    mutating memory tools against prefix-based id ambiguity."""
+    return bool(_UUID_RE.match(s.strip()))
+
 # ── Dataclass ────────────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class ToolSpec:
@@ -88,6 +113,22 @@ def _memory_write_validator(args: dict) -> Any:
         args["auto_classify"] = True
     return args
 
+def _memory_delete_validator(args: dict) -> Any:
+    """Validator for memory_delete. Requires a full UUID, never a prefix —
+    a prefix could delete the wrong memory irreversibly (full UUID required
+    for mutation safety). memory_get accepts a prefix for reads; this does not."""
+    mid = args.get("id", "")
+    if not mid or not str(mid).strip():
+        return "Error: id is required (the full UUID of the memory to delete)."
+    mid = str(mid).strip()
+    if not _is_full_uuid(mid):
+        return ("Error: id must be the full UUID, not a prefix — "
+                "full UUID required for mutation safety. "
+                "Resolve the prefix first with memory_get (which accepts a "
+                "prefix), then pass the returned full id.")
+    args["id"] = mid
+    return args
+
 def _memory_supersede_validator(args: dict) -> Any:
     """Validator for memory_supersede. Like _memory_write_validator but `type`
     is optional — an empty type means "inherit the old memory's type" (see
@@ -95,7 +136,17 @@ def _memory_supersede_validator(args: dict) -> Any:
     old_id = args.get("old_id", "")
     if not old_id or not str(old_id).strip():
         return "Error: old_id is required (the id of the memory to supersede)."
-    args["old_id"] = str(old_id).strip()
+    old_id = str(old_id).strip()
+    # Mutation safety: require a full UUID, never an id prefix. memory_get
+    # accepts an 8-char prefix for reads, but an ambiguous prefix on a
+    # mutation could close the wrong memory irreversibly, so supersede/delete
+    # demand the exact full id. See _is_full_uuid.
+    if not _is_full_uuid(old_id):
+        return ("Error: old_id must be the full UUID, not a prefix — "
+                "full UUID required for mutation safety. "
+                "Resolve the prefix first with memory_get (which accepts a "
+                "prefix), then pass the returned full id.")
+    args["old_id"] = old_id
     t = args.get("type", "")
     # Empty type is the inherit-from-old sentinel; only validate a non-empty one.
     if t and t not in VALID_MEMORY_TYPES:
@@ -440,12 +491,16 @@ TOOLS: list[ToolSpec] = [
             "point — it is only dropped from default search. Fields you omit "
             "(type, title, importance, scope) are inherited from the old memory, "
             "so pass only what changed. To hard-delete instead, that is a "
-            "separate gated tool (memory_delete)."
+            "separate gated tool (memory_delete). "
+            "old_id MUST be the full UUID — a prefix is rejected (full UUID "
+            "required for mutation safety; memory_get accepts a prefix, this "
+            "does not). Note: each supersede creates a NEW successor memory; "
+            "call it once with the full id, do not chain supersedes."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "old_id":       {"type": "string", "description": "Id (full UUID) of the memory being superseded. Must exist and not already be deleted/superseded."},
+                "old_id":       {"type": "string", "description": "FULL UUID of the memory being superseded (not an 8-char prefix — a prefix is rejected for mutation safety). Must exist and not already be deleted/superseded."},
                 "content":      {"type": "string", "description": "Body of the replacement memory (max 50000 chars)."},
                 "type":         {"type": "string", "description": f"Memory type of the replacement. Omit to inherit the old memory's type. One of: {', '.join(sorted(VALID_MEMORY_TYPES))}.", "default": ""},
                 "title":        {"type": "string", "description": "Title of the replacement. Omit to inherit the old memory's title.", "default": ""},
@@ -766,18 +821,22 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="memory_delete",
-        description="Deletes a MemoryItem (soft or hard).",
+        description=(
+            "Deletes a MemoryItem (soft or hard). id MUST be the full UUID — a "
+            "prefix is rejected (full UUID required for mutation safety; "
+            "memory_get accepts a prefix, this does not)."
+        ),
         parameters={
             "type": "object",
             "properties": {
-                "id":   {"type": "string", "description": "Memory item UUID."},
+                "id":   {"type": "string", "description": "FULL UUID of the memory (not an 8-char prefix — a prefix is rejected for mutation safety)."},
                 "hard": {"type": "boolean", "description": "Hard delete (permanent).", "default": False},
             },
             "required": ["id"],
         },
         impl=memory_core.memory_delete_impl,
         is_async=False,
-        validators=(),
+        validators=(_memory_delete_validator,),
         default_allowed=False,
         inject_agent_id=False,
     ),
