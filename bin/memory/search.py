@@ -1333,7 +1333,9 @@ async def memory_search_scored_impl(
         _enqueue_access_stamps([item[1]["id"] for item in ranked if "bm25_score" in item[1]])
 
     if ranked and (smart_time_boost > 0.0 or smart_neighbor_sessions > 0):
-        ranked = await _apply_smart_expansions(ranked, query, smart_time_boost, smart_neighbor_sessions)
+        ranked = await _resolve_graph_helper("_apply_smart_expansions")(
+            ranked, query, smart_time_boost, smart_neighbor_sessions
+        )
 
     if ranked and _prefer_observations_gate():
         ranked = _apply_observation_preference(ranked, k)
