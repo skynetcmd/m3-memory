@@ -19,6 +19,46 @@ forward-going only.
 
 ---
 
+## [Unreleased] — Tool dispatcher + generated catalog manifest
+
+Two new always-on tools let agents reach the whole catalog without paying for
+every schema at startup, plus a generated manifest and a drift test keep the
+documented tool count honest.
+
+### Added — `m3_call` / `m3_index` dispatcher
+
+- **`m3_call`** invokes any catalog tool by name without loading its domain —
+  the low-token path to the full surface. Supports `batch` (a list of
+  `{tool, args}`, each isolated, capped at 100) and `dry_run` (validate args +
+  check the destructive gate without executing). Destructive tools still
+  require `MCP_PROXY_ALLOW_DESTRUCTIVE=1`.
+- **`m3_index`** lists the catalog (optionally one domain) as structured rows —
+  name, domain, one-line summary, destructive flag, and arg specs — so an agent
+  can discover a tool's signature before calling it. Read-only metadata.
+- Both join the always-registered **essentials** set, so the dispatcher is
+  reachable in every session alongside `tools_list_domains` /
+  `tools_load_domain`. Agents no longer need to fall back to raw `sqlite3` or
+  Bash to touch a non-essential tool.
+
+### Added — generated tool-catalog manifest
+
+- **`bin/gen_tool_manifest.py`** emits `docs/tools/MCP_CATALOG.json` from
+  `mcp_tool_catalog.TOOLS` — per-tool name, domain, summary, destructive flag,
+  and arg specs (the universal `database` arg excluded), plus a top-level
+  `count` of non-meta tools. Output is deterministic (sorted, `indent=2`) so
+  re-running produces no spurious diff.
+- **`tests/test_tool_count_drift.py`** asserts the manifest `count`, the live
+  catalog count, and every hardcoded "N tools" claim in the public docs all
+  agree — so a catalog change that forgets to update the docs fails the build.
+
+### Changed
+
+- Catalog total is now **96 tools**; README / `COMPARISON.md` /
+  `MYTHS_AND_FACTS.md` / `docs/tools/files_memory.md` updated to match, and
+  `docs/MCP_TOOLS.md` + `docs/API_REFERENCE.md` document the dispatcher.
+
+---
+
 ## [2026.5.18.1] — May 18, 2026 — Security: harden content-safety regex (CodeQL #29)
 
 **Security fix.** The content-safety filter on `memory_write` had two issues

@@ -2,15 +2,15 @@
 
 Problem this solves
 -------------------
-m3 ships 85 tools in `mcp_tool_catalog.TOOLS`. Their JSON schemas serialize
-to ~15,800 tokens on the MCP wire. That cost is paid up-front at session
+m3 ships ~96 tools in `mcp_tool_catalog.TOOLS`. Their JSON schemas serialize
+to ~22,600 tokens on the MCP wire. That cost is paid up-front at session
 init — every client (Claude Code, Gemini CLI, OpenCode, OpenClaw, claude.ai
-connector) burns ~8 % of a 200K context window on schemas the agent may
+connector) burns ~10 % of a 200K context window on schemas the agent may
 never touch.
 
 Approach
 --------
-Group the 85 tools into ~8 domains (memory, chatlog, files, entity, agent,
+Group the tools into ~8 domains (memory, chatlog, files, entity, agent,
 tasks, conversations, admin). At MCP startup, expose only a small
 "essentials" set (search + write of the two main stores) plus a
 `tools_load_domain` meta-tool. When the agent calls
@@ -25,7 +25,7 @@ either:
     still get the schemas in-band; the agent can pass arbitrary JSON to
     `mcp_tool_call` style bridges that accept dynamic tool names.
 
-Disable lazy mode with `M3_TOOLS_LAZY=0` to restore the legacy "all 85
+Disable lazy mode with `M3_TOOLS_LAZY=0` to restore the legacy "all
 tools at startup" behavior.
 
 Domain assignment is derived from the tool name prefix — see
@@ -84,6 +84,9 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("agent",               "agent"),
     ("task",                "tasks"),
     ("conversation",        "conversations"),
+    # dispatcher / meta tools (like tools_*, cross-cutting) — route to admin
+    ("m3_call",             "admin"),
+    ("m3_index",            "admin"),
     # cross-cutting / system tools
     ("notify",              "admin"),
     ("notifications",       "admin"),
@@ -132,6 +135,9 @@ ESSENTIAL_TOOL_NAMES: frozenset[str] = frozenset({
     "chatlog_status",
     "task_list",
     "agent_list",
+    # dispatcher — reach the whole catalog by name without loading a domain
+    "m3_call",
+    "m3_index",
 })
 
 
