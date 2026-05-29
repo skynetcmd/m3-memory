@@ -19,7 +19,7 @@ mcp>=1.27.0,<2
 httpx[http2]>=0.28.1,<1
 h2>=4.3.0,<5
 requests>=2.33.1,<3
-urllib3>=2.6.3,<3
+urllib3>=2.7.0,<3  # 2.7.0 fixes PYSEC-2026-141/142
 
 # --- Database & Storage ---
 psycopg2-binary>=2.9.12,<3
@@ -43,6 +43,18 @@ tqdm>=4.67.3,<5
 
 # --- Embedding Server ---
 sentence-transformers>=5.4.1,<6
+# transformers is transitive (sentence-transformers / FlagEmbedding / peft) but
+# pinned directly to floor out 18 of 20 known CVEs (all the <4.53.0 ones).
+# Ceiling is <5 (NOT <6): transformers 5.x removed `is_torch_fx_available`, which
+# FlagEmbedding imports — verified to break the embedder on 5.9.0; 4.57.x is the
+# latest working 4.x. Two CVEs remain and are ACCEPTED:
+#   - CVE-2026-1839 (Trainer torch.load RCE) — fix only in 5.x; m3 never uses Trainer.
+#   - PYSEC-2025-217 (X-CLIP checkpoint-conversion RCE) — no fixed version exists;
+#     m3 never converts X-CLIP checkpoints.
+# Both require loading a malicious checkpoint; m3 only runs embedding inference on
+# its own trusted local model, so neither is reachable. Revisit when FlagEmbedding
+# supports transformers 5.x.
+transformers>=4.53.0,<5
 torch>=2.11.0,<3
 
 # --- Utilities ---
