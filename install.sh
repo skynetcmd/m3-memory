@@ -34,7 +34,28 @@ while [[ $# -gt 0 ]]; do
         --no-setup)             RUN_SETUP=0; shift ;;
         --install-gpu-embedder) INSTALL_GPU_EMBEDDER=1; shift ;;
         -h|--help)
-            sed -n '2,19p' "$0" | sed 's/^# \?//'
+            # Self-contained heredoc, not `sed "$0"`: when the script is run
+            # via `curl ... | bash`, $0 is "bash" and there is no file to read.
+            cat <<'USAGE'
+m3-memory installer — Linux + macOS.
+
+Detects the OS, installs the OS-level prerequisites (pipx, git, sqlite3),
+then runs `pipx install m3-memory && m3 setup` as the calling user.
+Idempotent: safe to re-run.
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
+
+Cautious version:
+  curl -fsSL .../install.sh -o install.sh && less install.sh && bash install.sh
+
+Flags:
+  --capture-mode {both|stop|precompact|none}   default: both
+  --endpoint URL                               pin LLM_ENDPOINTS_CSV
+  --skip-prereqs                               assume pipx/git/sqlite3 already present
+  --no-setup                                   stop after pipx install (skip the wizard)
+  --install-gpu-embedder                       also build the in-process GPU embedder (CUDA/Vulkan/Metal)
+USAGE
             exit 0
             ;;
         *) echo "unknown flag: $1" >&2; exit 2 ;;
