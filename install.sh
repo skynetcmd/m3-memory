@@ -182,7 +182,21 @@ esac
 
 # ── pipx install m3-memory ────────────────────────────────────────────────────
 
-if pipx list 2>/dev/null | grep -q '^   package m3-memory '; then
+# Detect an existing m3-memory pipx install without depending on the exact
+# layout of pipx's human-readable `list` output (the old check hardcoded a
+# 3-space indent + "package " prefix and broke on any pipx format change).
+# Prefer `--short` (machine-readable: "<pkg> <version>" per line); fall back to
+# a loose, indent-independent, case-insensitive match on plain `list`.
+m3_installed() {
+    local out
+    if out=$(pipx list --short 2>/dev/null) && [[ -n "$out" ]]; then
+        printf '%s\n' "$out" | grep -qiE '(^|/)m3-memory[[:space:]]'
+    else
+        pipx list 2>/dev/null | grep -qiE '(^|[^[:alnum:]_-])m3-memory([^[:alnum:]_-]|$)'
+    fi
+}
+
+if m3_installed; then
     say "m3-memory already installed via pipx — upgrading."
     pipx upgrade m3-memory || pipx install --force m3-memory
 else
