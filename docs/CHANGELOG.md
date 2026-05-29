@@ -57,6 +57,25 @@ documented tool count honest.
   `MYTHS_AND_FACTS.md` / `docs/tools/files_memory.md` updated to match, and
   `docs/MCP_TOOLS.md` + `docs/API_REFERENCE.md` document the dispatcher.
 
+### Added — generated `m3 <domain> <tool>` human CLI surface
+
+- The `m3` CLI now generates a subcommand for every catalog tool, grouped by
+  domain: `m3 files <tool>`, `m3 memory <tool>`, `m3 entity/agent/tasks/admin/
+  conversations/diagnostics <tool>`. The dispatch runs through the same
+  `execute_tool_structured` path as `m3_call`, so the human CLI and the agent
+  surface cannot drift. Flat-arg tools get one `--<prop>` flag each (booleans
+  via `--flag/--no-flag`); the few structured-arg tools take a single
+  `--json OBJ` blob. Every tool subcommand also accepts `--database`,
+  `--dry-run` (validate + gate-check without executing), and `--yes` (required
+  to run a destructive tool).
+- The chatlog domain is reached as **`m3 chat <tool>`** (e.g.
+  `m3 chat chatlog_search`), because top-level `m3 chatlog` is the pre-existing
+  operational command wired into `hooks.json`. `m3 chat` also carries the
+  operational `init` / `status` / `doctor` / `hook-path` subcommands, so it is
+  the single chatlog namespace.
+- **`m3 chatlog <init|status|doctor|hook-path>`** remains a back-compat alias —
+  existing hooks and install guides are unaffected.
+
 ---
 
 ## [2026.5.18.1] — May 18, 2026 — Security: harden content-safety regex (CodeQL #29)
