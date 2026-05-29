@@ -59,6 +59,14 @@ defaults. Power users can still run individual steps with `m3 install-m3`,
 `m3 embedder install`, `m3 chatlog init`, etc. — see `m3 --help`.
 Upgrade path: `pip install -U m3-memory && m3 update`.
 
+You can also reach **any** memory tool from the shell — every catalog tool is
+exposed as `m3 <domain> <tool>` (e.g. `m3 files files_stats`,
+`m3 memory memory_search --query "..."`). Chatlog tools live under
+`m3 chat <tool>` (e.g. `m3 chat chatlog_search`), since plain `m3 chatlog` is
+the operational subsystem command. Add `--dry-run` to validate without
+executing, and `--yes` to confirm a destructive tool. Run `m3 <domain> --help`
+to list a domain's tools.
+
 > **Tool catalog stays small in your context.** m3 ships 87 MCP tools but
 > groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
 > conversations, admin). Only ~6 essentials load at MCP startup
