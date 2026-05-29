@@ -103,6 +103,18 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
 # Tools always exposed at MCP startup. The "read + write essentials" set —
 # the 80/20 a typical session needs before reaching for anything else.
 # Everything else lives behind `tools_load_domain`.
+#
+# Includes a small read-only "store overview" set (files_stats / files_index /
+# files_corpus_list / chatlog_status / task_list / agent_list / files_get /
+# files_health). These answer the extremely common "what's in <store>?" /
+# "what's the state of <subsystem>?" question without a tools_load_domain
+# round-trip. They earn their ~1K startup-token cost because the load_domain
+# fallback is unreliable on clients that don't honor tools.listChanged: such
+# clients are handed the new schemas in-band but can't actually invoke the
+# freshly-registered tool, so an inspection request dead-ends. Keeping the
+# read-only inspectors always-on sidesteps that gap. Anything that MUTATES a
+# store stays behind tools_load_domain — only safe, idempotent reads belong
+# here.
 ESSENTIAL_TOOL_NAMES: frozenset[str] = frozenset({
     "memory_search",
     "memory_write",
@@ -111,6 +123,15 @@ ESSENTIAL_TOOL_NAMES: frozenset[str] = frozenset({
     "chatlog_write",
     "chatlog_search",
     "files_search",
+    # read-only store/subsystem overview — see note above
+    "files_stats",
+    "files_index",
+    "files_corpus_list",
+    "files_get",
+    "files_health",
+    "chatlog_status",
+    "task_list",
+    "agent_list",
 })
 
 
