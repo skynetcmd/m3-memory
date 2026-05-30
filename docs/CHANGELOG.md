@@ -19,6 +19,21 @@ forward-going only.
 
 ---
 
+## [2026.5.29.5] — May 29, 2026 — Files entity-linking fix
+
+### Fixed
+
+- **File fact-extraction now links entities into the core memory DB.** The
+  entity linker read its DB path from `M3_DATABASE`, which during ingest points
+  at the *files* DB (`files_database.db`) — so it looked for the `entities`
+  table there ("no such table: entities") and never populated
+  `fact_entity_refs`. Entities live in the core store (`agent_memory.db`) by
+  design (facts in files.db, entities in memory.db, linked via
+  `fact_entity_refs`). Added `config.memory_db_path()` resolving the core DB
+  independently of `M3_DATABASE` (`M3_MEMORY_DB` override, else the m3_sdk core
+  default). Verified live: refs populate, existing entities matched, unknowns
+  created provisional per the resolution policy.
+
 ## [2026.5.29.4] — May 29, 2026 — Files fact-extraction fix + docs
 
 ### Fixed
