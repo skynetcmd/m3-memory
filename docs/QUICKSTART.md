@@ -31,10 +31,15 @@ required), per-agent MCP wiring, chatlog hooks, and runs a final
 /plugin install m3@skynetcmd
 ```
 
-15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`,
-`/m3:status`, …), the `m3:curate-memory` and `m3:curate-chatlog` subagents,
-and auto-wired Stop + PreCompact chatlog hooks. See
-[claude_code_plugin.md](./claude_code_plugin.md) for the full reference.
+15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, `/m3:status`, …), the `m3:curate-memory` and `m3:curate-chatlog` subagents, and auto-wired Stop + PreCompact chatlog hooks. See [claude_code_plugin.md](./claude_code_plugin.md) for the full reference.
+
+### Google Antigravity users — install as a plugin
+
+```bash
+agy plugin install https://github.com/skynetcmd/m3-memory
+```
+
+15 `/m3:*` slash commands as native Skills, two curator subagents (`m3:curate-memory`, `m3:curate-chatlog`), and auto-wired chatlog hooks. See [antigravity_plugin.md](./antigravity_plugin.md) for the full reference.
 
 ### Windows
 
@@ -129,8 +134,7 @@ embedding-based memory, skip this — those features simply become no-ops.
 `m3 setup` wires every agent it detects on PATH. If you skipped the
 wizard or add an agent later, here's the manual recipe per agent.
 
-**Claude Code** — the [plugin route](./claude_code_plugin.md) is
-recommended. Manual:
+**Claude Code** — the [plugin route](./claude_code_plugin.md) is recommended. Manual:
 
 ```bash
 claude mcp add memory m3
@@ -146,6 +150,17 @@ Or edit `~/.claude/settings.json`:
 ```
 
 **Gemini CLI** (`~/.gemini/settings.json`):
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "m3" }
+  }
+}
+```
+
+**Google Antigravity** — the [plugin route](./antigravity_plugin.md) is recommended. Manual:
+
+Edit `~/.gemini/antigravity-cli/settings.json`:
 ```json
 {
   "mcpServers": {

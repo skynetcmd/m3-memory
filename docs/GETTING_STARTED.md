@@ -37,6 +37,14 @@ m3 setup
 
 That gets you 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, …) plus auto-wired hooks. See [the plugin reference](./claude_code_plugin.md).
 
+**Google Antigravity users — install as a plugin directly:**
+
+```bash
+agy plugin install https://github.com/skynetcmd/m3-memory
+```
+
+That installs all 15 `/m3:*` slash commands as native agent Skills and auto-wires the chatlog hooks. See [the plugin reference](./antigravity_plugin.md).
+
 **Windows or manual install:** see the [README](../README.md#-install), [INSTALL.md](../INSTALL.md), or the per-OS quickstarts ([Linux](./QUICKSTART_LINUX.md) / [macOS](./QUICKSTART_MACOS.md) / [Windows](./QUICKSTART_WINDOWS.md)).
 
 > **Tool catalog stays small in your context.** m3 ships 87 MCP tools but
