@@ -214,6 +214,46 @@ def files_dedup_review_impl(
     return review_dedup_candidate(candidate_uuid, action, note=note)
 
 
+def files_entity_coalesce_impl(
+    max_pairs: int = 1000,
+    dry_run: bool = False,
+    corpus: Optional[str] = None,
+) -> dict:
+    """Detect provisional-entity coalescing candidates (v1: detect + quarantine
+    + review only — never merges, never auto-applies).
+
+    Quarantines non-entity noise (reversible flag), then blocks→fuzzy→embeds
+    survivors and flags candidate pairs into entity_coalesce_candidates for
+    review. Use files_entity_coalesce_list to inspect and
+    files_entity_coalesce_review to record decisions. Set dry_run=True to
+    estimate without writing or embedding.
+    """
+    from .entity_coalesce import coalesce_detect
+    return coalesce_detect(max_pairs=max_pairs, dry_run=dry_run, corpus=corpus)
+
+
+def files_entity_coalesce_list_impl(
+    reviewed: Optional[bool] = False,
+    limit: int = 100,
+    min_cosine: Optional[float] = None,
+) -> list[dict]:
+    """List entity-coalescing candidate pairs detected by files_entity_coalesce."""
+    from .entity_coalesce import list_coalesce_candidates
+    return list_coalesce_candidates(reviewed=reviewed, limit=limit, min_cosine=min_cosine)
+
+
+def files_entity_coalesce_review_impl(
+    reviews: list,
+    note: str = "",
+) -> dict:
+    """Record review decisions for entity-coalescing candidates (BULK — pass a
+    LIST of {uuid, action}; action is merge|related|reject|defer). v1 records
+    intent only; applying the reversible same_as/cluster overlay is a future
+    phase."""
+    from .entity_coalesce import review_coalesce_candidates
+    return review_coalesce_candidates(reviews, note=note)
+
+
 def files_staleness_review_impl(
     directory: Optional[str] = None,
     corpus: Optional[str] = None,
@@ -721,6 +761,41 @@ def register(mcp) -> None:
         )
 
     @mcp.tool()
+    def files_entity_coalesce(
+        max_pairs: int = 1000,
+        dry_run: bool = False,
+        corpus: Optional[str] = None,
+    ) -> dict:
+        """Detect provisional-entity coalescing candidates (quarantine noise +
+        flag near-duplicate entities). Detection only — never merges, never
+        auto-applies; candidates land in entity_coalesce_candidates for review.
+        dry_run=True estimates without writing or embedding."""
+        return files_entity_coalesce_impl(
+            max_pairs=max_pairs, dry_run=dry_run, corpus=corpus,
+        )
+
+    @mcp.tool()
+    def files_entity_coalesce_list(
+        reviewed: Optional[bool] = False,
+        limit: int = 100,
+        min_cosine: Optional[float] = None,
+    ) -> list[dict]:
+        """List entity-coalescing candidate pairs (name + score + band)."""
+        return files_entity_coalesce_list_impl(
+            reviewed=reviewed, limit=limit, min_cosine=min_cosine,
+        )
+
+    @mcp.tool()
+    def files_entity_coalesce_review(
+        reviews: list,
+        note: str = "",
+    ) -> dict:
+        """Record review decisions in BULK: pass a list of {uuid, action} where
+        action is 'merge' | 'related' | 'reject' | 'defer'. Records intent only
+        (v1); applying the reversible overlay is a future phase."""
+        return files_entity_coalesce_review_impl(reviews=reviews, note=note)
+
+    @mcp.tool()
     def files_staleness_review(
         directory: Optional[str] = None,
         corpus: Optional[str] = None,
@@ -900,6 +975,25 @@ def main() -> int:
     p_dr.add_argument("--action", required=True, choices=["kept", "merged", "ignored"])
     p_dr.add_argument("--note", default="")
 
+    p_ec = sub.add_parser("entity-coalesce",
+                          help="detect provisional-entity coalescing candidates (detect+quarantine only)")
+    p_ec.add_argument("--max-pairs", type=int, default=1000)
+    p_ec.add_argument("--dry-run", action="store_true", help="estimate; no writes, no embedding")
+    p_ec.add_argument("--corpus", default=None)
+
+    p_ecl = sub.add_parser("entity-coalesce-list", help="list entity-coalescing candidates")
+    p_ecl.add_argument("--reviewed", action="store_true")
+    p_ecl.add_argument("--all", dest="reviewed_all", action="store_true",
+                       help="include both reviewed and unreviewed")
+    p_ecl.add_argument("--limit", type=int, default=100)
+    p_ecl.add_argument("--min-cosine", type=float, default=None)
+
+    p_ecr = sub.add_parser("entity-coalesce-review",
+                           help="record review decisions (bulk JSON list of {uuid,action})")
+    p_ecr.add_argument("--reviews", required=True,
+                       help='JSON list, e.g. \'[{"uuid":"...","action":"merge"}]\'')
+    p_ecr.add_argument("--note", default="")
+
     p_pr = sub.add_parser("promotable", help="list top promotion candidates by usage")
     p_pr.add_argument("--limit", type=int, default=20)
     p_pr.add_argument("--min-score", type=float, default=0.30)
@@ -1049,6 +1143,24 @@ def main() -> int:
     elif args.cmd == "dedup-review":
         r = files_dedup_review_impl(
             candidate_uuid=args.candidate_uuid, action=args.action, note=args.note,
+        )
+    elif args.cmd == "entity-coalesce":
+        r = files_entity_coalesce_impl(
+            max_pairs=args.max_pairs, dry_run=args.dry_run, corpus=args.corpus,
+        )
+    elif args.cmd == "entity-coalesce-list":
+        ec_reviewed: Optional[bool] = False
+        if args.reviewed_all:
+            ec_reviewed = None
+        elif args.reviewed:
+            ec_reviewed = True
+        r = files_entity_coalesce_list_impl(
+            reviewed=ec_reviewed, limit=args.limit, min_cosine=args.min_cosine,
+        )
+    elif args.cmd == "entity-coalesce-review":
+        import json as _json
+        r = files_entity_coalesce_review_impl(
+            reviews=_json.loads(args.reviews), note=args.note,
         )
     elif args.cmd == "promotable":
         r = files_promotable_impl(
