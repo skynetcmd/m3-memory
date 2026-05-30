@@ -572,7 +572,8 @@ def run_live_tui(interval: float = 5.0):
         lines.append(f"  [Ctrl+C / Q] Exit  |  [+] / [-] Change Interval ({current_interval:.1f}s)")
         lines.append("  Interactive Actions:")
         lines.append("  [D] Decay Sweep (Dry-run)  |  [A] Apply Decay Sweep  |  [S] Run Embed Sweeper")
-        lines.append("  [T] Backfill Titles        |  [E] Backfill Embeddings")
+        lines.append("  [T] Backfill Titles        |  [E] Backfill Embeddings |  [F] Ingest / Sync Files")
+        lines.append("  [H] Files DB Health / Rebuild")
 
         print("\n".join(lines))
 
@@ -600,6 +601,51 @@ def run_live_tui(interval: float = 5.0):
             elif key == "e":
                 cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_embed.py")]
                 _run_subprocess_interactive(cmd)
+            elif key == "h":
+                cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "files_memory", "tools.py"), "health", "--rebuild"]
+                _run_subprocess_interactive(cmd)
+            elif key == "f":
+                print("\033[?25h", end="") # Show cursor
+                print("\033[H\033[J", end="") # Clear screen
+                print("\n=== Ingest / Sync Files Database ===")
+                print("This will walk a directory, chunk its documents, and embed them.")
+                try:
+                    path_input = input("\nEnter absolute directory path to ingest (or press Enter to cancel):\n> ").strip()
+                except (KeyboardInterrupt, EOFError):
+                    path_input = ""
+                
+                if path_input:
+                    resolved_path = os.path.abspath(os.path.expanduser(path_input))
+                    if not os.path.isdir(resolved_path):
+                        print(f"\n[Error] Directory does not exist: {resolved_path}")
+                        print("\nPress any key to return to the live monitor...")
+                        _wait_for_any_key()
+                    else:
+                        print("\nSelect extraction mode:")
+                        print("1. Deferred Fact Extraction (Queue mode - default)")
+                        print("2. Synchronous Fact Extraction (Inline mode)")
+                        print("3. No Fact Extraction (None mode)")
+                        try:
+                            mode_choice = input("Select option [1-3] (default: 1): ").strip()
+                        except (KeyboardInterrupt, EOFError):
+                            mode_choice = "1"
+                        
+                        extract_mode = "queue"
+                        if mode_choice == "2":
+                            extract_mode = "inline"
+                        elif mode_choice == "3":
+                            extract_mode = "none"
+                        
+                        cmd = [
+                            sys.executable,
+                            os.path.join(os.path.dirname(__file__), "files_memory", "tools.py"),
+                            "ingest",
+                            resolved_path,
+                            "--mode",
+                            extract_mode
+                        ]
+                        _run_subprocess_interactive(cmd)
+                print("\033[?25l", end="") # Hide cursor
 
 
 def _format_table(data: dict[str, Any]) -> str:
