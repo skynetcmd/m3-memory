@@ -186,3 +186,7 @@ tests/repro_concurrent_hang.py
 
 # Internal design-philosophy digest — kept local, not in public origin
 docs/DESIGN_PHILOSOPHIES.md
+
+.agent_os_salt
+.agents/
+.antigravitycli/
