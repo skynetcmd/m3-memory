@@ -19,6 +19,30 @@ forward-going only.
 
 ---
 
+## [2026.5.29.7] — May 30, 2026 — Entity coalescing v1 + search crash fix
+
+### Added
+
+- **Entity-coalescing pass v1** (`files_entity_coalesce` + `_list` + `_review`
+  MCP tools; `files_memory.tools entity-coalesce[-list|-review]` CLI). Post-ingest
+  cleanup of provisional entities created by files fact-extraction: quarantines
+  non-entity noise (prices/code-tokens/fragments — reversible flag, never delete)
+  and flags near-duplicate entities into a review queue (block → rapidfuzz →
+  embed-survivors → two-band). **Detection + review only — never merges or
+  auto-applies**; "coalescing" is modeled as a reversible same_as/cluster overlay
+  decided by human review. Persists an `entity_embeddings` cache (re-runs skip
+  embedded names) and reports the embed tier with a hint to set `M3_EMBED_GGUF`
+  for the in-process path. Adds `rapidfuzz` (difflib fallback if absent).
+
+### Fixed
+
+- **`memory_search` NameError when observation gates were enabled.** Commit
+  d78fc1d extracted two call sites (`_apply_observation_preference`,
+  `_apply_two_stage_expansion`) but never created the functions, so enabling
+  `M3_PREFER_OBSERVATIONS` or `M3_TWO_STAGE_OBSERVATIONS` crashed search at
+  runtime. Restored both verbatim from the pre-refactor inline logic + added
+  regression tests and an end-to-end gated-search check.
+
 ## [2026.5.29.6] — May 29, 2026 — Windows UTF-8 mode (cp1252 crash class)
 
 ### Fixed
