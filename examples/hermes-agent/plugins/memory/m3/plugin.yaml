@@ -1,0 +1,4 @@
+name: m3
+version: 0.1.0
+description: "m3-memory — hybrid FTS5+vector recall with MMR, bitemporal model, KG supersession, async Observer/Reflector extraction. In-process via the m3-memory catalog (no server/proxy)."
+dependencies: []
