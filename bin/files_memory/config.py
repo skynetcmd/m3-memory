@@ -94,9 +94,29 @@ EXTRACT_MIN_LEAF_CHARS: int = int(os.environ.get("M3_FILES_EXTRACT_MIN_LEAF_CHAR
 # Promotion default scope when --scope not passed. See plan §14 Q3.
 PROMOTION_DEFAULT_SCOPE: str = os.environ.get("M3_FILES_PROMOTION_SCOPE", "user")
 
-# memory.db path for cross-store operations (entity link + promotion).
-# Resolves via the active M3Context — this is just the default.
-MEMORY_DB_PATH: str | None = os.environ.get("M3_DATABASE")  # None = M3Context default
+# Core memory.db path for cross-store operations (entity link + promotion).
+#
+# IMPORTANT: this must point at the CORE memory store (agent_memory.db), NOT at
+# whatever M3_DATABASE currently is. During file ingest/extraction M3_DATABASE is
+# set to the *files* DB (files_database.db), but entities live in the core memory
+# DB — so resolving this from M3_DATABASE sent the entity linker to the files DB,
+# which has no `entities` table ("no such table: entities"). Resolution order:
+#   M3_MEMORY_DB (explicit core-DB override)  >  m3_sdk core default
+#     (M3_MEMORY_ROOT/memory/agent_memory.db, env-M3_DATABASE-independent).
+# Set M3_MEMORY_DB only if your core store isn't at the default location.
+def memory_db_path() -> str:
+    """Absolute path to the CORE memory DB (agent_memory.db). Independent of
+    M3_DATABASE so it stays correct while M3_DATABASE points at the files DB."""
+    explicit = os.environ.get("M3_MEMORY_DB")
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+    from m3_sdk import _default_db_path
+    return _default_db_path()
+
+
+# Back-compat: some callers read the module attribute. Honors M3_MEMORY_DB if set
+# at import time; otherwise None means "resolve via memory_db_path() at call time".
+MEMORY_DB_PATH: str | None = os.environ.get("M3_MEMORY_DB")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
