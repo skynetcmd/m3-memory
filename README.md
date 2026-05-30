@@ -114,11 +114,11 @@ Measured on m3 main with the gpt-4o tokenizer over the serialized tool
 schemas (`{name, description, parameters}` per tool, as registered on the
 MCP wire):
 
-| Mode | Tools at startup | Tokens at startup | % of 200 K window |
-|---|---:|---:|---:|
-| **Lazy (default)** | **10** | **~3,540** | **1.8 %** |
-| Typical session (lazy + agent loads files + memory) | 64 | ~17,975 | 9.0 % |
-| Eager (`M3_TOOLS_LAZY=0` — legacy) | 103 | ~24,918 | 12.5 % |
+| Mode | Tools at startup | Tokens at startup | % of 200 K window | % of 256 K window |
+|---|---:|---:|---:|---:|
+| **Lazy (default)** | **10** | **~3,540** | **1.8 %** | **1.4 %** |
+| Typical session (lazy + agent loads files + memory) | 64 | ~17,975 | 9.0 % | 7.0 % |
+| Eager (`M3_TOOLS_LAZY=0` — legacy) | 103 | ~24,918 | 12.5 % | 9.7 % |
 
 For comparison, common alternatives: a 40-tool GitHub MCP server
 ≈ 12,000 tokens; the full 93-tool GitHub MCP server ≈ 55,000 tokens

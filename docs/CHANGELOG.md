@@ -19,6 +19,44 @@ forward-going only.
 
 ---
 
+## [2026.5.30.0] — May 30, 2026 — Entity coalescing v2 (reversible apply/unapply) + CLI exit-code fix
+
+### Added
+
+- **Entity-coalescing v2 — reversible overlay apply/unapply** (`files_entity_coalesce_apply`
+  + `files_entity_coalesce_unapply` MCP tools; `entity-coalesce-apply` /
+  `entity-coalesce-unapply` CLI). Materializes reviewed/auto-merge candidates as
+  a reversible `same_as` + shared-`cluster_id` overlay — members are never
+  deleted, the canonical view is a read-time projection, and a deterministic
+  representative is chosen per cluster. `unapply` fully reverses one cluster
+  (drops edges, clears flags, strips aliases) and **tombstones** the candidate
+  (`review_action='unapplied'`) so the auto-merge path will not silently
+  re-merge it (the "unmerge is a recorded decision" pattern); deliberate
+  re-apply remains available via explicit candidate UUIDs.
+
+### Changed
+
+- **Auto-merge band scoped to one detection run.** `apply --auto-merge` now
+  applies only the latest run's `merge` band (or an explicit `--run`), so a
+  superseded pre-guard run can't be silently materialized.
+- **Two false-merge guards on the detect pass.** Names differing only by a
+  leading underscore (private-vs-public) or a trailing numeric/version token
+  (distinct configs/versions) are demoted from `merge` to `needs_llm` — they
+  score high on similarity but are usually different entities.
+
+### Fixed
+
+- **CLI error exit codes no longer masked to 0 on Windows.** The UTF-8 re-exec
+  (`_ensure_utf8`) used `os.execv`, which on Windows spawns a child and returns
+  to the parent — so every non-zero exit (argparse errors, destructive-gate
+  refusals, bad `--json`, impl failures) was silently rewritten to 0. The
+  re-exec now propagates the child's exit code on Windows; the POSIX path is
+  unchanged.
+- **Embed-tier reporting keyed off the recorded model, not `M3_EMBED_GGUF`.**
+  A fast in-process GGUF run with the env var unset was wrongly reported as the
+  HTTP fallback. `_memory_db` mutations are also isolation-hardened (optional
+  explicit target + a confirm/db_path guard on real applies).
+
 ## [2026.5.29.7] — May 30, 2026 — Entity coalescing v1 + search crash fix
 
 ### Added
