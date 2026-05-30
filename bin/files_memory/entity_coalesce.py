@@ -189,17 +189,18 @@ def _now() -> str:
 
 
 def _embed_tier_info(model_seen: Optional[str]) -> dict:
-    """Report which embed tier served the run + a §8 perf hint. The embed
-    cascade picks tier-1 (in-process Rust, ~5× faster) only when M3_EMBED_GGUF
-    is set; otherwise it silently degrades to the HTTP fallback (§8 footgun). We
-    don't change that here — just surface it so the operator isn't blind to a
-    slow run. model_seen=None means dry-run / nothing embedded."""
-    gguf = (os.environ.get("M3_EMBED_GGUF") or "").strip()
-    in_process = bool(gguf) and bool(model_seen) and "gguf" in (model_seen or "").lower()
+    """Report which embed tier served the run + a §8 perf hint. The in-process
+    tier-1 (~5× faster) records a `*.gguf` model name; the HTTP fallback records
+    a plain model id (e.g. `text-embedding-bge-m3`). We key off the RECORDED
+    model, not M3_EMBED_GGUF — the cascade can resolve the GGUF tier without that
+    env var set, so an env-var check wrongly nagged about a slow run that was in
+    fact fast. model_seen=None means dry-run / nothing embedded (no hint)."""
+    in_process = bool(model_seen) and "gguf" in (model_seen or "").lower()
     info: dict = {"in_process": in_process, "model": model_seen}
-    if not in_process:
-        info["hint"] = ("embedding used the HTTP fallback tier; set M3_EMBED_GGUF "
-                        "to a local BGE-M3 GGUF for the ~5x-faster in-process tier (§8).")
+    # Only nag when an HTTP-tier model actually served work — not on dry-runs.
+    if model_seen is not None and not in_process:
+        info["hint"] = ("embedding used the HTTP fallback tier; a local BGE-M3 "
+                        "GGUF serves the ~5x-faster in-process tier (§8).")
     return info
 
 
