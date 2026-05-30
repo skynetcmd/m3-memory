@@ -40,6 +40,11 @@ pyobjc-framework-CoreWLAN; sys_platform == 'darwin'
 numpy>=2.4.4,<3
 scipy>=1.17.1,<2
 tqdm>=4.67.3,<5
+# Fast fuzzy string matching for entity coalescing (token-order-aware, ~3-4x
+# faster than stdlib difflib). Clean MIT leaf wheel, no transitive deps. The
+# entity-coalesce pass falls back to difflib if absent, so this is a perf/quality
+# dep, not a hard requirement.
+rapidfuzz>=3.14,<4
 
 # --- Embedding Server ---
 sentence-transformers>=5.4.1,<6

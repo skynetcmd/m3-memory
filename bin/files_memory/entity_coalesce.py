@@ -1,0 +1,394 @@
+"""Provisional-entity coalescing pass (v1: detect + quarantine + review only).
+
+Files fact-extraction links facts -> entities with an exact-match-or-create-
+provisional policy (no fuzzy/semantic match at ingest, to keep the ingest txn
+fast). That accumulates near-duplicate + non-entity "provisional" rows in the
+CORE memory DB (agent_memory.db): e.g. `database`/`databases`/`DB`, plus noise
+like `$0.25`, `%APPDATA%`, `#bug-reports`. This module is the post-ingest pass
+that cleans them up.
+
+v1 scope (this file): DETECTION + QUARANTINE + REVIEW QUEUE only. It NEVER
+merges destructively and never auto-applies. "Coalescing" is modeled as a
+reversible overlay (a `same_as` edge / shared cluster_id) decided later by a
+human reviewing the queue — members stay intact, canonical view is a read-time
+projection, reversal is trivial. (Design + lessons in
+to_be_deleted/ENTITY_COALESCING_PASS_SCOPE.md.)
+
+Pipeline:
+  Stage 0  prune  -> quarantine non-entity noise (reversible flag, never delete)
+  Stage 1  block  -> first-token, type-constrained; singletons drop out free
+  Stage 2  score  -> rapidfuzz within block; embed ONLY unresolved survivors
+  Stage 3  flag   -> write candidate pairs to entity_coalesce_candidates with a
+                     band (merge / needs_llm / related-not-same is a review verdict)
+
+Public API:
+    coalesce_detect(corpus=None, ...) -> dict            # the batch pass
+    list_coalesce_candidates(reviewed=False, ...) -> list[dict]
+    review_coalesce_candidates([{uuid, action}], ...) -> dict   # BULK (§3)
+
+Design philosophies honored: read-only detect (§6), indexed working-set columns
+not a JSON LIKE scan (§8), reuse the pool + batch-embed (§4), cluster-growth
+guardrail + type-constraint + false-split bias (lessons #2/#6/#7), structured
+returns + bulk review (§3).
+"""
+from __future__ import annotations
+
+import logging
+import os
+import re
+import sqlite3
+import time
+import uuid as _uuid
+from typing import Optional
+
+from .dedup import _cosine_packed
+from .entities import _memory_db
+
+logger = logging.getLogger("files_memory.entity_coalesce")
+
+# ── Tunables (env-overridable, mirrors files_dedup) ──────────────────────────
+AUTO_MERGE_COSINE: float = float(os.environ.get("M3_ENTITY_COALESCE_AUTOMERGE", "0.95"))
+FLAG_COSINE: float = float(os.environ.get("M3_ENTITY_COALESCE_FLAG", "0.80"))
+FUZZY_HIGH: int = int(os.environ.get("M3_ENTITY_COALESCE_FUZZY_HIGH", "90"))
+MAX_PAIRS: int = int(os.environ.get("M3_ENTITY_COALESCE_MAX_PAIRS", "1000"))
+MAX_BLOCK: int = int(os.environ.get("M3_ENTITY_COALESCE_MAX_BLOCK", "400"))
+# Cluster-growth guardrail (lesson #2): refuse to auto-band a pair that would
+# grow a same_as cluster beyond this — route to review instead.
+MAX_CLUSTER: int = int(os.environ.get("M3_ENTITY_COALESCE_MAX_CLUSTER", "12"))
+
+# Stage-0 noise: code keywords / generic nouns that are never useful entities.
+_DENY_NOUNS = frozenset({
+    "null", "true", "false", "none", "status", "result", "value", "default",
+    "database", "table", "row", "column", "key", "id", "name", "type", "data",
+    "error", "count", "max", "min", "sum", "coalesce", "select", "insert",
+    "update", "delete", "where", "from", "join", "index", "query", "field",
+})
+# Name patterns that are clearly not entities: prices/numbers, shell/env vars,
+# channel handles, quoted fragments, pure punctuation/symbol starts.
+_NOISE_RE = re.compile(r"""^(?:\$|%|#|['"`]|\d|[^\w])""")
+
+
+def _is_noise(name: str) -> bool:
+    n = (name or "").strip()
+    if not n:
+        return True
+    if _NOISE_RE.match(n):
+        return True
+    if n.lower() in _DENY_NOUNS:
+        return True
+    return False
+
+
+def _block_key(name: str) -> str:
+    """Cheap blocking key: lowercased first alpha token. Singletons under this
+    key have no candidate and are skipped — zero compare cost."""
+    toks = re.findall(r"[a-zA-Z0-9]+", (name or "").lower())
+    return toks[0] if toks else ""
+
+
+# ── Schema (idempotent; runs against agent_memory.db) ────────────────────────
+def ensure_schema(mem: sqlite3.Connection) -> None:
+    """Additive, idempotent. Indexed working-set columns on `entities`
+    (provisional/cluster_id/resolution_run) replace the unindexable
+    `attributes_json LIKE '%provisional%'` scan (§8). Plus the review-queue and
+    entity-embedding cache tables. Guards every ALTER with a PRAGMA check."""
+    cols = {r[1] for r in mem.execute("PRAGMA table_info(entities)").fetchall()}
+    if "coalesce_state" not in cols:
+        # 'provisional' | 'quarantined' | 'clustered' | NULL. Indexed so the
+        # working-set filter is a seek, not a full-table JSON scan.
+        mem.execute("ALTER TABLE entities ADD COLUMN coalesce_state TEXT")
+    if "cluster_id" not in cols:
+        mem.execute("ALTER TABLE entities ADD COLUMN cluster_id TEXT")
+    if "resolution_run" not in cols:
+        mem.execute("ALTER TABLE entities ADD COLUMN resolution_run TEXT")
+    mem.execute("CREATE INDEX IF NOT EXISTS idx_entities_coalesce_state ON entities(coalesce_state)")
+    mem.execute("CREATE INDEX IF NOT EXISTS idx_entities_cluster ON entities(cluster_id)")
+
+    mem.execute(
+        """CREATE TABLE IF NOT EXISTS entity_coalesce_candidates (
+            uuid TEXT PRIMARY KEY,
+            entity_a TEXT NOT NULL,
+            entity_b TEXT NOT NULL,
+            name_a TEXT, name_b TEXT,
+            cosine REAL, fuzzy INTEGER,
+            band TEXT,                 -- 'merge' | 'needs_llm'
+            verdict TEXT,              -- 'merge' | 'related_not_same' | 'uncertain' | NULL
+            resolution_run TEXT,
+            detected_at TEXT,
+            reviewed_at TEXT,
+            review_action TEXT,        -- 'merge' | 'related' | 'reject' | 'defer'
+            metadata TEXT
+        )"""
+    )
+    mem.execute("CREATE INDEX IF NOT EXISTS idx_ecc_reviewed ON entity_coalesce_candidates(reviewed_at)")
+    # Entity-name embedding cache (persisted; re-runs only embed new/changed —
+    # keyed on name hash). Also reusable for semantic entity search.
+    mem.execute(
+        """CREATE TABLE IF NOT EXISTS entity_embeddings (
+            entity_id TEXT PRIMARY KEY,
+            name_hash TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            dim INTEGER NOT NULL,
+            model TEXT,
+            created_at TEXT
+        )"""
+    )
+
+
+def _name_hash(name: str) -> str:
+    import hashlib
+    return hashlib.sha1((name or "").strip().lower().encode("utf-8"),
+                        usedforsecurity=False).hexdigest()[:16]
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _embed_tier_info(model_seen: Optional[str]) -> dict:
+    """Report which embed tier served the run + a §8 perf hint. The embed
+    cascade picks tier-1 (in-process Rust, ~5× faster) only when M3_EMBED_GGUF
+    is set; otherwise it silently degrades to the HTTP fallback (§8 footgun). We
+    don't change that here — just surface it so the operator isn't blind to a
+    slow run. model_seen=None means dry-run / nothing embedded."""
+    gguf = (os.environ.get("M3_EMBED_GGUF") or "").strip()
+    in_process = bool(gguf) and bool(model_seen) and "gguf" in (model_seen or "").lower()
+    info: dict = {"in_process": in_process, "model": model_seen}
+    if not in_process:
+        info["hint"] = ("embedding used the HTTP fallback tier; set M3_EMBED_GGUF "
+                        "to a local BGE-M3 GGUF for the ~5x-faster in-process tier (§8).")
+    return info
+
+
+# ── Stage 0: prune -> quarantine (reversible flag, never delete) ─────────────
+def _quarantine_noise(mem: sqlite3.Connection, run_id: str, dry_run: bool) -> dict:
+    """Tag provisional entities that are clearly not entities (deny-list +
+    noise regex). Reversible: sets coalesce_state='quarantined'; never deletes."""
+    rows = mem.execute(
+        "SELECT id, canonical_name FROM entities "
+        "WHERE entity_type = 'unknown' "
+        "  AND (coalesce_state IS NULL OR coalesce_state = 'provisional')"
+    ).fetchall()
+    to_q = [(r[0], r[1]) for r in rows if _is_noise(r[1])]
+    if not dry_run and to_q:
+        mem.executemany(
+            "UPDATE entities SET coalesce_state='quarantined', resolution_run=? WHERE id=?",
+            [(run_id, eid) for eid, _ in to_q],
+        )
+    return {"scanned": len(rows), "quarantined": len(to_q),
+            "samples": [n for _, n in to_q[:15]]}
+
+
+def _prime_embeddings(mem, items, dry_run):
+    """Batch-embed (§4 — one cascade call, not per-name HTTP) the given
+    [(eid, name)] whose cached embedding is missing/stale, and persist them.
+    Returns the count embedded. dry_run: skip embedding entirely (estimate only;
+    a dry-run must not make hundreds of embed calls). Returns (count, model)."""
+    if dry_run:
+        return 0, None
+    need_ids, need_names = [], []
+    for eid, name in items:
+        nh = _name_hash(name)
+        row = mem.execute(
+            "SELECT name_hash FROM entity_embeddings WHERE entity_id=?", (eid,)
+        ).fetchone()
+        if not (row and row[0] == nh):
+            need_ids.append((eid, name, nh))
+            need_names.append(name)
+    if not need_names:
+        return 0, None
+    from embedding_utils import pack
+
+    from .embed import embed_texts
+    results = embed_texts(need_names)  # ONE batched cascade call
+    n = 0
+    model_seen = None
+    for (eid, name, nh), (vec, model) in zip(need_ids, results):
+        if vec is None:
+            continue
+        model_seen = model
+        mem.execute(
+            "INSERT OR REPLACE INTO entity_embeddings"
+            "(entity_id, name_hash, embedding, dim, model, created_at) VALUES (?,?,?,?,?,?)",
+            (eid, nh, pack(vec), len(vec), model, _now()),
+        )
+        n += 1
+    mem.execute("COMMIT")   # commit the batch -> kill-and-resume safe
+    mem.execute("BEGIN")
+    return n, model_seen
+
+
+def _cached_embedding(mem, eid):
+    """Read-only: (packed, dim) from the cache, or (None, 0). Used in the
+    pairwise loop — never embeds (priming already did)."""
+    row = mem.execute(
+        "SELECT embedding, dim FROM entity_embeddings WHERE entity_id=?", (eid,)
+    ).fetchone()
+    return (row[0], row[1]) if row else (None, 0)
+
+
+def _cluster_size(mem, cid):
+    if not cid:
+        return 1
+    return mem.execute("SELECT count(*) FROM entities WHERE cluster_id=?", (cid,)).fetchone()[0]
+
+
+def coalesce_detect(*, corpus=None, max_pairs=MAX_PAIRS, dry_run=False, db_path=None):
+    """v1 batch pass: quarantine noise + detect coalescing candidates into the
+    review queue. Writes ONLY quarantine flags + candidate rows + the embedding
+    cache (no merges, no auto-apply). Returns structured counts (§3)."""
+    t0 = time.perf_counter()
+    run_id = "coalesce-" + _now()
+    out: dict = {"run_id": run_id, "dry_run": dry_run}
+    try:
+        with _memory_db() as mem:
+            ensure_schema(mem)
+            mem.execute("BEGIN")
+            out["prune"] = _quarantine_noise(mem, run_id, dry_run)
+
+            ents = mem.execute(
+                "SELECT id, canonical_name, cluster_id FROM entities "
+                "WHERE entity_type='unknown' "
+                "  AND COALESCE(coalesce_state,'provisional')='provisional' "
+                "  AND canonical_name IS NOT NULL"
+            ).fetchall()
+
+            blocks: dict = {}
+            for eid, name, cid in ents:
+                if _is_noise(name):
+                    continue
+                blocks.setdefault(_block_key(name), []).append((eid, name, cid))
+            multi = {k: v for k, v in blocks.items() if k and len(v) > 1}
+            out["blocks_total"] = len(blocks)
+            out["blocks_multi"] = len(multi)
+            out["singletons_skipped"] = sum(1 for v in blocks.values() if len(v) == 1)
+
+            existing: set = set()
+            for a, b in mem.execute(
+                "SELECT entity_a, entity_b FROM entity_coalesce_candidates WHERE reviewed_at IS NULL"
+            ).fetchall():
+                existing.add((a, b)); existing.add((b, a))
+
+            try:
+                from rapidfuzz import fuzz
+                def _fz(a, b):
+                    return int(fuzz.token_sort_ratio(a.lower(), b.lower()))
+            except ImportError:
+                import difflib
+                def _fz(a, b):
+                    return int(difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio() * 100)
+
+            # Batch-prime embeddings for all multi-block members up front (§4 —
+            # one cascade call, not per-name HTTP in the loop). dry_run skips
+            # embedding (estimate only). Then the loop reads the cache.
+            prime_items = []
+            for members in multi.values():
+                for eid, name, _cid in members[:MAX_BLOCK]:
+                    prime_items.append((eid, name))
+            out["embedded"], _model_seen = _prime_embeddings(mem, prime_items, dry_run)
+            out["embed_tier"] = _embed_tier_info(_model_seen)
+
+            recorded = 0
+            for key, members in multi.items():
+                if recorded >= max_pairs:
+                    break
+                if len(members) > MAX_BLOCK:
+                    members = members[:MAX_BLOCK]
+                for i in range(len(members)):
+                    if recorded >= max_pairs:
+                        break
+                    ai, an, acid = members[i]
+                    for j in range(i + 1, len(members)):
+                        bi, bn, bcid = members[j]
+                        if (ai, bi) in existing:
+                            continue
+                        fz = _fz(an, bn)
+                        cos = 0.0
+                        if fz < FUZZY_HIGH:
+                            if dry_run:
+                                continue  # no embeddings primed in dry-run
+                            ea, da = _cached_embedding(mem, ai)
+                            eb, db_ = _cached_embedding(mem, bi)
+                            if ea and eb and da == db_:
+                                cos = _cosine_packed(ea, eb, da)
+                            if cos < FLAG_COSINE:
+                                continue
+                        else:
+                            cos = fz / 100.0
+                        over = (_cluster_size(mem, acid) + _cluster_size(mem, bcid)) > MAX_CLUSTER
+                        band = "merge" if (cos >= AUTO_MERGE_COSINE and fz >= FUZZY_HIGH and not over) else "needs_llm"
+                        if not dry_run:
+                            mem.execute(
+                                "INSERT INTO entity_coalesce_candidates"
+                                "(uuid, entity_a, entity_b, name_a, name_b, cosine, fuzzy,"
+                                " band, resolution_run, detected_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                (str(_uuid.uuid4()), ai, bi, an, bn, cos, fz, band, run_id, _now()),
+                            )
+                        existing.add((ai, bi)); existing.add((bi, ai))
+                        recorded += 1
+                        if recorded >= max_pairs:
+                            break
+            out["candidates_recorded"] = recorded
+            mem.execute("COMMIT" if not dry_run else "ROLLBACK")
+    except Exception as e:
+        logger.warning("coalesce_detect failed: %s", e)
+        out["error"] = f"{type(e).__name__}: {e}"
+    out["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+    return out
+
+
+def list_coalesce_candidates(*, reviewed=False, limit=100, min_cosine=None):
+    """List coalescing candidate pairs (structured rows, §3). reviewed: None=both,
+    False=unreviewed, True=reviewed."""
+    sql = ["SELECT uuid, entity_a, entity_b, name_a, name_b, cosine, fuzzy, band,"
+           " verdict, detected_at, reviewed_at, review_action "
+           "FROM entity_coalesce_candidates WHERE 1=1"]
+    params: list = []
+    if reviewed is False:
+        sql.append("AND reviewed_at IS NULL")
+    elif reviewed is True:
+        sql.append("AND reviewed_at IS NOT NULL")
+    if min_cosine is not None:
+        sql.append("AND cosine >= ?"); params.append(min_cosine)
+    sql.append("ORDER BY cosine DESC, fuzzy DESC LIMIT ?"); params.append(limit)
+    with _memory_db() as mem:
+        mem.row_factory = sqlite3.Row
+        rows = mem.execute(" ".join(sql), params).fetchall()
+    return [
+        {"uuid": r["uuid"], "band": r["band"], "verdict": r["verdict"],
+         "cosine": round(r["cosine"] or 0.0, 4), "fuzzy": r["fuzzy"],
+         "detected_at": r["detected_at"], "reviewed_at": r["reviewed_at"],
+         "review_action": r["review_action"],
+         "entity_a": {"id": r["entity_a"], "name": r["name_a"]},
+         "entity_b": {"id": r["entity_b"], "name": r["name_b"]}}
+        for r in rows
+    ]
+
+
+def review_coalesce_candidates(reviews, *, note=""):
+    """BULK review (§3 — take a LIST). Each item {uuid, action}; action in
+    merge|related|reject|defer. v1 RECORDS the decision only — no overlay
+    applied (that is v2). Empty list -> {updated:0}."""
+    valid = {"merge", "related", "reject", "defer"}
+    if not isinstance(reviews, list):
+        raise ValueError("reviews must be a list of {uuid, action}")
+    now = _now()
+    updated, errors = 0, []
+    with _memory_db() as mem:
+        mem.execute("BEGIN")
+        for item in reviews:
+            if not isinstance(item, dict) or "uuid" not in item or "action" not in item:
+                errors.append({"item": item, "error": "needs {uuid, action}"}); continue
+            if item["action"] not in valid:
+                errors.append({"uuid": item.get("uuid"), "error": f"action must be {sorted(valid)}"}); continue
+            cur = mem.execute(
+                "UPDATE entity_coalesce_candidates SET reviewed_at=?, review_action=?, "
+                "metadata=json_set(COALESCE(metadata,'{}'),'$.note',?) WHERE uuid=?",
+                (now, item["action"], note, item["uuid"]),
+            )
+            if cur.rowcount:
+                updated += 1
+            else:
+                errors.append({"uuid": item["uuid"], "error": "not found"})
+        mem.execute("COMMIT")
+    return {"updated": updated, "errors": errors, "reviewed_at": now}
