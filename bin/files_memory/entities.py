@@ -46,25 +46,32 @@ logger = logging.getLogger("files_memory.entities")
 # memory.db connection (separate from files.db)
 # ──────────────────────────────────────────────────────────────────────────────
 @contextmanager
-def _memory_db() -> Iterator[sqlite3.Connection]:
-    """Yield a connection to memory.db.
+def _memory_db(path: "str | None" = None) -> Iterator[sqlite3.Connection]:
+    """Yield a connection to the CORE memory DB (agent_memory.db).
 
-    Resolves via the active M3Context — same path the rest of m3-memory
-    uses. We open a fresh connection (not pooled) because entity writes
-    are infrequent and we don't want to fight memory.db's connection
-    pool for transaction ownership.
+    `path` (optional) targets an EXPLICIT db — used by tests and by mutating
+    callers (e.g. entity_coalesce.apply) that must operate on a known/isolated
+    DB rather than silently inheriting the resolved default. When omitted,
+    resolves the core DB via config.memory_db_path() (honors M3_MEMORY_DB else
+    the m3_sdk default) — deliberately NOT M3_DATABASE, which during file
+    extraction points at the files DB (no `entities` table).
+
+    Fresh connection (not pooled) — entity writes are infrequent and we don't
+    want to fight memory.db's pool for transaction ownership.
     """
-    # Resolve the CORE memory DB (agent_memory.db) — NOT M3_DATABASE, which
-    # during file extraction points at the files DB (no `entities` table).
-    # config.memory_db_path() honors M3_MEMORY_DB else the m3_sdk core default.
-    try:
-        path = config.memory_db_path()
-    except ImportError:
-        # Fallback for tests that don't have m3_sdk on path.
-        path = config.MEMORY_DB_PATH or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "memory", "agent_memory.db",
-        )
+    if path is None:
+        try:
+            path = config.memory_db_path()
+        except ImportError:
+            # Fallback for tests that don't have m3_sdk on path.
+            path = config.MEMORY_DB_PATH or os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "memory", "agent_memory.db",
+            )
+    # Normalize consistently so an explicit path and the on-disk file compare
+    # equal regardless of how the caller spelled it (e.g. /tmp vs C:\...\Temp,
+    # symlinks, relative segments) — avoids spurious "not found" mismatches.
+    path = os.path.realpath(os.path.abspath(os.path.expanduser(path)))
 
     if not os.path.isfile(path):
         # No memory.db — caller decides what to do (typically skip linking).
