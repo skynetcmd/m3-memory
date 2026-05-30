@@ -1346,6 +1346,98 @@ async def memory_search_scored_impl(
     return ranked
 
 
+def _apply_observation_preference(ranked, k):
+    """Phase D Mastra: post-rank preference for type='observation' rows.
+
+    When M3_PREFER_OBSERVATIONS=1 (gated by _prefer_observations_gate),
+    partition the ranked list into observation hits vs raw hits. If the
+    observations alone supply enough context (sum of token estimates above
+    M3_OBSERVATION_BUDGET_TOKENS, default 4000), return only obs_hits[:k];
+    otherwise interleave observations first, then raw to fill k slots. Favors
+    synthesized atomic facts over raw turns when both are retrieved for the
+    same query. (Restored verbatim from the pre-d78fc1d inline logic — the
+    refactor extracted the call site but dropped the implementation.)
+    """
+    try:
+        obs_budget = int(os.environ.get("M3_OBSERVATION_BUDGET_TOKENS", "4000"))
+    except ValueError:
+        obs_budget = 4000
+    obs_hits = [(s, it) for s, it in ranked
+                if isinstance(it, dict) and it.get("type") == "observation"]
+    raw_hits = [(s, it) for s, it in ranked
+                if not (isinstance(it, dict) and it.get("type") == "observation")]
+    if obs_hits:
+        # Cheap token estimate: 1 token per 4 chars — an order-of-magnitude
+        # gate, not precise tokenization.
+        obs_tokens = sum(len((it.get("content") or "")) // 4 for _, it in obs_hits)
+        if obs_tokens >= obs_budget:
+            ranked = obs_hits[:k]
+        else:
+            slots = max(0, k - len(obs_hits))
+            ranked = obs_hits + raw_hits[:slots]
+    return ranked
+
+
+async def _apply_two_stage_expansion(ranked, k):
+    """Phase B3 two-stage retrieval: expand top-k observations to include their
+    source turns. When M3_TWO_STAGE_OBSERVATIONS=1, look up the source_turn_ids
+    the Observer stored in each observation's metadata and append those turns at
+    a score discount (M3_TWO_STAGE_TURN_PENALTY, default 0.7) so the observation
+    still ranks highest but the answerer sees the underlying turns for verbatim
+    quotes. (Restored verbatim from the pre-d78fc1d inline logic.)
+    """
+    try:
+        turn_penalty = float(os.environ.get("M3_TWO_STAGE_TURN_PENALTY", "0.7"))
+    except ValueError:
+        turn_penalty = 0.7
+    try:
+        max_turns_per_obs = int(os.environ.get("M3_TWO_STAGE_MAX_TURNS_PER_OBS", "3"))
+    except ValueError:
+        max_turns_per_obs = 3
+    topk = ranked[:k]
+    source_turn_ids: list[str] = []
+    existing_ids = {it.get("id") for _, it in topk if isinstance(it, dict) and it.get("id")}
+    for s, it in topk:
+        if not isinstance(it, dict) or it.get("type") != "observation":
+            continue
+        md = it.get("metadata") if isinstance(it.get("metadata"), dict) else None
+        if md is None:
+            raw = it.get("metadata_json") or "{}"
+            try:
+                md = json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, dict) else {})
+            except (json.JSONDecodeError, TypeError):
+                md = {}
+        stids = md.get("source_turn_ids") or []
+        if isinstance(stids, list):
+            for tid in stids[:max_turns_per_obs]:
+                if isinstance(tid, str) and tid not in existing_ids:
+                    source_turn_ids.append(tid)
+                    existing_ids.add(tid)
+    if source_turn_ids:
+        try:
+            with _db() as db:
+                placeholders = ",".join("?" * len(source_turn_ids))
+                turn_rows = db.execute(
+                    f"SELECT id, content, title, type, importance "
+                    f"FROM memory_items "
+                    f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted,0)=0",
+                    source_turn_ids,
+                ).fetchall()
+            base_score = min((s for s, _ in topk), default=0.5)
+            floor = max(0.01, base_score * turn_penalty)
+            for r in turn_rows:
+                expanded_item = dict(r) if hasattr(r, "keys") else {
+                    "id": r[0], "content": r[1], "title": r[2],
+                    "type": r[3], "importance": r[4] or 0.0,
+                }
+                expanded_item["_two_stage_expanded"] = True
+                ranked.append((floor, expanded_item))
+            ranked.sort(key=lambda t: t[0], reverse=True)
+        except Exception as e:
+            logger.debug(f"two-stage observation expansion failed: {e}")
+    return ranked
+
+
 
 async def memory_search_routed_impl(
     query: str,
