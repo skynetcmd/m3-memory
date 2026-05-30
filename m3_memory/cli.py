@@ -20,14 +20,63 @@ import os
 import sys
 from pathlib import Path  # noqa: F401 - used in _auto_install return-type comment
 
-# On Windows the default console code page is cp1252, which can't encode
-# characters outside that 8-bit range (em-dashes, arrows, box-drawing,
-# checkmarks, most non-Latin scripts). Any accidental non-ASCII in a
-# CLI print() would crash the whole command. Force the stdio streams
-# onto UTF-8 so user-facing output is safe to internationalize without
-# auditing every print site. Python 3.7+ .reconfigure() exists on the
-# real TextIOWrapper; during tests pytest substitutes a plain StringIO
-# that doesn't, so guard with hasattr.
+
+def _ensure_utf8() -> None:
+    """Guarantee the whole m3 process tree runs in Python UTF-8 mode.
+
+    On Windows the default console code page is cp1252, and both stdio AND
+    open() default to it. Any non-cp1252 character (em-dashes, arrows,
+    box-drawing, emoji) then crashes with UnicodeEncodeError on print or
+    UnicodeDecodeError on a no-encoding open(). `sys.stdout.reconfigure`
+    (below) only fixes stdio — NOT open() defaults, and not the bin/ scripts
+    this CLI execs/runpys. True UTF-8 mode (PEP 540) fixes all of it, but the
+    interpreter reads it only at startup, so we set PYTHONUTF8 and re-exec
+    once with -X utf8. The whole tree (CLI, in-process bridge, runpy'd bin
+    scripts, child subprocesses inheriting the env) is then UTF-8.
+
+    Safety: no-op if already in UTF-8 mode; a sentinel env var bounds the
+    re-exec to exactly once so it can never loop.
+
+    KNOWN LIMITATION — `python -c "<inline code>"` launches:
+    Re-execing an inline `-c` payload can mangle on Windows because the OS
+    re-quotes the program string when the process image is replaced; a
+    multi-statement `-c` string may come back as a SyntaxError in the re-exec'd
+    child. This does NOT affect any real m3 launch — the `m3` / `mcp-memory`
+    console scripts launch a file path, and `python -m m3_memory.cli` and
+    direct file-path launches all re-exec cleanly (verified). The `-c` form is
+    only used for ad-hoc one-liners that import this module, which is not a
+    supported entry path. If you must run such a one-liner and hit it, either
+    set `PYTHONUTF8=1` in the env first (then _ensure_utf8 short-circuits, no
+    re-exec) or write the code to a file and run that.
+    """
+    if sys.flags.utf8_mode:  # already -X utf8 or PYTHONUTF8=1
+        return
+    if os.environ.get("_M3_UTF8_REEXEC") == "1":  # re-exec already happened — stop
+        return
+    os.environ["PYTHONUTF8"] = "1"
+    os.environ["_M3_UTF8_REEXEC"] = "1"
+    # Rebuild the ORIGINAL launch faithfully. sys.orig_argv (3.10+) captures the
+    # full command incl. the -c/-m/file form and interpreter flags; sys.argv
+    # alone drops the launch form (re-exec'ing it breaks `python -c`/`-m`).
+    # Insert -X utf8 right after the executable, preserving everything else.
+    orig = list(getattr(sys, "orig_argv", [sys.executable, *sys.argv]))
+    if not orig:  # defensive — shouldn't happen
+        orig = [sys.executable, *sys.argv]
+    new_argv = [orig[0], "-X", "utf8", *orig[1:]]
+    try:
+        os.execv(sys.executable, new_argv)
+    except OSError:
+        # Re-exec failed (rare: exotic launcher / permissions). Fall through —
+        # the reconfigure block below still fixes stdio, the common case.
+        pass
+
+
+_ensure_utf8()
+
+# Belt-and-suspenders for stdio when re-exec didn't run (already-UTF8, sentinel
+# set, or re-exec failed). Python 3.7+ .reconfigure() exists on the real
+# TextIOWrapper; during tests pytest substitutes a plain StringIO that doesn't,
+# so guard with hasattr.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 if hasattr(sys.stderr, "reconfigure"):
@@ -126,7 +175,7 @@ def _run_bridge() -> None:
     # Execute the bridge in this process - equivalent to `python memory_bridge.py`,
     # not dynamic code from an untrusted source; it's a file path from our own
     # config (or an explicit env var, or a sibling of this package).
-    with open(bridge) as f:
+    with open(bridge, encoding="utf-8") as f:
         code = compile(f.read(), str(bridge), "exec")
     exec(code, {"__file__": str(bridge), "__name__": "__main__"})  # nosec B102
 
