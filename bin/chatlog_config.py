@@ -64,7 +64,7 @@ SPILL_DIR = os.path.join(_M3_ROOT, "memory", "chatlog_spill")
 INGEST_CURSOR = os.path.join(_M3_ROOT, "memory", ".chatlog_ingest_cursor.json")
 CHATLOG_MIGRATIONS_DIR = os.path.join(_M3_ROOT, "memory", "chatlog_migrations")
 
-VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "opencode", "aider"))
+VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider"))
 VALID_PROVIDERS: frozenset[str] = frozenset((
     "anthropic", "google", "openai", "local", "xai",
     "deepseek", "mistral", "meta", "other",
@@ -111,6 +111,7 @@ class ChatlogConfig:
     host_agents: dict[str, HookSpec] = field(default_factory=lambda: {
         "claude-code": HookSpec(),
         "gemini-cli":  HookSpec(),
+        "antigravity-cli": HookSpec(),
         "opencode":    HookSpec(),
         "aider":       HookSpec(),
     })

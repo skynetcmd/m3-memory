@@ -220,6 +220,20 @@ async def test_ingest_gemini_from_file_writes_real_rows(ingest_env):
 
 
 @pytest.mark.asyncio
+async def test_ingest_antigravity_from_file_writes_real_rows(ingest_env):
+    import chatlog_ingest, chatlog_core
+    fixture = os.path.join(FIXTURES, "gemini_session_sample.json")
+
+    result = await chatlog_ingest._ingest("antigravity-cli", fixture,
+                                          session_override="", variant="test")
+    await chatlog_core._flush_once()
+
+    assert result["failed"] == 0
+    assert result["written"] == 3
+    assert result["session_id"] == "fix-gemini-0001"
+
+
+@pytest.mark.asyncio
 async def test_ingest_is_idempotent_via_cursor(ingest_env):
     """Second invocation on the same transcript skips already-seen uuids."""
     import chatlog_ingest, chatlog_core

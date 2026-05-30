@@ -326,6 +326,7 @@ def _normalize(items: list[dict], host_agent: str, variant: Optional[str],
 PARSERS = {
     "claude-code": _parse_claude_code,
     "gemini-cli":  _parse_gemini_cli,
+    "antigravity-cli": _parse_gemini_cli,
 }
 
 

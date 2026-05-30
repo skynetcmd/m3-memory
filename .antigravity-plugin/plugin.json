@@ -1,0 +1,50 @@
+{
+  "name": "m3",
+  "version": "2026.5.30.0",
+  "description": "Local-first persistent memory for Antigravity — 101 MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
+  "keywords": [
+    "memory",
+    "mcp",
+    "rag",
+    "vector-search",
+    "sqlite",
+    "agentic",
+    "long-term-memory",
+    "chatlog",
+    "knowledge-graph",
+    "gdpr"
+  ],
+  "author": {
+    "name": "skynetcmd",
+    "url": "https://github.com/skynetcmd/m3-memory"
+  },
+  "homepage": "https://github.com/skynetcmd/m3-memory",
+  "repository": "https://github.com/skynetcmd/m3-memory",
+  "license": "Apache-2.0",
+  "userConfig": {
+    "endpoint": {
+      "type": "string",
+      "title": "LLM endpoint",
+      "description": "OpenAI-compatible endpoint for embeddings + enrichment. Leave empty to probe LM Studio :1234 and Ollama :11434.",
+      "default": ""
+    },
+    "capture_mode": {
+      "type": "string",
+      "title": "Chatlog capture mode",
+      "description": "Which hooks fire chatlog ingest. One of: both | stop | precompact | none. 'both' = Stop + PreCompact (recommended). Validated by mcp-memory at runtime; invalid values fall back to 'both'.",
+      "default": "both"
+    },
+    "embed_fallback_url": {
+      "type": "string",
+      "title": "Embedder fallback URL (tier-2)",
+      "description": "Always-on HTTP embedder URL — the m3-embed-server CPU service. Default :8082.",
+      "default": "http://127.0.0.1:8082"
+    },
+    "embed_gguf": {
+      "type": "string",
+      "title": "In-proc embedder GGUF path (tier-1)",
+      "description": "Absolute path to a BGE-M3 GGUF file. Optional — if empty, all embeds go through tier-2 HTTP.",
+      "default": ""
+    }
+  }
+}
