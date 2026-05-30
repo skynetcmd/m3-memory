@@ -96,11 +96,27 @@ def test_name_hash_stable_and_case_insensitive():
     assert ec._name_hash("a") != ec._name_hash("b")
 
 
-def test_embed_tier_info_reports_fallback(monkeypatch):
+def test_embed_tier_info_gguf_is_in_process(monkeypatch):
+    # GGUF model name => in-process tier-1, regardless of M3_EMBED_GGUF env
+    # (the cascade can resolve the GGUF path without it — the old env check
+    # wrongly nagged about a slow run that was in fact fast).
     monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
     info = ec._embed_tier_info("bge-m3-GGUF-Q4_K_M.gguf")
+    assert info["in_process"] is True
+    assert "hint" not in info
+
+
+def test_embed_tier_info_http_model_reports_fallback():
+    info = ec._embed_tier_info("text-embedding-bge-m3")
     assert info["in_process"] is False
-    assert "M3_EMBED_GGUF" in info["hint"]
+    assert "HTTP fallback" in info["hint"]
+
+
+def test_embed_tier_info_dry_run_no_hint():
+    # model_seen=None => dry-run / nothing embedded => no fallback nag
+    info = ec._embed_tier_info(None)
+    assert info["in_process"] is False
+    assert "hint" not in info
 
 
 # ── Integration: tmp DB, dry-run (no embedder) ───────────────────────────────
