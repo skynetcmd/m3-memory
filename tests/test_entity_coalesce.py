@@ -57,6 +57,33 @@ def test_underscore_collision_allows_real_variants(a, b):
     assert ec._underscore_collision(a, b) is False
 
 
+@pytest.mark.parametrize("a,b", [
+    ("run-config-k20", "run-config-k30"),  # trailing-number config (live false merge)
+    ("gpt-4", "gpt-5"),
+    ("baseline-1", "baseline-2"),
+    ("v1", "v2"),
+    ("phase 3", "phase 4"),
+    ("qwen3-embedding-0.6b", "qwen3-embedding-1.5b"),
+])
+def test_numeric_suffix_collision_demotes_distinct_configs(a, b):
+    # differ only by a numeric/version token = distinct config/version = different
+    assert ec._numeric_suffix_collision(a, b) is True
+
+
+@pytest.mark.parametrize("a,b", [
+    ("entity row", "entity rows"),        # singular/plural -> legit merge
+    ("MCP server", "MCP servers"),
+    ("memory/migrations", "memory/migrations/"),  # trailing slash -> legit merge
+    ("small models", "small model"),
+    ("qwen3-embedding-0.6b", "qwen3-embedding:0.6b"),  # same number, separator differs
+    ("content_hash", "_content_hash"),    # underscore guard's job, not this one
+    ("alpha-v2", "beta-v3"),              # word ALSO differs -> not purely numeric
+    ("foo", "foo"),                       # identical
+])
+def test_numeric_suffix_collision_allows_real_variants(a, b):
+    assert ec._numeric_suffix_collision(a, b) is False
+
+
 def test_block_key_first_token_normalized():
     assert ec._block_key("Data Warehouse") == "data"
     assert ec._block_key("data warehouse") == "data"      # same block, word-order
