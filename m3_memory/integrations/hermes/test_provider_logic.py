@@ -60,7 +60,7 @@ def _install_hermes_stubs() -> None:
 def _load_provider():
     """Import m3/__init__.py as a module after stubs are installed."""
     spec = importlib.util.spec_from_file_location(
-        "m3_provider_under_test", HERE / "plugins" / "memory" / "m3" / "__init__.py"
+        "m3_provider_under_test", HERE / "__init__.py"
     )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

@@ -111,6 +111,12 @@ Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/AGENT_INS
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["m3_memory*"]
+# The Hermes plugin under m3_memory/integrations/hermes/ is VENDORED DATA, not an
+# importable package — its __init__.py imports hermes-agent modules that exist
+# only after it's copied into a hermes-agent checkout. Exclude it from package
+# discovery so setuptools never treats it as code; it ships as package-data
+# below instead.
+exclude = ["m3_memory.integrations*"]
 
 [tool.setuptools.package-data]
 m3_memory = [
@@ -118,16 +124,13 @@ m3_memory = [
     "memory/migrations/*.sql",
     "mcp.json.example",
     "mcp-server.json",
+    # Hermes Agent memory-provider plugin, vendored under the package so it ships
+    # in the wheel for `pip install` users. Treated as data (see exclude above).
+    # The setup wizard's _find_m3_hermes_plugin_src() resolves this packaged copy.
+    "integrations/hermes/*.py",
+    "integrations/hermes/*.yaml",
+    "integrations/hermes/*.md",
 ]
-
-# Ship the Hermes Agent memory-provider plugin in the wheel (it lives outside
-# the m3_memory package, so package-data can't reach it). The setup wizard's
-# _find_m3_hermes_plugin_src() resolves this tree relative to the install root.
-[tool.setuptools.exclude-package-data]
-"*" = ["__pycache__/*", "*.pyc"]
-
-[tool.setuptools.force-include]
-"examples/hermes-agent" = "examples/hermes-agent"
 
 [tool.ruff]
 target-version = "py311"
