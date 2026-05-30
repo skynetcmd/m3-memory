@@ -110,6 +110,25 @@ All off by default. These change how much work each `memory_write` does and can 
 
 **Always-on:** resolved temporal anchors from `metadata.temporal_anchors` are now automatically prefixed to the embed text as `[YYYY-MM-DD] …` so vector and FTS searches can hit absolute dates even when the source text says "yesterday". No flag; free when anchors are absent.
 
+### Files Memory — Fact Extraction (opt-in)
+
+Controls the optional LLM fact-extraction / summarization layer of the
+file-ingestion subsystem (`files.db`). Off until `M3_FILES_EXTRACT_URL` is set;
+without it, ingest produces text + extractive summaries only. Full guide:
+[FILES_MEMORY.md → Enabling fact extraction](FILES_MEMORY.md#enabling-fact-extraction).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_FILES_EXTRACT_URL` | _(unset)_ | OpenAI-compatible chat endpoint base URL, **without** `/v1` (e.g. `http://127.0.0.1:1234`). Resolution order for extraction: this → `M3_FILES_SUMMARY_URL` → `M3_LMSTUDIO_URL`. All unset = extraction unavailable. |
+| `M3_FILES_EXTRACT_MODEL` | `qwen3-4b-instruct` | Model id requested for fact extraction (falls back to `M3_FILES_SUMMARY_MODEL`). |
+| `M3_FILES_SUMMARY_URL` | _(unset)_ | Endpoint for the abstractive summarizer; falls back to `M3_LMSTUDIO_URL`. Also serves as a fallback for extraction (see above). |
+| `M3_FILES_SUMMARY_MODEL` | `qwen3-4b-instruct` | Model id for the summarizer. |
+| `M3_LMSTUDIO_URL` | _(unset)_ | Shared last-resort fallback endpoint for both extract and summary when their specific URLs are unset. |
+
+Auth: if the endpoint enforces a key (LM Studio default), set
+[`LM_API_TOKEN`](#api-keys--authentication) — it is sent as
+`Authorization: Bearer <token>`. Omit for tokenless endpoints (Ollama).
+
 ### Local LLM selection
 
 M3 does not pin a specific chat model. `bin/llm_failover.py` discovers whatever is loaded on your OpenAI-compatible endpoint(s) and picks the largest model by parameter count, filtering out embedding-only models. To minimize latency for enrichment features (auto-classify, summarization), keep a **small** instruct model (0.5B–1B) loaded alongside your embedder:
