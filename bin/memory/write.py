@@ -631,6 +631,15 @@ async def memory_supersede_impl(
         )
 
     logger.info(f"Memory {new_id} explicitly supersedes {old_id} (valid_to={close_at})")
+    try:
+        from audit_trail import write_audit_entry
+        write_audit_entry(
+            action="memory_supersede",
+            target_id=old_id,
+            metadata={"new_id": new_id, "valid_to": close_at, "agent_id": agent_id}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to write audit trail entry for supersede: {e}")
     return f"Superseded {old_id} -> Created: {new_id}"
 
 

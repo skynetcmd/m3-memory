@@ -389,7 +389,6 @@ def gdpr_forget_impl(user_id: str) -> str:
             # Hard-delete the items themselves
             db.execute("DELETE FROM memory_items WHERE user_id = ?", (user_id,))
 
-        # Log the forget request
         try:
             db.execute(
                 "INSERT INTO gdpr_requests (id, subject_id, request_type, status, items_affected, completed_at) "
@@ -398,6 +397,16 @@ def gdpr_forget_impl(user_id: str) -> str:
             )
         except Exception:
             pass  # gdpr_requests table may not exist yet
+
+    try:
+        from audit_trail import write_audit_entry
+        write_audit_entry(
+            action="gdpr_forget",
+            target_id=user_id,
+            metadata={"request_id": req_id, "items_affected": total_deleted}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to write audit trail entry for gdpr_forget: {e}")
 
     return f"GDPR forget completed: {total_deleted} items hard-deleted for user_id={user_id} (request: {req_id})"
 
