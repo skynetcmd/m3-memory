@@ -565,6 +565,33 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="m3_help_capabilities",
+        description=(
+            "Discover m3-memory tool capabilities, parameters, and availability. "
+            "Allows filtering by a logical domain (memory, chatlog, files, entity, "
+            "agent, tasks, conversations, admin, diagnostics) or searching by keywords."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Optional domain to filter capabilities (e.g., 'memory', 'files').",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optional keyword search term to filter tools.",
+                },
+            },
+            "required": [],
+        },
+        impl=_tool_loader.help_capabilities,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="m3_index",
         description=(
             "List m3 catalog tools (optionally one domain) as structured rows: "
