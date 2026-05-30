@@ -1,9 +1,20 @@
-import os
-import sys
-import subprocess
-import venv
-import platform
 import getpass
+import os
+import subprocess
+import sys
+import venv
+
+
+def _os_name() -> str:
+    """WMI-safe OS name. Replaces platform.system(), which routes through a WMI
+    query that can hang on Py3.14/Windows. This is a standalone pre-install
+    script (stdlib only, runs before m3 is importable), so the helper is inlined
+    rather than shared. os.name/sys.platform are constants — no WMI."""
+    if os.name == "nt":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "Darwin"
+    return "Linux"
 
 # On Windows the default console code page is cp1252, which can't encode
 # characters outside that 8-bit range (emoji, arrows, box-drawing). A stray
@@ -47,13 +58,13 @@ def setup_master_key(python_exe):
     print("To sync API keys securely across devices, you must provide the AGENT_OS_MASTER_KEY.")
     print("This key will be securely stored in your native OS keyring (macOS Keychain,")
     print("Windows Credential Manager, or Linux Secret Service) and NEVER synced.")
-    
+
     while True:
         master_key = getpass.getpass("\nEnter the AGENT_OS_MASTER_KEY (or press Enter to skip for now): ").strip()
         if not master_key:
             print("Skipping master key setup. You will need to configure it later to use synced API keys.")
             break
-            
+
         confirm_key = getpass.getpass("Confirm AGENT_OS_MASTER_KEY: ").strip()
         if master_key == confirm_key:
             # We use the venv python to set the keyring so we know the module is available
@@ -83,7 +94,7 @@ def install_node_manager():
     Windows: Prefers nvm-windows (CoreyButler.NVMforWindows).
     Unix/macOS: Prefers nvm or fnm.
     """
-    system = platform.system()
+    system = _os_name()
     print(f"\n[*] Setting up Node.js Manager for {system}...")
 
     if system == "Windows":
@@ -118,7 +129,7 @@ def install_node_manager():
                 print("  -> winget install failed. You may need to install it manually.")
         except (subprocess.CalledProcessError, FileNotFoundError):
             print("  -> winget not found. Please install nvm-windows manually: https://github.com/coreybutler/nvm-windows/releases")
-            
+
     else:
         # Unix/macOS: Prefer fnm or nvm
         print("  -> Setting up Node.js manager for Unix...")
@@ -141,18 +152,18 @@ def setup_oxidation(pip_exe):
     print("  - Ultra-fast hybrid search ranking and chatlog redaction.")
     print("\n[NOTE] This requires a one-time setup of Rust/C++ build tools.")
     print("The performance gains will apply to every subsequent M3 interaction.")
-    
+
     choice = input("\nWould you like to install Project Oxidation now? [y/N]: ").strip().lower()
     if choice in ("y", "yes"):
-        system = platform.system()
+        system = _os_name()
         if system == "Windows":
             print("\n[*] Checking for Windows C++ Build Tools...")
             script = os.path.join(BASE_DIR, "install_oxidation_buildtools.ps1")
             if os.path.exists(script):
-                print(f"  -> Please run this script in an ADMINISTRATOR PowerShell to install build tools:")
+                print("  -> Please run this script in an ADMINISTRATOR PowerShell to install build tools:")
                 print(f"     powershell -ExecutionPolicy Bypass -File {script}")
                 input("\nPress Enter AFTER you have run the build tools script (or to attempt install anyway)...")
-            
+
         print("\n[*] Installing m3-core-rs from git...")
         run_cmd([pip_exe, "install",
                  "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"])
@@ -167,7 +178,7 @@ def main():
     print("\n" + "="*50)
     print("🚀 M3 MAX AGENTIC OS: UNIVERSAL INSTALLER")
     print("="*50)
-    
+
     # 0. Setup Node.js Management
     install_node_manager()
 
@@ -244,7 +255,7 @@ def main():
     print("\n" + "="*50)
     print("🎉 INSTALLATION COMPLETE!")
     print("="*50)
-    print(f"M3 Memory is now fully initialized for {platform.system()}.")
+    print(f"M3 Memory is now fully initialized for {_os_name()}.")
     print("\nMCP bridges are configured in .mcp.json — Claude Code will load them automatically.")
     print("\nNext Steps:")
     print("  1. (Recommended) Install a self-contained local embedder for Hybrid Search:")

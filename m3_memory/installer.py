@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import shutil
 import sqlite3
 import subprocess
@@ -30,6 +29,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from m3_memory._platform import os_name as _os_name
 
 REPO_URL = "https://github.com/skynetcmd/m3-memory.git"
 TARBALL_URL_TEMPLATE = "https://github.com/skynetcmd/m3-memory/archive/refs/tags/{tag}.tar.gz"
@@ -303,7 +304,7 @@ def _sqlite3_cli_hint() -> Optional[str]:
     if shutil.which("sqlite3"):
         return None
 
-    system = platform.system()
+    system = _os_name()
     if system == "Linux":
         # Try /etc/os-release for the package manager.
         distro = ""
@@ -341,7 +342,7 @@ def _fix_npm_global_path() -> Optional[str]:
     No-op on Windows (npm uses %APPDATA%\\npm which is added to user PATH by
     the Node installer). Idempotent — checks for the exact export line first.
     """
-    if platform.system() == "Windows":
+    if _os_name() == "Windows":
         return None
     npm_bin = Path.home() / ".npm-global" / "bin"
     if not npm_bin.exists():
