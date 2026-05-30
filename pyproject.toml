@@ -120,6 +120,15 @@ m3_memory = [
     "mcp-server.json",
 ]
 
+# Ship the Hermes Agent memory-provider plugin in the wheel (it lives outside
+# the m3_memory package, so package-data can't reach it). The setup wizard's
+# _find_m3_hermes_plugin_src() resolves this tree relative to the install root.
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__/*", "*.pyc"]
+
+[tool.setuptools.force-include]
+"examples/hermes-agent" = "examples/hermes-agent"
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
