@@ -13,6 +13,7 @@ import platform
 import re
 import sqlite3
 import subprocess
+import sys
 import unicodedata
 from datetime import datetime, timezone
 
@@ -56,7 +57,7 @@ def get_master_key() -> str | None:
     except Exception:
         pass
 
-    if platform.system() == "Darwin":
+    if sys.platform == "darwin":
         try:
             result = subprocess.run(
                 ["security", "find-generic-password", "-s", "AGENT_OS_MASTER_KEY", "-w"],
@@ -92,8 +93,12 @@ def _get_device_salt() -> bytes:
     try:
         with open(salt_path, "wb") as f:
             f.write(salt)
-        # Set restrictive permissions (user read/write only)
-        if platform.system() != "Windows":
+        # Set restrictive permissions (user read/write only).
+        # Use os.name, not platform.system(): on Python 3.14 / Windows the
+        # latter triggers a WMI query (platform._wmi_query) that can hang
+        # indefinitely. os.name == "nt" is a constant — no WMI, no stall —
+        # and chmod is a POSIX concern anyway.
+        if os.name != "nt":
             os.chmod(salt_path, 0o600)
     except Exception as e:
         logger.warning(f"Could not save device salt to {salt_path}: {e}")
@@ -200,8 +205,11 @@ def get_api_key(service: str) -> str | None:
         if alt:
             return alt
 
-    # Try python keyring if available
-    system = platform.system()
+    # Try python keyring if available.
+    # Derive the OS name from sys.platform, not platform.system(): the latter
+    # can hang on a WMI query on Python 3.14 / Windows. This runs on every
+    # secret read, so it must not stall.
+    system = {"darwin": "Darwin", "win32": "Windows"}.get(sys.platform, "Linux")
     try:
         import keyring
         val = keyring.get_password("system", service)
