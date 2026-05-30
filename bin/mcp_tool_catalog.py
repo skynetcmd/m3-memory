@@ -199,6 +199,29 @@ def _memory_search_gated_validator(args: dict) -> Any:
 def _memory_suggest_validator(args: dict) -> Any:
     return _variant_gate(args)
 
+def _memory_search_scored_validator(args: dict) -> Any:
+    """Validator for memory_search_scored.
+
+    Deliberately does NOT reuse `_memory_search_gated_validator`: that path's
+    `_memory_search_validator` rejects an empty query, but the scored search is
+    the structured backend for filter-only listings (e.g. a memory-provider's
+    get_all/profile call passes query='' + type_filter). So this validator
+    clamps query length and k, runs the SAME bench-data gate as memory_search
+    (`_variant_gate`, defaulting variant -> '__none__' so bench rows stay
+    hidden — keeps the scored sibling's row set identical to memory_search's),
+    but allows an empty query through.
+    """
+    q = str(args.get("query", ""))
+    if len(q) > MAX_QUERY_LENGTH:
+        q = q[:MAX_QUERY_LENGTH]
+    args["query"] = q
+    try:
+        k = int(args.get("k", 8))
+    except (TypeError, ValueError):
+        k = 8
+    args["k"] = max(1, min(k, MAX_K))
+    return _variant_gate(args)
+
 def _memory_update_validator(args: dict) -> Any:
     md = args.get("metadata", "")
     if isinstance(md, dict):
@@ -758,6 +781,40 @@ TOOLS: list[ToolSpec] = [
         impl=memory_core.memory_search_impl,
         is_async=True,
         validators=(_memory_search_gated_validator,),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_search_scored",
+        description=(
+            "Structured hybrid FTS5+vector+MMR search. Returns ranked rows "
+            "[(score, item)] with content + metadata (id, valid_from, "
+            "conversation_id, user_id) — NOT formatted text. Use when a caller "
+            "needs parseable rows rather than an LLM-readable block (e.g. a "
+            "memory-provider backend). Empty query + type_filter = filter-only "
+            "listing. Same bench-data gate as memory_search."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query":              {"type": "string", "description": "Search text. Empty string = filter-only (type/scope) listing.", "default": ""},
+                "k":                  {"type": "integer", "description": "Max rows (1-100).", "default": 8},
+                "type_filter":        {"type": "string", "description": "Restrict to a memory type (e.g. 'user_fact').", "default": ""},
+                "agent_filter":       {"type": "string", "description": "Restrict to an agent id.", "default": ""},
+                "search_mode":        {"type": "string", "enum": ["hybrid", "semantic", "keyword"], "description": "Retrieval mode.", "default": "hybrid"},
+                "user_id":            {"type": "string", "description": "Filter by data subject.", "default": ""},
+                "scope":              {"type": "string", "description": "Filter by isolation scope.", "default": ""},
+                "as_of":              {"type": "string", "description": "ISO-8601 time-travel cutoff (bitemporal point-in-time query).", "default": ""},
+                "conversation_id":    {"type": "string", "description": "Restrict to a conversation / team session.", "default": ""},
+                "recency_bias":       {"type": "number", "description": "Boost newer items (0.0=off).", "default": 0.0},
+                "variant":            {"type": "string", "description": "Ingest-pipeline filter. '' = real user data only.", "default": ""},
+                "include_bench_data": {"type": "boolean", "description": "Opt in to LOCOMO / LongMemEval bench rows. Default False hides any variant-tagged row.", "default": False},
+            },
+            "required": [],
+        },
+        impl=memory_core.memory_search_scored_impl,
+        is_async=True,
+        validators=(_memory_search_scored_validator,),
         default_allowed=True,
         inject_agent_id=False,
     ),
