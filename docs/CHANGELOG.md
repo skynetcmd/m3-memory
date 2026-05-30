@@ -19,6 +19,29 @@ forward-going only.
 
 ---
 
+## [2026.5.29.4] — May 29, 2026 — Files fact-extraction fix + docs
+
+### Fixed
+
+- **File fact-extraction now works against an auth-enabled LM Studio.** The
+  files-memory LLM extractor sent no `Authorization` header, so an auth-enabled
+  endpoint (LM Studio's default) silently produced zero facts; and it sent
+  `response_format={"type":"json_object"}`, which some builds reject with HTTP
+  400. Added a shared `config.llm_auth_headers()` (reads `LM_API_TOKEN`, empty
+  when unset so tokenless endpoints keep working) wired into extract / summarize
+  / carry-forward, and dropped the unsupported `response_format` hint. Verified
+  end-to-end producing well-formed atomic facts.
+
+### Documentation
+
+- **Documented how to enable fact extraction** (`FILES_MEMORY.md` → "Enabling
+  fact extraction"): endpoint env vars (`M3_FILES_EXTRACT_URL` /
+  `M3_FILES_EXTRACT_MODEL` / summary + `M3_LMSTUDIO_URL` fallbacks), the
+  `LM_API_TOKEN` auth requirement, `extract_mode` none/inline/queue, and a
+  verified queue→drain example. Added the `M3_FILES_*` vars to
+  `ENVIRONMENT_VARIABLES.md`.
+- **Fixed the Files Memory Quick Start** CLI invocation (`PYTHONPATH=bin`).
+
 ## [2026.5.29.3] — May 29, 2026 — Fix Windows installer crash
 
 ### Fixed
