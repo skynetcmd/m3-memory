@@ -25,6 +25,45 @@ except ImportError:
 
 logger = logging.getLogger("M3_SDK")
 
+
+def ensure_utf8() -> None:
+    """Guarantee the current process runs in Python UTF-8 mode.
+
+    On Windows both stdio AND open() default to the legacy cp1252 code page, so
+    any non-cp1252 character (em-dashes, arrows, box-drawing, emoji) crashes with
+    UnicodeEncodeError on print or UnicodeDecodeError on a no-encoding open().
+    True UTF-8 mode (PEP 540) fixes both, but the interpreter reads it only at
+    startup — so we set PYTHONUTF8 and re-exec once with -X utf8.
+
+    Shared canonical implementation: called from every m3 entry process that
+    isn't guaranteed to inherit UTF-8 mode — the m3 CLI (m3_memory.cli) and the
+    standalone MCP→OpenAI proxy (bin/mcp_proxy.py, the OpenClaw path, launched
+    directly as `python bin/mcp_proxy.py` so it never flows through the CLI).
+
+    Safety: no-op if already in UTF-8 mode; an env sentinel bounds the re-exec to
+    exactly once so it cannot loop; sys.orig_argv reconstructs the launch
+    faithfully (so -m / file-path forms survive).
+
+    KNOWN LIMITATION: inline `python -c "<code>"` launches can mangle on re-exec
+    because the OS re-quotes the program string; not a supported m3 entry path.
+    Set PYTHONUTF8=1 in the env to bypass (then this short-circuits).
+    """
+    if sys.flags.utf8_mode:
+        return
+    if os.environ.get("_M3_UTF8_REEXEC") == "1":
+        return
+    os.environ["PYTHONUTF8"] = "1"
+    os.environ["_M3_UTF8_REEXEC"] = "1"
+    orig = list(getattr(sys, "orig_argv", [sys.executable, *sys.argv])) or [
+        sys.executable, *sys.argv]
+    try:
+        os.execv(sys.executable, [orig[0], "-X", "utf8", *orig[1:]])
+    except OSError:
+        # Re-exec failed (exotic launcher / permissions). Caller's stdio
+        # reconfigure (if any) still handles the common print path.
+        pass
+
+
 # Single source of truth for the local LLM base URL + read timeout. Bridges
 # imported this from here in bench-wip; main had been redefining it in each
 # bridge. Still overridable via env so dev machines with LM Studio on a
