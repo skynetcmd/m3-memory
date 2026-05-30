@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=70", "wheel"]
+# setuptools>=77 is required for the SPDX `license = "Apache-2.0"` form;
+# <82 keeps it within torch 2.11's declared `setuptools<82` pin so an isolated
+# build doesn't trigger a dependency-conflict warning.
+requires = ["setuptools>=77,<82", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -90,7 +93,8 @@ dev = [
     "ruff>=0.15.12,<1",
     "mypy>=1.20.2,<2",
     "types-requests>=2.33.0.20260408",
-    "types-setuptools>=82.0.0.20260408",
+    # Capped <82 to track the setuptools<82 cap (torch 2.11 pins setuptools<82).
+    "types-setuptools>=77.0.0,<82",
     "types-PyYAML>=6.0.0",
     "twine>=6.2.0,<7",
     "build>=1.4.4,<2",
