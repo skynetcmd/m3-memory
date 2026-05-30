@@ -52,6 +52,8 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
         "main_chat_log_rows": 0,
         "chatlog_rows": 0,
         "chatlog_without_embed": 0,
+        "files_leaves": 0,
+        "files_unembedded": 0,
     }
 
     chatlog_db = os.path.abspath(config.db_path)
@@ -96,6 +98,28 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
         elif unified:
             # Single file — report the same number in both slots for compat.
             counts["chatlog_rows"] = counts["main_chat_log_rows"]
+
+        # Query Files DB counts
+        try:
+            from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
+            files_db = os.path.abspath(CONFIG_FILES_DB_PATH)
+        except Exception:
+            from m3_sdk import get_m3_root
+            files_db = os.path.abspath(os.environ.get("M3_FILES_DB_PATH") or os.path.join(get_m3_root(), "memory", "files_database.db"))
+
+        if os.path.exists(files_db):
+            try:
+                conn = sqlite3.connect(files_db, timeout=5)
+                try:
+                    row = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()
+                    counts["files_leaves"] = row[0] if row else 0
+
+                    row = conn.execute("SELECT COUNT(*) FROM leaves WHERE embedded = 0").fetchone()
+                    counts["files_unembedded"] = row[0] if row else 0
+                finally:
+                    conn.close()
+            except sqlite3.Error:
+                pass
 
     except Exception as e:
         logger.warning(f"Error fetching row counts: {e}")
@@ -512,9 +536,13 @@ def run_live_tui(interval: float = 5.0):
         spill_files = len([f for f in os.listdir(chatlog_config.SPILL_DIR) if f.endswith(".jsonl")]) if os.path.exists(chatlog_config.SPILL_DIR) else 0
         spill_bytes = state.get("spill", {}).get("bytes", 0)
         
+        files_leaves = row_counts.get("files_leaves", 0)
+        files_unembedded = row_counts.get("files_unembedded", 0)
+
         lines.append(_make_line(f"  Chatlog Queue Depth: {depth} / {max_depth}"))
         lines.append(_make_line(f"  Compaction Spill:    {spill_files} files ({spill_bytes / 1024:.1f} KB)"))
         lines.append(_make_line(f"  Chroma Sync Queue:   {chroma_q} pending upserts"))
+        lines.append(_make_line(f"  Files DB Chunks:     {files_leaves} total ({files_unembedded} pending embeddings)"))
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append(_make_line(" SYSTEM INTEGRATION HOOKS"))
         
