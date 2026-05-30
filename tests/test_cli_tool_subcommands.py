@@ -52,6 +52,21 @@ def _run_cli(*argv: str) -> subprocess.CompletedProcess:
     )
 
 
+def _run_cli_force_reexec(*argv: str) -> subprocess.CompletedProcess:
+    """Like _run_cli but with a CLEAN env so _ensure_utf8() takes the re-exec
+    path (PYTHONUTF8 unset, re-exec sentinel cleared). On Windows that re-exec
+    is a spawned subprocess, not a true exec — the historical bug let the
+    parent fall through to exit 0, masking every non-zero child exit code
+    (§3 fail-loud violation). This harness pins the propagation."""
+    env = dict(os.environ)
+    env.pop("PYTHONUTF8", None)
+    env.pop("_M3_UTF8_REEXEC", None)
+    return subprocess.run(
+        [sys.executable, "-m", "m3_memory.cli", *argv],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT), env=env,
+    )
+
+
 # ── files_stats: happy path ──────────────────────────────────────────────────
 
 @pytest.mark.skipif(not _FILES_DB.is_file(), reason="shipped files_database.db absent")
@@ -187,3 +202,23 @@ def test_admin_help_does_not_list_m3_call():
     proc = _run_cli("admin", "--help")
     assert proc.returncode == 0, proc.stderr
     assert "m3_call" not in proc.stdout, proc.stdout
+
+
+# ── exit-code propagation through the UTF-8 re-exec (§3 fail-loud) ────────────
+
+def test_error_exit_code_propagates_through_utf8_reexec():
+    """A failing command MUST exit non-zero even when _ensure_utf8 takes the
+    re-exec path. On Windows the re-exec is a spawned subprocess; the parent
+    must propagate the child's exit code instead of falling through to 0.
+    Regression for the bug where every CLI error silently became exit 0."""
+    proc = _run_cli_force_reexec("admin", "m3_call")  # invalid choice -> argparse exit 2
+    assert proc.returncode != 0, (
+        f"error exit code was masked to {proc.returncode} through the re-exec "
+        f"(§3 fail-loud violation)\nstderr={proc.stderr}"
+    )
+
+
+def test_success_exit_code_propagates_through_utf8_reexec():
+    """The flip side: a clean command still exits 0 through the re-exec path."""
+    proc = _run_cli_force_reexec("--version")
+    assert proc.returncode == 0, f"stderr={proc.stderr}\nstdout={proc.stdout}"
