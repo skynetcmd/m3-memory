@@ -481,15 +481,22 @@ def _pick_representative(mem, eid_a, eid_b):
 
 
 def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False,
-                      dry_run=False, db_path=None, confirm=False):
+                      resolution_run=None, dry_run=False, db_path=None,
+                      confirm=False):
     """Apply the reversible same_as/cluster overlay for coalescing candidates.
 
     Sources (union): explicit candidate_uuids that are reviewed merge OR (if
-    include_auto_merge) the 'merge'-band candidates (clean after the underscore
-    guard). For each pair: pick a deterministic representative, give the member
+    include_auto_merge) the 'merge'-band candidates (clean after the collision
+    guards). For each pair: pick a deterministic representative, give the member
     the rep's cluster_id, mark it coalesce_state='clustered', and write a
     `same_as` (member -> rep) edge. Members are NEVER deleted; reversal via
     unapply_cluster(). Returns structured counts. dry_run reports without writing.
+
+    RUN SCOPE: include_auto_merge applies ONLY the LATEST detection run by
+    default (or `resolution_run` if given). A superseded run carries pre-guard
+    bands (e.g. before a new false-merge guard landed) — silently applying those
+    would materialize exactly the merges the guard was added to prevent. Explicit
+    candidate_uuids are unaffected (the caller named them).
 
     MUTATION GUARD: this WRITES to the core entity graph. To avoid silently
     mutating the production DB, a real (non-dry-run) apply must EITHER target an
@@ -510,10 +517,26 @@ def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False,
         clauses, params = [], []
         if candidate_uuids:
             qs = ",".join("?" * len(candidate_uuids))
-            clauses.append(f"(uuid IN ({qs}) AND review_action='merge')")
+            # Explicit re-apply is a deliberate human act: accept a reviewed
+            # 'merge' OR an 'unapplied' tombstone (re-applying a previously
+            # torn-down cluster on purpose). The auto-merge path stays blind to
+            # 'unapplied' — only an explicit uuid resurrects it.
+            clauses.append(f"(uuid IN ({qs}) AND review_action IN ('merge','unapplied'))")
             params += list(candidate_uuids)
         if include_auto_merge:
-            clauses.append("(band='merge' AND reviewed_at IS NULL)")
+            # Scope to ONE detection run — the given one, else the latest —
+            # so superseded pre-guard bands are never silently applied.
+            run = resolution_run
+            if run is None:
+                row = mem.execute(
+                    "SELECT resolution_run FROM entity_coalesce_candidates "
+                    "ORDER BY detected_at DESC LIMIT 1"
+                ).fetchone()
+                run = row[0] if row else None
+            if run is not None:
+                clauses.append(
+                    "(band='merge' AND reviewed_at IS NULL AND resolution_run=?)")
+                params.append(run)
         if not clauses:
             mem.execute("ROLLBACK")
             return {**out, "clusters_touched": [], "note": "nothing selected"}
@@ -562,22 +585,63 @@ def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False,
 
 def unapply_cluster(cluster_id: str, *, db_path=None) -> dict:
     """Reverse a coalescence (lesson #1 — trivial undo): drop the same_as edges
-    into the cluster representative and clear cluster_id/coalesce_state on its
-    members. Members were never deleted, so this fully restores the prior state.
+    into the cluster representative, clear cluster_id/coalesce_state on its
+    members, strip the aliases apply added to the representative, and TOMBSTONE
+    the candidate(s) as review_action='unapplied'. Members were never deleted, so
+    this fully restores member data.
 
-    `db_path` targets an explicit DB (else the resolved core DB). Unapply is
-    inherently safe (it only REMOVES overlay edges/flags — never touches member
-    data), so no confirm guard is needed."""
+    Tombstone (A-plus, the MDM 'unmerge is a recorded decision' pattern): a torn-
+    down cluster must NOT silently re-merge on the next include_auto_merge run —
+    that would flip-flop forever. Marking review_action='unapplied' keeps it out
+    of the auto-merge band (which filters reviewed_at IS NULL) AND makes the audit
+    trail honest (the row no longer claims 'merge'). Re-apply remains possible as
+    a deliberate act via apply_coalescence(candidate_uuids=[...]).
+
+    `db_path` targets an explicit DB (else the resolved core DB). Unapply only
+    REMOVES overlay edges/flags + tombstones — never touches member data — so no
+    confirm guard is needed."""
     with _memory_db(db_path) as mem:
         mem.execute("BEGIN")
+        # Capture member -> representative BEFORE dropping edges: the same_as
+        # edge (member -> rep) is the source of truth for which alias to strip
+        # off which representative.
+        member_rep = mem.execute(
+            "SELECT er.from_entity, er.to_entity FROM entity_relationships er "
+            "JOIN entities m ON m.id = er.from_entity "
+            "WHERE er.predicate='same_as' AND m.cluster_id=?", (cluster_id,)
+        ).fetchall()
         members = [r[0] for r in mem.execute(
             "SELECT id FROM entities WHERE cluster_id=?", (cluster_id,)).fetchall()]
         if members:
             qs = ",".join("?" * len(members))
+            # Strip each member's name from its representative's alias list, so a
+            # round-trip (apply->unapply) leaves NO stale alias behind.
+            for member_id, rep_id in member_rep:
+                row = mem.execute(
+                    "SELECT canonical_name FROM entities WHERE id=?", (member_id,)
+                ).fetchone()
+                if row is None:
+                    continue
+                member_name = row[0]
+                mem.execute(
+                    "UPDATE entities SET attributes_json=json_set("
+                    "COALESCE(attributes_json,'{}'),'$.aliases',"
+                    "(SELECT COALESCE(json_group_array(value),'[]') FROM "
+                    " json_each(json_extract(attributes_json,'$.aliases')) "
+                    " WHERE value <> ?)) WHERE id=?",
+                    (member_name, rep_id),
+                )
             mem.execute(f"DELETE FROM entity_relationships WHERE predicate='same_as' "
                         f"AND from_entity IN ({qs})", members)
             mem.execute(f"UPDATE entities SET cluster_id=NULL, "
                         f"coalesce_state=CASE WHEN entity_type='unknown' THEN 'provisional' ELSE coalesce_state END "
                         f"WHERE id IN ({qs})", members)
+            # Tombstone the candidate(s) so auto-merge won't resurrect them.
+            mem.execute(
+                f"UPDATE entity_coalesce_candidates SET review_action='unapplied', "
+                f"reviewed_at=COALESCE(reviewed_at,?) "
+                f"WHERE (entity_a IN ({qs}) OR entity_b IN ({qs}))",
+                [_now()] + members + members,
+            )
         mem.execute("COMMIT")
     return {"cluster_id": cluster_id, "reverted_members": len(members)}
