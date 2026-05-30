@@ -21,7 +21,6 @@ import argparse
 import logging
 import os
 import pathlib
-import platform
 import socket
 import subprocess
 import sys
@@ -199,7 +198,9 @@ def main():
         # Pass-through env so pg_sync and chroma_sync subprocesses inherit.
         os.environ["M3_DATABASE"] = args.database
 
-    log.info(f"=== sync_all starting [{platform.system()}] ===")
+    # sys.platform, not platform.system() (WMI-hang risk on Py3.14/Windows).
+    _os = {"darwin": "Darwin", "win32": "Windows"}.get(sys.platform, "Linux")
+    log.info(f"=== sync_all starting [{_os}] ===")
 
     if not TARGET_IP:
         log.info("SYNC_TARGET_IP not set — skipping sync.")

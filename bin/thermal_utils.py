@@ -1,7 +1,7 @@
 import logging
 import os
-import platform
 import subprocess
+import sys
 
 logger = logging.getLogger("thermal_utils")
 
@@ -10,7 +10,9 @@ def get_thermal_status() -> str:
     Returns the thermal/pressure status of the current system.
     Returns: Nominal, Fair, Serious, or Critical.
     """
-    system = platform.system()
+    # sys.platform, not platform.system(): the latter can hang on a WMI query
+    # on Python 3.14 / Windows, and thermal checks run on a warm path.
+    system = {"darwin": "Darwin", "win32": "Windows"}.get(sys.platform, "Linux")
 
     if system == "Darwin":
         # macOS: Use 'sysctl' for thermal pressure
