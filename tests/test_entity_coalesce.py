@@ -35,6 +35,28 @@ def test_is_noise_keeps_real_entities(name):
     assert ec._is_noise(name) is False
 
 
+@pytest.mark.parametrize("a,b", [
+    ("content_hash", "_content_hash"),
+    ("predicates", "_PREDICATES"),
+    ("routed_impl", "_routed_impl"),
+    ("foo", "__foo"),
+])
+def test_underscore_collision_demotes_helper_vs_value(a, b):
+    # leading-underscore difference = private helper vs public value = different
+    assert ec._underscore_collision(a, b) is True
+
+
+@pytest.mark.parametrize("a,b", [
+    ("memory item", "memory items"),     # singular/plural -> legit merge
+    ("agent prompt", "agent prompts"),
+    ("SQLite database", "SQLite databases"),
+    ("foo", "foo"),                       # identical -> not a "collision"
+    ("foo", "bar"),                       # unrelated
+])
+def test_underscore_collision_allows_real_variants(a, b):
+    assert ec._underscore_collision(a, b) is False
+
+
 def test_block_key_first_token_normalized():
     assert ec._block_key("Data Warehouse") == "data"
     assert ec._block_key("data warehouse") == "data"      # same block, word-order
@@ -66,6 +88,12 @@ def tmp_entity_db(tmp_path, monkeypatch):
             id TEXT PRIMARY KEY, canonical_name TEXT, entity_type TEXT,
             attributes_json TEXT, valid_from TEXT, valid_to TEXT,
             content_hash TEXT, created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE entity_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_entity TEXT NOT NULL, to_entity TEXT NOT NULL,
+            predicate TEXT NOT NULL, confidence REAL DEFAULT 0.85,
+            valid_from TEXT, valid_to TEXT, source_memory_id TEXT, created_at TEXT
         );
         """
     )
@@ -159,3 +187,48 @@ def test_review_rejects_bad_action(tmp_entity_db):
 def test_review_non_list_raises(tmp_entity_db):
     with pytest.raises(ValueError):
         ec.review_coalesce_candidates({"uuid": "x", "action": "merge"})  # type: ignore[arg-type]
+
+
+# ── v2: reversible overlay apply / unapply ───────────────────────────────────
+def test_apply_creates_reversible_overlay_then_unapply_restores(tmp_entity_db):
+    # detect -> the 'small models'/'small model' pair lands in the merge band
+    ec.coalesce_detect(dry_run=False, max_pairs=50)
+    res = ec.apply_coalescence(include_auto_merge=True, dry_run=False)
+    assert res["applied"] >= 1
+    cid = res["clusters_touched"][0]
+
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    # overlay written: a same_as edge + a clustered member, NO entity deleted
+    sa = conn.execute("SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
+    clustered = conn.execute("SELECT count(*) FROM entities WHERE coalesce_state='clustered'").fetchone()[0]
+    total = conn.execute("SELECT count(*) FROM entities").fetchone()[0]
+    conn.close()
+    assert sa >= 1 and clustered >= 1
+    assert total == 7  # nothing deleted — members intact (lesson #1)
+
+    # reverse: unapply fully restores (drop edge + clear cluster_id)
+    rev = ec.unapply_cluster(cid)
+    assert rev["reverted_members"] >= 1
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    assert conn.execute("SELECT count(*) FROM entities WHERE cluster_id=?", (cid,)).fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT count(*) FROM entity_relationships WHERE predicate='same_as'"
+    ).fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM entities").fetchone()[0] == 7  # still all there
+    conn.close()
+
+
+def test_apply_dry_run_writes_nothing(tmp_entity_db):
+    ec.coalesce_detect(dry_run=False, max_pairs=50)
+    ec.apply_coalescence(include_auto_merge=True, dry_run=True)
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    sa = conn.execute("SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
+    conn.close()
+    assert sa == 0  # dry-run applied nothing
+
+
+def test_apply_with_nothing_selected_is_noop(tmp_entity_db):
+    ec.coalesce_detect(dry_run=False, max_pairs=50)
+    # neither explicit uuids nor include_auto_merge -> nothing selected
+    res = ec.apply_coalescence(dry_run=False)
+    assert res["applied"] == 0
