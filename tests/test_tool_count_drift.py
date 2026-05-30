@@ -50,7 +50,9 @@ _DOC_FILES = [
 # Matched verbatim and skipped so they don't masquerade as drift. Keep this
 # list tight: anything that isn't a recognized subcount must equal the total.
 _SUBCOUNT_EXCEPTIONS = (
-    "All 21 tools",        # files_memory.md — the files-memory domain itself
+    "26 MCP tools",        # files_memory.md title — the files-memory DOMAIN count
+    "All 26 tools",        # files_memory.md — the files-memory domain itself
+    "26-tool files-memory",  # README — the files-memory domain as a sub-layer
     "(5 tools)",           # files_memory.md — files_corpus_* module
 )
 
@@ -58,7 +60,9 @@ _SUBCOUNT_EXCEPTIONS = (
 # number is a phase ordinal. Strip these before scanning.
 _NONCOUNT_RE = re.compile(r"\bPhase \d+ tools\b")
 
-_TOOLS_RE = re.compile(r"\b(\d+) tools\b")
+# Catches "96 tools" AND "96 MCP tools" — the optional "MCP " qualifier was a
+# blind spot that let a stale "96 MCP tools" in README slip past a catalog bump.
+_TOOLS_RE = re.compile(r"\b(\d+) (?:MCP )?tools\b")
 
 
 def _computed_count() -> int:
