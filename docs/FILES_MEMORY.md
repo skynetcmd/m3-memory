@@ -29,15 +29,18 @@ Files-memory is the third store. Default location: `~/.m3/files_database.db`
 
 ## Quick start
 
+The CLI lives in `bin/`, so put it on the path (`PYTHONPATH=bin`, or run
+`python bin/files_memory/tools.py …` directly):
+
 ```bash
 # Ingest a directory
-python -m files_memory.tools ingest ~/Documents/notes --include "*.md"
+PYTHONPATH=bin python -m files_memory.tools ingest ~/Documents/notes --include "*.md"
 
 # Triage: file-level summaries, no leaf content
-python -m files_memory.tools index --limit 20
+PYTHONPATH=bin python -m files_memory.tools index --limit 20
 
 # Search: hybrid FTS5 + vector
-python -m files_memory.tools search "what did we decide about caching"
+PYTHONPATH=bin python -m files_memory.tools search "what did we decide about caching"
 ```
 
 All three are also available as MCP tools (`files_ingest`,
