@@ -8,10 +8,20 @@ Uses project virtual environment paths and ensures log directories exist.
 import argparse
 import os
 import pathlib
-import platform
 import subprocess
 import sys
 import tempfile
+
+
+def _os_name() -> str:
+    """WMI-safe OS name. Replaces platform.system(), which hangs on a WMI query
+    on Py3.14/Windows. os.name/sys.platform are constants — no WMI, same OS
+    branching ('Windows'/'Darwin'/'Linux')."""
+    if os.name == "nt":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "Darwin"
+    return "Linux"
 
 
 def _safe_print(msg: str) -> None:
@@ -90,7 +100,7 @@ def install_unix_cognitive_loop(m3_memory_root):
     crash. The loop's own acquire_lock() makes a redundant launch a quiet
     no-op, so this is safe to re-run. Cron is deliberately NOT used — it is the
     wrong tool for a keepalive daemon."""
-    os_name = platform.system()
+    os_name = _os_name()
     python_exe = _venv_python(m3_memory_root)
     bin_dir = os.path.join(m3_memory_root, "bin")
     os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
@@ -138,7 +148,7 @@ def install_unix_cognitive_loop(m3_memory_root):
 
 def remove_unix_cognitive_loop():
     """Uninstall the launchd agent / systemd unit for the cognitive loop."""
-    os_name = platform.system()
+    os_name = _os_name()
     if os_name == "Darwin":
         dest = os.path.expanduser(
             "~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist")
@@ -177,7 +187,7 @@ def _venv_python(m3_memory_root: str, windowless: bool = False) -> str:
     stdout/stderr, scheduled-task entrypoints MUST self-log via _task_runtime
     (they do — see get_schedule_specs / the --log-file args).
     """
-    if platform.system() == "Windows":
+    if _os_name() == "Windows":
         exe = "pythonw.exe" if windowless else "python.exe"
         candidate = os.path.join(m3_memory_root, ".venv", "Scripts", exe)
         if os.path.exists(candidate):
@@ -408,7 +418,7 @@ def main():
         list_schedules(m3_memory_root)
         return
 
-    os_name = platform.system()
+    os_name = _os_name()
     _safe_print(f"M3 Memory: Detecting platform... {os_name}")
     _safe_print(f"Project root: {m3_memory_root}")
 
