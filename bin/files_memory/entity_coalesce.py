@@ -445,7 +445,8 @@ def _pick_representative(mem, eid_a, eid_b):
     return rep, mem_ent
 
 
-def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False, dry_run=False):
+def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False,
+                      dry_run=False, db_path=None, confirm=False):
     """Apply the reversible same_as/cluster overlay for coalescing candidates.
 
     Sources (union): explicit candidate_uuids that are reviewed merge OR (if
@@ -453,9 +454,19 @@ def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False, dry_run
     guard). For each pair: pick a deterministic representative, give the member
     the rep's cluster_id, mark it coalesce_state='clustered', and write a
     `same_as` (member -> rep) edge. Members are NEVER deleted; reversal via
-    unapply_cluster(). Returns structured counts. dry_run reports without writing."""
+    unapply_cluster(). Returns structured counts. dry_run reports without writing.
+
+    MUTATION GUARD: this WRITES to the core entity graph. To avoid silently
+    mutating the production DB, a real (non-dry-run) apply must EITHER target an
+    explicit `db_path` OR pass `confirm=True` to acknowledge it will write to the
+    resolved core DB. dry_run is always allowed (it writes nothing)."""
+    if not dry_run and db_path is None and not confirm:
+        return {"applied": 0, "skipped": 0, "clusters_touched": [], "dry_run": False,
+                "error": "refused: a real apply must pass db_path=<target> or "
+                          "confirm=True (it writes to the core entity graph). "
+                          "Use dry_run=True to preview."}
     out: dict = {"applied": 0, "skipped": 0, "clusters_touched": set(), "dry_run": dry_run}
-    with _memory_db() as mem:
+    with _memory_db(db_path) as mem:
         ensure_schema(mem)
         mem.execute("BEGIN")
         # collect target candidates
@@ -514,11 +525,15 @@ def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False, dry_run
     return out
 
 
-def unapply_cluster(cluster_id: str) -> dict:
+def unapply_cluster(cluster_id: str, *, db_path=None) -> dict:
     """Reverse a coalescence (lesson #1 — trivial undo): drop the same_as edges
     into the cluster representative and clear cluster_id/coalesce_state on its
-    members. Members were never deleted, so this fully restores the prior state."""
-    with _memory_db() as mem:
+    members. Members were never deleted, so this fully restores the prior state.
+
+    `db_path` targets an explicit DB (else the resolved core DB). Unapply is
+    inherently safe (it only REMOVES overlay edges/flags — never touches member
+    data), so no confirm guard is needed."""
+    with _memory_db(db_path) as mem:
         mem.execute("BEGIN")
         members = [r[0] for r in mem.execute(
             "SELECT id FROM entities WHERE cluster_id=?", (cluster_id,)).fetchall()]
