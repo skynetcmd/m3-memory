@@ -54,10 +54,11 @@ def _memory_db() -> Iterator[sqlite3.Connection]:
     are infrequent and we don't want to fight memory.db's connection
     pool for transaction ownership.
     """
-    # Resolve via m3_sdk so we honor M3_DATABASE env + active_database().
+    # Resolve the CORE memory DB (agent_memory.db) — NOT M3_DATABASE, which
+    # during file extraction points at the files DB (no `entities` table).
+    # config.memory_db_path() honors M3_MEMORY_DB else the m3_sdk core default.
     try:
-        from m3_sdk import resolve_db_path
-        path = config.MEMORY_DB_PATH or resolve_db_path(None)
+        path = config.memory_db_path()
     except ImportError:
         # Fallback for tests that don't have m3_sdk on path.
         path = config.MEMORY_DB_PATH or os.path.join(
