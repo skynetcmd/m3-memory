@@ -84,3 +84,81 @@ def list_domains() -> str:
         ),
     }
     return json.dumps(out)
+
+
+def help_capabilities(domain: str = "", query: str = "") -> str:
+    """Impl for `m3_help_capabilities` MCP tool."""
+    import mcp_tool_catalog
+    from tool_domains import DOMAIN_DESCRIPTIONS, domain_of_tool, is_essential
+
+    domain = (domain or "").strip().lower()
+    query = (query or "").strip().lower()
+
+    if domain and domain not in DOMAIN_DESCRIPTIONS:
+        return (
+            f"Error: unknown domain '{domain}'. "
+            f"Valid domains: {', '.join(sorted(DOMAIN_DESCRIPTIONS.keys()))}"
+        )
+
+    matched_tools = []
+    for spec in mcp_tool_catalog.TOOLS:
+        td = domain_of_tool(spec.name)
+        if domain and td != domain:
+            continue
+        if query and (query not in spec.name.lower() and query not in spec.description.lower()):
+            continue
+        
+        # Extract parameter details to make it readable
+        props = spec.parameters.get("properties", {})
+        required = spec.parameters.get("required", [])
+        params_info = []
+        for p_name, p_schema in props.items():
+            req_str = "required" if p_name in required else "optional"
+            p_type = p_schema.get("type", "any")
+            p_desc = p_schema.get("description", "")
+            params_info.append(f"- **{p_name}** ({p_type}, {req_str}): {p_desc}")
+            
+        matched_tools.append({
+            "name": spec.name,
+            "domain": td,
+            "description": spec.description,
+            "is_essential": is_essential(spec.name),
+            "parameters": params_info
+        })
+
+    # Group by domain for clean formatting
+    grouped = {}
+    for mt in matched_tools:
+        grouped.setdefault(mt["domain"], []).append(mt)
+
+    lines = ["# M3-Memory Tool Capabilities Index"]
+    if domain:
+        lines.append(f"Filtering by domain: **{domain}**")
+    if query:
+        lines.append(f"Searching for query: *\"{query}\"*")
+    lines.append("")
+
+    if not matched_tools:
+        lines.append("No matching tools found.")
+        return "\n".join(lines)
+
+    for d_name in sorted(grouped.keys()):
+        d_desc = DOMAIN_DESCRIPTIONS.get(d_name, "")
+        lines.append(f"## Domain: {d_name} ({len(grouped[d_name])} tools)")
+        lines.append(f"*{d_desc}*")
+        lines.append("")
+        
+        for t in grouped[d_name]:
+            availability = "Always Available (Essential)" if t["is_essential"] else f"Lazy (requires `tools_load_domain(domain=\"{d_name}\")`)"
+            lines.append(f"### `{t['name']}`")
+            lines.append(f"**Description:** {t['description']}")
+            lines.append(f"**Availability:** {availability}")
+            if t["parameters"]:
+                lines.append("**Parameters:**")
+                lines.extend(t["parameters"])
+            else:
+                lines.append("**Parameters:** None")
+            lines.append("")
+
+    return "\n".join(lines)
+

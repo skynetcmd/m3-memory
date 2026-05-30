@@ -190,6 +190,175 @@ def chatlog_status_impl() -> str:
     return json.dumps(result, indent=2)
 
 
+def _get_file_size_mb(path: str) -> float:
+    try:
+        if os.path.exists(path):
+            return os.path.getsize(path) / (1024 * 1024)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _get_wal_size_mb(path: str) -> float:
+    return _get_file_size_mb(path + "-wal")
+
+
+def _get_chroma_queue_count(main_db: str) -> int:
+    if os.path.exists(main_db):
+        try:
+            conn = sqlite3.connect(main_db, timeout=2)
+            try:
+                row = conn.execute("SELECT COUNT(*) FROM chroma_sync_queue").fetchone()
+                return row[0] if row else 0
+            except sqlite3.Error:
+                pass
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    return 0
+
+
+def _get_last_turns(main_db: str) -> list[dict[str, str]]:
+    turns = []
+    if os.path.exists(main_db):
+        try:
+            conn = sqlite3.connect(main_db, timeout=2)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    "SELECT created_at, content FROM memory_items "
+                    "WHERE type='chat_log' AND is_deleted=0 "
+                    "ORDER BY created_at DESC LIMIT 5"
+                ).fetchall()
+                for r in rows:
+                    content = r["content"] or ""
+                    snippet = ""
+                    try:
+                        # Try parsing as JSON to extract a clean summary
+                        turn_data = json.loads(content)
+                        if isinstance(turn_data, dict):
+                            user_req = turn_data.get("request", "") or turn_data.get("user", "")
+                            agent_res = turn_data.get("response", "") or turn_data.get("agent", "")
+                            if user_req:
+                                snippet = f"user: {user_req}"
+                            elif agent_res:
+                                snippet = f"agent: {agent_res}"
+                    except Exception:
+                        pass
+                    if not snippet:
+                        snippet = content.replace("\n", " ")
+                    
+                    # Clean and truncate
+                    snippet = snippet.strip()
+                    if len(snippet) > 62:
+                        snippet = snippet[:59] + "..."
+                    
+                    ts = r["created_at"]
+                    try:
+                        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        ts_str = dt.strftime("%H:%M:%S")
+                    except Exception:
+                        ts_str = ts[:10]
+                        
+                    turns.append({"time": ts_str, "text": snippet})
+            except sqlite3.Error:
+                pass
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    return list(reversed(turns))
+
+
+def run_live_tui():
+    """Runs a zero-dependency ANSI live terminal dashboard."""
+    import time
+    from m3_sdk import resolve_db_path
+
+    # Hide cursor
+    print("\033[?25l", end="")
+
+    while True:
+        # Move cursor to home and clear screen
+        print("\033[H\033[J", end="")
+
+        config = chatlog_config.resolve_config()
+        state = _load_state_file()
+        row_counts = _get_row_counts(config)
+        main_db = os.path.abspath(resolve_db_path(None))
+        chatlog_db = os.path.abspath(config.db_path)
+        unified = chatlog_db == main_db
+
+        main_sz = _get_file_size_mb(main_db)
+        main_wal_sz = _get_wal_size_mb(main_db)
+        chat_sz = _get_file_size_mb(chatlog_db)
+        chat_wal_sz = _get_wal_size_mb(chatlog_db)
+
+        chroma_q = _get_chroma_queue_count(main_db)
+        last_turns = _get_last_turns(main_db)
+
+        # Build dashboard lines
+        lines = []
+        lines.append("┌────────────────────────────────────────────────────────────────────────────┐")
+        lines.append("│  ⚡ M3 MEMORY Diagnostics & Subsystem Status (Live Monitor)                 │")
+        lines.append("├────────────────────────────────────────────────────────────────────────────┤")
+        lines.append("│ DATABASE FILES & JOURNAL SIZE (WAL)                                        │")
+        
+        main_status = "active" if main_wal_sz > 0 else "idle"
+        lines.append(f"│  Main DB:   {main_db[:60]:<60} │")
+        lines.append(f"│             Size: {main_sz:6.1f} MB  |  WAL size: {main_wal_sz:5.1f} MB  |  Status: {main_status:<6} │")
+        
+        if not unified:
+            chat_status = "active" if chat_wal_sz > 0 else "idle"
+            lines.append(f"│  Chatlog:   {chatlog_db[:60]:<60} │")
+            lines.append(f"│             Size: {chat_sz:6.1f} MB  |  WAL size: {chat_wal_sz:5.1f} MB  |  Status: {chat_status:<6} │")
+        else:
+            lines.append("│  Chatlog:   (unified with main database file)                              │")
+            
+        lines.append("├────────────────────────────────────────────────────────────────────────────┤")
+        lines.append("│ QUEUE DEPTHS & SPILL MONITOR                                               │")
+        
+        depth = state.get("queue", {}).get("depth", 0)
+        max_depth = state.get("queue", {}).get("max", config.queue_max_depth)
+        spill_files = len([f for f in os.listdir(chatlog_config.SPILL_DIR) if f.endswith(".jsonl")]) if os.path.exists(chatlog_config.SPILL_DIR) else 0
+        spill_bytes = state.get("spill", {}).get("bytes", 0)
+        
+        lines.append(f"│  Chatlog Queue Depth: {depth:<4} / {max_depth:<4}                                           │")
+        lines.append(f"│  Compaction Spill:    {spill_files:<4} files ({spill_bytes / 1024:.1f} KB)                             │")
+        lines.append(f"│  Chroma Sync Queue:   {chroma_q:<4} pending upserts                                    │")
+        lines.append("├────────────────────────────────────────────────────────────────────────────┤")
+        lines.append("│ SYSTEM INTEGRATION HOOKS                                                   │")
+        
+        for name, spec in sorted(config.host_agents.items()):
+            status_str = "ENABLED " if spec.enabled else "DISABLED"
+            last_ms = state.get("hooks", {}).get(name, {}).get("last_write_ms_ago")
+            if last_ms is None:
+                activity_str = "never active"
+            elif last_ms < 60000:
+                activity_str = "active just now"
+            elif last_ms < 3600000:
+                activity_str = f"active {int(last_ms / 60000)} mins ago"
+            else:
+                activity_str = f"active {int(last_ms / 3600000)} hours ago"
+            lines.append(f"│  {name:<12} : [{status_str}]  {activity_str:<45} │")
+            
+        lines.append("├────────────────────────────────────────────────────────────────────────────┤")
+        lines.append("│ LAST 5 CHATLOG CAPTURE EVENTS                                              │")
+        
+        if last_turns:
+            for turn in last_turns:
+                lines.append(f"│  [{turn['time']}] {turn['text']:<63} │")
+        else:
+            lines.append("│  (No chatlog capture turns found yet)                                      │")
+            
+        lines.append("└────────────────────────────────────────────────────────────────────────────┘")
+        lines.append("  [Press Ctrl+C to exit]")
+
+        print("\n".join(lines))
+        time.sleep(1.0)
+
+
 def _format_table(data: dict[str, Any]) -> str:
     lines = []
     lines.append("=== Chat Log Status ===")
@@ -210,7 +379,14 @@ def _format_table(data: dict[str, Any]) -> str:
 
 
 def main():
-    if "--json" in sys.argv:
+    if "--live" in sys.argv:
+        try:
+            run_live_tui()
+        except KeyboardInterrupt:
+            # Restore cursor and exit
+            print("\033[?25h\nLive status monitor closed.")
+            sys.exit(0)
+    elif "--json" in sys.argv:
         print(chatlog_status_impl())
     else:
         status_json = chatlog_status_impl()
