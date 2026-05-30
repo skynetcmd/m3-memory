@@ -1,18 +1,19 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 96 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 115 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
 | Name | Category | Description |
 | --- | --- | --- |
-| `memory_delete` | Memory Operations | Deletes a MemoryItem (soft or hard). |
+| `memory_delete` | Memory Operations | Deletes a MemoryItem (soft or hard). id MUST be the full UUID — a prefix is rejected (full UUID required for mutation safety; memory_get accepts a prefix, this does not). |
 | `memory_delete_bulk` | Memory Operations | Deletes a list of MemoryItems (soft or hard) in one transaction per chunk. Use for curation/dedup passes deleting many items; falls back to per-id memory_delete behavior with the same hard-cascade semantics. Returns a structured {succeeded, not_found, mode} dict. |
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
 | `memory_get` | Memory Operations | Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
 | `memory_search_multi_db` | Memory Operations | Search across multiple SQLite databases (e.g. agent_memory.db AND agent_chatlog.db) in one call. Each DB is searched independently via hybrid FTS5+vector search and the top results are merged by score. Returns the global top-K with each item tagged with its source database. Caveat: FTS5 BM25 scores depend on per-DB corpus stats so cross-DB ranks are approximate; works well for small fan-out (typically 2-5 DBs sharing the same embed_model). |
 | `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. Optional graph_depth and expand_sessions add post-retrieval neighbor expansion. |
+| `memory_search_scored` | Memory Operations | Structured hybrid FTS5+vector+MMR search. Returns ranked rows [(score, item)] with content + metadata (id, valid_from, conversation_id, user_id) — NOT formatted text. Use when a caller needs parseable rows rather than an LLM-readable block (e.g. a memory-provider backend). Empty query + type_filter = filter-only listing. Same bench-data gate as memory_search. |
 | `memory_suggest` | Memory Operations | Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected. |
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
 | `memory_verify` | Memory Operations | Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with. |
@@ -79,10 +80,11 @@ This document provides a comprehensive inventory of all 96 MCP tools available i
 | `memory_export` | Data Governance | Export memories as portable JSON. Filter by agent, type, or date. |
 | `memory_import` | Data Governance | Import memories from a JSON export. UPSERT semantics — safe to re-run. |
 | `chroma_sync` | Infrastructure Operations | Bi-directional sync between local SQLite and ChromaDB. |
-| `embedder_status` | Infrastructure Operations | Check the status of the local sovereign embedder server (port 8081). |
+| `embedder_status` | Infrastructure Operations | Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_FALLBACK_URL). |
 | `memory_cost_report` | Infrastructure Operations | Returns current session operation counts and estimated token usage for memory operations. |
-| `m3_call` | Tool Dispatcher | Invoke any catalog tool by name (or batch) without loading its domain — the low-token path to the full tool surface. |
-| `m3_index` | Tool Dispatcher | List catalog tools (optionally one domain) as structured rows with arg specs — discover a tool's signature before calling it via `m3_call`. |
+| `curate_chatlog_apply` | Uncategorized | Deterministically apply a chatlog.db curator plan in ONE call. No LLM in the loop. Plan sections: decay (True/dict to run chatlog_decay), dedup (list of {keep_id, drop_ids}), promote (list of {ids, target_type}), prune (list of {conversation_id, reason}). Any section may be omitted. Returns structured per-section results + summary. |
+| `curate_memory_apply` | Uncategorized | Deterministically apply a memory.db curator plan in ONE call. No LLM in the loop — the apply phase is a pure function over the structured plan. Replaces the agent-driven APPLY-mode loop. Plan sections: delete (soft, list of UUIDs), delete_hard (cascade, list of UUIDs), link (list of {from_id, to_id, relationship_type}), update (list of {id, importance, metadata, ...}). Any section may be omitted. Returns structured per-section results + summary. |
+| `entity_mentions` | Uncategorized | List memory_ids that mention a specific entity in a single conversation. Pass either entity_id (preferred — exact match) or canonical_name (case-insensitive, optionally disambiguated by entity_type). Returns {entity_id, canonical_name, entity_type, total, memory_ids: [...]}. Caller fetches text via existing read paths (which carry their own authz). Companion to entity_search and entity_get; lives in the 'entity' domain. |
 | `files_corpus_create` | Uncategorized | Register a new corpus with optional default overrides. `default=True` marks this corpus as the installation's default (clears the flag on any prior default in the same transaction). |
 | `files_corpus_delete` | Uncategorized | Delete a corpus's settings row. Cascade=True also deletes every file_node in the corpus -- DESTRUCTIVE. Without cascade, refuses when the corpus has file_nodes. |
 | `files_corpus_get` | Uncategorized | Fetch a single corpus's settings + counts. |
@@ -91,6 +93,11 @@ This document provides a comprehensive inventory of all 96 MCP tools available i
 | `files_dedup` | Uncategorized | Scan leaf embeddings for near-duplicates above cosine threshold. Detection only -- pairs land in semantic_dedup_candidates for human review. |
 | `files_dedup_list` | Uncategorized | List near-duplicate candidate pairs with text snippets and paths. |
 | `files_dedup_review` | Uncategorized | Record a review decision on a near-duplicate candidate: 'kept' | 'merged' | 'ignored'. |
+| `files_entity_coalesce` | Uncategorized | Detect provisional-entity coalescing candidates (quarantine noise + flag near-duplicate entities). Detection only -- never merges, never auto-applies; candidates land in entity_coalesce_candidates for review. dry_run=True estimates without writing or embedding. |
+| `files_entity_coalesce_apply` | Uncategorized | Apply the reversible same_as/cluster overlay. Union of explicit candidate_uuids (reviewed 'merge' or 'unapplied' tombstone) and -- if include_auto_merge -- the LATEST run's 'merge' band (or resolution_run). Members are never deleted; reverse with files_entity_coalesce_unapply. WRITES the core graph: a real apply MUST pass confirm=True; dry_run=True previews without writing. |
+| `files_entity_coalesce_list` | Uncategorized | List entity-coalescing candidate pairs (name + score + band). |
+| `files_entity_coalesce_review` | Uncategorized | Record entity-coalescing review decisions in BULK: a list of {uuid, action} where action is 'merge' | 'related' | 'reject' | 'defer'. Records intent only; materialize with files_entity_coalesce_apply. |
+| `files_entity_coalesce_unapply` | Uncategorized | Reverse one coalescence cluster (drop edges, clear flags, strip aliases, tombstone the candidate so auto-merge won't resurrect it). Members are never deleted; re-apply via files_entity_coalesce_apply with candidate_uuids. |
 | `files_extract_pending` | Uncategorized | Drain leaves with extraction_status='pending' through the LLM fact extractor. Used after a queue-mode ingest. Safe to call repeatedly. |
 | `files_get` | Uncategorized | Fetch one record by UUID. Tries file_nodes then leaves. |
 | `files_health` | Uncategorized | DB integrity + FTS5 sync check. Set rebuild=True to fix drift. |
@@ -104,6 +111,16 @@ This document provides a comprehensive inventory of all 96 MCP tools available i
 | `files_staleness_review` | Uncategorized | Compare filesystem against files.db. Surfaces stale, touched-only, missing, new, failed-extraction, drifted-promotion files, and rename candidates. Report-only. |
 | `files_stats` | Uncategorized | Corpus-level counters: file_nodes, leaves, embed coverage, by-filetype. |
 | `files_watch_once` | Uncategorized | Single-pass staleness check + notification dispatch. Suitable for cron / scheduled runners. Notifications are emitted via the memory.db notifications inbox; cooldown suppresses duplicates within the window. |
+| `m3_call` | Uncategorized | Invoke ANY m3 catalog tool by name without loading its domain — the low-token path to the full tool surface. Single call: pass `tool` (e.g. 'files_stats') and `args` (an object). Batch: pass `batch`, a list of {tool, args} (each isolated — one failure won't abort the rest; capped at 100). Set `dry_run` to validate args + check the destructive gate WITHOUT executing. Returns JSON. Call `m3_index` first if you don't know a tool's args. Destructive tools require MCP_PROXY_ALLOW_DESTRUCTIVE=1. |
+| `m3_index` | Uncategorized | List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, destructive flag, and arg specs (name/type/required). Use this to discover the exact args for any tool before calling it via m3_call — cheaper than a failed call. Read-only catalog metadata; never returns tool output. Domains: memory, chatlog, files, entity, agent, tasks, conversations, admin. |
+| `memory_count_entities` | Uncategorized | Count distinct entities mentioned in a single conversation. Direct-index aggregation — no LLM, no embedding. Use this for 'how many distinct X did I mention' inventory questions where top-k embedding retrieval would miss instances spread thinly across many turns. Returns {count, conversation_id, entity_type, pattern}. |
+| `memory_count_mentions` | Uncategorized | Per-entity mention frequency within a single conversation, sorted DESC by count. Use for 'what are the most-mentioned X' or 'rank entities by frequency.' Returns {total, rows: [{entity_id, canonical_name, entity_type, mention_count}, ...]}. |
+| `memory_doctor` | Uncategorized | Self-service diagnostic for the m3-memory embedding cascade. Probes tier-1 (in-proc GGUF), tier-2 (m3-embed-server :8082), DB integrity, and end-to-end embed roundtrip — all concurrently with bounded 2s per-probe timeouts. Returns a structured dict with status ('healthy' | 'degraded' | 'broken'), per-tier details, issues, and actionable recommendations. Use this when memory_search hangs, embeddings look wrong, or you're standing up a new deployment. |
+| `memory_link_bulk` | Uncategorized | Create many memory_relationships rows in one transaction per chunk. Use for curation passes adding many LINK edges (device pairs, supersession chains, etc.). Validates existence of every referenced memory_id; skips duplicates without raising. Returns a structured {created, skipped_missing, skipped_duplicate, total} dict. |
+| `memory_supersede` | Uncategorized | Explicitly supersede an existing memory with a new one. Use this to record an intentional update — 'this fact replaces that specific memory' — when you know the old memory's id. Unlike memory_write's automatic contradiction detection (a cosine + title heuristic that may link the wrong prior memory or none at all), this targets the given old_id deterministically. Non-destructive: the old memory is retained, its validity interval is closed (is_deleted=1, valid_to set), and a 'supersedes' edge is recorded new -> old. The old memory stays retrievable by id and via memory_history, and as_of-filtered search still sees it valid before the supersession point — it is only dropped from default search. Fields you omit (type, title, importance, scope) are inherited from the old memory, so pass only what changed. To hard-delete instead, that is a separate gated tool (memory_delete). old_id MUST be the full UUID — a prefix is rejected (full UUID required for mutation safety; memory_get accepts a prefix, this does not). Note: each supersede creates a NEW successor memory; call it once with the full id, do not chain supersedes. |
+| `memory_update_bulk` | Uncategorized | Apply many metadata-only updates in one transaction per chunk. Designed for curation passes that retroactively set retention, importance, or supersession metadata. Per-id reembed is NOT supported here (use memory_update for reembed, or re_embed_all for the bulk reembed case). Returns structured {succeeded, not_found, no_change, total}. |
+| `tools_list_domains` | Uncategorized | List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, admin) and their tool counts. Call `tools_load_domain` to expose a domain's full tool surface. |
+| `tools_load_domain` | Uncategorized | Register a tool domain's full surface for the current MCP session. Use when you need tools beyond the essentials (memory_search, memory_write, memory_get, chatlog_search, chatlog_write, files_search). Valid domains: memory, chatlog, files, entity, agent, tasks, conversations, admin. |
 
 ---
 
@@ -111,7 +128,7 @@ This document provides a comprehensive inventory of all 96 MCP tools available i
 
 ### `memory_delete`
 
-Deletes a MemoryItem (soft or hard).
+Deletes a MemoryItem (soft or hard). id MUST be the full UUID — a prefix is rejected (full UUID required for mutation safety; memory_get accepts a prefix, this does not).
 
 **Source:** mcp_tool_catalog.py
 
@@ -119,7 +136,7 @@ Deletes a MemoryItem (soft or hard).
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
-| `id` | `string` | Yes | Memory item UUID. | `-` |
+| `id` | `string` | Yes | FULL UUID of the memory (not an 8-char prefix — a prefix is rejected for mutation safety). | `-` |
 | `hard` | `boolean` | No | Hard delete (permanent). | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
@@ -269,6 +286,30 @@ Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k
 | `auto_entity_graph_named_entity_threshold` | `integer` | No | Minimum named-entity count in query for AUTO entity_anchored branch to fire. Default 1 = fire on any proper noun phrase (two+ capitalized words). Higher (2-3) is more conservative. | `1` |
 | `entity_graph_valid_types` | `array` | No | Override list of allowed entity_type values for graph traversal. Default empty = use core defaults (person, place, organization, event, concept, object, date). Pass a list to filter traversal to specific types. | `[]` |
 | `entity_graph_valid_predicates` | `array` | No | Override list of allowed predicate values for graph traversal. Default empty = use core defaults (works_at, located_in, before, after, same_as, contradicts, mentions, relates_to). Pass a list to filter traversal to specific predicates. | `[]` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+### `memory_search_scored`
+
+Structured hybrid FTS5+vector+MMR search. Returns ranked rows [(score, item)] with content + metadata (id, valid_from, conversation_id, user_id) — NOT formatted text. Use when a caller needs parseable rows rather than an LLM-readable block (e.g. a memory-provider backend). Empty query + type_filter = filter-only listing. Same bench-data gate as memory_search.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `query` | `string` | No | Search text. Empty string = filter-only (type/scope) listing. | `` |
+| `k` | `integer` | No | Max rows (1-100). | `8` |
+| `type_filter` | `string` | No | Restrict to a memory type (e.g. 'user_fact'). | `` |
+| `agent_filter` | `string` | No | Restrict to an agent id. | `` |
+| `search_mode` | `string` | No | Retrieval mode. | `hybrid` |
+| `user_id` | `string` | No | Filter by data subject. | `` |
+| `scope` | `string` | No | Filter by isolation scope. | `` |
+| `as_of` | `string` | No | ISO-8601 time-travel cutoff (bitemporal point-in-time query). | `` |
+| `conversation_id` | `string` | No | Restrict to a conversation / team session. | `` |
+| `recency_bias` | `number` | No | Boost newer items (0.0=off). | `0.0` |
+| `variant` | `string` | No | Ingest-pipeline filter. '' = real user data only. | `` |
+| `include_bench_data` | `boolean` | No | Opt in to LOCOMO / LongMemEval bench rows. Default False hides any variant-tagged row. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ### `memory_suggest`
@@ -1327,7 +1368,7 @@ Bi-directional sync between local SQLite and ChromaDB.
 
 ### `embedder_status`
 
-Check the status of the local sovereign embedder server (port 8081).
+Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_FALLBACK_URL).
 
 **Source:** mcp_tool_catalog.py
 
@@ -1347,37 +1388,6 @@ Returns current session operation counts and estimated token usage for memory op
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
-| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
-
-## Tool Dispatcher
-
-### `m3_call`
-
-Invoke ANY m3 catalog tool by name without loading its domain — the low-token path to the full tool surface. Single call: pass `tool` (e.g. `files_stats`) and `args` (an object). Batch: pass `batch`, a list of `{tool, args}` (each isolated — one failure won't abort the rest; capped at 100). Set `dry_run` to validate args + check the destructive gate WITHOUT executing. Returns JSON. Call `m3_index` first if you don't know a tool's args. Destructive tools require `MCP_PROXY_ALLOW_DESTRUCTIVE=1`.
-
-**Source:** mcp_tool_catalog.py
-
-**Parameters:**
-
-| Parameter | Type | Required | Description | Default |
-| --- | --- | --- | --- | --- |
-| `tool` | `string` | No | Catalog tool name (see `m3_index`). | `` |
-| `args` | `object` | No | Arguments object for the target tool. | `{}` |
-| `batch` | `array` | No | List of `{tool, args}` for one-round-trip batch dispatch. | `None` |
-| `dry_run` | `boolean` | No | Validate + gate-check only; do not execute. | `False` |
-| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
-
-### `m3_index`
-
-List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, destructive flag, and arg specs (name/type/required). Use this to discover the exact args for any tool before calling it via `m3_call` — cheaper than a failed call. Read-only catalog metadata; never returns tool output. Domains: memory, chatlog, files, entity, agent, tasks, conversations, admin.
-
-**Source:** mcp_tool_catalog.py
-
-**Parameters:**
-
-| Parameter | Type | Required | Description | Default |
-| --- | --- | --- | --- | --- |
-| `domain` | `string` | No | Filter to one domain (empty = whole catalog). | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ---
