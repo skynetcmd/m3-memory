@@ -254,6 +254,45 @@ def files_entity_coalesce_review_impl(
     return review_coalesce_candidates(reviews, note=note)
 
 
+def files_entity_coalesce_apply_impl(
+    candidate_uuids: Optional[list] = None,
+    include_auto_merge: bool = False,
+    resolution_run: Optional[str] = None,
+    dry_run: bool = False,
+    confirm: bool = False,
+) -> dict:
+    """Apply the reversible same_as/cluster overlay for coalescing candidates.
+
+    Sources (union): explicit candidate_uuids that are reviewed 'merge' (or an
+    'unapplied' tombstone, re-applying on purpose) OR — if include_auto_merge —
+    the 'merge'-band candidates of the LATEST detection run (or `resolution_run`
+    if given). Members are NEVER deleted; each gets a shared cluster_id + a
+    reversible same_as edge to a deterministic representative. Reverse with
+    files_entity_coalesce_unapply.
+
+    WRITES to the core entity graph: a real (non-dry-run) apply MUST pass
+    confirm=True. dry_run=True previews without writing (no confirm needed)."""
+    from .entity_coalesce import apply_coalescence
+    return apply_coalescence(
+        candidate_uuids=candidate_uuids,
+        include_auto_merge=include_auto_merge,
+        resolution_run=resolution_run,
+        dry_run=dry_run,
+        confirm=confirm,
+    )
+
+
+def files_entity_coalesce_unapply_impl(cluster_id: str) -> dict:
+    """Reverse one coalescence cluster: drop its same_as edges, clear the
+    members' cluster_id/coalesce_state, strip the aliases apply added, and
+    tombstone the candidate(s) as 'unapplied' so auto-merge won't resurrect
+    them. Members are never deleted. Re-apply later via
+    files_entity_coalesce_apply(candidate_uuids=[...]). Inherently safe — no
+    confirm needed (removes overlay only, never touches member data)."""
+    from .entity_coalesce import unapply_cluster
+    return unapply_cluster(cluster_id)
+
+
 def files_staleness_review_impl(
     directory: Optional[str] = None,
     corpus: Optional[str] = None,
@@ -791,9 +830,39 @@ def register(mcp) -> None:
         note: str = "",
     ) -> dict:
         """Record review decisions in BULK: pass a list of {uuid, action} where
-        action is 'merge' | 'related' | 'reject' | 'defer'. Records intent only
-        (v1); applying the reversible overlay is a future phase."""
+        action is 'merge' | 'related' | 'reject' | 'defer'. Records intent only;
+        materialize decisions with files_entity_coalesce_apply."""
         return files_entity_coalesce_review_impl(reviews=reviews, note=note)
+
+    @mcp.tool()
+    def files_entity_coalesce_apply(
+        candidate_uuids: Optional[list] = None,
+        include_auto_merge: bool = False,
+        resolution_run: Optional[str] = None,
+        dry_run: bool = False,
+        confirm: bool = False,
+    ) -> dict:
+        """Apply the reversible same_as/cluster overlay. Union of explicit
+        candidate_uuids (reviewed 'merge' or 'unapplied' tombstone) and — if
+        include_auto_merge — the LATEST run's 'merge' band (or resolution_run).
+        Members are never deleted; reverse with files_entity_coalesce_unapply.
+        WRITES the core graph: a real apply MUST pass confirm=True; dry_run=True
+        previews without writing."""
+        return files_entity_coalesce_apply_impl(
+            candidate_uuids=candidate_uuids,
+            include_auto_merge=include_auto_merge,
+            resolution_run=resolution_run,
+            dry_run=dry_run,
+            confirm=confirm,
+        )
+
+    @mcp.tool()
+    def files_entity_coalesce_unapply(cluster_id: str) -> dict:
+        """Reverse one coalescence cluster (drop edges, clear flags, strip
+        aliases, tombstone the candidate so auto-merge won't resurrect it).
+        Members are never deleted; re-apply via files_entity_coalesce_apply
+        with candidate_uuids."""
+        return files_entity_coalesce_unapply_impl(cluster_id=cluster_id)
 
     @mcp.tool()
     def files_staleness_review(
@@ -994,6 +1063,21 @@ def main() -> int:
                        help='JSON list, e.g. \'[{"uuid":"...","action":"merge"}]\'')
     p_ecr.add_argument("--note", default="")
 
+    p_eca = sub.add_parser("entity-coalesce-apply",
+                           help="apply the reversible same_as/cluster overlay (WRITES core graph)")
+    p_eca.add_argument("--uuids", default=None,
+                       help="comma-separated candidate UUIDs to apply (reviewed 'merge' or 'unapplied')")
+    p_eca.add_argument("--auto-merge", action="store_true",
+                       help="apply the latest run's 'merge' band")
+    p_eca.add_argument("--run", default=None, help="restrict --auto-merge to this resolution_run")
+    p_eca.add_argument("--dry-run", action="store_true", help="preview; no writes (no --confirm needed)")
+    p_eca.add_argument("--confirm", action="store_true",
+                       help="required for a real apply — acknowledges writing to the core graph")
+
+    p_ecu = sub.add_parser("entity-coalesce-unapply",
+                           help="reverse one coalescence cluster (drop edges, strip aliases, tombstone)")
+    p_ecu.add_argument("cluster_id")
+
     p_pr = sub.add_parser("promotable", help="list top promotion candidates by usage")
     p_pr.add_argument("--limit", type=int, default=20)
     p_pr.add_argument("--min-score", type=float, default=0.30)
@@ -1162,6 +1246,15 @@ def main() -> int:
         r = files_entity_coalesce_review_impl(
             reviews=_json.loads(args.reviews), note=args.note,
         )
+    elif args.cmd == "entity-coalesce-apply":
+        uuids = ([u.strip() for u in args.uuids.split(",") if u.strip()]
+                 if args.uuids else None)
+        r = files_entity_coalesce_apply_impl(
+            candidate_uuids=uuids, include_auto_merge=args.auto_merge,
+            resolution_run=args.run, dry_run=args.dry_run, confirm=args.confirm,
+        )
+    elif args.cmd == "entity-coalesce-unapply":
+        r = files_entity_coalesce_unapply_impl(cluster_id=args.cluster_id)
     elif args.cmd == "promotable":
         r = files_promotable_impl(
             limit=args.limit, min_score=args.min_score, corpus=args.corpus,
