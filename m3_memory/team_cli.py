@@ -20,6 +20,16 @@ import os
 import sys
 from pathlib import Path
 
+# Force Python UTF-8 mode for the whole process tree (see cli._ensure_utf8 —
+# fixes Windows cp1252 stdio/open crashes). Re-exec is bounded to once.
+from m3_memory.cli import _ensure_utf8 as _ensure_utf8
+
+_ensure_utf8()
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 DEFAULT_TEAM_FILE = "team.yaml"
 
 MINIMAL_TEMPLATE = """\
