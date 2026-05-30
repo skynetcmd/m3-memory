@@ -279,6 +279,10 @@ def run_live_tui():
     # Hide cursor
     print("\033[?25l", end="")
 
+    tick = 0
+    t1_state = None
+    t2_state = None
+
     while True:
         # Move cursor to home and clear screen
         print("\033[H\033[J", end="")
@@ -298,6 +302,17 @@ def run_live_tui():
         chroma_q = _get_chroma_queue_count(main_db)
         last_turns = _get_last_turns(main_db)
 
+        # Refresh embedding cascade stats every 10 ticks (seconds) to keep UI fast
+        if tick % 10 == 0 or t1_state is None:
+            try:
+                from memory import doctor as doc
+                t1_state = doc._probe_tier1()
+                t2_state = doc._probe_tier2()
+            except Exception:
+                t1_state = {"status": "error"}
+                t2_state = {"status": "error"}
+        tick += 1
+
         # Build dashboard lines
         lines = []
         lines.append("┌────────────────────────────────────────────────────────────────────────────┐")
@@ -316,6 +331,21 @@ def run_live_tui():
         else:
             lines.append("│  Chatlog:   (unified with main database file)                              │")
             
+        lines.append("├────────────────────────────────────────────────────────────────────────────┤")
+        lines.append("│ EMBEDDING CASCADE DIAGNOSTICS                                              │")
+        
+        t1_status = t1_state.get("status", "unknown").upper()
+        t1_path = t1_state.get("gguf_path") or "Not set"
+        if len(t1_path) > 45:
+            t1_path = "..." + t1_path[-42:]
+        lines.append(f"│  GGUF (Tier 1):     [{t1_status:<14}] Path: {t1_path:<40} │")
+        
+        t2_status = t2_state.get("status", "unknown").upper()
+        t2_url = t2_state.get("url") or "Not set"
+        t2_lat = t2_state.get("latency_ms")
+        lat_str = f"({t2_lat} ms)" if t2_lat is not None else "(Offline)"
+        lines.append(f"│  Fallback (Tier 2): [{t2_status:<14}] URL: {t2_url:<27} {lat_str:<12} │")
+        
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append("│ QUEUE DEPTHS & SPILL MONITOR                                               │")
         
