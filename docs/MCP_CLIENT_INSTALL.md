@@ -58,7 +58,9 @@ domains including `diagnostics`. Calling `memory_doctor` returns
 
 ---
 
-## Client 2 — Gemini CLI
+## Client 2 — Gemini CLI & Google Antigravity
+
+### Gemini CLI
 
 Auto-wired by `m3 setup` (writes to `~/.gemini/settings.json`).
 
@@ -81,6 +83,37 @@ Manual config — edit `~/.gemini/settings.json`:
 Set `M3_EMBED_GGUF` if you have a BGE-M3 GGUF on disk for tier-1.
 
 Restart Gemini CLI. Verify: tool list includes the m3 MCP entries.
+
+### Google Antigravity (CLI & Desktop)
+
+**Native plugin** — easiest path.
+
+```bash
+# In the Antigravity CLI:
+agy plugin install https://github.com/skynetcmd/m3-memory
+```
+
+This registers the `m3` memory MCP server in `~/.gemini/antigravity-cli/settings.json`, wires the chatlog Stop + PreCompact hooks, and loads all 15 `/m3:*` slash commands as native agent Skills.
+
+**Manual config** — edit `~/.gemini/antigravity-cli/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "m3": {
+      "command": "m3",
+      "env": {
+        "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082",
+        "M3_EMBED_GGUF": ""
+      }
+    }
+  }
+}
+```
+
+Set `M3_EMBED_GGUF` if you have a BGE-M3 GGUF on disk for tier-1.
+
+Restart the Antigravity CLI or Desktop app.
 
 ---
 
