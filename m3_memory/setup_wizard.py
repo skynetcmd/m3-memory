@@ -77,11 +77,12 @@ def _ask_choice(question: str, choices: list[str], default: str) -> str:
 class AgentTargets:
     claude: bool = False
     gemini: bool = False
+    antigravity: bool = False
     opencode: bool = False
     openclaw: bool = False
 
     def any(self) -> bool:
-        return any((self.claude, self.gemini, self.opencode, self.openclaw))
+        return any((self.claude, self.gemini, self.antigravity, self.opencode, self.openclaw))
 
 
 def _detect_agents() -> AgentTargets:
@@ -91,6 +92,12 @@ def _detect_agents() -> AgentTargets:
     gemini = bool(
         shutil.which("gemini")
         or (Path.home() / ".npm-global" / "bin" / "gemini").exists()
+    )
+    # Antigravity CLI (agy)
+    antigravity = bool(
+        shutil.which("agy")
+        or (Path.home() / ".local" / "bin" / "agy").exists()
+        or (Path.home() / ".gemini" / "antigravity-cli").is_dir()
     )
     opencode = bool(shutil.which("opencode"))
     # OpenClaw has no native MCP, so detection drives the proxy default rather
@@ -103,7 +110,10 @@ def _detect_agents() -> AgentTargets:
         or (Path.home() / ".openclaw").is_dir()
         or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
     )
-    return AgentTargets(claude=claude, gemini=gemini, opencode=opencode, openclaw=openclaw)
+    return AgentTargets(
+        claude=claude, gemini=gemini, antigravity=antigravity,
+        opencode=opencode, openclaw=openclaw
+    )
 
 
 # ── plan dataclass ────────────────────────────────────────────────────────────
@@ -148,16 +158,19 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     _say("m3-memory setup — answer a few quick questions, then sit back.")
     print()
     print("  Agents detected on PATH:")
-    print(f"    {'[x]' if detected.claude   else '[ ]'} Claude Code  (claude)")
-    print(f"    {'[x]' if detected.gemini   else '[ ]'} Gemini CLI   (gemini)")
-    print(f"    {'[x]' if detected.opencode else '[ ]'} OpenCode     (opencode)")
-    print(f"    {'[x]' if detected.openclaw else '[ ]'} OpenClaw     (no native MCP; wired via local proxy)")
+    print(f"    {'[x]' if detected.claude      else '[ ]'} Claude Code          (claude)")
+    print(f"    {'[x]' if detected.gemini      else '[ ]'} Gemini CLI           (gemini)")
+    print(f"    {'[x]' if detected.antigravity else '[ ]'} Antigravity CLI/Desktop (antigravity)")
+    print(f"    {'[x]' if detected.opencode    else '[ ]'} OpenCode             (opencode)")
+    print(f"    {'[x]' if detected.openclaw    else '[ ]'} OpenClaw             (no native MCP; wired via local proxy)")
     print()
 
     if detected.claude:
         plan.targets.claude = _ask_yes_no("  Wire m3 into Claude Code?", default=True)
     if detected.gemini:
         plan.targets.gemini = _ask_yes_no("  Wire m3 into Gemini CLI?", default=True)
+    if detected.antigravity:
+        plan.targets.antigravity = _ask_yes_no("  Wire m3 into Antigravity CLI/Desktop?", default=True)
     if detected.opencode:
         plan.targets.opencode = _ask_yes_no("  Wire m3 into OpenCode?", default=True)
     plan.targets.openclaw = _ask_yes_no(
@@ -515,6 +528,15 @@ def _wire_opencode() -> bool:
     return True
 
 
+def _wire_antigravity() -> bool:
+    """Write the m3 MCP entry into ~/.gemini/antigravity-cli/settings.json."""
+    from m3_memory.installer import _register_antigravity_mcp
+    msg = _register_antigravity_mcp()
+    if msg:
+        _say(f"  · {msg.lstrip('[+=!]').strip()}")
+    return True
+
+
 def _wire_openclaw_note() -> bool:
     """OpenClaw can't speak MCP natively — print proxy instructions."""
     _say("  · OpenClaw needs the local proxy on http://localhost:9000/v1")
@@ -533,6 +555,8 @@ def _step_wire_agents(plan: SetupPlan) -> bool:
         _wire_claude(plan.capture_mode)
     if plan.targets.gemini:
         _wire_gemini()
+    if plan.targets.antigravity:
+        _wire_antigravity()
     if plan.targets.opencode:
         _wire_opencode()
     if plan.targets.openclaw:
@@ -561,13 +585,15 @@ def _summary(plan: SetupPlan) -> None:
     print()
     restart_lines = []
     if plan.targets.claude:
-        restart_lines.append("  • Claude Code  — restart the CLI (or run `/plugin reload`)")
+        restart_lines.append("  • Claude Code              — restart the CLI (or run `/plugin reload`)")
     if plan.targets.gemini:
-        restart_lines.append("  • Gemini CLI   — restart the CLI")
+        restart_lines.append("  • Gemini CLI               — restart the CLI")
+    if plan.targets.antigravity:
+        restart_lines.append("  • Antigravity CLI/Desktop  — restart the CLI/Desktop")
     if plan.targets.opencode:
-        restart_lines.append("  • OpenCode     — restart the CLI")
+        restart_lines.append("  • OpenCode                 — restart the CLI")
     if plan.targets.openclaw:
-        restart_lines.append("  • OpenClaw     — start `m3 proxy start`, then set base URL")
+        restart_lines.append("  • OpenClaw                 — start `m3 proxy start`, then set base URL")
     if restart_lines:
         print("Next step — restart your agent so it picks up the new MCP server:")
         for line in restart_lines:
@@ -591,6 +617,7 @@ def run_setup(args: argparse.Namespace) -> int:
     targets = [n for n, v in {
         "Claude Code": plan.targets.claude,
         "Gemini CLI": plan.targets.gemini,
+        "Antigravity CLI/Desktop": plan.targets.antigravity,
         "OpenCode": plan.targets.opencode,
         "OpenClaw": plan.targets.openclaw,
     }.items() if v]

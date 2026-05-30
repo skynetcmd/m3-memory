@@ -248,6 +248,52 @@ def _register_gemini_mcp() -> Optional[str]:
     return f"[+] registered 'memory' MCP in {settings_file}"
 
 
+def _register_antigravity_mcp() -> Optional[str]:
+    """Write a `memory` MCP entry to ~/.gemini/antigravity-cli/settings.json if Antigravity CLI exists.
+
+    Idempotent: leaves an existing `memory` entry untouched. Returns a short
+    status string for user-facing logging, or None if Antigravity CLI isn't on PATH.
+    """
+    agy_bin = shutil.which("agy")
+    if not agy_bin:
+        # Also check the common AppData / local candidate paths
+        candidate = Path.home() / ".local" / "bin" / "agy"
+        if not candidate.exists():
+            # Check Windows AppData Local candidate
+            appdata = os.environ.get("LOCALAPPDATA")
+            if appdata:
+                win_candidate = Path(appdata) / "agy" / "bin" / "agy.exe"
+                if not win_candidate.exists():
+                    # check if the folder C:\Users\bhaba\.gemini\antigravity-cli exists (our App Data dir)
+                    if not (Path.home() / ".gemini" / "antigravity-cli").is_dir():
+                        return None
+            else:
+                if not (Path.home() / ".gemini" / "antigravity-cli").is_dir():
+                    return None
+
+    settings_dir = Path.home() / ".gemini" / "antigravity-cli"
+    settings_file = settings_dir / "settings.json"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+
+    existing: dict = {}
+    if settings_file.is_file():
+        try:
+            existing = json.loads(settings_file.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            return f"[!] {settings_file} is unreadable; skipping Antigravity MCP registration"
+
+    mcp_servers = existing.setdefault("mcpServers", {})
+    if "memory" in mcp_servers:
+        return f"[=] Antigravity MCP 'memory' already registered in {settings_file}"
+
+    mcp_servers["memory"] = {"command": "mcp-memory"}
+    settings_file.write_text(
+        json.dumps(existing, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return f"[+] registered 'memory' MCP in {settings_file}"
+
+
 def _sqlite3_cli_hint() -> Optional[str]:
     """Return a per-OS install instruction if the `sqlite3` CLI is missing.
 
@@ -516,6 +562,7 @@ def _post_install(
             _run_os_install(bridge),
             _run_main_migrations(bridge),
             _register_gemini_mcp(),
+            _register_antigravity_mcp(),
             _sqlite3_cli_hint(),
             _fix_npm_global_path(),
         ) if m

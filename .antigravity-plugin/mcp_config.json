@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "m3": {
+      "command": "m3",
+      "env": {
+        "LLM_ENDPOINTS_CSV": "${user_config.endpoint}",
+        "M3_AUTO_INSTALL": "1",
+        "M3_EMBED_FALLBACK_URL": "${user_config.embed_fallback_url}",
+        "M3_EMBED_GGUF": "${user_config.embed_gguf}"
+      }
+    }
+  }
+}
