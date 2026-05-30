@@ -321,7 +321,12 @@ def get_hw_info() -> tuple[str, str]:
         except Exception:
             pass
     if not chip:
-        chip = platform.processor() or platform.machine() or "Unknown CPU"
+        # Avoid platform.machine() — it routes through uname()/WMI and can hang
+        # on Py3.14/Windows. processor() is WMI-free; fall back to the arch env
+        # var (Windows) or a generic label rather than the hanging WMI path.
+        chip = (platform.processor()
+                or os.environ.get("PROCESSOR_ARCHITECTURE")
+                or "Unknown CPU")
 
     # RAM
     total_gb = psutil.virtual_memory().total / (1024 ** 3)

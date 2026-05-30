@@ -20,13 +20,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
+from m3_memory._platform import os_name as _os_name
 
 # ── locations ─────────────────────────────────────────────────────────────────
 
@@ -247,7 +247,7 @@ def cmd_install_gpu(args: argparse.Namespace) -> int:
       Vulkan SDK env var set -> embedded-vulkan
       else                   -> error (user must install GPU toolchain first)
     """
-    system = platform.system()
+    system = _os_name()
     feature: Optional[str] = None
     if system == "Darwin":
         feature = "embedded-metal"

@@ -149,19 +149,17 @@ def _find_hermes_plugins_dir() -> Optional[Path]:
 
 
 def _find_m3_hermes_plugin_src() -> Optional[Path]:
-    """Locate the bundled m3 provider source (examples/hermes-agent/plugins/memory/m3).
+    """Locate the bundled m3 Hermes provider source (the directory the wizard
+    copies into a user's hermes-agent checkout).
 
-    Resolved relative to the installed package so it works from a source/editable
-    checkout (examples/ at the repo root) AND a pip wheel (examples/ shipped
-    next to the m3_memory package in site-packages via force-include).
+    Vendored at m3_memory/integrations/hermes/ as package-data, so it resolves
+    the same way whether installed from a pip wheel (site-packages) or a
+    source/editable checkout (repo). The provider files are DATA here — they
+    import hermes-agent modules and are not imported in-place.
     """
-    here = Path(__file__).resolve().parent          # .../m3_memory
-    # here.parent      → repo root (editable) OR site-packages (wheel)
-    # here.parent.parent → repo root when m3_memory is nested one deeper
-    for root in (here.parent, here.parent.parent):
-        src = root / "examples" / "hermes-agent" / "plugins" / "memory" / "m3"
-        if (src / "__init__.py").exists():
-            return src
+    src = Path(__file__).resolve().parent / "integrations" / "hermes"
+    if (src / "__init__.py").exists():
+        return src
     return None
 
 
@@ -600,13 +598,19 @@ def _wire_openclaw_note() -> bool:
     return True
 
 
+# Files copied into the user's hermes-agent plugin dir. README/test stay behind
+# in the vendored source — they're dev artifacts, not part of the live plugin.
+_HERMES_PLUGIN_FILES = ("__init__.py", "m3client.py", "plugin.yaml")
+
+
 def _wire_hermes() -> bool:
     """Copy the m3 memory-provider plugin into the user's hermes-agent checkout.
 
     Hermes Agent loads memory providers from `plugins/memory/<name>/`. We locate
-    the bundled source (examples/hermes-agent/plugins/memory/m3) and the user's
-    hermes plugins dir, then copy m3/ into place. Non-destructive: if a prior m3
-    plugin is already there, we ask before overwriting.
+    the vendored source (m3_memory/integrations/hermes/) and the user's hermes
+    plugins dir, then copy the plugin files into `plugins/memory/m3/`.
+    Non-destructive: if a prior m3 plugin is already there, we ask before
+    overwriting.
     """
     import shutil as _shutil
 
@@ -617,8 +621,7 @@ def _wire_hermes() -> bool:
         return False
     if not dst_parent:
         _warn("  · Hermes: no hermes-agent plugins/memory dir found — skipping")
-        print("    Copy it manually: examples/hermes-agent/plugins/memory/m3/ "
-              "→ <hermes>/plugins/memory/m3/")
+        print(f"    Copy it manually: {src} → <hermes>/plugins/memory/m3/")
         return False
 
     dst = dst_parent / "m3"
@@ -628,7 +631,9 @@ def _wire_hermes() -> bool:
             return True
         _shutil.rmtree(dst)
     try:
-        _shutil.copytree(src, dst)
+        dst.mkdir(parents=True, exist_ok=True)
+        for fname in _HERMES_PLUGIN_FILES:
+            _shutil.copy2(src / fname, dst / fname)
     except OSError as e:
         _warn(f"  · Hermes: copy failed ({e}) — skipping")
         return False
