@@ -1097,7 +1097,7 @@ async def memory_search_scored_impl(
             return await _recurse_semantic()
         return []
 
-    scored = []
+    scored: list[tuple[float, dict]] = []
     # Under max-kind, trim AFTER dedup so SEARCH_ROW_CAP counts unique items,
     # not kind-duplicated rows. Under default (pins to one kind) the dupes
     # don't exist, so the cap already counts unique items and we trim up-front
