@@ -96,6 +96,7 @@ def get_hook_path_for_agent(agent: str) -> tuple[str, str]:
     agent_map = {
         "claude-code": ("claude_code_precompact", "claude-code pre-compaction hook"),
         "gemini-cli": ("gemini_cli_onexit", "Gemini CLI session exit hook"),
+        "antigravity-cli": ("gemini_cli_onexit", "Antigravity CLI session exit hook"),
         "opencode": ("opencode_session_end", "OpenCode session end hook"),
         "aider": ("aider_chat_watcher", "Aider chat watcher hook"),
     }
@@ -116,8 +117,9 @@ def show_hook_wiring_instructions(agent: str, hook_spec: HookSpec) -> None:
     print(f"\n  {agent} ({desc}):")
     if agent == "claude-code":
         print("    - Follow the 'Claude Code Settings' section below to add hooks to ~/.claude/settings.json")
-    elif agent == "gemini-cli":
-        print("    - Register the hook in ~/.gemini/settings.json (see docs/CHATLOG.md for snippet)")
+    elif agent in ("gemini-cli", "antigravity-cli"):
+        config_file = "~/.gemini/antigravity-cli/settings.json" if agent == "antigravity-cli" else "~/.gemini/settings.json"
+        print(f"    - Register the hook in {config_file} (see docs/CHATLOG.md for snippet)")
         if is_windows:
             print(f"    - Command: powershell -NoProfile -ExecutionPolicy Bypass -File {ps1_path}")
         else:
