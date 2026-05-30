@@ -99,7 +99,7 @@ FILES_DB_PROMPT_ON_FIRST_USE: bool = os.environ.get(
 EMBED_MODEL: str = os.environ.get("EMBED_MODEL", "text-embedding-bge-m3")
 EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "1024"))
 EMBED_TIMEOUT_READ: float = 30.0
-ORIGIN_DEVICE: str = os.environ.get("ORIGIN_DEVICE", platform.node())
+ORIGIN_DEVICE: str = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
 
 # Per-backend circuit-breaker thresholds for the embed cascade in
 # `bin/memory/embed.py`. Each backend gets its own m3_core_rs.CircuitBreaker;

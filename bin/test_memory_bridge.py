@@ -216,7 +216,7 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         check("title correct",         data.get("title") == "LM Studio cert fix")
         check("importance=0.8",        abs(data.get("importance", 0) - 0.8) < 0.01, f"{data.get('importance')}")
         import platform
-        expected_device = os.environ.get("ORIGIN_DEVICE", platform.node())
+        expected_device = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
         check("origin_device=macbook", data.get("origin_device") == expected_device)
         check("is_deleted=0",          data.get("is_deleted") == 0)
     else:
