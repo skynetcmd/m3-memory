@@ -58,7 +58,7 @@ LM_STUDIO_EMBED_URL  = f"{LM_STUDIO_BASE}/embeddings"
 LM_MAX_TOKENS        = 32768
 LM_READ_TIMEOUT      = 4800.0   # ~80 min for 32k tokens at 7.5 tok/s on M3 Max
 MAX_CONTEXT_CHARS    = 60_000   # ~15k tokens
-ORIGIN_DEVICE        = os.environ.get("ORIGIN_DEVICE", platform.node())
+ORIGIN_DEVICE        = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 from contextlib import contextmanager

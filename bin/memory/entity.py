@@ -127,7 +127,7 @@ def _token_jaccard(a: str, b: str) -> float:
 
     Tries m3_core_rs.token_jaccard first (Rust), falls back to pure-Python.
     """
-    if _config.m3_core_rs is not None:
+    if _config.m3_core_rs is not None and hasattr(_config.m3_core_rs, "token_jaccard"):
         return _config.m3_core_rs.token_jaccard(a, b)
 
     ta = {t for t in _TOKEN_PUNCT_RE.sub(" ", a.lower()).split() if t}
@@ -241,7 +241,7 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
         return None
 
     # Tier-A perf: try the Rust batch path first (rayon parallel).
-    if _config.m3_core_rs is not None:
+    if _config.m3_core_rs is not None and hasattr(_config.m3_core_rs, "token_jaccard_batch"):
         names = [c["canonical_name"] for c in candidates]
         scores = _config.m3_core_rs.token_jaccard_batch(canonical_name, names)
         best_score, best_id = 0.0, None

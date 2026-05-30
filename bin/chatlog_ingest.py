@@ -297,7 +297,7 @@ def _commit_cursor(items: list[dict], session_id: str, cursor: dict) -> None:
 
 def _make_agent_id(host_agent: str) -> str:
     user = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
-    host = platform.node()
+    host = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
     return f"{host_agent}:{user}@{host}"
 
 
