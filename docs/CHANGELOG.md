@@ -19,6 +19,17 @@ forward-going only.
 
 ---
 
+## [2026.5.30.1] — May 30, 2026 — Google Antigravity plugin and native integration
+
+### Added
+
+- **First-class Google Antigravity plugin** under the `.antigravity-plugin/` directory, packaging 15 modular skills (slash commands), active lifecycle hooks, and curators (`curate-memory.md` / `curate-chatlog.md`).
+- **Antigravity CLI setup support** in the `m3 setup` wizard and installer pipeline. It automatically registers the m3 MCP server in `~/.gemini/antigravity-cli/settings.json`.
+- **Integrated Antigravity CLI chatlog auto-capture** under `bin/chatlog_config.py`, `bin/chatlog_core.py`, `bin/chatlog_init.py`, and `bin/chatlog_ingest.py`.
+- Dedicated Antigravity plugin documentation at `docs/antigravity_plugin.md` and linked across references.
+
+---
+
 ## [2026.5.30.0] — May 30, 2026 — Entity coalescing v2 (reversible apply/unapply) + CLI exit-code fix
 
 ### Added
