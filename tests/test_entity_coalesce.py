@@ -263,6 +263,63 @@ def test_apply_creates_reversible_overlay_then_unapply_restores(tmp_entity_db):
     conn.close()
 
 
+def test_unapply_tombstones_and_strips_alias_and_blocks_auto_remerge(tmp_entity_db):
+    # A-plus: unapply must (1) tombstone the candidate so include_auto_merge
+    # won't resurrect it, (2) leave NO stale alias on the representative, and
+    # (3) still allow a DELIBERATE explicit-uuid re-apply.
+    db = os.environ["M3_MEMORY_DB"]
+    ec.coalesce_detect(dry_run=False, max_pairs=50)
+    res = ec.apply_coalescence(include_auto_merge=True, dry_run=False, db_path=db)
+    cid = res["clusters_touched"][0]
+
+    conn = sqlite3.connect(db)
+    # alias was written on the representative (the same_as edge's to_entity)
+    rep_alias_rows = conn.execute(
+        "SELECT json_extract(r.attributes_json,'$.aliases') "
+        "FROM entity_relationships er JOIN entities r ON r.id = er.to_entity "
+        "WHERE er.predicate='same_as'").fetchall()
+    cand_uuid = conn.execute(
+        "SELECT uuid FROM entity_coalesce_candidates WHERE review_action='merge' LIMIT 1"
+    ).fetchone()[0]
+    conn.close()
+    assert any(a and a != "[]" for (a,) in rep_alias_rows), "apply should have set an alias"
+
+    # unapply
+    rev = ec.unapply_cluster(cid, db_path=db)
+    assert rev["reverted_members"] >= 1
+
+    conn = sqlite3.connect(db)
+    # (1) candidate tombstoned -> NOT 'merge', so auto-merge filter skips it
+    action = conn.execute(
+        "SELECT review_action FROM entity_coalesce_candidates WHERE uuid=?", (cand_uuid,)
+    ).fetchone()[0]
+    assert action == "unapplied"
+    # (2) no stale alias left anywhere
+    leftover = conn.execute(
+        "SELECT count(*) FROM entities "
+        "WHERE json_array_length(COALESCE(json_extract(attributes_json,'$.aliases'),'[]')) > 0"
+    ).fetchone()[0]
+    assert leftover == 0, "unapply must strip the alias it added"
+    conn.close()
+
+    # (3a) auto-merge does NOT resurrect the tombstoned cluster
+    again = ec.apply_coalescence(include_auto_merge=True, dry_run=False, db_path=db)
+    conn = sqlite3.connect(db)
+    sa = conn.execute(
+        "SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
+    conn.close()
+    assert again["applied"] == 0 and sa == 0, "auto-merge must not re-merge an unapplied cluster"
+
+    # (3b) explicit-uuid re-apply IS allowed (deliberate human act)
+    redo = ec.apply_coalescence(candidate_uuids=[cand_uuid], dry_run=False, db_path=db)
+    assert redo["applied"] == 1
+    conn = sqlite3.connect(db)
+    sa2 = conn.execute(
+        "SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
+    conn.close()
+    assert sa2 == 1
+
+
 def test_apply_dry_run_writes_nothing(tmp_entity_db):
     ec.coalesce_detect(dry_run=False, max_pairs=50)
     ec.apply_coalescence(include_auto_merge=True, dry_run=True)  # dry-run needs no guard
