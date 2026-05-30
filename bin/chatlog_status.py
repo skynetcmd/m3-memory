@@ -152,11 +152,20 @@ def chatlog_status_impl() -> str:
     main_db = os.path.abspath(resolve_db_path(None))
     chatlog_db = os.path.abspath(config.db_path)
 
+    # Resolve Files DB path
+    try:
+        from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
+        files_db = os.path.abspath(CONFIG_FILES_DB_PATH)
+    except Exception:
+        from m3_sdk import get_m3_root
+        files_db = os.path.abspath(os.environ.get("M3_FILES_DB_PATH") or os.path.join(get_m3_root(), "memory", "files_database.db"))
+
     result = {
         "unified": chatlog_db == main_db,
         "db_paths": {
             "main": main_db,
             "chatlog": chatlog_db,
+            "files": files_db,
         },
         "row_counts": row_counts,
         "queue": {
@@ -382,6 +391,18 @@ def _run_subprocess_interactive(cmd: list[str]) -> None:
     print("\033[?25l", end="")
 
 
+def _make_line(content: str) -> str:
+    """Helper to pad/trim inner line content to exactly 76 terminal columns, avoiding jagged right borders."""
+    width = 76
+    # Emojis like ⚡ take 2 terminal columns but 1 Python char
+    if "⚡" in content:
+        width -= 1
+    # Trim to width if too long
+    if len(content) > width:
+        content = content[:width - 3] + "..."
+    return f"│{content:<{width}}│"
+
+
 def run_live_tui(interval: float = 5.0):
     """Runs a zero-dependency ANSI live terminal dashboard with interactive controls."""
     import time
@@ -406,10 +427,20 @@ def run_live_tui(interval: float = 5.0):
         chatlog_db = os.path.abspath(config.db_path)
         unified = chatlog_db == main_db
 
+        # Resolve Files DB path
+        try:
+            from memory.config import FILES_DB_PATH as CONFIG_FILES_DB_PATH
+            files_db = os.path.abspath(CONFIG_FILES_DB_PATH)
+        except Exception:
+            from m3_sdk import get_m3_root
+            files_db = os.path.abspath(os.environ.get("M3_FILES_DB_PATH") or os.path.join(get_m3_root(), "memory", "files_database.db"))
+
         main_sz = _get_file_size_mb(main_db)
         main_wal_sz = _get_wal_size_mb(main_db)
         chat_sz = _get_file_size_mb(chatlog_db)
         chat_wal_sz = _get_wal_size_mb(chatlog_db)
+        files_sz = _get_file_size_mb(files_db)
+        files_wal_sz = _get_wal_size_mb(files_db)
 
         chroma_q = _get_chroma_queue_count(main_db)
         last_turns = _get_last_turns(main_db)
@@ -431,52 +462,61 @@ def run_live_tui(interval: float = 5.0):
                 t2_state = {"status": "error"}
         tick += 1
 
+        # Truncate paths to safe display lengths to avoid clipping
+        main_disp = main_db if len(main_db) <= 60 else "..." + main_db[-57:]
+        chat_disp = chatlog_db if len(chatlog_db) <= 60 else "..." + chatlog_db[-57:]
+        files_disp = files_db if len(files_db) <= 60 else "..." + files_db[-57:]
+
         # Build dashboard lines
         lines = []
         lines.append("┌────────────────────────────────────────────────────────────────────────────┐")
-        lines.append("│  ⚡ M3 MEMORY Diagnostics & Subsystem Status (Live Monitor)                 │")
+        lines.append(_make_line("  ⚡ M3 MEMORY Diagnostics & Subsystem Status (Live Monitor)"))
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
-        lines.append("│ DATABASE FILES & JOURNAL SIZE (WAL)                                        │")
+        lines.append(_make_line(" DATABASE FILES & JOURNAL SIZE (WAL)"))
         
         main_status = "active" if main_wal_sz > 0 else "idle"
-        lines.append(f"│  Main DB:   {main_db[:60]:<60} │")
-        lines.append(f"│             Size: {main_sz:6.1f} MB  |  WAL size: {main_wal_sz:5.1f} MB  |  Status: {main_status:<6} │")
+        lines.append(_make_line(f"  Main DB:   {main_disp}"))
+        lines.append(_make_line(f"             Size: {main_sz:6.1f} MB  |  WAL size: {main_wal_sz:5.1f} MB  |  Status: {main_status}"))
         
         if not unified:
             chat_status = "active" if chat_wal_sz > 0 else "idle"
-            lines.append(f"│  Chatlog:   {chatlog_db[:60]:<60} │")
-            lines.append(f"│             Size: {chat_sz:6.1f} MB  |  WAL size: {chat_wal_sz:5.1f} MB  |  Status: {chat_status:<6} │")
+            lines.append(_make_line(f"  Chatlog:   {chat_disp}"))
+            lines.append(_make_line(f"             Size: {chat_sz:6.1f} MB  |  WAL size: {chat_wal_sz:5.1f} MB  |  Status: {chat_status}"))
         else:
-            lines.append("│  Chatlog:   (unified with main database file)                              │")
+            lines.append(_make_line("  Chatlog:   (unified with main database file)"))
             
+        files_status = "active" if files_wal_sz > 0 else "idle"
+        lines.append(_make_line(f"  Files DB:  {files_disp}"))
+        lines.append(_make_line(f"             Size: {files_sz:6.1f} MB  |  WAL size: {files_wal_sz:5.1f} MB  |  Status: {files_status}"))
+        
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
-        lines.append("│ EMBEDDING CASCADE DIAGNOSTICS                                              │")
+        lines.append(_make_line(" EMBEDDING CASCADE DIAGNOSTICS"))
         
         t1_status = t1_state.get("status", "unknown").upper() if t1_state else "UNKNOWN"
         t1_path = t1_state.get("gguf_path") or "Not set" if t1_state else "Not set"
-        if len(t1_path) > 45:
-            t1_path = "..." + t1_path[-42:]
-        lines.append(f"│  GGUF (Tier 1):     [{t1_status:<14}] Path: {t1_path:<40} │")
+        if len(t1_path) > 40:
+            t1_path = "..." + t1_path[-37:]
+        lines.append(_make_line(f"  GGUF (Tier 1):     [{t1_status:<14}] Path: {t1_path}"))
         
         t2_status = t2_state.get("status", "unknown").upper() if t2_state else "UNKNOWN"
         t2_url = t2_state.get("url") or "Not set" if t2_state else "Not set"
         t2_lat = t2_state.get("latency_ms") if t2_state else None
         lat_str = f"({t2_lat} ms)" if t2_lat is not None else "(Offline)"
-        lines.append(f"│  Fallback (Tier 2): [{t2_status:<14}] URL: {t2_url:<27} {lat_str:<12} │")
+        lines.append(_make_line(f"  Fallback (Tier 2): [{t2_status:<14}] URL: {t2_url:<27} {lat_str}"))
         
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
-        lines.append("│ QUEUE DEPTHS & SPILL MONITOR                                               │")
+        lines.append(_make_line(" QUEUE DEPTHS & SPILL MONITOR"))
         
         depth = state.get("queue", {}).get("depth", 0)
         max_depth = state.get("queue", {}).get("max", config.queue_max_depth)
         spill_files = len([f for f in os.listdir(chatlog_config.SPILL_DIR) if f.endswith(".jsonl")]) if os.path.exists(chatlog_config.SPILL_DIR) else 0
         spill_bytes = state.get("spill", {}).get("bytes", 0)
         
-        lines.append(f"│  Chatlog Queue Depth: {depth:<4} / {max_depth:<4}                                           │")
-        lines.append(f"│  Compaction Spill:    {spill_files:<4} files ({spill_bytes / 1024:.1f} KB)                             │")
-        lines.append(f"│  Chroma Sync Queue:   {chroma_q:<4} pending upserts                                    │")
+        lines.append(_make_line(f"  Chatlog Queue Depth: {depth} / {max_depth}"))
+        lines.append(_make_line(f"  Compaction Spill:    {spill_files} files ({spill_bytes / 1024:.1f} KB)"))
+        lines.append(_make_line(f"  Chroma Sync Queue:   {chroma_q} pending upserts"))
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
-        lines.append("│ SYSTEM INTEGRATION HOOKS                                                   │")
+        lines.append(_make_line(" SYSTEM INTEGRATION HOOKS"))
         
         for name, spec in sorted(config.host_agents.items()):
             status_str = "ENABLED " if spec.enabled else "DISABLED"
@@ -489,16 +529,16 @@ def run_live_tui(interval: float = 5.0):
                 activity_str = f"active {int(last_ms / 60000)} mins ago"
             else:
                 activity_str = f"active {int(last_ms / 3600000)} hours ago"
-            lines.append(f"│  {name:<12} : [{status_str}]  {activity_str:<45} │")
+            lines.append(_make_line(f"  {name:<12} : [{status_str}]  {activity_str}"))
             
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
-        lines.append("│ LAST 5 CHATLOG CAPTURE EVENTS                                              │")
+        lines.append(_make_line(" LAST 5 CHATLOG CAPTURE EVENTS"))
         
         if last_turns:
             for turn in last_turns:
-                lines.append(f"│  [{turn['time']}] {turn['text']:<63} │")
+                lines.append(_make_line(f"  [{turn['time']}] {turn['text']}"))
         else:
-            lines.append("│  (No chatlog capture turns found yet)                                      │")
+            lines.append(_make_line("  (No chatlog capture turns found yet)"))
             
         lines.append("└────────────────────────────────────────────────────────────────────────────┘")
         lines.append(f"  [Ctrl+C / Q] Exit  |  [+] / [-] Change Interval ({current_interval:.1f}s)")
