@@ -87,6 +87,7 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     # dispatcher / meta tools (like tools_*, cross-cutting) — route to admin
     ("m3_call",             "admin"),
     ("m3_index",            "admin"),
+    ("m3_help_capabilities", "admin"),
     # cross-cutting / system tools
     ("notify",              "admin"),
     ("notifications",       "admin"),
@@ -138,6 +139,7 @@ ESSENTIAL_TOOL_NAMES: frozenset[str] = frozenset({
     # dispatcher — reach the whole catalog by name without loading a domain
     "m3_call",
     "m3_index",
+    "m3_help_capabilities",
 })
 
 
