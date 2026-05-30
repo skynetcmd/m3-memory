@@ -47,6 +47,14 @@ Installs on macOS or Linux with the single command above. Use this to [install o
 
 [Plugin reference](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_code_plugin.md) · [Claude.ai (web/desktop) connector](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_ai_connector.md)
 
+**Google Antigravity users** can install the plugin directly:
+
+```bash
+agy plugin install https://github.com/skynetcmd/m3-memory
+```
+
+[Plugin reference](https://github.com/skynetcmd/m3-memory/blob/main/docs/antigravity_plugin.md)
+
 ---
 
 Add to your MCP config:
