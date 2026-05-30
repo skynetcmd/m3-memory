@@ -267,7 +267,7 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 ### Reaching tools that aren't in your startup surface
 
 Only the **essentials** (the main searches + writes) are registered at session
-start; the rest of the 96 tools load on demand. You never need to drop to raw
+start; the rest of the 101 tools load on demand. You never need to drop to raw
 `sqlite3` or shell out via Bash to touch a tool — that fallback is a tool-spec
 gap, not a missing capability. Use the dispatcher instead:
 

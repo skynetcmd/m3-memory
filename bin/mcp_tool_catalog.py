@@ -2488,6 +2488,122 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="files_entity_coalesce",
+        description=(
+            "Detect provisional-entity coalescing candidates (quarantine noise + "
+            "flag near-duplicate entities). Detection only -- never merges, never "
+            "auto-applies; candidates land in entity_coalesce_candidates for "
+            "review. dry_run=True estimates without writing or embedding."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "max_pairs": {"type": "integer", "default": 1000},
+                "dry_run":   {"type": "boolean", "default": False},
+                "corpus":    {"type": "string",  "default": None},
+            },
+            "required": [],
+        },
+        impl=_files_tools.files_entity_coalesce_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="files_entity_coalesce_list",
+        description="List entity-coalescing candidate pairs (name + score + band).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "reviewed":   {"type": "boolean", "default": False},
+                "limit":      {"type": "integer", "default": 100},
+                "min_cosine": {"type": "number",  "default": None},
+            },
+            "required": [],
+        },
+        impl=_files_tools.files_entity_coalesce_list_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="files_entity_coalesce_review",
+        description=(
+            "Record entity-coalescing review decisions in BULK: a list of "
+            "{uuid, action} where action is 'merge' | 'related' | 'reject' | "
+            "'defer'. Records intent only; materialize with "
+            "files_entity_coalesce_apply."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "reviews": {"type": "array"},
+                "note":    {"type": "string", "default": ""},
+            },
+            "required": ["reviews"],
+        },
+        impl=_files_tools.files_entity_coalesce_review_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="files_entity_coalesce_apply",
+        description=(
+            "Apply the reversible same_as/cluster overlay. Union of explicit "
+            "candidate_uuids (reviewed 'merge' or 'unapplied' tombstone) and -- "
+            "if include_auto_merge -- the LATEST run's 'merge' band (or "
+            "resolution_run). Members are never deleted; reverse with "
+            "files_entity_coalesce_unapply. WRITES the core graph: a real apply "
+            "MUST pass confirm=True; dry_run=True previews without writing."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "candidate_uuids":    {"type": "array",   "default": None},
+                "include_auto_merge": {"type": "boolean", "default": False},
+                "resolution_run":     {"type": "string",  "default": None},
+                "dry_run":            {"type": "boolean", "default": False},
+                "confirm":            {"type": "boolean", "default": False},
+            },
+            "required": [],
+        },
+        impl=_files_tools.files_entity_coalesce_apply_impl,
+        is_async=False,
+        validators=(),
+        # Reversible by construction (writes a same_as/cluster overlay, never
+        # deletes members; unapply fully restores). Not destructive per §6, so
+        # not gated here — the impl's own confirm=True guard is the safety.
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="files_entity_coalesce_unapply",
+        description=(
+            "Reverse one coalescence cluster (drop edges, clear flags, strip "
+            "aliases, tombstone the candidate so auto-merge won't resurrect it). "
+            "Members are never deleted; re-apply via files_entity_coalesce_apply "
+            "with candidate_uuids."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "cluster_id": {"type": "string"},
+            },
+            "required": ["cluster_id"],
+        },
+        impl=_files_tools.files_entity_coalesce_unapply_impl,
+        is_async=False,
+        validators=(),
+        # Pure undo — removes only overlay edges/flags, restores state, deletes
+        # no member data. Never gated.
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="files_staleness_review",
         description=(
             "Compare filesystem against files.db. Surfaces stale, "

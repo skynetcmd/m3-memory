@@ -1,4 +1,4 @@
-# files-memory — 21 MCP tools for directory ingestion
+# files-memory — 26 MCP tools for directory ingestion
 
 > Status: 2026-05-17. Per-tool reference for the `files_memory` package.
 > Audience: someone wiring the file-ingestion pipeline into an agent
@@ -12,7 +12,7 @@ index, optionally extracts facts and links them to entities in
 `memory.db`, supports ascension of selected items to core memory, and
 provides watch-mode staleness review for ongoing corpus health.
 
-All 21 tools below are registered in `bin/mcp_tool_catalog.py` and
+All 26 tools below are registered in `bin/mcp_tool_catalog.py` and
 callable through the m3-memory MCP bridge or the
 `python -m files_memory.tools <command>` CLI.
 
@@ -325,4 +325,4 @@ python -m files_memory.tools watch --directory ~/Documents/notes \
 - `tests/eval_files_phase2.py` — P2 extraction + ascension + staleness
 - `tests/eval_files_phase3.py` — P3 provenance + carry-forward + dedup + rename + promotability
 - `tests/eval_files_phase4.py` — P4 watch + multi-corpus + cross-corpus
-- `bin/mcp_tool_catalog.py` — canonical MCP registration (all 96 tools)
+- `bin/mcp_tool_catalog.py` — canonical MCP registration (all 101 tools)
