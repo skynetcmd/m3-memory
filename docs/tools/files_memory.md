@@ -325,4 +325,4 @@ python -m files_memory.tools watch --directory ~/Documents/notes \
 - `tests/eval_files_phase2.py` — P2 extraction + ascension + staleness
 - `tests/eval_files_phase3.py` — P3 provenance + carry-forward + dedup + rename + promotability
 - `tests/eval_files_phase4.py` — P4 watch + multi-corpus + cross-corpus
-- `bin/mcp_tool_catalog.py` — canonical MCP registration (all 101 tools)
+- `bin/mcp_tool_catalog.py` — canonical MCP registration (all 102 tools)
