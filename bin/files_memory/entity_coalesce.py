@@ -91,6 +91,37 @@ def _underscore_collision(a: str, b: str) -> bool:
     return na != nb and na.lstrip("_") == nb.lstrip("_")
 
 
+# Tokenize on non-alphanumerics so `k20`, `v2`, `gpt-4`, `baseline_1` split into
+# the alpha stem and the trailing number. A token like `k20` is itself split to
+# (`k`, `20`) — that lets `...k20` vs `...k30` align on `k` and diverge on the
+# pure-digit token, which is exactly the collision we want to catch.
+_TOK_RE = re.compile(r"[a-z]+|\d+")
+
+
+def _numeric_suffix_collision(a: str, b: str) -> bool:
+    """True when two names are identical EXCEPT for a differing NUMERIC/version
+    token — e.g. `run-config-k20` vs `...-k30`, `gpt-4` vs `gpt-5`,
+    `baseline-1` vs `baseline-2`. These score 0.95+/95+ (would auto-merge) but
+    are usually DISTINCT configs/versions/experiments, not the same entity.
+    Validated on the first live v1 auto-merge band, which wrongly paired two
+    run configs differing only in a `k20`/`k30` trailing token. Demote to
+    needs_llm so a human/LLM adjudicates. (Lesson #6 — bias to false splits.)
+
+    Returns False for singular/plural or punctuation-only differences (those are
+    genuine merges, e.g. `entity row`/`entity rows`) — only a differing token
+    where ALL differing positions involve a numeric token trips the guard."""
+    ta, tb = _TOK_RE.findall(a.lower()), _TOK_RE.findall(b.lower())
+    if ta == tb or len(ta) != len(tb):
+        return False
+    diffs = [(x, y) for x, y in zip(ta, tb) if x != y]
+    if not diffs:
+        return False
+    # Every differing position must involve a numeric token on at least one side
+    # AND the non-numeric stems (if any) must match — i.e. the divergence is
+    # purely the number. `k20`->(`k`,`20`) handled by tokenization above.
+    return all(x.isdigit() or y.isdigit() for x, y in diffs)
+
+
 def _block_key(name: str) -> str:
     """Cheap blocking key: lowercased first alpha token. Singletons under this
     key have no candidate and are skipped — zero compare cost."""
@@ -328,11 +359,14 @@ def coalesce_detect(*, corpus=None, max_pairs=MAX_PAIRS, dry_run=False, db_path=
                         else:
                             cos = fz / 100.0
                         over = (_cluster_size(mem, acid) + _cluster_size(mem, bcid)) > MAX_CLUSTER
-                        # Underscore-collision guard: a leading-`_` difference is
-                        # usually private-helper-vs-public-value (different); never
-                        # auto-merge those — route to review. (Validated, live v1.)
+                        # Collision guards: leading-`_` (private-vs-public) and
+                        # trailing-number (distinct config/version) pairs score
+                        # 0.95+/95+ but are usually DIFFERENT entities — never
+                        # auto-merge, route to review. (Both validated, live v1.)
                         if (cos >= AUTO_MERGE_COSINE and fz >= FUZZY_HIGH
-                                and not over and not _underscore_collision(an, bn)):
+                                and not over
+                                and not _underscore_collision(an, bn)
+                                and not _numeric_suffix_collision(an, bn)):
                             band = "merge"
                         else:
                             band = "needs_llm"
