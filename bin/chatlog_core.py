@@ -38,7 +38,7 @@ from memory_core import _sanitize_fts
 logger = logging.getLogger("chatlog_core")
 
 VALID_ROLES = frozenset({"user", "assistant", "system", "tool"})
-VALID_HOST_AGENTS = frozenset({"claude-code", "gemini-cli", "opencode", "aider"})
+VALID_HOST_AGENTS = frozenset({"claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider"})
 VALID_PROVIDERS = frozenset({
     "anthropic", "google", "openai", "local", "xai",
     "deepseek", "mistral", "meta", "other",
