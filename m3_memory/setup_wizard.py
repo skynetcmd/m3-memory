@@ -151,11 +151,14 @@ def _find_hermes_plugins_dir() -> Optional[Path]:
 def _find_m3_hermes_plugin_src() -> Optional[Path]:
     """Locate the bundled m3 provider source (examples/hermes-agent/plugins/memory/m3).
 
-    Resolved relative to the installed package so it works from a pip install
-    or an editable checkout.
+    Resolved relative to the installed package so it works from a source/editable
+    checkout (examples/ at the repo root) AND a pip wheel (examples/ shipped
+    next to the m3_memory package in site-packages via force-include).
     """
     here = Path(__file__).resolve().parent          # .../m3_memory
-    for root in (here.parent, here.parent.parent):  # repo root candidates
+    # here.parent      → repo root (editable) OR site-packages (wheel)
+    # here.parent.parent → repo root when m3_memory is nested one deeper
+    for root in (here.parent, here.parent.parent):
         src = root / "examples" / "hermes-agent" / "plugins" / "memory" / "m3"
         if (src / "__init__.py").exists():
             return src

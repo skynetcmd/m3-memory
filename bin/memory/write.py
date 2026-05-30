@@ -1097,6 +1097,13 @@ async def memory_write_bulk_impl(
             except Exception as e:
                 logger.debug(f"gist row emit failed in bulk: {e}")
 
+    try:
+        from sqlite_pragmas import checkpoint_passive
+        with _db() as db:
+            checkpoint_passive(db)
+    except Exception as e:
+        logger.debug(f"Failed to checkpoint WAL after bulk write: {e}")
+
     return [p["id"] for p in prepared]
 
 
