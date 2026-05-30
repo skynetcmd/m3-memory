@@ -79,6 +79,18 @@ def _is_noise(name: str) -> bool:
     return False
 
 
+def _underscore_collision(a: str, b: str) -> bool:
+    """True when two names are identical EXCEPT for a leading underscore (and/or
+    case) — e.g. `content_hash` vs `_content_hash`, `predicates` vs `_PREDICATES`,
+    `routed_impl` vs `_routed_impl`. In m3's codebase a leading `_` distinguishes
+    a PRIVATE helper from a public value/concept, so these are usually DIFFERENT
+    entities. Validated on the first live v1 review: such pairs scored 0.95+/95+
+    (would auto-merge) but are false merges. Demote them to needs_llm so a human/
+    LLM adjudicates rather than auto-applying. (Lesson #6 — bias to false splits.)"""
+    na, nb = (a or "").lower(), (b or "").lower()
+    return na != nb and na.lstrip("_") == nb.lstrip("_")
+
+
 def _block_key(name: str) -> str:
     """Cheap blocking key: lowercased first alpha token. Singletons under this
     key have no candidate and are skipped — zero compare cost."""
@@ -316,7 +328,14 @@ def coalesce_detect(*, corpus=None, max_pairs=MAX_PAIRS, dry_run=False, db_path=
                         else:
                             cos = fz / 100.0
                         over = (_cluster_size(mem, acid) + _cluster_size(mem, bcid)) > MAX_CLUSTER
-                        band = "merge" if (cos >= AUTO_MERGE_COSINE and fz >= FUZZY_HIGH and not over) else "needs_llm"
+                        # Underscore-collision guard: a leading-`_` difference is
+                        # usually private-helper-vs-public-value (different); never
+                        # auto-merge those — route to review. (Validated, live v1.)
+                        if (cos >= AUTO_MERGE_COSINE and fz >= FUZZY_HIGH
+                                and not over and not _underscore_collision(an, bn)):
+                            band = "merge"
+                        else:
+                            band = "needs_llm"
                         if not dry_run:
                             mem.execute(
                                 "INSERT INTO entity_coalesce_candidates"
@@ -392,3 +411,123 @@ def review_coalesce_candidates(reviews, *, note=""):
                 errors.append({"uuid": item["uuid"], "error": "not found"})
         mem.execute("COMMIT")
     return {"updated": updated, "errors": errors, "reviewed_at": now}
+
+
+# ── v2: apply the reversible coalescence OVERLAY ─────────────────────────────
+# A "merge" is NOT destructive — members stay intact. We set a shared cluster_id
+# + write a `same_as` edge (member -> representative). Canonical view = read-time
+# projection (follow same_as). Reversal = drop the edge + clear cluster_id. No
+# entity is deleted, no fact_entity_refs migrated. (Lesson #1: reversible by
+# construction.)
+
+def _pick_representative(mem, eid_a, eid_b):
+    """Deterministic canonical pick (NOT the LLM's name — lesson #3): higher
+    files.db ref-degree wins; tie -> longer (more complete) name; tie -> lower id."""
+    def degree(eid):
+        # ref count in files.db; falls back to 0 if unavailable (read-only probe)
+        try:
+            from .db import _db as _files_db
+            with _files_db() as f:
+                return f.execute(
+                    "SELECT count(*) FROM fact_entity_refs WHERE entity_uuid=?", (eid,)
+                ).fetchone()[0]
+        except Exception:
+            return 0
+    a = mem.execute("SELECT id, canonical_name, entity_type FROM entities WHERE id=?", (eid_a,)).fetchone()
+    b = mem.execute("SELECT id, canonical_name, entity_type FROM entities WHERE id=?", (eid_b,)).fetchone()
+    da, db_ = degree(eid_a), degree(eid_b)
+    if da != db_:
+        rep, mem_ent = (a, b) if da > db_ else (b, a)
+    elif len((a[1] or "")) != len((b[1] or "")):
+        rep, mem_ent = (a, b) if len(a[1] or "") >= len(b[1] or "") else (b, a)
+    else:
+        rep, mem_ent = (a, b) if a[0] <= b[0] else (b, a)
+    return rep, mem_ent
+
+
+def apply_coalescence(*, candidate_uuids=None, include_auto_merge=False, dry_run=False):
+    """Apply the reversible same_as/cluster overlay for coalescing candidates.
+
+    Sources (union): explicit candidate_uuids that are reviewed merge OR (if
+    include_auto_merge) the 'merge'-band candidates (clean after the underscore
+    guard). For each pair: pick a deterministic representative, give the member
+    the rep's cluster_id, mark it coalesce_state='clustered', and write a
+    `same_as` (member -> rep) edge. Members are NEVER deleted; reversal via
+    unapply_cluster(). Returns structured counts. dry_run reports without writing."""
+    out: dict = {"applied": 0, "skipped": 0, "clusters_touched": set(), "dry_run": dry_run}
+    with _memory_db() as mem:
+        ensure_schema(mem)
+        mem.execute("BEGIN")
+        # collect target candidates
+        sel = ("SELECT uuid, entity_a, entity_b, band, review_action "
+               "FROM entity_coalesce_candidates WHERE ")
+        clauses, params = [], []
+        if candidate_uuids:
+            qs = ",".join("?" * len(candidate_uuids))
+            clauses.append(f"(uuid IN ({qs}) AND review_action='merge')")
+            params += list(candidate_uuids)
+        if include_auto_merge:
+            clauses.append("(band='merge' AND reviewed_at IS NULL)")
+        if not clauses:
+            mem.execute("ROLLBACK")
+            return {**out, "clusters_touched": [], "note": "nothing selected"}
+        rows = mem.execute(sel + " OR ".join(clauses), params).fetchall()
+        for cuuid, ea, eb, band, action in rows:
+            rep, m = _pick_representative(mem, ea, eb)
+            if rep is None or m is None:
+                out["skipped"] += 1
+                continue
+            cid = mem.execute(
+                "SELECT cluster_id FROM entities WHERE id=?", (rep[0],)
+            ).fetchone()[0] or ("cluster-" + rep[0][:12])
+            if not dry_run:
+                # representative gets/keeps the cluster_id
+                mem.execute("UPDATE entities SET cluster_id=? WHERE id=?", (cid, rep[0]))
+                # member joins the cluster (kept intact, flagged clustered)
+                mem.execute(
+                    "UPDATE entities SET cluster_id=?, coalesce_state='clustered' WHERE id=?",
+                    (cid, m[0]),
+                )
+                # reversible same_as edge: member -> representative
+                mem.execute(
+                    "INSERT INTO entity_relationships(from_entity, to_entity, predicate, "
+                    "confidence, valid_from, created_at) VALUES (?,?,?,?,?,?)",
+                    (m[0], rep[0], "same_as", 0.95, _now(), _now()),
+                )
+                # add the member's name as an alias on the representative
+                mem.execute(
+                    "UPDATE entities SET attributes_json=json_set("
+                    "COALESCE(attributes_json,'{}'),'$.aliases',"
+                    "json_insert(COALESCE(json_extract(attributes_json,'$.aliases'),'[]'),"
+                    "'$[#]', ?)) WHERE id=?",
+                    (m[1], rep[0]),
+                )
+                mem.execute(
+                    "UPDATE entity_coalesce_candidates SET reviewed_at=COALESCE(reviewed_at,?), "
+                    "review_action='merge', verdict='merge' WHERE uuid=?",
+                    (_now(), cuuid),
+                )
+            out["applied"] += 1
+            out["clusters_touched"].add(cid)
+        mem.execute("COMMIT" if not dry_run else "ROLLBACK")
+    out["clusters_touched"] = sorted(out["clusters_touched"])
+    return out
+
+
+def unapply_cluster(cluster_id: str) -> dict:
+    """Reverse a coalescence (lesson #1 — trivial undo): drop the same_as edges
+    into the cluster representative and clear cluster_id/coalesce_state on its
+    members. Members were never deleted, so this fully restores the prior state."""
+    with _memory_db() as mem:
+        mem.execute("BEGIN")
+        members = [r[0] for r in mem.execute(
+            "SELECT id FROM entities WHERE cluster_id=?", (cluster_id,)).fetchall()]
+        if members:
+            qs = ",".join("?" * len(members))
+            mem.execute(f"DELETE FROM entity_relationships WHERE predicate='same_as' "
+                        f"AND from_entity IN ({qs})", members)
+            mem.execute(f"UPDATE entities SET cluster_id=NULL, "
+                        f"coalesce_state=CASE WHEN entity_type='unknown' THEN 'provisional' ELSE coalesce_state END "
+                        f"WHERE id IN ({qs})", members)
+        mem.execute("COMMIT")
+    return {"cluster_id": cluster_id, "reverted_members": len(members)}
