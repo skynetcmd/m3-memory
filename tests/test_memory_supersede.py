@@ -332,7 +332,10 @@ def test_concurrent_close_loses_race_and_rolls_back_orphan(isolated_db, monkeypa
             conn.close()
         return await real_write(**kwargs)
 
-    monkeypatch.setattr(write_mod, "memory_write_impl", racing_write)
+    import sys
+    for name, module in list(sys.modules.items()):
+        if name.endswith("memory.write") and hasattr(module, "memory_write_impl"):
+            monkeypatch.setattr(module, "memory_write_impl", racing_write)
 
     result = asyncio.run(
         memory_supersede_impl(old_id=old_id, content="v2", embed=False)

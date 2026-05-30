@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-
 # ── small UI helpers ──────────────────────────────────────────────────────────
 
 def _color(code: str, msg: str) -> str:
@@ -79,9 +78,11 @@ class AgentTargets:
     antigravity: bool = False
     opencode: bool = False
     openclaw: bool = False
+    hermes: bool = False
 
     def any(self) -> bool:
-        return any((self.claude, self.gemini, self.antigravity, self.opencode, self.openclaw))
+        return any((self.claude, self.gemini, self.antigravity, self.opencode,
+                    self.openclaw, self.hermes))
 
 
 def _detect_agents() -> AgentTargets:
@@ -109,10 +110,56 @@ def _detect_agents() -> AgentTargets:
         or (Path.home() / ".openclaw").is_dir()
         or os.environ.get("OPENCLAW_GATEWAY_TOKEN")
     )
+    # Hermes Agent uses a file-based plugin (not MCP wiring): detection drives
+    # an offer to COPY the m3 provider into the user's hermes-agent checkout.
+    hermes = bool(_find_hermes_plugins_dir())
     return AgentTargets(
         claude=claude, gemini=gemini, antigravity=antigravity,
-        opencode=opencode, openclaw=openclaw
+        opencode=opencode, openclaw=openclaw, hermes=hermes
     )
+
+
+def _find_hermes_plugins_dir() -> Optional[Path]:
+    """Locate the hermes-agent install's plugins/memory/ dir, or None.
+
+    Hermes Agent has no fixed install root, so we probe the common spots:
+    the HERMES_HOME env var, ~/.hermes, and a few default checkout locations.
+    We look for a `plugins/memory` subtree (the single-select memory-provider
+    slot) — its presence is what lets us drop the m3 provider into place.
+    """
+    candidates = []
+    env_home = os.environ.get("HERMES_HOME")
+    if env_home:
+        candidates.append(Path(env_home))
+    candidates += [
+        Path.home() / ".hermes",
+        Path.home() / "hermes-agent",
+        Path.home() / "hermes",
+        Path.home() / "src" / "hermes-agent",
+        Path.home() / "code" / "hermes-agent",
+    ]
+    for root in candidates:
+        try:
+            pm = root / "plugins" / "memory"
+            if pm.is_dir():
+                return pm
+        except OSError:
+            continue
+    return None
+
+
+def _find_m3_hermes_plugin_src() -> Optional[Path]:
+    """Locate the bundled m3 provider source (examples/hermes-agent/plugins/memory/m3).
+
+    Resolved relative to the installed package so it works from a pip install
+    or an editable checkout.
+    """
+    here = Path(__file__).resolve().parent          # .../m3_memory
+    for root in (here.parent, here.parent.parent):  # repo root candidates
+        src = root / "examples" / "hermes-agent" / "plugins" / "memory" / "m3"
+        if (src / "__init__.py").exists():
+            return src
+    return None
 
 
 # ── plan dataclass ────────────────────────────────────────────────────────────
@@ -162,6 +209,7 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     print(f"    {'[x]' if detected.antigravity else '[ ]'} Antigravity CLI/Desktop (antigravity)")
     print(f"    {'[x]' if detected.opencode    else '[ ]'} OpenCode             (opencode)")
     print(f"    {'[x]' if detected.openclaw    else '[ ]'} OpenClaw             (no native MCP; wired via local proxy)")
+    print(f"    {'[x]' if detected.hermes      else '[ ]'} Hermes Agent         (file-based memory-provider plugin)")
     print()
 
     if detected.claude:
@@ -175,6 +223,11 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     plan.targets.openclaw = _ask_yes_no(
         "  Set up OpenClaw proxy (localhost:9000)?", default=detected.openclaw
     )
+    if detected.hermes:
+        plan.targets.hermes = _ask_yes_no(
+            "  Install the m3 memory-provider plugin into Hermes Agent?",
+            default=True,
+        )
 
     print()
     print("  Chatlog capture mode for Claude Code:")
@@ -544,6 +597,45 @@ def _wire_openclaw_note() -> bool:
     return True
 
 
+def _wire_hermes() -> bool:
+    """Copy the m3 memory-provider plugin into the user's hermes-agent checkout.
+
+    Hermes Agent loads memory providers from `plugins/memory/<name>/`. We locate
+    the bundled source (examples/hermes-agent/plugins/memory/m3) and the user's
+    hermes plugins dir, then copy m3/ into place. Non-destructive: if a prior m3
+    plugin is already there, we ask before overwriting.
+    """
+    import shutil as _shutil
+
+    src = _find_m3_hermes_plugin_src()
+    dst_parent = _find_hermes_plugins_dir()
+    if not src:
+        _warn("  · Hermes: bundled m3 plugin source not found — skipping")
+        return False
+    if not dst_parent:
+        _warn("  · Hermes: no hermes-agent plugins/memory dir found — skipping")
+        print("    Copy it manually: examples/hermes-agent/plugins/memory/m3/ "
+              "→ <hermes>/plugins/memory/m3/")
+        return False
+
+    dst = dst_parent / "m3"
+    if dst.exists():
+        if not _ask_yes_no(f"  · Hermes: {dst} exists — overwrite?", default=False):
+            _say("  · Hermes: left existing m3 plugin untouched")
+            return True
+        _shutil.rmtree(dst)
+    try:
+        _shutil.copytree(src, dst)
+    except OSError as e:
+        _warn(f"  · Hermes: copy failed ({e}) — skipping")
+        return False
+
+    _say(f"  · Hermes: m3 provider installed at {dst}")
+    print("    Add m3-memory's bin/ to PYTHONPATH in Hermes' launch env, then")
+    print("    select it via `hermes plugins` (memory providers are single-select).")
+    return True
+
+
 def _step_wire_agents(plan: SetupPlan) -> bool:
     """Wire MCP entries for every selected agent."""
     if not plan.targets.any():
@@ -560,6 +652,8 @@ def _step_wire_agents(plan: SetupPlan) -> bool:
         _wire_opencode()
     if plan.targets.openclaw:
         _wire_openclaw_note()
+    if plan.targets.hermes:
+        _wire_hermes()
     return True
 
 
@@ -619,15 +713,16 @@ def run_setup(args: argparse.Namespace) -> int:
         "Antigravity CLI/Desktop": plan.targets.antigravity,
         "OpenCode": plan.targets.opencode,
         "OpenClaw": plan.targets.openclaw,
+        "Hermes Agent": plan.targets.hermes,
     }.items() if v]
     print(f"  agents       : {', '.join(targets) if targets else '(none)'}")
     print(f"  capture mode : {plan.capture_mode}")
-    print(f"  Embedder     : sovereign CPU (BGE-M3 on :8082) — always installed")
+    print("  Embedder     : sovereign CPU (BGE-M3 on :8082) — always installed")
     print(f"  GPU add-on   : {'yes' if plan.install_gpu_embedder else 'no'}")
     if plan.endpoint:
         print(f"  LLM endpoint : {plan.endpoint}")
     if plan.cognitive_loop:
-        print(f"  cognitive loop: enabled")
+        print("  cognitive loop: enabled")
     print()
 
     if not args.non_interactive and not _ask_yes_no("Proceed?", default=True):

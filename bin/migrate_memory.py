@@ -639,6 +639,11 @@ def cmd_up(args):
         os.makedirs(os.path.dirname(target.db_path), exist_ok=True)
         conn = sqlite3.connect(target.db_path)
         try:
+            conn.execute("PRAGMA busy_timeout = 5000;")
+            conn.execute("PRAGMA locking_mode = EXCLUSIVE;")
+        except sqlite3.Error as e:
+            logger.warning(f"Could not set lock/timeout pragmas: {e}")
+        try:
             init_migrations_table(conn)
             applied = set(get_applied_versions(conn))
             cur = current_version(conn)
@@ -710,6 +715,11 @@ def cmd_down(args):
             logger.info(f"=== Processing {target.name} ===")
 
         conn = sqlite3.connect(target.db_path)
+        try:
+            conn.execute("PRAGMA busy_timeout = 5000;")
+            conn.execute("PRAGMA locking_mode = EXCLUSIVE;")
+        except sqlite3.Error as e:
+            logger.warning(f"Could not set lock/timeout pragmas: {e}")
         try:
             init_migrations_table(conn)
             applied = get_applied_versions(conn)

@@ -873,6 +873,15 @@ def memory_delete_impl(id, hard=False):
                 "DELETE FROM chroma_sync_queue WHERE memory_id = ? AND operation = 'upsert'",
                 (id,),
             )
+    try:
+        from audit_trail import write_audit_entry
+        write_audit_entry(
+            action="memory_delete",
+            target_id=id,
+            metadata={"hard": hard}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to write audit trail entry for delete: {e}")
     return f"{'Hard' if hard else 'Soft'}-deleted: {id}"
 
 
@@ -984,6 +993,21 @@ def memory_delete_bulk_impl(ids, hard=False):
                 )
 
             succeeded.extend(existing_ids)
+
+    try:
+        from audit_trail import write_audit_entry
+        write_audit_entry(
+            action="memory_delete_bulk",
+            target_id="bulk",
+            metadata={
+                "ids": id_list,
+                "hard": hard,
+                "succeeded": succeeded,
+                "not_found": not_found
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to write audit trail entry for bulk delete: {e}")
 
     return {
         "succeeded": succeeded,
