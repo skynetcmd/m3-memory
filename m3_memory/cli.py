@@ -63,12 +63,32 @@ def _ensure_utf8() -> None:
     if not orig:  # defensive — shouldn't happen
         orig = [sys.executable, *sys.argv]
     new_argv = [orig[0], "-X", "utf8", *orig[1:]]
-    try:
-        os.execv(sys.executable, new_argv)
-    except OSError:
-        # Re-exec failed (rare: exotic launcher / permissions). Fall through —
-        # the reconfigure block below still fixes stdio, the common case.
-        pass
+
+    # POSIX: os.execv truly REPLACES this process image — the child IS us, so
+    # its exit code is the process exit code. Nothing to propagate.
+    #
+    # Windows: there is no real exec. Python emulates os.execv by SPAWNING a
+    # child and returning control to the parent, which then exits 0 by falling
+    # through — silently rewriting EVERY non-zero child exit code (argparse
+    # errors, destructive-gate refusals, impl failures) to 0. That violates §3
+    # ("fail loud, never silent"). So on Windows we run the re-exec'd command as
+    # a real subprocess and propagate its exit code explicitly.
+    if os.name == "nt":
+        import subprocess
+        try:
+            completed = subprocess.run(new_argv)
+        except OSError:
+            # Spawn failed (exotic launcher / permissions). Fall through — the
+            # reconfigure block below still fixes stdio, the common case.
+            return
+        sys.exit(completed.returncode)
+    else:
+        try:
+            os.execv(sys.executable, new_argv)
+        except OSError:
+            # Re-exec failed (rare). Fall through — the reconfigure block below
+            # still fixes stdio, the common case.
+            pass
 
 
 _ensure_utf8()
