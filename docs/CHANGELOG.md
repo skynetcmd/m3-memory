@@ -19,6 +19,23 @@ forward-going only.
 
 ---
 
+## [2026.5.29.6] — May 29, 2026 — Windows UTF-8 mode (cp1252 crash class)
+
+### Fixed
+
+- **Eliminated the Windows cp1252 crash class across all clients.** On Windows
+  both stdio AND `open()` default to cp1252, so any non-cp1252 character
+  (em-dashes, arrows, box-drawing, emoji) crashed with `UnicodeEncodeError` on
+  print or `UnicodeDecodeError` on a no-encoding `open()`. The prior per-file
+  stdout reconfigure only patched stdio for one process. Now the entrypoints
+  force true Python UTF-8 mode (PEP 540): `m3_memory.cli` (covers Claude Code /
+  Gemini CLI / OpenCode, which launch the `m3` console script) and
+  `bin/mcp_proxy.py` (covers OpenClaw, which launches the proxy directly) set
+  `PYTHONUTF8=1` and re-exec once with `-X utf8`, so stdio and `open()` are both
+  UTF-8 for the whole process tree. Re-exec is bounded to once (sentinel; cannot
+  loop) and is a no-op when already in UTF-8 mode. Shared resolver added as
+  `m3_sdk.ensure_utf8`.
+
 ## [2026.5.29.5] — May 29, 2026 — Files entity-linking fix
 
 ### Fixed
