@@ -64,6 +64,13 @@ import time
 import uuid
 from typing import Any, AsyncIterator, List, Optional, Union
 
+# Force Python UTF-8 mode before any output. This proxy is launched directly
+# (`python bin/mcp_proxy.py` — the OpenClaw path), bypassing the m3 CLI, so it
+# can't rely on the CLI's UTF-8 re-exec. Re-execs once; no-op if already UTF-8.
+from m3_sdk import ensure_utf8 as _ensure_utf8
+
+_ensure_utf8()
+
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
