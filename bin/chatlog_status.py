@@ -271,8 +271,119 @@ def _get_last_turns(main_db: str) -> list[dict[str, str]]:
     return list(reversed(turns))
 
 
-def run_live_tui():
-    """Runs a zero-dependency ANSI live terminal dashboard."""
+def _get_keypress(timeout: float) -> str | None:
+    """Read a keypress within timeout. Supports Windows and Unix."""
+    import sys
+    import time
+
+    start_time = time.time()
+
+    if sys.platform == "win32":
+        import msvcrt
+        while time.time() - start_time < timeout:
+            if msvcrt.kbhit():
+                try:
+                    ch = msvcrt.getch()
+                    if isinstance(ch, bytes):
+                        val = ch.decode("utf-8", errors="ignore").lower()
+                        if val:
+                            return val
+                    else:
+                        val = str(ch).lower()
+                        if val:
+                            return val
+                except Exception:
+                    pass
+            time.sleep(0.05)
+        return None
+    else:
+        import select
+        import tty
+        import termios
+
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            time.sleep(timeout)
+            return None
+
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while time.time() - start_time < timeout:
+                rem = timeout - (time.time() - start_time)
+                step = min(0.05, max(0.01, rem))
+                rlist, _, _ = select.select([sys.stdin], [], [], step)
+                if rlist:
+                    ch = sys.stdin.read(1)
+                    return ch.lower()
+        except Exception:
+            time.sleep(timeout)
+            return None
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
+        return None
+
+
+def _wait_for_any_key() -> None:
+    """Wait for any keypress. Supports Windows and Unix."""
+    import sys
+    import time
+    if sys.platform == "win32":
+        import msvcrt
+        while msvcrt.kbhit():
+            msvcrt.getch()
+        while not msvcrt.kbhit():
+            time.sleep(0.05)
+        msvcrt.getch()
+    else:
+        import select
+        import tty
+        import termios
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            time.sleep(2.0)
+            return
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            select.select([sys.stdin], [], [])
+            sys.stdin.read(1)
+        except Exception:
+            time.sleep(2.0)
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except Exception:
+                pass
+
+
+def _run_subprocess_interactive(cmd: list[str]) -> None:
+    """Pause live TUI, restore cursor, execute subprocess, wait for key, and resume."""
+    import subprocess
+    print("\033[?25h", end="")
+    print("\033[H\033[J", end="")
+    print(f"\n>>> Executing command:\n    {' '.join(cmd)}")
+    print("=" * 80)
+    
+    try:
+        result = subprocess.run(cmd, shell=False)
+        print("=" * 80)
+        print(f"Command finished with exit code {result.returncode}.")
+    except Exception as e:
+        print("=" * 80)
+        print(f"Error executing command: {e}")
+    
+    print("\nPress any key to return to the live monitor...")
+    _wait_for_any_key()
+    print("\033[?25l", end="")
+
+
+def run_live_tui(interval: float = 5.0):
+    """Runs a zero-dependency ANSI live terminal dashboard with interactive controls."""
     import time
     from m3_sdk import resolve_db_path
 
@@ -282,6 +393,7 @@ def run_live_tui():
     tick = 0
     t1_state = None
     t2_state = None
+    current_interval = interval
 
     while True:
         # Move cursor to home and clear screen
@@ -302,8 +414,14 @@ def run_live_tui():
         chroma_q = _get_chroma_queue_count(main_db)
         last_turns = _get_last_turns(main_db)
 
-        # Refresh embedding cascade stats every 10 ticks (seconds) to keep UI fast
-        if tick % 10 == 0 or t1_state is None:
+        # Refresh embedding cascade stats every tick if interval is slow, or every 10 ticks if fast
+        refresh_cascade = False
+        if current_interval >= 5.0:
+            refresh_cascade = True
+        else:
+            refresh_cascade = (tick % int(5.0 / max(0.1, current_interval)) == 0) if current_interval > 0 else True
+
+        if refresh_cascade or t1_state is None:
             try:
                 from memory import doctor as doc
                 t1_state = doc._probe_tier1()
@@ -334,15 +452,15 @@ def run_live_tui():
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append("│ EMBEDDING CASCADE DIAGNOSTICS                                              │")
         
-        t1_status = t1_state.get("status", "unknown").upper()
-        t1_path = t1_state.get("gguf_path") or "Not set"
+        t1_status = t1_state.get("status", "unknown").upper() if t1_state else "UNKNOWN"
+        t1_path = t1_state.get("gguf_path") or "Not set" if t1_state else "Not set"
         if len(t1_path) > 45:
             t1_path = "..." + t1_path[-42:]
         lines.append(f"│  GGUF (Tier 1):     [{t1_status:<14}] Path: {t1_path:<40} │")
         
-        t2_status = t2_state.get("status", "unknown").upper()
-        t2_url = t2_state.get("url") or "Not set"
-        t2_lat = t2_state.get("latency_ms")
+        t2_status = t2_state.get("status", "unknown").upper() if t2_state else "UNKNOWN"
+        t2_url = t2_state.get("url") or "Not set" if t2_state else "Not set"
+        t2_lat = t2_state.get("latency_ms") if t2_state else None
         lat_str = f"({t2_lat} ms)" if t2_lat is not None else "(Offline)"
         lines.append(f"│  Fallback (Tier 2): [{t2_status:<14}] URL: {t2_url:<27} {lat_str:<12} │")
         
@@ -383,10 +501,37 @@ def run_live_tui():
             lines.append("│  (No chatlog capture turns found yet)                                      │")
             
         lines.append("└────────────────────────────────────────────────────────────────────────────┘")
-        lines.append("  [Press Ctrl+C to exit]")
+        lines.append(f"  [Ctrl+C / Q] Exit  |  [+] / [-] Change Interval ({current_interval:.1f}s)")
+        lines.append("  Interactive Actions:")
+        lines.append("  [D] Decay Sweep (Dry-run)  |  [A] Apply Decay Sweep  |  [S] Run Embed Sweeper")
+        lines.append("  [T] Backfill Titles        |  [E] Backfill Embeddings")
 
         print("\n".join(lines))
-        time.sleep(1.0)
+
+        # Read keypress
+        key = _get_keypress(current_interval)
+        if key:
+            if key in ("q", "\x03"):
+                raise KeyboardInterrupt()
+            elif key == "+":
+                current_interval = min(60.0, current_interval + 1.0)
+            elif key == "-":
+                current_interval = max(0.5, current_interval - 1.0)
+            elif key == "d":
+                cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db]
+                _run_subprocess_interactive(cmd)
+            elif key == "a":
+                cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db, "--apply"]
+                _run_subprocess_interactive(cmd)
+            elif key == "s":
+                cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_embed_sweeper.py"), "--database", main_db, "--drain-spill"]
+                _run_subprocess_interactive(cmd)
+            elif key == "t":
+                cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_title.py")]
+                _run_subprocess_interactive(cmd)
+            elif key == "e":
+                cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_embed.py")]
+                _run_subprocess_interactive(cmd)
 
 
 def _format_table(data: dict[str, Any]) -> str:
@@ -409,14 +554,29 @@ def _format_table(data: dict[str, Any]) -> str:
 
 
 def main():
-    if "--live" in sys.argv:
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="chatlog_status.py — summary of the chat log subsystem state."
+    )
+    parser.add_argument("--json", action="store_true", help="Output JSON format")
+    parser.add_argument("--live", action="store_true", help="Run live status monitor")
+    parser.add_argument(
+        "-i", "--interval",
+        type=float,
+        default=5.0,
+        help="Refresh interval for live monitor in seconds (default: 5.0)"
+    )
+
+    args = parser.parse_args()
+
+    if args.live:
         try:
-            run_live_tui()
+            run_live_tui(interval=args.interval)
         except KeyboardInterrupt:
             # Restore cursor and exit
             print("\033[?25h\nLive status monitor closed.")
             sys.exit(0)
-    elif "--json" in sys.argv:
+    elif args.json:
         print(chatlog_status_impl())
     else:
         status_json = chatlog_status_impl()
