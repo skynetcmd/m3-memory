@@ -317,7 +317,7 @@ def set_api_key(service: str, value: str):
         raise ValueError("AGENT_OS_MASTER_KEY not found in OS keyring. Cannot encrypt secret.")
 
     encrypted_value = _encrypt_value(value, master_key)
-    origin_device = os.environ.get("ORIGIN_DEVICE", platform.node())
+    origin_device = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
     # ISO-8601 UTC timestamp
     now = datetime.now(timezone.utc).isoformat()
 

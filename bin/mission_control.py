@@ -20,9 +20,9 @@ import psutil
 import requests
 
 # ── Platform detection ────────────────────────────────────────────────────────
-IS_WIN   = platform.system() == "Windows"
-IS_MAC   = platform.system() == "Darwin"
-IS_LINUX = platform.system() == "Linux"
+IS_WIN   = sys.platform == "win32"
+IS_MAC   = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
 
 # ── UTF-8 stdout (Windows terminals default to cp1252) ────────────────────────
 if IS_WIN:

@@ -9,31 +9,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 @pytest.fixture
 def trim_legacy(monkeypatch):
-    """Reload memory_core with the documented small-pool override so the trim
+    """Binds the documented small-pool overrides on the config module so the trim
     fires on the 5-element pools these tests use. Defaults (MIN_INPUT=20)
-    skip trimming for pools under 20; the legacy override (=3) restores the
-    pre-scale-fix behavior. See commit ca33b7278 for the rationale.
-
-    Post Phase-7+8 refactor: `_trim_by_elbow` reads `config.ELBOW_MIN_INPUT`
-    at call time from `memory.config`, so we must reload that module too
-    (the fixture used to only reload memory_core, which left a stale
-    config-bound copy of the override in memory.config — causing
-    test_default_min_input_skips_small_pools to fail when run AFTER any
-    fixture-using test in the same session).
+    skip trimming for pools under 20.
+    
+    Using monkeypatch.setattr directly on the config module object avoids
+    reload-based state leakage or sys.modules mismatch errors across tests.
     """
-    monkeypatch.setenv("M3_ELBOW_MIN_INPUT", "3")
-    monkeypatch.setenv("M3_ELBOW_MIN_RETURN", "1")
-    monkeypatch.setenv("M3_ELBOW_ABS_THRESHOLD", "0.0")
+    import sys
     import memory_core
-    from memory import config as _mem_config
-    importlib.reload(_mem_config)
-    importlib.reload(memory_core)
+    for name, module in list(sys.modules.items()):
+        if hasattr(module, "ELBOW_MIN_INPUT"):
+            monkeypatch.setattr(module, "ELBOW_MIN_INPUT", 3)
+            monkeypatch.setattr(module, "ELBOW_MIN_RETURN", 1)
+            monkeypatch.setattr(module, "ELBOW_ABS_THRESHOLD", 0.0)
     yield memory_core._trim_by_elbow
-    monkeypatch.delenv("M3_ELBOW_MIN_INPUT", raising=False)
-    monkeypatch.delenv("M3_ELBOW_MIN_RETURN", raising=False)
-    monkeypatch.delenv("M3_ELBOW_ABS_THRESHOLD", raising=False)
-    importlib.reload(_mem_config)
-    importlib.reload(memory_core)
 
 
 def _ranked(scores):

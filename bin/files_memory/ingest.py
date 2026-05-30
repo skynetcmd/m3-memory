@@ -102,7 +102,7 @@ def _iso_utc(ts: float | None = None) -> str:
 
 def _source_host() -> str:
     """Identifier for the host that produced this ingest record."""
-    return platform.node() or socket.gethostname() or "unknown"
+    return os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node() or socket.gethostname() or "unknown"
 
 
 def _next_version_label(conn, identity_key: str) -> str:
