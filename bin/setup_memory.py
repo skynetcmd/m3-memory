@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 BASE   = pathlib.Path(__file__).parent.parent.resolve()
-IS_WIN = platform.system() == "Windows"
+IS_WIN = sys.platform == "win32"
 VENV   = BASE / ".venv"
 PY     = VENV / ("Scripts/python.exe" if IS_WIN else "bin/python")
 PIP    = VENV / ("Scripts/pip.exe"    if IS_WIN else "bin/pip")

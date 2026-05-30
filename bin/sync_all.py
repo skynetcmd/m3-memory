@@ -26,7 +26,7 @@ import socket
 import subprocess
 import sys
 
-IS_WIN = platform.system() == "Windows"
+IS_WIN = sys.platform == "win32"
 
 BASE    = pathlib.Path(__file__).parent.parent.resolve()
 LOG_DIR = BASE / "logs"

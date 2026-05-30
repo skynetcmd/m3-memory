@@ -33,7 +33,7 @@ TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def _is_windows() -> bool:
-    return platform.system() == "Windows"
+    return sys.platform == "win32"
 
 
 # --- Windows persistence ---------------------------------------------------

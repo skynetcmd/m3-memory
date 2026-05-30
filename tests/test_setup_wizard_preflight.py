@@ -14,8 +14,8 @@ a monkey-patched subprocess.run.
 """
 from __future__ import annotations
 
-import platform
 import subprocess
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -102,7 +102,7 @@ def test_discover_priority_lmstudio_wins_over_models_dir(monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(
-    platform.system() != "Windows",
+    sys.platform != "win32",
     reason="tasklist-based scan is Windows-only by design",
 )
 def test_find_running_returns_empty_list_on_no_matches(monkeypatch):
@@ -114,7 +114,7 @@ def test_find_running_returns_empty_list_on_no_matches(monkeypatch):
 
 
 @pytest.mark.skipif(
-    platform.system() != "Windows",
+    sys.platform != "win32",
     reason="tasklist-based scan is Windows-only by design",
 )
 def test_find_running_parses_csv_pids(monkeypatch):
@@ -132,13 +132,13 @@ def test_find_running_parses_csv_pids(monkeypatch):
 def test_find_running_returns_empty_on_non_windows(monkeypatch):
     """On Unix the scan short-circuits to an empty list (rename-in-place
     means a running binary doesn't block reinstall — no scan needed)."""
-    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sys, "platform", "linux")
     assert setup_wizard._find_running_mcp_memory_processes() == []
 
 
 def test_find_running_handles_subprocess_error(monkeypatch):
     """Tasklist crash or timeout returns [], doesn't raise."""
-    if platform.system() != "Windows":
+    if sys.platform != "win32":
         pytest.skip("error-handling path only fires when tasklist would be invoked")
 
     def boom(*a, **kw):

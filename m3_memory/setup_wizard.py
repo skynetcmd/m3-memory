@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -246,7 +245,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     # On Windows, pip install -e cannot overwrite mcp-memory.exe if a
     # process is using it. Detect + offer to kill (interactive) or warn
     # (non-interactive).
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         running = _find_running_mcp_memory_processes()
         if running:
             _warn(f"  {len(running)} mcp-memory.exe process(es) running: {running}")
@@ -333,7 +332,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
 
 def _find_running_mcp_memory_processes() -> list[int]:
     """Return PIDs of any running mcp-memory.exe processes. Windows only."""
-    if platform.system() != "Windows":
+    if sys.platform != "win32":
         return []
     try:
         out = subprocess.run(
@@ -505,7 +504,7 @@ def _wire_gemini() -> bool:
 
 def _wire_opencode() -> bool:
     """Append an `m3` MCP entry to the user's opencode.json. Idempotent."""
-    if platform.system() == "Windows":
+    if sys.platform == "win32":
         cfg_path = Path(os.environ.get("APPDATA", "")) / "opencode" / "opencode.json"
     else:
         cfg_path = Path.home() / ".config" / "opencode" / "opencode.json"
