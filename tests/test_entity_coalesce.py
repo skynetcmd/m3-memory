@@ -193,7 +193,9 @@ def test_review_non_list_raises(tmp_entity_db):
 def test_apply_creates_reversible_overlay_then_unapply_restores(tmp_entity_db):
     # detect -> the 'small models'/'small model' pair lands in the merge band
     ec.coalesce_detect(dry_run=False, max_pairs=50)
-    res = ec.apply_coalescence(include_auto_merge=True, dry_run=False)
+    # explicit db_path satisfies the mutation guard AND exercises isolation
+    res = ec.apply_coalescence(include_auto_merge=True, dry_run=False,
+                               db_path=os.environ["M3_MEMORY_DB"])
     assert res["applied"] >= 1
     cid = res["clusters_touched"][0]
 
@@ -207,7 +209,7 @@ def test_apply_creates_reversible_overlay_then_unapply_restores(tmp_entity_db):
     assert total == 7  # nothing deleted — members intact (lesson #1)
 
     # reverse: unapply fully restores (drop edge + clear cluster_id)
-    rev = ec.unapply_cluster(cid)
+    rev = ec.unapply_cluster(cid, db_path=os.environ["M3_MEMORY_DB"])
     assert rev["reverted_members"] >= 1
     conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
     assert conn.execute("SELECT count(*) FROM entities WHERE cluster_id=?", (cid,)).fetchone()[0] == 0
@@ -220,7 +222,7 @@ def test_apply_creates_reversible_overlay_then_unapply_restores(tmp_entity_db):
 
 def test_apply_dry_run_writes_nothing(tmp_entity_db):
     ec.coalesce_detect(dry_run=False, max_pairs=50)
-    ec.apply_coalescence(include_auto_merge=True, dry_run=True)
+    ec.apply_coalescence(include_auto_merge=True, dry_run=True)  # dry-run needs no guard
     conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
     sa = conn.execute("SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
     conn.close()
@@ -230,5 +232,27 @@ def test_apply_dry_run_writes_nothing(tmp_entity_db):
 def test_apply_with_nothing_selected_is_noop(tmp_entity_db):
     ec.coalesce_detect(dry_run=False, max_pairs=50)
     # neither explicit uuids nor include_auto_merge -> nothing selected
-    res = ec.apply_coalescence(dry_run=False)
+    res = ec.apply_coalescence(dry_run=False, db_path=os.environ["M3_MEMORY_DB"])
     assert res["applied"] == 0
+
+
+def test_apply_refuses_real_write_without_target_or_confirm(tmp_entity_db):
+    # MUTATION GUARD: a real apply with neither db_path nor confirm must refuse,
+    # NOT silently write to the resolved core DB.
+    ec.coalesce_detect(dry_run=False, max_pairs=50)
+    res = ec.apply_coalescence(include_auto_merge=True, dry_run=False)  # no db_path, no confirm
+    assert res["applied"] == 0
+    assert "refused" in res.get("error", "")
+    # nothing written
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    sa = conn.execute("SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
+    conn.close()
+    assert sa == 0
+
+
+def test_apply_allows_real_write_with_confirm(tmp_entity_db, monkeypatch):
+    # confirm=True is the explicit acknowledgement path (resolves core DB; here
+    # the fixture pointed M3_MEMORY_DB at the tmp DB, so it stays isolated).
+    ec.coalesce_detect(dry_run=False, max_pairs=50)
+    res = ec.apply_coalescence(include_auto_merge=True, dry_run=False, confirm=True)
+    assert res["applied"] >= 1
