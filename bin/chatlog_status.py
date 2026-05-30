@@ -397,13 +397,22 @@ def _wait_for_any_key() -> None:
 def _run_subprocess_interactive(cmd: list[str]) -> None:
     """Pause live TUI, restore cursor, execute subprocess, wait for key, and resume."""
     import subprocess
+    import os
     print("\033[?25h", end="")
     print("\033[H\033[J", end="")
     print(f"\n>>> Executing command:\n    {' '.join(cmd)}")
     print("=" * 80)
     
+    # Add bin directory to PYTHONPATH so packages like files_memory are importable when run as modules
+    env = os.environ.copy()
+    bin_dir = os.path.dirname(os.path.abspath(__file__))
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = bin_dir + os.pathsep + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = bin_dir
+    
     try:
-        result = subprocess.run(cmd, shell=False)
+        result = subprocess.run(cmd, env=env, shell=False)
         print("=" * 80)
         print(f"Command finished with exit code {result.returncode}.")
     except Exception as e:
@@ -602,7 +611,7 @@ def run_live_tui(interval: float = 5.0):
                 cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_embed.py")]
                 _run_subprocess_interactive(cmd)
             elif key == "h":
-                cmd = [sys.executable, os.path.join(os.path.dirname(__file__), "files_memory", "tools.py"), "health", "--rebuild"]
+                cmd = [sys.executable, "-m", "files_memory.tools", "health", "--rebuild"]
                 _run_subprocess_interactive(cmd)
             elif key == "f":
                 print("\033[?25h", end="") # Show cursor
@@ -638,7 +647,8 @@ def run_live_tui(interval: float = 5.0):
                         
                         cmd = [
                             sys.executable,
-                            os.path.join(os.path.dirname(__file__), "files_memory", "tools.py"),
+                            "-m",
+                            "files_memory.tools",
                             "ingest",
                             resolved_path,
                             "--mode",
