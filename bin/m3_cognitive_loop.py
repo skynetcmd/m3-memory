@@ -37,7 +37,7 @@ if str(_BIN) not in sys.path:
 import chatlog_config
 import m3_enrich
 import m3_entities
-from m3_sdk import M3Context, resolve_db_path, get_governor_pacing
+from m3_sdk import M3Context, get_governor_pacing, resolve_db_path
 
 # PID file path for single-instance locking
 PID_FILE = REPO_ROOT / "memory" / "cognitive_loop.pid"

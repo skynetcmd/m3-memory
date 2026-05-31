@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from embedding_utils import infer_change_agent as _infer_change_agent_util
-from m3_sdk import M3Context, resolve_db_path, migration_lock
+from m3_sdk import M3Context, migration_lock, resolve_db_path
 
 from . import config
 
