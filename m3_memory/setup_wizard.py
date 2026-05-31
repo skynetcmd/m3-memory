@@ -122,29 +122,38 @@ def _detect_agents() -> AgentTargets:
 def _find_hermes_plugins_dir() -> Optional[Path]:
     """Locate the hermes-agent install's plugins/memory/ dir, or None.
 
-    Hermes Agent has no fixed install root, so we probe the common spots:
-    the HERMES_HOME env var, ~/.hermes, and a few default checkout locations.
-    We look for a `plugins/memory` subtree (the single-select memory-provider
-    slot) — its presence is what lets us drop the m3 provider into place.
+    Hermes Agent has no fixed install root, so we probe the common spots. Two
+    layouts exist: the checkout root holds plugins/memory directly, OR an
+    app-data home dir (e.g. %LOCALAPPDATA%\\hermes) contains a `hermes-agent/`
+    checkout one level down. We test both `<root>/plugins/memory` and
+    `<root>/hermes-agent/plugins/memory` for every candidate. The
+    plugins/memory subtree is the single-select memory-provider slot — its
+    presence is what lets us drop the m3 provider into place.
     """
-    candidates = []
+    roots = []
     env_home = os.environ.get("HERMES_HOME")
     if env_home:
-        candidates.append(Path(env_home))
-    candidates += [
+        roots.append(Path(env_home))
+    # Windows app-data location (the `hermes` CLI's default home).
+    localappdata = os.environ.get("LOCALAPPDATA")
+    if localappdata:
+        roots.append(Path(localappdata) / "hermes")
+    roots += [
+        Path.home() / "AppData" / "Local" / "hermes",  # explicit Windows fallback
         Path.home() / ".hermes",
         Path.home() / "hermes-agent",
         Path.home() / "hermes",
         Path.home() / "src" / "hermes-agent",
         Path.home() / "code" / "hermes-agent",
     ]
-    for root in candidates:
-        try:
-            pm = root / "plugins" / "memory"
-            if pm.is_dir():
-                return pm
-        except OSError:
-            continue
+    for root in roots:
+        for pm in (root / "plugins" / "memory",
+                   root / "hermes-agent" / "plugins" / "memory"):
+            try:
+                if pm.is_dir():
+                    return pm
+            except OSError:
+                continue
     return None
 
 
