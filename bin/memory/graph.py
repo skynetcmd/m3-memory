@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from collections.abc import Collection
 
+from . import config
 from .config import EMBED_DIM, ENTITY_SEED_STOPLIST
 from .db import _db
 from .embed import _embed
@@ -41,8 +42,53 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
     if depth <= 0 or not seed_ids:
         return set()
     depth = min(int(depth), 3)
+
+    # Oxidation (Phase C.2): when m3_core_rs is present, collect the reachable
+    # edge set from SQLite (still index-driven per hop) into a Rust GraphIndex
+    # and let it do the multi-hop dedup/merge traversal in one call. The Python
+    # path below is the exact-parity fallback. memory_relationships edges are
+    # treated as undirected here (the SQL UNION follows both from->to and
+    # to->from), so each edge is added in both directions to the index.
+    _rs = config.m3_core_rs
+    if _rs is not None:
+        try:
+            graph = _rs.GraphIndex()
+            seen_for_fetch: set = set(seed_ids)
+            frontier: set = set(seed_ids)
+            with _db() as db:
+                for _ in range(depth):
+                    if not frontier:
+                        break
+                    frontier_list = list(frontier)
+                    placeholders = ",".join("?" * len(frontier_list))
+                    rows = db.execute(
+                        f"SELECT from_id, to_id FROM memory_relationships "
+                        f"WHERE from_id IN ({placeholders}) "
+                        f"UNION "
+                        f"SELECT from_id, to_id FROM memory_relationships "
+                        f"WHERE to_id IN ({placeholders})",
+                        frontier_list + frontier_list,
+                    ).fetchall()
+                    next_frontier: set = set()
+                    for r in rows:
+                        fid, tid = r["from_id"], r["to_id"]
+                        graph.add_edge(fid, tid, "rel", 1.0)
+                        graph.add_edge(tid, fid, "rel", 1.0)
+                        for nid in (fid, tid):
+                            if nid not in seen_for_fetch:
+                                seen_for_fetch.add(nid)
+                                next_frontier.add(nid)
+                    frontier = next_frontier
+            # expand() returns the reachable node set within `depth` hops,
+            # excluding the seeds themselves — exactly _graph_neighbor_ids's
+            # contract. The limit is generous; the bounded edge fetch above
+            # already caps the graph size.
+            return set(graph.expand(list(seed_ids), depth, 100_000))
+        except Exception:  # noqa: BLE001 — any FFI hiccup falls back to Python
+            logger.debug("m3_core_rs GraphIndex traversal failed; using Python path", exc_info=True)
+
     seen: set = set(seed_ids)
-    frontier: set = set(seed_ids)
+    frontier = set(seed_ids)
     with _db() as db:
         for _ in range(depth):
             if not frontier:
@@ -57,7 +103,7 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
                 f"WHERE to_id IN ({placeholders})",
                 frontier_list + frontier_list,
             ).fetchall()
-            next_frontier: set = set()
+            next_frontier = set()
             for r in rows:
                 nid = r["nid"]
                 if nid not in seen:
