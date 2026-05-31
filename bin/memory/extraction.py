@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import importlib.util
 import json
 import logging
 import os
 import re
 import sys
-import importlib.util
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 # Ensure bin/ is on path for unified_ai and llm_failover imports
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,8 +23,9 @@ _BIN = os.path.dirname(_HERE)
 if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
-import unified_ai
 import llm_failover
+import unified_ai
+
 from memory import config as _config
 from memory import entity as _entity_mod
 
@@ -72,7 +73,7 @@ class BaseExtractor(abc.ABC):
 # ──────────────────────────────────────────────────────────────────────────────
 def normalize_entity_id(name: str, etype: str) -> str:
     """Slugify and prefix entity name to generate a canonical entity ID.
-    
+
     Example: normalize_entity_id("Roanoke", "place") -> "place:roanoke"
     """
     clean = name.strip().lower()
@@ -83,7 +84,7 @@ def normalize_entity_id(name: str, etype: str) -> str:
 
 def canonicalize_relationship(rel_type: str) -> str:
     """Normalize a relationship predicate string to snake_case.
-    
+
     Example: canonicalize_relationship("lives in") -> "lives_in"
     """
     clean = rel_type.strip().lower()
@@ -99,9 +100,9 @@ class RuleBasedExtractor(BaseExtractor):
     """Heuristic rule-based extractor using regular expressions and vocabulary list alignment."""
 
     async def extract(self, text: str) -> dict:
-        entities = []
-        relationships = []
-        
+        entities: list[dict[str, Any]] = []
+        relationships: list[dict[str, Any]] = []
+
         # Pull active vocabulary from entity.py
         active_types = _entity_mod.VALID_ENTITY_TYPES
         active_predicates = _entity_mod.VALID_ENTITY_PREDICATES
@@ -131,7 +132,7 @@ class RuleBasedExtractor(BaseExtractor):
         # 2. Capitalized words (Person, Place, Organization candidate)
         # Match consecutive capitalized words, e.g., "John Doe", "Roanoke", "Google Corp"
         matches = re.finditer(r"\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\b", text)
-        
+
         for m in matches:
             name = m.group(1)
             offset = m.start()
@@ -139,7 +140,7 @@ class RuleBasedExtractor(BaseExtractor):
                 continue
             if name in extracted_names:
                 continue
-                
+
             # Classify based on heuristics or active vocab defaults
             etype = "person"
             if any(term in name.lower() for term in ("corp", "inc", "ltd", "google", "microsoft", "amazon", "github", "apple")):
@@ -180,7 +181,7 @@ class RuleBasedExtractor(BaseExtractor):
                             "predicate": pred,
                             "confidence": 0.75
                         })
-            
+
             # check works at (allowing intermediate words or overall context)
             for org in org_nodes:
                 p = re.escape(person)
@@ -368,18 +369,18 @@ class CustomScriptExtractor(BaseExtractor):
             spec = importlib.util.spec_from_file_location("custom_extractor_mod", str(path))
             if spec is None or spec.loader is None:
                 raise ValueError(f"Could not load spec for {path}")
-                
+
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
-            
+
             fn = getattr(mod, self.function_name)
-            
+
             # Support both async and sync custom functions
             if asyncio.iscoroutinefunction(fn):
                 res = await fn(text)
             else:
                 res = fn(text)
-                
+
             if not isinstance(res, dict):
                 raise ValueError("Custom script extraction must return a dict.")
             return res
@@ -445,7 +446,7 @@ async def extract_entities_impl(text: str) -> str:
     extractor = get_configured_extractor()
     try:
         res = await extractor.extract(text)
-        
+
         # Verify result format contains the necessary lists
         if not isinstance(res, dict):
             res = {"entities": [], "relationships": []}
@@ -453,11 +454,11 @@ async def extract_entities_impl(text: str) -> str:
             res["entities"] = []
         if "relationships" not in res:
             res["relationships"] = []
-            
+
         # Clean and normalize extraction formats
         active_types = _entity_mod.VALID_ENTITY_TYPES
         active_predicates = _entity_mod.VALID_ENTITY_PREDICATES
-        
+
         cleaned_entities = []
         for ent in res["entities"]:
             cname = (ent.get("canonical_name") or ent.get("name") or "").strip()
@@ -471,7 +472,7 @@ async def extract_entities_impl(text: str) -> str:
                 "mention_offset": int(ent.get("mention_offset") or 0),
                 "confidence": float(ent.get("confidence") or 0.85)
             })
-            
+
         cleaned_relationships = []
         for rel in res["relationships"]:
             from_ent = (rel.get("from_entity") or rel.get("from") or "").strip()
@@ -485,7 +486,7 @@ async def extract_entities_impl(text: str) -> str:
                 "predicate": pred,
                 "confidence": float(rel.get("confidence") or 0.85)
             })
-            
+
         return json.dumps({"entities": cleaned_entities, "relationships": cleaned_relationships})
     except Exception as e:
         logger.error(f"extract_entities_impl failed: {e}")
