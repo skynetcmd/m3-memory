@@ -59,7 +59,11 @@ Before any push to a remote:
    cites the tenet and always exits 0, because legitimate exceptions exist
    (migrations, fixtures). The *judgment* tenets — Effectiveness metric
    pre-registration (§5), performance budgets (§8), one-feature-per-PR (§2) —
-   cannot be regex-checked; hold them yourself and in review.
+   cannot be regex-checked; hold them yourself and in review. When a push
+   changes code (`bin/`/`m3_memory/` `.py`), the hook also prints a short
+   **guidelines reminder** of those judgment tenets so they aren't silently
+   skipped — a prompt to re-read [`DESIGN_PHILOSOPHIES.md`](DESIGN_PHILOSOPHIES.md),
+   not a gate.
 
 **Enforcement is layered (defense in depth) so no agent can bypass it by
 reading the "wrong" file:**

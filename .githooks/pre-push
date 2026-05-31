@@ -61,4 +61,22 @@ echo "[pre-push] 3/3 design-philosophy advisory scan"
 # proceeds regardless; the script itself also always exits 0.
 "$PY" bin/check_design_philosophy.py || true
 
+# Guidelines reminder — only when this push actually changes code (bin/ or
+# m3_memory/ .py), not on docs/config-only pushes. The static scan above
+# catches the regex-checkable bans; these are the JUDGMENT tenets it cannot
+# check, surfaced as a prompt so they aren't silently skipped.
+CODE_CHANGED="$(git diff --name-only "$RANGE" -- 'bin/**/*.py' 'm3_memory/**/*.py' 'bin/*.py' 2>/dev/null || true)"
+if [ -n "$CODE_CHANGED" ]; then
+  cat >&2 <<'REMINDER'
+[pre-push] Design philosophies — hold these as you push (docs/DESIGN_PHILOSOPHIES.md):
+   - Effectiveness (§5): does it move a pre-registered metric? "It compiles" is the floor.
+   - Robustness (§3): fail loud, structured returns, empty=zero/list never None.
+   - Efficiency (§4) / Performance (§8): SQL not Python aggregation; meet P50/P95/P99 budgets.
+   - Hardening (§6) / Privacy (§7): parameterized SQL, gated destructive ops, scope on every query.
+   - Modularity (§2): one feature per PR; shim-preserved identity.
+   - Tool-shape (§12): returns are an API surface — give agents rows, not prose.
+   Full text: docs/DESIGN_PHILOSOPHIES.md (re-read §2-§8 before adding a tool/submodule/impl fn).
+REMINDER
+fi
+
 echo "[pre-push] OK — drift clean, no leakage detected."
