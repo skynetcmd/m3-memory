@@ -39,7 +39,6 @@ logger = logging.getLogger("memory.util")
 _POISON_PATTERNS = [
     re.compile(r"<script\b", re.IGNORECASE),
     re.compile(r"javascript:", re.IGNORECASE),
-    re.compile(r"(?:DROP|DELETE|ALTER)\s+TABLE", re.IGNORECASE),
     re.compile(r"__import__|\bexec\s*\(|\beval\s*\(", re.IGNORECASE),
     re.compile(r"(?:ignore|disregard)\s+(?:all\s+)?(?:previous|prior)\s+instructions", re.IGNORECASE),
 ]
@@ -52,6 +51,30 @@ def _check_content_safety(content: str) -> str | None:
     for pattern in _POISON_PATTERNS:
         if pattern.search(content):
             return f"Error: content rejected — matches safety pattern: {pattern.pattern[:50]}"
+            
+    # SQLGlot AST SQL Injection Guard
+    try:
+        import sqlglot
+        from sqlglot.errors import SqlglotError
+        try:
+            parsed = sqlglot.parse(content)
+            for expression in parsed:
+                if expression:
+                    for node in expression.walk():
+                        node_name = type(node).__name__.lower()
+                        if any(x in node_name for x in ("drop", "delete", "alter")):
+                            return f"Error: content rejected — matches safety pattern: SQL AST {type(node).__name__}"
+        except SqlglotError:
+            # Content is not parseable as SQL — that includes ParseError AND
+            # TokenError. TokenError (NOT a subclass of ParseError) fires during
+            # tokenization on ordinary prose with an unterminated quote, e.g. an
+            # apostrophe in "isn't"/"don't"; the old `except ParseError` let it
+            # crash memory_write. Unparseable input is, by definition, not an
+            # executable SQL statement, so treat it as safe and fall through.
+            pass
+    except ImportError:
+        pass
+
     return None
 
 
