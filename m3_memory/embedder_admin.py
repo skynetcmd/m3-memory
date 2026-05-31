@@ -26,8 +26,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from m3_memory._platform import os_name as _os_name
-
 # ── locations ─────────────────────────────────────────────────────────────────
 
 def _m3_root() -> Path:
@@ -239,50 +237,25 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 
 
 def cmd_install_gpu(args: argparse.Namespace) -> int:
-    """Rebuild m3-core-rs with the appropriate `embedded-<gpu>` feature.
+    """Install the m3-core-rs Rust core with GPU acceleration for this host.
 
-    Picks the feature based on what's available:
-      Apple Silicon / macOS  -> embedded-metal
-      NVIDIA + nvcc on PATH  -> embedded-cuda
-      Vulkan SDK env var set -> embedded-vulkan
-      else                   -> error (user must install GPU toolchain first)
+    Detects the backend (macOS->Metal, NVIDIA->CUDA, Vulkan->Vulkan, else CPU)
+    and installs the matching prebuilt wheel from PyPI
+    (``m3-core-rs-<os>-<backend>``), falling back to a from-source build only
+    when no prebuilt wheel exists for this platform/Python.
+
+    Backend detection and install logic live in ``rust_core_install`` so the
+    setup wizard and this command share one code path; that module also holds
+    the (os, backend) -> package-name mapping that mirrors the m3-core-rs
+    ``build_wheel.py`` used to publish the wheels.
     """
-    system = _os_name()
-    feature: Optional[str] = None
-    if system == "Darwin":
-        feature = "embedded-metal"
-    elif shutil.which("nvcc"):
-        feature = "embedded-cuda"
-    elif os.environ.get("VULKAN_SDK"):
-        feature = "embedded-vulkan"
-    else:
-        print(
-            "Error: no GPU toolchain detected.\n"
-            "  Install one and re-run:\n"
-            "    CUDA: install CUDA Toolkit + add nvcc to PATH\n"
-            "    Vulkan: install Vulkan SDK + set VULKAN_SDK\n"
-            "    Metal: macOS only (auto-detected)",
-            file=sys.stderr,
-        )
-        return 1
+    from m3_memory import rust_core_install
 
-    print(f"[~] building m3-core-rs with feature={feature}")
-    # m3-core-rs isn't on PyPI yet, so we pip-install it directly from git.
-    # M3_CORE_RS_BUILD_FEATURES is the conventional env var that the crate's
-    # build.rs reads to pick the GPU backend (CUDA / Vulkan / Metal).
-    env = os.environ.copy()
-    env["M3_CORE_RS_BUILD_FEATURES"] = feature
-    rc = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps",
-         "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"],
-        env=env,
-    ).returncode
-    if rc != 0:
-        print(f"[!] GPU build failed (exit {rc}); CPU embedder still serves embeddings.",
-              file=sys.stderr)
-        return rc
-    print(f"[OK] m3-core-rs rebuilt with {feature}; restart any running embedder service.")
-    return 0
+    allow_source = not getattr(args, "no_source_fallback", False)
+    rc = rust_core_install.install_rust_core(allow_source_fallback=allow_source)
+    if rc == 0:
+        print("[OK] m3-core-rs installed; restart any running embedder service.")
+    return rc
 
 
 # ── argparse wiring ───────────────────────────────────────────────────────────
@@ -303,7 +276,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
     p_install_gpu = sub.add_parser(
         "install-gpu",
-        help="Build the in-process GPU embedder (CUDA/Vulkan/Metal autodetected).",
+        help="Install the GPU-accelerated Rust core (CUDA/Vulkan/Metal autodetected); "
+             "prebuilt wheel from PyPI, source build fallback.",
+    )
+    p_install_gpu.add_argument(
+        "--no-source-fallback", action="store_true",
+        help="Fail instead of building from source when no prebuilt wheel matches "
+             "this platform/Python.",
     )
     p_install_gpu.set_defaults(func=cmd_install_gpu)
 
