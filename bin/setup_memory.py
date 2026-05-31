@@ -7,7 +7,6 @@ All progress logged to stderr; final config JSON printed to stdout.
 import json
 import os
 import pathlib
-import platform
 import sqlite3
 import subprocess
 import sys
