@@ -554,16 +554,6 @@ INDEX_HTML = """
 
         <!-- Sidebar Panel (Right Column) -->
         <aside>
-            <!-- Contradictions & Audit Feed -->
-            <div class="m3-card">
-                <div class="m3-card-title">
-                    <span>Change & Conflict Log</span>
-                </div>
-                <div id="historyLog" hx-get="/api/history" hx-trigger="load, every 5s">
-                    <!-- Loaded dynamically -->
-                </div>
-            </div>
-
             <!-- GDPR Center -->
             <div class="m3-card">
                 <div class="m3-card-title">GDPR Compliance center</div>
@@ -576,6 +566,16 @@ INDEX_HTML = """
                     <button class="m3-btn m3-btn-danger" style="width: 100%; font-size: 0.85rem;" onclick="forgetGDPR()">Purge User Records (Art. 17)</button>
                 </div>
                 <div id="gdprFeedback" style="margin-top: 0.75rem; font-size: 0.8rem; text-align: center;"></div>
+            </div>
+
+            <!-- Contradictions & Audit Feed -->
+            <div class="m3-card">
+                <div class="m3-card-title">
+                    <span>Change & Conflict Log</span>
+                </div>
+                <div id="historyLog" hx-get="/api/history" hx-trigger="load, every 5s">
+                    <!-- Loaded dynamically -->
+                </div>
             </div>
         </aside>
     </div>
