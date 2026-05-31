@@ -45,10 +45,10 @@ if not _OXIDATION_DISABLED:
     except ImportError:
         m3_core_rs = None  # extra not installed — Python path is the default
 
-# Shadow-mode flag. Uses M3_ROUTE_SHADOW_MODE (plan §9.6) with values off/log;
-# `enforce` is intentionally NOT implemented — cutover is out of scope here.
-# Anything other than "log" (case-insensitive) means shadow is OFF.
-_ROUTE_SHADOW_MODE = os.environ.get("M3_ROUTE_SHADOW_MODE", "off").lower()
+# Shadow-mode flag. Uses M3_ROUTE_SHADOW_MODE (plan §9.6) with values off/log/enforce;
+# Defaults to "enforce" if the Rust core (m3_core_rs) is installed and active,
+# otherwise falls back to "off" (Python authoritative decider).
+_ROUTE_SHADOW_MODE = os.environ.get("M3_ROUTE_SHADOW_MODE", "enforce" if m3_core_rs is not None else "off").lower()
 _ROUTE_SHADOW = _ROUTE_SHADOW_MODE == "log"
 
 # ---------------------------------------------------------------------------
