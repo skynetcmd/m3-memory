@@ -51,6 +51,7 @@ def _transfer_to_archive(item_id, reason, db):
 
 def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
     import time
+
     from m3_sdk import _LAST_USER_INTERACTION
     if time.time() - _LAST_USER_INTERACTION < 15.0:
         logger.info("Active query session detected. Suspending curation pass to yield resources.")
@@ -230,6 +231,7 @@ def _enforce_retention_policies(db):
 
 def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddings=True):
     import time
+
     from m3_sdk import _LAST_USER_INTERACTION
     if time.time() - _LAST_USER_INTERACTION < 15.0:
         logger.info("Active query session detected. Suspending curation pass to yield resources.")

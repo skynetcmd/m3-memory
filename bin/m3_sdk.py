@@ -12,7 +12,6 @@ import threading
 import time
 from collections import OrderedDict
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
@@ -64,15 +63,15 @@ def get_governor_pacing(telemetry: dict) -> dict:
     """Return pacing delay configurations for background and interactive pipelines."""
     load = max(telemetry.get("cpu_total", 0.0), telemetry.get("ram_total", 0.0), telemetry.get("gpu_total", 0.0))
     elapsed = time.time() - _LAST_USER_INTERACTION
-    
+
     # 1. Critical Mode (Overall load >= LIMIT_THRESHOLD)
     if LIMIT_THRESHOLD != 100 and load >= LIMIT_THRESHOLD:
         return {"background": "HALTED", "interactive_delay": 30.0} # 30s-60s delay
-        
+
     # 2. Throttled Mode (Overall load >= INITIAL_LIMIT but < LIMIT_THRESHOLD)
     if load >= INITIAL_LIMIT:
         return {"background": "THROTTLED", "background_delay": 10.0, "interactive_delay": 0.0} # 5s-10s delay
-        
+
     # 3. Normal Mode
     if elapsed < 30.0:
         return {"background": "HALTED", "interactive_delay": 0.0}
@@ -82,11 +81,11 @@ def get_governor_pacing(telemetry: dict) -> dict:
 
 async def pre_execute_interactive_check():
     register_user_interaction()
-    
+
     ctx = M3Context.for_db()
     telemetry = ctx.get_system_telemetry()
     pacing = get_governor_pacing(telemetry)
-    
+
     delay = pacing.get("interactive_delay", 0.0)
     if delay > 0.0:
         logger.warning(
@@ -98,17 +97,17 @@ async def pre_execute_interactive_check():
 @contextmanager
 def migration_lock():
     """Acquires an exclusive atomic file lock for safe startup migrations.
-    
+
     If the lock is held by another process, it block-waits (with a timeout of 120s)
     until the lock is released.
     """
     lock_path = os.path.join(get_m3_config_root(), ".migration.lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    
+
     fd = None
     start_time = time.time()
     acquired = False
-    
+
     while time.time() - start_time < 120.0:
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -116,14 +115,14 @@ def migration_lock():
             break
         except FileExistsError:
             time.sleep(0.5)
-            
+
     if not acquired:
         raise RuntimeError(
             f"Could not acquire migration lock at {lock_path} within 120 seconds. "
             "Another migration process may be hung. If you are sure no other process is migrating, "
             "delete the lock file manually."
         )
-        
+
     try:
         yield
     finally:
@@ -399,12 +398,12 @@ class M3Context:
         self.m3_config_root = get_m3_config_root()
         self.m3_engine_root = get_m3_engine_root()
         self.m3_memory_root = get_m3_root()  # Keep for legacy compatibility
-        
+
         # Load dotenv from config root first, fallback to memory root
         dotenv_path = os.path.join(self.m3_config_root, ".env")
         if not os.path.exists(dotenv_path):
             dotenv_path = os.path.join(self.m3_memory_root, ".env")
-            
+
         if os.path.exists(dotenv_path):
             load_dotenv(dotenv_path)
 
@@ -503,30 +502,30 @@ class M3Context:
                 "gpu_total": 0.0,
                 "thermal": "Nominal"
             }
-            
+
         # CPU Total Usage
         try:
             cpu_total = psutil.cpu_percent(interval=None)
         except Exception:
             cpu_total = 0.0
-            
+
         # RAM Total Usage
         try:
             ram = psutil.virtual_memory()
             ram_total = ram.percent
         except Exception:
             ram_total = 0.0
-            
+
         # GPU Total Usage (Mock/fallback)
         gpu_total = 0.0
-            
+
         # Thermal Load
         try:
             from thermal_utils import get_thermal_status
             thermal = get_thermal_status()
         except Exception:
             thermal = "Nominal"
-            
+
         return {
             "cpu_total": cpu_total,
             "ram_total": ram_total,
@@ -536,7 +535,7 @@ class M3Context:
 
     def _verify_cohesion(self):
         """Verifies the cohesion between the configuration salt and the database.
-        
+
         Creates the `m3_system_cohesion` metadata table if it does not exist, and
         stores or re-verifies the SHA-256 hash of the active encryption salt.
         """
@@ -544,11 +543,11 @@ class M3Context:
             from auth_utils import get_salt_path
         except ImportError:
             return
-            
+
         salt_path = get_salt_path()
         if not salt_path or not os.path.exists(salt_path):
             return
-            
+
         try:
             with open(salt_path, "rb") as f:
                 salt_bytes = f.read()
