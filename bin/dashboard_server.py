@@ -1183,14 +1183,16 @@ def parse_metadata(metadata_json: str) -> tuple[list, dict]:
 async def get_index(request: Request):
     active_db = resolve_db_path(None)
     header = HEADER_HTML.format(explorer_active="active", browse_active="", db_path=active_db)
-    return INDEX_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", active_db)
+    content = INDEX_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", active_db)
+    return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
 
 @app.get("/browse", response_class=HTMLResponse)
 async def get_browse(request: Request):
     active_db = resolve_db_path(None)
     header = HEADER_HTML.format(explorer_active="", browse_active="active", db_path=active_db)
-    return BROWSE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", active_db)
+    content = BROWSE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", active_db)
+    return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
 
 @app.get("/api/stats", response_class=HTMLResponse)
