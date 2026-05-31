@@ -16,6 +16,12 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
 
+@pytest.fixture(autouse=True)
+def isolate_routing_env(monkeypatch):
+    """Ensure the test suite runs with M3_ROUTE_SHADOW_MODE set to 'off' by default."""
+    monkeypatch.setenv("M3_ROUTE_SHADOW_MODE", "off")
+
+
 @pytest.mark.asyncio
 async def test_is_temporal_query_temporal_keywords():
     """is_temporal_query returns True for queries with temporal vocabulary."""
