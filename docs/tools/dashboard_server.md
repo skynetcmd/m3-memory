@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: 7627c4d36339
-mtime_utc: 2026-05-31T18:39:28.267858+00:00
-generated_utc: 2026-05-31T18:42:52.690276+00:00
+sha1: 74e7c796de77
+mtime_utc: 2026-05-31T18:57:47.132714+00:00
+generated_utc: 2026-05-31T18:58:02.588220+00:00
 private: false
 ---
 
@@ -42,6 +42,8 @@ _(no argparse arguments detected)_
 - `chatlog_config (resolve_config)`
 - `m3_sdk (active_database)`
 - `m3_sdk (resolve_db_path)`
+- `memory_core (memory_delete_impl)`
+- `memory_core (memory_update_impl)`
 - `memory_maintenance (gdpr_export_impl, gdpr_forget_impl)`
 
 ---
@@ -50,28 +52,30 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `cmd`` (line 2296)
+- `subprocess.Popen()  → `cmd`` (line 2887)
 
 **sqlite**
 
-- `sqlite3.connect()  → `chatlog_db`` (line 1699)
-- `sqlite3.connect()  → `files_db`` (line 1708)
-- `sqlite3.connect()  → `main_db`` (line 1672)
-- `sqlite3.connect()  → `main_db`` (line 1694)
-- `sqlite3.connect()  → `selected_db_path`` (line 1835)
-- `sqlite3.connect()  → `selected_db_path`` (line 2008)
+- `sqlite3.connect()  → `chatlog_db`` (line 1919)
+- `sqlite3.connect()  → `files_db`` (line 1928)
+- `sqlite3.connect()  → `main_db`` (line 1892)
+- `sqlite3.connect()  → `main_db`` (line 1914)
+- `sqlite3.connect()  → `selected_db_path`` (line 2055)
+- `sqlite3.connect()  → `selected_db_path`` (line 2228)
 
 
 ---
 
 ## Notable external imports
 
+- `difflib`
 - `fastapi (FastAPI, Form, HTTPException, Request)`
 - `fastapi.responses (HTMLResponse, JSONResponse, StreamingResponse)`
 - `files_memory.search (files_search)`
 - `memory (config)`
 - `memory.config (FILES_DB_PATH)`
 - `memory.db (_db)`
+- `memory.db (_record_history)`
 - `memory.search (memory_search_scored_impl)`
 - `uvicorn`
 
