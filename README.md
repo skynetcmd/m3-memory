@@ -106,7 +106,7 @@ chat model for generation (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B
 instruct GGUF). M3 auto-selects it; embedding-only features work without
 it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
-> **Optional — Rust core (`m3-core-rs`).** A Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) takes over hot-path work — hashing, cosine/MMR ranking, redaction, and the in-process llama.cpp embeddings (CPU + optional GPU). Until `m3-core-rs` ships wheels to PyPI, install it manually: `pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"` (needs a Rust toolchain ≥1.94 + maturin). Set `M3_CORE_RS_DISABLE=1` at runtime to force the Python path. See [docs/ENVIRONMENT_VARIABLES.md → Project Oxidation](docs/ENVIRONMENT_VARIABLES.md).
+> **⚡ Auto-Oxidation is ON by Default.** M3 Memory features a high-performance Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) that automatically takes over hot-path operations (MMR reranking, cosine similarity, chat-log redaction, query routing, and in-process GGUF embeddings) to deliver major performance enhancements out-of-the-box when the wheels are installed. If you prefer to opt out and run pure Python instead, simply set `M3_CORE_RS_DISABLE=1` in your environment. See [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) for configuration details.
 
 Restart your agent. Done!
 
