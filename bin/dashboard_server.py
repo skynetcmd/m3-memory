@@ -530,10 +530,38 @@ INDEX_HTML = """
 
             <!-- Graph Canvas Explorer -->
             <div class="m3-card">
-                <div class="m3-card-title">
+                <div class="m3-card-title" style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
                     <span>Interactive Knowledge Graph</span>
-                    <button class="m3-btn" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="resetSimulation()">Reset Layout</button>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <button class="m3-btn" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="resetSimulation()">Reset Layout</button>
+                    </div>
                 </div>
+                
+                <!-- Controls Row -->
+                <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; padding: 0.5rem; background: hsla(222, 22%, 5%, 0.4); border: 1px solid var(--m3-border-glass); border-radius: 8px; font-size: 0.8rem; color: hsl(210, 15%, 80%);">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="reloadSlider">Data Sync:</label>
+                        <select id="reloadSlider" onchange="updateReloadInterval()" style="background: var(--m3-bg-surface); border: 1px solid var(--m3-border-glass); color: #fff; border-radius: 4px; padding: 2px 6px; font-size: 0.75rem;">
+                            <option value="0">Manual Only</option>
+                            <option value="5000">Every 5s</option>
+                            <option value="10000" selected>Every 10s</option>
+                            <option value="30000">Every 30s</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="fpsSlider">Physics Target:</label>
+                        <select id="fpsSlider" onchange="updateFpsLimit()" style="background: var(--m3-bg-surface); border: 1px solid var(--m3-border-glass); color: #fff; border-radius: 4px; padding: 2px 6px; font-size: 0.75rem;">
+                            <option value="60">60 FPS (Fluid)</option>
+                            <option value="30" selected>30 FPS (Efficient)</option>
+                            <option value="10">10 FPS (Low CPU)</option>
+                            <option value="0">Freeze Physics</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span id="physicsStatus" style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: var(--m3-neon-cyan);">Status: Active</span>
+                    </div>
+                </div>
+
                 <div class="graph-panel">
                     <canvas id="graphCanvas"></canvas>
                 </div>
@@ -626,20 +654,68 @@ INDEX_HTML = """
         window.addEventListener("resize", resizeCanvas);
         resizeCanvas();
 
+        let reloadTimer = null;
+        let fpsLimit = 30; // default to efficient 30 FPS
+        let lastFrameTime = 0;
+        let isSleeping = false;
+        let activeActivity = 150; // ticks remaining before sleep
+
+        function updateReloadInterval() {
+            const val = parseInt(document.getElementById("reloadSlider").value);
+            if (reloadTimer) {
+                clearInterval(reloadTimer);
+                reloadTimer = null;
+            }
+            if (val > 0) {
+                reloadTimer = setInterval(() => {
+                    loadGraph(true); // background update
+                }, val);
+            }
+        }
+
+        function updateFpsLimit() {
+            fpsLimit = parseInt(document.getElementById("fpsSlider").value);
+            if (fpsLimit > 0) {
+                wakePhysics();
+            } else {
+                isSleeping = true;
+                document.getElementById("physicsStatus").innerText = "Status: Frozen";
+                document.getElementById("physicsStatus").style.color = "var(--m3-neon-amber)";
+            }
+        }
+
+        function wakePhysics() {
+            activeActivity = 150;
+            if (isSleeping && fpsLimit > 0) {
+                isSleeping = false;
+                document.getElementById("physicsStatus").innerText = "Status: Active";
+                document.getElementById("physicsStatus").style.color = "var(--m3-neon-cyan)";
+                requestAnimationFrame(draw);
+            }
+        }
+
         // Fetch graph and run simulation
-        async function loadGraph() {
+        async function loadGraph(isBackground = false) {
             try {
                 const res = await fetch("/api/graph");
                 const data = await res.json();
                 
+                const oldNodesMap = new Map(nodes.map(n => [n.id, n]));
+                
                 // Initialize physics state
-                nodes = data.nodes.map(n => ({
-                    ...n,
-                    x: canvas.width / 2 + (Math.random() - 0.5) * 200,
-                    y: canvas.height / 2 + (Math.random() - 0.5) * 200,
-                    vx: 0,
-                    vy: 0
-                }));
+                nodes = data.nodes.map(n => {
+                    const existing = oldNodesMap.get(n.id);
+                    if (isBackground && existing) {
+                        return { ...n, ...existing };
+                    }
+                    return {
+                        ...n,
+                        x: existing ? existing.x : canvas.width / 2 + (Math.random() - 0.5) * 200,
+                        y: existing ? existing.y : canvas.height / 2 + (Math.random() - 0.5) * 200,
+                        vx: existing ? existing.vx : 0,
+                        vy: existing ? existing.vy : 0
+                    };
+                });
                 
                 // Map links to objects
                 links = data.links.map(l => ({
@@ -647,6 +723,8 @@ INDEX_HTML = """
                     source: nodes.find(n => n.id === l.source),
                     target: nodes.find(n => n.id === l.target)
                 })).filter(l => l.source && l.target);
+                
+                wakePhysics();
                 
             } catch(e) {
                 console.error("Failed to load graph nodes", e);
@@ -719,7 +797,19 @@ INDEX_HTML = """
         }
 
         // Draw loop
-        function draw() {
+        function draw(timestamp) {
+            if (isSleeping || fpsLimit === 0) return;
+            
+            // FPS limiting
+            if (!lastFrameTime) lastFrameTime = timestamp;
+            const elapsed = timestamp - lastFrameTime;
+            
+            if (elapsed < (1000 / fpsLimit)) {
+                requestAnimationFrame(draw);
+                return;
+            }
+            lastFrameTime = timestamp;
+            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             ctx.save();
@@ -765,7 +855,26 @@ INDEX_HTML = """
             ctx.restore();
             
             updatePhysics();
-            requestAnimationFrame(draw);
+            
+            // Auto sleep cooling mechanism
+            let totalVelocity = 0;
+            nodes.forEach(n => {
+                totalVelocity += Math.abs(n.vx) + Math.abs(n.vy);
+            });
+            
+            if (totalVelocity < 0.05 * nodes.length) {
+                activeActivity--;
+            } else {
+                activeActivity = 120;
+            }
+            
+            if (activeActivity <= 0) {
+                isSleeping = true;
+                document.getElementById("physicsStatus").innerText = "Status: Asleep (0% CPU)";
+                document.getElementById("physicsStatus").style.color = "var(--m3-neon-emerald)";
+            } else {
+                requestAnimationFrame(draw);
+            }
         }
 
         // Mouse interaction for drag
@@ -785,6 +894,8 @@ INDEX_HTML = """
                 return dx*dx + dy*dy < 144;
             });
             
+            wakePhysics();
+            
             if (!selectedNode) {
                 isDraggingCanvas = true;
                 dragStartMouse = { x: e.clientX, y: e.clientY };
@@ -797,20 +908,24 @@ INDEX_HTML = """
                 const rect = canvas.getBoundingClientRect();
                 selectedNode.x = (e.clientX - rect.left - offsetX) / scale;
                 selectedNode.y = (e.clientY - rect.top - offsetY) / scale;
+                wakePhysics();
             } else if (isDraggingCanvas) {
                 offsetX = dragStartOffset.x + (e.clientX - dragStartMouse.x);
                 offsetY = dragStartOffset.y + (e.clientY - dragStartMouse.y);
+                wakePhysics();
             }
         });
 
         canvas.addEventListener("mouseup", () => {
             selectedNode = null;
             isDraggingCanvas = false;
+            wakePhysics();
         });
 
         canvas.addEventListener("mouseleave", () => {
             selectedNode = null;
             isDraggingCanvas = false;
+            wakePhysics();
         });
 
         // Zoom wheel
@@ -823,6 +938,7 @@ INDEX_HTML = """
                 scale /= zoomFactor;
             }
             scale = Math.max(0.4, Math.min(3.0, scale));
+            wakePhysics();
         });
 
         function resetSimulation() {
@@ -830,6 +946,7 @@ INDEX_HTML = """
             offsetX = 0;
             offsetY = 0;
             loadGraph();
+            wakePhysics();
         }
 
         // GDPR functions
@@ -898,7 +1015,8 @@ INDEX_HTML = """
 
         // Init loads
         loadGraph();
-        draw();
+        updateReloadInterval();
+        requestAnimationFrame(draw);
     </script>
 </body>
 </html>
