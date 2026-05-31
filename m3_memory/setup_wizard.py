@@ -234,8 +234,16 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         "  Set up OpenClaw proxy (localhost:9000)?", default=detected.openclaw
     )
     if detected.hermes:
+        print()
+        print("  [Probing] Hermes Agent detected on system!")
+        print("  You can configure M3 to:")
+        print("    - OPTIMALLY REPLACE Hermes' default memory system for unified, rich SOTA recall, or")
+        print("    - RUN ALONGSIDE default memories to extend Hermes' capability with long-term vector search.")
+        print("  For complete setup guidance, see the newly created documentation at:")
+        print("  docs/HERMES.md (file:///C:/Users/bhaba/m3-memory/docs/HERMES.md)")
+        print()
         plan.targets.hermes = _ask_yes_no(
-            "  Install the m3 memory-provider plugin into Hermes Agent?",
+            "  Install the m3 SOTA memory-provider plugin into Hermes Agent?",
             default=True,
         )
 
@@ -647,9 +655,11 @@ def _wire_hermes() -> bool:
         _warn(f"  · Hermes: copy failed ({e}) — skipping")
         return False
 
-    _say(f"  · Hermes: m3 provider installed at {dst}")
-    print("    Add m3-memory's bin/ to PYTHONPATH in Hermes' launch env, then")
-    print("    select it via `hermes plugins` (memory providers are single-select).")
+    _say(f"  · Hermes: m3 SOTA provider installed at {dst}")
+    print("    To complete configuration:")
+    print("    1. Add m3-memory's bin/ to PYTHONPATH in Hermes' launch environment.")
+    print("    2. Enable and select 'm3' inside `hermes plugins` to replace/run alongside default memory.")
+    print("    For exact instructions and troubleshooting, see docs/HERMES.md (file:///C:/Users/bhaba/m3-memory/docs/HERMES.md).")
     return True
 
 
