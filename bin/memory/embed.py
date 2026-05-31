@@ -124,13 +124,17 @@ _PRIMARY_BREAKER = _maybe_make_breaker(
     config.EMBED_BREAKER_PRIMARY_THRESHOLD,
     config.EMBED_BREAKER_PRIMARY_RESET_SECS,
 )
+_CLOUD_BREAKER = _maybe_make_breaker(
+    config.EMBED_BREAKER_CLOUD_THRESHOLD,
+    config.EMBED_BREAKER_CLOUD_RESET_SECS,
+)
 
 
 def get_embed_breaker_state() -> dict:
-    """Return current state of all three embed breakers.
+    """Return current state of all four embed breakers.
 
     Useful for diagnostics and surfacing via `embedder_status_impl`.
-    Returns `{embedded, cpu_fallback, primary}` each mapped to a state
+    Returns `{embedded, cpu_fallback, primary, cloud}` each mapped to a state
     string (`"closed"` / `"open"` / `"half_open"`) or `"disabled"` when
     the breaker isn't constructed (Rust unavailable or threshold=0).
     """
@@ -138,13 +142,14 @@ def get_embed_breaker_state() -> dict:
         "embedded": _EMBEDDED_BREAKER.state() if _EMBEDDED_BREAKER else "disabled",
         "cpu_fallback": _CPU_FALLBACK_BREAKER.state() if _CPU_FALLBACK_BREAKER else "disabled",
         "primary": _PRIMARY_BREAKER.state() if _PRIMARY_BREAKER else "disabled",
+        "cloud": _CLOUD_BREAKER.state() if _CLOUD_BREAKER else "disabled",
     }
 
 
 def reset_embed_breakers() -> dict:
     """Force-close all breakers (test/debug helper). Returns prior state."""
     prior = get_embed_breaker_state()
-    for breaker in (_EMBEDDED_BREAKER, _CPU_FALLBACK_BREAKER, _PRIMARY_BREAKER):
+    for breaker in (_EMBEDDED_BREAKER, _CPU_FALLBACK_BREAKER, _PRIMARY_BREAKER, _CLOUD_BREAKER):
         if breaker is not None:
             breaker.record_success()
     return prior
@@ -550,66 +555,237 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         )
         return None, config.EMBED_MODEL
 
+    model = config.EMBED_MODEL
     try:
-        _track_cost_lazy("embed_calls", len(text.split()) * 2)
-        token = _ctx().get_secret("LM_API_TOKEN") or "lm-studio"
-        client = _get_embed_client()
-        if config._EMBED_URL_OVERRIDE:
-            base_url = config._EMBED_URL_OVERRIDE.rstrip("/")
-            model = config._EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
-        else:
-            result = await get_best_embed(client, token)
-            if not result:
-                return None, config.EMBED_MODEL
-            base_url, model = result
+        try:
+            _track_cost_lazy("embed_calls", len(text.split()) * 2)
+            token = _ctx().get_secret("LM_API_TOKEN") or "lm-studio"
+            client = _get_embed_client()
+            if config._EMBED_URL_OVERRIDE:
+                base_url = config._EMBED_URL_OVERRIDE.rstrip("/")
+                model = config._EMBED_MODEL_OVERRIDE or "bge-m3-GGUF-Q4_K_M.gguf"
+            else:
+                result = await get_best_embed(client, token)
+                if not result:
+                    raise RuntimeError("No primary embedding backend returned by get_best_embed")
+                base_url, model = result
 
-        last_exc = None
-        for attempt in range(3):
-            try:
-                resp = await client.post(
-                    f"{base_url}/embeddings",
-                    json={"model": model, "input": text},
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ),
-                )
-                resp.raise_for_status()
-                emb = resp.json()["data"][0]["embedding"]
-
-                if not _EMBED_DIM_VALIDATED:
-                    if len(emb) != config.EMBED_DIM:
-                        logger.error(
-                            f"Embedding dimension mismatch: got {len(emb)}, "
-                            f"expected EMBED_DIM={config.EMBED_DIM}. Update EMBED_DIM env var."
-                        )
-                    _EMBED_DIM_VALIDATED = True
-
-                if _PRIMARY_BREAKER is not None:
-                    _PRIMARY_BREAKER.record_success()
-                _record_embed_backend("http-primary", 1)
-                return emb, model
-            except Exception as e:
-                last_exc = e
-                if attempt < 2:
-                    wait = 2 * (2 ** attempt)
-                    logger.warning(
-                        f"Embedding attempt {attempt + 1} failed: {e}. Retrying in {wait}s..."
+            last_exc = None
+            for attempt in range(3):
+                try:
+                    resp = await client.post(
+                        f"{base_url}/embeddings",
+                        json={"model": model, "input": text},
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ),
                     )
-                    await asyncio.sleep(wait)
+                    resp.raise_for_status()
+                    emb = resp.json()["data"][0]["embedding"]
 
-        # All 3 attempts exhausted — tick the breaker once for the whole
-        # call, then wrap the last exception for log clarity.
-        if _PRIMARY_BREAKER is not None:
-            _PRIMARY_BREAKER.record_failure()
-        wrapped = EmbedPrimaryError(f"{base_url}: {last_exc}")
-        wrapped.__cause__ = last_exc
-        logger.error(
-            f"{type(wrapped).__name__}: {wrapped} after 3 attempts"
-        )
-        from llm_failover import clear_embed_cache
-        clear_embed_cache()
+                    if not _EMBED_DIM_VALIDATED:
+                        if len(emb) != config.EMBED_DIM:
+                            logger.error(
+                                f"Embedding dimension mismatch: got {len(emb)}, "
+                                f"expected EMBED_DIM={config.EMBED_DIM}. Update EMBED_DIM env var."
+                            )
+                        _EMBED_DIM_VALIDATED = True
+
+                    if _PRIMARY_BREAKER is not None:
+                        _PRIMARY_BREAKER.record_success()
+                    _record_embed_backend("http-primary", 1)
+                    return emb, model
+                except Exception as e:
+                    last_exc = e
+                    if attempt < 2:
+                        wait = 2 * (2 ** attempt)
+                        logger.warning(
+                            f"Embedding attempt {attempt + 1} failed: {e}. Retrying in {wait}s..."
+                        )
+                        await asyncio.sleep(wait)
+
+            # All 3 attempts exhausted — tick the breaker once for the whole
+            # call, then wrap the last exception for log clarity.
+            if _PRIMARY_BREAKER is not None:
+                _PRIMARY_BREAKER.record_failure()
+            wrapped = EmbedPrimaryError(f"{base_url}: {last_exc}")
+            wrapped.__cause__ = last_exc
+            logger.error(
+                f"{type(wrapped).__name__}: {wrapped} after 3 attempts"
+            )
+            from llm_failover import clear_embed_cache
+            clear_embed_cache()
+        except Exception as e:
+            if _PRIMARY_BREAKER is not None:
+                _PRIMARY_BREAKER.record_failure()
+            wrapped = EmbedPrimaryError(str(e))
+            wrapped.__cause__ = e
+            logger.warning(
+                f"Primary HTTP fallback exception: {wrapped} — attempting Tier 4 fallback if allowed"
+            )
+            from llm_failover import clear_embed_cache
+            clear_embed_cache()
+        
+        # Fall through to Tier 4 Cloud Enclave if enabled
+        if config.M3_ALLOW_CLOUD_FALLBACK and config.M3_CLOUD_ENCLAVE_URL:
+            if _CLOUD_BREAKER is None or _CLOUD_BREAKER.allow_request():
+                try:
+                    # 1. PII Redaction Gate
+                    from chatlog_redaction import scrub
+                    redact_cfg = {
+                        "enabled": True,
+                        "patterns": ["api_keys", "bearer_tokens", "jwt", "aws_keys", "github_tokens", "pii"],
+                        "custom_regex": [],
+                        "redact_pii": True,
+                    }
+                    scrubbed_text, match_count, groups_fired = scrub(text, redact_cfg)
+                    if match_count > 0:
+                        logger.info(
+                            f"PII Redaction Gate: redacted {match_count} items from "
+                            f"text before cloud transmission (groups: {groups_fired})"
+                        )
+                    
+                    # 2. Keyring credentials resolution
+                    token = None
+                    if config.M3_CLOUD_AUTH_TOKEN_KEYRING:
+                        try:
+                            if ":" in config.M3_CLOUD_AUTH_TOKEN_KEYRING:
+                                service, username = config.M3_CLOUD_AUTH_TOKEN_KEYRING.split(":", 1)
+                            else:
+                                service = "m3_memory"
+                                username = config.M3_CLOUD_AUTH_TOKEN_KEYRING
+                            from auth_utils import safe_keyring_get_password
+                            token = safe_keyring_get_password(service, username)
+                        except Exception as keyring_err:
+                            logger.warning(f"Keyring lookup for cloud token failed: {keyring_err}")
+                    
+                    if not token:
+                        token = os.environ.get("M3_CLOUD_AUTH_TOKEN")
+                    
+                    # 3. HTTP Call to Cloud Enclave
+                    client = _get_embed_client()
+                    headers = {}
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
+                    
+                    url = config.M3_CLOUD_ENCLAVE_URL.rstrip("/")
+                    post_url = url if url.endswith("/embeddings") or url.endswith("/embedding") else f"{url}/embeddings"
+                    
+                    resp = await client.post(
+                        post_url,
+                        json={"model": config.EMBED_MODEL, "input": scrubbed_text},
+                        headers=headers,
+                        timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 2),
+                    )
+                    resp.raise_for_status()
+                    emb = resp.json()["data"][0]["embedding"]
+                    
+                    if len(emb) != config.EMBED_DIM:
+                        logger.error(f"Cloud Enclave embedding dim {len(emb)} != EMBED_DIM {config.EMBED_DIM}")
+                    
+                    if _CLOUD_BREAKER is not None:
+                        _CLOUD_BREAKER.record_success()
+                    _record_embed_backend("cloud-enclave", 1)
+                    return emb, config.EMBED_MODEL
+                except Exception as cloud_err:
+                    if _CLOUD_BREAKER is not None:
+                        _CLOUD_BREAKER.record_failure()
+                    logger.error(f"Tier 4 Cloud Enclave failed: {cloud_err}. Routing payload back to local fallback.")
+        
         return None, model
     finally:
         _EMBED_SEM.release()
+
+
+async def _embed_many_cloud_fallback(
+    out: list[tuple[list[float] | None, str]],
+    miss_indices: list[int],
+    texts: list[str],
+) -> None:
+    """Invokes Tier 4 Cloud Enclave for any items in miss_indices that failed to embed."""
+    if not (config.M3_ALLOW_CLOUD_FALLBACK and config.M3_CLOUD_ENCLAVE_URL):
+        return
+
+    cloud_indices = [idx for idx in miss_indices if out[idx] is None or out[idx][0] is None]
+    if not cloud_indices:
+        return
+
+    if _CLOUD_BREAKER is not None and not _CLOUD_BREAKER.allow_request():
+        logger.warning("Cloud Enclave breaker is open. Skipping Tier 4 fallback.")
+        return
+
+    try:
+        # 1. PII Redaction Gate
+        from chatlog_redaction import scrub
+        redact_cfg = {
+            "enabled": True,
+            "patterns": ["api_keys", "bearer_tokens", "jwt", "aws_keys", "github_tokens", "pii"],
+            "custom_regex": [],
+            "redact_pii": True,
+        }
+        
+        cloud_texts = []
+        for idx in cloud_indices:
+            scrubbed, _, _ = scrub(texts[idx], redact_cfg)
+            cloud_texts.append(scrubbed)
+        
+        # 2. Keyring credentials resolution
+        token = None
+        if config.M3_CLOUD_AUTH_TOKEN_KEYRING:
+            try:
+                if ":" in config.M3_CLOUD_AUTH_TOKEN_KEYRING:
+                    service, username = config.M3_CLOUD_AUTH_TOKEN_KEYRING.split(":", 1)
+                else:
+                    service = "m3_memory"
+                    username = config.M3_CLOUD_AUTH_TOKEN_KEYRING
+                from auth_utils import safe_keyring_get_password
+                token = safe_keyring_get_password(service, username)
+            except Exception as keyring_err:
+                logger.warning(f"Keyring lookup for cloud token failed: {keyring_err}")
+        
+        if not token:
+            token = os.environ.get("M3_CLOUD_AUTH_TOKEN")
+        
+        # 3. HTTP Call to Cloud Enclave (Batched)
+        client = _get_embed_client()
+        headers = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        
+        url = config.M3_CLOUD_ENCLAVE_URL.rstrip("/")
+        post_url = url if url.endswith("/embeddings") or url.endswith("/embedding") else f"{url}/embeddings"
+        
+        resp = await client.post(
+            post_url,
+            json={"model": config.EMBED_MODEL, "input": cloud_texts},
+            headers=headers,
+            timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 4),
+        )
+        resp.raise_for_status()
+        data = resp.json()["data"]
+        ordered = sorted(data, key=lambda d: d.get("index", 0))
+        vecs = [d["embedding"] for d in ordered]
+        
+        if len(vecs) == len(cloud_texts):
+            _cloud_served = 0
+            for idx, vec in zip(cloud_indices, vecs):
+                if vec is not None:
+                    if len(vec) != config.EMBED_DIM:
+                        logger.error(f"Cloud Enclave embedding dim {len(vec)} != EMBED_DIM {config.EMBED_DIM}")
+                    out[idx] = (vec, config.EMBED_MODEL)
+                    _cloud_served += 1
+            
+            if _cloud_served:
+                if _CLOUD_BREAKER is not None:
+                    _CLOUD_BREAKER.record_success()
+                _record_embed_backend("cloud-enclave", _cloud_served)
+        else:
+            logger.error(f"Cloud enclave returned {len(vecs)} vectors for {len(cloud_texts)} inputs")
+            if _CLOUD_BREAKER is not None:
+                _CLOUD_BREAKER.record_failure()
+    except Exception as e:
+        if _CLOUD_BREAKER is not None:
+            _CLOUD_BREAKER.record_failure()
+        logger.error(f"Tier 4 Cloud Enclave bulk failed: {e}. Routing payloads back to local fallback.")
 
 
 async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
@@ -713,6 +889,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         if not result:
             for i in miss_indices:
                 out[i] = (None, config.EMBED_MODEL)
+            await _embed_many_cloud_fallback(out, miss_indices, texts)
             return out  # type: ignore[return-value]
         base_url, model = result
 
@@ -788,6 +965,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     if _primary_served:
         _record_embed_backend("http-primary", _primary_served)
 
+    await _embed_many_cloud_fallback(out, miss_indices, texts)
     return out  # type: ignore[return-value]
 
 

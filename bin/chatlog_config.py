@@ -49,20 +49,35 @@ from sqlite_pragmas import apply_pragmas
 
 logger = logging.getLogger("chatlog_config")
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-from m3_sdk import get_m3_root
+from m3_sdk import get_m3_config_root, get_m3_engine_root, get_m3_root
 
+_M3_CONFIG_ROOT = get_m3_config_root()
+_M3_ENGINE_ROOT = get_m3_engine_root()
 _M3_ROOT = get_m3_root()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Config and state files move to the unified root.
-CONFIG_PATH = os.path.join(_M3_ROOT, "memory", ".chatlog_config.json")
-DEFAULT_DB_PATH = os.path.join(_M3_ROOT, "memory", "agent_chatlog.db")
-MAIN_DB_PATH = os.environ.get("M3_DATABASE") or os.path.join(_M3_ROOT, "memory", "agent_memory.db")
-STATE_FILE = os.path.join(_M3_ROOT, "memory", ".chatlog_state.json")
-SPILL_DIR = os.path.join(_M3_ROOT, "memory", "chatlog_spill")
-INGEST_CURSOR = os.path.join(_M3_ROOT, "memory", ".chatlog_ingest_cursor.json")
-CHATLOG_MIGRATIONS_DIR = os.path.join(_M3_ROOT, "memory", "chatlog_migrations")
+# Helper to check new path first, fallback to legacy path if it exists and new does not
+def _resolve_config_file(filename: str) -> str:
+    new_path = os.path.join(_M3_CONFIG_ROOT, filename)
+    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
+    if os.path.exists(legacy_path) and not os.path.exists(new_path):
+        return legacy_path
+    return new_path
+
+def _resolve_engine_file(filename: str) -> str:
+    new_path = os.path.join(_M3_ENGINE_ROOT, filename)
+    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
+    if os.path.exists(legacy_path) and not os.path.exists(new_path):
+        return legacy_path
+    return new_path
+
+CONFIG_PATH = _resolve_config_file(".chatlog_config.json")
+DEFAULT_DB_PATH = os.environ.get("M3_CHATLOG_DB") or _resolve_engine_file("agent_chatlog.db")
+MAIN_DB_PATH = os.environ.get("M3_DATABASE") or _resolve_engine_file("agent_memory.db")
+STATE_FILE = _resolve_engine_file(".chatlog_state.json")
+SPILL_DIR = _resolve_engine_file("chatlog_spill")
+INGEST_CURSOR = _resolve_engine_file(".chatlog_ingest_cursor.json")
+CHATLOG_MIGRATIONS_DIR = _resolve_engine_file("chatlog_migrations")
 
 VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider"))
 VALID_PROVIDERS: frozenset[str] = frozenset((

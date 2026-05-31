@@ -62,23 +62,32 @@ _EMBED_MODEL_OVERRIDE: str | None = (os.environ.get("M3_EMBED_MODEL") or "").str
 # ──────────────────────────────────────────────────────────────────────────────
 # Paths
 # ──────────────────────────────────────────────────────────────────────────────
-from m3_sdk import get_m3_root
+from m3_sdk import get_m3_config_root, get_m3_engine_root, get_m3_root
 
 # BASE_DIR remains the m3-memory repo root for internal assets (e.g. config lists).
 BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Default state (DBs) now lives in the unified M3 root (~/.m3-memory/memory/).
-# Precedence: M3_DATABASE env > get_m3_root()/memory/agent_memory.db.
+_M3_CONFIG_ROOT = get_m3_config_root()
+_M3_ENGINE_ROOT = get_m3_engine_root()
 _M3_ROOT = get_m3_root()
-DB_PATH: str = os.environ.get("M3_DATABASE") or os.path.join(_M3_ROOT, "memory", "agent_memory.db")
-ARCHIVE_DB_PATH: str = os.path.join(_M3_ROOT, "memory", "agent_memory_archive.db")
+
+def _resolve_engine_file(filename: str) -> str:
+    new_path = os.path.join(_M3_ENGINE_ROOT, filename)
+    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
+    if os.path.exists(legacy_path) and not os.path.exists(new_path):
+        return legacy_path
+    return new_path
+
+DB_PATH: str = os.environ.get("M3_DATABASE") or _resolve_engine_file("agent_memory.db")
+ARCHIVE_DB_PATH: str = _resolve_engine_file("agent_memory_archive.db")
 
 # files.db (FILE_INGESTION_PLAN.md). Separate physical store with its own
 # lifecycle (high-volume, regeneratable, version-tracked, promotable).
 # Resolution order: M3_FILES_DB_PATH env > get_m3_root()/memory/files_database.db.
 FILES_DB_PATH: str = os.path.abspath(
     os.environ.get("M3_FILES_DB_PATH")
-    or os.path.join(_M3_ROOT, "memory", "files_database.db")
+    or _resolve_engine_file("files_database.db")
 )
 # When true, the ingester prompts on first-ever invocation to confirm the
 # files.db path (and offers to write M3_FILES_DB_PATH to a user-shell env
@@ -319,3 +328,16 @@ FEDERATION_LOW_SCORE_THRESHOLD: float = float(
 
 AUTO_RELATED_LINK: bool = os.environ.get("M3_AUTO_RELATED_LINK", "1") == "1"
 AUTO_RELATED_LINK_SCOPE_BY_VARIANT: bool = os.environ.get("M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT", "1") == "1"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tier 4 Cloud Enclave & Failover Configurations (Milestone 3)
+# ──────────────────────────────────────────────────────────────────────────────
+M3_ALLOW_CLOUD_FALLBACK: bool = os.environ.get("M3_ALLOW_CLOUD_FALLBACK", "0").lower() in ("1", "true", "yes")
+M3_CLOUD_ENCLAVE_URL: str | None = (os.environ.get("M3_CLOUD_ENCLAVE_URL") or "").strip() or None
+M3_CLOUD_AUTH_TOKEN_KEYRING: str | None = (os.environ.get("M3_CLOUD_AUTH_TOKEN_KEYRING") or "").strip() or None
+M3_CLOUD_MINIMIZATION_LEVEL: str = (os.environ.get("M3_CLOUD_MINIMIZATION_LEVEL") or "standard").lower()
+
+# Circuit Breaker for Tier 4 Cloud Enclave
+EMBED_BREAKER_CLOUD_THRESHOLD: int = int(os.environ.get("M3_EMBED_BREAKER_CLOUD_THRESHOLD", "3"))
+EMBED_BREAKER_CLOUD_RESET_SECS: float = float(os.environ.get("M3_EMBED_BREAKER_CLOUD_RESET_SECS", "60.0"))
+

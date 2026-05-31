@@ -15,6 +15,10 @@ CLI entry: `python -m files_memory.ingest <root>` (added in tools.py).
 from __future__ import annotations
 
 import logging
+import threading
+
+_INGEST_FD_SEM = threading.Semaphore(32)
+_INGEST_LLM_SEM = threading.Semaphore(2)
 import os
 import platform
 import socket
@@ -142,8 +146,9 @@ def _read_file_text(path: str, max_bytes: int) -> Optional[str]:
     but we use errors='replace' as a safety net.
     """
     try:
-        with open(path, "rb") as f:
-            raw = f.read(max_bytes)
+        with _INGEST_FD_SEM:
+            with open(path, "rb") as f:
+                raw = f.read(max_bytes)
         return raw.decode("utf-8", errors="replace")
     except OSError as e:
         logger.warning("read failed for %s: %s", path, e)
@@ -518,10 +523,11 @@ def ingest_one_file(
                                     (leaf_uuid,),
                                 ).fetchone()[0]
                                 continue
-                        result = extract_facts_for_leaf(
-                            leaf_uuid, leaf_text,
-                            file_summary=file_summary,
-                        )
+                        with _INGEST_LLM_SEM:
+                            result = extract_facts_for_leaf(
+                                leaf_uuid, leaf_text,
+                                file_summary=file_summary,
+                            )
                         write_extraction_result(
                             conn, result,
                             file_node_uuid=file_node_uuid,

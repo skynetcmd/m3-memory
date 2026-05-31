@@ -41,15 +41,34 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
-from m3_sdk import get_m3_root
+from m3_sdk import get_m3_config_root, get_m3_engine_root, get_m3_root
 
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
 logger = logging.getLogger("migrate_memory")
 
+_M3_CONFIG_ROOT = get_m3_config_root()
+_M3_ENGINE_ROOT = get_m3_engine_root()
+_M3_ROOT = get_m3_root()
+
+def _resolve_config_file(filename: str) -> str:
+    new_path = os.path.join(_M3_CONFIG_ROOT, filename)
+    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
+    if os.path.exists(legacy_path) and not os.path.exists(new_path):
+        return legacy_path
+    return new_path
+
+def _resolve_engine_file(filename: str) -> str:
+    new_path = os.path.join(_M3_ENGINE_ROOT, filename)
+    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
+    if os.path.exists(legacy_path) and not os.path.exists(new_path):
+        return legacy_path
+    return new_path
+
+CONFIG_PATH = _resolve_config_file(".migrate_config.json")
+DB_PATH = os.environ.get("M3_DATABASE") or _resolve_engine_file("agent_memory.db")
+# Migrations inside the repository are still base-dir relative since they are static code assets
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 MIGRATIONS_DIR = os.path.join(BASE_DIR, "memory", "migrations")
-CONFIG_PATH = os.path.join(BASE_DIR, "memory", ".migrate_config.json")
 
 
 # ── Migration Target ────────────────────────────────────────────────────────
@@ -285,8 +304,8 @@ def prompt_backup_dir(assume_yes: bool) -> str:
     if saved and os.path.isdir(saved):
         return saved
 
-    # Precedence: M3_MEMORY_ROOT/backups > ~/.m3-memory/backups
-    default = os.path.join(get_m3_root(), "backups")
+    # Precedence: get_m3_engine_root()/backups > get_m3_root()/backups
+    default = os.path.join(get_m3_engine_root(), "backups")
 
     if assume_yes:
         # Non-interactive: fall back to out-of-repo default under the user's home
