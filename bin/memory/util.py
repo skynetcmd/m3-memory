@@ -51,7 +51,7 @@ def _check_content_safety(content: str) -> str | None:
     for pattern in _POISON_PATTERNS:
         if pattern.search(content):
             return f"Error: content rejected — matches safety pattern: {pattern.pattern[:50]}"
-            
+
     # SQLGlot AST SQL Injection Guard
     try:
         import sqlglot
