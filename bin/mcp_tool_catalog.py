@@ -2256,6 +2256,31 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="extract_entities",
+        description=(
+            "Accepts raw text, extracts entities and relationship predicates "
+            "based on the configured pluggable entity-extraction backend, "
+            "and returns them as structured JSON without modifying the database. "
+            "Use this to preview what entities and relationships would be extracted "
+            "from raw content."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Raw text content to extract entities and links from.",
+                },
+            },
+            "required": ["text"],
+        },
+        impl=LazyImpl("memory.extraction", "extract_entities_impl"),
+        is_async=True,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="extract_pending",
         description="Extract pending entities from the queue. Default dry_run=true reports count + ETA; pass dry_run=false to execute.",
         parameters={

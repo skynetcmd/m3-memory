@@ -150,6 +150,14 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
         metadata = "{}"
     _track_cost("write_calls")
 
+    if entity_extractor is None:
+        # Load configured extractor if active or enabled
+        write_through = os.environ.get("M3_EXTRACTION_WRITE_THROUGH", "0").lower() in ("1", "true", "yes")
+        if write_through or os.environ.get("M3_EXTRACTION_TYPE"):
+            from .extraction import get_configured_extractor
+            ext = get_configured_extractor()
+            entity_extractor = ext.extract
+
     if auto_classify and (not type or type == "auto"):
         type = await _auto_classify(content, title)
 
@@ -662,6 +670,12 @@ async def memory_write_bulk_impl(
     entity_extractor_variant_allowlist: "set[str] | None" = None,
 ) -> list[str]:
     _resolve_mc_callbacks()
+    if entity_extractor is None:
+        write_through = os.environ.get("M3_EXTRACTION_WRITE_THROUGH", "0").lower() in ("1", "true", "yes")
+        if write_through or os.environ.get("M3_EXTRACTION_TYPE"):
+            from .extraction import get_configured_extractor
+            ext = get_configured_extractor()
+            entity_extractor = ext.extract
     """Bulk write that routes embeddings through `_embed_many`. Intended for
     benchmark / import paths where per-item contradiction detection would
     dominate wall-clock. Returns a list of item_ids (or empty string on failure).
