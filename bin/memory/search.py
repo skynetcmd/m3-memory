@@ -930,6 +930,47 @@ async def memory_search_scored_impl(
 
     vector_weight = _maybe_route_query(query, vector_weight, intent_hint=intent_hint)
 
+    # Pre-emptive FTS short-circuit check for high-specificity lookup queries
+    # to bypass embedding entirely
+    if len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
+        try:
+            from memory.fts import _compile_fts_query
+            fts_query, ok = _compile_fts_query(query, search_mode)
+            if ok:
+                extra_columns = list(extra_columns or [])
+                _BASE_COLS = ["id", "content", "title", "type", "importance"]
+                _allowed_extra = {
+                    "metadata_json", "conversation_id", "valid_from", "valid_to",
+                    "user_id", "scope", "agent_id", "created_at", "source",
+                }
+                safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
+                extra_cols_sql = ""
+                if safe_extra:
+                    extra_cols_sql = ", " + ", ".join(f"mi.{c}" for c in safe_extra)
+                
+                with _db() as conn:
+                    row = conn.execute(
+                        f"""
+                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql}
+                        FROM memory_items_fts fts
+                        JOIN memory_items mi ON fts.rowid = mi.rowid
+                        WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0
+                        LIMIT 1
+                        """,
+                        (fts_query,)
+                    ).fetchone()
+                    if row:
+                        hit = dict(row)
+                        content_lower = hit["content"].lower()
+                        query_lower = query.lower()
+                        # Verify the match is a direct specific hit (e.g. key or exact phrase match)
+                        if query_lower in content_lower or query_lower in hit["title"].lower():
+                            logger.info("FTS Short-Circuit early exit triggered for query: %r", query)
+                            # Return 1.0 exact score match, bypassing embedding generation!
+                            return [(1.0, hit)]
+        except Exception as exc:
+            logger.debug("FTS Short-circuit check failed (non-fatal): %s", exc)
+
     q_vec, _ = await _embed(query)
     if not q_vec:
         return []
