@@ -857,31 +857,31 @@ INDEX_HTML = """
                 <div class="m3-card-title">System Diagnostics & Tasks</div>
                 <div style="display: flex; flex-direction: column; gap: 0.5rem;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('decay_dry')">
+                        <button class="m3-btn tooltip-container" style="font-size: 0.92rem; padding: 0.6rem 0.35rem;" onclick="runMaintenance('decay_dry')">
                             Decay Dry-Run
                             <span class="m3-tooltip">Preview memory decay and expiration scores. Safe dry-run, <strong style="color: var(--m3-neon-cyan);">no database edits.</strong></span>
                         </button>
-                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('decay_apply')">
+                        <button class="m3-btn tooltip-container" style="font-size: 0.92rem; padding: 0.6rem 0.35rem;" onclick="runMaintenance('decay_apply')">
                             Decay Apply
                             <span class="m3-tooltip">Calculate and commit memory decay scores, prune expired items, and enforce retention limits. <strong style="color: var(--m3-neon-amber);">Modifies DB.</strong></span>
                         </button>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('embed_sweep')">
+                        <button class="m3-btn tooltip-container" style="font-size: 0.92rem; padding: 0.6rem 0.35rem;" onclick="runMaintenance('embed_sweep')">
                             Embed Sweeper
                             <span class="m3-tooltip">Sweep and process pending entity extraction queue tasks, draining and compacting spill jobs.</span>
                         </button>
-                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('files_health')">
+                        <button class="m3-btn tooltip-container" style="font-size: 0.92rem; padding: 0.6rem 0.35rem;" onclick="runMaintenance('files_health')">
                             Files Rebuild
                             <span class="m3-tooltip">Scan Files database integrity, chunk document segments, and force rebuilding of index indices.</span>
                         </button>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('backfill_titles')">
+                        <button class="m3-btn tooltip-container" style="font-size: 0.92rem; padding: 0.6rem 0.35rem;" onclick="runMaintenance('backfill_titles')">
                             Backfill Titles
                             <span class="m3-tooltip">Derive titles for unnamed or generic entries automatically. <strong style="color: hsl(15, 100%, 55%); font-weight: 700;">Automatically confirms ('--yes') and applies changes.</strong></span>
                         </button>
-                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('backfill_embeds')">
+                        <button class="m3-btn tooltip-container" style="font-size: 0.92rem; padding: 0.6rem 0.35rem;" onclick="runMaintenance('backfill_embeds')">
                             Backfill Embeds
                             <span class="m3-tooltip">Generate missing vector embeddings for database facts and log records automatically. <strong style="color: hsl(15, 100%, 55%); font-weight: 700;">Automatically confirms ('--yes') and applies changes.</strong></span>
                         </button>
@@ -892,7 +892,7 @@ INDEX_HTML = """
                         <span style="font-size: 0.75rem; color: var(--m3-neon-cyan); font-family: 'Outfit', sans-serif;">Console Log</span>
                         <button class="m3-btn" style="padding: 2px 6px; font-size: 0.65rem;" onclick="clearConsole()">Clear</button>
                     </div>
-                    <pre id="consoleOutput" style="background: hsla(222, 22%, 5%, 0.8); border: 1px solid var(--m3-border-glass); border-radius: 6px; padding: 0.75rem; font-family: 'Fira Code', Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace; font-size: 0.72rem; line-height: 1.45; color: hsl(210, 15%, 90%); max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+                    <pre id="consoleOutput" style="background: hsla(222, 22%, 5%, 0.8); border: 1px solid var(--m3-border-glass); border-radius: 6px; padding: 0.75rem; font-family: 'Fira Code', Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace; font-size: 0.82rem; line-height: 1.45; color: hsl(210, 15%, 90%); max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
                 </div>
             </div>
 
