@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_init.py
-sha1: 8eb26c7df507
-mtime_utc: 2026-05-01T09:14:47.217939+00:00
-generated_utc: 2026-05-01T13:05:26.752279+00:00
+sha1: c75d022e3e60
+mtime_utc: 2026-05-30T18:38:21.553829+00:00
+generated_utc: 2026-05-31T18:42:52.636912+00:00
 private: false
 ---
 
@@ -29,7 +29,7 @@ path equality.
 
 ## Entry points
 
-- `def main()` (line 590)
+- `def main()` (line 592)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -66,9 +66,9 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 261)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 236)
-- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 714)
+- `subprocess.run()  → `[sys.executable, install_script, '--add', 'chatlog-embed-sweep']`` (line 263)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 238)
+- `subprocess.run()  → `[sys.executable, migrate_script, 'up', '--target', 'chatlog', '-y']`` (line 716)
 
 
 ---
@@ -85,6 +85,8 @@ _(only stdlib)_
 - `claude_code_precompact.sh`
 - `gemini_cli_onexit.sh`
 - `settings.json`
+- `~/.gemini/antigravity-cli/settings.json`
+- `~/.gemini/settings.json`
 
 ---
 

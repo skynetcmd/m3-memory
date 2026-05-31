@@ -1,8 +1,8 @@
 ---
 tool: bin/test_fips_integrity.py
-sha1: 9cece4bdb8e1
-mtime_utc: 2026-05-07T03:32:14.565827+00:00
-generated_utc: 2026-05-09T13:54:34.982853+00:00
+sha1: 3654cf2b80b2
+mtime_utc: 2026-05-31T16:08:17.252572+00:00
+generated_utc: 2026-05-31T18:42:53.011509+00:00
 private: false
 ---
 
@@ -28,7 +28,8 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_CRYPTO_BACKEND`
+- `M3_FIPS_MODE`
 
 ---
 
@@ -50,7 +51,9 @@ _(no subprocess / http / sqlite calls detected)_
 - `base64`
 - `cryptography.fernet (Fernet)`
 - `cryptography.hazmat.primitives (hashes)`
+- `cryptography.hazmat.primitives.ciphers.aead (AESGCM)`
 - `cryptography.hazmat.primitives.kdf.pbkdf2 (PBKDF2HMAC)`
+- `ctypes`
 - `ssl`
 - `unittest`
 

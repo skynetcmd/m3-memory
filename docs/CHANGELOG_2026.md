@@ -1,5 +1,22 @@
 # M3 Memory System Changelog - 2026
 
+## May 31, 2026
+
+### 🖥️ Live Observability & Web Diagnostics Portal (v2026.5.31.0)
+
+#### Web Dashboard (`bin/dashboard_server.py`)
+- **Multi-DB Overview**: Native dynamic FastAPI control center for core memory nodes, chatlog sessions, and ingested files, featuring real-time HSL cyan/magenta/emerald themes, active context glows, transparency dimming, and alert banners.
+- **Accurate Chatlog Sessions card**: Shows distinct conversation sessions count (coalescing legacy NULL values to `'legacy'` to represent untracked blocks cleanly) as the primary large numeric value, and total back-and-forth communication turns (`type='chat_log'`) in a smaller Fira Code sub-label.
+- **Accurate Files card**: Shows total file chunks as the primary large numeric value, and deduplicated non-blank lines (`57,024 lines` calculated dynamically via `text_sha256` Group-By) and files count as a smaller Fira Code sub-label.
+- **Process Isolation**: Prevents process-wide environment pollution by caching static database paths (`_DB_PATHS`) at startup, completely isolating parallel tab queries and multi-DB focal views.
+
+#### System Maintenance & Diagnostics Task Launcher
+- **Integrated Control Panel**: Surfs a System Diagnostics & Tasks launcher inside the unified dashboard.
+- **Background execution**: Safely triggers heavy-duty maintenance runs asynchronously, such as ephemerality decay (`chatlog_decay.py`) and lazy embedding backfill (`chatlog_embed_sweeper.py`), without locking the UI.
+- **Live streaming outputs**: Spawns non-blocking subprocesses, streams standard outputs and logs in real-time, and surfaces completion exit codes directly in the web dashboard.
+
+---
+
 ## May 4, 2026
 
 ### 🤖 Autonomous Cognitive Loop (v2026.5.4.5)

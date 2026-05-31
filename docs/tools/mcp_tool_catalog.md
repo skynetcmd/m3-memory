@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: 4cbbc1a640bf
-mtime_utc: 2026-05-29T17:25:04.710162+00:00
-generated_utc: 2026-05-29T17:25:11.430252+00:00
+sha1: a54a74155ff0
+mtime_utc: 2026-05-31T16:08:17.248982+00:00
+generated_utc: 2026-05-31T18:42:52.863046+00:00
 private: false
 ---
 
@@ -45,18 +45,14 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-_(none detected)_
+- `MCP_PROXY_ALLOW_DESTRUCTIVE`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `chatlog_core`
-- `chatlog_status`
 - `m3_sdk (active_database)`
-- `memory_core`
-- `memory_maintenance`
-- `memory_sync`
+- `tool_domains`
 - `tool_loader`
 
 ---
@@ -69,7 +65,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `files_memory (tools)`
+- `importlib`
 
 ---
 

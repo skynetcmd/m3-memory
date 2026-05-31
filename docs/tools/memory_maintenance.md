@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: 916179e6ecbc
-mtime_utc: 2026-05-23T12:31:13.386618+00:00
-generated_utc: 2026-05-23T17:51:49.228884+00:00
+sha1: 5bf75428c099
+mtime_utc: 2026-05-31T16:08:17.252067+00:00
+generated_utc: 2026-05-31T18:42:52.896049+00:00
 private: false
 ---
 
@@ -35,6 +35,8 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
+- `audit_trail (write_audit_entry)`
+- `m3_sdk (_LAST_USER_INTERACTION)`
 - `memory_core`
 - `memory_core (ARCHIVE_DB_PATH, DEDUP_LIMIT, DEDUP_THRESHOLD, EMBED_DIM, _content_hash, _cosine, _db, _embed, _get_embed_client, _pack, _unpack, ctx, get_best_llm, m3_core_rs, memory_link_impl)`
 
@@ -45,7 +47,7 @@ _(none detected)_
 **sqlite**
 
 - `sqlite3.connect()  → `ARCHIVE_DB_PATH`` (line 33)
-- `sqlite3.connect()  → `active_path`` (line 322)
+- `sqlite3.connect()  → `active_path`` (line 336)
 
 
 ---

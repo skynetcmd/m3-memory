@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: 747530ea035a
-mtime_utc: 2026-05-14T05:26:33.275442+00:00
-generated_utc: 2026-05-14T05:37:12.624469+00:00
+sha1: 3fdfbec40f16
+mtime_utc: 2026-05-31T16:08:17.247946+00:00
+generated_utc: 2026-05-31T18:42:52.761975+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 295)
+- `def main()` (line 311)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -67,7 +67,7 @@ for m3_enrich and m3_entities.
 - `chatlog_config`
 - `m3_enrich`
 - `m3_entities`
-- `m3_sdk (M3Context, resolve_db_path)`
+- `m3_sdk (M3Context, get_governor_pacing, resolve_db_path)`
 
 ---
 
