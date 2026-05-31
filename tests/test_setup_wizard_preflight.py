@@ -193,3 +193,181 @@ def test_setup_plan_has_embed_gguf_field():
     fields = {f.name for f in dataclasses.fields(plan)}
     assert "embed_gguf" in fields
     assert plan.embed_gguf is None  # default
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Agent Autodetection & Prompting Validation
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_detect_agents_none_found(monkeypatch, tmp_path):
+    """When no agent binaries or directories are present, all fields are False."""
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: None)
+    monkeypatch.setenv("OPENCLAW_GATEWAY_TOKEN", "")
+
+    targets = setup_wizard._detect_agents()
+    assert targets.claude is False
+    assert targets.gemini is False
+    assert targets.antigravity is False
+    assert targets.opencode is False
+    assert targets.openclaw is False
+    assert targets.hermes is False
+    assert targets.any() is False
+
+
+def test_detect_agents_all_found(monkeypatch, tmp_path):
+    """When all agent CLIs, fallbacks, or app-data dirs are mock-present, all fields are True."""
+    monkeypatch.setattr("shutil.which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: tmp_path / "hermes_plugins")
+
+    targets = setup_wizard._detect_agents()
+    assert targets.claude is True
+    assert targets.gemini is True
+    assert targets.antigravity is True
+    assert targets.opencode is True
+    assert targets.openclaw is True
+    assert targets.hermes is True
+    assert targets.any() is True
+
+
+def test_detect_agents_fallback_paths(monkeypatch, tmp_path):
+    """Fallback paths (like ~/.gemini/antigravity-cli or ~/.openclaw) are correctly scanned."""
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    # 1. Gemini fallback: ~/.npm-global/bin/gemini
+    gemini_path = home / ".npm-global" / "bin" / "gemini"
+    gemini_path.parent.mkdir(parents=True, exist_ok=True)
+    gemini_path.write_text("fake gemini binary", encoding="utf-8")
+
+    # 2. Antigravity fallback: ~/.gemini/antigravity-cli
+    agy_dir = home / ".gemini" / "antigravity-cli"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3. OpenClaw fallback: ~/.openclaw
+    openclaw_dir = home / ".openclaw"
+    openclaw_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: None)
+
+    targets = setup_wizard._detect_agents()
+    assert targets.claude is False
+    assert targets.gemini is True
+    assert targets.antigravity is True
+    assert targets.opencode is False
+    assert targets.openclaw is True
+    assert targets.hermes is False
+
+
+def test_find_hermes_plugins_dir_via_env(monkeypatch, tmp_path):
+    """HERMES_HOME environment variable takes highest priority for Hermes detection."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "custom_hermes"))
+
+    pm = tmp_path / "custom_hermes" / "plugins" / "memory"
+    pm.mkdir(parents=True)
+
+    found = setup_wizard._find_hermes_plugins_dir()
+    assert found is not None
+    assert found == pm
+
+
+def test_find_hermes_plugins_dir_via_localappdata(monkeypatch, tmp_path):
+    """LOCALAPPDATA is probed on Windows for %LOCALAPPDATA%/hermes/hermes-agent/plugins/memory."""
+    monkeypatch.setenv("HERMES_HOME", "")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "LocalAppData"))
+
+    pm = tmp_path / "LocalAppData" / "hermes" / "hermes-agent" / "plugins" / "memory"
+    pm.mkdir(parents=True)
+
+    found = setup_wizard._find_hermes_plugins_dir()
+    assert found is not None
+    assert found == pm
+
+
+def test_gather_plan_interactive_defaults(monkeypatch):
+    """When agents are detected, interactive gather_plan defaults are optimal (True)."""
+    import argparse
+    detected = setup_wizard.AgentTargets(
+        claude=True, gemini=True, antigravity=True,
+        opencode=True, openclaw=True, hermes=True
+    )
+
+    class FakeArgs:
+        non_interactive = False
+        endpoint = None
+        cognitive_loop = False
+        agents = None
+        capture_mode = None
+        install_gpu_embedder = False
+
+    args = FakeArgs()
+    questions_asked = []
+
+    def mock_ask_yes_no(question: str, default: bool) -> bool:
+        questions_asked.append((question, default))
+        return default
+
+    def mock_ask_choice(question: str, choices: list[str], default: str) -> str:
+        questions_asked.append((question, default))
+        return default
+
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", mock_ask_yes_no)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", mock_ask_choice)
+
+    plan = setup_wizard._gather_plan(detected, args)
+
+    assert plan.targets.claude is True
+    assert plan.targets.gemini is True
+    assert plan.targets.antigravity is True
+    assert plan.targets.opencode is True
+    assert plan.targets.openclaw is True
+    assert plan.targets.hermes is True
+    assert plan.capture_mode == "both"
+    assert plan.install_gpu_embedder is False
+
+
+def test_wire_opencode_writes_json(monkeypatch, tmp_path):
+    """_wire_opencode creates the opencode.json config file with correct settings."""
+    import json
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    success = setup_wizard._wire_opencode()
+    assert success is True
+
+    cfg_file = tmp_path / "opencode" / "opencode.json"
+    assert cfg_file.is_file()
+
+    content = json.loads(cfg_file.read_text(encoding="utf-8"))
+    assert content["mcp"]["memory"]["command"] == ["m3"]
+
+
+def test_wire_hermes_plugin_copy(monkeypatch, tmp_path):
+    """_wire_hermes copies the bundled Hermes provider files to the plugin destination."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    for fname in ["__init__.py", "m3client.py", "plugin.yaml"]:
+        (src_dir / fname).write_text(f"content of {fname}", encoding="utf-8")
+
+    dst_parent = tmp_path / "dst" / "plugins" / "memory"
+    dst_parent.mkdir(parents=True)
+
+    monkeypatch.setattr(setup_wizard, "_find_m3_hermes_plugin_src", lambda: src_dir)
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: dst_parent)
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda q, default: True)
+
+    success = setup_wizard._wire_hermes()
+    assert success is True
+
+    dst_m3 = dst_parent / "m3"
+    assert dst_m3.is_dir()
+    for fname in ["__init__.py", "m3client.py", "plugin.yaml"]:
+        assert (dst_m3 / fname).is_file()
+        assert (dst_m3 / fname).read_text(encoding="utf-8") == f"content of {fname}"
+
