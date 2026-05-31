@@ -211,6 +211,30 @@ def conv_id_diversity(candidates: list, top_n: int = 10) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _map_rust_to_py_branch(query: str, rs_branch: str) -> str:
+    """Maps Rust pre-retrieval route branches to conceptual Python branch names."""
+    # 1. Temporal cues fallback (regex check matches Python temporal decider)
+    if has_temporal_cues(query):
+        return "temporal"
+    
+    # 2. Named entities match entity anchored
+    if rs_branch == "entity":
+        return "entity_anchored"
+    
+    # 3. Lexical maps directly to default fallback
+    if rs_branch == "lexical":
+        return "default"
+    
+    # 4. Semantic maps to default or multi_session
+    if rs_branch == "semantic":
+        # If the query has comparison cues, map to multi_session
+        if has_comparison_cues(query):
+            return "multi_session"
+        return "default"
+        
+    return rs_branch
+
+
 def _route_shadow_compare(query: str, py_branch: str) -> None:
     """Run the Rust route decider alongside Python and log any disagreement.
 
@@ -234,16 +258,18 @@ def _route_shadow_compare(query: str, py_branch: str) -> None:
         signals = m3_core_rs.extract_signals(query)
         decision = m3_core_rs.decide_route(query, signals)
         rs_branch = decision.branch
-        if rs_branch == py_branch:
+        mapped_branch = _map_rust_to_py_branch(query, rs_branch)
+        
+        if mapped_branch == py_branch:
             _log.debug(
                 "route shadow AGREE: branch=%s query=%r rs_confidence=%.3f",
                 py_branch, query, decision.confidence,
             )
         else:
             _log.warning(
-                "route shadow DISAGREE: py_branch=%s rs_branch=%s query=%r "
+                "route shadow DISAGREE: py_branch=%s rs_branch=%s mapped_branch=%s query=%r "
                 "rs_confidence=%.3f rs_signal_breakdown=%s",
-                py_branch, rs_branch, query, decision.confidence,
+                py_branch, rs_branch, mapped_branch, query, decision.confidence,
                 decision.signal_breakdown,
             )
     except Exception as exc:  # noqa: BLE001 — shadow must never break routing
@@ -271,6 +297,20 @@ def decide_branch(query: str, candidates: list, params: dict) -> str:
     params may override any threshold via keys matching the AUTO_* constant names
     (lowercase, e.g. 'auto_top1_sharp_min').
     """
+    if _ROUTE_SHADOW_MODE == "enforce" and m3_core_rs is not None:
+        try:
+            signals = m3_core_rs.extract_signals(query)
+            decision = m3_core_rs.decide_route(query, signals)
+            rs_branch = decision.branch
+            mapped_branch = _map_rust_to_py_branch(query, rs_branch)
+            _log.debug(
+                "route enforce mode: rs_branch=%s -> mapped_branch=%s query=%r confidence=%.3f",
+                rs_branch, mapped_branch, query, decision.confidence
+            )
+            return mapped_branch
+        except Exception as exc:
+            _log.warning("Rust enforce-mode routing failed, falling back to Python decider: %s", exc)
+
     branch = _decide_branch_impl(query, candidates, params)
     # Shadow hook — runs the Rust route decider alongside Python and logs
     # disagreements. Observe-only: `branch` is returned unchanged regardless.
