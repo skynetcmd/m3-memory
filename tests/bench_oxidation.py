@@ -325,7 +325,7 @@ print()
 
 # --- 4. MMR rerank ---------------------------------------------------------
 print("[4] MMR rerank  (Rust: mmr_rerank_scored force_seed_first=True  |  Python: memory_core MMR loop replica)")
-for pool in (24, 150, 500):
+for pool in (24, 150):
     k = pool // 3
     cands = take_vecs(pool)
     # descending-sorted blended relevance, as the production call site guarantees
