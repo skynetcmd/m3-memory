@@ -28,7 +28,7 @@ import os
 import re
 import sqlite3
 from collections.abc import Callable
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 from m3_sdk import resolve_db_path
 
@@ -112,7 +112,6 @@ from .util import (
     _cosine,
     _cosine_batch_packed,
     _np,
-    _unpack_many,
 )
 
 logger = logging.getLogger("memory.search")

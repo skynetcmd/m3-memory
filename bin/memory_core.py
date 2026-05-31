@@ -49,7 +49,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 
@@ -325,10 +324,10 @@ from memory.write import (  # noqa: F401 — re-exports
     _check_contradictions,
     memory_link_impl,
     memory_supersede_impl,
-    memory_write_bulk_impl,
-    memory_write_impl,
-    memory_write_from_file_impl,
     memory_write_batch_impl,
+    memory_write_bulk_impl,
+    memory_write_from_file_impl,
+    memory_write_impl,
 )
 
 # Phase 4.A: Chroma federation helpers (queue insert, collection-id cache,
@@ -464,9 +463,6 @@ async def conversation_summarize_impl(conversation_id: str, threshold: int = 20)
 # embedder_status_impl moved to bin/memory/embed.py in Phase 3.
 # Re-exported via the shim at the top.
 from embedding_utils import HAS_NUMPY as _HAS_NUMPY
-from embedding_utils import (
-    infer_change_agent as _infer_change_agent_util,
-)
 from embedding_utils import (
     pack as _pack,
 )
