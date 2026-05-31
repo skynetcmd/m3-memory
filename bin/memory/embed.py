@@ -624,7 +624,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
             )
             from llm_failover import clear_embed_cache
             clear_embed_cache()
-        
+
         # Fall through to Tier 4 Cloud Enclave if enabled
         if config.M3_ALLOW_CLOUD_FALLBACK and config.M3_CLOUD_ENCLAVE_URL:
             if _CLOUD_BREAKER is None or _CLOUD_BREAKER.allow_request():
@@ -643,7 +643,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                             f"PII Redaction Gate: redacted {match_count} items from "
                             f"text before cloud transmission (groups: {groups_fired})"
                         )
-                    
+
                     # 2. Keyring credentials resolution
                     token = None
                     if config.M3_CLOUD_AUTH_TOKEN_KEYRING:
@@ -657,19 +657,19 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                             token = safe_keyring_get_password(service, username)
                         except Exception as keyring_err:
                             logger.warning(f"Keyring lookup for cloud token failed: {keyring_err}")
-                    
+
                     if not token:
                         token = os.environ.get("M3_CLOUD_AUTH_TOKEN")
-                    
+
                     # 3. HTTP Call to Cloud Enclave
                     client = _get_embed_client()
                     headers = {}
                     if token:
                         headers["Authorization"] = f"Bearer {token}"
-                    
+
                     url = config.M3_CLOUD_ENCLAVE_URL.rstrip("/")
                     post_url = url if url.endswith("/embeddings") or url.endswith("/embedding") else f"{url}/embeddings"
-                    
+
                     resp = await client.post(
                         post_url,
                         json={"model": config.EMBED_MODEL, "input": scrubbed_text},
@@ -678,10 +678,10 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     )
                     resp.raise_for_status()
                     emb = resp.json()["data"][0]["embedding"]
-                    
+
                     if len(emb) != config.EMBED_DIM:
                         logger.error(f"Cloud Enclave embedding dim {len(emb)} != EMBED_DIM {config.EMBED_DIM}")
-                    
+
                     if _CLOUD_BREAKER is not None:
                         _CLOUD_BREAKER.record_success()
                     _record_embed_backend("cloud-enclave", 1)
@@ -690,7 +690,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     if _CLOUD_BREAKER is not None:
                         _CLOUD_BREAKER.record_failure()
                     logger.error(f"Tier 4 Cloud Enclave failed: {cloud_err}. Routing payload back to local fallback.")
-        
+
         return None, model
     finally:
         _EMBED_SEM.release()
@@ -722,12 +722,12 @@ async def _embed_many_cloud_fallback(
             "custom_regex": [],
             "redact_pii": True,
         }
-        
+
         cloud_texts = []
         for idx in cloud_indices:
             scrubbed, _, _ = scrub(texts[idx], redact_cfg)
             cloud_texts.append(scrubbed)
-        
+
         # 2. Keyring credentials resolution
         token = None
         if config.M3_CLOUD_AUTH_TOKEN_KEYRING:
@@ -741,19 +741,19 @@ async def _embed_many_cloud_fallback(
                 token = safe_keyring_get_password(service, username)
             except Exception as keyring_err:
                 logger.warning(f"Keyring lookup for cloud token failed: {keyring_err}")
-        
+
         if not token:
             token = os.environ.get("M3_CLOUD_AUTH_TOKEN")
-        
+
         # 3. HTTP Call to Cloud Enclave (Batched)
         client = _get_embed_client()
         headers = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        
+
         url = config.M3_CLOUD_ENCLAVE_URL.rstrip("/")
         post_url = url if url.endswith("/embeddings") or url.endswith("/embedding") else f"{url}/embeddings"
-        
+
         resp = await client.post(
             post_url,
             json={"model": config.EMBED_MODEL, "input": cloud_texts},
@@ -764,7 +764,7 @@ async def _embed_many_cloud_fallback(
         data = resp.json()["data"]
         ordered = sorted(data, key=lambda d: d.get("index", 0))
         vecs = [d["embedding"] for d in ordered]
-        
+
         if len(vecs) == len(cloud_texts):
             _cloud_served = 0
             for idx, vec in zip(cloud_indices, vecs):
@@ -773,7 +773,7 @@ async def _embed_many_cloud_fallback(
                         logger.error(f"Cloud Enclave embedding dim {len(vec)} != EMBED_DIM {config.EMBED_DIM}")
                     out[idx] = (vec, config.EMBED_MODEL)
                     _cloud_served += 1
-            
+
             if _cloud_served:
                 if _CLOUD_BREAKER is not None:
                     _CLOUD_BREAKER.record_success()
