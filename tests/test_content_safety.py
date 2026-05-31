@@ -54,6 +54,29 @@ def test_rejects_malicious(content):
     "executor role",
     "execution_time",
     "",
+    # Apostrophe prose — must NOT crash. The sqlglot guard tokenizes a lone
+    # apostrophe as the start of an unterminated SQL string literal and raises
+    # TokenError (NOT a ParseError); the old `except ParseError` let it escape
+    # and crash memory_write. These are ordinary, safe text.
+    "it isn't a problem and we don't expect one",
+    "the user's config wasn't migrated; that's the bug",
+    "can't, won't, shouldn't — none of these are SQL",
+    "O'Brien said the schema's fine",
+    # Mixed quotes / brackets that also trip the tokenizer.
+    'she said "hello" and left',
+    "a quote ' with no close and a [bracket",
 ])
 def test_allows_benign(content):
     assert _check_content_safety(content) is None
+
+
+@pytest.mark.parametrize("content", [
+    # Real destructive SQL must still be caught even when apostrophes appear
+    # nearby — i.e. the broadened except must not mask genuine detections on
+    # parseable statements.
+    "DELETE FROM users WHERE name = 'bob'",
+    "DROP TABLE accounts",
+    "ALTER TABLE t ADD COLUMN x INT",
+])
+def test_still_rejects_real_sql_with_quotes(content):
+    assert _check_content_safety(content) is not None
