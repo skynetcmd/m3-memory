@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: 78661781bd08
-mtime_utc: 2026-05-23T12:31:13.388927+00:00
-generated_utc: 2026-05-23T17:51:49.298492+00:00
+sha1: 29f6734988da
+mtime_utc: 2026-05-30T18:58:35.315418+00:00
+generated_utc: 2026-05-31T18:42:52.994652+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ DB list:
 
 ## Entry points
 
-- `def main()` (line 186)
+- `def main()` (line 185)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -66,15 +66,15 @@ DB list:
 
 **subprocess**
 
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 162)
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 117)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 161)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 116)
 
 
 ---
 
 ## Notable external imports
 
-- `platform`
+_(only stdlib)_
 
 ---
 

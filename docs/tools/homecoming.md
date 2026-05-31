@@ -1,8 +1,8 @@
 ---
 tool: bin/homecoming.py
-sha1: e1c161be01eb
-mtime_utc: 2026-05-21T14:41:32.907417+00:00
-generated_utc: 2026-05-24T12:09:07.906648+00:00
+sha1: 284f628ef211
+mtime_utc: 2026-05-31T16:08:17.247433+00:00
+generated_utc: 2026-05-31T18:42:52.733344+00:00
 private: false
 ---
 
@@ -11,18 +11,18 @@ private: false
 ## Purpose
 
 bin/homecoming.py — "Homecoming" migration script for m3-memory.
-Relocates repo-relative state to ~/.m3-memory/.
+Relocates repo-relative and old ~/.m3-memory/ state to new decoupled standard roots
+(~/.m3/config and ~/.m3/engine).
 
 This tool is non-destructive: it COPIES databases using the SQLite Backup API
 and MOVES configuration files. It does NOT modify system-wide tool settings
-(Claude/Gemini) to ensure safety. Users should update their tool settings
-manually to point to the new bridge paths.
+(Claude/Gemini) to ensure safety. manually update tool settings if needed.
 
 ---
 
 ## Entry points
 
-- `def main()` (line 72)
+- `def main()` (line 91)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -41,7 +41,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (get_m3_root)`
+- `m3_sdk (get_m3_config_root, get_m3_engine_root)`
 
 ---
 
@@ -49,8 +49,8 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `dst`` (line 63)
-- `sqlite3.connect()  → `src`` (line 62)
+- `sqlite3.connect()  → `dst`` (line 82)
+- `sqlite3.connect()  → `src`` (line 81)
 
 
 ---
@@ -63,14 +63,14 @@ _(only stdlib)_
 
 ## File dependencies (repo paths referenced)
 
-- `.chatlog_config.json`
-- `.chatlog_ingest_cursor.json`
-- `.chatlog_state.json`
 - `.db`
-- `.migrate_config.json`
-- `agent_chatlog.db`
-- `agent_memory.db`
-- `agent_test_bench.db`
+- `memory/.chatlog_config.json`
+- `memory/.chatlog_ingest_cursor.json`
+- `memory/.chatlog_state.json`
+- `memory/.migrate_config.json`
+- `memory/agent_chatlog.db`
+- `memory/agent_memory.db`
+- `memory/agent_test_bench.db`
 
 ---
 

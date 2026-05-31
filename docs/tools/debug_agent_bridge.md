@@ -1,8 +1,8 @@
 ---
 tool: bin/debug_agent_bridge.py
-sha1: 9a4c0a6ec4ee
-mtime_utc: 2026-05-07T01:48:32.233585+00:00
-generated_utc: 2026-05-09T13:54:34.056898+00:00
+sha1: 34b3a171752d
+mtime_utc: 2026-05-30T16:01:33.795980+00:00
+generated_utc: 2026-05-31T18:42:52.694923+00:00
 private: false
 ---
 
@@ -39,6 +39,8 @@ _(no argparse arguments detected)_
 ## Environment variables read
 
 - `AI_WORKSPACE_DIR`
+- `COMPUTERNAME`
+- `HOSTNAME`
 - `ORIGIN_DEVICE`
 
 ---
