@@ -136,8 +136,21 @@ class M3Client:
         return [{"content": it.get("content", "")} for _s, it in rows]
 
     def conclude(self, content: str, user_id: str) -> None:
-        """Verbatim fact write (no Observer re-extraction)."""
-        self._call("memory_write", content=content, user_id=user_id, type="fact")
+        """Verbatim fact write (no Observer re-extraction).
+
+        Scope + type MUST match the read paths: search()/get_all() query
+        scope="user", and get_all() filters type="user_fact". Writing under a
+        different scope/type (m3's default is the "agent" scope) stores the fact
+        where recall never looks — so m3_conclude "succeeds" yet
+        m3_search/m3_profile return nothing. Keep these aligned.
+        """
+        self._call(
+            "memory_write",
+            content=content,
+            user_id=user_id,
+            type="user_fact",
+            scope="user",
+        )
 
     def chatlog_write(
         self,
