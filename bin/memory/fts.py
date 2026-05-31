@@ -13,6 +13,8 @@ import json
 import re
 from functools import lru_cache
 
+from . import config
+
 __all__ = [
     "_sanitize_fts",
     "_sanitize_for_searchable",
@@ -121,7 +123,18 @@ _FTS_OPERATORS = re.compile(r"\b(OR|AND|NOT|NEAR)\b|[*()\[\]{}]")
 
 
 def _sanitize_fts(query: str, max_len: int = 500) -> str:
-    """Strip FTS5 operators from user input to prevent query injection."""
+    """Strip FTS5 operators from user input to prevent query injection.
+
+    Oxidation: routed through m3_core_rs.sanitize_fts (byte-exact Rust port,
+    no regex engine) when the extension is present; the regex body below is the
+    parity fallback. Parity gated by tests/test_fts_parity.py.
+    """
+    _rs = config.m3_core_rs
+    if _rs is not None:
+        try:
+            return _rs.sanitize_fts(query, max_len)
+        except Exception:  # noqa: BLE001 — FFI hiccup falls back to Python
+            pass
     if len(query) > max_len:
         query = query[:max_len]
     return _FTS_OPERATORS.sub(" ", query).strip()
@@ -156,7 +169,18 @@ def _compile_fts_query(query: str, mode: str) -> tuple[str, bool]:
     depunctuated to match the FTS trigger's normalized storage, then either
     wildcarded (single-token alnum) or OR-joined (multi-token in ``fts5`` mode)
     or passed straight through.
+
+    Oxidation: routed through m3_core_rs.compile_fts_query (byte-exact Rust port)
+    when the extension is present; the Python body below is the parity fallback.
+    The @lru_cache wraps this function, so the FFI crossing is paid once per
+    unique (query, mode). Parity gated by tests/test_fts_parity.py.
     """
+    _rs = config.m3_core_rs
+    if _rs is not None:
+        try:
+            return tuple(_rs.compile_fts_query(query, mode))
+        except Exception:  # noqa: BLE001 — FFI hiccup falls back to Python
+            pass
     is_exact_query = (query.startswith('"') and query.endswith('"')) or (
         query.startswith("'") and query.endswith("'")
     )
