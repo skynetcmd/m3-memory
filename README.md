@@ -106,7 +106,7 @@ chat model for generation (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B
 instruct GGUF). M3 auto-selects it; embedding-only features work without
 it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
-> **⚡ Auto-Oxidation is ON by Default.** M3 Memory features a high-performance Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) that automatically takes over hot-path operations (MMR reranking, cosine similarity, chat-log redaction, query routing, and in-process GGUF embeddings) to deliver major performance enhancements out-of-the-box when the wheels are installed. If you prefer to opt out and run pure Python instead, simply set `M3_CORE_RS_DISABLE=1` in your environment. See [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) for configuration details.
+> **⚡ Auto-Oxidation is ON by Default.** Auto-oxidation is enabled by default to deliver enhanced performance across hot-path operations. Users can easily opt out if desired: simply set `M3_CORE_RS_DISABLE=1` in your environment to run the pure-Python fallback path. See [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) for configuration details.
 
 Restart your agent. Done!
 
