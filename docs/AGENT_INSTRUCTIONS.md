@@ -50,6 +50,17 @@ Before any push to a remote:
    public remote. The pre-push hook scans the outgoing diff for the known
    markers; a hit blocks the push.
 
+3. **Design-philosophy advisory scan (warns, does NOT block).**
+   `python bin/check_design_philosophy.py` flags the *mechanically checkable*
+   anti-patterns named in [`DESIGN_PHILOSOPHIES.md`](DESIGN_PHILOSOPHIES.md) in
+   your changed files — `SELECT *` (§4/§8), raw `sqlite3.connect(` instead of
+   the `_db()` pool (§4/§8), inline `PRAGMA` instead of `apply_pragmas` (§10),
+   and `ToolSpec(` without a `description=` (§3/§12). It is **advisory**: it
+   cites the tenet and always exits 0, because legitimate exceptions exist
+   (migrations, fixtures). The *judgment* tenets — Effectiveness metric
+   pre-registration (§5), performance budgets (§8), one-feature-per-PR (§2) —
+   cannot be regex-checked; hold them yourself and in review.
+
 **Enforcement is layered (defense in depth) so no agent can bypass it by
 reading the "wrong" file:**
 
