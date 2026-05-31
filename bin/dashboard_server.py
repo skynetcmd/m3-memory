@@ -495,13 +495,12 @@ STYLE_CSS = """
             font-weight: 500;
         }
 
-        /* --- Premium Custom Tooltips --- */
-        [data-tooltip] {
+        /* --- Premium Custom HTML Tooltips --- */
+        .tooltip-container {
             position: relative;
         }
 
-        [data-tooltip]::after {
-            content: attr(data-tooltip);
+        .tooltip-container .m3-tooltip {
             position: absolute;
             bottom: 125%; /* Positioned above the button, safe from large cursors */
             left: 50%;
@@ -515,6 +514,7 @@ STYLE_CSS = """
             padding: 0.5rem 0.75rem;
             font-size: 0.72rem;
             font-family: 'Inter', sans-serif;
+            font-weight: normal;
             line-height: 1.45;
             width: 240px; /* Constrain width to force elegant wrapping */
             white-space: normal;
@@ -528,7 +528,7 @@ STYLE_CSS = """
             text-align: center;
         }
 
-        [data-tooltip]:hover::after {
+        .tooltip-container:hover .m3-tooltip {
             opacity: 1;
             visibility: visible;
             transform: translateX(-50%) scale(1);
@@ -640,16 +640,34 @@ INDEX_HTML = """
                 <div class="m3-card-title">System Diagnostics & Tasks</div>
                 <div style="display: flex; flex-direction: column; gap: 0.5rem;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Preview memory decay and expiration scores. Safe dry-run, no database edits." onclick="runMaintenance('decay_dry')">Decay Dry-Run</button>
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Calculate and commit memory decay scores, prune expired items, and enforce retention limits." onclick="runMaintenance('decay_apply')">Decay Apply</button>
+                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('decay_dry')">
+                            Decay Dry-Run
+                            <span class="m3-tooltip">Preview memory decay and expiration scores. Safe dry-run, <strong style="color: var(--m3-neon-cyan);">no database edits.</strong></span>
+                        </button>
+                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('decay_apply')">
+                            Decay Apply
+                            <span class="m3-tooltip">Calculate and commit memory decay scores, prune expired items, and enforce retention limits. <strong style="color: var(--m3-neon-amber);">Modifies DB.</strong></span>
+                        </button>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Sweep and process pending entity extraction queue tasks, draining and compacting spill jobs." onclick="runMaintenance('embed_sweep')">Embed Sweeper</button>
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Scan Files database integrity, chunk document segments, and force rebuilding of index indices." onclick="runMaintenance('files_health')">Files Rebuild</button>
+                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('embed_sweep')">
+                            Embed Sweeper
+                            <span class="m3-tooltip">Sweep and process pending entity extraction queue tasks, draining and compacting spill jobs.</span>
+                        </button>
+                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('files_health')">
+                            Files Rebuild
+                            <span class="m3-tooltip">Scan Files database integrity, chunk document segments, and force rebuilding of index indices.</span>
+                        </button>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Derive titles for unnamed or generic entries automatically. Automatically confirms ('--yes') and applies changes." onclick="runMaintenance('backfill_titles')">Backfill Titles</button>
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Generate missing vector embeddings for database facts and log records automatically. Automatically confirms ('--yes') and applies changes." onclick="runMaintenance('backfill_embeds')">Backfill Embeds</button>
+                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('backfill_titles')">
+                            Backfill Titles
+                            <span class="m3-tooltip">Derive titles for unnamed or generic entries automatically. <strong style="color: hsl(15, 100%, 55%); font-weight: 700;">Automatically confirms ('--yes') and applies changes.</strong></span>
+                        </button>
+                        <button class="m3-btn tooltip-container" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('backfill_embeds')">
+                            Backfill Embeds
+                            <span class="m3-tooltip">Generate missing vector embeddings for database facts and log records automatically. <strong style="color: hsl(15, 100%, 55%); font-weight: 700;">Automatically confirms ('--yes') and applies changes.</strong></span>
+                        </button>
                     </div>
                 </div>
                 <div id="maintenanceConsole" style="margin-top: 1rem; display: none;">
