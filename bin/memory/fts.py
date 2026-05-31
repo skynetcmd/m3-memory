@@ -13,8 +13,6 @@ import json
 import re
 from functools import lru_cache
 
-from . import config
-
 __all__ = [
     "_sanitize_fts",
     "_sanitize_for_searchable",
