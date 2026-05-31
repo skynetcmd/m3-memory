@@ -1,0 +1,41 @@
+# Tool-catalog drift gate — enforces the pre-push regen process for EVERY
+# author (Claude / Gemini / Antigravity / human), since CLAUDE.md is read by
+# Claude alone. bin/mcp_tool_catalog.py is the canonical MCP registry; the
+# catalog JSON, MCP_TOOLS.md, and hardcoded "N tools" counts are generated
+# from it and are not auto-refreshed. This job regenerates them and fails if
+# anything drifted. Make it a required status check in branch protection so
+# no drifted commit can merge to main.
+#
+# Single source of truth: bin/check_tool_catalog_drift.py — the same script
+# the local .githooks/pre-push hook runs.
+
+name: Tool catalog drift
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Tool catalog / docs drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest types-PyYAML
+      - name: Check tool-catalog drift
+        # Regenerates the catalog/inventory and runs the drift tests. Fails if
+        # bin/mcp_tool_catalog.py changed without the generated artifacts +
+        # "N tools" counts being updated in the same change.
+        run: python bin/check_tool_catalog_drift.py

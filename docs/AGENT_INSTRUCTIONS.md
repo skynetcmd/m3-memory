@@ -23,6 +23,51 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 ---
 
+## 🚦 Pre-push process — ALL agents (not just Claude)
+
+**This applies to every agent and human — Claude, Gemini CLI, Antigravity, and
+anyone pushing by hand.** Do not assume the rules live only in your own
+instruction file (`CLAUDE.md` / `GEMINI.md` / Antigravity config). They are
+enforced mechanically so they hold regardless of what you read.
+
+Before any push to a remote:
+
+1. **Tool-catalog drift gate.** `bin/mcp_tool_catalog.py` is the canonical MCP
+   tool registry. The catalog JSON (`docs/tools/MCP_CATALOG.json`), the
+   inventory (`docs/MCP_TOOLS.md`), the generator's `EXPECTED_TOOL_COUNT`, and
+   the hardcoded "N tools" counts in `README.md`, `docs/COMPARISON.md`,
+   `docs/MYTHS_AND_FACTS.md`, `docs/tools/files_memory.md` are all *generated
+   from* it and are NOT auto-refreshed. If you add/remove/rename a tool, you
+   MUST regenerate and update those, in the same change. Run:
+   ```
+   python bin/check_tool_catalog_drift.py
+   ```
+   A non-zero exit (or any leftover `git diff` in the generated docs) is a
+   STOP signal — regenerate, update the count claims, commit, then push.
+
+2. **Bench-data leakage scan.** Never push LME-M/LongMemEval-M data,
+   methodology, in-flight bench results, or local absolute paths / secrets to a
+   public remote. The pre-push hook scans the outgoing diff for the known
+   markers; a hit blocks the push.
+
+**Enforcement is layered (defense in depth) so no agent can bypass it by
+reading the "wrong" file:**
+
+- **Local hook** — `.githooks/pre-push` runs both gates before every push.
+  Enable once per clone: `python bin/setup_hooks.py` (sets
+  `git config core.hooksPath .githooks`). **Every agent and human must run
+  this once after cloning.**
+- **CI gate** — `.github/workflows/tool-catalog-drift.yml` re-runs the drift
+  check on every push/PR to `main`; make it a required status check so a
+  drifted commit cannot merge no matter who authored it.
+- This document — the human/agent-readable why, referenced by `CLAUDE.md`,
+  `AGENTS.md`, and `GEMINI.md`.
+
+The single source of truth for the check is `bin/check_tool_catalog_drift.py`;
+the hook and CI both call it, so the logic can never fork.
+
+---
+
 ## 🧠 Core Behavioral Rules
 
 You have full access to **M3 Memory** — a persistent, local-first agentic memory layer via MCP tools. This gives you long-term continuity across sessions, projects, and conversations.
