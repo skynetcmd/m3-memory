@@ -568,6 +568,32 @@ INDEX_HTML = """
                 <div id="gdprFeedback" style="margin-top: 0.75rem; font-size: 0.8rem; text-align: center;"></div>
             </div>
 
+            <!-- System Diagnostics & Tasks -->
+            <div class="m3-card">
+                <div class="m3-card-title">System Diagnostics & Tasks</div>
+                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('decay_dry')">Decay Dry-Run</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('decay_apply')">Decay Apply</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('embed_sweep')">Embed Sweeper</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('files_health')">Files Rebuild</button>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('backfill_titles')">Backfill Titles</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" onclick="runMaintenance('backfill_embeds')">Backfill Embeds</button>
+                    </div>
+                </div>
+                <div id="maintenanceConsole" style="margin-top: 1rem; display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                        <span style="font-size: 0.75rem; color: var(--m3-neon-cyan); font-family: 'Outfit', sans-serif;">Console Log</span>
+                        <button class="m3-btn" style="padding: 2px 6px; font-size: 0.65rem;" onclick="clearConsole()">Clear</button>
+                    </div>
+                    <pre id="consoleOutput" style="background: hsla(222, 22%, 5%, 0.8); border: 1px solid var(--m3-border-glass); border-radius: 6px; padding: 0.5rem; font-family: 'Fira Code', monospace; font-size: 0.7rem; color: #fff; max-height: 180px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+                </div>
+            </div>
+
             <!-- Contradictions & Audit Feed -->
             <div class="m3-card">
                 <div class="m3-card-title">
@@ -843,6 +869,31 @@ INDEX_HTML = """
                 fb.style.color = "var(--m3-neon-amber)";
                 fb.innerText = "Failed to purge user.";
             }
+        }
+
+        async function runMaintenance(action) {
+            const consoleDiv = document.getElementById("maintenanceConsole");
+            const outputPre = document.getElementById("consoleOutput");
+            consoleDiv.style.display = "block";
+            outputPre.style.color = "var(--m3-neon-cyan)";
+            outputPre.innerText = `[System] Triggering ${action}...\n`;
+            outputPre.scrollTop = outputPre.scrollHeight;
+            
+            try {
+                const res = await fetch(`/api/maintenance/${action}`, { method: "POST" });
+                const text = await res.text();
+                outputPre.style.color = res.ok ? "#fff" : "var(--m3-neon-amber)";
+                outputPre.innerText += text;
+            } catch(e) {
+                outputPre.style.color = "var(--m3-neon-amber)";
+                outputPre.innerText += `[Error] Failed to connect to server: ${e.message}\n`;
+            }
+            outputPre.scrollTop = outputPre.scrollHeight;
+        }
+
+        function clearConsole() {
+            document.getElementById("consoleOutput").innerText = "";
+            document.getElementById("maintenanceConsole").style.display = "none";
         }
 
         // Init loads
@@ -1279,6 +1330,55 @@ async def forget_gdpr_data(user_id: str = Form(...)):
         return HTMLResponse(content=f"GDPR Purge Successful: {msg}", status_code=200)
     except Exception as e:
         return HTMLResponse(content=f"Purge Failed: {str(e)}", status_code=500)
+
+
+@app.post("/api/maintenance/{action}", response_class=HTMLResponse)
+async def run_maintenance_task(action: str):
+    """Executes backend maintenance actions similar to TUI options."""
+    import subprocess
+    
+    main_db = os.path.abspath(resolve_db_path(None))
+    
+    # Resolve Chatlog DB path
+    try:
+        from chatlog_config import resolve_config
+        config = resolve_config()
+        chatlog_db = os.path.abspath(config.db_path)
+    except Exception:
+        chatlog_db = main_db
+        
+    cmd_map = {
+        "decay_dry": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db],
+        "decay_apply": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db, "--apply"],
+        "embed_sweep": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_embed_sweeper.py"), "--database", main_db, "--drain-spill"],
+        "backfill_titles": [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_title.py")],
+        "backfill_embeds": [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_embed.py")],
+        "files_health": [sys.executable, "-m", "files_memory.tools", "health", "--rebuild"]
+    }
+    
+    if action not in cmd_map:
+        raise HTTPException(status_code=400, detail="Invalid action")
+        
+    cmd = cmd_map[action]
+    
+    # Run command inside a thread to keep FastAPI non-blocking
+    def run_cmd():
+        env = os.environ.copy()
+        # Add bin directory to PYTHONPATH so files_memory is importable
+        bin_dir = os.path.dirname(os.path.abspath(__file__))
+        if "PYTHONPATH" in env:
+            env["PYTHONPATH"] = bin_dir + os.pathsep + env["PYTHONPATH"]
+        else:
+            env["PYTHONPATH"] = bin_dir
+            
+        try:
+            res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, shell=False)
+            return res.stdout + "\n" + res.stderr + f"\nProcess exited with code {res.returncode}"
+        except Exception as e:
+            return f"Error executing process: {str(e)}"
+            
+    output = await asyncio.to_thread(run_cmd)
+    return HTMLResponse(content=output, status_code=200)
 
 
 # --- Execution Hook ---
