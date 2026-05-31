@@ -132,11 +132,16 @@ class M3MemoryProvider(MemoryProvider):
         return "m3"
 
     def is_available(self) -> bool:
-        # Available iff the m3 catalog is importable (bin/ on PYTHONPATH).
+        # Available iff the m3 catalog module is on the path. Use find_spec, NOT
+        # `import mcp_tool_catalog`: discovery runs is_available() for every
+        # provider at startup, and actually importing the catalog pulls in
+        # memory_core + the embedder load path (slow, and historically a WMI
+        # stall on Py3.14/Windows). find_spec only resolves the module location
+        # — no execution, no side effects, instant.
+        import importlib.util
         try:
-            import mcp_tool_catalog  # noqa: F401
-            return True
-        except Exception:
+            return importlib.util.find_spec("mcp_tool_catalog") is not None
+        except (ImportError, ValueError):
             return False
 
     def save_config(self, values, hermes_home):
@@ -169,10 +174,12 @@ class M3MemoryProvider(MemoryProvider):
                 return self._client
             try:
                 from .m3client import M3Client
-            except ImportError as e:
-                raise RuntimeError(
-                    f"m3 client unavailable (is m3-memory bin/ on PYTHONPATH?): {e}"
-                )
+            except Exception as e:
+                # Widened from ImportError: a slow/partial import of the m3
+                # catalog under threaded tool execution can surface as other
+                # exception types. Report the concrete error rather than a
+                # generic "PYTHONPATH?" guess.
+                raise RuntimeError(f"m3 client unavailable: {type(e).__name__}: {e}")
             self._client = M3Client(agent_id=self._agent_id)
             return self._client
 
