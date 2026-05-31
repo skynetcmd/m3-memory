@@ -109,3 +109,30 @@ def verify_audit_trail() -> bool:
         return True
     except Exception:
         return False
+
+
+def log_event(ctx, category: str, detail_a: str,
+              detail_b: str = "", detail_c: Any = None) -> None:
+    """Route a structured event to the correct legacy table.
+
+    Used by bridges that predate the unified memory_items model.
+    Categories: 'thought'/'activity' → activity_logs; 'decision' → project_decisions.
+    Unknown categories fall through to activity_logs for safety.
+    """
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with ctx.get_sqlite_conn() as conn:
+        cur = conn.cursor()
+        if category == "decision":
+            cur.execute(
+                "INSERT INTO project_decisions (project, decision, rationale, timestamp) "
+                "VALUES (?, ?, ?, ?)",
+                (detail_c or "default", detail_a, detail_b, now),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO activity_logs (timestamp, query, response, model_used) "
+                "VALUES (?, ?, ?, ?)",
+                (now, detail_a, detail_b, detail_c or category),
+            )
+        conn.commit()
+

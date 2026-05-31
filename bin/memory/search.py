@@ -1051,10 +1051,15 @@ async def memory_search_scored_impl(
         with _db() as db:
             if search_mode == "semantic":
                 sql = f"""
+                    WITH limited AS (
+                        SELECT mi.id FROM memory_items mi
+                        WHERE {where_sql}
+                        LIMIT 50
+                    )
                     SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score{extra_sql}
                     FROM memory_items mi
                     JOIN memory_embeddings me ON mi.id = me.memory_id
-                    WHERE {where_sql}
+                    WHERE mi.id IN (SELECT id FROM limited)
                     ORDER BY mi.created_at DESC
                 """
                 if os.environ.get("M3_DEBUG"):

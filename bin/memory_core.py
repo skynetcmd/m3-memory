@@ -132,6 +132,12 @@ from memory.config import (  # noqa: F401 — re-exports
     SUPERSEDES_PENALTY,
     TITLE_MATCH_BOOST,
     m3_core_rs,
+    M3_ALLOW_CLOUD_FALLBACK,
+    M3_CLOUD_ENCLAVE_URL,
+    M3_CLOUD_AUTH_TOKEN_KEYRING,
+    M3_CLOUD_MINIMIZATION_LEVEL,
+    EMBED_BREAKER_CLOUD_THRESHOLD,
+    EMBED_BREAKER_CLOUD_RESET_SECS,
 )
 from memory.db import (  # noqa: F401 — re-exports
     _ACCESS_FLUSH_INTERVAL,
