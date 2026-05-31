@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_m3_m3__memory_search",
+      "mcp__memory__memory_search"
+    ]
+  }
+}

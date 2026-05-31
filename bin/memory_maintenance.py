@@ -50,6 +50,12 @@ def _transfer_to_archive(item_id, reason, db):
     finally: adb.close()
 
 def memory_dedup_impl(threshold=DEDUP_THRESHOLD, dry_run=True, limit=0):
+    import time
+    from m3_sdk import _LAST_USER_INTERACTION
+    if time.time() - _LAST_USER_INTERACTION < 15.0:
+        logger.info("Active query session detected. Suspending curation pass to yield resources.")
+        time.sleep(5.0)
+
     """Find near-duplicate memory items by cosine similarity over embeddings.
 
     Returns a structured dict:
@@ -223,6 +229,12 @@ def _enforce_retention_policies(db):
     return purged
 
 def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddings=True):
+    import time
+    from m3_sdk import _LAST_USER_INTERACTION
+    if time.time() - _LAST_USER_INTERACTION < 15.0:
+        logger.info("Active query session detected. Suspending curation pass to yield resources.")
+        time.sleep(5.0)
+
     now = datetime.now(timezone.utc).isoformat()
     report = []
     with _db() as db:

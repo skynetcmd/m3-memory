@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from embedding_utils import infer_change_agent as _infer_change_agent_util
-from m3_sdk import M3Context, resolve_db_path
+from m3_sdk import M3Context, resolve_db_path, migration_lock
 
 from . import config
 
@@ -203,14 +203,15 @@ def _ensure_sync_tables(db_path: str | None = None) -> None:
             _nw = no_window_kwargs()
         except Exception:
             _nw = {}
-        subprocess.run(
-            [sys.executable, migration_script, "up", "--yes", *target_flag],
-            check=True,
-            timeout=300,
-            stdin=subprocess.DEVNULL,
-            env=env,
-            **_nw,
-        )
+        with migration_lock():
+            subprocess.run(
+                [sys.executable, migration_script, "up", "--yes", *target_flag],
+                check=True,
+                timeout=300,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                **_nw,
+            )
     except Exception as e:
         logger.exception(f"_ensure_sync_tables failed: {e}")
 

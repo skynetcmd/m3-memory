@@ -19,7 +19,64 @@ from datetime import datetime, timezone
 
 from _task_runtime import no_window_kwargs
 
+import queue
+import time
+
 logger = logging.getLogger(__name__)
+
+# Keyring Circuit Breaker & Concurrency state
+_KEYRING_CB_OPEN_UNTIL = 0.0
+_KEYRING_LOCK = threading.Lock()
+
+def safe_keyring_get_password(service_name: str, username: str) -> str | None:
+    """Wraps keyring.get_password with a single-concurrency lock and 2s timeout.
+    
+    If it times out or fails, opens Keyring Circuit Breaker for 300s and returns None.
+    """
+    global _KEYRING_CB_OPEN_UNTIL
+    
+    # 1. Check Circuit Breaker
+    if time.time() < _KEYRING_CB_OPEN_UNTIL:
+        logger.debug("Keyring circuit breaker is OPEN. Falling back to local vault.")
+        return None
+        
+    # 2. Acquire lock to serialize keyring queries
+    acquired = _KEYRING_LOCK.acquire(timeout=2.0)
+    if not acquired:
+        logger.warning("Keyring lock contention. Keyring circuit breaker opened.")
+        _KEYRING_CB_OPEN_UNTIL = time.time() + 300.0
+        return None
+        
+    try:
+        import keyring
+        res_queue = queue.Queue()
+        
+        def _target():
+            try:
+                val = keyring.get_password(service_name, username)
+                res_queue.put((True, val))
+            except Exception as e:
+                res_queue.put((False, e))
+                
+        t = threading.Thread(target=_target, daemon=True)
+        t.start()
+        
+        try:
+            success, result = res_queue.get(timeout=2.0)
+            if success:
+                return result
+            else:
+                logger.debug(f"Keyring lookup failed: {result}")
+                return None
+        except queue.Empty:
+            logger.warning("Keyring lookup timed out after 2s. Opening circuit breaker for 300s.")
+            _KEYRING_CB_OPEN_UNTIL = time.time() + 300.0
+            return None
+    except Exception as e:
+        logger.debug(f"Keyring import or setup failed: {e}")
+        return None
+    finally:
+        _KEYRING_LOCK.release()
 
 # Dynamically resolve DB path relative to project root.
 # DB_PATH is the *default* location kept for legacy callers; vault reads and
@@ -50,8 +107,7 @@ def get_master_key() -> str | None:
         return val
 
     try:
-        import keyring
-        val = keyring.get_password("system", "AGENT_OS_MASTER_KEY")
+        val = safe_keyring_get_password("system", "AGENT_OS_MASTER_KEY")
         if val:
             return val
     except Exception:
@@ -77,8 +133,15 @@ def _get_device_salt() -> bytes:
     Generates one if it doesn't exist. This ensures consistent key derivation
     on the same device without storing the salt in the DB.
     """
-    from m3_sdk import get_m3_root
-    salt_path = os.path.join(get_m3_root(), ".agent_os_salt")
+    from m3_sdk import get_m3_config_root, get_m3_root
+    # Check config root first, fallback to legacy root
+    config_root = get_m3_config_root()
+    salt_path = os.path.join(config_root, ".agent_os_salt")
+    if not os.path.exists(salt_path):
+        legacy_path = os.path.join(get_m3_root(), ".agent_os_salt")
+        if os.path.exists(legacy_path):
+            salt_path = legacy_path
+
     if os.path.exists(salt_path):
         try:
             with open(salt_path, "rb") as f:
@@ -90,6 +153,8 @@ def _get_device_salt() -> bytes:
 
     # Generate new salt
     salt = os.urandom(16)
+    # Ensure config directory exists
+    os.makedirs(os.path.dirname(salt_path), exist_ok=True)
     try:
         with open(salt_path, "wb") as f:
             f.write(salt)
@@ -211,8 +276,7 @@ def get_api_key(service: str) -> str | None:
     # secret read, so it must not stall.
     system = {"darwin": "Darwin", "win32": "Windows"}.get(sys.platform, "Linux")
     try:
-        import keyring
-        val = keyring.get_password("system", service)
+        val = safe_keyring_get_password("system", service)
         if val:
             return val
     except ImportError:

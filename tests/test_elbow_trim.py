@@ -18,6 +18,13 @@ def trim_legacy(monkeypatch):
     """
     import sys
     import memory_core
+    from memory import search
+    
+    # Directly patch memory.search's config module reference for maximum resilience
+    monkeypatch.setattr(search.config, "ELBOW_MIN_INPUT", 3)
+    monkeypatch.setattr(search.config, "ELBOW_MIN_RETURN", 1)
+    monkeypatch.setattr(search.config, "ELBOW_ABS_THRESHOLD", 0.0)
+    
     for name, module in list(sys.modules.items()):
         if hasattr(module, "ELBOW_MIN_INPUT"):
             monkeypatch.setattr(module, "ELBOW_MIN_INPUT", 3)

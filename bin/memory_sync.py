@@ -148,20 +148,24 @@ async def _push_to_chroma(client, col_id, col_path, max_items, target):
             try:
                 await client.post(f"{col_path}/upsert", json={"ids": batch_ids, "embeddings": batch_vecs, "documents": batch_docs, "metadatas": batch_metas}, timeout=30.0)
                 synced += len(batch_ids)
+                ctx._record_success("chromadb")
                 if batch_qids:
                     db.execute(f"DELETE FROM chroma_sync_queue WHERE id IN ({','.join(['?']*len(batch_qids))})", batch_qids)
             except Exception as e:
                 logger.exception(f"[{target.name}] ChromaDB upsert failed for {len(batch_ids)} items: {e}")
+                ctx._record_failure("chromadb", 120.0)
                 failed += len(batch_ids)
 
         if delete_ids:
             try:
                 await client.post(f"{col_path}/delete", json={"ids": delete_ids}, timeout=30.0)
                 synced += len(delete_ids)
+                ctx._record_success("chromadb")
                 if delete_qids:
                     db.execute(f"DELETE FROM chroma_sync_queue WHERE id IN ({','.join(['?']*len(delete_qids))})", delete_qids)
             except Exception as e:
                 logger.exception(f"[{target.name}] ChromaDB delete failed for {len(delete_ids)} items: {e}")
+                ctx._record_failure("chromadb", 120.0)
                 failed += len(delete_ids)
 
         if skip_qids:
@@ -194,6 +198,7 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
             "include": ["documents", "metadatas", "embeddings"]
         }, timeout=30.0)
         resp.raise_for_status()
+        ctx._record_success("chromadb")
         data = resp.json()
 
         if not data.get("ids"): return 0, 0, ""
@@ -250,11 +255,15 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
 
     except Exception as e:
         logger.exception(f"[{target.name}] ChromaDB pull failed: {e}")
+        ctx._record_failure("chromadb", 120.0)
         failed = max_items
 
     return pulled, failed, ""
 
 async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
+    if not ctx._check_circuit("chromadb"):
+        return "ChromaDB sync skipped: Circuit Breaker is OPEN."
+
     if direction not in ("push", "pull", "both"):
         return f"Error: invalid direction '{direction}'."
 
@@ -295,9 +304,11 @@ async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
         url = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{CHROMA_COLLECTION}"
         resp = await client.get(url, timeout=10.0)
         resp.raise_for_status()
+        ctx._record_success("chromadb")
         col_id = resp.json()["id"]
     except Exception as e:
         logger.error(f"ChromaDB unreachable: {e}")
+        ctx._record_failure("chromadb", 120.0)
         return "ChromaDB unreachable"
 
     col_path = f"{CHROMA_BASE_URL}{CHROMA_V2_PREFIX}/{col_id}"

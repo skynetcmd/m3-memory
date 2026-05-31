@@ -37,7 +37,7 @@ if str(_BIN) not in sys.path:
 import chatlog_config
 import m3_enrich
 import m3_entities
-from m3_sdk import M3Context, resolve_db_path
+from m3_sdk import M3Context, resolve_db_path, get_governor_pacing
 
 # PID file path for single-instance locking
 PID_FILE = REPO_ROOT / "memory" / "cognitive_loop.pid"
@@ -269,6 +269,22 @@ async def main_loop(args):
             pass
 
     while not _STOP_EVENT.is_set():
+        # Adaptive Governor Gating
+        try:
+            ctx = M3Context.for_db(args.database)
+            telemetry = ctx.get_system_telemetry()
+            pacing = get_governor_pacing(telemetry)
+            if pacing["background"] == "HALTED":
+                logger.info("Host load or activity critical. Background Cognitive Loop HALTED. Sleeping 5s...")
+                await asyncio.sleep(5.0)
+                continue
+            if telemetry.get("thermal") in ("Serious", "Critical"):
+                logger.info("Thermal load serious. Pausing cognitive loop for 10s...")
+                await asyncio.sleep(10.0)
+                continue
+        except Exception as e:
+            logger.debug(f"Governor check error (non-fatal): {e}")
+
         start_time = time.monotonic()
 
         if not args.skip_entities:
