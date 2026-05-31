@@ -49,8 +49,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os  # noqa: F401 — re-export
 import uuid
 from datetime import datetime, timezone
+
+from embedding_utils import infer_change_agent as _infer_change_agent_util  # noqa: F401 — re-export
 
 # Legacy back-compat: `_lru_cache` was imported inline in the FTS block
 # (used internally by `_compile_fts_query`'s @decorator). Preserved as a
