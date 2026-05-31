@@ -65,7 +65,12 @@ reading the "wrong" file:**
 - **Local hook** — `.githooks/pre-push` runs both gates before every push.
   Enable once per clone: `python bin/setup_hooks.py` (sets
   `git config core.hooksPath .githooks`). **Every agent and human must run
-  this once after cloning.**
+  this once after cloning.** For speed, the hook reads the actual push range
+  from git's stdin and **skips the (Python-spawning) drift gate unless the
+  push touches the catalog, its generators, or the docs whose counts they
+  own** — the common push then runs only the sub-millisecond leakage scan and
+  spawns no Python at all. The drift gate is still enforced unconditionally in
+  CI, so skipping it locally can never let drift reach `main`.
 - **CI gate** — `.github/workflows/tool-catalog-drift.yml` re-runs the drift
   check on every push/PR to `main`; make it a required status check so a
   drifted commit cannot merge no matter who authored it.

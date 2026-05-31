@@ -19,6 +19,7 @@ jobs:
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: "3.12"
+        cache: 'pip'
     - name: Install Ruff
       run: pip install ruff
     - name: Run Ruff
@@ -37,6 +38,7 @@ jobs:
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: "3.12"
+        cache: 'pip'
     - name: Install dependencies
       run: |
         pip install -r requirements.txt
@@ -53,6 +55,7 @@ jobs:
       uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       with:
         python-version: "3.12"
+        cache: 'pip'
 
     # Bandit: static analysis on all code paths. Config (skips, exclusions)
     # lives in pyproject.toml under [tool.bandit].
@@ -95,15 +98,32 @@ jobs:
       # through m3-memory. Ignored; revisit if pyjwt ships a real fix.
       run: /tmp/m3-core/bin/pip-audit --strict -l --ignore-vuln CVE-2026-3219 --ignore-vuln PYSEC-2025-183
 
+  # Emit the test matrix based on event type. Pull requests get a single fast
+  # cell (ubuntu + 3.12) for quick feedback; pushes to main/release run the
+  # full OS × Python grid so cross-platform coverage still gates the branch
+  # everything merges into. A bug that only shows on macOS/Windows or 3.11 is
+  # caught at merge time, not on every PR iteration.
+  matrix-setup:
+    name: Resolve test matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo 'matrix={"os":["ubuntu-latest"],"python-version":["3.12"]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"os":["ubuntu-latest","macos-latest","windows-latest"],"python-version":["3.11","3.12"]}' >> "$GITHUB_OUTPUT"
+          fi
+
   test:
-    name: Test on ${{ matrix.os }}
-    needs: [lint, typecheck]
+    name: Test on ${{ matrix.os }} (py${{ matrix.python-version }})
+    needs: [lint, typecheck, matrix-setup]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12"]
+      matrix: ${{ fromJSON(needs.matrix-setup.outputs.matrix) }}
 
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
