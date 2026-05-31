@@ -1015,7 +1015,7 @@ INDEX_HTML = """
                 }
                 
                 outputPre.style.color = "#fff";
-                outputPre.innerText = text + "\n";
+                outputPre.innerText = text + "\\n";
                 outputPre.scrollTop = outputPre.scrollHeight;
                 
                 // Start polling logs
