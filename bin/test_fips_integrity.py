@@ -4,12 +4,13 @@ test_fips_integrity.py — Validation suite for FIPS-ready crypto abstraction.
 """
 
 import base64
+import ctypes
 import hashlib
 import os
 import sys
 import unittest
-import ctypes
 from pathlib import Path
+
 
 # Mock CDLL if real wolfSSL library is missing but requested
 class MockCFunction:
@@ -58,14 +59,14 @@ class MockLibWolf:
         key = self.active_keys.get(aes_addr)
         in_bytes = ctypes.string_at(in_buf, sz)
         iv_bytes = ctypes.string_at(iv, ivSz)
-        
+
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         aesgcm = AESGCM(key)
         full_enc = aesgcm.encrypt(iv_bytes, in_bytes, None)
-        
+
         ciphertext = full_enc[:-16]
         tag_bytes = full_enc[-16:]
-        
+
         ctypes.memmove(out, ciphertext, len(ciphertext))
         ctypes.memmove(tag, tag_bytes, len(tag_bytes))
         return 0
@@ -76,11 +77,11 @@ class MockLibWolf:
         in_bytes = ctypes.string_at(in_buf, sz)
         iv_bytes = ctypes.string_at(iv, ivSz)
         tag_bytes = ctypes.string_at(tag, tagSz)
-        
+
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         aesgcm = AESGCM(key)
         decrypted = aesgcm.decrypt(iv_bytes, in_bytes + tag_bytes, None)
-        
+
         ctypes.memmove(out, decrypted, len(decrypted))
         return 0
 
@@ -107,13 +108,14 @@ if os.environ.get("M3_CRYPTO_BACKEND") == "WOLFSSL" or os.environ.get("M3_FIPS_M
             if "wolfssl" in name.lower() or "libwolfssl" in name.lower():
                 return mock_lib
             raise OSError(f"Mock CDLL: library {name} not found")
-        ctypes.CDLL = mock_cdll
+        ctypes.CDLL = mock_cdll  # type: ignore[assignment,misc]  # deliberate test monkeypatch of the CDLL loader
 
 # Add bin to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import auth_utils
 from crypto_provider import get_sha256, provider
+
 
 class TestFipsIntegrity(unittest.TestCase):
     def test_sha256_abstraction(self):

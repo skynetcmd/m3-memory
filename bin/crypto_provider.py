@@ -153,16 +153,16 @@ class CryptoProvider:
     def _wolf_aes_gcm_encrypt(self, data: bytes, key: bytes) -> bytes:
         if not self._libwolf:
             raise RuntimeError("wolfSSL library not loaded")
-        
+
         iv = os.urandom(12)
         out_buf = ctypes.create_string_buffer(len(data))
         tag_buf = ctypes.create_string_buffer(16)
-        
+
         aes = ctypes.create_string_buffer(512)
         ret_key = self._libwolf.wc_AesGcmSetKey(aes, key, len(key))
         if ret_key != 0:
             raise RuntimeError(f"wc_AesGcmSetKey failed with code: {ret_key}")
-            
+
         ret_enc = self._libwolf.wc_AesGcmEncrypt(
             aes, out_buf, data, len(data),
             iv, len(iv), tag_buf, 16,
@@ -170,27 +170,27 @@ class CryptoProvider:
         )
         if ret_enc != 0:
             raise RuntimeError(f"wc_AesGcmEncrypt failed with code: {ret_enc}")
-            
+
         return iv + out_buf.raw + tag_buf.raw
 
     def _wolf_aes_gcm_decrypt(self, token: bytes, key: bytes) -> bytes:
         if not self._libwolf:
             raise RuntimeError("wolfSSL library not loaded")
-            
+
         if len(token) < 28:
             raise ValueError("Token too short for AES-GCM")
-            
+
         iv = token[:12]
         tag = token[-16:]
         ciphertext = token[12:-16]
-        
+
         out_buf = ctypes.create_string_buffer(len(ciphertext))
-        
+
         aes = ctypes.create_string_buffer(512)
         ret_key = self._libwolf.wc_AesGcmSetKey(aes, key, len(key))
         if ret_key != 0:
             raise RuntimeError(f"wc_AesGcmSetKey failed with code: {ret_key}")
-            
+
         ret_dec = self._libwolf.wc_AesGcmDecrypt(
             aes, out_buf, ciphertext, len(ciphertext),
             iv, len(iv), tag, 16,
@@ -198,7 +198,7 @@ class CryptoProvider:
         )
         if ret_dec != 0:
             raise RuntimeError(f"wc_AesGcmDecrypt failed with code: {ret_dec}")
-            
+
         return out_buf.raw
 
     def sha256(self, data: bytes) -> str:
@@ -302,7 +302,7 @@ class CryptoProvider:
         if hasattr(ssl, "TLSVersion"):
             ctx.minimum_version = ssl.TLSVersion.TLSv1_3
             ctx.maximum_version = ssl.TLSVersion.TLSv1_3
-        
+
         # Configure FIPS-validated ciphers for default SSL context if possible
         try:
             ctx.set_ciphers("ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256")

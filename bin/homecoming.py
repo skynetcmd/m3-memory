@@ -43,7 +43,7 @@ def get_legacy_assets():
     """
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     old_m3_root = os.path.join(os.path.expanduser("~"), ".m3-memory")
-    
+
     candidates = [
         # (key, rel_path, dst_type)
         ("core_db", "memory/agent_memory.db", "engine"),
@@ -56,21 +56,21 @@ def get_legacy_assets():
         ("migrate_config", "memory/.migrate_config.json", "config"),
         ("salt", ".agent_os_salt", "config"),
     ]
-    
+
     assets = {}
     for key, rel_path, dst_type in candidates:
         src_repo = os.path.join(base, rel_path)
         src_old_home = os.path.join(old_m3_root, rel_path.replace("memory/", ""))
-        
+
         if key == "salt":
             src_repo = os.path.join(base, ".agent_os_salt")
             src_old_home = os.path.join(old_m3_root, ".agent_os_salt")
-            
+
         if os.path.exists(src_repo):
             assets[key] = (src_repo, dst_type)
         elif os.path.exists(src_old_home):
             assets[key] = (src_old_home, dst_type)
-            
+
     return assets
 
 def backup_db(src, dst):
