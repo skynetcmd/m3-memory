@@ -339,7 +339,7 @@ def prompt_backup_dir(assume_yes: bool) -> str:
 
 # ── Backup / restore ────────────────────────────────────────────────────────
 
-def take_backup(backup_dir: str, version_before: int, tag: str, target: MigrationTarget) -> str:
+def take_backup(backup_dir: str, version_before: int, tag: str, target: MigrationTarget, src_conn: Optional[sqlite3.Connection] = None) -> str:
     if not os.path.exists(target.db_path):
         logger.info(f"No existing database to back up: {target.db_path}")
         return ""
@@ -354,15 +354,22 @@ def take_backup(backup_dir: str, version_before: int, tag: str, target: Migratio
     # while other connections are writing. Falls back to file-copy if the
     # source can't be opened (rare on a locked DB on Windows).
     try:
-        src_conn = sqlite3.connect(target.db_path)
-        try:
+        if src_conn is not None:
             dst_conn = sqlite3.connect(dst)
             try:
                 src_conn.backup(dst_conn)
             finally:
                 dst_conn.close()
-        finally:
-            src_conn.close()
+        else:
+            src_conn_local = sqlite3.connect(target.db_path)
+            try:
+                dst_conn = sqlite3.connect(dst)
+                try:
+                    src_conn_local.backup(dst_conn)
+                finally:
+                    dst_conn.close()
+            finally:
+                src_conn_local.close()
     except sqlite3.Error as e:
         logger.warning(f"Online backup failed ({e}); falling back to file copy.")
         shutil.copy2(target.db_path, dst)
@@ -704,7 +711,7 @@ def cmd_up(args):
                 logger.info("Aborted by user.")
                 continue
 
-            take_backup(backup_dir, cur, "pre-up", target)
+            take_backup(backup_dir, cur, "pre-up", target, conn)
 
             for v in pending:
                 entry = migs[v]
@@ -777,7 +784,7 @@ def cmd_down(args):
                 logger.info("Aborted by user.")
                 continue
 
-            take_backup(backup_dir, cur, "pre-down", target)
+            take_backup(backup_dir, cur, "pre-down", target, conn)
 
             for v in to_revert:
                 revert_migration(conn, v, migs[v]["down"])

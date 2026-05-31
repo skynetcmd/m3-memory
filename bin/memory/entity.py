@@ -162,7 +162,34 @@ def _cosine(v1, v2):
 # `.locked()` or `._value` for queue-depth diagnostics.
 from .config import ENTITY_EXTRACT_CONCURRENCY  # noqa: E402 — local to this block
 
-_ENTITY_EXTRACT_SEM = asyncio.Semaphore(ENTITY_EXTRACT_CONCURRENCY)
+_ENTITY_EXTRACT_SEMS: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
+_ENTITY_EXTRACT_SEM_FALLBACK = asyncio.Semaphore(ENTITY_EXTRACT_CONCURRENCY)
+
+def get_entity_extract_sem() -> asyncio.Semaphore:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return _ENTITY_EXTRACT_SEM_FALLBACK
+
+    if loop not in _ENTITY_EXTRACT_SEMS:
+        # Cleanup closed loops to prevent memory leak
+        for k in list(_ENTITY_EXTRACT_SEMS.keys()):
+            try:
+                if k.is_closed():
+                    del _ENTITY_EXTRACT_SEMS[k]
+            except Exception:
+                pass
+        _ENTITY_EXTRACT_SEMS[loop] = asyncio.Semaphore(ENTITY_EXTRACT_CONCURRENCY)
+    return _ENTITY_EXTRACT_SEMS[loop]
+
+class LoopScopedSemaphoreProxy:
+    def __getattr__(self, name):
+        return getattr(get_entity_extract_sem(), name)
+
+    def __await__(self):
+        return get_entity_extract_sem().acquire().__await__()
+
+_ENTITY_EXTRACT_SEM = LoopScopedSemaphoreProxy()
 _PENDING_ENTITY_TASKS: "set[asyncio.Task]" = set()
 
 
@@ -712,19 +739,43 @@ async def extract_pending_impl(
             "sample_ids": sample_ids,
         }
 
-    # Execute: placeholder until Wave 3 wires entity_extractor injection.
-    # The entity_extractor is provided at write-time through memory_write_impl;
-    # a drain path that calls the extractor requires it to be injected by the
-    # MCP tool layer (same pattern as enrich_pending_impl).
-    # valid_types/valid_predicates are accepted here now so callers can pass them
-    # when Wave 3 wires the real execution path.
+    # Execute: Drain the queue using the pluggable entity extractor
+    processed = 0
+    succeeded = 0
+    failed = 0
+    errors = []
+
+    from .extraction import get_configured_extractor
+    ext = get_configured_extractor()
+    extractor_func = ext.extract
+
+    # We iterate and process each pending item under the semaphore to manage concurrency
+    for memory_id, content, valid_from in pending:
+        await _ENTITY_EXTRACT_SEM.acquire()
+        try:
+            # We run the extractor and write the entities/relationships directly
+            await _run_entity_extractor(
+                memory_id,
+                content,
+                extractor_func,
+                valid_types=valid_types,
+                valid_predicates=valid_predicates,
+            )
+            succeeded += 1
+        except Exception as e:
+            failed += 1
+            errors.append(f"{memory_id}: {str(e)}")
+            logger.warning(f"extract_pending_impl: failed to process {memory_id}: {e}")
+        finally:
+            processed += 1
+
     return {
-        "processed": 0,
-        "succeeded": 0,
-        "failed": 0,
-        "errors_summary": "Execution requires entity_extractor (Wave 3 MCP tool)",
-        "entities_created": 0,
-        "relationships_created": 0,
+        "processed": processed,
+        "succeeded": succeeded,
+        "failed": failed,
+        "errors_summary": "; ".join(errors) if errors else "None",
+        "entities_created": succeeded,  # simple proxy for success count
+        "relationships_created": succeeded,
     }
 
 
