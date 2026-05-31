@@ -21,13 +21,13 @@ is an update primitive, not a delete; do not chain it to "clean up" clutter.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-import importlib
 
 class LazyImpl:
     def __init__(self, module_name: str, attr_name: str):
