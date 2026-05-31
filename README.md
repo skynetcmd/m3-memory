@@ -24,7 +24,7 @@ Local-first Agentic Memory Layer Framework for MCP Agents • 103 tools • Hybr
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
 
-Works with Claude Code, Gemini CLI, Aider, OpenCode, and any MCP-compatible agent. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
+Works with Claude Code, Gemini CLI, Aider, Google Antigravity, OpenCode, Hermes Agent, and any MCP-compatible agent. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
 
 > 👉 **I've read enough, I just want to install it on [Windows](docs/QUICKSTART_WINDOWS.md), [macOS](docs/QUICKSTART_MACOS.md), or [Linux](docs/QUICKSTART_LINUX.md).**
 
@@ -54,6 +54,15 @@ agy plugin install https://github.com/skynetcmd/m3-memory
 ```
 
 [Plugin reference](https://github.com/skynetcmd/m3-memory/blob/main/docs/antigravity_plugin.md)
+
+**Hermes Agent users** can install the memory-provider plugin directly (supports optimal replacement of default memory or parallel coexistence for rich SOTA retrieval):
+
+```bash
+# Handled automatically via our setup wizard:
+m3 setup
+```
+
+[Plugin integration guide](docs/HERMES.md)
 
 ---
 
