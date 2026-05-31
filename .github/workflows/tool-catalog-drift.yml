@@ -39,3 +39,12 @@ jobs:
         # bin/mcp_tool_catalog.py changed without the generated artifacts +
         # "N tools" counts being updated in the same change.
         run: python bin/check_tool_catalog_drift.py
+
+      - name: Design-philosophy advisory scan
+        # ADVISORY — surfaces DESIGN_PHILOSOPHIES.md anti-patterns in the PR's
+        # changed files. continue-on-error keeps it non-blocking (matches the
+        # local pre-push hook's advisory posture); it annotates, never gates.
+        continue-on-error: true
+        run: |
+          git fetch origin main --depth=1 || true
+          python bin/check_design_philosophy.py --range origin/main...HEAD
