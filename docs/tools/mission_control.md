@@ -1,8 +1,8 @@
 ---
 tool: bin/mission_control.py
-sha1: 4fba6f5f2f37
-mtime_utc: 2026-05-01T09:15:53.153019+00:00
-generated_utc: 2026-05-24T12:09:08.328950+00:00
+sha1: b5e2f364909f
+mtime_utc: 2026-05-30T20:48:00.265055+00:00
+generated_utc: 2026-05-31T18:42:52.930423+00:00
 private: true
 ---
 
@@ -31,6 +31,7 @@ _(no argparse arguments detected)_
 
 - `LM_API_TOKEN`
 - `LM_STUDIO_API_KEY`
+- `PROCESSOR_ARCHITECTURE`
 - `TERM_PROGRAM`
 
 ---
@@ -51,12 +52,12 @@ _(no argparse arguments detected)_
 - `subprocess.check_output()  → `['nvidia-smi']`` (line 233)
 - `subprocess.check_output()  → `['security', 'find-generic-password', '-s', 'LM_STUDIO_API_KEY', '-w']`` (line 82)
 - `subprocess.check_output()  → `['sysctl', '-n', 'machdep.cpu.brand_string']`` (line 297)
-- `subprocess.check_output()  → `['system_profiler', 'SPDisplaysDataType']`` (line 344)
+- `subprocess.check_output()  → `['system_profiler', 'SPDisplaysDataType']`` (line 349)
 - `subprocess.check_output()  → `['system_profiler', 'SPHardwareDataType']`` (line 303)
 - `subprocess.check_output()  → `cmd`` (line 257)
 - `subprocess.check_output()` (line 213)
 - `subprocess.check_output()` (line 288)
-- `subprocess.check_output()` (line 333)
+- `subprocess.check_output()` (line 338)
 
 **http**
 
@@ -64,8 +65,8 @@ _(no argparse arguments detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `str(DB_PATH)`` (line 362)
-- `sqlite3.connect()  → `str(DB_PATH)`` (line 387)
+- `sqlite3.connect()  → `str(DB_PATH)`` (line 367)
+- `sqlite3.connect()  → `str(DB_PATH)`` (line 392)
 
 
 ---

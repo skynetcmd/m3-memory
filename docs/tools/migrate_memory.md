@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: fd3cda144da3
-mtime_utc: 2026-05-07T22:32:45.932728+00:00
-generated_utc: 2026-05-09T13:54:34.699127+00:00
+sha1: 90173d2e8c3d
+mtime_utc: 2026-05-31T09:16:37.962211+00:00
+generated_utc: 2026-05-31T18:42:52.922937+00:00
 private: false
 ---
 
@@ -41,7 +41,7 @@ transaction already committed.
 
 ## Entry points
 
-- `def main()` (line 911)
+- `def main()` (line 947)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -80,7 +80,7 @@ transaction already committed.
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config (CHATLOG_MIGRATIONS_DIR, chatlog_db_path)`
-- `m3_sdk (get_m3_root)`
+- `m3_sdk (get_m3_config_root, get_m3_engine_root, get_m3_root)`
 - `m3_sdk (resolve_db_path)`
 
 ---
@@ -89,15 +89,16 @@ transaction already committed.
 
 **sqlite**
 
-- `sqlite3.connect()  → `dst`` (line 340)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 116)
-- `sqlite3.connect()  → `target.db_path`` (line 338)
-- `sqlite3.connect()  → `target.db_path`` (line 374)
-- `sqlite3.connect()  → `target.db_path`` (line 572)
-- `sqlite3.connect()  → `target.db_path`` (line 640)
-- `sqlite3.connect()  → `target.db_path`` (line 712)
-- `sqlite3.connect()  → `target.db_path`` (line 769)
-- `sqlite3.connect()  → `target.db_path`` (line 809)
+- `sqlite3.connect()  → `dst`` (line 358)
+- `sqlite3.connect()  → `dst`` (line 366)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 135)
+- `sqlite3.connect()  → `target.db_path`` (line 364)
+- `sqlite3.connect()  → `target.db_path`` (line 400)
+- `sqlite3.connect()  → `target.db_path`` (line 598)
+- `sqlite3.connect()  → `target.db_path`` (line 666)
+- `sqlite3.connect()  → `target.db_path`` (line 743)
+- `sqlite3.connect()  → `target.db_path`` (line 805)
+- `sqlite3.connect()  → `target.db_path`` (line 845)
 
 
 ---

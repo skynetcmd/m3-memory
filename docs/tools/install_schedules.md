@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: bb6d1403cecc
-mtime_utc: 2026-05-14T05:41:26.861767+00:00
-generated_utc: 2026-05-14T05:43:18.197359+00:00
+sha1: ba2da2b20f98
+mtime_utc: 2026-05-30T20:47:47.636492+00:00
+generated_utc: 2026-05-31T18:42:52.739117+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 388)
+- `def main()` (line 398)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -50,25 +50,25 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['crontab', '-l']`` (line 49)
-- `subprocess.run()  → `['crontab', tmp_path]`` (line 68)
-- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 110)
-- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 109)
-- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 146)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 324)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 368)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 126)
-- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 160)
-- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 154)
-- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 127)
-- `subprocess.run()  → `schtasks_cmd`` (line 350)
+- `subprocess.run()  → `['crontab', '-l']`` (line 59)
+- `subprocess.run()  → `['crontab', tmp_path]`` (line 78)
+- `subprocess.run()  → `['launchctl', 'load', dest]`` (line 120)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 119)
+- `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 156)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 334)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 378)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 136)
+- `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 170)
+- `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 164)
+- `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 137)
+- `subprocess.run()  → `schtasks_cmd`` (line 360)
 
 
 ---
 
 ## Notable external imports
 
-- `platform`
+_(only stdlib)_
 
 ---
 

@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-24T12:09:08.847080+00:00._
+_Generated 2026-05-31T18:42:53.079389+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -16,8 +16,9 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/auto_route.py](auto_route.md) | auto_route — multi-signal retrieval branch decider. |  |
 | [bin/backfill_content_hash.py](backfill_content_hash.md) | backfill_content_hash.py — populate memory_embeddings.content_hash on legacy rows. |  |
 | [bin/batch_runner.py](batch_runner.md) | Provider-neutral batch-API runner protocol with Anthropic implementation. |  |
-| [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. |  |
-| [bin/benchmark_memory.py](benchmark_memory.md) | Retrieval Quality Benchmark for M3 Memory System. |  |
+| [bin/bench_longmemeval.py](bench_longmemeval.md) | LongMemEval benchmark runner for m3-memory. | yes |
+| [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. | yes |
+| [bin/benchmark_memory.py](benchmark_memory.md) | Retrieval Quality Benchmark for M3 Memory System. | yes |
 | [bin/build_kg_variant.py](build_kg_variant.md) | Build a KG-enriched variant from an existing source variant. |  |
 | [bin/chatlog_config.py](chatlog_config.md) | chatlog_config.py — configuration resolver for the chat log subsystem. |  |
 | [bin/chatlog_core.py](chatlog_core.md) | chatlog_core.py — the load-bearing module for the chat log subsystem. |  |
@@ -28,6 +29,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/chatlog_redaction.py](chatlog_redaction.md) | Optional secret-scrubbing for chat log entries. |  |
 | [bin/chatlog_status.py](chatlog_status.md) | chatlog_status.py — single-call summary of the chat log subsystem state. |  |
 | [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
+| [bin/check_tool_catalog_drift.py](check_tool_catalog_drift.md) | Single source of truth for the tool-catalog pre-push drift gate. |  |
 | [bin/chroma_health.py](chroma_health.md) | CLI script to report ChromaDB sync health metrics. |  |
 | [bin/chroma_sync_cli.py](chroma_sync_cli.md) | CLI wrapper for ChromaDB bi-directional sync. |  |
 | [bin/cleanup_logs.sh](cleanup_logs.sh.md) | (no docstring) |  |
@@ -35,6 +37,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/cli_knowledge.py](cli_knowledge.md) | (no docstring) |  |
 | [bin/curator_apply.py](curator_apply.md) | Deterministic apply of a curator plan — one entry point, no LLM in the loop. |  |
 | [bin/custom_tool_bridge.py](custom_tool_bridge.md) | (no docstring) |  |
+| [bin/dashboard_server.py](dashboard_server.md) | M3 Cognitive & Observability Portal. |  |
 | [bin/debug_agent_bridge.py](debug_agent_bridge.md) | Debug Agent MCP Bridge — Autonomous debugging tools. |  |
 | [bin/deep_sync.py](deep_sync.md) | (no docstring) |  |
 | [bin/embed_agent_instructions.py](embed_agent_instructions.md) | One-shot script: embed AGENT_INSTRUCTIONS.md sections as searchable memory items. |  |
@@ -46,6 +49,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/enrichment_state.py](enrichment_state.md) | Durable per-group enrichment state for m3_enrich. |  |
 | [bin/fetch_sovereign_assets.py](fetch_sovereign_assets.md) | fetch_sovereign_assets.py — Hydrate the _assets/embedder directory for sovereign setup. |  |
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
+| [bin/gen_tool_manifest.py](gen_tool_manifest.md) | Generate a machine-readable tool-catalog manifest at docs/tools/MCP_CATALOG.json. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
 | [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
 | [bin/homecoming.py](homecoming.md) | bin/homecoming.py — "Homecoming" migration script for m3-memory. |  |
@@ -68,7 +72,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |
 | [bin/memory_bridge.py](memory_bridge.md) | (no docstring) |  |
 | [bin/memory_core.py](memory_core.md) | Core memory primitives: single + bulk write, search, enrichment, emitters. |  |
-| [bin/memory_doctor.py](memory_doctor.md) | (no docstring) |  |
+| [bin/memory_doctor.py](memory_doctor.md) | m3-memory doctor — thin CLI dispatcher over the three doctor phases. |  |
 | [bin/memory_maintenance.py](memory_maintenance.md) | (no docstring) |  |
 | [bin/memory_sync.py](memory_sync.md) | (no docstring) |  |
 | [bin/migrate_entity_vocab.py](migrate_entity_vocab.md) | One-shot migration: rename v1 entity vocabulary to v2-aligned names. |  |
@@ -85,6 +89,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/run_reflector.py](run_reflector.md) | Phase D Mastra-style Reflector drainer. |  |
 | [bin/secret_rotator.py](secret_rotator.md) | (no docstring) |  |
 | [bin/session_handoff.py](session_handoff.md) | (no docstring) |  |
+| [bin/setup_hooks.py](setup_hooks.md) | Enable the repo's shared git hooks for this clone. |  |
 | [bin/setup_secret.py](setup_secret.md) | Interactive CLI for adding API keys to the m3-memory encrypted vault. |  |
 | [bin/setup_test_db.py](setup_test_db.md) | Seed a fresh SQLite DB with the full m3-memory schema for test isolation. |  |
 | [bin/slm_intent.py](slm_intent.md) | Small-Language-Model intent classifier with named-profile configs. |  |
