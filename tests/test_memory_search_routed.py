@@ -1368,3 +1368,59 @@ def test_displacement_guard_env_var_override(monkeypatch):
 
     assert mc.EXPANSION_DISPLACEMENT_MARGIN == 2.0
     assert mc.EXPANSION_PROTECTED_RANKS == 3
+
+
+@pytest.mark.asyncio
+async def test_fts_short_circuit_bypasses_embedding(monkeypatch, tmp_path):
+    """Verify that highly specific FTS exact match triggers the short-circuit and completely bypasses embedding."""
+    import memory_core as mc
+    import sqlite3
+    from conftest import create_full_main_schema
+
+    db_path = tmp_path / "test_short_circuit.db"
+    create_full_main_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+
+    # Insert a specific memory item into the database
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        # Write to memory_items and memory_items_fts (the schema already has standard trigger-syncs)
+        conn.execute(
+            """
+            INSERT INTO memory_items (id, content, title, type, importance, is_deleted)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """,
+            ("key1", "My secret API key is SK-983271", "grok api key", "note", 0.95)
+        )
+        conn.execute(
+            """
+            INSERT INTO memory_items_fts (rowid, content, title)
+            VALUES (last_insert_rowid(), ?, ?)
+            """,
+            ("My secret API key is SK-983271", "grok api key")
+        )
+        conn.commit()
+
+    embed_called = False
+
+    async def mock_embed(text: str):
+        nonlocal embed_called
+        embed_called = True
+        return [0.1] * 1536, "mock_model"
+
+    monkeypatch.setattr(mc, "_embed", mock_embed)
+
+    # Search for the exact high-specificity phrase
+    results = await mc.memory_search_routed_impl(
+        "My secret API key", k=5
+    )
+
+    # 1. Verify that FTS short-circuit bypassed embedding entirely
+    assert not embed_called, "Embedding generation should have been bypassed by the FTS short-circuit!"
+
+    # 2. Verify that we got the exact correct hit with a score of 1.0
+    assert len(results) == 1, f"Expected 1 hit, got {len(results)}"
+    score, hit = results[0]
+    assert score == 1.0, f"Expected exact short-circuit score 1.0, got {score}"
+    assert hit["id"] == "key1"
+    assert "SK-983271" in hit["content"]
