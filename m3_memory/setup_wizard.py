@@ -534,8 +534,10 @@ def _step_cpu_sovereign_embedder() -> bool:
 def _step_gpu_embedder() -> bool:
     """Install the in-process GPU embedder (CUDA / Vulkan / Metal autodetected).
 
-    Builds m3-core-rs with the appropriate `embedded-<gpu>` feature. Requires
-    a Rust toolchain. Non-fatal: failure falls back to the CPU embedder.
+    Installs the matching prebuilt m3-core-rs wheel from PyPI
+    (``m3-core-rs-<os>-<backend>``); only builds from source (needs a Rust
+    toolchain) when no prebuilt wheel matches this platform/Python. Non-fatal:
+    failure falls back to the CPU embedder.
     """
     _say("Step 3/5: installing GPU-accelerated in-process embedder")
     cmd = [sys.executable, "-m", "m3_memory.cli", "embedder", "install-gpu"]
