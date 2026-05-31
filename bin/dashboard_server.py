@@ -618,7 +618,7 @@ INDEX_HTML = """
                         <span style="font-size: 0.75rem; color: var(--m3-neon-cyan); font-family: 'Outfit', sans-serif;">Console Log</span>
                         <button class="m3-btn" style="padding: 2px 6px; font-size: 0.65rem;" onclick="clearConsole()">Clear</button>
                     </div>
-                    <pre id="consoleOutput" style="background: hsla(222, 22%, 5%, 0.8); border: 1px solid var(--m3-border-glass); border-radius: 6px; padding: 0.5rem; font-family: 'Fira Code', monospace; font-size: 0.7rem; color: #fff; max-height: 180px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+                    <pre id="consoleOutput" style="background: hsla(222, 22%, 5%, 0.8); border: 1px solid var(--m3-border-glass); border-radius: 6px; padding: 0.75rem; font-family: 'Fira Code', Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace; font-size: 0.72rem; line-height: 1.45; color: hsl(210, 15%, 90%); max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
                 </div>
             </div>
 
@@ -1532,8 +1532,8 @@ async def trigger_maintenance_task(action: str):
         "decay_dry": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db],
         "decay_apply": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db, "--apply"],
         "embed_sweep": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_embed_sweeper.py"), "--database", main_db, "--drain-spill"],
-        "backfill_titles": [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_title.py")],
-        "backfill_embeds": [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_embed.py")],
+        "backfill_titles": [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_title.py"), "--yes"],
+        "backfill_embeds": [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_embed.py"), "--yes"],
         "files_health": [sys.executable, "-m", "files_memory.tools", "health", "--rebuild"]
     }
     
