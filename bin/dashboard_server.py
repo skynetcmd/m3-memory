@@ -988,6 +988,8 @@ INDEX_HTML = """
             }
         }
 
+        let maintenancePollTimer = null;
+
         async function runMaintenance(action) {
             const consoleDiv = document.getElementById("maintenanceConsole");
             const outputPre = document.getElementById("consoleOutput");
@@ -996,19 +998,61 @@ INDEX_HTML = """
             outputPre.innerText = `[System] Triggering ${action}...\n`;
             outputPre.scrollTop = outputPre.scrollHeight;
             
+            if (maintenancePollTimer) {
+                clearInterval(maintenancePollTimer);
+                maintenancePollTimer = null;
+            }
+            
             try {
-                const res = await fetch(`/api/maintenance/${action}`, { method: "POST" });
+                const res = await fetch(`/api/maintenance/trigger/${action}`, { method: "POST" });
                 const text = await res.text();
-                outputPre.style.color = res.ok ? "#fff" : "var(--m3-neon-amber)";
-                outputPre.innerText += text;
+                
+                if (!res.ok) {
+                    outputPre.style.color = "var(--m3-neon-amber)";
+                    outputPre.innerText += text;
+                    outputPre.scrollTop = outputPre.scrollHeight;
+                    return;
+                }
+                
+                outputPre.style.color = "#fff";
+                outputPre.innerText = text + "\n";
+                outputPre.scrollTop = outputPre.scrollHeight;
+                
+                // Start polling logs
+                maintenancePollTimer = setInterval(pollMaintenanceStatus, 1500);
             } catch(e) {
                 outputPre.style.color = "var(--m3-neon-amber)";
-                outputPre.innerText += `[Error] Failed to connect to server: ${e.message}\n`;
+                outputPre.innerText += `[Error] Failed to trigger task: ${e.message}\n`;
+                outputPre.scrollTop = outputPre.scrollHeight;
             }
-            outputPre.scrollTop = outputPre.scrollHeight;
+        }
+
+        async function pollMaintenanceStatus() {
+            const outputPre = document.getElementById("consoleOutput");
+            try {
+                const res = await fetch("/api/maintenance/status");
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                outputPre.innerText = data.logs;
+                
+                if (data.status === "finished") {
+                    clearInterval(maintenancePollTimer);
+                    maintenancePollTimer = null;
+                    const color = data.exit_code === 0 ? "var(--m3-neon-emerald)" : "var(--m3-neon-amber)";
+                    outputPre.innerHTML += `\n<span style="color: ${color}; font-weight: 600;">[System] Task finished with exit code ${data.exit_code}.</span>\n`;
+                }
+                outputPre.scrollTop = outputPre.scrollHeight;
+            } catch(e) {
+                console.error("Failed to poll status", e);
+            }
         }
 
         function clearConsole() {
+            if (maintenancePollTimer) {
+                clearInterval(maintenancePollTimer);
+                maintenancePollTimer = null;
+            }
             document.getElementById("consoleOutput").innerText = "";
             document.getElementById("maintenanceConsole").style.display = "none";
         }
@@ -1450,11 +1494,27 @@ async def forget_gdpr_data(user_id: str = Form(...)):
         return HTMLResponse(content=f"Purge Failed: {str(e)}", status_code=500)
 
 
-@app.post("/api/maintenance/{action}", response_class=HTMLResponse)
-async def run_maintenance_task(action: str):
-    """Executes backend maintenance actions similar to TUI options."""
+active_task = {
+    "process": None,
+    "action": None,
+    "log_path": None,
+    "log_file_handle": None,
+    "expected_wait": ""
+}
+
+@app.post("/api/maintenance/trigger/{action}", response_class=HTMLResponse)
+async def trigger_maintenance_task(action: str):
+    """Asynchronously triggers maintenance scripts in the background."""
     import subprocess
     
+    # Check if a task is already running
+    proc = active_task["process"]
+    if proc is not None and proc.poll() is None:
+        return HTMLResponse(
+            content=f"[Error] Another task ({active_task['action']}) is already running. Please wait for it to complete.",
+            status_code=400
+        )
+        
     main_db = os.path.abspath(resolve_db_path(None))
     
     # Resolve Chatlog DB path
@@ -1474,33 +1534,120 @@ async def run_maintenance_task(action: str):
         "files_health": [sys.executable, "-m", "files_memory.tools", "health", "--rebuild"]
     }
     
+    wait_map = {
+        "decay_dry": "5-15 seconds (dry-run)",
+        "decay_apply": "5-15 seconds",
+        "embed_sweep": "10-60 seconds (sweeping and compacting queue)",
+        "backfill_titles": "30-180 seconds (generating titles via LLM/fallback)",
+        "backfill_embeds": "1-5 minutes (generating embedding vectors for queue)",
+        "files_health": "10-45 seconds (probing and rebuilding chunks)"
+    }
+    
     if action not in cmd_map:
         raise HTTPException(status_code=400, detail="Invalid action")
         
     cmd = cmd_map[action]
+    expected_wait = wait_map.get(action, "1-3 minutes")
     
-    # Run command inside a thread to keep FastAPI non-blocking
-    def run_cmd():
-        env = os.environ.copy()
-        # Add bin directory to PYTHONPATH so files_memory is importable
-        bin_dir = os.path.dirname(os.path.abspath(__file__))
-        if "PYTHONPATH" in env:
-            env["PYTHONPATH"] = bin_dir + os.pathsep + env["PYTHONPATH"]
-        else:
-            env["PYTHONPATH"] = bin_dir
-            
-        # Force Python subprocesses to execute in UTF-8 mode on Windows
-        env["PYTHONUTF8"] = "1"
-            
+    log_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "maintenance_run.log"))
+    
+    # Close any existing open handles
+    if active_task["log_file_handle"]:
         try:
-            # Capture outputs using explicit UTF-8 decoding to override CP1252 locale defaults
-            res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", check=False, shell=False)
-            return res.stdout + "\n" + res.stderr + f"\nProcess exited with code {res.returncode}"
-        except Exception as e:
-            return f"Error executing process: {str(e)}"
+            active_task["log_file_handle"].close()
+        except Exception:
+            pass
+        active_task["log_file_handle"] = None
+        
+    # Truncate and prep new log file
+    try:
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(f"[System] Starting {action}...\n")
+            f.write(f"[System] Expected wait time: {expected_wait}\n")
+            f.write(f"[System] Command: {' '.join(cmd)}\n\n")
+    except Exception as e:
+        return HTMLResponse(content=f"[Error] Failed to initialize log: {str(e)}", status_code=500)
+        
+    # Open log file in append mode for child process redirection
+    log_file_handle = open(log_path, "a", encoding="utf-8", errors="replace")
+    
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    bin_dir = os.path.dirname(os.path.abspath(__file__))
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = bin_dir + os.pathsep + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = bin_dir
+        
+    try:
+        # Spawn child process in the background
+        proc = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=log_file_handle,
+            stderr=subprocess.STDOUT, # redirect stderr to stdout
+            shell=False
+        )
+        
+        active_task["process"] = proc
+        active_task["action"] = action
+        active_task["log_path"] = log_path
+        active_task["log_file_handle"] = log_file_handle
+        active_task["expected_wait"] = expected_wait
+        
+        return HTMLResponse(
+            content=f"[System] Triggered background task '{action}'.\nExpected wait: {expected_wait}.\nRunning in background...",
+            status_code=200
+        )
+    except Exception as e:
+        try:
+            log_file_handle.close()
+        except Exception:
+            pass
+        return HTMLResponse(content=f"[Error] Failed to spawn process: {str(e)}", status_code=500)
+
+
+@app.get("/api/maintenance/status")
+async def get_maintenance_status():
+    """Polls the status of the background maintenance task and reads live logs."""
+    proc = active_task["process"]
+    log_path = active_task["log_path"]
+    
+    status = "idle"
+    exit_code = None
+    
+    if proc is not None:
+        exit_code = proc.poll()
+        if exit_code is not None:
+            status = "finished"
+            # Safe close handle
+            if active_task["log_file_handle"]:
+                try:
+                    active_task["log_file_handle"].close()
+                except Exception:
+                    pass
+                active_task["log_file_handle"] = None
+        else:
+            status = "running"
             
-    output = await asyncio.to_thread(run_cmd)
-    return HTMLResponse(content=output, status_code=200)
+    # Read the log file
+    logs = ""
+    if log_path and os.path.exists(log_path):
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                logs = f.read()
+        except Exception as e:
+            logs = f"Error reading live logs: {str(e)}"
+            
+    return JSONResponse(
+        content={
+            "status": status,
+            "action": active_task["action"],
+            "expected_wait": active_task["expected_wait"],
+            "exit_code": exit_code,
+            "logs": logs
+        }
+    )
 
 
 # --- Execution Hook ---
