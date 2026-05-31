@@ -23,7 +23,121 @@ try:
 except ImportError:
     def load_dotenv(*args, **kwargs): pass
 
+M3_CORE_RS_DISABLE = os.environ.get("M3_CORE_RS_DISABLE", "0") == "1"
+
+try:
+    if M3_CORE_RS_DISABLE:
+        raise ImportError
+    from m3_core_rs import format_log
+except ImportError:
+    def format_log(event: str, *args, **kwargs) -> str:
+        parts = [event]
+        for a in args:
+            if a is None or a == "":
+                continue
+            parts.append(str(a))
+        for k, v in kwargs.items():
+            if v is None:
+                continue
+            parts.append(f"{k}={v}")
+        return " | ".join(parts)
+
 logger = logging.getLogger("M3_SDK")
+
+import hashlib
+
+_LAST_USER_INTERACTION = 0.0
+
+# User-selectable configurations
+INITIAL_LIMIT = min(99, max(10, int(os.environ.get("M3_GOVERNOR_INITIAL_THRESHOLD", "85"))))
+LIMIT_THRESHOLD = min(100, max(20, int(os.environ.get("M3_GOVERNOR_LIMIT_THRESHOLD", "95"))))
+
+# Enforce sanity constraint: initial < limit
+if INITIAL_LIMIT >= LIMIT_THRESHOLD and LIMIT_THRESHOLD != 100:
+    INITIAL_LIMIT = LIMIT_THRESHOLD - 5
+
+def register_user_interaction():
+    global _LAST_USER_INTERACTION
+    _LAST_USER_INTERACTION = time.time()
+
+def get_governor_pacing(telemetry: dict) -> dict:
+    """Return pacing delay configurations for background and interactive pipelines."""
+    load = max(telemetry.get("cpu_total", 0.0), telemetry.get("ram_total", 0.0), telemetry.get("gpu_total", 0.0))
+    elapsed = time.time() - _LAST_USER_INTERACTION
+    
+    # 1. Critical Mode (Overall load >= LIMIT_THRESHOLD)
+    if LIMIT_THRESHOLD != 100 and load >= LIMIT_THRESHOLD:
+        return {"background": "HALTED", "interactive_delay": 30.0} # 30s-60s delay
+        
+    # 2. Throttled Mode (Overall load >= INITIAL_LIMIT but < LIMIT_THRESHOLD)
+    if load >= INITIAL_LIMIT:
+        return {"background": "THROTTLED", "background_delay": 10.0, "interactive_delay": 0.0} # 5s-10s delay
+        
+    # 3. Normal Mode
+    if elapsed < 30.0:
+        return {"background": "HALTED", "interactive_delay": 0.0}
+    elif elapsed < 60.0:
+        return {"background": "TAPERED", "background_delay": 5.0, "interactive_delay": 0.0}
+    return {"background": "CONTINUOUS", "background_delay": 0.1, "interactive_delay": 0.0}
+
+async def pre_execute_interactive_check():
+    register_user_interaction()
+    
+    ctx = M3Context.for_db()
+    telemetry = ctx.get_system_telemetry()
+    pacing = get_governor_pacing(telemetry)
+    
+    delay = pacing.get("interactive_delay", 0.0)
+    if delay > 0.0:
+        logger.warning(
+            f"Host load critical. Throttling interactive task by {delay}s "
+            "to prevent system freeze."
+        )
+        await asyncio.sleep(delay)
+
+@contextmanager
+def migration_lock():
+    """Acquires an exclusive atomic file lock for safe startup migrations.
+    
+    If the lock is held by another process, it block-waits (with a timeout of 120s)
+    until the lock is released.
+    """
+    lock_path = os.path.join(get_m3_config_root(), ".migration.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    
+    fd = None
+    start_time = time.time()
+    acquired = False
+    
+    while time.time() - start_time < 120.0:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            acquired = True
+            break
+        except FileExistsError:
+            time.sleep(0.5)
+            
+    if not acquired:
+        raise RuntimeError(
+            f"Could not acquire migration lock at {lock_path} within 120 seconds. "
+            "Another migration process may be hung. If you are sure no other process is migrating, "
+            "delete the lock file manually."
+        )
+        
+    try:
+        yield
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+            try:
+                os.unlink(lock_path)
+            except Exception:
+                pass
+
+
 
 
 def ensure_utf8() -> None:
@@ -135,15 +249,103 @@ def get_m3_root() -> str:
     return os.path.join(os.path.expanduser("~"), ".m3-memory")
 
 
-def _default_db_path() -> str:
-    # Precedence: M3_MEMORY_ROOT/memory/agent_memory.db > sibling memory/ folder.
-    root = os.getenv("M3_MEMORY_ROOT")
+def get_m3_config_root() -> str:
+    """Returns the M3 configuration directory.
+    Precedence: M3_CONFIG_ROOT > M3_MEMORY_ROOT/config > ~/.m3/config
+    """
+    root = os.getenv("M3_CONFIG_ROOT")
     if root:
-        return os.path.join(os.path.abspath(os.path.expanduser(root)), "memory", "agent_memory.db")
+        return os.path.abspath(os.path.expanduser(root))
+    m3_mem_root = os.getenv("M3_MEMORY_ROOT")
+    if m3_mem_root:
+        return os.path.join(os.path.abspath(os.path.expanduser(m3_mem_root)), "config")
+    return os.path.join(os.path.expanduser("~"), ".m3", "config")
 
-    # Fallback to sibling memory/ directory (developer clone case)
+
+def get_m3_engine_root() -> str:
+    """Returns the M3 database engine directory.
+    Precedence: M3_ENGINE_ROOT > M3_MEMORY_ROOT/engine > ~/.m3/engine
+    """
+    root = os.getenv("M3_ENGINE_ROOT")
+    if root:
+        return os.path.abspath(os.path.expanduser(root))
+    m3_mem_root = os.getenv("M3_MEMORY_ROOT")
+    if m3_mem_root:
+        return os.path.join(os.path.abspath(os.path.expanduser(m3_mem_root)), "engine")
+    return os.path.join(os.path.expanduser("~"), ".m3", "engine")
+
+
+def _db_is_populated(path: str) -> bool:
+    """True iff `path` is a SQLite file that actually carries the memory schema.
+
+    A bare-existence check is not enough: a connection attempt against a not-yet-
+    migrated engine root auto-creates a 0-table `agent_memory.db` stub, and that
+    stub would otherwise shadow a populated legacy DB (the M3_MEMORY_ROOT drift —
+    a fresh engine/ stub silently winning over memory/agent_memory.db with the
+    real data). Returns False for a missing file, an empty stub, or any open/read
+    error (treat unreadable as "not usable" so the caller keeps searching).
+    """
+    if not os.path.exists(path):
+        return False
+    try:
+        conn = sqlite3.connect(path, timeout=2)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_items' LIMIT 1"
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — unreadable/locked DB is not a usable default
+        return False
+
+
+def _default_db_path() -> str:
+    # Precedence: explicit M3_ENGINE_ROOT (honored as-is) > a *populated* derived
+    # engine root > a populated ~/.m3/engine default > populated sibling memory/
+    # (dev clone) > the derived engine path as a last resort (fresh install).
+    #
+    # The key fix over the naive "any env var set -> engine path" rule: when only
+    # M3_MEMORY_ROOT is set, the engine path is DERIVED, not chosen. If that
+    # derived DB is missing or an empty stub, we must not let it shadow a
+    # populated legacy memory/ DB — see _db_is_populated.
+    if os.getenv("M3_ENGINE_ROOT"):
+        # Explicit engine root is a deliberate operator choice; honor it verbatim
+        # even if empty (a fresh deployment legitimately starts empty here).
+        return os.path.join(get_m3_engine_root(), "agent_memory.db")
+
+    engine_db = os.path.join(get_m3_engine_root(), "agent_memory.db")
+    if os.getenv("M3_MEMORY_ROOT"):
+        if _db_is_populated(engine_db):
+            return engine_db
+        # Derived engine DB is missing/empty. Prefer a populated legacy memory/
+        # DB under the same root before falling back to the empty engine path.
+        legacy_under_root = os.path.join(
+            os.path.abspath(os.path.expanduser(os.getenv("M3_MEMORY_ROOT"))),
+            "memory", "agent_memory.db",
+        )
+        if _db_is_populated(legacy_under_root):
+            logger.warning(
+                "M3_MEMORY_ROOT engine DB (%s) is missing or unmigrated; using the "
+                "populated legacy store at %s. Run bin/homecoming.py to migrate, or "
+                "set M3_ENGINE_ROOT explicitly to silence this.",
+                engine_db, legacy_under_root,
+            )
+            return legacy_under_root
+        return engine_db
+
+    # No env override: prefer a populated ~/.m3/engine default, else a populated
+    # sibling memory/ (developer clone), else the engine default for a fresh start.
+    m3_engine_default = os.path.join(os.path.expanduser("~"), ".m3", "engine", "agent_memory.db")
+    if _db_is_populated(m3_engine_default):
+        return m3_engine_default
+
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, "memory", "agent_memory.db")
+    legacy_path = os.path.join(base, "memory", "agent_memory.db")
+    if _db_is_populated(legacy_path):
+        return legacy_path
+
+    return os.path.join(get_m3_engine_root(), "agent_memory.db")
 
 
 def resolve_db_path(explicit: Optional[str] = None) -> str:
@@ -194,8 +396,15 @@ def add_database_arg(parser: argparse.ArgumentParser) -> None:
 
 class M3Context:
     def __init__(self, db_path: Optional[str] = None):
-        self.m3_memory_root = get_m3_root()
-        dotenv_path = os.path.join(self.m3_memory_root, ".env")
+        self.m3_config_root = get_m3_config_root()
+        self.m3_engine_root = get_m3_engine_root()
+        self.m3_memory_root = get_m3_root()  # Keep for legacy compatibility
+        
+        # Load dotenv from config root first, fallback to memory root
+        dotenv_path = os.path.join(self.m3_config_root, ".env")
+        if not os.path.exists(dotenv_path):
+            dotenv_path = os.path.join(self.m3_memory_root, ".env")
+            
         if os.path.exists(dotenv_path):
             load_dotenv(dotenv_path)
 
@@ -265,11 +474,117 @@ class M3Context:
                     logger.error(f"Failed to create SQLite connection for {self.db_path}: {e}")
                     raise
             self._pool = pool
+            try:
+                self._verify_cohesion()
+            except Exception as e:
+                # If we fail the cohesion check, let's close the pool and raise
+                self._pool = None
+                while not pool.empty():
+                    try:
+                        pool.get_nowait().close()
+                    except Exception:
+                        pass
+                logger.error(f"Cohesion validation failed: {e}")
+                raise
             # One-time sanity log per context.
             _probe = pool.queue[0]
             _jm = _probe.execute("PRAGMA journal_mode").fetchone()[0]
             _sy = _probe.execute("PRAGMA synchronous").fetchone()[0]
             logger.info(f"SQLite pool ready: db={self.db_path} journal_mode={_jm} synchronous={_sy} pool_size={pool_size}")
+
+    def get_system_telemetry(self) -> dict:
+        """Unify system hardware metrics (CPU, RAM, GPU, Thermal status)."""
+        try:
+            import psutil
+        except ImportError:
+            return {
+                "cpu_total": 0.0,
+                "ram_total": 0.0,
+                "gpu_total": 0.0,
+                "thermal": "Nominal"
+            }
+            
+        # CPU Total Usage
+        try:
+            cpu_total = psutil.cpu_percent(interval=None)
+        except Exception:
+            cpu_total = 0.0
+            
+        # RAM Total Usage
+        try:
+            ram = psutil.virtual_memory()
+            ram_total = ram.percent
+        except Exception:
+            ram_total = 0.0
+            
+        # GPU Total Usage (Mock/fallback)
+        gpu_total = 0.0
+            
+        # Thermal Load
+        try:
+            from thermal_utils import get_thermal_status
+            thermal = get_thermal_status()
+        except Exception:
+            thermal = "Nominal"
+            
+        return {
+            "cpu_total": cpu_total,
+            "ram_total": ram_total,
+            "gpu_total": gpu_total,
+            "thermal": thermal
+        }
+
+    def _verify_cohesion(self):
+        """Verifies the cohesion between the configuration salt and the database.
+        
+        Creates the `m3_system_cohesion` metadata table if it does not exist, and
+        stores or re-verifies the SHA-256 hash of the active encryption salt.
+        """
+        try:
+            from auth_utils import get_salt_path
+        except ImportError:
+            return
+            
+        salt_path = get_salt_path()
+        if not salt_path or not os.path.exists(salt_path):
+            return
+            
+        try:
+            with open(salt_path, "rb") as f:
+                salt_bytes = f.read()
+            salt_hash = hashlib.sha256(salt_bytes).hexdigest()
+        except Exception as e:
+            logger.warning(f"Failed to read/hash salt for cohesion check: {e}")
+            return
+
+        with self.get_sqlite_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS m3_system_cohesion (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+            row = conn.execute("SELECT value FROM m3_system_cohesion WHERE key = 'salt_hash'").fetchone()
+            if row:
+                stored_hash = row[0]
+                if stored_hash != salt_hash:
+                    raise RuntimeError(
+                        f"CRITICAL COHESION ERROR: Active configuration salt mismatch with stored database hash!\n"
+                        f"Stored Hash: {stored_hash}\n"
+                        f"Active Hash: {salt_hash}\n"
+                        f"This database was previously encrypted with a different salt. Decoupled path mismatch detected.\n"
+                        f"Please reconcile your config and engine folders or env overrides (M3_CONFIG_ROOT / M3_ENGINE_ROOT)."
+                    )
+            else:
+                conn.execute(
+                    "INSERT INTO m3_system_cohesion (key, value) VALUES ('salt_hash', ?)",
+                    (salt_hash,)
+                )
+                conn.commit()
+
 
     def _check_circuit(self, service: str) -> bool:
         """Checks if the circuit for a specific service is open."""
@@ -285,12 +600,13 @@ class M3Context:
         if service in _CIRCUITS:
             del _CIRCUITS[service]
 
-    def _record_failure(self, service: str):
+    def _record_failure(self, service: str, custom_cooldown: Optional[float] = None):
         state = _CIRCUITS.get(service, {"failures": 0, "open_until": 0})
         state["failures"] += 1
+        cooldown = custom_cooldown or _CB_COOLDOWN
         if state["failures"] >= _CB_THRESHOLD:
-            state["open_until"] = time.time() + _CB_COOLDOWN
-            logger.warning(f"Circuit for {service} OPENED for {_CB_COOLDOWN}s.")
+            state["open_until"] = time.time() + cooldown
+            logger.warning(f"Circuit for {service} OPENED for {cooldown}s.")
         _CIRCUITS[service] = state
 
     def get_async_client(self) -> httpx.AsyncClient:
@@ -422,22 +738,9 @@ class M3Context:
         Categories: 'thought'/'activity' → activity_logs; 'decision' → project_decisions.
         Unknown categories fall through to activity_logs for safety.
         """
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        with self.get_sqlite_conn() as conn:
-            cur = conn.cursor()
-            if category == "decision":
-                cur.execute(
-                    "INSERT INTO project_decisions (project, decision, rationale, timestamp) "
-                    "VALUES (?, ?, ?, ?)",
-                    (detail_c or "default", detail_a, detail_b, now),
-                )
-            else:
-                cur.execute(
-                    "INSERT INTO activity_logs (timestamp, query, response, model_used) "
-                    "VALUES (?, ?, ?, ?)",
-                    (now, detail_a, detail_b, detail_c or category),
-                )
-            conn.commit()
+        from audit_trail import log_event
+        log_event(self, category, detail_a, detail_b, detail_c)
+
 
     @contextmanager
     def pg_connection(self):
@@ -471,16 +774,7 @@ class StructuredLogger:
     """Renders structured log lines as `event | k=v | k=v` for grep-friendly output."""
 
     def format(self, event: str, *args, **kwargs) -> str:
-        parts = [event]
-        for a in args:
-            if a is None or a == "":
-                continue
-            parts.append(str(a))
-        for k, v in kwargs.items():
-            if v is None:
-                continue
-            parts.append(f"{k}={v}")
-        return " | ".join(parts)
+        return format_log(event, *args, **kwargs)
 
     def log(self, event: str, *args, **kwargs) -> None:
         """Helper to format and print a structured log line to stderr."""

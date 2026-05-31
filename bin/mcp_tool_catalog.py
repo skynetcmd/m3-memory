@@ -27,15 +27,34 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-import chatlog_core
-import chatlog_status
-import memory_core
-import memory_maintenance
-import memory_sync
+import importlib
 
-# files-memory tool impls. Imported lazily-friendly: the package is
-# self-contained and has no circular dependency on memory_core.
-from files_memory import tools as _files_tools
+class LazyImpl:
+    def __init__(self, module_name: str, attr_name: str):
+        self.module_name = module_name
+        self.attr_name = attr_name
+        self._cached_func = None
+
+    def __call__(self, *args, **kwargs):
+        if self._cached_func is None:
+            mod = importlib.import_module(self.module_name)
+            self._cached_func = getattr(mod, self.attr_name)
+        return self._cached_func(*args, **kwargs)
+
+class LazyModuleProxy:
+    def __init__(self, module_name: str):
+        self._module_name = module_name
+
+    def __getattr__(self, name: str):
+        return LazyImpl(self._module_name, name)
+
+chatlog_core = LazyModuleProxy("chatlog_core")
+chatlog_status = LazyModuleProxy("chatlog_status")
+memory_core = LazyModuleProxy("memory_core")
+memory_maintenance = LazyModuleProxy("memory_maintenance")
+memory_sync = LazyModuleProxy("memory_sync")
+_files_tools = LazyModuleProxy("files_memory.tools")
+
 from m3_sdk import active_database
 
 # ── Validation Constants (hoisted from memory_bridge.py) ─────────────────────
