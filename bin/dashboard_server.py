@@ -494,6 +494,45 @@ STYLE_CSS = """
             font-family: 'Outfit', sans-serif;
             font-weight: 500;
         }
+
+        /* --- Premium Custom Tooltips --- */
+        [data-tooltip] {
+            position: relative;
+        }
+
+        [data-tooltip]::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 125%; /* Positioned above the button, safe from large cursors */
+            left: 50%;
+            transform: translateX(-50%) scale(0.95);
+            background: hsla(224, 25%, 5%, 0.98);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid var(--m3-border-glass);
+            border-radius: 6px;
+            color: hsl(210, 15%, 90%);
+            padding: 0.5rem 0.75rem;
+            font-size: 0.72rem;
+            font-family: 'Inter', sans-serif;
+            line-height: 1.45;
+            width: 240px; /* Constrain width to force elegant wrapping */
+            white-space: normal;
+            word-wrap: break-word;
+            box-shadow: var(--m3-shadow-card);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+            z-index: 1000;
+            text-align: center;
+        }
+
+        [data-tooltip]:hover::after {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) scale(1);
+        }
 """
 
 # --- Explorer (View 1) Layout Template ---
@@ -601,16 +640,16 @@ INDEX_HTML = """
                 <div class="m3-card-title">System Diagnostics & Tasks</div>
                 <div style="display: flex; flex-direction: column; gap: 0.5rem;">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" title="Preview memory decay and expiration scores. Safe dry-run, no database edits." onclick="runMaintenance('decay_dry')">Decay Dry-Run</button>
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" title="Calculate and commit memory decay scores, prune expired items, and enforce retention limits." onclick="runMaintenance('decay_apply')">Decay Apply</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Preview memory decay and expiration scores. Safe dry-run, no database edits." onclick="runMaintenance('decay_dry')">Decay Dry-Run</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Calculate and commit memory decay scores, prune expired items, and enforce retention limits." onclick="runMaintenance('decay_apply')">Decay Apply</button>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" title="Sweep and process pending entity extraction queue tasks, draining and compacting spill jobs." onclick="runMaintenance('embed_sweep')">Embed Sweeper</button>
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" title="Scan Files database integrity, chunk document segments, and force rebuilding of index indices." onclick="runMaintenance('files_health')">Files Rebuild</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Sweep and process pending entity extraction queue tasks, draining and compacting spill jobs." onclick="runMaintenance('embed_sweep')">Embed Sweeper</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Scan Files database integrity, chunk document segments, and force rebuilding of index indices." onclick="runMaintenance('files_health')">Files Rebuild</button>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" title="Derive titles for unnamed or generic entries automatically. Automatically confirms ('--yes') and applies changes." onclick="runMaintenance('backfill_titles')">Backfill Titles</button>
-                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" title="Generate missing vector embeddings for database facts and log records automatically. Automatically confirms ('--yes') and applies changes." onclick="runMaintenance('backfill_embeds')">Backfill Embeds</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Derive titles for unnamed or generic entries automatically. Automatically confirms ('--yes') and applies changes." onclick="runMaintenance('backfill_titles')">Backfill Titles</button>
+                        <button class="m3-btn" style="font-size: 0.8rem; padding: 0.5rem 0.25rem;" data-tooltip="Generate missing vector embeddings for database facts and log records automatically. Automatically confirms ('--yes') and applies changes." onclick="runMaintenance('backfill_embeds')">Backfill Embeds</button>
                     </div>
                 </div>
                 <div id="maintenanceConsole" style="margin-top: 1rem; display: none;">
