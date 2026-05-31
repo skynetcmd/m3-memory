@@ -50,20 +50,14 @@ Before any push to a remote:
    public remote. The pre-push hook scans the outgoing diff for the known
    markers; a hit blocks the push.
 
-3. **Design-philosophy advisory scan (warns, does NOT block).**
-   `python bin/check_design_philosophy.py` flags the *mechanically checkable*
-   anti-patterns named in [`DESIGN_PHILOSOPHIES.md`](DESIGN_PHILOSOPHIES.md) in
-   your changed files — `SELECT *` (§4/§8), raw `sqlite3.connect(` instead of
-   the `_db()` pool (§4/§8), inline `PRAGMA` instead of `apply_pragmas` (§10),
-   and `ToolSpec(` without a `description=` (§3/§12). It is **advisory**: it
-   cites the tenet and always exits 0, because legitimate exceptions exist
-   (migrations, fixtures). The *judgment* tenets — Effectiveness metric
-   pre-registration (§5), performance budgets (§8), one-feature-per-PR (§2) —
-   cannot be regex-checked; hold them yourself and in review. When a push
-   changes code (`bin/`/`m3_memory/` `.py`), the hook also prints a short
-   **guidelines reminder** of those judgment tenets so they aren't silently
-   skipped — a prompt to re-read [`DESIGN_PHILOSOPHIES.md`](DESIGN_PHILOSOPHIES.md),
-   not a gate.
+3. **Follow the design philosophies (author's responsibility).** When a push
+   changes code (`bin/`/`m3_memory/` `.py`), the hook prints a short reminder
+   of the core tenets — Effectiveness (§5), Robustness (§3), Efficiency/
+   Performance (§4/§8), Hardening/Privacy (§6/§7), Modularity / one-feature-
+   per-PR (§2), Tool-shape (§12). This is a **prompt, not a gate**: there is no
+   auto-checker to satisfy or bypass. You are expected to hold these as you
+   write and push. Re-read [`DESIGN_PHILOSOPHIES.md`](DESIGN_PHILOSOPHIES.md)
+   (especially §2–§8) before adding a tool, submodule, or impl function.
 
 **Enforcement is layered (defense in depth) so no agent can bypass it by
 reading the "wrong" file:**

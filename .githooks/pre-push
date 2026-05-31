@@ -53,18 +53,10 @@ if [ -n "$LEAK" ]; then
   exit 1
 fi
 
-echo "[pre-push] 3/3 design-philosophy advisory scan"
-# ADVISORY ONLY — surfaces concrete anti-patterns from
-# docs/DESIGN_PHILOSOPHIES.md (SELECT *, raw sqlite3.connect, inline PRAGMA,
-# ToolSpec without description) in the changed files. Never blocks: many hits
-# are legitimate (migrations, fixtures). The `|| true` guarantees the push
-# proceeds regardless; the script itself also always exits 0.
-"$PY" bin/check_design_philosophy.py || true
-
-# Guidelines reminder — only when this push actually changes code (bin/ or
-# m3_memory/ .py), not on docs/config-only pushes. The static scan above
-# catches the regex-checkable bans; these are the JUDGMENT tenets it cannot
-# check, surfaced as a prompt so they aren't silently skipped.
+# Design-philosophy reminder — only when this push actually changes code
+# (bin/ or m3_memory/ .py), not on docs/config-only pushes. The author is
+# responsible for following the guidelines; this is a prompt, not a tool or a
+# gate (no auto-checking, nothing to bypass).
 CODE_CHANGED="$(git diff --name-only "$RANGE" -- 'bin/**/*.py' 'm3_memory/**/*.py' 'bin/*.py' 2>/dev/null || true)"
 if [ -n "$CODE_CHANGED" ]; then
   cat >&2 <<'REMINDER'
