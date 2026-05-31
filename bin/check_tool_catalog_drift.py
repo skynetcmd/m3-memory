@@ -109,7 +109,15 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Drift tests also gate the prose 'N tools' counts the generators don't own.
-    rc = _run([_PY, "-m", "pytest", "-q", *_DRIFT_TESTS])
+    # Run pytest with plugin autoload disabled (these tests need neither anyio
+    # nor asyncio) and the cache provider off — both shave fixed startup cost
+    # off a check that runs on the push hot path.
+    import os
+    env = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    rc = subprocess.run(
+        [_PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", *_DRIFT_TESTS],
+        cwd=_ROOT, env=env,
+    ).returncode
     if rc != 0:
         print("[drift] drift tests failed — a hardcoded 'N tools' count or the "
               "committed manifest is out of sync. Fix and re-run.", file=sys.stderr)
