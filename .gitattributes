@@ -6,6 +6,10 @@
 *.py       text eol=lf
 *.ps1      text eol=crlf
 
+# Git hooks are extensionless shell scripts — must stay LF so they execute
+# on Linux/macOS after a Windows checkout.
+.githooks/* text eol=lf
+
 # Binaries: never convert.
 *.db       binary
 *.png      binary
