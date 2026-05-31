@@ -24,7 +24,12 @@ import threading
 from concurrent.futures import Future
 from typing import Any, List
 
-import mcp_tool_catalog as cat
+# NOTE: mcp_tool_catalog is imported lazily inside _call(), NOT at module top.
+# It pulls a heavy dependency chain (memory_core + embedder), and a slow
+# module-level import races under Hermes' threaded tool execution: a second
+# thread can observe this module half-initialized in sys.modules, yielding
+# "ImportError: cannot import name 'M3Client'". Deferring the import lets the
+# class bind instantly, eliminating the race.
 
 
 class M3Client:
@@ -58,7 +63,40 @@ class M3Client:
             t.start()
             cls._loop, cls._thread = loop, t
 
+    @staticmethod
+    def _ensure_m3_path_priority() -> None:
+        """Make m3-memory's bin/ win the `memory` package name.
+
+        m3's internals do bare `import memory.chroma` etc. A host like Hermes
+        Agent puts its own `plugins/` (containing `plugins/memory/`) on
+        sys.path, which shadows m3's top-level `memory` package and breaks the
+        import with "No module named 'memory.chroma'". We resolve mcp_tool_catalog's
+        own directory (m3's bin/) and move it to the FRONT of sys.path so m3's
+        `memory` resolves first. Idempotent; cheap.
+        """
+        import importlib.util
+        import sys
+        spec = importlib.util.find_spec("mcp_tool_catalog")
+        if spec and spec.origin:
+            import os
+            bin_dir = os.path.dirname(spec.origin)
+            if sys.path and sys.path[0] != bin_dir:
+                # Drop any existing occurrence, then prepend.
+                sys.path[:] = [p for p in sys.path if p != bin_dir]
+                sys.path.insert(0, bin_dir)
+            # If a shadowing `memory` was already imported, evict it so the
+            # next import re-resolves against m3's bin.
+            _m = sys.modules.get("memory")
+            if _m is not None:
+                _f = getattr(_m, "__file__", "") or ""
+                if not _f.startswith(bin_dir):
+                    for _name in [n for n in sys.modules
+                                  if n == "memory" or n.startswith("memory.")]:
+                        del sys.modules[_name]
+
     def _call(self, name: str, **args) -> Any:
+        self._ensure_m3_path_priority()
+        import mcp_tool_catalog as cat  # lazy — see module-top note
         spec = cat.get_tool(name)
         if spec is None:
             raise ValueError(f"unknown m3 tool: {name}")
