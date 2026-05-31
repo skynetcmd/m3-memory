@@ -41,6 +41,7 @@ HEADER_HTML = """
         <div style="display: flex; gap: 0.5rem; align-items: center;">
             <a href="/" class="nav-link {explorer_active}">Graph Explorer</a>
             <a href="/browse" class="nav-link {browse_active}">KB Browser</a>
+            <a href="/audit" class="nav-link {audit_active}">Conflict & Audit Log</a>
         </div>
         
         {db_selector_html}
@@ -780,7 +781,7 @@ INDEX_HTML = """
         <!-- Main Panel (Left Column) -->
         <main>
             <!-- System Stats Grid -->
-            <div class="metrics-grid" hx-get="/api/stats" hx-trigger="load, every 8s">
+            <div class="metrics-grid" hx-get="/api/stats" hx-trigger="load, every 8s, refreshStats">
                 <!-- Swapped in dynamically by HTMX -->
             </div>
 
@@ -1333,6 +1334,13 @@ INDEX_HTML = """
                     maintenancePollTimer = null;
                     const color = data.exit_code === 0 ? "var(--m3-neon-emerald)" : "var(--m3-neon-amber)";
                     outputPre.innerHTML += `\n<span style="color: ${color}; font-weight: 600;">[System] Task finished with exit code ${data.exit_code}.</span>\n`;
+                    if (data.exit_code === 0) {
+                        try {
+                            htmx.trigger(".metrics-grid", "refreshStats");
+                        } catch(err) {
+                            console.error("HTMX trigger failed", err);
+                        }
+                    }
                 }
                 outputPre.scrollTop = outputPre.scrollHeight;
             } catch(e) {
@@ -1433,11 +1441,17 @@ BROWSE_HTML = """
                 
                 <select name="type" class="m3-select" hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="change" hx-include="[name='q'], [name='limit']">
                     <option value="">-- All Types --</option>
+                    <option value="note">Note</option>
+                    <option value="summary">Summary</option>
                     <option value="fact">Fact</option>
                     <option value="decision">Decision</option>
+                    <option value="task">Task</option>
+                    <option value="plan">Plan</option>
+                    <option value="preference">Preference</option>
+                    <option value="to_do">To-Do</option>
                     <option value="knowledge">Knowledge</option>
                     <option value="project">Project</option>
-                    <option value="note">Note</option>
+                    <option value="local_device">Local Device</option>
                     <option value="network_config">Network Config</option>
                     <option value="infrastructure">Infrastructure</option>
                     <option value="reference">Reference</option>
@@ -1498,6 +1512,200 @@ BROWSE_HTML = """
 </body>
 </html>
 """
+
+# --- Audit & Timeline (View 3) Layout Template ---
+AUDIT_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3 Conflict & Audit Log</title>
+    <!-- Modern Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <style>
+        {{ STYLE_CSS }}
+        
+        .audit-container {
+            max-width: 1200px;
+            width: 100%;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+            flex-grow: 1;
+        }
+        
+        .timeline-container {
+            display: flex;
+            flex-direction: column;
+            gap: 2.5rem;
+            margin-top: 2rem;
+        }
+        
+        .timeline-group-card {
+            background: var(--m3-bg-card-glass);
+            border: 1px solid var(--m3-border-glass);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: var(--m3-shadow-card);
+            position: relative;
+            overflow: hidden;
+            transition: var(--m3-transition-smooth);
+        }
+        
+        .timeline-group-card:hover {
+            border-color: hsla(180, 100%, 50%, 0.25);
+            box-shadow: var(--m3-shadow-glow);
+        }
+        
+        /* Vertical line for the timeline */
+        .timeline-flow {
+            position: relative;
+            padding-left: 2.5rem;
+            margin-top: 1.5rem;
+        }
+        
+        .timeline-flow::before {
+            content: '';
+            position: absolute;
+            left: 11px;
+            top: 5px;
+            bottom: 5px;
+            width: 2px;
+            background: hsla(217, 19%, 27%, 0.5);
+        }
+        
+        .timeline-node {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+        
+        .timeline-node:last-child {
+            margin-bottom: 0;
+        }
+        
+        .timeline-badge {
+            position: absolute;
+            left: -2.5rem;
+            top: 2px;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #000;
+            z-index: 2;
+            box-shadow: 0 0 8px rgba(0,0,0,0.5);
+        }
+        
+        .badge-create { background: var(--m3-neon-emerald); box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
+        .badge-update { background: var(--m3-neon-cyan); box-shadow: 0 0 10px rgba(6, 182, 212, 0.4); }
+        .badge-supersede { background: var(--m3-neon-amber); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
+        .badge-contradiction { background: var(--m3-neon-amber); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
+        .badge-delete { background: hsl(15, 100%, 55%); box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
+        .badge-resolve { background: var(--m3-neon-purple); box-shadow: 0 0 10px rgba(168, 85, 247, 0.4); }
+        
+        .timeline-content-box {
+            background: hsla(222, 22%, 5%, 0.4);
+            border: 1px solid var(--m3-border-glass);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+        }
+        
+        .diff-text {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            line-height: 1.45;
+            color: hsl(210, 15%, 85%);
+            background: hsla(222, 22%, 3%, 0.6);
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            margin-top: 0.5rem;
+            border: 1px solid rgba(255,255,255,0.03);
+        }
+        
+        .filter-panel {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 768px) {
+            .filter-panel {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    {{ HEADER }}
+
+    <div class="audit-container">
+        <!-- Title & Desc -->
+        <div class="m3-card" style="margin-bottom: 2rem;">
+            <div class="m3-card-title" style="font-size: 1.4rem; color: var(--m3-neon-cyan);">Conflict & Audit Log</div>
+            <p style="font-size: 0.88rem; color: hsl(210, 15%, 75%); line-height: 1.5; margin-top: 0.5rem;">
+                Explore raw bitemporal change timelines. This panel detects, groups, and lets you resolve contradictions, supersession history, and change logs. It shows interactive word-level <strong>Diff Blocks</strong> comparing previous vs. new values.
+            </p>
+        </div>
+
+        <!-- Filter Panel -->
+        <div class="m3-card" style="margin-bottom: 2rem;">
+            <div class="m3-card-title">Filter Conflict Timelines</div>
+            <div class="filter-panel">
+                <input type="text" name="q" class="m3-input" placeholder="Search memory ID, title or content keywords..."
+                       hx-get="/api/audit/timeline" hx-target="#auditTimeline" hx-trigger="keyup changed delay:300ms, filter" hx-include="[name='limit']">
+                
+                <select name="limit" class="m3-select" hx-get="/api/audit/timeline" hx-target="#auditTimeline" hx-trigger="change" hx-include="[name='q']">
+                    <option value="10">Latest 10 Timelines</option>
+                    <option value="25" selected>Latest 25 Timelines</option>
+                    <option value="50">Latest 50 Timelines</option>
+                    <option value="100">Latest 100 Timelines</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Timeline Results -->
+        <div id="auditTimeline" hx-get="/api/audit/timeline" hx-trigger="load">
+            <p style="text-align: center; color: hsl(210, 15%, 65%); padding: 3rem 0;">Scanning memory history database...</p>
+        </div>
+    </div>
+
+    <!-- Database Selector Script -->
+    <script>
+        function toggleDbMenu(event) {
+            event.stopPropagation();
+            const menu = document.getElementById("dbMenu");
+            menu.classList.toggle("show");
+        }
+
+        function selectDatabase(dbName) {
+            document.cookie = "selected_db=" + dbName + "; path=/; max-age=31536000; SameSite=Lax";
+            window.location.reload();
+        }
+
+        window.addEventListener("click", function(event) {
+            const menu = document.getElementById("dbMenu");
+            if (menu && menu.classList.contains("show")) {
+                menu.classList.remove("show");
+            }
+        });
+    </script>
+</body>
+</html>
+"""
+
 
 # --- FastAPI Setup ---
 @asynccontextmanager
@@ -1624,7 +1832,7 @@ async def get_index(request: Request):
     set_active_db_env(selected_db)
     
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="active", browse_active="", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="active", browse_active="", audit_active="", db_selector_html=db_selector_html)
     content = INDEX_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
@@ -1636,8 +1844,20 @@ async def get_browse(request: Request):
     set_active_db_env(selected_db)
     
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="", browse_active="active", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="", browse_active="active", audit_active="", db_selector_html=db_selector_html)
     content = BROWSE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
+    return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+@app.get("/audit", response_class=HTMLResponse)
+async def get_audit(request: Request):
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    
+    db_selector_html = build_db_selector_html(selected_db)
+    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="active", db_selector_html=db_selector_html)
+    content = AUDIT_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
 
@@ -1945,11 +2165,11 @@ async def search_memories(request: Request, q: str = ""):
             cards = []
             for score, item in results:
                 badge_class = "badge-note"
-                if item.get("type") == "fact":
+                if item.get("type") in ("fact", "local_device", "project", "reference"):
                     badge_class = "badge-fact"
-                elif item.get("type") == "contradiction":
+                elif item.get("type") in ("contradiction", "decision", "task", "to_do"):
                     badge_class = "badge-warn"
-                elif item.get("type") == "chat_log":
+                elif item.get("type") in ("knowledge", "network_config", "infrastructure", "chat_log"):
                     badge_class = "badge-sys"
                     
                 explain_html = ""
@@ -2075,13 +2295,11 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                 bar_color = "var(--m3-neon-amber)"
                 
             badge_class = "badge-note"
-            if row["type"] == "fact":
+            if row["type"] in ("fact", "local_device", "project", "reference"):
                 badge_class = "badge-fact"
-            elif row["type"] == "decision":
+            elif row["type"] in ("decision", "task", "to_do"):
                 badge_class = "badge-warn"
-            elif row["type"] in ("knowledge", "network_config", "infrastructure"):
-                badge_class = "badge-sys"
-            elif row["type"] == "chat_log":
+            elif row["type"] in ("knowledge", "network_config", "infrastructure", "chat_log"):
                 badge_class = "badge-sys"
                 
             tags, extras = parse_metadata(row["metadata_json"])
@@ -2175,6 +2393,379 @@ async def get_history_feed(request: Request):
         return '<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 1rem 0;">No history logs captured yet.</p>'
         
     return "\n".join(logs)
+
+
+# --- Timeline Diff and Audit Helpers ---
+def make_html_diff(prev_val: str, new_val: str) -> str:
+    if not prev_val:
+        prev_val = ""
+    if not new_val:
+        new_val = ""
+    prev_val = prev_val.strip()
+    new_val = new_val.strip()
+    if not prev_val and not new_val:
+        return '<span style="color: hsl(210, 10%, 50%); font-style: italic;">(Empty)</span>'
+    if not prev_val:
+        return f'<span style="background: rgba(16, 185, 129, 0.2); color: var(--m3-neon-emerald); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500;">{new_val}</span>'
+    if not new_val:
+        return f'<span style="background: rgba(239, 68, 68, 0.2); color: #ff6b6b; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.3); text-decoration: line-through;">{prev_val}</span>'
+    
+    import difflib
+    matcher = difflib.SequenceMatcher(None, prev_val.split(), new_val.split())
+    result = []
+    for opcode, a_start, a_end, b_start, b_end in matcher.get_opcodes():
+        if opcode == 'equal':
+            result.append(" ".join(prev_val.split()[a_start:a_end]))
+        elif opcode == 'insert':
+            inserted = " ".join(new_val.split()[b_start:b_end])
+            result.append(f'<span style="background: rgba(16, 185, 129, 0.25); color: #88ff88; border-bottom: 2px solid var(--m3-neon-emerald); padding: 0 4px; border-radius: 2px; font-weight: 600;">{inserted}</span>')
+        elif opcode == 'delete':
+            deleted = " ".join(prev_val.split()[a_start:a_end])
+            result.append(f'<span style="background: rgba(239, 68, 68, 0.25); color: #ff6b6b; text-decoration: line-through; border-bottom: 2px solid #ef4444; padding: 0 4px; border-radius: 2px;">{deleted}</span>')
+        elif opcode == 'replace':
+            deleted = " ".join(prev_val.split()[a_start:a_end])
+            inserted = " ".join(new_val.split()[b_start:b_end])
+            result.append(f'<span style="background: rgba(239, 68, 68, 0.25); color: #ff6b6b; text-decoration: line-through; padding: 0 4px; border-radius: 2px;">{deleted}</span>'
+                          f' <span style="background: rgba(16, 185, 129, 0.25); color: #88ff88; padding: 0 4px; border-radius: 2px; font-weight: 600;">{inserted}</span>')
+    return " ".join(result)
+
+
+def render_audit_card(memory_id: str, db: Any) -> str:
+    # 1. Fetch current memory state from memory_items if it exists
+    row = db.execute(
+        "SELECT title, content, type, user_id, importance, is_deleted, updated_at "
+        "FROM memory_items WHERE id = ?", (memory_id,)
+    ).fetchone()
+    
+    current_title = "None (Deleted)"
+    current_content = ""
+    current_type = "unknown"
+    is_deleted = True
+    user_id = ""
+    importance = 0.0
+    updated_at = ""
+    
+    if row:
+        current_title = row["title"] or "(Untitled)"
+        current_content = row["content"] or ""
+        current_type = row["type"] or "note"
+        is_deleted = bool(row["is_deleted"])
+        user_id = row["user_id"] or ""
+        importance = row["importance"] or 0.0
+        updated_at = row["updated_at"] or ""
+    
+    # 2. Fetch history records sorted by created_at DESC
+    hist_rows = db.execute(
+        "SELECT event, field, prev_value, new_value, actor_id, created_at "
+        "FROM memory_history WHERE memory_id = ? "
+        "ORDER BY created_at DESC", (memory_id,)
+    ).fetchall()
+    
+    # Check if there's any active conflict/contradiction
+    has_contradiction = any(r["event"].upper() == "CONTRADICTION" for r in hist_rows)
+    
+    status_label = "Active"
+    status_style = "background: hsla(145, 100%, 45%, 0.1); color: var(--m3-neon-emerald); border: 1px solid rgba(16, 185, 129, 0.25);"
+    
+    if is_deleted:
+        status_label = "Deleted"
+        status_style = "background: hsla(15, 100%, 50%, 0.1); color: hsl(15, 100%, 55%); border: 1px solid rgba(239, 68, 68, 0.25);"
+    elif has_contradiction:
+        status_label = "Contradiction State"
+        status_style = "background: hsla(38, 100%, 50%, 0.1); color: var(--m3-neon-amber); border: 1px solid rgba(245, 158, 11, 0.25);"
+    
+    # 3. Generate timeline HTML
+    nodes_html = []
+    for r in hist_rows:
+        event = r["event"].upper()
+        field = r["field"] or "content"
+        prev_v = r["prev_value"] or ""
+        new_v = r["new_value"] or ""
+        actor = r["actor_id"] or "system"
+        ts = r["created_at"].replace("T", " ")[:16]
+        
+        badge_cls = f"badge-{event.lower()}"
+        icon = event[0] if event else "U"
+        
+        diff_html = ""
+        if event in ("UPDATE", "SUPERSEDE", "CONTRADICTION"):
+            diff_block = make_html_diff(prev_v, new_v)
+            diff_html = f"""
+            <div style="margin-top: 0.5rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: hsl(210, 10%, 60%);">Diff ({field}):</span>
+                <div class="diff-text">{diff_block}</div>
+            </div>
+            """
+        elif event == "CREATE":
+            diff_html = f"""
+            <div style="margin-top: 0.5rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: hsl(210, 10%, 60%);">Initial Content:</span>
+                <div class="diff-text" style="color: var(--m3-neon-emerald);">{new_v or prev_v}</div>
+            </div>
+            """
+        elif event == "DELETE":
+            diff_html = f"""
+            <div style="margin-top: 0.5rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: hsl(210, 10%, 60%);">Deleted Value:</span>
+                <div class="diff-text" style="color: #ff6b6b; text-decoration: line-through;">{prev_v}</div>
+            </div>
+            """
+        elif event == "RESOLVE":
+            diff_html = f"""
+            <div style="margin-top: 0.5rem;">
+                <span style="font-size: 0.75rem; font-weight: 600; color: hsl(210, 10%, 60%);">Resolution:</span>
+                <div class="diff-text" style="color: var(--m3-neon-purple);">{new_v or 'Conflict resolved, marked active.'}</div>
+            </div>
+            """
+            
+        nodes_html.append(f"""
+        <div class="timeline-node">
+            <div class="timeline-badge {badge_cls}">{icon}</div>
+            <div class="timeline-content-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
+                    <strong style="color: var(--m3-neon-cyan);">{event}</strong>
+                    <span style="color: hsl(210, 10%, 55%); font-family: 'Fira Code', monospace;">{ts}</span>
+                </div>
+                <div style="font-size: 0.78rem; color: hsl(210, 10%, 75%); margin-top: 0.25rem;">
+                    by <strong style="color: #fff;">{actor}</strong> | field: <code>{field}</code>
+                </div>
+                {diff_html}
+            </div>
+        </div>
+        """)
+        
+    timeline_flow_html = ""
+    if nodes_html:
+        timeline_flow_html = f"""
+        <div class="timeline-flow">
+            {"".join(nodes_html)}
+        </div>
+        """
+    else:
+        timeline_flow_html = '<p style="color: hsl(210, 10%, 50%); font-style: italic; margin-top: 1rem;">No detailed history recorded.</p>'
+        
+    # Actions panel
+    actions_html = ""
+    if not is_deleted:
+        actions_html = f"""
+        <button class="m3-btn" style="background: hsla(270, 100%, 65%, 0.15); color: var(--m3-neon-purple); border: 1px solid rgba(168, 85, 247, 0.25); font-size: 0.75rem; padding: 0.35rem 0.75rem;"
+                hx-post="/api/audit/resolve/{memory_id}" hx-target="#card-{memory_id}" hx-swap="outerHTML">
+            Resolve Conflict
+        </button>
+        <button class="m3-btn" style="background: transparent; border: 1px solid var(--m3-border-glass); color: hsl(210, 10%, 80%); font-size: 0.75rem; padding: 0.35rem 0.75rem;"
+                onclick="document.getElementById('override-form-{memory_id}').style.display='block'">
+            Override/Edit
+        </button>
+        <button class="m3-btn" style="background: hsla(15, 100%, 55%, 0.1); color: hsl(15, 100%, 70%); border: 1px solid rgba(239, 68, 68, 0.25); font-size: 0.75rem; padding: 0.35rem 0.75rem;"
+                hx-post="/api/audit/soft-delete/{memory_id}" hx-target="#card-{memory_id}" hx-swap="outerHTML"
+                hx-confirm="Are you sure you want to soft-delete this memory?">
+            Soft Delete
+        </button>
+        <button class="m3-btn" style="background: hsla(15, 100%, 55%, 0.25); color: hsl(15, 100%, 80%); border: 1px solid rgba(239, 68, 68, 0.4); font-size: 0.75rem; padding: 0.35rem 0.75rem;"
+                hx-post="/api/audit/hard-delete/{memory_id}" hx-target="#card-{memory_id}" hx-swap="outerHTML"
+                hx-confirm="CRITICAL: Are you sure you want to HARD-delete this memory and purge its vectors?">
+            Hard Delete
+        </button>
+        """
+    else:
+        # Deleted but can resolve or hard delete
+        actions_html = f"""
+        <button class="m3-btn" style="background: hsla(145, 100%, 45%, 0.15); color: var(--m3-neon-emerald); border: 1px solid rgba(16, 185, 129, 0.25); font-size: 0.75rem; padding: 0.35rem 0.75rem;"
+                hx-post="/api/audit/resolve/{memory_id}" hx-target="#card-{memory_id}" hx-swap="outerHTML">
+            Restore Memory
+        </button>
+        <button class="m3-btn" style="background: hsla(15, 100%, 55%, 0.25); color: hsl(15, 100%, 80%); border: 1px solid rgba(239, 68, 68, 0.4); font-size: 0.75rem; padding: 0.35rem 0.75rem;"
+                hx-post="/api/audit/hard-delete/{memory_id}" hx-target="#card-{memory_id}" hx-swap="outerHTML"
+                hx-confirm="CRITICAL: Are you sure you want to HARD-delete this memory and purge its vectors?">
+            Hard Delete (Purge)
+        </button>
+        """
+        
+    return f"""
+    <div class="timeline-group-card" id="card-{memory_id}">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--m3-border-glass); padding-bottom: 1rem;">
+            <div>
+                <span class="m3-badge" style="{status_style} font-size: 0.72rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.5rem; display: inline-block;">
+                    {status_label}
+                </span>
+                <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff;">{current_title}</h3>
+                <div style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 10%, 65%); margin-top: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.75rem;">
+                    <span><strong>ID:</strong> {memory_id}</span>
+                    <span><strong>Type:</strong> <span class="m3-badge badge-sys" style="font-size: 0.65rem; padding: 1px 4px;">{current_type}</span></span>
+                    {f'<span><strong>User ID:</strong> {user_id}</span>' if user_id else ''}
+                    <span><strong>Importance:</strong> {importance:.2f}</span>
+                </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                {actions_html}
+            </div>
+        </div>
+        
+        <!-- Timeline Flow Section -->
+        {timeline_flow_html}
+        
+        <!-- Inline Edit Override Form -->
+        <div id="override-form-{memory_id}" style="display: none; margin-top: 1.5rem; padding: 1.25rem; background: hsla(222, 22%, 4%, 0.6); border: 1px dashed var(--m3-border-glass); border-radius: 8px;">
+            <form hx-post="/api/audit/override/{memory_id}" hx-target="#card-{memory_id}" hx-swap="outerHTML">
+                <div style="margin-bottom: 0.75rem;">
+                    <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem; font-weight: 600; color: var(--m3-neon-cyan);">Override Title</label>
+                    <input type="text" name="title" class="m3-input" value="{current_title.replace('"', '&quot;')}" style="width: 100%;" required>
+                </div>
+                <div style="margin-bottom: 0.75rem;">
+                    <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem; font-weight: 600; color: var(--m3-neon-cyan);">Override Content</label>
+                    <textarea name="content" class="m3-input" rows="4" style="width: 100%; font-family: 'Fira Code', monospace; font-size: 0.8rem; resize: vertical;" required>{current_content}</textarea>
+                </div>
+                <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                    <button type="button" class="m3-btn" style="background: transparent; border: 1px solid var(--m3-border-glass); padding: 0.35rem 0.75rem; font-size: 0.75rem; color: #fff;" onclick="document.getElementById('override-form-{memory_id}').style.display='none'">Cancel</button>
+                    <button type="submit" class="m3-btn" style="background: var(--m3-neon-cyan); color: #000; font-weight: 600; padding: 0.35rem 0.75rem; font-size: 0.75rem;">Apply Override</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    """
+
+
+@app.get("/api/audit/timeline", response_class=HTMLResponse)
+async def get_audit_timeline(request: Request, q: str = "", limit: int = 25):
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    
+    try:
+        from m3_sdk import active_database
+        with active_database(selected_db_path):
+            with _db() as db:
+                hist_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_history'").fetchone()
+                if not hist_exists:
+                    return '<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 2rem 0;">History table memory_history does not exist in this database.</p>'
+                
+                # Fetch distinct memory IDs that have history, sorted by their latest activity
+                sql_ids = """
+                    SELECT memory_id, MAX(created_at) as last_act 
+                    FROM memory_history 
+                    GROUP BY memory_id 
+                    ORDER BY last_act DESC
+                """
+                all_mems = db.execute(sql_ids).fetchall()
+                
+                matched_ids = []
+                for m in all_mems:
+                    mem_id = m["memory_id"]
+                    
+                    # Look up item details to support keyword/title/content filtering
+                    item = db.execute(
+                        "SELECT title, content, type FROM memory_items WHERE id = ?", (mem_id,)
+                    ).fetchone()
+                    
+                    # If query is specified, check matches
+                    if q:
+                        q_lower = q.lower()
+                        match = False
+                        if q_lower in mem_id.lower():
+                            match = True
+                        if item:
+                            if item["title"] and q_lower in item["title"].lower():
+                                match = True
+                            if item["content"] and q_lower in item["content"].lower():
+                                match = True
+                            if item["type"] and q_lower in item["type"].lower():
+                                match = True
+                        if not match:
+                            continue
+                            
+                    matched_ids.append(mem_id)
+                    if len(matched_ids) >= limit:
+                        break
+                
+                if not matched_ids:
+                    return f'<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 2rem 0;">No change history timelines matched "{q}".</p>'
+                
+                cards_html = []
+                for mem_id in matched_ids:
+                    cards_html.append(render_audit_card(mem_id, db))
+                    
+                return f"""
+                <div class="timeline-container">
+                    {"".join(cards_html)}
+                </div>
+                """
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return f'<p style="color: var(--m3-neon-amber); text-align: center; font-size: 0.85rem; padding: 2rem 0;">Failed to scan timelines: {str(e)}</p>'
+
+
+@app.post("/api/audit/override/{memory_id}", response_class=HTMLResponse)
+async def audit_override(memory_id: str, request: Request, title: str = Form(...), content: str = Form(...)):
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    
+    # Import and run memory_update_impl
+    from memory_core import memory_update_impl
+    await memory_update_impl(id=memory_id, title=title, content=content, reembed=True)
+    
+    from m3_sdk import active_database
+    with active_database(selected_db_path):
+        with _db() as db:
+            return render_audit_card(memory_id, db)
+
+
+@app.post("/api/audit/resolve/{memory_id}", response_class=HTMLResponse)
+async def audit_resolve(memory_id: str, request: Request):
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    
+    from datetime import datetime, timezone
+    from memory.db import _record_history
+    
+    from m3_sdk import active_database
+    with active_database(selected_db_path):
+        with _db() as db:
+            # 1. Update is_deleted = 0
+            db.execute("UPDATE memory_items SET is_deleted = 0, updated_at = ? WHERE id = ?", 
+                       (datetime.now(timezone.utc).isoformat(), memory_id))
+            # 2. Record "resolve" event in history
+            row = db.execute("SELECT content FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
+            content = row["content"] if row else "Restored and active."
+            _record_history(memory_id, "resolve", "Conflict state or soft-deleted", content, "is_deleted", actor_id="dashboard", db=db)
+            
+            return render_audit_card(memory_id, db)
+
+
+@app.post("/api/audit/soft-delete/{memory_id}", response_class=HTMLResponse)
+async def audit_soft_delete(memory_id: str, request: Request):
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    
+    from memory_core import memory_delete_impl
+    memory_delete_impl(memory_id, hard=False)
+    
+    from m3_sdk import active_database
+    with active_database(selected_db_path):
+        with _db() as db:
+            return render_audit_card(memory_id, db)
+
+
+@app.post("/api/audit/hard-delete/{memory_id}", response_class=HTMLResponse)
+async def audit_hard_delete(memory_id: str, request: Request):
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    
+    from memory_core import memory_delete_impl
+    memory_delete_impl(memory_id, hard=True)
+    
+    return f"""
+    <div class="timeline-group-card" id="card-{memory_id}" style="border-color: rgba(239, 68, 68, 0.4); background: hsla(15, 100%, 50%, 0.05); text-align: center; padding: 2rem;">
+        <span style="color: hsl(15, 100%, 65%); font-size: 1.5rem; display: block; margin-bottom: 0.5rem;">💀 Memory Purged</span>
+        <p style="font-size: 0.85rem; color: hsl(210, 10%, 75%);">
+            Memory ID <code style="color: #fff;">{memory_id}</code> and all associated vector embeddings have been completely purged from the core layers (GDPR Article 17 hard-delete).
+        </p>
+    </div>
+    """
 
 
 @app.get("/api/gdpr/export")
