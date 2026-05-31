@@ -1,8 +1,8 @@
 ---
 tool: bin/test_memory_bridge.py
-sha1: 5eb51e5dfca1
-mtime_utc: 2026-04-23T20:33:55.979065+00:00
-generated_utc: 2026-05-24T12:09:08.651994+00:00
+sha1: 0818ecc6bcd7
+mtime_utc: 2026-05-30T16:01:38.273980+00:00
+generated_utc: 2026-05-31T18:42:53.037781+00:00
 private: false
 ---
 
@@ -36,6 +36,8 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
+- `COMPUTERNAME`
+- `HOSTNAME`
 - `ORIGIN_DEVICE`
 - `SEARCH_ROW_CAP`
 

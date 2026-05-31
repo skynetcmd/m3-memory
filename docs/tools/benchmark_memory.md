@@ -2,8 +2,8 @@
 tool: bin/benchmark_memory.py
 sha1: 143eb8d26a82
 mtime_utc: 2026-05-24T12:05:50.605654+00:00
-generated_utc: 2026-05-24T12:09:07.520887+00:00
-private: false
+generated_utc: 2026-05-31T18:42:52.594833+00:00
+private: true
 ---
 
 # bin/benchmark_memory.py

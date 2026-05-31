@@ -1,8 +1,8 @@
 ---
 tool: bin/auth_utils.py
-sha1: ec39e091ec24
-mtime_utc: 2026-05-23T12:31:13.373149+00:00
-generated_utc: 2026-05-23T17:51:48.994284+00:00
+sha1: c1d988ec48b1
+mtime_utc: 2026-05-31T16:08:17.245368+00:00
+generated_utc: 2026-05-31T18:42:52.557561+00:00
 private: false
 ---
 
@@ -29,6 +29,8 @@ _(no argparse arguments detected)_
 ## Environment variables read
 
 - `AGENT_OS_MASTER_KEY`
+- `COMPUTERNAME`
+- `HOSTNAME`
 - `LM_STUDIO_API_KEY`
 - `ORIGIN_DEVICE`
 
@@ -38,7 +40,7 @@ _(no argparse arguments detected)_
 
 - `_task_runtime (no_window_kwargs)`
 - `crypto_provider (provider)`
-- `m3_sdk (get_m3_root)`
+- `m3_sdk (get_m3_config_root, get_m3_root)`
 - `m3_sdk (resolve_db_path)`
 
 ---
@@ -47,15 +49,15 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 233)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 61)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 219)
-- `subprocess.run()` (line 248)
+- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 304)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 117)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 290)
+- `subprocess.run()` (line 319)
 
 **sqlite**
 
-- `sqlite3.connect()  → `_vault_db_path()`` (line 326)
-- `sqlite3.connect()  → `vault_path`` (line 265)
+- `sqlite3.connect()  → `_vault_db_path()`` (line 397)
+- `sqlite3.connect()  → `vault_path`` (line 336)
 
 
 ---

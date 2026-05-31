@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_status.py
-sha1: 72a39ce9f7ff
-mtime_utc: 2026-04-23T20:33:55.938242+00:00
-generated_utc: 2026-05-24T12:09:07.651311+00:00
+sha1: b1d1cb569315
+mtime_utc: 2026-05-31T09:01:46.146475+00:00
+generated_utc: 2026-05-31T18:42:52.648781+00:00
 private: false
 ---
 
@@ -23,49 +23,66 @@ Cold call <50ms (no full table scans).
 
 ## Entry points
 
-- `def main()` (line 212)
+- `def main()` (line 679)
 - `if __name__ == "__main__"` guard
 
 ---
 
 ## CLI flags / arguments
 
-_(no argparse arguments detected)_
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--json` | Output JSON format | `False` |  | store_true |  |
+| `--live` | Run live status monitor | `False` |  | store_true |  |
+| `-i`, `--interval` | Refresh interval for live monitor in seconds (default: 5.0) | `5.0` |  | float |  |
 
 ---
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_FILES_DB_PATH`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
+- `m3_sdk (get_m3_root)`
 - `m3_sdk (resolve_db_path)`
 
 ---
 
 ## Calls OUT (external side-channels)
 
+**subprocess**
+
+- `subprocess.run()  → `cmd`` (line 415)
+
 **sqlite**
 
-- `sqlite3.connect()  → `chatlog_db`` (line 78)
-- `sqlite3.connect()  → `main_db`` (line 64)
+- `sqlite3.connect()  → `chatlog_db`` (line 80)
+- `sqlite3.connect()  → `files_db`` (line 112)
+- `sqlite3.connect()  → `main_db`` (line 242)
+- `sqlite3.connect()  → `main_db`` (line 259)
+- `sqlite3.connect()  → `main_db`` (line 66)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `memory (doctor)`
+- `memory.config (FILES_DB_PATH)`
+- `msvcrt`
+- `select`
+- `termios`
+- `tty`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `files_database.db`
 
 ---
 

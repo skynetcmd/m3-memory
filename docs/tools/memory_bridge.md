@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_bridge.py
-sha1: bf7d527b6c24
-mtime_utc: 2026-05-23T13:00:03.723163+00:00
-generated_utc: 2026-05-23T17:51:49.204454+00:00
+sha1: e9d57daadac5
+mtime_utc: 2026-05-30T18:38:21.560004+00:00
+generated_utc: 2026-05-31T18:42:52.866983+00:00
 private: false
 ---
 
@@ -43,6 +43,7 @@ _(no argparse arguments detected)_
 - `memory_core`
 - `tool_domains`
 - `tool_loader`
+- `version_drift (check_and_record)`
 
 ---
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_sdk.py
-sha1: 2bd41a1263b2
-mtime_utc: 2026-05-23T12:31:13.383966+00:00
-generated_utc: 2026-05-23T17:51:49.173331+00:00
+sha1: 8f9c407c10e5
+mtime_utc: 2026-05-31T16:08:17.248463+00:00
+generated_utc: 2026-05-31T18:42:52.826381+00:00
 private: false
 ---
 
@@ -34,32 +34,47 @@ _(no conventional entry point detected)_
 - `DB_POOL_TIMEOUT`
 - `LM_READ_TIMEOUT`
 - `LM_STUDIO_BASE`
+- `M3_CONFIG_ROOT`
 - `M3_CONTEXT_CACHE_SIZE`
+- `M3_CORE_RS_DISABLE`
 - `M3_DATABASE`
+- `M3_ENGINE_ROOT`
+- `M3_GOVERNOR_INITIAL_THRESHOLD`
+- `M3_GOVERNOR_LIMIT_THRESHOLD`
 - `M3_MEMORY_ROOT`
 - `PG_URL`
+- `PYTHONUTF8`
+- `_M3_UTF8_REEXEC`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `audit_trail (log_event)`
 - `auth_utils (get_api_key)`
+- `auth_utils (get_salt_path)`
 - `chatlog_config`
 - `crypto_provider (provider)`
 - `sqlite_pragmas (apply_pragmas, profile_for_db)`
+- `thermal_utils (get_thermal_status)`
 
 ---
 
 ## Calls OUT (external side-channels)
 
+**subprocess**
+
+- `os.execv()  → `sys.executable`` (line 173)
+
 **http**
 
-- `httpx.AsyncClient()` (line 273)
-- `httpx.AsyncClient()` (line 276)
+- `httpx.AsyncClient()` (line 627)
+- `httpx.AsyncClient()` (line 630)
 
 **sqlite**
 
-- `sqlite3.connect()  → `self.db_path`` (line 219)
+- `sqlite3.connect()  → `path`` (line 290)
+- `sqlite3.connect()  → `self.db_path`` (line 466)
 
 
 ---
@@ -70,6 +85,8 @@ _(no conventional entry point detected)_
 - `contextvars`
 - `dotenv (load_dotenv)`
 - `httpx`
+- `m3_core_rs (format_log)`
+- `psutil`
 - `psycopg2`
 
 ---
