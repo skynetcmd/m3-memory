@@ -1489,8 +1489,12 @@ async def run_maintenance_task(action: str):
         else:
             env["PYTHONPATH"] = bin_dir
             
+        # Force Python subprocesses to execute in UTF-8 mode on Windows
+        env["PYTHONUTF8"] = "1"
+            
         try:
-            res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, shell=False)
+            # Capture outputs using explicit UTF-8 decoding to override CP1252 locale defaults
+            res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", check=False, shell=False)
             return res.stdout + "\n" + res.stderr + f"\nProcess exited with code {res.returncode}"
         except Exception as e:
             return f"Error executing process: {str(e)}"
