@@ -240,7 +240,13 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         print("    - OPTIMALLY REPLACE Hermes' default memory system for unified, rich SOTA recall, or")
         print("    - RUN ALONGSIDE default memories to extend Hermes' capability with long-term vector search.")
         print("  For complete setup guidance, see the newly created documentation at:")
-        print("  docs/HERMES.md (file:///C:/Users/bhaba/m3-memory/docs/HERMES.md)")
+        try:
+            from m3_sdk import get_m3_root
+            from pathlib import Path as _Path
+            _doc_path = f"file:///{_Path(get_m3_root()).resolve().as_posix()}/docs/HERMES.md"
+        except Exception:
+            _doc_path = "docs/HERMES.md"
+        print(f"  docs/HERMES.md ({_doc_path})")
         print()
         plan.targets.hermes = _ask_yes_no(
             "  Install the m3 SOTA memory-provider plugin into Hermes Agent?",
@@ -659,7 +665,13 @@ def _wire_hermes() -> bool:
     print("    To complete configuration:")
     print("    1. Add m3-memory's bin/ to PYTHONPATH in Hermes' launch environment.")
     print("    2. Enable and select 'm3' inside `hermes plugins` to replace/run alongside default memory.")
-    print("    For exact instructions and troubleshooting, see docs/HERMES.md (file:///C:/Users/bhaba/m3-memory/docs/HERMES.md).")
+    try:
+        from m3_sdk import get_m3_root
+        from pathlib import Path as _Path
+        _doc_path = f"file:///{_Path(get_m3_root()).resolve().as_posix()}/docs/HERMES.md"
+    except Exception:
+        _doc_path = "docs/HERMES.md"
+    print(f"    For exact instructions and troubleshooting, see docs/HERMES.md ({_doc_path}).")
     return True
 
 

@@ -38,7 +38,7 @@ Hermes Agent loads plugins dynamically and needs to find M3's core package in it
 
 #### On Windows (PowerShell):
 ```powershell
-$env:PYTHONPATH = "C:\Users\bhaba\m3-memory\bin;" + $env:PYTHONPATH
+$env:PYTHONPATH = "C:\path\to\m3-memory\bin;" + $env:PYTHONPATH
 ```
 
 #### On Linux / macOS (Bash/Zsh):
