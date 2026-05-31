@@ -1502,6 +1502,7 @@ active_task = {
     "expected_wait": ""
 }
 
+@app.post("/api/maintenance/{action}", response_class=HTMLResponse)
 @app.post("/api/maintenance/trigger/{action}", response_class=HTMLResponse)
 async def trigger_maintenance_task(action: str):
     """Asynchronously triggers maintenance scripts in the background."""
