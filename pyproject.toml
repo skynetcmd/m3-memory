@@ -238,4 +238,9 @@ exclude_dirs = ["tests", "benchmarks", ".venv", "venv"]
 #   dev/bench runs); reproducible sampling is the goal, not entropy.
 #   `secrets` module would be wrong here. Documented in
 #   docs/audits/security-scan-2026-05-01.md.
-skips = ["B101", "B110", "B112", "B311", "B404", "B603", "B607", "B608"]
+# B606: `os.execv(sys.executable, ...)` in the UTF-8 re-exec helper
+#   (m3_sdk.ensure_utf8 / m3_memory.cli) re-launches THIS interpreter with
+#   `-X utf8` and a fixed argv derived from sys.orig_argv — no shell, no
+#   user-controlled program path. It is process-replacement of self, not
+#   spawning an external program; the B606 "no shell" heuristic does not apply.
+skips = ["B101", "B110", "B112", "B311", "B404", "B603", "B606", "B607", "B608"]
