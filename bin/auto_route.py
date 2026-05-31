@@ -211,15 +211,22 @@ def conv_id_diversity(candidates: list, top_n: int = 10) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _map_rust_to_py_branch(query: str, rs_branch: str) -> str:
+def _map_rust_to_py_branch(query: str, rs_branch: str, params: dict | None = None) -> str:
     """Maps Rust pre-retrieval route branches to conceptual Python branch names."""
+    if params is None:
+        params = {}
+
     # 1. Temporal cues fallback (regex check matches Python temporal decider)
     if has_temporal_cues(query):
         return "temporal"
     
     # 2. Named entities match entity anchored
     if rs_branch == "entity":
-        return "entity_anchored"
+        entity_graph_enabled = params.get("auto_entity_graph_enabled", True)
+        entity_threshold = params.get("auto_entity_graph_named_entity_threshold", 1)
+        if entity_graph_enabled and count_named_entities(query) >= entity_threshold:
+            return "entity_anchored"
+        return "default"
     
     # 3. Lexical maps directly to default fallback
     if rs_branch == "lexical":
@@ -235,7 +242,7 @@ def _map_rust_to_py_branch(query: str, rs_branch: str) -> str:
     return rs_branch
 
 
-def _route_shadow_compare(query: str, py_branch: str) -> None:
+def _route_shadow_compare(query: str, py_branch: str, params: dict | None = None) -> None:
     """Run the Rust route decider alongside Python and log any disagreement.
 
     SHADOW MODE ONLY — this function never affects the returned branch. Python
@@ -258,7 +265,7 @@ def _route_shadow_compare(query: str, py_branch: str) -> None:
         signals = m3_core_rs.extract_signals(query)
         decision = m3_core_rs.decide_route(query, signals)
         rs_branch = decision.branch
-        mapped_branch = _map_rust_to_py_branch(query, rs_branch)
+        mapped_branch = _map_rust_to_py_branch(query, rs_branch, params)
         
         if mapped_branch == py_branch:
             _log.debug(
@@ -299,10 +306,25 @@ def decide_branch(query: str, candidates: list, params: dict) -> str:
     """
     if _ROUTE_SHADOW_MODE == "enforce" and m3_core_rs is not None:
         try:
+            # 1. Post-retrieval sharp spike check (Option B override) to ensure identical behavior
+            t1 = top_1_score(candidates)
+            s3 = slope_at_3(candidates)
+            top1_sharp_min = params.get("auto_top1_sharp_min", AUTO_TOP1_SHARP_MIN)
+            slope_sharp_min = params.get("auto_slope_at_3_sharp_min", AUTO_SLOPE_AT_3_SHARP_MIN)
+            top1_low_threshold = params.get("auto_top1_low_threshold", AUTO_TOP1_LOW_THRESHOLD)
+            
+            if t1 > top1_sharp_min and s3 > slope_sharp_min and t1 > top1_low_threshold:
+                _log.debug(
+                    "route enforce mode: post-retrieval sharp spike override detected (top_1=%.3f, slope=%.3f)",
+                    t1, s3
+                )
+                return "sharp"
+
+            # 2. Otherwise fall back to pre-retrieval Rust decision
             signals = m3_core_rs.extract_signals(query)
             decision = m3_core_rs.decide_route(query, signals)
             rs_branch = decision.branch
-            mapped_branch = _map_rust_to_py_branch(query, rs_branch)
+            mapped_branch = _map_rust_to_py_branch(query, rs_branch, params)
             _log.debug(
                 "route enforce mode: rs_branch=%s -> mapped_branch=%s query=%r confidence=%.3f",
                 rs_branch, mapped_branch, query, decision.confidence
@@ -314,7 +336,7 @@ def decide_branch(query: str, candidates: list, params: dict) -> str:
     branch = _decide_branch_impl(query, candidates, params)
     # Shadow hook — runs the Rust route decider alongside Python and logs
     # disagreements. Observe-only: `branch` is returned unchanged regardless.
-    _route_shadow_compare(query, branch)
+    _route_shadow_compare(query, branch, params)
     return branch
 
 
