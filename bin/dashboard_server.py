@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-M3 Cognitive Dashboard Server.
-FastAPI + HTMX lightweight local administration and visualization portal.
+M3 Cognitive & Observability Portal.
+FastAPI + HTMX unified local control center for Graph Exploration & KB Browsing.
 Listens on port 8088 by default.
 """
 
@@ -31,23 +31,28 @@ from memory_maintenance import gdpr_export_impl, gdpr_forget_impl
 PORT = 8088
 HOST = "127.0.0.1"
 
-# --- HTML template embedded as raw string for ultimate single-file portability ---
-INDEX_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>M3 Cognitive Dashboard</title>
-    <!-- Modern Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- HTMX -->
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    
-    <style>
+# --- Common HTML Parts (Styling, Header, Nav) ---
+HEADER_HTML = """
+    <header>
+        <div class="logo-group">
+            <div class="m3-status-dot"></div>
+            <div class="logo-text">M3 COGNITIVE</div>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <a href="/" class="nav-link {explorer_active}">Graph Explorer</a>
+            <a href="/browse" class="nav-link {browse_active}">KB Browser</a>
+        </div>
+        <div class="db-status" title="Active SQLite path">
+            DB: {db_path}
+        </div>
+        <div class="status-dot-container">
+            <span style="color: hsl(210, 15%, 75%); font-family: 'Outfit', sans-serif; font-weight: 500;">Active Link</span>
+            <div class="m3-status-dot" style="background-color: var(--m3-neon-emerald); box-shadow: 0 0 10px var(--m3-neon-emerald); animation: pulse-glow-emerald 2s infinite;"></div>
+        </div>
+    </header>
+"""
+
+STYLE_CSS = """
         :root {
             /* --- Theme Foundations --- */
             --m3-bg-deep: hsl(224, 25%, 6%);
@@ -115,6 +120,30 @@ INDEX_HTML = """
             -webkit-text-fill-color: transparent;
         }
 
+        .nav-link {
+            font-family: 'Outfit', sans-serif;
+            color: hsl(210, 15%, 75%);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.95rem;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: var(--m3-transition-smooth);
+            border: 1px solid transparent;
+        }
+
+        .nav-link:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-link.active {
+            color: var(--m3-neon-cyan);
+            background: hsla(180, 100%, 50%, 0.08);
+            border-color: hsla(180, 100%, 50%, 0.25);
+            box-shadow: 0 0 10px hsla(180, 100%, 50%, 0.1);
+        }
+
         .db-status {
             font-family: 'Fira Code', monospace;
             font-size: 0.8rem;
@@ -123,7 +152,7 @@ INDEX_HTML = """
             padding: 0.4rem 0.8rem;
             border-radius: 6px;
             border: 1px solid var(--m3-border-glass);
-            max-width: 400px;
+            max-width: 300px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -149,6 +178,12 @@ INDEX_HTML = """
             0% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.4); }
             70% { box-shadow: 0 0 0 8px rgba(0, 255, 255, 0); }
             100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0); }
+        }
+
+        @keyframes pulse-glow-emerald {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
 
         /* --- Dashboard Grid Layout --- */
@@ -234,7 +269,7 @@ INDEX_HTML = """
             letter-spacing: 0.05em;
         }
 
-        /* --- Interactive Search bar --- */
+        /* --- Interactive Search & Filters bar --- */
         .search-group {
             display: flex;
             gap: 0.75rem;
@@ -257,6 +292,23 @@ INDEX_HTML = """
             outline: none;
             border-color: var(--m3-neon-cyan);
             box-shadow: 0 0 12px hsla(180, 100%, 50%, 0.15);
+        }
+
+        .m3-select {
+            background: hsla(222, 22%, 5%, 0.8);
+            border: 1px solid var(--m3-border-glass);
+            color: #fff;
+            border-radius: 8px;
+            padding: 0.75rem 1.5rem;
+            font-family: inherit;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: var(--m3-transition-smooth);
+        }
+
+        .m3-select:focus {
+            outline: none;
+            border-color: var(--m3-neon-cyan);
         }
 
         .m3-btn {
@@ -311,10 +363,10 @@ INDEX_HTML = """
             text-transform: uppercase;
         }
 
-        .badge-note { background: hsla(270, 100%, 65%, 0.15); color: var(--m3-neon-purple); border: 1px solid rgba(168, 85, 247, 0.3); }
-        .badge-fact { background: hsla(180, 100%, 50%, 0.1); color: var(--m3-neon-cyan); border: 1px solid rgba(6, 182, 212, 0.3); }
-        .badge-warn { background: hsla(38, 100%, 50%, 0.1); color: var(--m3-neon-amber); border: 1px solid rgba(245, 158, 11, 0.3); }
-        .badge-sys { background: hsla(145, 100%, 45%, 0.1); color: var(--m3-neon-emerald); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-note { background: hsla(270, 100%, 65%, 0.12); color: var(--m3-neon-purple); border: 1px solid rgba(168, 85, 247, 0.25); }
+        .badge-fact { background: hsla(145, 100%, 45%, 0.1); color: var(--m3-neon-emerald); border: 1px solid rgba(16, 185, 129, 0.25); }
+        .badge-warn { background: hsla(38, 100%, 50%, 0.1); color: var(--m3-neon-amber); border: 1px solid rgba(245, 158, 11, 0.25); }
+        .badge-sys { background: hsla(180, 100%, 50%, 0.1); color: var(--m3-neon-cyan); border: 1px solid rgba(6, 182, 212, 0.25); }
 
         .memory-id {
             font-family: 'Fira Code', monospace;
@@ -402,23 +454,71 @@ INDEX_HTML = """
         .gdpr-user-group {
             margin-bottom: 0.5rem;
         }
+
+        /* --- KB Browser Progress indicators --- */
+        .m3-progress-container {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: hsla(222, 22%, 5%, 0.6);
+            border: 1px solid var(--m3-border-glass);
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.75rem;
+            color: #fff;
+        }
+
+        .m3-progress-bar {
+            width: 60px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .m3-progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: var(--m3-transition-smooth);
+        }
+
+        /* --- Tags capsules --- */
+        .m3-tag {
+            background: hsla(270, 100%, 65%, 0.08);
+            border: 1px solid rgba(168, 85, 247, 0.25);
+            color: var(--m3-neon-purple);
+            font-size: 0.7rem;
+            padding: 0.15rem 0.45rem;
+            border-radius: 4px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 500;
+        }
+"""
+
+# --- Explorer (View 1) Layout Template ---
+INDEX_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3 Cognitive Dashboard</title>
+    <!-- Modern Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <style>
+        {{ STYLE_CSS }}
     </style>
 </head>
 <body>
 
-    <header>
-        <div class="logo-group">
-            <div class="m3-status-dot"></div>
-            <div class="logo-text">M3 COGNITIVE</div>
-        </div>
-        <div class="db-status" title="Active SQLite path">
-            DB: {{ db_path }}
-        </div>
-        <div class="status-dot-container">
-            <span style="color: hsl(210, 15%, 75%); font-family: 'Outfit', sans-serif; font-weight: 500;">Active Link</span>
-            <div class="m3-status-dot" style="background-color: var(--m3-neon-emerald); box-shadow: 0 0 10px var(--m3-neon-emerald);"></div>
-        </div>
-    </header>
+    {{ HEADER }}
 
     <div class="container">
         <!-- Main Panel (Left Column) -->
@@ -753,26 +853,131 @@ INDEX_HTML = """
 </html>
 """
 
+# --- Browser (View 2) Layout Template ---
+BROWSE_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3 Knowledge Base Browser</title>
+    <!-- Modern Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    
+    <style>
+        {{ STYLE_CSS }}
+        
+        .browse-container {
+            max-width: 1200px;
+            width: 100%;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+            flex-grow: 1;
+        }
+        
+        .filter-panel {
+            display: grid;
+            grid-template-columns: 2fr 1fr 120px;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        @media (max-width: 768px) {
+            .filter-panel {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    {{ HEADER }}
+
+    <div class="browse-container">
+        <!-- Filter Bar Panel -->
+        <div class="m3-card" style="margin-bottom: 2rem;">
+            <div class="m3-card-title">Filter & Search Knowledge base</div>
+            <div class="filter-panel">
+                <input type="text" name="q" class="m3-input" placeholder="Search keywords in title or content..."
+                       hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="keyup changed delay:300ms, filter" hx-include="[name='type'], [name='limit']">
+                
+                <select name="type" class="m3-select" hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="change" hx-include="[name='q'], [name='limit']">
+                    <option value="">-- All Types --</option>
+                    <option value="fact">Fact</option>
+                    <option value="decision">Decision</option>
+                    <option value="knowledge">Knowledge</option>
+                    <option value="project">Project</option>
+                    <option value="note">Note</option>
+                    <option value="network_config">Network Config</option>
+                    <option value="infrastructure">Infrastructure</option>
+                    <option value="reference">Reference</option>
+                </select>
+                
+                <select name="limit" class="m3-select" hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="change" hx-include="[name='q'], [name='type']">
+                    <option value="20">Top 20</option>
+                    <option value="50" selected>Top 50</option>
+                    <option value="100">Top 100</option>
+                    <option value="1000">All</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Rendered Cards -->
+        <div id="kbEntries" hx-get="/api/kb" hx-trigger="load">
+            <!-- Loaded dynamically by HTMX -->
+            <p style="text-align: center; color: hsl(210, 15%, 65%); padding: 3rem 0;">Scanning knowledge index...</p>
+        </div>
+    </div>
+
+</body>
+</html>
+"""
+
 # --- FastAPI Setup ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Log startup info
     active = resolve_db_path(None)
-    print(f"M3 Cognitive Dashboard serving SQLite database: {active}", flush=True)
+    print(f"M3 Cognitive Portal serving SQLite database: {active}", flush=True)
     print(f"Server available at http://{HOST}:{PORT}", flush=True)
     yield
 
 app = FastAPI(
-    title="M3 Cognitive Dashboard",
-    description="Portal to inspect local context indexing.",
+    title="M3 Cognitive Portal",
+    description="Observability and Browser Portal.",
     lifespan=lifespan
 )
+
+# --- Helpers ---
+def parse_metadata(metadata_json: str) -> tuple[list, dict]:
+    """Helper to extract tags and extras from JSON string."""
+    if not metadata_json:
+        return [], {}
+    try:
+        meta = json.loads(metadata_json)
+    except Exception:
+        return [], {}
+    tags = meta.get("tags") or []
+    extras = {k: v for k, v in meta.items() if k != "tags" and v}
+    return tags, extras
 
 # --- Routes ---
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
     active_db = resolve_db_path(None)
-    return INDEX_HTML.replace("{{ db_path }}", active_db)
+    header = HEADER_HTML.format(explorer_active="active", browse_active="", db_path=active_db)
+    return INDEX_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", active_db)
+
+
+@app.get("/browse", response_class=HTMLResponse)
+async def get_browse(request: Request):
+    active_db = resolve_db_path(None)
+    header = HEADER_HTML.format(explorer_active="", browse_active="active", db_path=active_db)
+    return BROWSE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", active_db)
 
 
 @app.get("/api/stats", response_class=HTMLResponse)
@@ -787,7 +992,6 @@ async def get_stats():
         with _db() as db:
             total_mems = db.execute("SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted, 0) = 0").fetchone()[0]
             
-            # Check if entities & relationships tables exist before querying
             ent_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entities'").fetchone()
             if ent_exists:
                 total_ents = db.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
@@ -861,7 +1065,6 @@ async def search_memories(q: str = ""):
         return '<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">Type in search bar to explore FTS5 & Vector similarity explain graphs.</p>'
         
     try:
-        # Search using standard explain=True
         results = await memory_search_scored_impl(
             query=q,
             explain=True,
@@ -909,10 +1112,99 @@ async def search_memories(q: str = ""):
                 {explain_html}
             </div>
             """)
-        return "\\n".join(cards)
+        return "\n".join(cards)
         
     except Exception as e:
         return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning indices: {str(e)}</p>'
+
+
+@app.get("/api/kb", response_class=HTMLResponse)
+async def get_kb_cards(q: str = "", type: str = "", limit: int = 50):
+    """Replicates cli_kb_browse.py rank search directly into high-fidelity web cards."""
+    try:
+        query = """
+            SELECT id, type, title, content, metadata_json, importance,
+                   origin_device, change_agent, created_at, updated_at
+            FROM memory_items
+            WHERE is_deleted = 0
+        """
+        params = []
+        
+        if type:
+            query += " AND type = ?"
+            params.append(type)
+            
+        if q.strip():
+            query += " AND (LOWER(title) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?))"
+            params += [f"%{q}%", f"%{q}%"]
+            
+        query += " ORDER BY importance DESC, updated_at DESC"
+        query += f" LIMIT {int(limit)}"
+        
+        with _db() as db:
+            rows = db.execute(query, params).fetchall()
+            
+        total = len(rows)
+        if total == 0:
+            return f'<p style="text-align: center; color: hsl(210, 15%, 65%); padding: 3rem 0;">No matching entries found.</p>'
+            
+        cards = []
+        for idx, row in enumerate(rows, 1):
+            importance = row["importance"] or 0.0
+            bar_color = "var(--m3-neon-purple)"
+            if importance >= 0.9:
+                bar_color = "var(--m3-neon-emerald)"
+            elif importance >= 0.7:
+                bar_color = "var(--m3-neon-amber)"
+                
+            badge_class = "badge-note"
+            if row["type"] == "fact":
+                badge_class = "badge-fact"
+            elif row["type"] == "decision":
+                badge_class = "badge-warn"
+            elif row["type"] in ("knowledge", "network_config", "infrastructure"):
+                badge_class = "badge-sys"
+                
+            tags, extras = parse_metadata(row["metadata_json"])
+            tag_html = ""
+            if tags:
+                tag_html = '<div style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem;">' + \
+                           "".join([f'<span class="m3-tag">{t}</span>' for t in tags]) + '</div>'
+                           
+            extras_html = ""
+            if extras:
+                extras_list = [f'<span style="margin-right: 0.75rem; color: hsl(210, 10%, 65%);"><strong style="color: hsl(210, 10%, 80%);">{k}:</strong> {v}</span>' for k, v in extras.items()]
+                extras_html = '<div style="font-family: \'Fira Code\', monospace; font-size: 0.75rem; margin-top: 0.5rem; display: flex; flex-wrap: wrap;">' + \
+                              "".join(extras_list) + '</div>'
+                              
+            cards.append(f"""
+            <div class="memory-card">
+                <div class="memory-header">
+                    <div>
+                        <span style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.85rem; color: var(--m3-neon-cyan);">#{idx:03d}/{total}</span>
+                        <span class="m3-badge {badge_class}" style="margin-left: 0.5rem;">{row['type']}</span>
+                        <span style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 15%, 50%); margin-left: 0.75rem;">{row['origin_device'] or '?'} &middot; {row['change_agent'] or '?'}</span>
+                    </div>
+                    <div class="m3-progress-container" title="Importance score: {importance:.2f}">
+                        <div class="m3-progress-bar">
+                            <div class="m3-progress-fill" style="width: {importance * 100}%; background-color: {bar_color}; box-shadow: 0 0 8px {bar_color};"></div>
+                        </div>
+                        <span>{importance:.2f}</span>
+                    </div>
+                </div>
+                <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.5rem;">{row['title'] or 'Untitled Entry'}</h3>
+                <div style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: hsl(210, 15%, 55%); margin-bottom: 0.75rem;">
+                    id: {row['id']} &middot; created: {(row['created_at'] or '')[:19]} &middot; updated: {(row['updated_at'] or '')[:19]}
+                </div>
+                <div class="memory-content" style="white-space: pre-wrap;">{row['content'] or ''}</div>
+                {tag_html}
+                {extras_html}
+            </div>
+            """)
+        return "\n".join(cards)
+        
+    except Exception as e:
+        return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning DB: {str(e)}</p>'
 
 
 @app.get("/api/history", response_class=HTMLResponse)
@@ -923,16 +1215,17 @@ async def get_history_feed():
         with _db() as db:
             hist_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_history'").fetchone()
             if hist_exists:
+                # Standardized history query based on migrations: event instead of action, prev_value/new_value instead of prev_content/new_content, created_at instead of timestamp
                 rows = db.execute(
-                    "SELECT action, memory_id, prev_content, new_content, timestamp FROM memory_history ORDER BY id DESC LIMIT 5"
+                    "SELECT event, memory_id, prev_value, new_value, created_at FROM memory_history ORDER BY created_at DESC LIMIT 5"
                 ).fetchall()
                 for r in rows:
-                    action = r["action"].upper()
-                    ts = r["timestamp"].replace("T", " ")[:16]
+                    action = r["event"].upper()
+                    ts = r["created_at"].replace("T", " ")[:16]
                     color = "var(--m3-neon-purple)"
                     border = "1px solid var(--m3-border-glass)"
                     
-                    if action == "SUPERSEDE" or action == "CONTRADICTION":
+                    if action in ("SUPERSEDE", "CONTRADICTION"):
                         color = "var(--m3-neon-amber)"
                         border = "1px solid rgba(245, 158, 11, 0.25)"
                     elif action == "DELETE":
@@ -947,7 +1240,7 @@ async def get_history_feed():
                         </div>
                         <div style="color: hsl(210, 15%, 85%); font-size: 0.82rem; margin-top: 0.4rem;">
                             <strong>ID:</strong> {r['memory_id'][:8]}<br>
-                            <strong>Details:</strong> {r['new_content'] or r['prev_content'] or 'System record updated.'}
+                            <strong>Details:</strong> {r['new_value'] or r['prev_value'] or 'System record updated.'}
                         </div>
                     </div>
                     """)
@@ -957,7 +1250,7 @@ async def get_history_feed():
     if not logs:
         return '<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 1rem 0;">No history logs captured yet.</p>'
         
-    return "\\n".join(logs)
+    return "\n".join(logs)
 
 
 @app.get("/api/gdpr/export")
@@ -965,10 +1258,8 @@ async def export_gdpr_data(user_id: str = "default"):
     """Invokes core gdpr_export_impl as Article 20 JSON download."""
     try:
         raw_json = gdpr_export_impl(user_id)
-        # Verify JSON
         data = json.loads(raw_json)
         
-        # Return as downloadable StreamingResponse
         def iter_json():
             yield json.dumps(data, indent=2)
             
@@ -992,7 +1283,6 @@ async def forget_gdpr_data(user_id: str = Form(...)):
 
 # --- Execution Hook ---
 if __name__ == "__main__":
-    # Allow overriding port/host via env variables
     port_override = int(os.environ.get("M3_DASHBOARD_PORT", PORT))
     host_override = os.environ.get("M3_DASHBOARD_HOST", HOST)
     
