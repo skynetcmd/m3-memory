@@ -11,6 +11,13 @@
 #
 # A non-zero exit blocks the push. Override only in a real emergency with
 # `git push --no-verify` — and then fix forward immediately.
+#
+# Performance: the expensive half is the drift gate, which spawns Python to
+# regenerate artifacts + run pytest. That work is only meaningful when the
+# push actually touches the tool catalog, its generators, or the docs whose
+# counts they own. So we change-detect first and SKIP the gate entirely when
+# the push range doesn't touch those paths — the common case. The leakage
+# scan is a sub-millisecond `git diff | grep` and always runs.
 
 set -euo pipefail
 
@@ -20,32 +27,78 @@ cd "$ROOT"
 PY="python"
 command -v python >/dev/null 2>&1 || PY="python3"
 
-echo "[pre-push] 1/2 tool-catalog drift gate"
-"$PY" bin/check_tool_catalog_drift.py || {
-  echo "[pre-push] BLOCKED: tool-catalog drift. Regenerate + commit, then re-push." >&2
-  exit 1
-}
+# --- Determine the exact push range -----------------------------------------
+# git feeds the pre-push hook one line per ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# Using the real remote sha makes both the change-detection and the leakage
+# scan precise — we inspect exactly the commits this push would publish, not a
+# hardcoded origin/main guess that's wrong for feature branches / other remotes.
+ZERO="0000000000000000000000000000000000000000"
+RANGES=()
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "${local_sha:-}" ] && continue
+  [ "$local_sha" = "$ZERO" ] && continue          # branch deletion — nothing to scan
+  if [ "$remote_sha" = "$ZERO" ]; then
+    RANGES+=("$local_sha")                         # new remote branch — scan all of it
+  else
+    RANGES+=("$remote_sha..$local_sha")            # existing branch — only new commits
+  fi
+done
 
-echo "[pre-push] 2/2 bench-data leakage scan"
-# Scan what is actually being pushed: commits on HEAD not yet on origin/main.
+# Fallback when stdin is empty (e.g. invoked manually for a dry run): use the
+# old origin/main heuristic so the gate still does something sensible.
+if [ ${#RANGES[@]} -eq 0 ]; then
+  if git rev-parse --verify --quiet origin/main >/dev/null; then
+    RANGES=("origin/main..HEAD")
+  else
+    RANGES=("HEAD")
+  fi
+fi
+
+# Union of files changed across all pushed ranges.
+changed_files() {
+  local r
+  for r in "${RANGES[@]}"; do
+    git diff --name-only "$r" 2>/dev/null || true
+  done | sort -u
+}
+CHANGED="$(changed_files)"
+
+# --- 1/2 tool-catalog drift gate (conditional) ------------------------------
+# Paths whose change can make the generated catalog/inventory or the hardcoded
+# "N tools" counts go stale. Mirrors check_tool_catalog_drift.py's universe.
+if printf '%s\n' "$CHANGED" | grep -qE \
+  '^bin/mcp_tool_catalog\.py$|^bin/mcp_proxy\.py$|^bin/gen_tool_manifest\.py$|^bin/gen_mcp_inventory\.py$|^docs/tools/MCP_CATALOG\.json$|^docs/MCP_TOOLS\.md$|^README\.md$|^docs/COMPARISON\.md$|^docs/MYTHS_AND_FACTS\.md$|^docs/tools/files_memory\.md$|^tests/test_tool_count_drift\.py$|^tests/test_mcp_catalog_manifest_fresh\.py$'
+then
+  echo "[pre-push] 1/2 tool-catalog drift gate (catalog/docs touched — checking)"
+  "$PY" bin/check_tool_catalog_drift.py || {
+    echo "[pre-push] BLOCKED: tool-catalog drift. Regenerate + commit, then re-push." >&2
+    exit 1
+  }
+else
+  echo "[pre-push] 1/2 tool-catalog drift gate — skipped (no catalog/doc paths in push)"
+fi
+
+# --- 2/2 bench-data leakage scan (always) -----------------------------------
 # Patterns mirror the m3 bench-privacy guard (LME-M ids, dataset paths, local
 # absolute paths, credentials). A hit is a STOP — investigate before pushing.
-RANGE="origin/main..HEAD"
-if ! git rev-parse --verify --quiet origin/main >/dev/null; then
-  RANGE="HEAD"   # no origin/main locally — scan the whole branch
-fi
 # Exclude the meta-files that legitimately CONTAIN the marker patterns: this
 # hook (its own regex), the doc describing the process, and the leakage-test
 # fixtures. Without this, the scanner matches its own definition — a false
 # positive that would block the very commit that adds the gate.
-LEAK="$(git diff "$RANGE" -- '**' \
-  ':(exclude).githooks/pre-push' \
-  ':(exclude)docs/AGENT_INSTRUCTIONS.md' \
-  ':(exclude)tests/test_*leak*' \
-  ':(exclude)tests/test_*bench*' \
-  2>/dev/null | grep -iE \
-  'lme-m/v3|lme_m\.db|PLAN_v4|smoke-142|237,655|2,446,993|enrichment_groups.*lme|locomo|/Users/[a-z]+|C:[\\/]+Users|@gmail|sk-ant-[a-z0-9]{20,}|AIza[a-z0-9_-]{30,}' \
-  || true)"
+echo "[pre-push] 2/2 bench-data leakage scan"
+LEAK=""
+for r in "${RANGES[@]}"; do
+  hit="$(git diff "$r" -- '**' \
+    ':(exclude).githooks/pre-push' \
+    ':(exclude)docs/AGENT_INSTRUCTIONS.md' \
+    ':(exclude)tests/test_*leak*' \
+    ':(exclude)tests/test_*bench*' \
+    2>/dev/null | grep -iE \
+    'lme-m/v3|lme_m\.db|PLAN_v4|smoke-142|237,655|2,446,993|enrichment_groups.*lme|locomo|/Users/[a-z]+|C:[\\/]+Users|@gmail|sk-ant-[a-z0-9]{20,}|AIza[a-z0-9_-]{30,}' \
+    || true)"
+  [ -n "$hit" ] && LEAK="$LEAK$hit"$'\n'
+done
 if [ -n "$LEAK" ]; then
   echo "[pre-push] BLOCKED: possible bench-data / secret leakage in the push diff:" >&2
   echo "$LEAK" | head -20 >&2
@@ -56,8 +109,10 @@ fi
 # Design-philosophy reminder — only when this push actually changes code
 # (bin/ or m3_memory/ .py), not on docs/config-only pushes. The author is
 # responsible for following the guidelines; this is a prompt, not a tool or a
-# gate (no auto-checking, nothing to bypass).
-CODE_CHANGED="$(git diff --name-only "$RANGE" -- 'bin/**/*.py' 'm3_memory/**/*.py' 'bin/*.py' 2>/dev/null || true)"
+# gate (no auto-checking, nothing to bypass). Uses the already-computed
+# CHANGED union (across all pushed ranges) rather than a single $RANGE diff,
+# so it's accurate for multi-ref / non-origin pushes too.
+CODE_CHANGED="$(printf '%s\n' "$CHANGED" | grep -E '^(bin/|m3_memory/).*\.py$' || true)"
 if [ -n "$CODE_CHANGED" ]; then
   cat >&2 <<'REMINDER'
 [pre-push] Design philosophies — hold these as you push (docs/DESIGN_PHILOSOPHIES.md):
