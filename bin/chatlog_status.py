@@ -281,19 +281,19 @@ def _get_last_turns(main_db: str) -> list[dict[str, str]]:
                         pass
                     if not snippet:
                         snippet = content.replace("\n", " ")
-                    
+
                     # Clean and truncate
                     snippet = snippet.strip()
                     if len(snippet) > 62:
                         snippet = snippet[:59] + "..."
-                    
+
                     ts = r["created_at"]
                     try:
                         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                         ts_str = dt.strftime("%H:%M:%S")
                     except Exception:
                         ts_str = ts[:10]
-                        
+
                     turns.append({"time": ts_str, "text": snippet})
             except sqlite3.Error:
                 pass
@@ -331,8 +331,8 @@ def _get_keypress(timeout: float) -> str | None:
         return None
     else:
         import select
-        import tty
         import termios
+        import tty
 
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
@@ -373,8 +373,8 @@ def _wait_for_any_key() -> None:
         msvcrt.getch()
     else:
         import select
-        import tty
         import termios
+        import tty
         fd = sys.stdin.fileno()
         if not os.isatty(fd):
             time.sleep(2.0)
@@ -396,13 +396,13 @@ def _wait_for_any_key() -> None:
 
 def _run_subprocess_interactive(cmd: list[str]) -> None:
     """Pause live TUI, restore cursor, execute subprocess, wait for key, and resume."""
-    import subprocess
     import os
+    import subprocess
     print("\033[?25h", end="")
     print("\033[H\033[J", end="")
     print(f"\n>>> Executing command:\n    {' '.join(cmd)}")
     print("=" * 80)
-    
+
     # Add bin directory to PYTHONPATH so packages like files_memory are importable when run as modules
     env = os.environ.copy()
     bin_dir = os.path.dirname(os.path.abspath(__file__))
@@ -410,7 +410,7 @@ def _run_subprocess_interactive(cmd: list[str]) -> None:
         env["PYTHONPATH"] = bin_dir + os.pathsep + env["PYTHONPATH"]
     else:
         env["PYTHONPATH"] = bin_dir
-    
+
     try:
         result = subprocess.run(cmd, env=env, shell=False)
         print("=" * 80)
@@ -418,7 +418,7 @@ def _run_subprocess_interactive(cmd: list[str]) -> None:
     except Exception as e:
         print("=" * 80)
         print(f"Error executing command: {e}")
-    
+
     print("\nPress any key to return to the live monitor...")
     _wait_for_any_key()
     print("\033[?25l", end="")
@@ -438,7 +438,6 @@ def _make_line(content: str) -> str:
 
 def run_live_tui(interval: float = 5.0):
     """Runs a zero-dependency ANSI live terminal dashboard with interactive controls."""
-    import time
     from m3_sdk import resolve_db_path
 
     # Hide cursor
@@ -506,45 +505,45 @@ def run_live_tui(interval: float = 5.0):
         lines.append(_make_line("  ⚡ M3 MEMORY Diagnostics & Subsystem Status (Live Monitor)"))
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append(_make_line(" DATABASE FILES & JOURNAL SIZE (WAL)"))
-        
+
         main_status = "active" if main_wal_sz > 0 else "idle"
         lines.append(_make_line(f"  Main DB:   {main_disp}"))
         lines.append(_make_line(f"             Size: {main_sz:6.1f} MB  |  WAL size: {main_wal_sz:5.1f} MB  |  Status: {main_status}"))
-        
+
         if not unified:
             chat_status = "active" if chat_wal_sz > 0 else "idle"
             lines.append(_make_line(f"  Chatlog:   {chat_disp}"))
             lines.append(_make_line(f"             Size: {chat_sz:6.1f} MB  |  WAL size: {chat_wal_sz:5.1f} MB  |  Status: {chat_status}"))
         else:
             lines.append(_make_line("  Chatlog:   (unified with main database file)"))
-            
+
         files_status = "active" if files_wal_sz > 0 else "idle"
         lines.append(_make_line(f"  Files DB:  {files_disp}"))
         lines.append(_make_line(f"             Size: {files_sz:6.1f} MB  |  WAL size: {files_wal_sz:5.1f} MB  |  Status: {files_status}"))
-        
+
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append(_make_line(" EMBEDDING CASCADE DIAGNOSTICS"))
-        
+
         t1_status = t1_state.get("status", "unknown").upper() if t1_state else "UNKNOWN"
         t1_path = t1_state.get("gguf_path") or "Not set" if t1_state else "Not set"
         if len(t1_path) > 40:
             t1_path = "..." + t1_path[-37:]
         lines.append(_make_line(f"  GGUF (Tier 1):     [{t1_status:<14}] Path: {t1_path}"))
-        
+
         t2_status = t2_state.get("status", "unknown").upper() if t2_state else "UNKNOWN"
         t2_url = t2_state.get("url") or "Not set" if t2_state else "Not set"
         t2_lat = t2_state.get("latency_ms") if t2_state else None
         lat_str = f"({t2_lat} ms)" if t2_lat is not None else "(Offline)"
         lines.append(_make_line(f"  Fallback (Tier 2): [{t2_status:<14}] URL: {t2_url:<27} {lat_str}"))
-        
+
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append(_make_line(" QUEUE DEPTHS & SPILL MONITOR"))
-        
+
         depth = state.get("queue", {}).get("depth", 0)
         max_depth = state.get("queue", {}).get("max", config.queue_max_depth)
         spill_files = len([f for f in os.listdir(chatlog_config.SPILL_DIR) if f.endswith(".jsonl")]) if os.path.exists(chatlog_config.SPILL_DIR) else 0
         spill_bytes = state.get("spill", {}).get("bytes", 0)
-        
+
         files_leaves = row_counts.get("files_leaves", 0)
         files_unembedded = row_counts.get("files_unembedded", 0)
 
@@ -554,7 +553,7 @@ def run_live_tui(interval: float = 5.0):
         lines.append(_make_line(f"  Files DB Chunks:     {files_leaves} total ({files_unembedded} pending embeddings)"))
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append(_make_line(" SYSTEM INTEGRATION HOOKS"))
-        
+
         for name, spec in sorted(config.host_agents.items()):
             status_str = "ENABLED " if spec.enabled else "DISABLED"
             last_ms = state.get("hooks", {}).get(name, {}).get("last_write_ms_ago")
@@ -567,16 +566,16 @@ def run_live_tui(interval: float = 5.0):
             else:
                 activity_str = f"active {int(last_ms / 3600000)} hours ago"
             lines.append(_make_line(f"  {name:<12} : [{status_str}]  {activity_str}"))
-            
+
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append(_make_line(" LAST 5 CHATLOG CAPTURE EVENTS"))
-        
+
         if last_turns:
             for turn in last_turns:
                 lines.append(_make_line(f"  [{turn['time']}] {turn['text']}"))
         else:
             lines.append(_make_line("  (No chatlog capture turns found yet)"))
-            
+
         lines.append("└────────────────────────────────────────────────────────────────────────────┘")
         lines.append(f"  [Ctrl+C / Q] Exit  |  [+] / [-] Change Interval ({current_interval:.1f}s)")
         lines.append("  Interactive Actions:")
@@ -622,7 +621,7 @@ def run_live_tui(interval: float = 5.0):
                     path_input = input("\nEnter absolute directory path to ingest (or press Enter to cancel):\n> ").strip()
                 except (KeyboardInterrupt, EOFError):
                     path_input = ""
-                
+
                 if path_input:
                     resolved_path = os.path.abspath(os.path.expanduser(path_input))
                     if not os.path.isdir(resolved_path):
@@ -638,13 +637,13 @@ def run_live_tui(interval: float = 5.0):
                             mode_choice = input("Select option [1-3] (default: 1): ").strip()
                         except (KeyboardInterrupt, EOFError):
                             mode_choice = "1"
-                        
+
                         extract_mode = "queue"
                         if mode_choice == "2":
                             extract_mode = "inline"
                         elif mode_choice == "3":
                             extract_mode = "none"
-                        
+
                         cmd = [
                             sys.executable,
                             "-m",

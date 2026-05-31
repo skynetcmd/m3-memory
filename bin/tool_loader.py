@@ -107,7 +107,7 @@ def help_capabilities(domain: str = "", query: str = "") -> str:
             continue
         if query and (query not in spec.name.lower() and query not in spec.description.lower()):
             continue
-        
+
         # Extract parameter details to make it readable
         props = spec.parameters.get("properties", {})
         required = spec.parameters.get("required", [])
@@ -117,7 +117,7 @@ def help_capabilities(domain: str = "", query: str = "") -> str:
             p_type = p_schema.get("type", "any")
             p_desc = p_schema.get("description", "")
             params_info.append(f"- **{p_name}** ({p_type}, {req_str}): {p_desc}")
-            
+
         matched_tools.append({
             "name": spec.name,
             "domain": td,
@@ -127,9 +127,9 @@ def help_capabilities(domain: str = "", query: str = "") -> str:
         })
 
     # Group by domain for clean formatting
-    grouped = {}
+    grouped: dict[str, list[dict]] = {}
     for mt in matched_tools:
-        grouped.setdefault(mt["domain"], []).append(mt)
+        grouped.setdefault(str(mt["domain"]), []).append(mt)
 
     lines = ["# M3-Memory Tool Capabilities Index"]
     if domain:
@@ -147,7 +147,7 @@ def help_capabilities(domain: str = "", query: str = "") -> str:
         lines.append(f"## Domain: {d_name} ({len(grouped[d_name])} tools)")
         lines.append(f"*{d_desc}*")
         lines.append("")
-        
+
         for t in grouped[d_name]:
             availability = "Always Available (Essential)" if t["is_essential"] else f"Lazy (requires `tools_load_domain(domain=\"{d_name}\")`)"
             lines.append(f"### `{t['name']}`")

@@ -1265,7 +1265,9 @@ async def memory_write_from_file_impl(
     try:
         size = os.path.getsize(p)
     except OSError as e:
-        return f"Error: cannot stat file: {type(e).__name__}: {e}"
+        # NB: `type` is shadowed by this function's `type: str` param, so the
+        # builtin is unavailable here — use e.__class__ to name the exception.
+        return f"Error: cannot stat file: {e.__class__.__name__}: {e}"
     # Defense-in-depth size check — memory_write_impl will also enforce
     # 50_000-char limit on content, but we should fail fast before reading
     # a multi-megabyte file off disk.
@@ -1276,7 +1278,7 @@ async def memory_write_from_file_impl(
         with open(p, "r", encoding="utf-8") as f:
             content = f.read()
     except (OSError, UnicodeDecodeError) as e:
-        return f"Error: cannot read file: {type(e).__name__}: {e}"
+        return f"Error: cannot read file: {e.__class__.__name__}: {e}"
 
     # Delegate to the canonical singleton path. Every gate applies to the
     # disk-read content the same way it applies to inline content.
@@ -1365,7 +1367,10 @@ async def memory_write_batch_impl(items: list[dict]):
 
         with _db() as db:
             for (mid, text), result in zip(write_tasks, embeddings):
-                if isinstance(result, Exception):
+                # gather(return_exceptions=True) yields BaseException, not just
+                # Exception — widen the guard so the post-guard type narrows to
+                # the real (vec, meta) tuple (fixes mypy "not iterable").
+                if isinstance(result, BaseException):
                     logger.warning(f"Batch embed failed for {mid}: {result}; skipping chroma_sync_queue insert")
                     continue
                 if result is None:

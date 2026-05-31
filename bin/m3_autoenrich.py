@@ -20,7 +20,6 @@ way the result is consistent regardless of which shell launched this script.
 from __future__ import annotations
 
 import argparse
-import platform
 import re
 import shutil
 import subprocess
