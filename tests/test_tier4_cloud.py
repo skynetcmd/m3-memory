@@ -21,6 +21,16 @@ def clean_breakers(monkeypatch):
     reset_embed_breakers()
     # Ultimate cache buster: force content hash to be unique every time to guarantee cache misses
     monkeypatch.setattr("memory.embed._content_hash", lambda t: str(uuid.uuid4()))
+    
+    # Mock best LLM failover globally to avoid real network requests
+    async def mock_get_best_embed(*args, **kwargs):
+        return None
+    monkeypatch.setattr("memory.embed.get_best_embed", mock_get_best_embed)
+    monkeypatch.setattr("llm_failover.get_best_embed", mock_get_best_embed)
+    
+    # Bypass migrations globally to avoid DB lock contention
+    monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
+    
     yield
     reset_embed_breakers()
 
@@ -62,7 +72,7 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
     # Mock best LLM failover to fail
     async def mock_get_best_embed(*args, **kwargs):
         return None
-    monkeypatch.setattr("llm_failover.get_best_embed", mock_get_best_embed)
+    monkeypatch.setattr("memory.embed.get_best_embed", mock_get_best_embed)
 
     # Mock keyring lookup to return a token
     monkeypatch.setattr("auth_utils.safe_keyring_get_password", lambda s, u: "keyring-token")
@@ -114,7 +124,7 @@ async def test_tier4_circuit_breaker(monkeypatch):
 
     # Mock all local tiers to fail
     monkeypatch.setattr("memory.embed._get_embedded_embedder", lambda: None)
-    monkeypatch.setattr("llm_failover.get_best_embed", lambda *a, **k: None)
+    monkeypatch.setattr("memory.embed.get_best_embed", lambda *a, **k: None)
 
     # Force enclave to fail
     async def mock_post_fail(*args, **kwargs):
