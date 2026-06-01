@@ -47,7 +47,35 @@ def main() -> int:
         "--skip-embed-server", action="store_true",
         help="Skip the Rust-side m3-embed-server doctor subprocess.",
     )
+    parser.add_argument(
+        "--fix", action="store_true",
+        help="Run quick-repair mode to auto-fix common deployment issues.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Use with --fix to simulate repair steps without making changes.",
+    )
     args = parser.parse_args()
+
+    if args.fix:
+        import asyncio
+        from memory.doctor import memory_doctor_fix_impl
+        
+        mode = "Dry-Run " if args.dry_run else ""
+        print(f"==> Running m3-memory {mode}self-repair...")
+        res = asyncio.run(memory_doctor_fix_impl(dry_run=args.dry_run))
+        
+        print(f"\nRepair Summary: {res['summary'].upper()}")
+        print("-" * 50)
+        for act in res["actions"]:
+            status_char = "[OK]" if act["status"] == "ok" else "[SKIP]" if act["status"] == "skipped" else "[ERR]"
+            print(f"  {status_char} {act['action']}")
+            print(f"         Detail: {act['detail']}")
+        print("-" * 50)
+        
+        if res["summary"] == "failed":
+            return 1
+        return 0
 
     exit_code = 0
 
