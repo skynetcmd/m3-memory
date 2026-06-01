@@ -104,6 +104,27 @@ def migration_lock():
     lock_path = os.path.join(get_m3_config_root(), ".migration.lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
 
+    # Try native Rust advisory lock first
+    if not M3_CORE_RS_DISABLE:
+        try:
+            import m3_core_rs
+            if hasattr(m3_core_rs, "NativeMigrationLock"):
+                lock = m3_core_rs.NativeMigrationLock(lock_path)
+                acquired = lock.acquire(120)
+                if not acquired:
+                    raise RuntimeError(
+                        f"Could not acquire native migration lock at {lock_path} within 120 seconds."
+                    )
+                try:
+                    yield
+                finally:
+                    lock.release()
+                return
+        except Exception as e:
+            if isinstance(e, RuntimeError) and "lock" in str(e):
+                raise
+            # Fall back to Python busy-wait lock on other errors
+
     fd = None
     start_time = time.time()
     acquired = False
@@ -493,6 +514,21 @@ class M3Context:
 
     def get_system_telemetry(self) -> dict:
         """Unify system hardware metrics (CPU, RAM, GPU, Thermal status)."""
+        # Try native Rust FFI fast path first
+        if not M3_CORE_RS_DISABLE:
+            try:
+                import m3_core_rs
+                if hasattr(m3_core_rs, "get_native_telemetry"):
+                    telemetry = m3_core_rs.get_native_telemetry()
+                    return {
+                        "cpu_total": float(getattr(telemetry, "cpu_total", 0.0)),
+                        "ram_total": float(getattr(telemetry, "ram_total", 0.0)),
+                        "gpu_total": float(getattr(telemetry, "gpu_total", 0.0)),
+                        "thermal": str(getattr(telemetry, "thermal", "Nominal")),
+                    }
+            except Exception:
+                pass
+
         try:
             import psutil
         except ImportError:
@@ -587,20 +623,62 @@ class M3Context:
 
     def _check_circuit(self, service: str) -> bool:
         """Checks if the circuit for a specific service is open."""
+        if not M3_CORE_RS_DISABLE:
+            try:
+                import m3_core_rs
+                if hasattr(m3_core_rs, "NativeCircuitBreaker"):
+                    state = _CIRCUITS.get(service)
+                    if not state or not hasattr(state, "check"):
+                        state = m3_core_rs.NativeCircuitBreaker(3, 60)
+                        _CIRCUITS[service] = state
+                    return state.check()
+            except Exception:
+                pass
+
         state = _CIRCUITS.get(service)
-        if not state:
+        if state is None or isinstance(state, dict):
+            if not state:
+                return True
+            if state["open_until"] > time.time():
+                logger.error(f"Circuit for {service} is OPEN. Failing fast.")
+                return False
             return True
-        if state["open_until"] > time.time():
-            logger.error(f"Circuit for {service} is OPEN. Failing fast.")
-            return False
         return True
 
     def _record_success(self, service: str):
+        if not M3_CORE_RS_DISABLE:
+            try:
+                import m3_core_rs
+                if hasattr(m3_core_rs, "NativeCircuitBreaker"):
+                    state = _CIRCUITS.get(service)
+                    if state and hasattr(state, "record_success"):
+                        state.record_success()
+                        return
+            except Exception:
+                pass
+
         if service in _CIRCUITS:
             del _CIRCUITS[service]
 
     def _record_failure(self, service: str, custom_cooldown: Optional[float] = None):
-        state = _CIRCUITS.get(service, {"failures": 0, "open_until": 0})
+        if not M3_CORE_RS_DISABLE:
+            try:
+                import m3_core_rs
+                if hasattr(m3_core_rs, "NativeCircuitBreaker"):
+                    state = _CIRCUITS.get(service)
+                    if not state or not hasattr(state, "check"):
+                        cooldown = int(custom_cooldown or _CB_COOLDOWN)
+                        state = m3_core_rs.NativeCircuitBreaker(3, cooldown)
+                        _CIRCUITS[service] = state
+                    if hasattr(state, "record_failure"):
+                        state.record_failure()
+                        return
+            except Exception:
+                pass
+
+        state = _CIRCUITS.get(service)
+        if state is None or not isinstance(state, dict):
+            state = {"failures": 0, "open_until": 0}
         state["failures"] += 1
         cooldown = custom_cooldown or _CB_COOLDOWN
         if state["failures"] >= _CB_THRESHOLD:
