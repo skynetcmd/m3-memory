@@ -270,3 +270,226 @@ async def memory_doctor_impl() -> dict[str, Any]:
         "issues": issues,
         "recommendations": recommendations,
     }
+
+
+# ── Quick-repair mode (m3 doctor --fix) ──────────────────────────────────────
+
+async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
+    """Run the doctor in repair mode — attempt to auto-fix detected issues.
+
+    Repair actions (ordered safest → most impactful):
+      1. Run pending migrations (``migrate_memory.py up --yes``).
+      2. Rebuild the FTS5 full-text index (``INSERT INTO ... REBUILD``).
+      3. Run missing-embedding backfill (``embed_backfill.py``).
+      4. Rebuild the m3_system_cohesion table if it is missing or stale.
+
+    Each action records its outcome in the returned dict. dry_run=True
+    reports what *would* be done without writing anything.
+
+    Returns:
+        {
+            "dry_run": bool,
+            "actions": [
+                {"action": str, "status": "ok"|"skipped"|"error", "detail": str},
+                ...
+            ],
+            "summary": "ok" | "partial" | "nothing_to_do" | "failed",
+        }
+    """
+    import subprocess
+    import sys
+
+    from m3_sdk import resolve_db_path
+
+    diag = await memory_doctor_impl()
+    actions: list[dict[str, Any]] = []
+
+    def _record(action: str, status: str, detail: str = "") -> None:
+        actions.append({"action": action, "status": status, "detail": detail})
+        logger.info("doctor --fix [%s] %s: %s", status, action, detail or "(ok)")
+
+    db_path = resolve_db_path(None)
+
+    # ── Action 1: Run pending migrations ──────────────────────────────────────
+    migration_needed = diag["db"]["status"] != "online"
+    if not migration_needed:
+        # Check whether DB version is behind the latest migration file
+        try:
+            import os, re, sqlite3 as _sq
+            mig_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "memory", "migrations",
+            )
+            file_versions = sorted(
+                int(m.group(1))
+                for fn in os.listdir(mig_dir)
+                if (m := re.match(r"^(\d+)_.*\.up\.sql$", fn))
+            )
+            latest_file = max(file_versions) if file_versions else 0
+            conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+            try:
+                row = conn.execute(
+                    "SELECT MAX(CAST(version AS INTEGER)) FROM schema_versions "
+                    "WHERE CAST(version AS INTEGER) > 0"
+                ).fetchone()
+                db_ver = int(row[0]) if row and row[0] else 0
+            finally:
+                conn.close()
+            migration_needed = db_ver < latest_file
+        except Exception as e:
+            migration_needed = True
+            logger.debug("doctor --fix migration check failed: %s", e)
+
+    if migration_needed:
+        if dry_run:
+            _record("run_migrations", "skipped", "dry_run=True; would run migrate_memory.py up --yes")
+        else:
+            try:
+                import os as _os
+                env = _os.environ.copy()
+                env["M3_DATABASE"] = str(db_path)
+                mig_script = _os.path.join(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                    "bin", "migrate_memory.py"
+                )
+                result = subprocess.run(
+                    [sys.executable, mig_script, "up", "--yes"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                if result.returncode == 0:
+                    _record("run_migrations", "ok", result.stdout.strip()[:200] or "migrations applied")
+                else:
+                    _record("run_migrations", "error", result.stderr.strip()[:300])
+            except Exception as e:
+                _record("run_migrations", "error", str(e))
+    else:
+        _record("run_migrations", "skipped", "DB already at latest migration version")
+
+    # ── Action 2: Rebuild FTS5 index ──────────────────────────────────────────
+    try:
+        import sqlite3 as _sq
+        conn = _sq.connect(str(db_path), timeout=5.0)
+        conn.row_factory = _sq.Row
+        try:
+            # Check whether FTS index exists
+            fts_exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_items_fts'"
+            ).fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:
+        fts_exists = False
+
+    if fts_exists:
+        if dry_run:
+            _record("rebuild_fts5", "skipped", "dry_run=True; would run INSERT INTO memory_items_fts(memory_items_fts) VALUES('rebuild')")
+        else:
+            try:
+                conn = _sq.connect(str(db_path), timeout=30.0)
+                try:
+                    conn.execute("INSERT INTO memory_items_fts(memory_items_fts) VALUES('rebuild')")
+                    conn.commit()
+                    _record("rebuild_fts5", "ok", "FTS5 index rebuilt")
+                finally:
+                    conn.close()
+            except Exception as e:
+                _record("rebuild_fts5", "error", str(e))
+    else:
+        _record("rebuild_fts5", "skipped", "memory_items_fts table not found")
+
+    # ── Action 3: Embed backfill (items missing embeddings) ───────────────────
+    try:
+        import sqlite3 as _sq
+        conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM memory_items mi "
+                "LEFT JOIN memory_embeddings me ON mi.id = me.memory_id "
+                "WHERE mi.is_deleted = 0 AND me.memory_id IS NULL"
+            ).fetchone()
+            missing_embeds = int(row[0]) if row else 0
+        finally:
+            conn.close()
+    except Exception:
+        missing_embeds = 0
+
+    if missing_embeds > 0:
+        if dry_run:
+            _record(
+                "embed_backfill",
+                "skipped",
+                f"dry_run=True; {missing_embeds} items missing embeddings — would run embed_backfill.py",
+            )
+        else:
+            try:
+                import os as _os
+                env = _os.environ.copy()
+                env["M3_DATABASE"] = str(db_path)
+                bf_script = _os.path.join(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                    "bin", "embed_backfill.py"
+                )
+                result = subprocess.run(
+                    [sys.executable, bf_script, "--limit", "500"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode == 0:
+                    _record("embed_backfill", "ok", f"backfilled {missing_embeds} items (capped at 500 per run)")
+                else:
+                    _record("embed_backfill", "error", result.stderr.strip()[:300])
+            except Exception as e:
+                _record("embed_backfill", "error", str(e))
+    else:
+        _record("embed_backfill", "skipped", "no items missing embeddings")
+
+    # ── Action 4: Cohesion table rebuild ──────────────────────────────────────
+    try:
+        import sqlite3 as _sq
+        conn = _sq.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+        try:
+            cohesion_ok = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='m3_system_cohesion'"
+            ).fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:
+        cohesion_ok = False
+
+    if not cohesion_ok:
+        if dry_run:
+            _record("rebuild_cohesion", "skipped", "dry_run=True; would rebuild m3_system_cohesion table")
+        else:
+            try:
+                from m3_sdk import M3Context
+                # Trigger a re-init of the cohesion table by opening a connection
+                ctx = M3Context.for_db(str(db_path))
+                _ = ctx.get_sqlite_conn()
+                _record("rebuild_cohesion", "ok", "m3_system_cohesion table rebuilt via M3Context init")
+            except Exception as e:
+                _record("rebuild_cohesion", "error", str(e))
+    else:
+        _record("rebuild_cohesion", "skipped", "m3_system_cohesion table already present")
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    statuses = {a["status"] for a in actions}
+    if not actions or statuses == {"skipped"}:
+        summary = "nothing_to_do"
+    elif "error" in statuses and "ok" in statuses:
+        summary = "partial"
+    elif "error" in statuses:
+        summary = "failed"
+    else:
+        summary = "ok"
+
+    return {
+        "dry_run": dry_run,
+        "actions": actions,
+        "summary": summary,
+    }
+

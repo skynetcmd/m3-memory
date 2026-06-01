@@ -14,6 +14,7 @@ a monkey-patched subprocess.run.
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -370,4 +371,59 @@ def test_wire_hermes_plugin_copy(monkeypatch, tmp_path):
     for fname in ["__init__.py", "m3client.py", "plugin.yaml"]:
         assert (dst_m3 / fname).is_file()
         assert (dst_m3 / fname).read_text(encoding="utf-8") == f"content of {fname}"
+
+
+def test_gather_plan_non_interactive_decouple_and_fips(monkeypatch):
+    """Non-interactive gather plan respects decoupled roots and FIPS flags."""
+    args = argparse.Namespace(
+        endpoint="http://localhost:1111",
+        cognitive_loop=True,
+        non_interactive=True,
+        agents="claude",
+        capture_mode="stop",
+        install_gpu_embedder=True,
+        decouple_roots=True,
+        config_root="/tmp/config",
+        engine_root="/tmp/engine",
+        fips_mode=True,
+    )
+    detected = setup_wizard.AgentTargets(claude=True)
+    plan = setup_wizard._gather_plan(detected, args)
+
+    assert plan.decouple_roots is True
+    assert plan.config_root == "/tmp/config"
+    assert plan.engine_root == "/tmp/engine"
+    assert plan.fips_mode is True
+
+
+def test_gather_plan_interactive_decouple_and_fips(monkeypatch):
+    """Interactive gather plan prompts and accepts decoupled roots and FIPS choices."""
+    args = argparse.Namespace(
+        endpoint=None,
+        cognitive_loop=False,
+        non_interactive=False,
+    )
+    detected = setup_wizard.AgentTargets(claude=True)
+
+    calls = []
+    def mock_ask_yes_no(question, default):
+        calls.append(question)
+        if "decoupled" in question:
+            return True
+        if "FIPS" in question:
+            return True
+        return False
+
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", mock_ask_yes_no)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda q, choices, default: default)
+
+    plan = setup_wizard._gather_plan(detected, args)
+
+    assert plan.decouple_roots is True
+    assert plan.config_root is not None
+    assert plan.engine_root is not None
+    assert plan.fips_mode is True
+    assert any("decoupled" in c for c in calls)
+    assert any("FIPS" in c for c in calls)
+
 

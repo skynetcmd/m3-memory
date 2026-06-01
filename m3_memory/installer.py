@@ -67,6 +67,10 @@ def load_config() -> dict:
 
 def save_config(cfg: dict) -> None:
     config_dir().mkdir(parents=True, exist_ok=True)
+    import os
+    for env_var in ("M3_CONFIG_ROOT", "M3_ENGINE_ROOT", "M3_FIPS_MODE"):
+        if env_var in os.environ and env_var not in cfg:
+            cfg[env_var] = os.environ[env_var]
     config_file().write_text(json.dumps(cfg, indent=2, sort_keys=True), encoding="utf-8")
 
 

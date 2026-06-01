@@ -2336,6 +2336,40 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
 
+    ToolSpec(
+        name="memory_doctor_fix",
+        description=(
+            "Run the m3-memory self-repair mode (m3 doctor --fix). "
+            "Attempts to auto-fix the most common deployment issues in order: "
+            "(1) apply pending SQLite migrations, "
+            "(2) rebuild the FTS5 full-text index, "
+            "(3) embed-backfill items that are missing vector embeddings (capped at 500/run), "
+            "(4) rebuild the m3_system_cohesion table if absent. "
+            "Set dry_run=True to see what *would* be done without making any changes. "
+            "Returns a structured dict with per-action outcomes and a summary status "
+            "('ok' | 'partial' | 'nothing_to_do' | 'failed')."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "dry_run": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, report what would be done without writing anything. "
+                        "Default: false."
+                    ),
+                    "default": False,
+                },
+            },
+            "required": [],
+        },
+        impl=memory_core.memory_doctor_fix_impl,
+        is_async=True,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+
     # ───────────────────────────────────────────────────────────────────────────
     # files-memory tools (FILE_INGESTION_PLAN.md phases 1-4).
     # All sync; the package's LLM and embed calls block (the embed cascade
