@@ -292,6 +292,10 @@ _LAZY_IMPORTS = {
     "_session_neighbor_ids": "memory.graph",
     "memory_graph_impl": "memory.graph",
 
+    # memory.history
+    "compute_bitemporal_diffs_impl": "memory.history",
+    "get_bitemporal_timeline_impl": "memory.history",
+
     # memory.search
     "_DATE_MONTHS": "memory.search",
     "_DATE_RE_ISO": "memory.search",
