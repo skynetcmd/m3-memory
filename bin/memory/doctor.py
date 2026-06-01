@@ -315,7 +315,9 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
     if not migration_needed:
         # Check whether DB version is behind the latest migration file
         try:
-            import os, re, sqlite3 as _sq
+            import os
+            import re
+            import sqlite3 as _sq
             mig_dir = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 "memory", "migrations",

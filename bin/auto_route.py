@@ -219,7 +219,7 @@ def _map_rust_to_py_branch(query: str, rs_branch: str, params: dict | None = Non
     # 1. Temporal cues fallback (regex check matches Python temporal decider)
     if has_temporal_cues(query):
         return "temporal"
-    
+
     # 2. Named entities match entity anchored
     if rs_branch == "entity":
         entity_graph_enabled = params.get("auto_entity_graph_enabled", True)
@@ -227,18 +227,18 @@ def _map_rust_to_py_branch(query: str, rs_branch: str, params: dict | None = Non
         if entity_graph_enabled and count_named_entities(query) >= entity_threshold:
             return "entity_anchored"
         return "default"
-    
+
     # 3. Lexical maps directly to default fallback
     if rs_branch == "lexical":
         return "default"
-    
+
     # 4. Semantic maps to default or multi_session
     if rs_branch == "semantic":
         # If the query has comparison cues, map to multi_session
         if has_comparison_cues(query):
             return "multi_session"
         return "default"
-        
+
     return rs_branch
 
 
@@ -266,7 +266,7 @@ def _route_shadow_compare(query: str, py_branch: str, params: dict | None = None
         decision = m3_core_rs.decide_route(query, signals)
         rs_branch = decision.branch
         mapped_branch = _map_rust_to_py_branch(query, rs_branch, params)
-        
+
         if mapped_branch == py_branch:
             _log.debug(
                 "route shadow AGREE: branch=%s query=%r rs_confidence=%.3f",
@@ -312,7 +312,7 @@ def decide_branch(query: str, candidates: list, params: dict) -> str:
             top1_sharp_min = params.get("auto_top1_sharp_min", AUTO_TOP1_SHARP_MIN)
             slope_sharp_min = params.get("auto_slope_at_3_sharp_min", AUTO_SLOPE_AT_3_SHARP_MIN)
             top1_low_threshold = params.get("auto_top1_low_threshold", AUTO_TOP1_LOW_THRESHOLD)
-            
+
             if t1 > top1_sharp_min and s3 > slope_sharp_min and t1 > top1_low_threshold:
                 _log.debug(
                     "route enforce mode: post-retrieval sharp spike override detected (top_1=%.3f, slope=%.3f)",

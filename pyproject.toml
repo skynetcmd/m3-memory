@@ -147,7 +147,17 @@ select = ["E", "F", "W", "I"]
 #   before importing project modules — buried imports are intentional.
 # E701/E702: one-liner `if x: return` / `try: foo` is used throughout bench
 #   and ingest scripts as a terseness choice; not a readability problem here.
-ignore = ["E501", "E402", "E701", "E702"]
+# E741: single-letter vars (l, O, I) are used intentionally in math/loop contexts.
+ignore = ["E501", "E402", "E701", "E702", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# memory_core.py uses a module-level __getattr__ for lazy submodule dispatch.
+# All private helpers (_db, _record_history, _embed, etc.) are registered in
+# _LAZY_IMPORTS and resolved at runtime — Ruff's static analysis can't see
+# through __getattr__, so F821 is a false positive for this file.
+"bin/memory_core.py" = ["F821"]
+# dashboard_server.py imports Any via TYPE_CHECKING guard; F821 is spurious.
+"bin/dashboard_server.py" = ["F821"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -202,6 +212,7 @@ module = [
     "custom_tool_bridge",
     "embed_agent_instructions",
     "chroma_sync_cli",
+    "dashboard_server",
 ]
 ignore_errors = true
 
@@ -243,4 +254,10 @@ exclude_dirs = ["tests", "benchmarks", ".venv", "venv"]
 #   `-X utf8` and a fixed argv derived from sys.orig_argv — no shell, no
 #   user-controlled program path. It is process-replacement of self, not
 #   spawning an external program; the B606 "no shell" heuristic does not apply.
-skips = ["B101", "B110", "B112", "B311", "B404", "B603", "B606", "B607", "B608"]
+# B105: `_LAZY_IMPORTS` in memory_core.py maps symbol names to module-path strings
+#   (e.g. "M3_CLOUD_AUTH_TOKEN_KEYRING": "memory.config"). Bandit's regex matches
+#   on the key containing "TOKEN"/"KEYRING" and flags the module-path value as a
+#   hardcoded credential — a false positive. No actual credential is stored here;
+#   this is a pure symbol→module routing table for the lazy-import shim.
+skips = ["B101", "B105", "B110", "B112", "B311", "B404", "B603", "B606", "B607", "B608"]
+
