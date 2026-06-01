@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-from typing import Any
 
-from m3_sdk import resolve_db_path
 from memory.db import _db
 
 logger = logging.getLogger("memory.history")
@@ -34,14 +31,14 @@ def compute_bitemporal_diffs_impl(
     # Try high-speed Polars path first
     try:
         import polars as pl
-        
+
         # 1. Load data directly into columnar Polars Arrow chunks
         df = pl.DataFrame(
             history_rows,
             schema=["id", "memory_id", "field", "old_value", "new_value"],
             orient="row"
         )
-        
+
         # 2. Perform parallel time-series grouping and delta calculation
         # Group by memory_id and field, select the last new_value chronologically (last id)
         grouped = (
@@ -51,7 +48,7 @@ def compute_bitemporal_diffs_impl(
             .agg(pl.col("new_value").last().alias("current_value"))
             .collect()
         )
-        
+
         # 3. Serialize back via fast JSON writer
         return json.dumps(grouped.to_dicts())
     except ImportError:

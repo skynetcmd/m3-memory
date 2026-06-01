@@ -102,7 +102,6 @@ from .fts import (
     _EVENT_PROPER_NOUN,
     _TEMPORAL_QUERY_RE,
     _TEMPORAL_ROUTER_RE,
-    _compile_fts_query,
     _query_title_token_set,
     _title_overlap_from_qset,
 )
@@ -967,7 +966,7 @@ async def memory_search_scored_impl(
                 extra_cols_sql = ""
                 if safe_extra:
                     extra_cols_sql = ", " + ", ".join(f"mi.{c}" for c in safe_extra)
-                
+
                 with _db() as conn:
                     row = conn.execute(
                         f"""
