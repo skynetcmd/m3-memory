@@ -332,6 +332,10 @@ def _trim_by_elbow(ranked: list[tuple[float, dict]], sensitivity: float = 1.5) -
     if len(ranked) < config.ELBOW_MIN_INPUT:
         return ranked
 
+    # Absolute Quality Gating Floor: only trim if the top result indicates a strong semantic anchor
+    if ranked[0][0] < 0.75:
+        return ranked
+
     # Calculate score differences between consecutive results
     diffs = [ranked[i][0] - ranked[i + 1][0] for i in range(len(ranked) - 1)]
     avg_diff = sum(diffs) / len(diffs)
@@ -711,6 +715,16 @@ def is_temporal_query(query: str) -> bool:
 # via `from .util import _batch_cosine` if a future block needs to.
 
 
+def _detect_sqlite_vec(db) -> bool:
+    """Return True if the sqlite-vec extension functions are available on the connection."""
+    import sqlite3
+    if not isinstance(db, sqlite3.Connection):
+        return False
+    try:
+        db.execute("SELECT vec_version()")
+        return True
+    except Exception:
+        return False
 
 
 def _hybrid_score_batch(
@@ -934,6 +948,12 @@ async def memory_search_scored_impl(
     # to bypass embedding entirely
     if len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
         try:
+            # Gating: Reject generic conversational queries from short-circuiting
+            conversational_stops = {"show", "get", "find", "tell", "me", "the", "about", "what", "who", "when", "where", "why", "how", "list"}
+            query_words = set(query.lower().split())
+            if query_words.issubset(conversational_stops):
+                raise ValueError("Generic conversational query; skipping short-circuit.")
+
             from memory.fts import _compile_fts_query
             fts_query, ok = _compile_fts_query(query, search_mode)
             if ok:
@@ -1086,51 +1106,88 @@ async def memory_search_scored_impl(
     # for max-kind so the unique pool stays near 1000. Strategy="default"
     # pins to a single kind, so the base cap already counts unique items.
     sql_row_limit = 5000 if vector_kind_strategy == "max" else 2000
+    has_vec = False
 
     try:
         with _db() as db:
+            has_vec = _detect_sqlite_vec(db)
             if search_mode == "semantic":
-                sql = f"""
-                    WITH limited AS (
-                        SELECT mi.id FROM memory_items mi
-                        WHERE {where_sql}
-                        LIMIT 50
-                    )
-                    SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score{extra_sql}
-                    FROM memory_items mi
-                    JOIN memory_embeddings me ON mi.id = me.memory_id
-                    WHERE mi.id IN (SELECT id FROM limited)
-                    ORDER BY mi.created_at DESC
-                """
-                if os.environ.get("M3_DEBUG"):
-                    print(f"DEBUG SQL (semantic):\n{sql}")
-                    print(f"DEBUG PARAMS: {params}")
-                rows = db.execute(sql, params).fetchall()
+                if has_vec:
+                    import struct
+                    q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
+                    sql = f"""
+                        WITH limited AS (
+                            SELECT mi.id FROM memory_items mi
+                            WHERE {where_sql}
+                            LIMIT 50
+                        )
+                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score,
+                               (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
+                        FROM memory_items mi
+                        JOIN memory_embeddings me ON mi.id = me.memory_id
+                        WHERE mi.id IN (SELECT id FROM limited)
+                        ORDER BY vec_score DESC
+                    """
+                    if os.environ.get("M3_DEBUG"):
+                        print(f"DEBUG SQL (semantic sqlite-vec):\n{sql}")
+                    rows = db.execute(sql, (q_blob, *params)).fetchall()
+                else:
+                    sql = f"""
+                        WITH limited AS (
+                            SELECT mi.id FROM memory_items mi
+                            WHERE {where_sql}
+                            LIMIT 50
+                        )
+                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score{extra_sql}
+                        FROM memory_items mi
+                        JOIN memory_embeddings me ON mi.id = me.memory_id
+                        WHERE mi.id IN (SELECT id FROM limited)
+                        ORDER BY mi.created_at DESC
+                    """
+                    if os.environ.get("M3_DEBUG"):
+                        print(f"DEBUG SQL (semantic standard):\n{sql}")
+                    rows = db.execute(sql, params).fetchall()
                 if os.environ.get("M3_DEBUG"):
                     print(f"DEBUG SQL HITS (semantic): {len(rows)}")
             else:
-                # ...
-                # (omitted for brevity, will do hybrid next)
-                sql = f"""
-                    SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
-                           bm25(memory_items_fts) as bm25_score{extra_sql}
-                    FROM memory_items mi
-                    JOIN memory_embeddings me ON mi.id = me.memory_id
-                    JOIN memory_items_fts fts ON mi.rowid = fts.rowid
-                    WHERE {where_sql} AND memory_items_fts MATCH ?
-                    ORDER BY bm25_score ASC
-                    LIMIT {sql_row_limit}
-                """
                 fts_query, ok = _compile_fts_query(query, search_mode)
                 if not ok:
                     if search_mode != "fts5":
                         return await _recurse_semantic()
                     return []
 
-                if os.environ.get("M3_DEBUG"):
-                    print(f"DEBUG SQL (hybrid):\n{sql}")
-                    print(f"DEBUG PARAMS: {(*params, fts_query)}")
-                rows = db.execute(sql, (*params, fts_query)).fetchall()
+                if has_vec:
+                    import struct
+                    q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
+                    sql = f"""
+                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
+                               bm25(memory_items_fts) as bm25_score,
+                               (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
+                        FROM memory_items mi
+                        JOIN memory_embeddings me ON mi.id = me.memory_id
+                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
+                        WHERE {where_sql} AND memory_items_fts MATCH ?
+                        ORDER BY bm25_score ASC
+                        LIMIT {sql_row_limit}
+                    """
+                    if os.environ.get("M3_DEBUG"):
+                        print(f"DEBUG SQL (hybrid sqlite-vec):\n{sql}")
+                    rows = db.execute(sql, (q_blob, *params, fts_query)).fetchall()
+                else:
+                    sql = f"""
+                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
+                               bm25(memory_items_fts) as bm25_score{extra_sql}
+                        FROM memory_items mi
+                        JOIN memory_embeddings me ON mi.id = me.memory_id
+                        JOIN memory_items_fts fts ON mi.rowid = fts.rowid
+                        WHERE {where_sql} AND memory_items_fts MATCH ?
+                        ORDER BY bm25_score ASC
+                        LIMIT {sql_row_limit}
+                    """
+                    if os.environ.get("M3_DEBUG"):
+                        print(f"DEBUG SQL (hybrid standard):\n{sql}")
+                    rows = db.execute(sql, (*params, fts_query)).fetchall()
+
                 if os.environ.get("M3_DEBUG"):
                     print(f"DEBUG SQL HITS (hybrid): {len(rows)}")
                 if not rows and search_mode != "fts5":
@@ -1156,7 +1213,10 @@ async def memory_search_scored_impl(
     # code path. Embeddings are only materialized as a list when MMR needs them
     # (lazy `_get_page_matrix` below).
     page_blobs = [r["embedding"] for r in rows]
-    page_scores = _cosine_batch_packed(q_vec, page_blobs, EMBED_DIM)
+    if has_vec:
+        page_scores = [float(row["vec_score"]) for row in rows]
+    else:
+        page_scores = _cosine_batch_packed(q_vec, page_blobs, EMBED_DIM)
 
     # Max-kind fusion: when the SQL let through multiple vector_kind rows
     # per memory_id, keep the row with the highest vector similarity so

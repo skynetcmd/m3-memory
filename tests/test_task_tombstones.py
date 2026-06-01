@@ -1,5 +1,8 @@
 import os
 import sys
+import tempfile
+import shutil
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +17,44 @@ from memory_core import (
     task_update_impl,
 )
 
+
+# ── Isolation: route every _db() call to a fresh temp DB ─────────────────────
+# Without this, task_create_impl targets the production DB (or whatever
+# M3_DATABASE resolves to at test time), which may be write-locked by the
+# dashboard server or another process — causing sqlite3.OperationalError:
+# database is locked inside _ensure_sync_tables.
+
+@pytest.fixture(autouse=True)
+def _isolated_db(monkeypatch, tmp_path):
+    """Per-test isolated main DB.
+
+    Copies a pre-migrated template (built once per session by
+    create_full_main_schema) into tmp_path, routes M3_DATABASE there,
+    and clears the _initialized_dbs cache so _lazy_init re-runs against
+    the new path. M3_SKIP_MIGRATIONS=1 prevents a second migrate_memory
+    subprocess since the template is already at the latest version.
+    """
+    from conftest import create_full_main_schema
+    import memory.db as _mdb
+
+    db_path = tmp_path / "tombstone_test.db"
+    create_full_main_schema(db_path)
+
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
+
+    # Clear the per-path init cache so _lazy_init runs against the new temp DB.
+    # M3Context.for_db() reads M3_DATABASE env dynamically each call, so no
+    # additional cache invalidation is needed beyond _initialized_dbs.
+    _mdb._initialized_dbs.discard(str(db_path))
+
+    yield db_path
+
+    # Teardown: evict temp path from cache to avoid cross-test bleed
+    _mdb._initialized_dbs.discard(str(db_path))
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def fresh_task():
@@ -32,6 +73,8 @@ def _row(task_id):
             (task_id,),
         ).fetchone()
 
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
 
 def test_soft_delete_sets_tombstone_and_hides_from_list(fresh_task):
     task_id = fresh_task
