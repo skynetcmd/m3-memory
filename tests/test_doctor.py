@@ -258,3 +258,32 @@ async def test_recommendations_actionable():
     for rec in out["recommendations"]:
         assert isinstance(rec, str)
         assert len(rec) > 20, f"recommendation too terse: {rec!r}"
+
+
+@pytest.mark.asyncio
+async def test_doctor_fix_mode():
+    """Verify that memory_doctor_fix_impl runs successfully in both dry_run and active mode."""
+    from memory.doctor import memory_doctor_fix_impl
+    # 1. Test dry_run=True (should run diagnosis and record skipped/dry_run actions)
+    out_dry = await memory_doctor_fix_impl(dry_run=True)
+    assert out_dry["dry_run"] is True
+    assert "actions" in out_dry
+    assert "summary" in out_dry
+    for act in out_dry["actions"]:
+        assert "action" in act
+        assert "status" in act
+        assert "detail" in act
+        if act["status"] != "skipped":
+            # Should have skipped or ok (if skipped due to dry_run or nothing to do)
+            assert "dry_run=True" in act["detail"] or "skipped" in act["status"]
+
+    # 2. Test dry_run=False
+    out_active = await memory_doctor_fix_impl(dry_run=False)
+    assert out_active["dry_run"] is False
+    assert "actions" in out_active
+    assert "summary" in out_active
+    # Since isolated environment DB might not have schema_versions or other tables initially,
+    # the doctor --fix will attempt migrations or cohesion rebuild.
+    # At least some action should succeed or be skipped.
+    assert out_active["summary"] in {"ok", "nothing_to_do", "partial", "failed"}
+

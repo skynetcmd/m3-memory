@@ -184,6 +184,10 @@ class SetupPlan:
     # B15: GGUF path discovered + accepted in preflight. Used by the embedder
     # install step to pin tier-1 into the service config.toml so it persists.
     embed_gguf: Optional[str] = None
+    decouple_roots: bool = False
+    config_root: Optional[str] = None
+    engine_root: Optional[str] = None
+    fips_mode: bool = False
 
 
 # ── prompt phase ──────────────────────────────────────────────────────────────
@@ -207,6 +211,15 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
             plan.targets = detected
         plan.capture_mode = args.capture_mode or "both"
         plan.install_gpu_embedder = bool(args.install_gpu_embedder)
+        plan.decouple_roots = bool(getattr(args, "decouple_roots", False))
+        plan.config_root = getattr(args, "config_root", None)
+        plan.engine_root = getattr(args, "engine_root", None)
+        if plan.decouple_roots:
+            if not plan.config_root:
+                plan.config_root = os.path.expanduser("~/.m3/config")
+            if not plan.engine_root:
+                plan.engine_root = os.path.expanduser("~/.m3/engine")
+        plan.fips_mode = bool(getattr(args, "fips_mode", False))
         return plan
 
     # ── interactive prompts ───────────────────────────────────────────────────
@@ -276,6 +289,28 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         default=False,
     )
 
+    print()
+    print("  Decoupled Directory Scheme:")
+    print("    Configure separate folders for configurations (~/.m3/config) and")
+    print("    databases (~/.m3/engine) to ensure clean security boundaries.")
+    plan.decouple_roots = _ask_yes_no(
+        "  Configure decoupled directories (~/.m3/config and ~/.m3/engine)?",
+        default=True,
+    )
+    if plan.decouple_roots:
+        plan.config_root = os.path.expanduser("~/.m3/config")
+        plan.engine_root = os.path.expanduser("~/.m3/engine")
+        _say(f"    Config root: {plan.config_root}")
+        _say(f"    Engine root: {plan.engine_root}")
+
+    print()
+    print("  Strict FIPS 140-3 Security Lock:")
+    print("    Enables strict wolfSSL-based FIPS compliance boundaries for crypto operations.")
+    plan.fips_mode = _ask_yes_no(
+        "  Enable strict FIPS 140-3 compliance execution mode (M3_FIPS_MODE=1)?",
+        default=False,
+    )
+
     return plan
 
 
@@ -296,6 +331,13 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     """
     _say("Step 0/5: pre-install checks (B15)")
     ok = True
+
+    # ── Probe 0: decoupled paths and FIPS configuration ─────────────────
+    if plan.decouple_roots:
+        _ok(f"  decoupled config root: {plan.config_root}")
+        _ok(f"  decoupled engine root: {plan.engine_root}")
+    if plan.fips_mode:
+        _ok("  strict FIPS 140-3 execution mode: ENABLED")
 
     # ── Probe 1: stale m3_memory/ package shadowing ─────────────────────
     # If another repo (e.g. an old m3-lme-s clone) has a top-level
@@ -735,6 +777,17 @@ def _summary(plan: SetupPlan) -> None:
     else:
         print("No agents were wired. Run `m3 setup` again or wire one by hand.")
     print()
+    if plan.decouple_roots or plan.fips_mode:
+        print("Security & Path Configuration:")
+        print("  To ensure these settings persist across shell sessions and are visible to your agents,")
+        print("  please add the following environment variables to your shell profile (.bashrc, .zshrc, or Windows Env):")
+        if plan.decouple_roots:
+            print(f"    export M3_CONFIG_ROOT=\"{plan.config_root}\"")
+            print(f"    export M3_ENGINE_ROOT=\"{plan.engine_root}\"")
+        if plan.fips_mode:
+            print("    export M3_FIPS_MODE=1")
+        print()
+
     print("Quick checks:")
     print("  m3 doctor           # verify everything")
     print("  m3 --help           # see every subcommand")
@@ -764,11 +817,25 @@ def run_setup(args: argparse.Namespace) -> int:
         print(f"  LLM endpoint : {plan.endpoint}")
     if plan.cognitive_loop:
         print("  cognitive loop: enabled")
+    print(f"  decouple roots: {'yes' if plan.decouple_roots else 'no'}")
+    if plan.decouple_roots:
+        print(f"    config root: {plan.config_root}")
+        print(f"    engine root: {plan.engine_root}")
+    print(f"  strict FIPS  : {'yes' if plan.fips_mode else 'no'}")
     print()
 
     if not args.non_interactive and not _ask_yes_no("Proceed?", default=True):
         _warn("aborted by user — no changes made")
         return 1
+
+    # Set decoupled paths and FIPS compliance mode in environment so child commands inherit
+    if plan.decouple_roots:
+        os.environ["M3_CONFIG_ROOT"] = plan.config_root
+        os.environ["M3_ENGINE_ROOT"] = plan.engine_root
+        os.makedirs(plan.config_root, exist_ok=True)
+        os.makedirs(plan.engine_root, exist_ok=True)
+    if plan.fips_mode:
+        os.environ["M3_FIPS_MODE"] = "1"
 
     # Execute. Step 0 (preflight) and Step 1 (install-m3) can hard-abort.
     if not _step_preflight(plan, args):
@@ -826,5 +893,21 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cognitive-loop", action="store_true",
         help="Enable the background cognitive loop worker.",
+    )
+    parser.add_argument(
+        "--decouple-roots", action="store_true",
+        help="Configure decoupled directories (~/.m3/config and ~/.m3/engine).",
+    )
+    parser.add_argument(
+        "--config-root", default=None,
+        help="Explicit M3_CONFIG_ROOT path.",
+    )
+    parser.add_argument(
+        "--engine-root", default=None,
+        help="Explicit M3_ENGINE_ROOT path.",
+    )
+    parser.add_argument(
+        "--fips-mode", action="store_true",
+        help="Enable strict M3_FIPS_MODE=1 execution mode and security locks.",
     )
     parser.set_defaults(func=run_setup)

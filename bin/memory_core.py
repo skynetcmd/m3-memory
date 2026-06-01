@@ -64,324 +64,312 @@ from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
 from llm_failover import get_best_llm
 from m3_sdk import M3Context, resolve_db_path
-from memory.chroma import (  # noqa: F401
-    _CHROMA_COLLECTION_ID_CACHE,
-    _query_chroma,
-    _queue_chroma,
-    _resolve_chroma_collection_id,
-)
-from memory.config import (  # noqa: F401 — re-exports
-    _DEFAULT_VALID_ENTITY_PREDICATES,
-    _DEFAULT_VALID_ENTITY_TYPES,
-    _EMBED_MODEL_OVERRIDE,
-    _EMBED_URL_OVERRIDE,
-    _ENV_ENTITY_VOCAB_YAML,
-    _OXIDATION_DISABLED,
-    ARCHIVE_DB_PATH,
-    AUTO_RELATED_LINK,
-    AUTO_RELATED_LINK_SCOPE_BY_VARIANT,
-    BASE_DIR,
-    CHROMA_BASE_URL,
-    CHROMA_COLLECTION,
-    CHROMA_COLLECTIONS,
-    CHROMA_CONNECT_T,
-    CHROMA_CONTENT_MAX,
-    CHROMA_PULL_PAGE_SIZE,
-    CHROMA_READ_T,
-    CHROMA_V2_PREFIX,
-    CONTRADICTION_THRESHOLD,
-    CONTRADICTION_TITLE_GATE,
-    CONTRADICTION_TYPE_EXCLUSIONS,
-    DB_PATH,
-    DEDUP_LIMIT,
-    DEDUP_THRESHOLD,
-    DEFAULT_CHANGE_AGENT,
-    DEFAULT_ENTITY_VOCAB_YAML,
-    DEFAULT_RERANK_MODEL,
-    ELBOW_ABS_THRESHOLD,
-    ELBOW_MIN_INPUT,
-    ELBOW_MIN_RETURN,
-    EMBED_BREAKER_CLOUD_RESET_SECS,
-    EMBED_BREAKER_CLOUD_THRESHOLD,
-    EMBED_DIM,
-    EMBED_MODEL,
-    EMBED_TIMEOUT_READ,
-    ENABLE_ENTITY_GRAPH,
-    ENABLE_FACT_ENRICHED,
-    ENTITY_EXTRACT_CONCURRENCY,
-    ENTITY_EXTRACT_MAX_ATTEMPTS,
-    ENTITY_RESOLVE_COSINE_MIN,
-    ENTITY_RESOLVE_FUZZY_MIN,
-    ENTITY_SEED_STOPLIST,
-    EXPANSION_DISPLACEMENT_MARGIN,
-    EXPANSION_PROTECTED_RANKS,
-    FACT_ENRICH_CONCURRENCY,
-    FACT_ENRICH_MAX_ATTEMPTS,
-    FEDERATION_LOW_SCORE_THRESHOLD,
-    IMPORTANCE_WEIGHT,
-    INGEST_EVENT_ROWS,
-    INGEST_GIST_MIN_TURNS,
-    INGEST_GIST_ROWS,
-    INGEST_GIST_STRIDE,
-    INGEST_WINDOW_CHUNKS,
-    INGEST_WINDOW_SIZE,
-    INTENT_ROUTING,
-    INTENT_USER_FACT_BOOST,
-    LLM_TIMEOUT,
-    M3_ALLOW_CLOUD_FALLBACK,
-    M3_CLOUD_AUTH_TOKEN_KEYRING,
-    M3_CLOUD_ENCLAVE_URL,
-    M3_CLOUD_MINIMIZATION_LEVEL,
-    ORIGIN_DEVICE,
-    QUERY_TYPE_ROUTING,
-    SEARCH_ROW_CAP,
-    SHORT_TURN_THRESHOLD,
-    SPEAKER_IN_TITLE,
-    SUPERSEDES_PENALTY,
-    TITLE_MATCH_BOOST,
-    m3_core_rs,
-)
-from memory.db import (  # noqa: F401 — re-exports
-    _ACCESS_FLUSH_INTERVAL,
-    _ENTITY_COUNT_QUERY,
-    _GATE_CACHE,
-    _GATE_CACHE_TTL,
-    _OBS_COUNT_QUERY,
-    _access_flusher_task,
-    _access_lock,
-    _access_pending,
-    _access_stamp_flusher,
-    _backfill_change_agent,
-    _conn,
-    _db,
-    _enqueue_access_stamps,
-    _ensure_sync_tables,
-    _gate_active,
-    _gate_count_query,
-    _init_lock,
-    _initialized,
-    _initialized_dbs,
-    _lazy_init,
-    _local,
-    _record_history,
-    memory_history_impl,
-)
-from memory.doctor import memory_doctor_impl  # noqa: F401 — re-export
-from memory.embed import (  # noqa: F401 — re-exports
-    _CPU_FALLBACK_BREAKER,
-    _DENSE_ERR_RE,
-    _EMBED_BACKEND_STATS,
-    _EMBED_BACKEND_STATS_LOCK,
-    _EMBED_BULK_SEM,
-    _EMBED_CLIENT,
-    _EMBED_CLIENT_LOCK,
-    _EMBED_CLIENT_LOOP_ID,
-    _EMBED_DIM_VALIDATED,
-    _EMBED_FALLBACK_URL,
-    _EMBED_GGUF_MODEL_TAG,
-    _EMBED_GGUF_PATH,
-    _EMBED_HTTP_KEEPALIVE_EXPIRY,
-    _EMBED_HTTP_MAX_CONNS,
-    _EMBED_HTTP_MAX_KEEPALIVE,
-    _EMBED_SEM,
-    # Per-backend circuit breakers (audit item L). Each breaker is a
-    # m3_core_rs.CircuitBreaker (or None when Rust is unavailable or the
-    # operator set the threshold env var to 0). Re-exported through the
-    # shim so external diagnostics (`embedder_status_impl`, ops scripts)
-    # can read breaker state without importing memory.embed directly.
-    _EMBEDDED_BREAKER,
-    _ENTITY_NAME_EMBED_CACHE,
-    _PRIMARY_BREAKER,
-    DENSE_MIN_SUB_CHARS,
-    DENSE_TARGET_TOKENS,
-    DENSE_TOKEN_OVERLAP,
-    EMBED_BULK_CHUNK,
-    EMBED_BULK_CONCURRENCY,
-    ENTITY_NAME_EMBED_CACHE_MAX,
-    MAX_CHARS_PER_CHUNK,
-    MIN_OVERLAP_CHARS,
-    STRIDE_CHARS,
-    EmbeddedBackendError,
-    # Typed exceptions for log-line clarity (D in the perf audit). Cascade
-    # contract unchanged — callers still see (None, model) on total failure;
-    # these classes only surface in log lines via their type names.
-    EmbedError,
-    EmbedFallbackError,
-    EmbedPrimaryError,
-    EmbedSemaphoreTimeout,
-    _augment_embed_text_with_anchors,
-    _chunk_for_sliding_window,
-    _content_hash,
-    _embed,
-    _embed_canonical_cached,
-    _embed_many,
-    _embedded_embed_checked,
-    _embedded_embedder,
-    _embedded_label,
-    _get_embed_client,
-    _get_embedded_embedder,
-    _record_embed_backend,
-    _shared_embed_client,
-    _subdivide_dense_chunk,
-    embedder_status_impl,
-    get_embed_backend_stats,
-    get_embed_breaker_state,
-    reset_embed_backend_stats,
-    reset_embed_breakers,
-    set_embed_override,
-)
-from memory.enrich import (  # noqa: F401 — re-exports
-    _select_pending_fact_enrichment,
-    _try_enrich_or_enqueue,
-    enrich_pending_impl,
-)
-from memory.entity import (  # noqa: F401 — re-exports
-    _ENTITY_EXTRACT_SEM,
-    _PENDING_ENTITY_TASKS,
-    _TOKEN_PUNCT_RE,
-    VALID_ENTITY_PREDICATES,
-    VALID_ENTITY_TYPES,
-    _create_entity,
-    _enqueue_entity_extraction,
-    _link_entity_relationship,
-    _link_memory_to_entity,
-    _resolve_entity,
-    _resolve_entity_async,
-    _run_entity_extractor,
-    _select_pending_entity_extraction,
-    _token_jaccard,
-    _try_extract_or_enqueue,
-    entity_extractor_health,
-    entity_get_impl,
-    entity_search_impl,
-    extract_pending_impl,
-    load_entity_vocab,
-)
-from memory.entity_count import (  # noqa: F401 — re-exports
-    count_entities_impl,
-    count_mentions_impl,
-    list_mentions_impl,
-)
-from memory.fts import (  # noqa: F401 — re-exports
-    _EVENT_DATE_HINT,
-    _EVENT_PROPER_NOUN,
-    _EVENT_SENT_SPLIT,
-    _EVENT_VERB_LIST,
-    _EVENT_VERB_RE,
-    _FTS_OPERATORS,
-    _SEARCHABLE_PUNCT,
-    _TOKEN_SPLIT,
-    _augment_title_with_role,
-    _compile_fts_query,
-    _query_title_overlap,
-    _query_title_token_set,
-    _sanitize_for_searchable,
-    _sanitize_fts,
-    _title_overlap_from_qset,
-)
-from memory.graph import (  # noqa: F401 — re-exports
-    _entity_graph_neighbor_ids,
-    _graph_neighbor_ids,
-    _score_extra_rows,
-    _session_neighbor_ids,
-    memory_graph_impl,
-)
-from memory.search import (  # noqa: F401
-    _DATE_MONTHS,
-    _DATE_RE_ISO,
-    _DATE_RE_LONG,
-    _ENTITY_MENTION_PATTERNS,
-    _ENTITY_MENTION_RE,
-    _RERANKER_MODEL,
-    _RERANKER_MODEL_NAME,
-    _TEMPORAL_QUERY_RE,
-    _TEMPORAL_ROUTER_PATTERNS,
-    _TEMPORAL_ROUTER_RE,
-    _UNSET,
-    _apply_auto_layer,
-    _apply_recency_bonus,
-    _apply_rerank,
-    _apply_sharp_trim,
-    _apply_temporal_boost,
-    _cosine_batch_packed,
-    _enforce_expansion_displacement_guard,
-    _extract_caller_overrides,
-    _get_reranker,
-    _hybrid_score_batch,
-    _maybe_expand_routed,
-    _maybe_route_query,
-    _pull_predecessor_turns,
-    _recency_bonus_ranks,
-    _trim_by_elbow,
-    is_temporal_query,
-    memory_search_impl,
-    memory_search_multi_db_impl,
-    memory_search_routed_impl,
-    memory_search_scored_impl,
-)
 
-# Phase 4.B (in progress): search/retrieval moves to bin/memory/search.py.
-# Sub-commit 1 brings just the scoring helpers; search-impls land in later
-# sub-commits. _batch_cosine moved to memory.util (write-path + search-path
-# co-tenant).
-from memory.util import (
-    _batch_cosine,  # noqa: F401 — re-export
-    _cosine,  # noqa: F401 — re-export for memory_maintenance
-)
-from memory.util import sha256_hex as _sha256_hex  # noqa: F401 — re-export
-from memory.write import (  # noqa: F401 — re-exports
-    _check_contradictions,
-    memory_link_impl,
-    memory_supersede_impl,
-    memory_write_batch_impl,
-    memory_write_bulk_impl,
-    memory_write_from_file_impl,
-    memory_write_impl,
-)
+# ── Dynamic Plugin Architecture (Milestone 1) ─────────────────────────────────
+# Lazily import submodules only when their attributes are accessed, minimizing
+# startup overhead and context initialization footprint.
 
-# Phase 4.A: Chroma federation helpers (queue insert, collection-id cache,
-# federated query) moved to bin/memory/chroma.py. _CHROMA_COLLECTION_ID_CACHE
-# preserves identity through this re-export.
-from memory import chroma as _mc_chroma  # noqa: F401
+_LAZY_IMPORTS = {
+    # memory.chroma
+    "_CHROMA_COLLECTION_ID_CACHE": "memory.chroma",
+    "_query_chroma": "memory.chroma",
+    "_queue_chroma": "memory.chroma",
+    "_resolve_chroma_collection_id": "memory.chroma",
+    "_mc_chroma": "memory",
 
-# ── Modularization shim (Phase 1) ─────────────────────────────────────────────
-# The constants and Rust-core reference below now live in bin/memory/config.py.
-# This module re-exports them to preserve back-compat for callers that import
-# directly from memory_core. See docs/MEMORY_CORE_MODULARIZATION.md.
-#
-# Mutable config-shapes (`_EMBED_URL_OVERRIDE`, `_EMBED_MODEL_OVERRIDE`) live
-# on `memory.config` as module attributes. Code that WRITES them must do so
-# through the module attribute (e.g. `config._EMBED_URL_OVERRIDE = url`), not
-# via a local binding here, or the writes won't be observable to other
-# modules importing through `memory.config`.
-from memory import config as _mc_config  # noqa: F401 — used for mutable attrs
+    # memory.config
+    "_DEFAULT_VALID_ENTITY_PREDICATES": "memory.config",
+    "_DEFAULT_VALID_ENTITY_TYPES": "memory.config",
+    "_EMBED_MODEL_OVERRIDE": "memory.config",
+    "_EMBED_URL_OVERRIDE": "memory.config",
+    "_ENV_ENTITY_VOCAB_YAML": "memory.config",
+    "_OXIDATION_DISABLED": "memory.config",
+    "ARCHIVE_DB_PATH": "memory.config",
+    "AUTO_RELATED_LINK": "memory.config",
+    "AUTO_RELATED_LINK_SCOPE_BY_VARIANT": "memory.config",
+    "BASE_DIR": "memory.config",
+    "CHROMA_BASE_URL": "memory.config",
+    "CHROMA_COLLECTION": "memory.config",
+    "CHROMA_COLLECTIONS": "memory.config",
+    "CHROMA_CONNECT_T": "memory.config",
+    "CHROMA_CONTENT_MAX": "memory.config",
+    "CHROMA_PULL_PAGE_SIZE": "memory.config",
+    "CHROMA_READ_T": "memory.config",
+    "CHROMA_V2_PREFIX": "memory.config",
+    "CONTRADICTION_THRESHOLD": "memory.config",
+    "CONTRADICTION_TITLE_GATE": "memory.config",
+    "CONTRADICTION_TYPE_EXCLUSIONS": "memory.config",
+    "DB_PATH": "memory.config",
+    "DEDUP_LIMIT": "memory.config",
+    "DEDUP_THRESHOLD": "memory.config",
+    "DEFAULT_CHANGE_AGENT": "memory.config",
+    "DEFAULT_ENTITY_VOCAB_YAML": "memory.config",
+    "DEFAULT_RERANK_MODEL": "memory.config",
+    "ELBOW_ABS_THRESHOLD": "memory.config",
+    "ELBOW_MIN_INPUT": "memory.config",
+    "ELBOW_MIN_RETURN": "memory.config",
+    "EMBED_BREAKER_CLOUD_RESET_SECS": "memory.config",
+    "EMBED_BREAKER_CLOUD_THRESHOLD": "memory.config",
+    "EMBED_DIM": "memory.config",
+    "EMBED_MODEL": "memory.config",
+    "EMBED_TIMEOUT_READ": "memory.config",
+    "ENABLE_ENTITY_GRAPH": "memory.config",
+    "ENABLE_FACT_ENRICHED": "memory.config",
+    "ENTITY_EXTRACT_CONCURRENCY": "memory.config",
+    "ENTITY_EXTRACT_MAX_ATTEMPTS": "memory.config",
+    "ENTITY_RESOLVE_COSINE_MIN": "memory.config",
+    "ENTITY_RESOLVE_FUZZY_MIN": "memory.config",
+    "ENTITY_SEED_STOPLIST": "memory.config",
+    "EXPANSION_DISPLACEMENT_MARGIN": "memory.config",
+    "EXPANSION_PROTECTED_RANKS": "memory.config",
+    "FACT_ENRICH_CONCURRENCY": "memory.config",
+    "FACT_ENRICH_MAX_ATTEMPTS": "memory.config",
+    "FEDERATION_LOW_SCORE_THRESHOLD": "memory.config",
+    "IMPORTANCE_WEIGHT": "memory.config",
+    "INGEST_EVENT_ROWS": "memory.config",
+    "INGEST_GIST_MIN_TURNS": "memory.config",
+    "INGEST_GIST_ROWS": "memory.config",
+    "INGEST_GIST_STRIDE": "memory.config",
+    "INGEST_WINDOW_CHUNKS": "memory.config",
+    "INGEST_WINDOW_SIZE": "memory.config",
+    "INTENT_ROUTING": "memory.config",
+    "INTENT_USER_FACT_BOOST": "memory.config",
+    "LLM_TIMEOUT": "memory.config",
+    "M3_ALLOW_CLOUD_FALLBACK": "memory.config",
+    "M3_CLOUD_AUTH_TOKEN_KEYRING": "memory.config",
+    "M3_CLOUD_ENCLAVE_URL": "memory.config",
+    "M3_CLOUD_MINIMIZATION_LEVEL": "memory.config",
+    "ORIGIN_DEVICE": "memory.config",
+    "QUERY_TYPE_ROUTING": "memory.config",
+    "SEARCH_ROW_CAP": "memory.config",
+    "SHORT_TURN_THRESHOLD": "memory.config",
+    "SPEAKER_IN_TITLE": "memory.config",
+    "SUPERSEDES_PENALTY": "memory.config",
+    "TITLE_MATCH_BOOST": "memory.config",
+    "m3_core_rs": "memory.config",
+    "_mc_config": "memory",
 
-# Phase 2.B: SQLite primitives, schema lifecycle, history, gate cache, and
-# the access-stamp batcher live on bin/memory/db.py. The mutable sets/dicts
-# (_initialized_dbs, _GATE_CACHE, _access_pending) are externally imported;
-# the shim preserves their identity by re-exporting the references rather
-# than re-assigning them.
-from memory import db as _mc_db  # noqa: F401
+    # memory.db
+    "_ACCESS_FLUSH_INTERVAL": "memory.db",
+    "_ENTITY_COUNT_QUERY": "memory.db",
+    "_GATE_CACHE": "memory.db",
+    "_GATE_CACHE_TTL": "memory.db",
+    "_OBS_COUNT_QUERY": "memory.db",
+    "_access_flusher_task": "memory.db",
+    "_access_lock": "memory.db",
+    "_access_pending": "memory.db",
+    "_access_stamp_flusher": "memory.db",
+    "_backfill_change_agent": "memory.db",
+    "_conn": "memory.db",
+    "_db": "memory.db",
+    "_enqueue_access_stamps": "memory.db",
+    "_ensure_sync_tables": "memory.db",
+    "_gate_active": "memory.db",
+    "_gate_count_query": "memory.db",
+    "_init_lock": "memory.db",
+    "_initialized": "memory.db",
+    "_initialized_dbs": "memory.db",
+    "_lazy_init": "memory.db",
+    "_local": "memory.db",
+    "_record_history": "memory.db",
+    "memory_history_impl": "memory.db",
+    "_mc_db": "memory",
 
-# Phase 3: The embedding pipeline (cascade, in-process embedder lazy-init,
-# sliding-window chunking, dense recovery, anchor augmentation, HTTP-client
-# singleton, backend stats, canonical-name cache) lives in bin/memory/embed.py.
-# The mutable containers (_EMBED_BACKEND_STATS, _ENTITY_NAME_EMBED_CACHE,
-# _embedded_embedder/_checked) preserve identity through these re-exports.
-from memory import embed as _mc_embed  # noqa: F401
+    # memory.doctor
+    "memory_doctor_impl": "memory.doctor",
+    "memory_doctor_fix_impl": "memory.doctor",
 
-# Phase 6: entity-extraction subsystem (vocab loading, canonical-name
-# resolution, entity CRUD, queue runner, MCP read-side impls) lives in
-# bin/memory/entity.py. Externally-imported state — VALID_ENTITY_TYPES,
-# VALID_ENTITY_PREDICATES, _ENTITY_EXTRACT_SEM, _PENDING_ENTITY_TASKS —
-# is re-exported via `from .entity import ...` so object identity
-# survives the shim (callers comparing `id(mc.VALID_ENTITY_TYPES)`
-# against `id(memory.entity.VALID_ENTITY_TYPES)` stay equal).
-from memory import entity as _mc_entity  # noqa: F401
-from memory import search as _mc_search  # noqa: F401
+    # memory.embed
+    "_CPU_FALLBACK_BREAKER": "memory.embed",
+    "_DENSE_ERR_RE": "memory.embed",
+    "_EMBED_BACKEND_STATS": "memory.embed",
+    "_EMBED_BACKEND_STATS_LOCK": "memory.embed",
+    "_EMBED_BULK_SEM": "memory.embed",
+    "_EMBED_CLIENT": "memory.embed",
+    "_EMBED_CLIENT_LOCK": "memory.embed",
+    "_EMBED_CLIENT_LOOP_ID": "memory.embed",
+    "_EMBED_DIM_VALIDATED": "memory.embed",
+    "_EMBED_FALLBACK_URL": "memory.embed",
+    "_EMBED_GGUF_MODEL_TAG": "memory.embed",
+    "_EMBED_GGUF_PATH": "memory.embed",
+    "_EMBED_HTTP_KEEPALIVE_EXPIRY": "memory.embed",
+    "_EMBED_HTTP_MAX_CONNS": "memory.embed",
+    "_EMBED_HTTP_MAX_KEEPALIVE": "memory.embed",
+    "_EMBED_SEM": "memory.embed",
+    "_EMBEDDED_BREAKER": "memory.embed",
+    "_ENTITY_NAME_EMBED_CACHE": "memory.embed",
+    "_PRIMARY_BREAKER": "memory.embed",
+    "DENSE_MIN_SUB_CHARS": "memory.embed",
+    "DENSE_TARGET_TOKENS": "memory.embed",
+    "DENSE_TOKEN_OVERLAP": "memory.embed",
+    "EMBED_BULK_CHUNK": "memory.embed",
+    "EMBED_BULK_CONCURRENCY": "memory.embed",
+    "ENTITY_NAME_EMBED_CACHE_MAX": "memory.embed",
+    "MAX_CHARS_PER_CHUNK": "memory.embed",
+    "MIN_OVERLAP_CHARS": "memory.embed",
+    "STRIDE_CHARS": "memory.embed",
+    "EmbeddedBackendError": "memory.embed",
+    "EmbedError": "memory.embed",
+    "EmbedFallbackError": "memory.embed",
+    "EmbedPrimaryError": "memory.embed",
+    "EmbedSemaphoreTimeout": "memory.embed",
+    "_augment_embed_text_with_anchors": "memory.embed",
+    "_chunk_for_sliding_window": "memory.embed",
+    "_content_hash": "memory.embed",
+    "_embed": "memory.embed",
+    "_embed_canonical_cached": "memory.embed",
+    "_embed_many": "memory.embed",
+    "_embedded_embed_checked": "memory.embed",
+    "_embedded_embedder": "memory.embed",
+    "_embedded_label": "memory.embed",
+    "_get_embed_client": "memory.embed",
+    "_get_embedded_embedder": "memory.embed",
+    "_record_embed_backend": "memory.embed",
+    "_shared_embed_client": "memory.embed",
+    "_subdivide_dense_chunk": "memory.embed",
+    "embedder_status_impl": "memory.embed",
+    "get_embed_backend_stats": "memory.embed",
+    "get_embed_breaker_state": "memory.embed",
+    "reset_embed_backend_stats": "memory.embed",
+    "reset_embed_breakers": "memory.embed",
+    "set_embed_override": "memory.embed",
+    "_mc_embed": "memory",
 
-# In-process llama.cpp embedding backend. Opt-in: set M3_EMBED_GGUF to the
-# bge-m3 GGUF path. Unset (default) -> the HTTP embed path is used unchanged.
+    # memory.enrich
+    "_select_pending_fact_enrichment": "memory.enrich",
+    "_try_enrich_or_enqueue": "memory.enrich",
+    "enrich_pending_impl": "memory.enrich",
+
+    # memory.entity
+    "_ENTITY_EXTRACT_SEM": "memory.entity",
+    "_PENDING_ENTITY_TASKS": "memory.entity",
+    "_TOKEN_PUNCT_RE": "memory.entity",
+    "VALID_ENTITY_PREDICATES": "memory.entity",
+    "VALID_ENTITY_TYPES": "memory.entity",
+    "_create_entity": "memory.entity",
+    "_enqueue_entity_extraction": "memory.entity",
+    "_link_entity_relationship": "memory.entity",
+    "_link_memory_to_entity": "memory.entity",
+    "_resolve_entity": "memory.entity",
+    "_resolve_entity_async": "memory.entity",
+    "_run_entity_extractor": "memory.entity",
+    "_select_pending_entity_extraction": "memory.entity",
+    "_token_jaccard": "memory.entity",
+    "_try_extract_or_enqueue": "memory.entity",
+    "entity_extractor_health": "memory.entity",
+    "entity_get_impl": "memory.entity",
+    "entity_search_impl": "memory.entity",
+    "extract_pending_impl": "memory.entity",
+    "load_entity_vocab": "memory.entity",
+    "_mc_entity": "memory",
+
+    # memory.entity_count
+    "count_entities_impl": "memory.entity_count",
+    "count_mentions_impl": "memory.entity_count",
+    "list_mentions_impl": "memory.entity_count",
+
+    # memory.fts
+    "_EVENT_DATE_HINT": "memory.fts",
+    "_EVENT_PROPER_NOUN": "memory.fts",
+    "_EVENT_SENT_SPLIT": "memory.fts",
+    "_EVENT_VERB_LIST": "memory.fts",
+    "_EVENT_VERB_RE": "memory.fts",
+    "_FTS_OPERATORS": "memory.fts",
+    "_SEARCHABLE_PUNCT": "memory.fts",
+    "_TOKEN_SPLIT": "memory.fts",
+    "_augment_title_with_role": "memory.fts",
+    "_compile_fts_query": "memory.fts",
+    "_query_title_overlap": "memory.fts",
+    "_query_title_token_set": "memory.fts",
+    "_sanitize_for_searchable": "memory.fts",
+    "_sanitize_fts": "memory.fts",
+    "_title_overlap_from_qset": "memory.fts",
+
+    # memory.graph
+    "_entity_graph_neighbor_ids": "memory.graph",
+    "_graph_neighbor_ids": "memory.graph",
+    "_score_extra_rows": "memory.graph",
+    "_session_neighbor_ids": "memory.graph",
+    "memory_graph_impl": "memory.graph",
+
+    # memory.search
+    "_DATE_MONTHS": "memory.search",
+    "_DATE_RE_ISO": "memory.search",
+    "_DATE_RE_LONG": "memory.search",
+    "_ENTITY_MENTION_PATTERNS": "memory.search",
+    "_ENTITY_MENTION_RE": "memory.search",
+    "_RERANKER_MODEL": "memory.search",
+    "_RERANKER_MODEL_NAME": "memory.search",
+    "_TEMPORAL_QUERY_RE": "memory.search",
+    "_TEMPORAL_ROUTER_PATTERNS": "memory.search",
+    "_TEMPORAL_ROUTER_RE": "memory.search",
+    "_UNSET": "memory.search",
+    "_apply_auto_layer": "memory.search",
+    "_apply_recency_bonus": "memory.search",
+    "_apply_rerank": "memory.search",
+    "_apply_sharp_trim": "memory.search",
+    "_apply_temporal_boost": "memory.search",
+    "_cosine_batch_packed": "memory.search",
+    "_enforce_expansion_displacement_guard": "memory.search",
+    "_extract_caller_overrides": "memory.search",
+    "_get_reranker": "memory.search",
+    "_hybrid_score_batch": "memory.search",
+    "_maybe_expand_routed": "memory.search",
+    "_maybe_route_query": "memory.search",
+    "_pull_predecessor_turns": "memory.search",
+    "_recency_bonus_ranks": "memory.search",
+    "_trim_by_elbow": "memory.search",
+    "is_temporal_query": "memory.search",
+    "memory_search_impl": "memory.search",
+    "memory_search_multi_db_impl": "memory.search",
+    "memory_search_routed_impl": "memory.search",
+    "memory_search_scored_impl": "memory.search",
+    "_mc_search": "memory",
+
+    # memory.util
+    "_batch_cosine": "memory.util",
+    "_cosine": "memory.util",
+    "_sha256_hex": "memory.util",
+
+    # memory.write
+    "_check_contradictions": "memory.write",
+    "memory_link_impl": "memory.write",
+    "memory_supersede_impl": "memory.write",
+    "memory_write_batch_impl": "memory.write",
+    "memory_write_bulk_impl": "memory.write",
+    "memory_write_from_file_impl": "memory.write",
+    "memory_write_impl": "memory.write",
+
+    # lazy semaphores / variables
+    "_FACT_ENRICH_SEM": "lazy_sem",
+}
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_IMPORTS:
+        mod_name = _LAZY_IMPORTS[name]
+        import importlib
+        if mod_name == "memory":
+            real_sub = name.replace("_mc_", "")
+            val = importlib.import_module(f"memory.{real_sub}")
+        elif name == "_sha256_hex":
+            val = getattr(importlib.import_module(mod_name), "sha256_hex")
+        elif name == "_FACT_ENRICH_SEM":
+            import asyncio
+            from memory.config import FACT_ENRICH_CONCURRENCY
+            val = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
+        else:
+            val = getattr(importlib.import_module(mod_name), name)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_LAZY_IMPORTS.keys()))
+
+
+
+
+
 # Guarded on EMBED_DIM: if the GGUF's dimension doesn't match, the embedded
 # path is disabled and HTTP is used, rather than writing incompatible vectors
 # into the index. M3_CORE_RS_DISABLE forces HTTP regardless.
@@ -580,7 +568,6 @@ from memory.util import _POISON_PATTERNS, _check_content_safety  # noqa: F401
 # Re-exported via the shim at the top.
 # _EMBED_SEM and _EMBED_DIM_VALIDATED moved to bin/memory/embed.py in Phase 3.
 # Enrichment-pipeline semaphores stay here until enrich.py is extracted.
-_FACT_ENRICH_SEM = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
 
 _COST_COUNTERS = {"embed_calls": 0, "embed_tokens_est": 0, "search_calls": 0, "write_calls": 0}
 _PENDING_FACT_TASKS: set[asyncio.Task] = set()
@@ -607,14 +594,20 @@ _PENDING_FACT_TASKS: set[asyncio.Task] = set()
 # Re-exported via the shim at the top.
 
 def _prefer_observations_gate() -> bool:
-    return _gate_active("M3_PREFER_OBSERVATIONS", _OBS_COUNT_QUERY, threshold=100)
+    import sys
+    mc = sys.modules[__name__]
+    return getattr(mc, "_gate_active")("M3_PREFER_OBSERVATIONS", getattr(mc, "_OBS_COUNT_QUERY"), threshold=100)
 
 def _two_stage_observations_gate() -> bool:
     # Paired with PREFER_OBSERVATIONS: same trigger.
-    return _gate_active("M3_TWO_STAGE_OBSERVATIONS", _OBS_COUNT_QUERY, threshold=100)
+    import sys
+    mc = sys.modules[__name__]
+    return getattr(mc, "_gate_active")("M3_TWO_STAGE_OBSERVATIONS", getattr(mc, "_OBS_COUNT_QUERY"), threshold=100)
 
 def _enable_entity_graph_gate() -> bool:
-    return _gate_active("M3_ENABLE_ENTITY_GRAPH", _ENTITY_COUNT_QUERY, threshold=1)
+    import sys
+    mc = sys.modules[__name__]
+    return getattr(mc, "_gate_active")("M3_ENABLE_ENTITY_GRAPH", getattr(mc, "_ENTITY_COUNT_QUERY"), threshold=1)
 
 
 _AUTO_ENTITIES_CACHE: dict[str, list[str]] = {}

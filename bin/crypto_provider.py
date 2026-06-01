@@ -291,17 +291,17 @@ class CryptoProvider:
         # Default Fallback (Standard Python ssl)
         import ssl
         ctx = ssl.create_default_context()
-        # Explicitly disable old TLS versions
-        if hasattr(ssl, "OP_NO_SSLv2"): ctx.options |= ssl.OP_NO_SSLv2
-        if hasattr(ssl, "OP_NO_SSLv3"): ctx.options |= ssl.OP_NO_SSLv3
-        if hasattr(ssl, "OP_NO_TLSv1"): ctx.options |= ssl.OP_NO_TLSv1
-        if hasattr(ssl, "OP_NO_TLSv1_1"): ctx.options |= ssl.OP_NO_TLSv1_1
-        if hasattr(ssl, "OP_NO_TLSv1_2"): ctx.options |= ssl.OP_NO_TLSv1_2
-
-        # Enforce TLS 1.3 strictly
+        # Enforce TLS 1.3 via minimum_version (modern API; OP_NO_TLS* deprecated in 3.10+)
         if hasattr(ssl, "TLSVersion"):
             ctx.minimum_version = ssl.TLSVersion.TLSv1_3
             ctx.maximum_version = ssl.TLSVersion.TLSv1_3
+        else:
+            # Fallback for older Python without TLSVersion enum
+            if hasattr(ssl, "OP_NO_SSLv2"): ctx.options |= ssl.OP_NO_SSLv2  # noqa: E701
+            if hasattr(ssl, "OP_NO_SSLv3"): ctx.options |= ssl.OP_NO_SSLv3  # noqa: E701
+            if hasattr(ssl, "OP_NO_TLSv1"): ctx.options |= ssl.OP_NO_TLSv1  # noqa: E701
+            if hasattr(ssl, "OP_NO_TLSv1_1"): ctx.options |= ssl.OP_NO_TLSv1_1  # noqa: E701
+            if hasattr(ssl, "OP_NO_TLSv1_2"): ctx.options |= ssl.OP_NO_TLSv1_2  # noqa: E701
 
         # Configure FIPS-validated ciphers for default SSL context if possible
         try:
