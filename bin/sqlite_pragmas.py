@@ -161,6 +161,15 @@ def apply_pragmas(
     for pragma, value in knobs.items():
         conn.execute(f"PRAGMA {pragma} = {value}")
 
+    # Try to load sqlite-vec dynamically if available
+    try:
+        import sqlite_vec
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+    except (ImportError, sqlite3.OperationalError, AttributeError):
+        pass
+
 
 def checkpoint_passive(conn: sqlite3.Connection) -> tuple[int, int, int]:
     """Run a PASSIVE checkpoint.

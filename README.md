@@ -7,7 +7,7 @@
 
 # M3 Memory
 
-Local-first Agentic Memory Layer Framework for MCP Agents • 104 tools • Hybrid search (FTS5 + vector + MMR) • Directory ingestion & file-memory • GDPR • FIPS 140-3 ready • 100% local
+Local-first Agentic Memory Layer Framework for MCP Agents • 105 tools • Hybrid search (FTS5 + vector + MMR) • Directory ingestion & file-memory • GDPR • FIPS 140-3 ready • 100% local
 
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
@@ -112,9 +112,9 @@ Restart your agent. Done!
 
 ---
 
-## 🎚️ 104 tools, but they don't all crowd your context — domain gating keeps the catalog small
+## 🎚️ 105 tools, but they don't all crowd your context — domain gating keeps the catalog small
 
-M3 exposes 104 MCP tools so power users can customize at fine granularity —
+M3 exposes 105 MCP tools so power users can customize at fine granularity —
 single-id deletes, bulk variants, per-store searches, KG traversals, GDPR
 primitives, agent handoffs, watch-mode admin, the lot. Most agents never
 touch most of them in a typical session.
@@ -141,7 +141,7 @@ For comparison, common alternatives: a 40-tool GitHub MCP server
 ≈ 12,000 tokens; the full 93-tool GitHub MCP server ≈ 55,000 tokens
 ([MCP Token Counter](https://mcpplaygroundonline.com/blog/mcp-token-counter-optimize-context-window)).
 m3's lazy default keeps the always-on surface ~7× smaller than the full
-eager catalog while giving the agent the full 104 tools whenever it
+eager catalog while giving the agent the full 105 tools whenever it
 actually needs them.
 
 Disable with `M3_TOOLS_LAZY=0` if your client doesn't support
@@ -211,7 +211,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 **Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `m3 setup` for a one-command wizard that detects agents, wires settings.json + hooks, installs the sovereign CPU embedder, and verifies with `doctor` in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 
-**Context-frugal tool catalog** — 104 MCP tools grouped into 8 domains, loaded lazily. Startup surface is **~3,540 tokens** (~1.8% of a 200K window) vs ~24,918 if every tool registered eagerly. Agent expands a domain when it needs the rest. See [§ 104 tools, domain-gated](#-104-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small).
+**Context-frugal tool catalog** — 105 MCP tools grouped into 8 domains, loaded lazily. Startup surface is **~3,540 tokens** (~1.8% of a 200K window) vs ~24,918 if every tool registered eagerly. Agent expands a domain when it needs the rest. See [§ 105 tools, domain-gated](#-104-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small).
 
 **Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB, with manifest-driven multi-DB support for fleet deployments. Set one environment variable and your memories follow you across machines.
 
@@ -225,7 +225,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | ✨ **[Core features](docs/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](examples/multi-agent-team/README.md)** |
 | 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[Compare M3 to alternatives](docs/COMPARISON.md)** ([sovereign substrates table](docs/M3_Comparison_Table.md)) |
 | 🔧 **[Implementation details](docs/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](docs/ENVIRONMENT_VARIABLES.md)** |
-| 🤖 **[Agent rules + all 104 tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
+| 🤖 **[Agent rules + all 105 tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
 | 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
 | 🗺️ **[Roadmap](docs/ROADMAP.md)** | |
 
@@ -258,7 +258,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | |
 |---|---|
-| **104 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, entity graph, fact enrichment, chat-log capture, and a 26-tool files-memory layer (directory ingestion, hierarchical chunking, ascension to core memory, watch-mode staleness review) |
+| **105 MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, entity graph, fact enrichment, chat-log capture, and a 26-tool files-memory layer (directory ingestion, hierarchical chunking, ascension to core memory, watch-mode staleness review) |
 | **563 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, orchestration, and the files-memory pipeline |
 | **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
 | **SQLite core** | No external database required. Single-file, portable, inspectable |
@@ -304,13 +304,13 @@ Most sessions use three tools. The rest is there when you need it.
 | `memory_suggest` | Search with full score breakdown |
 | `memory_get` | Fetch a specific memory by ID |
 
-All 104 tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md) and the full inventory lives in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
+All 105 tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md) and the full inventory lives in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 
 ---
 
 ## 🤖 For AI agents
 
-M3 Memory exposes 104 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, entity-graph extraction, fact enrichment, chat-log capture for multi-agent orchestration, and a files-memory layer that ingests entire directories (markdown, PDF, plain text) into a hierarchical store with hybrid search, fact extraction, ascension to core memory, and watch-mode staleness review. Any MCP-compatible agent can use them automatically.
+M3 Memory exposes 105 MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, entity-graph extraction, fact enrichment, chat-log capture for multi-agent orchestration, and a files-memory layer that ingests entire directories (markdown, PDF, plain text) into a hierarchical store with hybrid search, fact extraction, ascension to core memory, and watch-mode staleness review. Any MCP-compatible agent can use them automatically.
 
 To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
 

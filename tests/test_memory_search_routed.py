@@ -1424,3 +1424,88 @@ async def test_fts_short_circuit_bypasses_embedding(monkeypatch, tmp_path):
     assert score == 1.0, f"Expected exact short-circuit score 1.0, got {score}"
     assert hit["id"] == "key1"
     assert "SK-983271" in hit["content"]
+
+
+@pytest.mark.asyncio
+async def test_fts_short_circuit_conversational_skip(monkeypatch, tmp_path):
+    """Verify that generic conversational query is skipped for short-circuit, calling embed normally."""
+    import memory_core as mc
+    import sqlite3
+    from conftest import create_full_main_schema
+
+    db_path = tmp_path / "test_short_circuit_skip.db"
+    create_full_main_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            INSERT INTO memory_items (id, content, title, type, importance, is_deleted)
+            VALUES (?, ?, ?, ?, ?, 0)
+            """,
+            ("key1", "show me details about coding bots", "show me", "note", 0.95)
+        )
+        conn.execute(
+            """
+            INSERT INTO memory_items_fts (rowid, content, title)
+            VALUES (last_insert_rowid(), ?, ?)
+            """,
+            ("show me details about coding bots", "show me")
+        )
+        conn.commit()
+
+    embed_called = False
+
+    async def mock_embed(text: str):
+        nonlocal embed_called
+        embed_called = True
+        return [0.1] * 1024, "mock_model"
+
+    monkeypatch.setattr(mc, "_embed", mock_embed)
+
+    # Search for conversational stop-word query "show me"
+    # FTS early exit should bypass it, running standard embed path
+    try:
+        await mc.memory_search_routed_impl("show me", k=5)
+    except Exception:
+        pass
+
+    assert embed_called, "Generic conversational query should NOT bypass embedding!"
+
+
+def test_elbow_quality_gating_floor(monkeypatch):
+    """Verify that elbow-trimming is bypassed when the top candidate's similarity is below 0.75."""
+    import memory_core as mc
+    import memory.config
+    
+    # 1. Top score is 0.70 (< 0.75) -> Should bypass trimming entirely and keep all
+    hits_low = [
+        (0.70, {"id": "mem1"}),
+        (0.50, {"id": "mem2"}),
+        (0.48, {"id": "mem3"}),
+        (0.46, {"id": "mem4"}),
+        (0.44, {"id": "mem5"}),
+        (0.42, {"id": "mem6"}),
+    ]
+    
+    # Mock ELBOW_MIN_INPUT to 5 so it triggers on these pools
+    monkeypatch.setattr(memory.config, "ELBOW_MIN_INPUT", 5)
+    # Mock ELBOW_MIN_RETURN to 3 so it is allowed to trim below 6 elements
+    monkeypatch.setattr(memory.config, "ELBOW_MIN_RETURN", 3)
+    
+    out_low = mc._trim_by_elbow(hits_low, sensitivity=1.0)
+    assert len(out_low) == len(hits_low), "Should bypass trimming when top similarity < 0.75"
+
+    # 2. Top score is 0.90 (>= 0.75) -> Should run trimming
+    hits_high = [
+        (0.90, {"id": "mem1"}),
+        (0.85, {"id": "mem2"}),
+        (0.80, {"id": "mem3"}),
+        (0.40, {"id": "mem4"}), # huge drop here
+        (0.38, {"id": "mem5"}),
+        (0.36, {"id": "mem6"}),
+    ]
+    
+    out_high = mc._trim_by_elbow(hits_high, sensitivity=1.5)
+    assert len(out_high) < len(hits_high), "Should trim candidates when top similarity is high and drop occurs"

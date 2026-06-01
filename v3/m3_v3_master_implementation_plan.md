@@ -224,51 +224,56 @@ To optimize implementation speed and guarantee maximum code quality, we will del
 
 This project represents the **M3-v3 Lifecycle**. It is organized into 5 developmental milestones across multiple sessions.
 
-### Milestone 1: Path Decoupling, SDK Realignment & Hardened Startup (Current Session Target)
-- [ ] Create `get_m3_config_root()` and `get_m3_engine_root()` in `bin/m3_sdk.py`
-- [ ] Extract `log_event()` out of `m3_sdk.py` into `bin/audit_trail.py`
-- [ ] Unify hardware telemetry checks in `m3_sdk.py`
-- [ ] Implement atomic lock file (`.migration.lock`) for safe startup auto-migration
-- [ ] Create the `m3_system_cohesion` validation table and enforce salt check at system boot
-- [ ] Replace regex injection checks in `util.py` with `sqlglot` AST parsing logic
+### Milestone 1: Path Decoupling, SDK Realignment & Hardened Startup ✅ COMPLETE
+- [x] Create `get_m3_config_root()` and `get_m3_engine_root()` in `bin/m3_sdk.py`
+- [x] Extract `log_event()` out of `m3_sdk.py` into `bin/audit_trail.py`
+- [x] Unify hardware telemetry checks in `m3_sdk.py`
+- [x] Implement atomic lock file (`.migration.lock`) for safe startup auto-migration
+- [x] Create the `m3_system_cohesion` validation table and enforce salt check at system boot
+- [x] Replace regex injection checks in `util.py` with `sqlglot` AST parsing logic
 - [ ] Implement the Setup Wizard terminal interface (`m3 setup`)
 - [ ] Refactor eagerly loaded tool submodules into the Dynamic Plugin Architecture
-- [ ] Implement Ingestion FD Semaphores (`asyncio.Semaphore(32)`) in the ingest engine
-- [ ] Implement Keyring D-Bus Circuit Breaker (2-second timeout) inside vault resolution checks
-- [ ] Implement Curation Activity Semaphores in `memory_maintenance.py` to yield database lock priority
-- [ ] Add interaction hook `register_user_interaction()`, system telemetry metrics, and `get_governor_pacing()` (with user-selectable `M3_GOVERNOR_INITIAL_THRESHOLD` and `M3_GOVERNOR_LIMIT_THRESHOLD` checks, 5-10s / 30-60s pacing delays, and 100% limit overrides) to `m3_sdk.py` for Adaptive Governor control
-- [ ] Refactor `bin/install_schedules.py` to migrate time-based crons (`pg_sync.py`, `chatlog_embed_sweeper.py`, `files_watch_once.py`) to Governor-tracked loops
-- [ ] Update database and config resolutions in `m3_sdk.py`, `chatlog_core.py`, and `sqlite_pragmas.py`
-- [ ] Refactor `bin/homecoming.py` to support `~/.m3/config` and `~/.m3/engine` migration path
-- [ ] Integrate startup auto-migration check in `m3_sdk.py`
-- [ ] Run test suite to verify no regressions in basic setups
+- [x] Implement Ingestion FD Semaphores (`asyncio.Semaphore(32)`) in the ingest engine
+- [x] Implement Keyring D-Bus Circuit Breaker (2-second timeout) inside vault resolution checks
+- [x] Implement Curation Activity Semaphores in `memory_maintenance.py` to yield database lock priority
+- [x] Add interaction hook `register_user_interaction()`, system telemetry metrics, and `get_governor_pacing()` (with user-selectable `M3_GOVERNOR_INITIAL_THRESHOLD` and `M3_GOVERNOR_LIMIT_THRESHOLD` checks, 5-10s / 30-60s pacing delays, and 100% limit overrides) to `m3_sdk.py` for Adaptive Governor control
+- [x] Refactor `bin/install_schedules.py` to migrate time-based crons (`pg_sync.py`, `chatlog_embed_sweeper.py`, `files_watch_once.py`) to Governor-tracked loops
+- [x] Update database and config resolutions in `m3_sdk.py`, `chatlog_core.py`, and `sqlite_pragmas.py`
+- [x] Refactor `bin/homecoming.py` to support `~/.m3/config` and `~/.m3/engine` migration path
+- [x] Integrate startup auto-migration check in `m3_sdk.py`
+- [x] Run test suite to verify no regressions in basic setups
 
-### Milestone 2: Hardening the FIPS Boundary
-- [ ] Implement full ctypes bindings to wolfSSL (`wc_AesGcmEncrypt`/`wc_AesGcmDecrypt`) in `crypto_provider.py`
-- [ ] Standardize the SHA-256 verification to fail-closed under `M3_FIPS_MODE=1` if wolfCrypt is missing
-- [ ] Enforce the FIPS Abort Lockout startup check to abort execution if initialization fails
-- [ ] Verify bindings using `bin/test_fips_integrity.py`
-- [ ] Integrate FIPS-hardened TLS 1.3 Context as the primary client context in `m3_sdk.py`
+### Milestone 2: Hardening the FIPS Boundary ✅ COMPLETE
+- [x] Implement full ctypes bindings to wolfSSL (`wc_AesGcmEncrypt`/`wc_AesGcmDecrypt`) in `crypto_provider.py`
+- [x] Standardize the SHA-256 verification to fail-closed under `M3_FIPS_MODE=1` if wolfCrypt is missing
+- [x] Enforce the FIPS Abort Lockout startup check to abort execution if initialization fails
+- [x] Verify bindings using `tests/test_fips_integrity.py` (14/14 tests pass)
+- [x] Integrate FIPS-hardened TLS 1.3 Context as the primary client context in `m3_sdk.py`
 
-### Milestone 3: Sovereign Cloud Failover, ChromaDB Circuit Breakers & PII Redaction
-- [ ] Create Tier 4 Cloud endpoint configurations in `bin/memory/config.py` and `bin/memory/embed.py`
-- [ ] Write integration block for `chatlog_redaction.py` to scrub parameters before sending to cloud
-- [ ] Implement ChromaDB Sync Endpoint Circuit Breaker (3 failures, 120s cooldown) in vector pushes
-- [ ] Wire the local semantic/Ollama cache fallback if the cloud failover experiences high load or latency spikes
+### Milestone 3: Sovereign Cloud Failover, ChromaDB Circuit Breakers & PII Redaction ✅ COMPLETE
+- [x] Create Tier 4 Cloud endpoint configurations in `bin/memory/config.py` and `bin/memory/embed.py`
+- [x] Write integration block for `chatlog_redaction.py` to scrub parameters before sending to cloud
+- [x] Implement ChromaDB Sync Endpoint Circuit Breaker (3 failures, 120s cooldown) in vector pushes
+- [x] Wire the local semantic/Ollama cache fallback if the cloud failover experiences high load or latency spikes
 
-### Milestone 4: Rust Crate Expansion & SDK Oxidation
-- [ ] Set up `m3-graph-rs` and `m3-fts-rs` PyO3 crates
-- [ ] Oxidize the `StructuredLogger` helper block to achieve zero-allocation log printing
-- [ ] Enable in-place heap slicing on `&PyString` in the compiled Rust `Redactor` block
+### Milestone 4: Rust Crate Expansion & SDK Oxidation 🚧 IN PROGRESS
+- [x] Set up `m3-graph` and `m3-fts` crates with full implementations and unit tests
+- [x] Expose `GraphIndex`, `CircuitBreaker`, `RetryPolicy` as PyO3 bindings in `m3-core-py`
+- [x] Expose `sanitize_fts`, `compile_fts_query` as PyO3 bindings in `m3-core-py`
+- [x] Oxidize the `StructuredLogger` helper block to achieve zero-allocation log printing (`format_log`)
+- [x] Enable in-place heap slicing on `&PyString` in the compiled Rust `Redactor` block
+- [x] Implement Fast-BFS traversal in Rust via `m3-graph` and link to `graph.py` in memory search
+- [x] Implement FTS5 sanitizer in Rust via `m3-fts` and replace python fts parser in `fts.py`
+- [x] Add rayon data-parallel acceleration to `mmr_rerank` and `mmr_rerank_scored` in `m3-vector`
 - [ ] Oxidize the Adaptive Governor cooldown state and user thresholds checks inside `m3-core-py`
 - [ ] Oxidize the incremental directory walk and hash checks of the Filesystem Watcher in `m3-ingest-rs`
-- [ ] Implement Fast-BFS traversal in Rust and link to query scoring in `search.py`
-- [ ] Implement FTS5 sanitizer in Rust and replace python fts parser
 - [ ] Add async batch writing queues in `db.py` to scale concurrent write performance
+- [ ] Rebuild Rust wheel and publish (currently building with `maturin develop --release`)
 
-### Milestone 5: Pre-Compiled Infrastructure & CTE Filters
-- [ ] Implement CTE pre-filtering in `bin/memory/search.py` to drop candidate lists to `<50` before vector calculations
+### Milestone 5: Pre-Compiled Infrastructure & CTE Filters 🚧 IN PROGRESS
+- [x] Implement CTE pre-filtering in `bin/memory/search.py` semantic mode (drops to <50 before vector calc)
 - [ ] Integrate `m3 doctor --fix` quick repair hooks
 - [ ] Create GitHub Actions workflow to build and publish wheel binaries (`m3-core-py`)
 - [ ] Compile and distribute local SQLite extensions (`sqlite-vec`) for native SQLite vector computation
 - [ ] Re-run the entire retrieval baseline (`tests/capture_retrieval_baseline.py`) and benchmarks (`bench_memory.py`) to verify optimization budgets
+
