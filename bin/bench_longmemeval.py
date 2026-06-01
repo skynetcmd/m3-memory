@@ -50,13 +50,12 @@ os.environ.setdefault("LLM_ENDPOINTS_CSV", "http://localhost:8081/v1")
 os.environ.setdefault("EMBED_BULK_CHUNK", "1024")
 os.environ.setdefault("EMBED_BULK_CONCURRENCY", "4")
 
-import memory_core  # noqa: E402
-from memory_core import (  # noqa: E402
-    memory_write_bulk_impl,
-    memory_search_scored_impl,
-    _db,
-)
 from auth_utils import get_api_key  # noqa: E402
+from memory_core import (  # noqa: E402
+    _db,
+    memory_search_scored_impl,
+    memory_write_bulk_impl,
+)
 
 DEFAULT_DATASET = BASE_DIR / "data" / "longmemeval" / "longmemeval_s_cleaned.json"
 
@@ -100,6 +99,7 @@ def wipe_bench_rows(pattern: str) -> dict:
         counts["chroma_sync_queue_orphans"] = cur.rowcount
     # VACUUM must run outside any transaction; open a fresh raw connection.
     import sqlite3
+
     from memory_core import DB_PATH
     raw = sqlite3.connect(DB_PATH, isolation_level=None)
     try:

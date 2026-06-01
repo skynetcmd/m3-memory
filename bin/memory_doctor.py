@@ -59,12 +59,13 @@ def main() -> int:
 
     if args.fix:
         import asyncio
+
         from memory.doctor import memory_doctor_fix_impl
-        
+
         mode = "Dry-Run " if args.dry_run else ""
         print(f"==> Running m3-memory {mode}self-repair...")
         res = asyncio.run(memory_doctor_fix_impl(dry_run=args.dry_run))
-        
+
         print(f"\nRepair Summary: {res['summary'].upper()}")
         print("-" * 50)
         for act in res["actions"]:
@@ -72,7 +73,7 @@ def main() -> int:
             print(f"  {status_char} {act['action']}")
             print(f"         Detail: {act['detail']}")
         print("-" * 50)
-        
+
         if res["summary"] == "failed":
             return 1
         return 0

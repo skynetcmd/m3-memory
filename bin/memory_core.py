@@ -53,8 +53,6 @@ import os  # noqa: F401 — re-export
 import uuid
 from datetime import datetime, timezone
 
-from embedding_utils import infer_change_agent as _infer_change_agent_util  # noqa: F401 — re-export
-
 # Legacy back-compat: `_lru_cache` was imported inline in the FTS block
 # (used internally by `_compile_fts_query`'s @decorator). Preserved as a
 # re-export because the API snapshot captured it as a public symbol —
@@ -62,6 +60,7 @@ from embedding_utils import infer_change_agent as _infer_change_agent_util  # no
 from functools import lru_cache as _lru_cache  # noqa: F401 — re-export
 from typing import Any, Awaitable, Callable  # noqa: F401 (used in annotations)
 
+from embedding_utils import infer_change_agent as _infer_change_agent_util  # noqa: F401 — re-export
 from llm_failover import get_best_llm
 from m3_sdk import M3Context, resolve_db_path
 
@@ -359,6 +358,7 @@ def __getattr__(name: str) -> Any:
             val = getattr(importlib.import_module(mod_name), "sha256_hex")
         elif name == "_FACT_ENRICH_SEM":
             import asyncio
+
             from memory.config import FACT_ENRICH_CONCURRENCY
             val = asyncio.Semaphore(FACT_ENRICH_CONCURRENCY)
         else:

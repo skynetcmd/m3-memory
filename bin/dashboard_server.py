@@ -7,23 +7,21 @@ Listens on port 8088 by default.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sqlite3
 import sys
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any
 
+import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-import uvicorn
 
 # Ensure bin/ is on path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from m3_sdk import resolve_db_path
-from memory import config as _config
 from memory.db import _db
 from memory.search import memory_search_scored_impl
 from memory_maintenance import gdpr_export_impl, gdpr_forget_impl
@@ -43,9 +41,9 @@ HEADER_HTML = """
             <a href="/browse" class="nav-link {browse_active}">KB Browser</a>
             <a href="/audit" class="nav-link {audit_active}">Conflict & Audit Log</a>
         </div>
-        
+
         {db_selector_html}
-        
+
         <div class="status-dot-container">
             <span style="color: hsl(210, 15%, 75%); font-family: 'Outfit', sans-serif; font-weight: 500;">Active Link</span>
             <div class="m3-status-dot" style="background-color: var(--m3-neon-emerald); box-shadow: 0 0 10px var(--m3-neon-emerald); animation: pulse-glow-emerald 2s infinite;"></div>
@@ -59,19 +57,19 @@ STYLE_CSS = """
             --m3-bg-deep: hsl(224, 25%, 6%);
             --m3-bg-surface: hsl(222, 22%, 10%);
             --m3-bg-card-glass: hsla(222, 22%, 12%, 0.75);
-            
+
             /* --- Core Neon Accents --- */
             --m3-neon-cyan: hsl(180, 100%, 50%);
             --m3-neon-purple: hsl(270, 100%, 65%);
             --m3-neon-amber: hsl(38, 100%, 50%);
             --m3-neon-emerald: hsl(145, 100%, 45%);
-            
+
             /* --- Borders & Shadows --- */
             --m3-border-glow: hsla(180, 100%, 50%, 0.2);
             --m3-border-glass: hsla(217, 19%, 27%, 0.25);
             --m3-shadow-glow: 0 0 25px hsla(180, 100%, 50%, 0.15);
             --m3-shadow-card: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
-            
+
             /* --- Transitions --- */
             --m3-transition-smooth: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
         }
@@ -630,7 +628,7 @@ STYLE_CSS = """
             border-left-color: var(--m3-neon-cyan);
             box-shadow: inset 0 0 10px hsla(180, 100%, 50%, 0.02);
         }
-        
+
         .db-menu-item.active[onclick*="chatlog"] {
             background: hsla(300, 100%, 65%, 0.05);
             border-left-color: hsl(300, 100%, 65%);
@@ -667,11 +665,11 @@ STYLE_CSS = """
             color: var(--m3-neon-cyan);
             margin-bottom: 0.25rem;
         }
-        
+
         .db-menu-item[onclick*="chatlog"] .db-item-meta {
             color: hsl(300, 100%, 65%);
         }
-        
+
         .db-menu-item[onclick*="files"] .db-item-meta {
             color: var(--m3-neon-emerald);
         }
@@ -727,7 +725,7 @@ STYLE_CSS = """
             border-color: hsla(180, 100%, 50%, 0.15);
             color: hsl(180, 15%, 85%);
         }
-        
+
         .m3-alert-banner.banner-main svg {
             color: var(--m3-neon-cyan);
         }
@@ -737,7 +735,7 @@ STYLE_CSS = """
             border-color: hsla(300, 100%, 65%, 0.15);
             color: hsl(300, 15%, 85%);
         }
-        
+
         .m3-alert-banner.banner-chatlog svg {
             color: hsl(300, 100%, 65%);
         }
@@ -747,7 +745,7 @@ STYLE_CSS = """
             border-color: hsla(145, 100%, 45%, 0.15);
             color: hsl(145, 15%, 85%);
         }
-        
+
         .m3-alert-banner.banner-files svg {
             color: var(--m3-neon-emerald);
         }
@@ -765,10 +763,10 @@ INDEX_HTML = """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
-    
+
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    
+
     <style>
         {{ STYLE_CSS }}
     </style>
@@ -793,7 +791,7 @@ INDEX_HTML = """
                         <button class="m3-btn" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="resetSimulation()">Reset Layout</button>
                     </div>
                 </div>
-                
+
                 <!-- Controls Row -->
                 <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; padding: 0.5rem; background: hsla(222, 22%, 5%, 0.4); border: 1px solid var(--m3-border-glass); border-radius: 8px; font-size: 0.8rem; color: hsl(210, 15%, 80%);">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -931,14 +929,14 @@ INDEX_HTML = """
     <script>
         const canvas = document.getElementById("graphCanvas");
         const ctx = canvas.getContext("2d");
-        
+
         let nodes = [];
         let links = [];
         let selectedNode = null;
         let scale = 1.0;
         let offsetX = 0;
         let offsetY = 0;
-        
+
         // Auto-scale canvas on resize
         function resizeCanvas() {
             canvas.width = canvas.parentElement.clientWidth;
@@ -992,9 +990,9 @@ INDEX_HTML = """
             try {
                 const res = await fetch("/api/graph");
                 const data = await res.json();
-                
+
                 const oldNodesMap = new Map(nodes.map(n => [n.id, n]));
-                
+
                 // Initialize physics state
                 nodes = data.nodes.map(n => {
                     const existing = oldNodesMap.get(n.id);
@@ -1009,16 +1007,16 @@ INDEX_HTML = """
                         vy: existing ? existing.vy : 0
                     };
                 });
-                
+
                 // Map links to objects
                 links = data.links.map(l => ({
                     ...l,
                     source: nodes.find(n => n.id === l.source),
                     target: nodes.find(n => n.id === l.target)
                 })).filter(l => l.source && l.target);
-                
+
                 wakePhysics();
-                
+
             } catch(e) {
                 console.error("Failed to load graph nodes", e);
             }
@@ -1040,7 +1038,7 @@ INDEX_HTML = """
             const kLink = 0.05;
             const linkDist = 90;
             const friction = 0.85;
-            
+
             // Repulsion between all node pairs
             for(let i=0; i<nodes.length; i++) {
                 for(let j=i+1; j<nodes.length; j++) {
@@ -1059,7 +1057,7 @@ INDEX_HTML = """
                     }
                 }
             }
-            
+
             // Link attraction
             links.forEach(l => {
                 const dx = l.target.x - l.source.x;
@@ -1068,13 +1066,13 @@ INDEX_HTML = """
                 const force = kLink * (dist - linkDist) / dist;
                 const fx = force * dx;
                 const fy = force * dy;
-                
+
                 l.source.vx += fx;
                 l.source.vy += fy;
                 l.target.vx -= fx;
                 l.target.vy -= fy;
             });
-            
+
             // Apply speed limits, drag, and update positions
             nodes.forEach(n => {
                 if(n === selectedNode) return; // skip currently dragged
@@ -1082,7 +1080,7 @@ INDEX_HTML = """
                 n.vy *= friction;
                 n.x += Math.max(-10, Math.min(10, n.vx));
                 n.y += Math.max(-10, Math.min(10, n.vy));
-                
+
                 // Contain inside bounds
                 n.x = Math.max(20, Math.min(canvas.width - 20, n.x));
                 n.y = Math.max(20, Math.min(canvas.height - 20, n.y));
@@ -1092,23 +1090,23 @@ INDEX_HTML = """
         // Draw loop
         function draw(timestamp) {
             if (isSleeping || fpsLimit === 0) return;
-            
+
             // FPS limiting
             if (!lastFrameTime) lastFrameTime = timestamp;
             const elapsed = timestamp - lastFrameTime;
-            
+
             if (elapsed < (1000 / fpsLimit)) {
                 requestAnimationFrame(draw);
                 return;
             }
             lastFrameTime = timestamp;
-            
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
+
             ctx.save();
             ctx.translate(offsetX, offsetY);
             ctx.scale(scale, scale);
-            
+
             // Draw links
             ctx.lineWidth = 1;
             links.forEach(l => {
@@ -1117,7 +1115,7 @@ INDEX_HTML = """
                 ctx.moveTo(l.source.x, l.source.y);
                 ctx.lineTo(l.target.x, l.target.y);
                 ctx.stroke();
-                
+
                 // Draw relationship predicate tag at midpoint
                 const mx = (l.source.x + l.target.x) / 2;
                 const my = (l.source.y + l.target.y) / 2;
@@ -1126,7 +1124,7 @@ INDEX_HTML = """
                 ctx.textAlign = "center";
                 ctx.fillText(l.predicate, mx, my - 2);
             });
-            
+
             // Draw nodes
             nodes.forEach(n => {
                 const color = getNodeColor(n.type);
@@ -1137,30 +1135,30 @@ INDEX_HTML = """
                 ctx.shadowBlur = 8;
                 ctx.fill();
                 ctx.shadowBlur = 0; // reset
-                
+
                 // Node label
                 ctx.fillStyle = "#fff";
                 ctx.font = "10px 'Outfit', sans-serif";
                 ctx.textAlign = "center";
                 ctx.fillText(n.name, n.x, n.y - 12);
             });
-            
+
             ctx.restore();
-            
+
             updatePhysics();
-            
+
             // Auto sleep cooling mechanism
             let totalVelocity = 0;
             nodes.forEach(n => {
                 totalVelocity += Math.abs(n.vx) + Math.abs(n.vy);
             });
-            
+
             if (totalVelocity < 0.05 * nodes.length) {
                 activeActivity--;
             } else {
                 activeActivity = 120;
             }
-            
+
             if (activeActivity <= 0) {
                 isSleeping = true;
                 document.getElementById("physicsStatus").innerText = "Status: Asleep (0% CPU)";
@@ -1179,16 +1177,16 @@ INDEX_HTML = """
             const rect = canvas.getBoundingClientRect();
             const mouseX = (e.clientX - rect.left - offsetX) / scale;
             const mouseY = (e.clientY - rect.top - offsetY) / scale;
-            
+
             // Check if clicked a node
             selectedNode = nodes.find(n => {
                 const dx = n.x - mouseX;
                 const dy = n.y - mouseY;
                 return dx*dx + dy*dy < 144;
             });
-            
+
             wakePhysics();
-            
+
             if (!selectedNode) {
                 isDraggingCanvas = true;
                 dragStartMouse = { x: e.clientX, y: e.clientY };
@@ -1248,7 +1246,7 @@ INDEX_HTML = """
             const fb = document.getElementById("gdprFeedback");
             fb.style.color = "var(--m3-neon-cyan)";
             fb.innerText = "Exporting data structure...";
-            
+
             window.location.href = `/api/gdpr/export?user_id=${encodeURIComponent(uid)}`;
             setTimeout(() => {
                 fb.innerText = "Export triggered successfully.";
@@ -1261,13 +1259,13 @@ INDEX_HTML = """
             if (!confirm(`Are you absolutely sure you want to completely purge user data for '${uid}'? This hard-deletes all memories, vectors, and graph edges recursively.`)) {
                 return;
             }
-            
+
             fb.style.color = "var(--m3-neon-amber)";
             fb.innerText = "Purging memory layers...";
             try {
                 const formData = new FormData();
                 formData.append("user_id", uid);
-                
+
                 const res = await fetch("/api/gdpr/forget", {
                     method: "POST",
                     body: formData
@@ -1290,27 +1288,27 @@ INDEX_HTML = """
             outputPre.style.color = "var(--m3-neon-cyan)";
             outputPre.innerText = `[System] Triggering ${action}...\n`;
             outputPre.scrollTop = outputPre.scrollHeight;
-            
+
             if (maintenancePollTimer) {
                 clearInterval(maintenancePollTimer);
                 maintenancePollTimer = null;
             }
-            
+
             try {
                 const res = await fetch(`/api/maintenance/trigger/${action}`, { method: "POST" });
                 const text = await res.text();
-                
+
                 if (!res.ok) {
                     outputPre.style.color = "var(--m3-neon-amber)";
                     outputPre.innerText += text;
                     outputPre.scrollTop = outputPre.scrollHeight;
                     return;
                 }
-                
+
                 outputPre.style.color = "#fff";
                 outputPre.innerText = text + "\\n";
                 outputPre.scrollTop = outputPre.scrollHeight;
-                
+
                 // Start polling logs
                 maintenancePollTimer = setInterval(pollMaintenanceStatus, 1500);
             } catch(e) {
@@ -1326,9 +1324,9 @@ INDEX_HTML = """
                 const res = await fetch("/api/maintenance/status");
                 if (!res.ok) return;
                 const data = await res.json();
-                
+
                 outputPre.innerText = data.logs;
-                
+
                 if (data.status === "finished") {
                     clearInterval(maintenancePollTimer);
                     maintenancePollTimer = null;
@@ -1398,13 +1396,13 @@ BROWSE_HTML = """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
-    
+
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    
+
     <style>
         {{ STYLE_CSS }}
-        
+
         .browse-container {
             max-width: 1200px;
             width: 100%;
@@ -1412,7 +1410,7 @@ BROWSE_HTML = """
             padding: 0 1.5rem;
             flex-grow: 1;
         }
-        
+
         .filter-panel {
             display: grid;
             grid-template-columns: 2fr 1fr 120px;
@@ -1438,7 +1436,7 @@ BROWSE_HTML = """
             <div class="filter-panel">
                 <input type="text" name="q" class="m3-input" placeholder="Search keywords in title or content..."
                        hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="keyup changed delay:300ms, filter" hx-include="[name='type'], [name='limit']">
-                
+
                 <select name="type" class="m3-select" hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="change" hx-include="[name='q'], [name='limit']">
                     <option value="">-- All Types --</option>
                     <option value="note">Note</option>
@@ -1456,7 +1454,7 @@ BROWSE_HTML = """
                     <option value="infrastructure">Infrastructure</option>
                     <option value="reference">Reference</option>
                 </select>
-                
+
                 <select name="limit" class="m3-select" hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="change" hx-include="[name='q'], [name='type']">
                     <option value="20">Top 20</option>
                     <option value="50" selected>Top 50</option>
@@ -1525,13 +1523,13 @@ AUDIT_HTML = """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
-    
+
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    
+
     <style>
         {{ STYLE_CSS }}
-        
+
         .audit-container {
             max-width: 1200px;
             width: 100%;
@@ -1539,14 +1537,14 @@ AUDIT_HTML = """
             padding: 0 1.5rem;
             flex-grow: 1;
         }
-        
+
         .timeline-container {
             display: flex;
             flex-direction: column;
             gap: 2.5rem;
             margin-top: 2rem;
         }
-        
+
         .timeline-group-card {
             background: var(--m3-bg-card-glass);
             border: 1px solid var(--m3-border-glass);
@@ -1557,19 +1555,19 @@ AUDIT_HTML = """
             overflow: hidden;
             transition: var(--m3-transition-smooth);
         }
-        
+
         .timeline-group-card:hover {
             border-color: hsla(180, 100%, 50%, 0.25);
             box-shadow: var(--m3-shadow-glow);
         }
-        
+
         /* Vertical line for the timeline */
         .timeline-flow {
             position: relative;
             padding-left: 2.5rem;
             margin-top: 1.5rem;
         }
-        
+
         .timeline-flow::before {
             content: '';
             position: absolute;
@@ -1579,16 +1577,16 @@ AUDIT_HTML = """
             width: 2px;
             background: hsla(217, 19%, 27%, 0.5);
         }
-        
+
         .timeline-node {
             position: relative;
             margin-bottom: 1.5rem;
         }
-        
+
         .timeline-node:last-child {
             margin-bottom: 0;
         }
-        
+
         .timeline-badge {
             position: absolute;
             left: -2.5rem;
@@ -1605,21 +1603,21 @@ AUDIT_HTML = """
             z-index: 2;
             box-shadow: 0 0 8px rgba(0,0,0,0.5);
         }
-        
+
         .badge-create { background: var(--m3-neon-emerald); box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
         .badge-update { background: var(--m3-neon-cyan); box-shadow: 0 0 10px rgba(6, 182, 212, 0.4); }
         .badge-supersede { background: var(--m3-neon-amber); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
         .badge-contradiction { background: var(--m3-neon-amber); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
         .badge-delete { background: hsl(15, 100%, 55%); box-shadow: 0 0 10px rgba(239, 68, 68, 0.4); }
         .badge-resolve { background: var(--m3-neon-purple); box-shadow: 0 0 10px rgba(168, 85, 247, 0.4); }
-        
+
         .timeline-content-box {
             background: hsla(222, 22%, 5%, 0.4);
             border: 1px solid var(--m3-border-glass);
             border-radius: 8px;
             padding: 0.75rem 1rem;
         }
-        
+
         .diff-text {
             font-family: 'Fira Code', monospace;
             font-size: 0.8rem;
@@ -1632,7 +1630,7 @@ AUDIT_HTML = """
             margin-top: 0.5rem;
             border: 1px solid rgba(255,255,255,0.03);
         }
-        
+
         .filter-panel {
             display: grid;
             grid-template-columns: 2fr 1fr;
@@ -1666,7 +1664,7 @@ AUDIT_HTML = """
             <div class="filter-panel">
                 <input type="text" name="q" class="m3-input" placeholder="Search memory ID, title or content keywords..."
                        hx-get="/api/audit/timeline" hx-target="#auditTimeline" hx-trigger="keyup changed delay:300ms, filter" hx-include="[name='limit']">
-                
+
                 <select name="limit" class="m3-select" hx-get="/api/audit/timeline" hx-target="#auditTimeline" hx-trigger="change" hx-include="[name='q']">
                     <option value="10">Latest 10 Timelines</option>
                     <option value="25" selected>Latest 25 Timelines</option>
@@ -1728,8 +1726,8 @@ _DB_PATHS = None
 def get_db_paths() -> dict[str, str]:
     global _DB_PATHS
     if _DB_PATHS is None:
-        from m3_sdk import resolve_db_path
         from chatlog_config import DEFAULT_DB_PATH
+        from m3_sdk import resolve_db_path
         from memory.config import FILES_DB_PATH
         _DB_PATHS = {
             "main": resolve_db_path(None),
@@ -1759,19 +1757,19 @@ def build_db_selector_html(selected_db: str) -> str:
             sizes[k] = f"{size_mb:.1f} MB"
         else:
             sizes[k] = "0.0 MB"
-            
+
     display_names = {
         "main": "Main DB",
         "chatlog": "Chatlog DB",
         "files": "Files DB"
     }
-    
+
     active_display = display_names.get(selected_db, "Main DB")
-    
+
     main_active = "active" if selected_db == "main" else ""
     chatlog_active = "active" if selected_db == "chatlog" else ""
     files_active = "active" if selected_db == "files" else ""
-    
+
     return f"""
     <div class="db-selector-container">
         <button class="db-selector-btn" onclick="toggleDbMenu(event)">
@@ -1781,7 +1779,7 @@ def build_db_selector_html(selected_db: str) -> str:
         </button>
         <div class="db-menu" id="dbMenu">
             <div class="db-menu-header">Select Cognitive Core</div>
-            
+
             <div class="db-menu-item {main_active}" onclick="selectDatabase('main')">
                 <div class="db-item-title-row">
                     <span class="db-item-title">Main DB</span>
@@ -1790,7 +1788,7 @@ def build_db_selector_html(selected_db: str) -> str:
                 <div class="db-item-meta">agent_memory.db</div>
                 <div class="db-item-desc">Knowledge graph, core facts & decision records.</div>
             </div>
-            
+
             <div class="db-menu-item {chatlog_active}" onclick="selectDatabase('chatlog')">
                 <div class="db-item-title-row">
                     <span class="db-item-title">Chatlog DB</span>
@@ -1799,7 +1797,7 @@ def build_db_selector_html(selected_db: str) -> str:
                 <div class="db-item-meta">agent_chatlog.db</div>
                 <div class="db-item-desc">Historical chat turns, session history, promoting cues.</div>
             </div>
-            
+
             <div class="db-menu-item {files_active}" onclick="selectDatabase('files')">
                 <div class="db-item-title-row">
                     <span class="db-item-title">Files DB</span>
@@ -1830,7 +1828,7 @@ async def get_index(request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     db_selector_html = build_db_selector_html(selected_db)
     header = HEADER_HTML.format(explorer_active="active", browse_active="", audit_active="", db_selector_html=db_selector_html)
     content = INDEX_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
@@ -1842,7 +1840,7 @@ async def get_browse(request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     db_selector_html = build_db_selector_html(selected_db)
     header = HEADER_HTML.format(explorer_active="", browse_active="active", audit_active="", db_selector_html=db_selector_html)
     content = BROWSE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
@@ -1854,7 +1852,7 @@ async def get_audit(request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     db_selector_html = build_db_selector_html(selected_db)
     header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="active", db_selector_html=db_selector_html)
     content = AUDIT_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
@@ -1865,9 +1863,9 @@ async def get_audit(request: Request):
 async def get_stats(request: Request):
     """Returns dynamic HTML stats counters cards across Main, Chatlog and Files DBs."""
     selected_db = request.cookies.get("selected_db", "main")
-    selected_db_path = get_active_db_path(request)
+    get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     total_mems = 0
     total_ents = 0
     total_rels = 0
@@ -1877,30 +1875,30 @@ async def get_stats(request: Request):
     file_chunks = 0
     files_count = 0
     file_lines = 0
-    
-    from m3_sdk import resolve_db_path
+
     from chatlog_config import DEFAULT_DB_PATH
+    from m3_sdk import resolve_db_path
     from memory.config import FILES_DB_PATH
-    
+
     main_db = resolve_db_path(None)
     chatlog_db = DEFAULT_DB_PATH
     files_db = FILES_DB_PATH
-    
+
     # Query Main DB
     try:
         if os.path.exists(main_db):
             with sqlite3.connect(main_db, timeout=5.0) as conn:
                 conn.row_factory = sqlite3.Row
                 total_mems = conn.execute("SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted, 0) = 0 AND type != 'chat_log'").fetchone()[0]
-                
+
                 ent_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entities'").fetchone()
                 if ent_exists:
                     total_ents = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
-                    
+
                 rel_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entity_relationships'").fetchone()
                 if rel_exists:
                     total_rels = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0]
-                    
+
                 queue_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entity_extraction_queue'").fetchone()
                 if queue_exists:
                     queue_len = conn.execute("SELECT COUNT(*) FROM entity_extraction_queue").fetchone()[0]
@@ -1942,15 +1940,15 @@ async def get_stats(request: Request):
     highlight_main = ""
     highlight_chatlog = ""
     highlight_files = ""
-    
+
     sub_main = ""
     sub_chatlog = ""
     sub_files = ""
-    
+
     style_main = ""
     style_chatlog = ""
     style_files = ""
-    
+
     if selected_db == "main":
         highlight_main = "highlight-main"
         sub_main = '<span style="font-size: 0.72rem; color: var(--m3-neon-cyan); opacity: 0.85;">(Active Core)</span>'
@@ -2046,10 +2044,10 @@ async def get_graph(request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     nodes = []
     links = []
-    
+
     if selected_db == "files":
         try:
             with sqlite3.connect(selected_db_path, timeout=5.0) as conn:
@@ -2078,7 +2076,7 @@ async def get_graph(request: Request):
         except Exception as e:
             print(f"Failed to query files graph: {e}", flush=True)
         return {"nodes": nodes, "links": links}
-        
+
     try:
         from m3_sdk import active_database
         with active_database(selected_db_path):
@@ -2092,7 +2090,7 @@ async def get_graph(request: Request):
                             "name": r["canonical_name"],
                             "type": r["entity_type"]
                         })
-                        
+
                 rel_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entity_relationships'").fetchone()
                 if rel_exists:
                     rows = db.execute("SELECT from_entity, to_entity, predicate FROM entity_relationships LIMIT 250").fetchall()
@@ -2104,7 +2102,7 @@ async def get_graph(request: Request):
                         })
     except Exception as e:
         print(f"Failed to load graph database items: {e}", flush=True)
-        
+
     return {"nodes": nodes, "links": links}
 
 
@@ -2114,7 +2112,7 @@ async def search_memories(request: Request, q: str = ""):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     if selected_db == "files":
         if not q.strip():
             return '<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">Type in search bar to scan files and chunk indexes.</p>'
@@ -2123,7 +2121,7 @@ async def search_memories(request: Request, q: str = ""):
             hits = files_search(q, limit=15, db_path=selected_db_path)
             if not hits:
                 return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed file chunks found for "{q}".</p>'
-            
+
             cards = []
             for hit in hits:
                 cards.append(f"""
@@ -2149,7 +2147,7 @@ async def search_memories(request: Request, q: str = ""):
 
     if not q.strip():
         return '<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">Type in search bar to explore FTS5 & Vector similarity explain graphs.</p>'
-        
+
     try:
         from m3_sdk import active_database
         with active_database(selected_db_path):
@@ -2158,10 +2156,10 @@ async def search_memories(request: Request, q: str = ""):
                 explain=True,
                 extra_columns=["metadata_json", "conversation_id", "valid_from", "valid_to", "user_id"]
             )
-            
+
             if not results:
                 return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed memories found for "{q}".</p>'
-                
+
             cards = []
             for score, item in results:
                 badge_class = "badge-note"
@@ -2171,7 +2169,7 @@ async def search_memories(request: Request, q: str = ""):
                     badge_class = "badge-warn"
                 elif item.get("type") in ("knowledge", "network_config", "infrastructure", "chat_log"):
                     badge_class = "badge-sys"
-                    
+
                 explain_html = ""
                 exp = item.get("_explanation")
                 if exp:
@@ -2188,7 +2186,7 @@ async def search_memories(request: Request, q: str = ""):
                         </div>
                     </div>
                     """
-                    
+
                 cards.append(f"""
                 <div class="memory-card">
                     <div class="memory-header">
@@ -2203,7 +2201,7 @@ async def search_memories(request: Request, q: str = ""):
                 </div>
                 """)
             return "\n".join(cards)
-            
+
     except Exception as e:
         return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning indices: {str(e)}</p>'
 
@@ -2214,7 +2212,7 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     if selected_db == "files":
         try:
             query = "SELECT uuid, filename, path, filetype, size_bytes, corpus_id, created_at FROM file_nodes"
@@ -2223,16 +2221,16 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                 query += " WHERE filename LIKE ? OR path LIKE ?"
                 params += [f"%{q}%", f"%{q}%"]
             query += " ORDER BY created_at DESC LIMIT ?"
-            params.append(int(limit))
-            
+            params.append(str(int(limit)))
+
             with sqlite3.connect(selected_db_path, timeout=5.0) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(query, params).fetchall()
-                
+
             total = len(rows)
             if total == 0:
-                return f'<p style="text-align: center; color: hsl(210, 15%, 65%); padding: 3rem 0;">No matching ingested files found.</p>'
-                
+                return '<p style="text-align: center; color: hsl(210, 15%, 65%); padding: 3rem 0;">No matching ingested files found.</p>'
+
             cards = []
             for idx, row in enumerate(rows, 1):
                 size_kb = round(row["size_bytes"] / 1024, 1)
@@ -2264,27 +2262,27 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
             WHERE is_deleted = 0
         """
         params = []
-        
+
         if type:
             query += " AND type = ?"
             params.append(type)
-            
+
         if q.strip():
             query += " AND (LOWER(title) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?))"
             params += [f"%{q}%", f"%{q}%"]
-            
+
         query += " ORDER BY importance DESC, updated_at DESC"
         query += f" LIMIT {int(limit)}"
-        
+
         from m3_sdk import active_database
         with active_database(selected_db_path):
             with _db() as db:
                 rows = db.execute(query, params).fetchall()
-            
+
         total = len(rows)
         if total == 0:
-            return f'<p style="text-align: center; color: hsl(210, 15%, 65%); padding: 3rem 0;">No matching entries found.</p>'
-            
+            return '<p style="text-align: center; color: hsl(210, 15%, 65%); padding: 3rem 0;">No matching entries found.</p>'
+
         cards = []
         for idx, row in enumerate(rows, 1):
             importance = row["importance"] or 0.0
@@ -2293,7 +2291,7 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                 bar_color = "var(--m3-neon-emerald)"
             elif importance >= 0.7:
                 bar_color = "var(--m3-neon-amber)"
-                
+
             badge_class = "badge-note"
             if row["type"] in ("fact", "local_device", "project", "reference"):
                 badge_class = "badge-fact"
@@ -2301,19 +2299,19 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                 badge_class = "badge-warn"
             elif row["type"] in ("knowledge", "network_config", "infrastructure", "chat_log"):
                 badge_class = "badge-sys"
-                
+
             tags, extras = parse_metadata(row["metadata_json"])
             tag_html = ""
             if tags:
                 tag_html = '<div style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem;">' + \
                            "".join([f'<span class="m3-tag">{t}</span>' for t in tags]) + '</div>'
-                           
+
             extras_html = ""
             if extras:
                 extras_list = [f'<span style="margin-right: 0.75rem; color: hsl(210, 10%, 65%);"><strong style="color: hsl(210, 10%, 80%);">{k}:</strong> {v}</span>' for k, v in extras.items()]
                 extras_html = '<div style="font-family: \'Fira Code\', monospace; font-size: 0.75rem; margin-top: 0.5rem; display: flex; flex-wrap: wrap;">' + \
                               "".join(extras_list) + '</div>'
-                              
+
             cards.append(f"""
             <div class="memory-card">
                 <div class="memory-header">
@@ -2339,7 +2337,7 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
             </div>
             """)
         return "\n".join(cards)
-        
+
     except Exception as e:
         return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning DB: {str(e)}</p>'
 
@@ -2350,7 +2348,7 @@ async def get_history_feed(request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     logs = []
     try:
         from m3_sdk import active_database
@@ -2366,14 +2364,14 @@ async def get_history_feed(request: Request):
                         ts = r["created_at"].replace("T", " ")[:16]
                         color = "var(--m3-neon-purple)"
                         border = "1px solid var(--m3-border-glass)"
-                        
+
                         if action in ("SUPERSEDE", "CONTRADICTION"):
                             color = "var(--m3-neon-amber)"
                             border = "1px solid rgba(245, 158, 11, 0.25)"
                         elif action == "DELETE":
                             color = "hsl(15, 100%, 50%)"
                             border = "1px solid rgba(239, 68, 68, 0.25)"
-                            
+
                         logs.append(f"""
                         <div class="conflict-item" style="border-left-color: {color}; border-color: {border}; background: hsla(222, 22%, 5%, 0.45);">
                             <div style="display: flex; justify-content: space-between; font-weight: 600; font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: {color}; margin-bottom: 0.25rem;">
@@ -2391,7 +2389,7 @@ async def get_history_feed(request: Request):
 
     if not logs:
         return '<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 1rem 0;">No history logs captured yet.</p>'
-        
+
     return "\n".join(logs)
 
 
@@ -2409,7 +2407,7 @@ def make_html_diff(prev_val: str, new_val: str) -> str:
         return f'<span style="background: rgba(16, 185, 129, 0.2); color: var(--m3-neon-emerald); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500;">{new_val}</span>'
     if not new_val:
         return f'<span style="background: rgba(239, 68, 68, 0.2); color: #ff6b6b; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.3); text-decoration: line-through;">{prev_val}</span>'
-    
+
     import difflib
     matcher = difflib.SequenceMatcher(None, prev_val.split(), new_val.split())
     result = []
@@ -2436,15 +2434,14 @@ def render_audit_card(memory_id: str, db: Any) -> str:
         "SELECT title, content, type, user_id, importance, is_deleted, updated_at "
         "FROM memory_items WHERE id = ?", (memory_id,)
     ).fetchone()
-    
+
     current_title = "None (Deleted)"
     current_content = ""
     current_type = "unknown"
     is_deleted = True
     user_id = ""
     importance = 0.0
-    updated_at = ""
-    
+
     if row:
         current_title = row["title"] or "(Untitled)"
         current_content = row["content"] or ""
@@ -2452,28 +2449,28 @@ def render_audit_card(memory_id: str, db: Any) -> str:
         is_deleted = bool(row["is_deleted"])
         user_id = row["user_id"] or ""
         importance = row["importance"] or 0.0
-        updated_at = row["updated_at"] or ""
-    
+        row["updated_at"] or ""
+
     # 2. Fetch history records sorted by created_at DESC
     hist_rows = db.execute(
         "SELECT event, field, prev_value, new_value, actor_id, created_at "
         "FROM memory_history WHERE memory_id = ? "
         "ORDER BY created_at DESC", (memory_id,)
     ).fetchall()
-    
+
     # Check if there's any active conflict/contradiction
     has_contradiction = any(r["event"].upper() == "CONTRADICTION" for r in hist_rows)
-    
+
     status_label = "Active"
     status_style = "background: hsla(145, 100%, 45%, 0.1); color: var(--m3-neon-emerald); border: 1px solid rgba(16, 185, 129, 0.25);"
-    
+
     if is_deleted:
         status_label = "Deleted"
         status_style = "background: hsla(15, 100%, 50%, 0.1); color: hsl(15, 100%, 55%); border: 1px solid rgba(239, 68, 68, 0.25);"
     elif has_contradiction:
         status_label = "Contradiction State"
         status_style = "background: hsla(38, 100%, 50%, 0.1); color: var(--m3-neon-amber); border: 1px solid rgba(245, 158, 11, 0.25);"
-    
+
     # 3. Generate timeline HTML
     nodes_html = []
     for r in hist_rows:
@@ -2483,10 +2480,10 @@ def render_audit_card(memory_id: str, db: Any) -> str:
         new_v = r["new_value"] or ""
         actor = r["actor_id"] or "system"
         ts = r["created_at"].replace("T", " ")[:16]
-        
+
         badge_cls = f"badge-{event.lower()}"
         icon = event[0] if event else "U"
-        
+
         diff_html = ""
         if event in ("UPDATE", "SUPERSEDE", "CONTRADICTION"):
             diff_block = make_html_diff(prev_v, new_v)
@@ -2517,7 +2514,7 @@ def render_audit_card(memory_id: str, db: Any) -> str:
                 <div class="diff-text" style="color: var(--m3-neon-purple);">{new_v or 'Conflict resolved, marked active.'}</div>
             </div>
             """
-            
+
         nodes_html.append(f"""
         <div class="timeline-node">
             <div class="timeline-badge {badge_cls}">{icon}</div>
@@ -2533,7 +2530,7 @@ def render_audit_card(memory_id: str, db: Any) -> str:
             </div>
         </div>
         """)
-        
+
     timeline_flow_html = ""
     if nodes_html:
         timeline_flow_html = f"""
@@ -2543,7 +2540,7 @@ def render_audit_card(memory_id: str, db: Any) -> str:
         """
     else:
         timeline_flow_html = '<p style="color: hsl(210, 10%, 50%); font-style: italic; margin-top: 1rem;">No detailed history recorded.</p>'
-        
+
     # Actions panel
     actions_html = ""
     if not is_deleted:
@@ -2580,7 +2577,7 @@ def render_audit_card(memory_id: str, db: Any) -> str:
             Hard Delete (Purge)
         </button>
         """
-        
+
     return f"""
     <div class="timeline-group-card" id="card-{memory_id}">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid var(--m3-border-glass); padding-bottom: 1rem;">
@@ -2600,10 +2597,10 @@ def render_audit_card(memory_id: str, db: Any) -> str:
                 {actions_html}
             </div>
         </div>
-        
+
         <!-- Timeline Flow Section -->
         {timeline_flow_html}
-        
+
         <!-- Inline Edit Override Form -->
         <div id="override-form-{memory_id}" style="display: none; margin-top: 1.5rem; padding: 1.25rem; background: hsla(222, 22%, 4%, 0.6); border: 1px dashed var(--m3-border-glass); border-radius: 8px;">
             <form hx-post="/api/audit/override/{memory_id}" hx-target="#card-{memory_id}" hx-swap="outerHTML">
@@ -2630,7 +2627,7 @@ async def get_audit_timeline(request: Request, q: str = "", limit: int = 25):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     try:
         from m3_sdk import active_database
         with active_database(selected_db_path):
@@ -2638,25 +2635,25 @@ async def get_audit_timeline(request: Request, q: str = "", limit: int = 25):
                 hist_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_history'").fetchone()
                 if not hist_exists:
                     return '<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 2rem 0;">History table memory_history does not exist in this database.</p>'
-                
+
                 # Fetch distinct memory IDs that have history, sorted by their latest activity
                 sql_ids = """
-                    SELECT memory_id, MAX(created_at) as last_act 
-                    FROM memory_history 
-                    GROUP BY memory_id 
+                    SELECT memory_id, MAX(created_at) as last_act
+                    FROM memory_history
+                    GROUP BY memory_id
                     ORDER BY last_act DESC
                 """
                 all_mems = db.execute(sql_ids).fetchall()
-                
+
                 matched_ids = []
                 for m in all_mems:
                     mem_id = m["memory_id"]
-                    
+
                     # Look up item details to support keyword/title/content filtering
                     item = db.execute(
                         "SELECT title, content, type FROM memory_items WHERE id = ?", (mem_id,)
                     ).fetchone()
-                    
+
                     # If query is specified, check matches
                     if q:
                         q_lower = q.lower()
@@ -2672,18 +2669,18 @@ async def get_audit_timeline(request: Request, q: str = "", limit: int = 25):
                                 match = True
                         if not match:
                             continue
-                            
+
                     matched_ids.append(mem_id)
                     if len(matched_ids) >= limit:
                         break
-                
+
                 if not matched_ids:
                     return f'<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 2rem 0;">No change history timelines matched "{q}".</p>'
-                
+
                 cards_html = []
                 for mem_id in matched_ids:
                     cards_html.append(render_audit_card(mem_id, db))
-                    
+
                 return f"""
                 <div class="timeline-container">
                     {"".join(cards_html)}
@@ -2700,11 +2697,11 @@ async def audit_override(memory_id: str, request: Request, title: str = Form(...
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     # Import and run memory_update_impl
     from memory_core import memory_update_impl
     await memory_update_impl(id=memory_id, title=title, content=content, reembed=True)
-    
+
     from m3_sdk import active_database
     with active_database(selected_db_path):
         with _db() as db:
@@ -2716,21 +2713,21 @@ async def audit_resolve(memory_id: str, request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     from datetime import datetime, timezone
-    from memory.db import _record_history
-    
+
     from m3_sdk import active_database
+    from memory.db import _record_history
     with active_database(selected_db_path):
         with _db() as db:
             # 1. Update is_deleted = 0
-            db.execute("UPDATE memory_items SET is_deleted = 0, updated_at = ? WHERE id = ?", 
+            db.execute("UPDATE memory_items SET is_deleted = 0, updated_at = ? WHERE id = ?",
                        (datetime.now(timezone.utc).isoformat(), memory_id))
             # 2. Record "resolve" event in history
             row = db.execute("SELECT content FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
             content = row["content"] if row else "Restored and active."
             _record_history(memory_id, "resolve", "Conflict state or soft-deleted", content, "is_deleted", actor_id="dashboard", db=db)
-            
+
             return render_audit_card(memory_id, db)
 
 
@@ -2739,10 +2736,10 @@ async def audit_soft_delete(memory_id: str, request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     from memory_core import memory_delete_impl
     memory_delete_impl(memory_id, hard=False)
-    
+
     from m3_sdk import active_database
     with active_database(selected_db_path):
         with _db() as db:
@@ -2752,12 +2749,12 @@ async def audit_soft_delete(memory_id: str, request: Request):
 @app.post("/api/audit/hard-delete/{memory_id}", response_class=HTMLResponse)
 async def audit_hard_delete(memory_id: str, request: Request):
     selected_db = request.cookies.get("selected_db", "main")
-    selected_db_path = get_active_db_path(request)
+    get_active_db_path(request)
     set_active_db_env(selected_db)
-    
+
     from memory_core import memory_delete_impl
     memory_delete_impl(memory_id, hard=True)
-    
+
     return f"""
     <div class="timeline-group-card" id="card-{memory_id}" style="border-color: rgba(239, 68, 68, 0.4); background: hsla(15, 100%, 50%, 0.05); text-align: center; padding: 2rem;">
         <span style="color: hsl(15, 100%, 65%); font-size: 1.5rem; display: block; margin-bottom: 0.5rem;">💀 Memory Purged</span>
@@ -2774,10 +2771,10 @@ async def export_gdpr_data(user_id: str = "default"):
     try:
         raw_json = gdpr_export_impl(user_id)
         data = json.loads(raw_json)
-        
+
         def iter_json():
             yield json.dumps(data, indent=2)
-            
+
         headers = {
             "Content-Disposition": f'attachment; filename="m3_gdpr_export_{user_id}.json"'
         }
@@ -2796,7 +2793,7 @@ async def forget_gdpr_data(user_id: str = Form(...)):
         return HTMLResponse(content=f"Purge Failed: {str(e)}", status_code=500)
 
 
-active_task = {
+active_task: dict[str, Any] = {
     "process": None,
     "action": None,
     "log_path": None,
@@ -2809,7 +2806,7 @@ active_task = {
 async def trigger_maintenance_task(action: str):
     """Asynchronously triggers maintenance scripts in the background."""
     import subprocess
-    
+
     # Check if a task is already running
     proc = active_task["process"]
     if proc is not None and proc.poll() is None:
@@ -2817,9 +2814,9 @@ async def trigger_maintenance_task(action: str):
             content=f"[Error] Another task ({active_task['action']}) is already running. Please wait for it to complete.",
             status_code=400
         )
-        
+
     main_db = os.path.abspath(resolve_db_path(None))
-    
+
     # Resolve Chatlog DB path
     try:
         from chatlog_config import resolve_config
@@ -2827,7 +2824,7 @@ async def trigger_maintenance_task(action: str):
         chatlog_db = os.path.abspath(config.db_path)
     except Exception:
         chatlog_db = main_db
-        
+
     cmd_map = {
         "decay_dry": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db],
         "decay_apply": [sys.executable, os.path.join(os.path.dirname(__file__), "chatlog_decay.py"), "--db", chatlog_db, "--apply"],
@@ -2836,7 +2833,7 @@ async def trigger_maintenance_task(action: str):
         "backfill_embeds": [sys.executable, os.path.join(os.path.dirname(__file__), "m3_chatlog_backfill_embed.py"), "--yes"],
         "files_health": [sys.executable, "-m", "files_memory.tools", "health", "--rebuild"]
     }
-    
+
     wait_map = {
         "decay_dry": "5-15 seconds (dry-run)",
         "decay_apply": "5-15 seconds",
@@ -2845,15 +2842,15 @@ async def trigger_maintenance_task(action: str):
         "backfill_embeds": "1-5 minutes (generating embedding vectors for queue)",
         "files_health": "10-45 seconds (probing and rebuilding chunks)"
     }
-    
+
     if action not in cmd_map:
         raise HTTPException(status_code=400, detail="Invalid action")
-        
+
     cmd = cmd_map[action]
     expected_wait = wait_map.get(action, "1-3 minutes")
-    
+
     log_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "maintenance_run.log"))
-    
+
     # Close any existing open handles
     if active_task["log_file_handle"]:
         try:
@@ -2861,7 +2858,7 @@ async def trigger_maintenance_task(action: str):
         except Exception:
             pass
         active_task["log_file_handle"] = None
-        
+
     # Truncate and prep new log file
     try:
         with open(log_path, "w", encoding="utf-8") as f:
@@ -2870,10 +2867,10 @@ async def trigger_maintenance_task(action: str):
             f.write(f"[System] Command: {' '.join(cmd)}\n\n")
     except Exception as e:
         return HTMLResponse(content=f"[Error] Failed to initialize log: {str(e)}", status_code=500)
-        
+
     # Open log file in append mode for child process redirection
     log_file_handle = open(log_path, "a", encoding="utf-8", errors="replace")
-    
+
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     bin_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2881,7 +2878,7 @@ async def trigger_maintenance_task(action: str):
         env["PYTHONPATH"] = bin_dir + os.pathsep + env["PYTHONPATH"]
     else:
         env["PYTHONPATH"] = bin_dir
-        
+
     try:
         # Spawn child process in the background
         proc = subprocess.Popen(
@@ -2891,13 +2888,13 @@ async def trigger_maintenance_task(action: str):
             stderr=subprocess.STDOUT, # redirect stderr to stdout
             shell=False
         )
-        
+
         active_task["process"] = proc
         active_task["action"] = action
         active_task["log_path"] = log_path
         active_task["log_file_handle"] = log_file_handle
         active_task["expected_wait"] = expected_wait
-        
+
         return HTMLResponse(
             content=f"[System] Triggered background task '{action}'.\nExpected wait: {expected_wait}.\nRunning in background...",
             status_code=200
@@ -2915,10 +2912,10 @@ async def get_maintenance_status():
     """Polls the status of the background maintenance task and reads live logs."""
     proc = active_task["process"]
     log_path = active_task["log_path"]
-    
+
     status = "idle"
     exit_code = None
-    
+
     if proc is not None:
         exit_code = proc.poll()
         if exit_code is not None:
@@ -2932,7 +2929,7 @@ async def get_maintenance_status():
                 active_task["log_file_handle"] = None
         else:
             status = "running"
-            
+
     # Read the log file
     logs = ""
     if log_path and os.path.exists(log_path):
@@ -2941,7 +2938,7 @@ async def get_maintenance_status():
                 logs = f.read()
         except Exception as e:
             logs = f"Error reading live logs: {str(e)}"
-            
+
     return JSONResponse(
         content={
             "status": status,
@@ -2957,5 +2954,5 @@ async def get_maintenance_status():
 if __name__ == "__main__":
     port_override = int(os.environ.get("M3_DASHBOARD_PORT", PORT))
     host_override = os.environ.get("M3_DASHBOARD_HOST", HOST)
-    
+
     uvicorn.run("dashboard_server:app", host=host_override, port=port_override, reload=False)
