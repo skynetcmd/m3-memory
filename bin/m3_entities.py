@@ -171,25 +171,31 @@ def _build_extractor(
         # ~2k chars of content).
         body = content[: profile.input_max_chars] if profile.input_max_chars else content[:4000]
 
-        # Anthropic /v1/messages payload (same shape as observer profile).
-        payload = {
-            "model": profile.model,
-            "max_tokens": profile.max_tokens,
-            "messages": [
-                {"role": "user", "content": body},
-            ],
-        }
-        # System prompt goes in the top-level `system` field for Anthropic.
-        if profile.system:
-            payload["system"] = profile.system
-        if profile.temperature is not None:
-            payload["temperature"] = profile.temperature
-
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": token,
-            "anthropic-version": getattr(profile, "anthropic_version", "2023-06-01"),
-        }
+        # Build the request per the profile's wire-format backend.
+        # - "anthropic": /v1/messages (top-level `system`, x-api-key header,
+        #   content-block response). LM Studio's Anthropic-compat endpoint.
+        # - "openai": /v1/chat/completions (system as a message, Bearer auth,
+        #   choices[].message.content response). Enables OpenAI-compatible
+        #   endpoints (OpenAI, Gemini openai-compat, LM Studio /v1/chat).
+        backend = getattr(profile, "backend", "anthropic") or "anthropic"
+        if backend == "openai":
+            messages = []
+            if profile.system:
+                messages.append({"role": "system", "content": profile.system})
+            messages.append({"role": "user", "content": body})
+            payload = {"model": profile.model, "max_tokens": profile.max_tokens, "messages": messages}
+            if profile.temperature is not None:
+                payload["temperature"] = profile.temperature
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+        else:  # anthropic (default — preserves prior behaviour)
+            payload = {"model": profile.model, "max_tokens": profile.max_tokens,
+                       "messages": [{"role": "user", "content": body}]}
+            if profile.system:
+                payload["system"] = profile.system
+            if profile.temperature is not None:
+                payload["temperature"] = profile.temperature
+            headers = {"Content-Type": "application/json", "x-api-key": token,
+                       "anthropic-version": getattr(profile, "anthropic_version", "2023-06-01")}
 
         try:
             r = await client.post(profile.url, json=payload, headers=headers, timeout=profile.timeout_s)
@@ -199,11 +205,19 @@ def _build_extractor(
             raise RuntimeError(f"http {r.status_code}: {r.text[:300]}")
 
         data = r.json()
-        # Anthropic content blocks
-        text = ""
-        for blk in data.get("content") or []:
-            if isinstance(blk, dict) and blk.get("type") == "text":
-                text += blk.get("text", "")
+        # Extract the response text per backend shape.
+        if backend == "openai":
+            choices = data.get("choices") or []
+            msg = (choices[0].get("message") or {}) if choices else {}
+            # some reasoning models (gpt-oss) leave the answer in `reasoning`
+            text = msg.get("content") or msg.get("reasoning") or ""
+            # strip a <think>...</think> reasoning block if present
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        else:
+            text = ""
+            for blk in data.get("content") or []:
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    text += blk.get("text", "")
         text = strip_code_fences(text)
         m = JSON_RE.search(text)
         if not m:
@@ -434,6 +448,31 @@ async def _run_db(
     # Make sure entity-graph code-path is enabled in this process.
     os.environ.setdefault("M3_ENABLE_ENTITY_GRAPH", "1")
 
+    def _enqueue_failure(memory_id: str, err: Exception) -> None:
+        """Record a failed turn in entity_extraction_queue so it is visibly
+        resumable instead of silently dropped. Mirrors memory_core's live
+        enqueue-on-miss exactly (INSERT OR REPLACE + attempts increment) so the
+        existing extract_pending / dead-letter machinery picks these up. Best-
+        effort: a queue-write failure must never mask the original error."""
+        try:
+            import sqlite3 as _sql
+            qc = _sql.connect(str(db_path), timeout=30)
+            qc.execute(
+                """INSERT OR REPLACE INTO entity_extraction_queue
+                       (memory_id, attempts, last_error, last_attempt_at)
+                   VALUES (
+                       ?,
+                       COALESCE((SELECT attempts FROM entity_extraction_queue WHERE memory_id=?), 0) + 1,
+                       ?,
+                       strftime('%Y-%m-%dT%H:%M:%SZ','now')
+                   )""",
+                (memory_id, memory_id, f"{type(err).__name__}: {err}"[:500]),
+            )
+            qc.commit()
+            qc.close()
+        except Exception:
+            pass  # never let queue bookkeeping break the run
+
     rows = _query_eligible_rows(
         db_path, type_allowlist, source_variant, limit, skip_already_extracted,
         source_conv_list=source_conv_list,
@@ -472,7 +511,8 @@ async def _run_db(
                             print(f"[m3-entities] retry {memory_id[:8]}: {type(e).__name__}", flush=True)
                 if out is None:
                     counters["failed"] += 1
-                    print(f"[m3-entities] FAIL {memory_id[:8]}: {type(last_err).__name__}: {last_err}", flush=True)
+                    _enqueue_failure(memory_id, last_err)
+                    print(f"[m3-entities] FAIL {memory_id[:8]}: {type(last_err).__name__}: {last_err} (queued)", flush=True)
                     return
                 ents = out.get("entities", [])
                 rels = out.get("relationships", [])
@@ -495,7 +535,8 @@ async def _run_db(
                     )
                 except Exception as e:
                     counters["write_failed"] += 1
-                    print(f"[m3-entities] WRITE-FAIL {memory_id[:8]}: {type(e).__name__}: {e}", flush=True)
+                    _enqueue_failure(memory_id, e)
+                    print(f"[m3-entities] WRITE-FAIL {memory_id[:8]}: {type(e).__name__}: {e} (queued)", flush=True)
 
         await asyncio.gather(*(gated(mid, txt) for mid, txt in rows))
 
