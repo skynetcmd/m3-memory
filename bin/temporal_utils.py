@@ -60,17 +60,41 @@ _SIMPLE_REL_PATTERNS: list[tuple[re.Pattern[str], int]] = [
     (re.compile(r"\btomorrow\b"), 1),
     (re.compile(r"\brecently\b"), 0),
 ]
+# Quantifier in "N <unit> ago" accepts digits, the singular article (a/an → 1),
+# and spelled-out small numbers including "couple" (→2) and "few" (→3).
+# Conversational text uses "two months ago"/"a couple of weeks ago" far more
+# than bare digits, so word-numbers are not optional.
+_WORDNUM: dict[str, int] = {
+    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "couple": 2, "few": 3, "several": 3,
+}
+# alternation of all spelled tokens, longest-first not needed (all \w), plus \d+
+_QTY = r"(\d+|" + "|".join(_WORDNUM) + r")"
+
+
+def _rel_count(tok: str) -> int:
+    tok = tok.lower()
+    return _WORDNUM[tok] if tok in _WORDNUM else int(tok)
+
+
+# "(?:of\s+)?" absorbs "a couple OF weeks ago".
 _NUMERIC_REL_PATTERNS: list[tuple[re.Pattern[str], Callable[[str], timedelta]]] = [
-    (re.compile(r"\b(\d+)\s+days?\s+ago\b"), lambda d: timedelta(days=int(d))),
-    (re.compile(r"\b(\d+)\s+weeks?\s+ago\b"), lambda w: timedelta(weeks=int(w))),
-    (re.compile(r"\b(\d+)\s+months?\s+ago\b"), lambda m: timedelta(days=int(m) * 30)),
-    (re.compile(r"\b(\d+)\s+years?\s+ago\b"), lambda y: timedelta(days=int(y) * 365)),
+    (re.compile(rf"\b{_QTY}\s+(?:of\s+)?days?\s+ago\b"), lambda d: timedelta(days=_rel_count(d))),
+    (re.compile(rf"\b{_QTY}\s+(?:of\s+)?weeks?\s+ago\b"), lambda w: timedelta(weeks=_rel_count(w))),
+    (re.compile(rf"\b{_QTY}\s+(?:of\s+)?months?\s+ago\b"), lambda m: timedelta(days=_rel_count(m) * 30)),
+    (re.compile(rf"\b{_QTY}\s+(?:of\s+)?years?\s+ago\b"), lambda y: timedelta(days=_rel_count(y) * 365)),
 ]
 _STATIC_REL_PATTERNS: list[tuple[re.Pattern[str], Callable[[datetime], datetime]]] = [
     (re.compile(r"\blast\s+weekend\b"), lambda a: a - timedelta(days=a.weekday() + 2)),
     (re.compile(r"\blast\s+week\b"), lambda a: a - timedelta(days=7)),
+    (re.compile(r"\bnext\s+week\b"), lambda a: a + timedelta(days=7)),
     (re.compile(r"\bnext\s+month\b"), lambda a: a + timedelta(days=30)),
     (re.compile(r"\blast\s+month\b"), lambda a: a - timedelta(days=30)),
+    # "this <period>" resolves to the anchor itself — the period containing
+    # "now". For window-membership checks ("did X happen this month") the
+    # anchor date is the correct representative point.
+    (re.compile(r"\bthis\s+(?:week|month|year|weekend)\b"), lambda a: a),
 ]
 
 # Cap on "N <unit> ago" deltas. timedelta itself raises OverflowError for
