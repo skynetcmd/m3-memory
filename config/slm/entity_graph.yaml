@@ -8,18 +8,43 @@ cache_system: true
 system: |
   Extract entities and relationships from the input text.
 
-  Entity types (use only these): person, place, organization, event, concept, object, date.
-  Predicates (use only these): works_at, located_in, before, after, same_as, contradicts, mentions, relates_to.
+  Entity types (use only these): person, place, organization, event, date, quantity,
+  preference, product, topic.
 
-  For each entity: provide a canonical name (capitalized, one form regardless of how the user
-  refers to it — e.g., "my sister Alex" → canonical_name "Alex"), the entity_type, and the
-  surface mention as it appeared in the text.
+  Predicates (use only these):
+    located_in       person -> place (residence)
+    works_at         person -> organization
+    family_of        person -> person (blood/marriage kin; relation word in "role": sister/mom/...)
+    knows            person -> person (non-family tie; "role": friend/coworker/neighbor/...)
+    prefers          person -> preference/product (favorite/love/enjoy)
+    owns             person -> product/object (possessions/acquisitions: books, courses, plants, ...)
+    has_participant  event -> person (who was there)
+    has_location     event -> place
+    has_time         event -> date ("when" holds the time phrase verbatim)
+    has_quantity     entity -> quantity (a stated count; "qty" holds it as a string)
+    same_as          entity -> entity (canonical alias)
+    source_of        fact -> memory_item
+    supersedes       fact -> fact (a later value replaces an earlier one)
+    mentions         catch-all — use ONLY when nothing above fits
 
-  For each relationship: from_entity and to_entity must be canonical names that ALSO appear
-  in the entities list above. Use predicates literally; do not invent new ones.
+  ENTITY rules:
+  - canonical_name is the BARE noun, singular, no count/possessive: "two cats" -> "cat";
+    "my old bicycle" -> "bicycle"; "5 piano lessons" -> "piano lesson".
+  - mention_text is the EXACT surface span as written (keep number/possessive): "two cats",
+    "my old bicycle", "5 piano lessons".
+  - attrs may carry "role" (kin/social label), "when" (a time phrase ONLY, verbatim, else ""),
+    and "qty" (a stated count as a string).
+
+  RELATIONSHIP rules:
+  - family_of ONLY for blood/marriage kin; a friend/colleague/neighbor/named acquaintance is knows.
+  - For an event, has_participant points to each NAMED person who was there (do not auto-add the
+    speaker unless the text says they attended).
+  - from_entity and to_entity must be canonical names that ALSO appear in the entities list.
+  - Use predicates literally; do not invent new ones.
+  - Do NOT resolve dates — copy the relative phrase verbatim into "when".
 
   Output ONLY a JSON object on a single line:
-  {"entities": [{"canonical_name": "...", "entity_type": "...", "mention_text": "...", "confidence": 0.0-1.0}],
+  {"entities": [{"canonical_name": "...", "entity_type": "...", "mention_text": "...", "attrs": {"role": "...", "when": "...", "qty": "..."}, "confidence": 0.0-1.0}],
    "relationships": [{"from_entity": "...", "to_entity": "...", "predicate": "...", "confidence": 0.0-1.0}]}
 
   If the text contains no entities, output exactly: {"entities": [], "relationships": []}
