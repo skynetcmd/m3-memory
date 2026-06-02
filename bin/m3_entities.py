@@ -450,28 +450,39 @@ async def _run_db(
 
     def _enqueue_failure(memory_id: str, err: Exception) -> None:
         """Record a failed turn in entity_extraction_queue so it is visibly
-        resumable instead of silently dropped. Mirrors memory_core's live
-        enqueue-on-miss exactly (INSERT OR REPLACE + attempts increment) so the
-        existing extract_pending / dead-letter machinery picks these up. Best-
-        effort: a queue-write failure must never mask the original error."""
+        resumable instead of silently dropped — recovered by the existing
+        extract_pending / dead-letter machinery.
+
+        Concurrency-hardened (vs memory_core's live INSERT-OR-REPLACE): uses an
+        atomic UPSERT (ON CONFLICT(memory_id) DO UPDATE) so the row is updated
+        in place — no delete+insert churn, stable id, safe when the live
+        enricher or another batch worker touches the same queue. busy_timeout
+        lets it wait out a concurrent writer's lock rather than failing.
+        Best-effort: a queue-write failure must never mask the original error."""
+        qc = None
         try:
             import sqlite3 as _sql
             qc = _sql.connect(str(db_path), timeout=30)
+            qc.execute("PRAGMA busy_timeout=30000")
             qc.execute(
-                """INSERT OR REPLACE INTO entity_extraction_queue
+                """INSERT INTO entity_extraction_queue
                        (memory_id, attempts, last_error, last_attempt_at)
-                   VALUES (
-                       ?,
-                       COALESCE((SELECT attempts FROM entity_extraction_queue WHERE memory_id=?), 0) + 1,
-                       ?,
-                       strftime('%Y-%m-%dT%H:%M:%SZ','now')
-                   )""",
-                (memory_id, memory_id, f"{type(err).__name__}: {err}"[:500]),
+                   VALUES (?, 1, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   ON CONFLICT(memory_id) DO UPDATE SET
+                       attempts        = attempts + 1,
+                       last_error      = excluded.last_error,
+                       last_attempt_at = excluded.last_attempt_at""",
+                (memory_id, f"{type(err).__name__}: {err}"[:500]),
             )
             qc.commit()
-            qc.close()
         except Exception:
             pass  # never let queue bookkeeping break the run
+        finally:
+            if qc is not None:
+                try:
+                    qc.close()
+                except Exception:
+                    pass
 
     rows = _query_eligible_rows(
         db_path, type_allowlist, source_variant, limit, skip_already_extracted,
