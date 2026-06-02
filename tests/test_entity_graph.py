@@ -1712,3 +1712,59 @@ def test_module_constants_match_default_yaml():
     assert preds == memory_core.VALID_ENTITY_PREDICATES, (
         f"Predicates from YAML {preds} != module constant {memory_core.VALID_ENTITY_PREDICATES}"
     )
+
+
+def test_extraction_prompt_vocab_matches_validation_vocab():
+    """Regression guard: the shipped extraction prompt (config/slm/entity_graph.yaml)
+    must only declare entity types + predicates that the validation vocab
+    (entity_graph_default.yaml) accepts.
+
+    Catches prompt/vocab drift — the 2026-06 bug where the prompt still listed the
+    v1 vocab (works_at/located_in/contradicts/relates_to, types concept/object)
+    after the vocab moved to v2 (family_of/owns/has_*). A drifted prompt instructs
+    the model to emit predicates/types that are silently REJECTED at write time
+    (entity.py validation), and omits the predicates the vocab actually supports.
+    """
+    import re
+    from pathlib import Path
+
+    import memory_core
+    import yaml
+
+    repo = Path(__file__).parent.parent
+    types, preds = memory_core.load_entity_vocab(
+        str(repo / "config" / "lists" / "entity_graph_default.yaml")
+    )
+    valid = set(types) | set(preds)
+
+    prompt = yaml.safe_load((repo / "config" / "slm" / "entity_graph.yaml").read_text(encoding="utf-8"))["system"]
+
+    # The prompt declares its allowed vocab in two list contexts:
+    #   "Entity types (use only these): a, b, c."
+    #   a "Predicates (use only these):" block where each predicate is the first
+    #   token of an indented line.
+    m = re.search(r"Entity types \(use only these\):(.+?)(?:Predicates|\n\n)", prompt, re.S)
+    declared_types = {
+        t.strip(" .").lower()
+        for t in re.split(r"[,\n]", m.group(1) if m else "")
+        if t.strip(" .") and t.strip(" .").lower() != "these"
+    }
+
+    pred_block = prompt.split("Predicates (use only these):", 1)[1]
+    pred_block = re.split(r"\n\s*[A-Z]{2,}", pred_block, maxsplit=1)[0]  # stop at the next ALLCAPS section header
+    # Each predicate is the first lowercase token of an indented definition line
+    # ("  located_in   person -> place"). Indentation is >=2 spaces.
+    declared_preds = {
+        ln.split()[0].lower()
+        for ln in pred_block.splitlines()
+        if re.match(r"\s{2,}[a-z_]+\s", ln)
+    }
+
+    declared = declared_types | declared_preds
+    assert declared, "Could not parse any declared vocab from the prompt — parser/format drift."
+    unknown = declared - {v.lower() for v in valid}
+    assert not unknown, (
+        f"Extraction prompt declares vocab not in the validation set (would be rejected "
+        f"at write time): {sorted(unknown)}. Sync config/slm/entity_graph.yaml with "
+        f"config/lists/entity_graph_default.yaml."
+    )
