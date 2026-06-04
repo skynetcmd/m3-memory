@@ -102,23 +102,122 @@ def detect_backend(os_tok: Optional[str] = None) -> BackendChoice:
     return BackendChoice(os_tok, "cpu", "no GPU toolchain detected — CPU build")
 
 
-def _pip(*args: str, env: Optional[dict] = None) -> int:
+def _pip(*args: str, env: Optional[dict] = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "pip", *args],
         env=env if env is not None else os.environ.copy(),
-    ).returncode
+        capture_output=True,
+        text=True,
+    )
+
+
+def _is_pep668(result: subprocess.CompletedProcess) -> bool:
+    """Return True if pip refused due to PEP 668 (externally-managed-environment)."""
+    return result.returncode != 0 and "externally-managed-environment" in result.stderr
+
+
+def _can_sudo() -> bool:
+    """Return True if the current user can run sudo without a password prompt.
+
+    Uses `sudo -n true` — the -n flag makes sudo fail immediately rather than
+    prompting, so this is safe to call non-interactively.
+    """
+    return subprocess.run(
+        ["sudo", "-n", "true"],
+        capture_output=True,
+    ).returncode == 0
+
+
+def _in_privileged_group() -> bool:
+    """Return True if the user is in the 'sudo' or 'wheel' group."""
+    try:
+        import grp
+        user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+        privileged = {"sudo", "wheel"}
+        for g in grp.getgrall():
+            if g.gr_name in privileged and user in g.gr_mem:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _pip_install_with_pep668_fallback(*pip_args: str) -> int:
+    """Run pip install, retrying with --user on PEP 668 systems.
+
+    Strategy:
+      1. Try pip install <args> as-is.
+      2. If pip rejects with PEP 668 (externally-managed-environment),
+         retry with --user (installs to ~/.local, no root needed).
+      3. If --user also fails, detect whether the user can sudo and
+         print the exact command(s) to run as root, then return non-zero.
+
+    Returns 0 on success, non-zero otherwise.
+    """
+    result = _pip(*pip_args)
+    if result.returncode == 0:
+        return 0
+
+    if not _is_pep668(result):
+        # Some other pip error — print stderr and propagate.
+        if result.stderr:
+            print(result.stderr, file=sys.stderr, end="")
+        return result.returncode
+
+    print("[rust-core] pip refused (PEP 668 externally-managed-environment); "
+          "retrying with --user ...", file=sys.stderr)
+    user_result = _pip("--user", *pip_args)
+    if user_result.returncode == 0:
+        return 0
+
+    # --user also failed. Build the exact sudo command and advise the user.
+    sudo_cmd = (
+        f"sudo pip install --break-system-packages {' '.join(pip_args)}"
+    )
+    can_sudo = _can_sudo()
+    in_group = _in_privileged_group()
+
+    if can_sudo:
+        print(
+            "[rust-core] --user install also failed. You have sudo access — "
+            "run this command to install system-wide:\n"
+            f"    {sudo_cmd}",
+            file=sys.stderr,
+        )
+    elif in_group:
+        print(
+            "[rust-core] --user install also failed. You are in the sudo/wheel "
+            "group but sudo requires your password. Open another shell and run:\n"
+            f"    {sudo_cmd}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "[rust-core] --user install also failed and you do not appear to "
+            "have sudo access.\n"
+            "Ask a system administrator to open a root shell and run:\n"
+            f"    {sudo_cmd}\n"
+            "Or ask them to add you to the 'sudo' (Debian/Ubuntu) or 'wheel' "
+            "(RHEL/Fedora/Arch) group, then log out and back in.",
+            file=sys.stderr,
+        )
+
+    if user_result.stderr:
+        print(user_result.stderr, file=sys.stderr, end="")
+    return user_result.returncode
 
 
 def install_prebuilt(choice: BackendChoice, *, version: str = M3_CORE_RS_VERSION) -> int:
     """Try to install the matching prebuilt wheel from PyPI.
 
-    Returns pip's exit code. A non-zero result is the signal to fall back to
-    a source build — most commonly because no wheel exists for this host's
-    platform/Python yet (pip exits non-zero with "no matching distribution").
+    Returns 0 on success, non-zero otherwise. A non-zero result (other than a
+    PEP 668 advisory already printed) signals to fall back to a source build.
     """
     spec = f"{choice.package}=={version}"
     print(f"[rust-core] installing prebuilt wheel: {spec}  ({choice.reason})")
-    return _pip("install", "--upgrade", "--only-binary=:all:", spec)
+    return _pip_install_with_pep668_fallback(
+        "install", "--upgrade", "--only-binary=:all:", spec
+    )
 
 
 def install_from_source(choice: BackendChoice, *,
@@ -140,7 +239,7 @@ def install_from_source(choice: BackendChoice, *,
         args += ["--config-settings", f"build-args=--features {','.join(feats)}"]
     print(f"[rust-core] building from source @ {git_tag} "
           f"(features={feats or '(none)'}); this needs Rust + a compiler")
-    return _pip(*args)
+    return _pip_install_with_pep668_fallback(*args)
 
 
 def install_rust_core(os_tok: Optional[str] = None, *,
