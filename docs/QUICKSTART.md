@@ -31,6 +31,14 @@ required), per-agent MCP wiring, chatlog hooks, and runs a final
 /plugin install m3@skynetcmd
 ```
 
+> **No GitHub SSH key?** The `owner/repo` shorthand above uses SSH. If you
+> get a "Premature close" or "ERR_STREAM_PREMATURE_CLOSE" error, use the
+> HTTPS URL instead:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
+
 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, `/m3:status`, …), the `m3:curate-memory` and `m3:curate-chatlog` subagents, and auto-wired Stop + PreCompact chatlog hooks. See [claude_code_plugin.md](./claude_code_plugin.md) for the full reference.
 
 ### Google Antigravity users — install as a plugin
