@@ -1,5 +1,13 @@
 # M3 Agentic Memory — Full Install Plan (macOS)
 
+> **Looking for the standard install?** This document covers the advanced
+> repo-clone / homelab path (Postgres sync, ChromaDB, scheduled tasks).
+> For a normal install use the one-liner:
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
+> ```
+> See [install_macos.md](install_macos.md) and [QUICKSTART_MACOS.md](QUICKSTART_MACOS.md).
+
 > **Minimum viable install** (no homelab): Steps 1-4 + 6-8.
 > The memory system works fully local via SQLite without Postgres or ChromaDB.
 
@@ -10,11 +18,12 @@
 | Requirement | Check |
 |---|---|
 | **macOS 13+** | `sw_vers` |
-| **Python 3.11+** | `python --version` |
+| **Python 3.11+** | `python3 --version` |
 | **Git** | `git --version` |
 | **Homebrew** *(recommended)* | `brew --version` |
 
-> If Python is not installed, run `brew install python` or download from [python.org](https://www.python.org/downloads/).
+> If Python is not installed: `brew install python@3.13`
+> Avoid the macOS-shipped `/usr/bin/python3` — it is old and externally managed.
 
 ---
 
@@ -32,7 +41,7 @@ cd m3-memory
 ## Step 2 — Create and activate the virtual environment
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 ```
 
@@ -40,7 +49,7 @@ Verify the venv is active — your prompt should show `(.venv)` and:
 
 ```bash
 python --version      # Should print Python 3.11+
-pip --version           # Should point to .venv/bin/pip
+pip --version         # Should point to .venv/bin/pip
 ```
 
 ---
@@ -59,7 +68,7 @@ pip install -r requirements.txt
 ## Step 4 — Run the automated installer
 
 ```bash
-python install_os.py
+python3 install_os.py
 ```
 
 This performs 6 actions automatically:
@@ -114,33 +123,40 @@ source ~/.zshrc
 
 ---
 
-## Step 7 — Generate MCP configs
+## Step 7 — Wire MCP clients
+
+> **Modern path (recommended):** `m3 setup` (or `m3 install-m3`) handles
+> MCP wiring automatically. Use that unless you need the legacy config files.
+
+**Quick wiring:**
 
 ```bash
-python bin/generate_configs.py
+# Claude Code (--global writes to ~/.claude/settings.json, available in all projects)
+claude mcp add --global memory m3
+
+# Gemini CLI
+m3 chatlog init --apply-gemini
 ```
 
-This does three things:
-1. Patches `config/claude-settings.json` and `config/gemini-settings.json` with the correct absolute paths for your machine
-2. Sets the correct `python` command in all MCP server entries
-3. Generates `.mcp.json` in the project root — Claude Code automatically loads MCP servers from this file
+**Legacy path** (generates machine-specific config files for older setups):
 
-The following bridges are registered:
+```bash
+python3 bin/generate_configs.py
+```
 
-| Server name | Script |
-|---|---|
-| `memory` | `bin/memory_bridge.py` |
-
-> **Note:** `.mcp.json` is gitignored because it contains machine-specific absolute paths. Re-run `generate_configs.py` after cloning on a new machine.
+This patches `config/claude-settings.json` and `config/gemini-settings.json`
+with absolute paths and generates `.mcp.json` in the project root.
+`.mcp.json` is gitignored — re-run after cloning on a new machine.
 
 ---
 
 ## Step 8 — Verify everything
 
 ```bash
-bash bin/mcp_check.sh
-python bin/test_memory_bridge.py
-python run_tests.py
+m3 doctor                        # canonical health check
+bash bin/mcp_check.sh            # legacy MCP connectivity check (optional)
+python3 bin/test_memory_bridge.py
+python3 run_tests.py
 ```
 
 ---
@@ -150,7 +166,7 @@ python run_tests.py
 **Option A — Automated:**
 
 ```bash
-python bin/install_schedules.py
+python3 bin/install_schedules.py
 ```
 
 This installs crontab entries from `bin/crontab.template`.
@@ -188,10 +204,14 @@ Or skip it entirely if you are not using PostgreSQL homelab sync.
 macOS should use the Keychain backend automatically. Verify with:
 
 ```bash
-python -c "import keyring; print(keyring.get_keyring())"
+python3 -c "import keyring; print(keyring.get_keyring())"
 ```
 
-This should show `KeychainKeyring`.
+This should show `KeychainKeyring`. If it shows something else, reinstall:
+
+```bash
+pip install --force-reinstall keyring
+```
 
 ### `fnm` not recognized after install
 
@@ -202,6 +222,19 @@ echo 'eval "$(fnm env --use-on-cd)"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
+### `fnm` gives "Permission denied" (not "command not found")
+
+A system-wide `fnm` binary exists but is not executable by your user.
+The installer (as of v2026.6.4+) handles this automatically and installs
+fnm into your home directory. If you hit this on an older install, re-run
+`python3 install_os.py` after upgrading m3-memory.
+
 ### `security` command errors when storing keys
 
-Ensure you are not running in a headless SSH session — macOS Keychain requires a GUI login session for first-time access. If prompted, unlock the login keychain.
+macOS Keychain requires a GUI login session for first-time access — it
+does not work over a headless SSH session without a forwarded Keychain agent.
+Options:
+- Run the setup locally (not over SSH) and let `keyring` store to Keychain.
+- Over SSH: install `keyrings.alt` for a file-based fallback:
+  `pip install keyrings.alt` — then re-run `python3 install_os.py`.
+- Or store keys as environment variables in `~/.zshrc` instead of Keychain.
