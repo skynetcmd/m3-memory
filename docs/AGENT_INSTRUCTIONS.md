@@ -21,6 +21,30 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 **If the m3-memory MCP server is not registered in your client**, stop and tell the user. Do not fall back to a built-in memory system silently. Registration steps for each client (Claude Code, Gemini CLI, Aider, OpenCode, etc.) are in [QUICKSTART.md](./QUICKSTART.md).
 
+## 🚨 Silent Failure Detection — Mandatory Session Start Check
+
+**Registered ≠ working.** The MCP server can be registered but silently failing to capture chatlog (hooks disabled, agent unregistered, write errors). This caused 48+ hours of design context loss on 2026-06-03 with no warning to the user.
+
+**At session start, ALL agents MUST:**
+
+1. **Verify MCP tools are reachable.** If `memory_search`, `chatlog_search`, or equivalent tools return errors or are absent — **tell the user immediately and loudly.** Do not proceed silently.
+
+2. **Verify chatlog is writing** (for long-running projects — check within first few exchanges):
+   - Call `chatlog_status` or equivalent
+   - If `hook.enabled = false` OR `last_write` is null/stale → **warn the user immediately:**
+     > "⚠️ m3 chatlog hooks are not writing. Design decisions made this session will NOT be preserved across sessions. Please check your hook configuration (`m3 status`) before continuing substantive work."
+
+3. **Never silently degrade.** The correct behavior when m3 is unreachable or not writing is a **loud, visible warning** — not silent fallback to flat files, not continuing as if everything is fine.
+
+**Memory trust hierarchy (all agents must follow):**
+1. **m3 memory** — persistent, cross-session, curated. **Highest trust.**
+2. **Artifacts** — HANDOFF files, git history, output files, committed code
+3. **Context/session memory** — ephemeral, reconstructed. **Lowest trust.**
+
+When m3 memory contradicts what you think you remember from context — **trust m3**. Context memory degrades across session boundaries; m3 does not.
+
+**Why:** Silent chatlog failure + no warning = session context lost at the next session boundary. The next agent starts fresh, reverts to wrong assumptions, and may go rogue from the established plan. This is preventable only if the failure is surfaced at session start, not discovered hours later.
+
 ---
 
 ## 🚦 Pre-push process — ALL agents (not just Claude)
