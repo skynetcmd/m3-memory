@@ -245,8 +245,12 @@ def targets(selected: str = "all") -> List[MigrationTarget]:
                 else:  # main / unknown
                     logger.error(
                         "Refusing to apply chatlog migrations to %s — schema "
-                        "fingerprint says kind=%s. Set CHATLOG_DB_PATH to a "
-                        "real chatlog DB or omit it.", chatlog_path, chatlog_kind,
+                        "fingerprint says kind=%s. "
+                        "If this is a fresh install and no chatlog data exists, "
+                        "delete the file and re-run (`rm %s`). "
+                        "If it contains data you want to keep, set CHATLOG_DB_PATH "
+                        "to a real chatlog DB or omit it to use the default path.",
+                        chatlog_path, chatlog_kind, chatlog_path,
                     )
                     if selected == "chatlog":
                         return []

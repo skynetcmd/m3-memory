@@ -352,7 +352,7 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
                 env["M3_DATABASE"] = str(db_path)
                 mig_script = _os.path.join(
                     _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                    "bin", "migrate_memory.py"
+                    "migrate_memory.py"
                 )
                 result = subprocess.run(
                     [sys.executable, mig_script, "up", "--yes"],
@@ -364,7 +364,17 @@ async def memory_doctor_fix_impl(dry_run: bool = False) -> dict[str, Any]:
                 if result.returncode == 0:
                     _record("run_migrations", "ok", result.stdout.strip()[:200] or "migrations applied")
                 else:
-                    _record("run_migrations", "error", result.stderr.strip()[:300])
+                    stderr = result.stderr.strip()
+                    if "database is locked" in stderr:
+                        _record(
+                            "run_migrations", "error",
+                            "database is locked — the MCP server holds open connections. "
+                            "Stop Claude Code (or the m3 MCP server), run "
+                            "`python bin/migrate_memory.py up --target main -y` "
+                            "from the repo root, then restart.",
+                        )
+                    else:
+                        _record("run_migrations", "error", stderr[:300])
             except Exception as e:
                 _record("run_migrations", "error", str(e))
     else:
