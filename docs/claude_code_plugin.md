@@ -13,10 +13,17 @@ captured agentic-coding conversations).
 /plugin install m3@skynetcmd
 ```
 
+> **No GitHub SSH key?** The `owner/repo` shorthand uses SSH. If you get a
+> "Premature close" or "ERR_STREAM_PREMATURE_CLOSE" error, use the HTTPS URL:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
+
 Or directly from the repo without going through the marketplace:
 
 ```
-/plugin install github.com/skynetcmd/m3-memory
+/plugin install https://github.com/skynetcmd/m3-memory
 ```
 
 After install, restart your Claude Code session (or run `/plugin reload`)
