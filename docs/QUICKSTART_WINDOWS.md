@@ -8,7 +8,7 @@ Get persistent memory + directory ingestion running on Windows in under five min
 
 ## 1. Install
 
-If you don't already have Python/pip installed (or aren't sure), run these three commands once in an **elevated PowerShell**:
+**Prerequisites** — run once in an **elevated PowerShell** (right-click → Run as administrator):
 
 ```powershell
 winget install -e --id Python.Python.3.12
@@ -16,12 +16,39 @@ winget install -e --id Git.Git
 winget install -e --id SQLite.SQLite
 ```
 
-Then as your normal user, install m3 and start the smart setup:
+> **Microsoft Store Python?** The Store version (`python3.exe` stub) blocks
+> some installs. Use the winget version above instead — it puts a real
+> `python.exe` on PATH.
+
+Then install m3 and run the setup wizard **as your normal user** (not elevated):
 
 ```powershell
-pip install m3-memory
+# Recommended: pipx isolates m3 and auto-manages PATH
+winget install -e --id Python.Launcher   # ensures py.exe is available
+pip install --user pipx
+pipx ensurepath
+# Open a new terminal so PATH refreshes, then:
+pipx install m3-memory
 m3 setup
 ```
+
+**Prefer plain pip?**
+
+```powershell
+pip install --user m3-memory
+m3 setup
+```
+
+> **`m3` not found after `pip install --user`?** pip puts the script in
+> `%APPDATA%\Python\Python312\Scripts\` (adjust for your Python version).
+> Add that folder to your user PATH:
+> ```powershell
+> $scripts = "$env:APPDATA\Python\Python312\Scripts"
+> [Environment]::SetEnvironmentVariable(
+>     "PATH", "$env:PATH;$scripts", "User")
+> # Then open a new terminal.
+> ```
+> Using pipx avoids this entirely — it handles PATH automatically.
 
 `m3 setup` detects every agent on PATH, asks a handful of questions, and drives the rest end-to-end:
 
@@ -37,8 +64,6 @@ Restart your agent and you're done. The rest of this doc covers the features.
 
 > **Tool catalog stays small in your context.** m3 ships 87 MCP tools but groups them into 8 domains (memory, chatlog, files, entity, agent, tasks, conversations, admin). Only ~6 essentials load at MCP startup (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
 
-> If `m3` isn't found after `pip install --user`, add `%APPDATA%\Python\Python312\Scripts` (substitute your Python version) to your user PATH. See [install_windows.md](install_windows.md#common-gotchas) for the exact recipe.
-
 ---
 
 ## 2. Connect M3 to your agent
@@ -53,6 +78,13 @@ If you skipped the wizard, or you're adding an agent later, here's the manual re
 /plugin marketplace add skynetcmd/m3-memory
 /plugin install m3@skynetcmd
 ```
+
+> **No GitHub SSH key?** The `owner/repo` shorthand uses SSH. If you get a
+> "Premature close" or "ERR_STREAM_PREMATURE_CLOSE" error, use the HTTPS URL:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
 
 Then `/plugin reload` (or restart Claude Code). The plugin auto-registers the MCP, wires the chatlog Stop + PreCompact hooks, and adds 15 `/m3:*` slash commands plus two curator subagents — confirm with `/m3:health`.
 
@@ -94,7 +126,66 @@ Start-Process -WindowStyle Hidden `
 
 ---
 
-## 3. Ingest a directory
+## 3. Embedder (Tier-2 service — optional but recommended)
+
+The **Tier-1 in-process GGUF embedder** is active from the moment m3 starts — no extra steps. The **Tier-2 embed server** (port 8082, Windows Service) improves cold-start performance but is optional. M3 works fully without it.
+
+### Install the binary first
+
+```powershell
+m3 embedder install-gpu   # installs the prebuilt wheel — no Rust needed for CPU
+```
+
+This installs the `m3-embed-server` binary via a prebuilt PyPI wheel. Despite the name, it works on CPU-only machines. On NVIDIA machines it autodetects CUDA; on others it falls back to CPU.
+
+### Register as a Windows Service (requires elevation)
+
+The embed server registers as a Windows Service, which needs Administrator rights:
+
+```powershell
+# Open an elevated PowerShell (right-click → Run as administrator), then:
+m3 embedder install
+```
+
+Verify from any terminal:
+
+```powershell
+m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
+```
+
+### If you can't elevate (no admin rights)
+
+Run the server directly in a background PowerShell job:
+
+```powershell
+$env:M3_EMBED_GGUF = "$env:USERPROFILE\.m3-memory\_assets\models\bge-m3-Q4_K_M.gguf"
+Start-Process -WindowStyle Hidden -FilePath "m3-embed-server" `
+    -RedirectStandardOutput "$env:TEMP\m3-embed.log" `
+    -RedirectStandardError  "$env:TEMP\m3-embed.log"
+```
+
+To start automatically at login without elevation, create a Task Scheduler entry:
+
+```powershell
+$gguf    = "$env:USERPROFILE\.m3-memory\_assets\models\bge-m3-Q4_K_M.gguf"
+$action  = New-ScheduledTaskAction `
+               -Execute "powershell.exe" `
+               -Argument "-WindowStyle Hidden -Command `"& { `$env:M3_EMBED_GGUF='$gguf'; m3-embed-server }`"" `
+               -WorkingDirectory "$env:USERPROFILE"
+$trigger  = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0
+Register-ScheduledTask -TaskName "m3-embed-server" `
+    -Action $action -Trigger $trigger -Settings $settings `
+    -RunLevel Limited -Force
+```
+
+> **Tip:** Task Scheduler entries with `RunLevel Limited` don't need elevation
+> and survive reboots. Use `Unregister-ScheduledTask -TaskName "m3-embed-server"`
+> to remove it.
+
+---
+
+## 4. Ingest a directory
 
 Just tell your agent:
 
@@ -122,7 +213,7 @@ For images and audio: convert them to text first with your favorite tool (`tesse
 
 ---
 
-## 4. Search what you ingested
+## 5. Search what you ingested
 
 Just ask:
 
@@ -132,7 +223,7 @@ The agent returns the matching paragraphs with their source file and section hea
 
 ---
 
-## 5. Backfilling old conversations (optional)
+## 6. Backfilling old conversations (optional)
 
 If you had conversations before installing M3, ingest them in one shot per format. The cursor (`memory\.chatlog_ingest_cursor.json`) tracks what's already in so re-running is safe.
 
@@ -161,9 +252,10 @@ python bin\chatlog_ingest.py --format claude-code `
 
 ### Windows-specific notes
 
-- The watch daemon survives reboots via Task Scheduler. Create a task that runs `python -m files_memory.tools watch ...` at log on; set "Restart on failure" to keep it sticky.
-- If `pip install --user` puts `m3.exe` somewhere unreachable, add the Scripts directory to your user PATH — see [install_windows.md § Common gotchas](install_windows.md#common-gotchas).
-- The embedder uses CUDA on NVIDIA GPUs if a recent CUDA toolkit is on PATH; falls back to CPU otherwise. Vulkan / DirectML builds are documented in [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md).
-- PowerShell 7+ recommended; `winget install Microsoft.PowerShell` to upgrade.
+- **Embedder as a Windows Service** requires an elevated terminal. If you can't elevate, use the Task Scheduler approach in §3 above — no admin rights needed.
+- **The watch daemon** survives reboots the same way. Replace `m3-embed-server` with `python -m files_memory.tools watch --directory $env:USERPROFILE\Documents` in the `Register-ScheduledTask` snippet above.
+- **PATH after `pip install --user`** — covered in §1. Using `pipx` avoids the issue entirely.
+- **GPU acceleration** — CUDA autodetected if `nvcc` is on PATH; Vulkan also supported. Run `m3 embedder install-gpu` after installing CUDA Toolkit. Vulkan / DirectML builds: [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md).
+- **PowerShell 7+** recommended: `winget install Microsoft.PowerShell`.
 
 Need more? [Full install reference](install_windows.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All 96 MCP tools](MCP_TOOLS.md)
