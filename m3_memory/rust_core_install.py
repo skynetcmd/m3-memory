@@ -78,6 +78,38 @@ def host_os() -> str:
     return {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}[name]
 
 
+def _vulkan_has_device() -> bool:
+    """Return True if vulkaninfo reports at least one physical GPU device.
+
+    vulkaninfo is often installed on headless Linux boxes (as part of the
+    mesa/vulkan-tools package) without any Vulkan-capable GPU. Presence of
+    the binary alone is not a reliable signal. We run `vulkaninfo --summary`
+    (fast, no display required) and look for a GPU name line, which only
+    appears when a real device is enumerated.
+
+    Returns False on any error (timeout, permission denied, parse failure)
+    so the caller always falls back to CPU safely.
+    """
+    try:
+        result = subprocess.run(
+            ["vulkaninfo", "--summary"],
+            capture_output=True, text=True, timeout=5,
+        )
+        output = result.stdout + result.stderr
+        # vulkaninfo --summary prints "GPU id : 0 (Device Name)" for each device.
+        # "No devices available" or empty deviceName means no real GPU.
+        for line in output.splitlines():
+            lo = line.lower()
+            if "gpu id" in lo and "no device" not in lo:
+                return True
+            # Also catch "deviceName" from the full JSON-style output.
+            if "devicename" in lo and lo.split("=")[-1].strip() not in ("", "unknown"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def detect_backend(os_tok: Optional[str] = None) -> BackendChoice:
     """Pick the best backend for this host.
 
@@ -95,9 +127,14 @@ def detect_backend(os_tok: Optional[str] = None) -> BackendChoice:
     if shutil.which("nvcc") or os.environ.get("CUDA_PATH"):
         return BackendChoice(os_tok, "cuda", "NVIDIA CUDA toolchain detected")
 
-    # Vulkan: SDK env var (build-time) OR the runtime loader/tools present.
-    if os.environ.get("VULKAN_SDK") or shutil.which("vulkaninfo"):
-        return BackendChoice(os_tok, "vulkan", "Vulkan runtime/SDK detected")
+    # Vulkan: SDK env var (explicit build-time config) OR vulkaninfo reports
+    # at least one real device. vulkaninfo presence alone is not enough —
+    # the Vulkan loader/tools are often installed system-wide on headless
+    # Linux boxes without any Vulkan-capable GPU. Probe the output.
+    if os.environ.get("VULKAN_SDK"):
+        return BackendChoice(os_tok, "vulkan", "VULKAN_SDK env var set")
+    if shutil.which("vulkaninfo") and _vulkan_has_device():
+        return BackendChoice(os_tok, "vulkan", "Vulkan device detected via vulkaninfo")
 
     return BackendChoice(os_tok, "cpu", "no GPU toolchain detected — CPU build")
 
@@ -220,6 +257,33 @@ def install_prebuilt(choice: BackendChoice, *, version: str = M3_CORE_RS_VERSION
     )
 
 
+def _check_build_tools() -> list[str]:
+    """Return a list of missing build tools needed for a source build.
+
+    Checks for cmake and a C++ compiler. Both must be executable by the
+    current user — a binary that exists but isn't executable is reported
+    as missing (same symptom as absent).
+    """
+    missing = []
+    for tool, candidates in [
+        ("cmake",   ["cmake"]),
+        ("C++ compiler", ["c++", "g++", "clang++"]),
+    ]:
+        found = False
+        for cmd in candidates:
+            path = shutil.which(cmd)
+            if path:
+                try:
+                    subprocess.run([path, "--version"], capture_output=True, timeout=5)
+                    found = True
+                    break
+                except (PermissionError, OSError):
+                    pass  # binary exists but not executable for this user
+        if not found:
+            missing.append(tool)
+    return missing
+
+
 def install_from_source(choice: BackendChoice, *,
                         git_tag: str = M3_CORE_RS_GIT_TAG) -> int:
     """Build m3-core-rs from the git source with the backend's Cargo features.
@@ -230,6 +294,23 @@ def install_from_source(choice: BackendChoice, *,
     config-settings — NOT the old M3_CORE_RS_BUILD_FEATURES env var, which the
     crate never read (latent no-op bug in the prior implementation).
     """
+    # Pre-flight: check build tools before launching a multi-minute compile
+    # that will fail with a cryptic Permission denied buried in 1000+ lines.
+    missing = _check_build_tools()
+    if missing:
+        print(
+            f"[rust-core] source build requires: {', '.join(missing)}\n"
+            "  On Debian/Ubuntu:  sudo apt install cmake build-essential\n"
+            "  On Fedora/RHEL:    sudo dnf install cmake gcc-c++\n"
+            "  On Arch:           sudo pacman -S cmake base-devel\n"
+            "  If cmake/c++ exists but gives 'Permission denied', the binary\n"
+            "  is not executable by this user — ask an admin to fix permissions\n"
+            "  or install the package for this user's distro.\n"
+            "  CPU embedding (Tier-1/Tier-2) works without this.",
+            file=sys.stderr,
+        )
+        return 1
+
     url = (f"m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git"
            f"@{git_tag}#subdirectory=crates/m3-core-py")
     args = ["install", "--force-reinstall", "--no-deps", url]
