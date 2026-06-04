@@ -1,5 +1,13 @@
 # M3 Agentic Memory — Full Install Plan (Linux)
 
+> **Looking for the standard install?** This document covers the advanced
+> repo-clone / homelab path (Postgres sync, ChromaDB, scheduled tasks).
+> For a normal install use the one-liner:
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
+> ```
+> See [install_linux.md](install_linux.md) and [QUICKSTART_LINUX.md](QUICKSTART_LINUX.md).
+
 > **Minimum viable install** (no homelab): Steps 1-4 + 6-7.
 > The memory system works fully local via SQLite without Postgres or ChromaDB.
 
@@ -10,13 +18,15 @@
 | Requirement | Check |
 |---|---|
 | **Ubuntu 22.04+ / Fedora 38+ / Debian 12+** | `cat /etc/os-release` |
-| **Python 3.11+** | `python3 --version` or `python --version` |
+| **Python 3.11+** | `python3 --version` |
 | **Git** | `git --version` |
-| **pip** | `pip3 --version` or `pip --version` |
+| **pip** | `pip3 --version` |
 
 > If Python is not installed:
 > - **Ubuntu/Debian:** `sudo apt update && sudo apt install python3 python3-pip python3-venv git`
 > - **Fedora:** `sudo dnf install python3 python3-pip git`
+> - **No sudo?** Ask a sysadmin to install prerequisites, or use a distro
+>   that ships Python 3.11+ by default.
 
 ---
 
@@ -67,7 +77,7 @@ pip install -r requirements.txt
 ## Step 4 — Run the automated installer
 
 ```bash
-python install_os.py
+python3 install_os.py
 ```
 
 This performs 6 actions automatically:
@@ -78,7 +88,7 @@ This performs 6 actions automatically:
 | 2 | Creates `memory/` and `logs/` directories | Standard `os.makedirs` |
 | 3 | Creates/reuses `.venv` and installs requirements | Uses `.venv/bin/pip` |
 | 4 | Runs `bin/migrate_memory.py` | Initializes the SQLite schema |
-| 5 | Prompts for `AGENT_OS_MASTER_KEY` | Stores via Secret Service (GNOME Keyring / KWallet) |
+| 5 | Prompts for `AGENT_OS_MASTER_KEY` | Stores via Secret Service (GNOME Keyring / KWallet); see keyring note below |
 | 6 | Attempts initial PostgreSQL sync | Safe to fail if no homelab |
 
 ---
@@ -104,7 +114,9 @@ python -c "import keyring; print(keyring.get_password('system', 'AGENT_OS_MASTER
 > **Keyring backend requirements:**
 > - **GNOME (Ubuntu, Fedora GNOME):** `sudo apt install gnome-keyring` or `sudo dnf install gnome-keyring`. Requires an active D-Bus session.
 > - **KDE:** KWallet is used automatically.
-> - **Headless / SSH:** Install `keyrings.alt` for a file-based fallback: `pip install keyrings.alt`
+> - **Headless / SSH / containers:** D-Bus user session is often absent.
+>   Install `keyrings.alt` for a file-based fallback: `pip install keyrings.alt`
+>   If you get "Failed to connect to user scope bus" errors, this is why.
 
 ---
 
@@ -127,33 +139,40 @@ source ~/.bashrc
 
 ---
 
-## Step 7 — Generate MCP configs
+## Step 7 — Wire MCP clients
+
+> **Modern path (recommended):** `m3 setup` (or `m3 install-m3`) handles
+> MCP wiring automatically. Use that unless you need the legacy config files.
+
+**Quick wiring:**
 
 ```bash
-python bin/generate_configs.py
+# Claude Code
+claude mcp add memory m3
+
+# Gemini CLI
+m3 chatlog init --apply-gemini
 ```
 
-This does three things:
-1. Patches `config/claude-settings.json` and `config/gemini-settings.json` with the correct absolute paths for your machine
-2. Sets the correct `python` command in all MCP server entries
-3. Generates `.mcp.json` in the project root — Claude Code automatically loads MCP servers from this file
+**Legacy path** (generates machine-specific config files for older setups):
 
-The following bridges are registered:
+```bash
+python3 bin/generate_configs.py
+```
 
-| Server name | Script |
-|---|---|
-| `memory` | `bin/memory_bridge.py` |
-
-> **Note:** `.mcp.json` is gitignored because it contains machine-specific absolute paths. Re-run `generate_configs.py` after cloning on a new machine.
+This patches `config/claude-settings.json` and `config/gemini-settings.json`
+with absolute paths and generates `.mcp.json` in the project root.
+`.mcp.json` is gitignored — re-run after cloning on a new machine.
 
 ---
 
 ## Step 8 — Verify everything
 
 ```bash
-bash bin/mcp_check.sh
-python bin/test_memory_bridge.py
-python run_tests.py
+m3 doctor                        # canonical health check
+bash bin/mcp_check.sh            # legacy MCP connectivity check (optional)
+python3 bin/test_memory_bridge.py
+python3 run_tests.py
 ```
 
 ---
@@ -163,7 +182,7 @@ python run_tests.py
 **Option A — Automated:**
 
 ```bash
-python bin/install_schedules.py
+python3 bin/install_schedules.py
 ```
 
 This installs crontab entries from `bin/crontab.template`.
@@ -221,6 +240,13 @@ Add fnm to your shell profile:
 echo 'eval "$(fnm env --use-on-cd)"' >> ~/.bashrc
 source ~/.bashrc
 ```
+
+### `fnm` / `node` gives "Permission denied" (not "command not found")
+
+This means a system-wide `fnm` binary exists but is not executable by your
+user. The installer (as of v2026.6.4+) now handles this automatically and
+installs fnm into your home directory. If you hit this on an older install,
+re-run `python3 install_os.py` after upgrading m3-memory.
 
 ### `python3-venv` missing (Ubuntu/Debian)
 
