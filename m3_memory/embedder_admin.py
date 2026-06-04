@@ -165,13 +165,41 @@ def cmd_install(args: argparse.Namespace) -> int:
     """End-to-end CPU embedder install: locate GGUF + register service + start."""
     binary = _server_binary()
     if not binary:
-        print(
-            "Error: m3-embed-server binary not found.\n"
-            "  Install m3-core-rs from git (Rust >=1.94 + maturin required):\n"
-            "    pip install 'm3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py'\n"
-            "  Or set M3_EMBED_SERVER_BIN to point at a prebuilt binary.",
-            file=sys.stderr,
-        )
+        # Detect whether a prebuilt wheel is likely to exist for this platform
+        # so we can give an actionable next step rather than a raw git URL.
+        try:
+            from m3_memory.rust_core_install import detect_backend
+            choice = detect_backend()
+            prebuilt_hint = f"m3-core-rs-{choice.os_tok}-{choice.backend}"
+        except Exception:
+            prebuilt_hint = None
+
+        has_cargo = shutil.which("cargo") is not None
+
+        lines = [
+            "Error: m3-embed-server binary not found.",
+            "",
+            "  Fix: run `m3 embedder install-gpu` — it installs the right prebuilt",
+            "  wheel from PyPI automatically (no Rust toolchain required for CPU):",
+            "    m3 embedder install-gpu",
+        ]
+        if prebuilt_hint:
+            lines.append(f"  (will install: {prebuilt_hint})")
+        if not has_cargo:
+            lines += [
+                "",
+                "  NOTE: Rust/cargo is NOT installed on this machine. The prebuilt",
+                "  wheel path above does not require it. Only a from-source build does.",
+            ]
+        lines += [
+            "",
+            "  Alternative: set M3_EMBED_SERVER_BIN to point at a prebuilt binary.",
+            "",
+            "  NOTE: Tier-2 (this service) is optional. Tier-1 in-process GGUF",
+            "  embedding is already active and fully functional — m3 works without",
+            "  this service. Install it only for faster cold-start performance.",
+        ]
+        print("\n".join(lines), file=sys.stderr)
         return 1
 
     gguf = _locate_gguf_or_explain()
@@ -186,13 +214,28 @@ def cmd_install(args: argparse.Namespace) -> int:
         extra += ["--concurrency", str(args.concurrency)]
     rc = _service_cmd(binary, gguf, "install", *extra)
     if rc != 0:
-        print(f"[!] `m3-embed-server install` exited {rc}", file=sys.stderr)
+        print(
+            f"[!] `m3-embed-server install` exited {rc}\n"
+            "  This usually means systemd --user is unavailable (container, SSH session,\n"
+            "  or system without a D-Bus user session).\n"
+            "  You can run the embed server directly instead:\n"
+            f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &\n"
+            "  To start it automatically on boot, add to crontab (crontab -e):\n"
+            f"    @reboot M3_EMBED_GGUF={gguf} m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &\n"
+            "  Tier-1 in-process GGUF is active and sufficient — this step is optional.",
+            file=sys.stderr,
+        )
         return rc
 
     print("[~] starting m3-embed-server")
     rc = _service_cmd(binary, gguf, "start")
     if rc != 0:
-        print(f"[!] `m3-embed-server start` exited {rc}", file=sys.stderr)
+        print(
+            f"[!] `m3-embed-server start` exited {rc}\n"
+            "  If systemd --user is unavailable, start the server directly:\n"
+            f"    M3_EMBED_GGUF={gguf} nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &",
+            file=sys.stderr,
+        )
         return rc
 
     print("[OK] sovereign CPU embedder running on port 8082")
@@ -202,7 +245,12 @@ def cmd_install(args: argparse.Namespace) -> int:
 def _binary_and_gguf_or_fail() -> Optional[tuple[Path, Path]]:
     binary = _server_binary()
     if not binary:
-        print("Error: m3-embed-server not installed. Run `m3 embedder install`.", file=sys.stderr)
+        print(
+            "Error: m3-embed-server not installed.\n"
+            "  Run `m3 embedder install-gpu` to install it (prebuilt wheel, no Rust needed for CPU).\n"
+            "  Tier-1 in-process GGUF embedding is active and sufficient — this service is optional.",
+            file=sys.stderr,
+        )
         return None
     # For start/stop/status/uninstall the service config already has the GGUF
     # baked in via `install`, so a missing GGUF here is non-fatal. Pass a
