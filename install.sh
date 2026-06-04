@@ -71,6 +71,49 @@ say()         { printf '\033[36m==>\033[0m %s\n' "$*"; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# Returns 0 if the user can sudo without a password (NOPASSWD or already
+# authenticated in this session). Uses -n so it never prompts.
+can_sudo_nopasswd() { sudo -n true 2>/dev/null; }
+
+# Returns 0 if the user is in the sudo or wheel group (can sudo, but may need
+# a password).
+in_privileged_group() {
+    local user="${USER:-$(id -un)}"
+    local group
+    for group in sudo wheel; do
+        if getent group "$group" 2>/dev/null | grep -qE "(^|,)${user}(,|$)"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Run a command that needs root. Tries sudo first; if unavailable, prints the
+# command the user should run in a root shell and exits with an error.
+#
+# Usage: run_as_root <cmd> [args...]
+run_as_root() {
+    if can_sudo_nopasswd; then
+        sudo "$@"
+    elif in_privileged_group; then
+        # In the group but sudo needs a password — try interactively.
+        # If there's no tty (curl|bash), sudo will fail; catch that and advise.
+        if ! sudo "$@" 2>/dev/null; then
+            color_err "sudo requires a password but no terminal is available."
+            color_err "Open another shell as root and run:"
+            color_err "    $*"
+            color_err "Then re-run this installer."
+            exit 1
+        fi
+    else
+        color_err "This step requires root but you are not in the sudo or wheel group."
+        color_err "Ask a system administrator to run the following in a root shell:"
+        color_err "    $*"
+        color_err "Then re-run this installer with --skip-prereqs."
+        exit 1
+    fi
+}
+
 # Refuse to run as root via curl|bash. Root would put pipx files under /root and
 # leave the actual user without an install. Sudo prompts inside the script
 # install OS packages cleanly without this risk.
@@ -122,19 +165,19 @@ install_prereqs_linux() {
     say "Need: ${missing[*]}"
 
     case "$DISTRO" in
-        debian|ubuntu|linuxmint|pop|raspbian)
+        debian|ubuntu|linuxmint|pop|raspbian|neon|kali|zorin|elementary|mint)
             # python3-venv is a runtime dependency of pipx on Debian/Ubuntu.
             local pkgs=("${missing[@]}")
             need_cmd pipx || pkgs+=(python3-venv)
-            sudo apt-get update
-            sudo apt-get install -y "${pkgs[@]}"
+            run_as_root apt-get update -qq
+            run_as_root apt-get install -y "${pkgs[@]}"
             ;;
         fedora|rhel|centos|rocky|almalinux)
             # Fedora calls the package python3-virtualenv (pipx >= 38 ships
             # with system venv on RHEL clones; treat it like Debian).
             local pkgs=("${missing[@]}")
             need_cmd pipx || pkgs+=(python3-virtualenv)
-            sudo dnf install -y "${pkgs[@]}"
+            run_as_root dnf install -y "${pkgs[@]}"
             ;;
         arch|manjaro|endeavouros)
             local map=()
@@ -144,19 +187,34 @@ install_prereqs_linux() {
                     *)    map+=("$p") ;;
                 esac
             done
-            sudo pacman -S --needed --noconfirm "${map[@]}"
+            run_as_root pacman -S --needed --noconfirm "${map[@]}"
             ;;
         opensuse*|suse|sles)
-            sudo zypper install -y "${missing[@]}"
+            run_as_root zypper install -y "${missing[@]}"
             ;;
         alpine)
-            sudo apk add --no-cache "${missing[@]}"
+            run_as_root apk add --no-cache "${missing[@]}"
             ;;
         *)
-            color_err "Unknown Linux distro: ${DISTRO:-unset}"
-            color_err "Install manually: ${missing[*]}"
-            color_err "Then re-run with --skip-prereqs."
-            exit 1
+            # Unknown distro — try apt-get (covers many Debian derivatives
+            # that don't set a recognised ID in /etc/os-release).
+            if need_cmd apt-get; then
+                color_warn "Unknown distro '${DISTRO:-unset}'; trying apt-get (Debian-family fallback)."
+                local pkgs=("${missing[@]}")
+                need_cmd pipx || pkgs+=(python3-venv)
+                run_as_root apt-get update -qq
+                run_as_root apt-get install -y "${pkgs[@]}"
+            elif need_cmd dnf; then
+                color_warn "Unknown distro '${DISTRO:-unset}'; trying dnf (RHEL-family fallback)."
+                local pkgs=("${missing[@]}")
+                need_cmd pipx || pkgs+=(python3-virtualenv)
+                run_as_root dnf install -y "${pkgs[@]}"
+            else
+                color_err "Unknown Linux distro: ${DISTRO:-unset} — no known package manager found."
+                color_err "Install manually: ${missing[*]}"
+                color_err "Then re-run with --skip-prereqs."
+                exit 1
+            fi
             ;;
     esac
 }
