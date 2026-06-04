@@ -93,7 +93,7 @@ Then `/plugin reload` (or restart Claude Code). The plugin auto-registers the MC
 If you'd rather wire it by hand:
 
 ```bash
-claude mcp add memory m3
+claude mcp add --global memory m3
 ```
 
 ### Gemini CLI
