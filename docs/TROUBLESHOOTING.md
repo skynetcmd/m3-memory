@@ -48,7 +48,7 @@
   **not** fix this — it only hides the task's entry in the Task Scheduler UI,
   not the console window. Use the fix above instead.
 - **macOS / Linux**: not affected — cron jobs never draw a window. Just run
-  `python bin/install_schedules.py --add all` normally.
+  `python3 bin/install_schedules.py --add all` normally.
 
 ---
 
