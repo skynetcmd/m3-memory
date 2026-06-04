@@ -45,8 +45,15 @@ identically — the MCP protocol does the rest.
 
 ```bash
 # In Claude Code:
+/plugin marketplace add skynetcmd/m3-memory
 /plugin install m3@skynetcmd
 ```
+
+> **No GitHub SSH key?** The `owner/repo` shorthand uses SSH. If you get "Premature close" or "ERR_STREAM_PREMATURE_CLOSE", use the HTTPS URL:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
 
 The plugin's `mcpServers.m3.env` block reads `userConfig.embed_gguf`
 and `userConfig.embed_fallback_url` set during install. Both knobs are

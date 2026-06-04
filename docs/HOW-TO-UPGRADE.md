@@ -10,7 +10,7 @@ From the repo root, in order:
 
 ```bash
 # 1. Back up the DB before you touch anything
-python bin/migrate_memory.py backup --yes
+python3 bin/migrate_memory.py backup --yes
 
 # 2. Sync code
 git fetch --all --prune
@@ -22,8 +22,8 @@ pip install --upgrade pip
 pip install --upgrade -r requirements.txt
 
 # 4. Apply any pending DB migrations
-python bin/migrate_memory.py status
-python bin/migrate_memory.py up --yes
+python3 bin/migrate_memory.py status
+python3 bin/migrate_memory.py up --yes
 
 # 5. Verify
 python -m pip_audit --strict
@@ -39,7 +39,7 @@ Each step is expanded below. If anything fails, see **[Rolling back](#rolling-ba
 Migrations are reversible by design, but DB corruption from a mid-flight crash is not. Always back up before `up` or `down`.
 
 ```bash
-python bin/migrate_memory.py backup --yes
+python3 bin/migrate_memory.py backup --yes
 ```
 
 The backup uses SQLite's online-backup API (consistent snapshot even under concurrent writes) and lands in the backup directory saved in settings. Pass `--out /path/to/dir` to override.
@@ -115,19 +115,19 @@ Migrations live in `memory/migrations/` as numbered `NNN_name.up.sql` / `NNN_nam
 
 ```bash
 # Show current version and what's pending
-python bin/migrate_memory.py status
+python3 bin/migrate_memory.py status
 
 # Preview the SQL for the next pending migration without applying
-python bin/migrate_memory.py plan
+python3 bin/migrate_memory.py plan
 
 # Apply everything pending (non-interactive)
-python bin/migrate_memory.py up --yes
+python3 bin/migrate_memory.py up --yes
 
 # Apply up to a specific version
-python bin/migrate_memory.py up --to 17 --yes
+python3 bin/migrate_memory.py up --to 17 --yes
 
 # Dry-run (print what would happen, change nothing)
-python bin/migrate_memory.py up --dry-run
+python3 bin/migrate_memory.py up --dry-run
 ```
 
 > **Note:** When the MCP server starts, it runs `up --yes` automatically. If a migration silently isn't getting applied, check for a pre-existing backup collision in `memory/` or a lock from a stale process.
@@ -137,7 +137,7 @@ python bin/migrate_memory.py up --dry-run
 The script integrity-checks the restored DB and aborts loudly if it's not `ok`. You'll see a `pre-up-*.bak` alongside `agent_memory.db`. Restore with:
 
 ```bash
-python bin/migrate_memory.py restore memory/agent_memory.db.pre-up-<timestamp>.bak --yes
+python3 bin/migrate_memory.py restore memory/agent_memory.db.pre-up-<timestamp>.bak --yes
 ```
 
 ---
@@ -146,20 +146,20 @@ python bin/migrate_memory.py restore memory/agent_memory.db.pre-up-<timestamp>.b
 
 ```bash
 # Quick health check
-python bin/memory_doctor.py
+python3 bin/memory_doctor.py
 
 # Full test suite (fast; integration tests are skipped unless configured)
 pytest -q
 
 # Confirm MCP server starts and advertises the expected tool catalog
-python bin/mcp_tool_catalog.py --check
+python3 bin/mcp_tool_catalog.py --check
 ```
 
 If you use Postgres sync or ChromaDB, also run:
 
 ```bash
-python bin/pg_setup.py --check
-python bin/chroma_sync_cli.py status
+python3 bin/pg_setup.py --check
+python3 bin/chroma_sync_cli.py status
 ```
 
 ---
@@ -245,8 +245,8 @@ sudo apt upgrade postgresql postgresql-contrib
 sudo systemctl restart postgresql
 
 # Then reapply any PG-side schema changes
-python bin/pg_setup.py
-python bin/pg_sync.py --once
+python3 bin/pg_setup.py
+python3 bin/pg_sync.py --once
 ```
 
 ### ChromaDB (optional, if running a local Chroma server)
@@ -260,7 +260,7 @@ pip install --upgrade chromadb
 Then:
 
 ```bash
-python bin/chroma_sync_cli.py reindex
+python3 bin/chroma_sync_cli.py reindex
 ```
 
 ---
@@ -272,9 +272,9 @@ If the upgrade left things in a worse state:
 ### Roll back the DB
 
 ```bash
-python bin/migrate_memory.py down --to <previous_version> --yes
+python3 bin/migrate_memory.py down --to <previous_version> --yes
 # or restore from the pre-upgrade backup
-python bin/migrate_memory.py restore memory/agent_memory.db.pre-up-<timestamp>.bak --yes
+python3 bin/migrate_memory.py restore memory/agent_memory.db.pre-up-<timestamp>.bak --yes
 ```
 
 ### Roll back the code
@@ -303,7 +303,7 @@ pip install -r requirements.txt
 - **`pip install --upgrade` with no args** → that's a pip usage error. Pass package names or `-r requirements.txt`.
 - **`Defaulting to user installation because normal site-packages is not writeable`** → you're running system pip, not the venv's pip. Activate the venv first.
 - **`migrate_memory.py` hangs** → another process holds the SQLite lock. Find it with `lsof memory/agent_memory.db` (Linux/macOS) or Resource Monitor (Windows); stop it, then retry.
-- **MCP server won't start after upgrade** → check `memory/logs/` for the last traceback, and confirm `python bin/migrate_memory.py status` shows no pending migrations.
+- **MCP server won't start after upgrade** → check `memory/logs/` for the last traceback, and confirm `python3 bin/migrate_memory.py status` shows no pending migrations.
 - **Pytest failures on first run after upgrade** → run `pytest --lf -vv` to re-run only the failing tests with full output; most often an env var (`M3_*`) or local LLM endpoint regressed.
 
 More recipes in [`docs/TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
