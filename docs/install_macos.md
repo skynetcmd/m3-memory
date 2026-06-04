@@ -29,10 +29,14 @@ If you'd rather not run the script:
 ```bash
 brew install pipx git sqlite
 pipx ensurepath
-exec $SHELL -l                         # pick up ~/.local/bin in PATH
+source ~/.zshrc   # or open a new terminal to pick up ~/.local/bin
 pipx install m3-memory
 m3 setup                               # one-command wizard
 ```
+
+> **`exec $SHELL -l` not working?** It only works in interactive login
+> shells. `source ~/.zshrc` (zsh) or `source ~/.bash_profile` (bash) is
+> more reliable, or just open a new terminal.
 
 > 🍎 **Apple Silicon vs Intel:** the sovereign baseline (BGE-M3 CPU on :8082)
 > runs on both. The wizard offers an opt-in GPU in-process embedder; on Apple
@@ -61,21 +65,94 @@ claude mcp add memory m3
 m3 chatlog init --apply-gemini
 ```
 
+### Claude Code plugin install
+
+```
+/plugin marketplace add skynetcmd/m3-memory
+/plugin install m3@skynetcmd
+```
+
+> **No GitHub SSH key?** The `owner/repo` shorthand uses SSH. If you get
+> "Premature close" or "ERR_STREAM_PREMATURE_CLOSE", use the HTTPS URL:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
+
+---
+
+## Embedder (Tier-2 service — optional but recommended)
+
+The **Tier-1 in-process GGUF embedder** is active from the moment m3 starts —
+no extra steps. The **Tier-2 embed server** (port 8082, launchd user agent)
+improves cold-start performance but is optional. M3 works fully without it.
+
+### Install the binary first
+
+```bash
+m3 embedder install-gpu   # autodetects Metal on Apple Silicon, CPU on Intel
+```
+
+No Rust toolchain needed — installs a prebuilt PyPI wheel.
+
+### Register as a launchd user agent (no sudo required)
+
+```bash
+m3 embedder install   # writes ~/Library/LaunchAgents/ai.m3.embed-server.plist
+```
+
+Starts at login automatically. Verify:
+
+```bash
+m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
+```
+
+### If launchd install fails
+
+Run the server directly for the current session:
+
+```bash
+M3_EMBED_GGUF=~/.m3-memory/_assets/models/bge-m3-Q4_K_M.gguf \
+    nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &
+```
+
+Or create the launchd plist manually — see
+[QUICKSTART_MACOS.md § Embedder](QUICKSTART_MACOS.md#3-embedder-tier-2-service--optional-but-recommended)
+for the ready-to-use XML template.
+
 ---
 
 ## Common gotchas
 
 - **`m3: command not found` after `pipx install`** — pipx adds
   `~/.local/bin` to PATH via `pipx ensurepath`, but you need a new shell
-  for it to take effect. `exec $SHELL -l` works without closing the terminal.
+  for it to take effect. Run `source ~/.zshrc` (zsh) or
+  `source ~/.bash_profile` (bash), or open a new terminal.
   (`mcp-memory` is also installed as a backwards-compatible alias.)
+
 - **Homebrew Python is PEP 668** — that's fine, it's why we use pipx.
+  Never `pip install m3-memory` against Homebrew or system Python directly.
+
 - **macOS-shipped Python (`/usr/bin/python3`) is old and externally managed** —
-  don't try to `pip install` against it. Always use brew Python via pipx.
+  don't try to `pip install` against it. Use `brew install pipx` and go
+  through pipx.
+
+- **`m3 embedder install` says "binary not found"** — run
+  `m3 embedder install-gpu` first to install the `m3-embed-server` binary
+  (prebuilt wheel, no Rust), then retry `m3 embedder install`.
+
+- **`m3 embedder install` fails with a launchd error** — run the server
+  directly with `nohup` (see the Embedder section above) or use the manual
+  plist in [QUICKSTART_MACOS.md](QUICKSTART_MACOS.md#3-embedder-tier-2-service--optional-but-recommended).
+
 - **`m3 embedder install` says GGUF is an LFS pointer** — the bundled bge-m3
   model file is tracked via Git LFS. If you cloned m3-memory directly without
-  LFS, run `git lfs install && git lfs pull` inside the checkout
-  (`pipx`/`pip` users don't hit this — the wizard handles it).
+  LFS, run `git lfs install && git lfs pull` inside the checkout.
+  (`pipx`/`pip` users don't hit this — the wizard handles it.)
+
+- **Apple Silicon: `ggml_vulkan: No devices found`** — harmless warning from
+  llama.cpp. Metal acceleration is active regardless; Vulkan is Linux/Windows
+  only. Embeddings work correctly.
 
 ---
 
