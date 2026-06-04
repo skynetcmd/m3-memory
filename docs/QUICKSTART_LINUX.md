@@ -54,6 +54,13 @@ If you skipped the wizard, or you're adding an agent later, here's the manual re
 /plugin install m3@skynetcmd
 ```
 
+> **No GitHub SSH key?** The `owner/repo` shorthand uses SSH. If you get a
+> "Premature close" or "ERR_STREAM_PREMATURE_CLOSE" error, use the HTTPS URL:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
+
 Then `/plugin reload` (or restart Claude Code). The plugin auto-registers the MCP, wires the chatlog Stop + PreCompact hooks, and adds 15 `/m3:*` slash commands plus two curator subagents — confirm with `/m3:health`.
 
 If you'd rather wire it by hand:
