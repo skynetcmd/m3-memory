@@ -1,5 +1,10 @@
 # M3 Agentic Memory — Full Install Plan (Windows / PowerShell)
 
+> **Looking for the standard install?** This document covers the advanced
+> repo-clone / homelab path (Postgres sync, ChromaDB, scheduled tasks).
+> For a normal install see [install_windows.md](install_windows.md) and
+> [QUICKSTART_WINDOWS.md](QUICKSTART_WINDOWS.md).
+
 > **Minimum viable install** (no homelab): Steps 1-4 + 6-8.
 > The memory system works fully local via SQLite without Postgres or ChromaDB.
 
@@ -14,7 +19,10 @@
 | **Git** | `git --version` |
 | **PowerShell 5.1+** (ships with Windows) | `$PSVersionTable.PSVersion` |
 
-> If Python is not installed, get it from [python.org](https://www.python.org/downloads/) or run `winget install Python.Python.3.13`. **Check "Add python.exe to PATH"** during install.
+> If Python is not installed, run `winget install -e --id Python.Python.3.12`
+> in an elevated PowerShell. **Avoid the Microsoft Store Python** — it installs
+> a stub launcher that blocks some installs. The winget version puts a real
+> `python.exe` on PATH.
 
 ---
 
@@ -132,35 +140,42 @@ $env:CHROMA_BASE_URL = "http://YOUR_SERVER_IP:8000"
 
 ---
 
-## Step 7 — Generate MCP configs
+## Step 7 — Wire MCP clients
+
+> **Modern path (recommended):** `m3 setup` (or `m3 install-m3`) handles
+> MCP wiring automatically. Use that unless you need the legacy config files.
+
+**Quick wiring:**
 
 ```powershell
-python bin/generate_configs.py
+# Claude Code
+claude mcp add memory m3
+
+# Gemini CLI
+m3 chatlog init --apply-gemini
 ```
 
-This does three things:
-1. Patches `config/claude-settings.json` and `config/gemini-settings.json` with the correct absolute paths for your machine
-2. Sets the correct `python` command in all MCP server entries
-3. Generates `.mcp.json` in the project root — Claude Code automatically loads MCP servers from this file
+**Legacy path** (generates machine-specific config files for older setups):
 
-The following bridges are registered:
+```powershell
+python bin\generate_configs.py
+```
 
-| Server name | Script |
-|---|---|
-| `memory` | `bin\memory_bridge.py` |
-
-> **Note:** `.mcp.json` is gitignored because it contains machine-specific absolute paths. Re-run `generate_configs.py` after cloning on a new machine.
+This patches `config/claude-settings.json` and `config/gemini-settings.json`
+with absolute paths and generates `.mcp.json` in the project root.
+`.mcp.json` is gitignored — re-run after cloning on a new machine.
 
 ---
 
 ## Step 8 — Verify everything
 
 ```powershell
-python bin/test_memory_bridge.py
+m3 doctor                            # canonical health check
+python bin\test_memory_bridge.py
 python run_tests.py
+# With Git Bash or WSL only:
+bash bin/mcp_check.sh
 ```
-
-> The bash-based `bin/mcp_check.sh` from the macOS guide is not available on native Windows PowerShell. If you have Git Bash or WSL, you can run `bash bin/mcp_check.sh` instead.
 
 ---
 
@@ -239,6 +254,21 @@ pip install --force-reinstall keyring pywin32
 ### `nvm` not recognized after install
 
 Restart your terminal. `nvm-windows` modifies the system PATH, which only takes effect in new sessions.
+
+### `nvm` / `winget` gives "Permission denied" (not "command not found")
+
+A system-wide binary exists but is not accessible to the current user. The
+installer (as of v2026.6.4+) now handles this automatically and falls back
+to a user-scoped install. If you hit this on an older install, re-run
+`python install_os.py` after upgrading m3-memory.
+
+### Python not on PATH / Microsoft Store Python
+
+If `python` resolves to the Windows Store stub:
+1. **Settings → Apps → App execution aliases** — toggle off both Python entries.
+2. Re-run `winget install -e --id Python.Python.3.12` to install the real interpreter.
+3. Open a new terminal and verify: `where.exe python` should point to
+   something under `%LOCALAPPDATA%\Programs\Python\Python312\python.exe`.
 
 ### Python not found / wrong version
 
