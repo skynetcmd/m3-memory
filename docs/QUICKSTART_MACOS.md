@@ -59,6 +59,13 @@ If you skipped the wizard, or you're adding an agent later, here's the manual re
 /plugin install m3@skynetcmd
 ```
 
+> **No GitHub SSH key?** The `owner/repo` shorthand uses SSH. If you get a
+> "Premature close" or "ERR_STREAM_PREMATURE_CLOSE" error, use the HTTPS URL:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
+
 Then `/plugin reload` (or restart Claude Code). The plugin auto-registers the MCP, wires the chatlog Stop + PreCompact hooks, and adds 15 `/m3:*` slash commands plus two curator subagents — confirm with `/m3:health`.
 
 If you'd rather wire it by hand:
@@ -95,7 +102,68 @@ bash bin/start_mcp_proxy.sh --background
 
 ---
 
-## 3. Ingest a directory
+## 3. Embedder (Tier-2 service — optional but recommended)
+
+The **Tier-1 in-process GGUF embedder** is active from the moment m3 starts — no extra steps. The **Tier-2 embed server** (port 8082) improves cold-start performance but is optional. M3 works fully without it.
+
+### Install the binary first
+
+```bash
+m3 embedder install-gpu   # installs the prebuilt wheel — autodetects Metal on Apple Silicon
+```
+
+On Apple Silicon this installs the Metal-accelerated build. On Intel it installs the CPU build. No Rust toolchain needed.
+
+### Register as a launchd user agent
+
+```bash
+m3 embedder install       # registers + starts a ~/Library/LaunchAgents/ plist
+```
+
+This runs automatically at login, no sudo required. To verify:
+
+```bash
+m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
+```
+
+### If the launchd install fails
+
+Run the server directly:
+
+```bash
+M3_EMBED_GGUF=~/.m3-memory/_assets/models/bge-m3-Q4_K_M.gguf \
+    nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &
+```
+
+To start at login via launchd manually, create `~/Library/LaunchAgents/ai.m3.embed.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>             <string>ai.m3.embed</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>M3_EMBED_GGUF=$HOME/.m3-memory/_assets/models/bge-m3-Q4_K_M.gguf exec m3-embed-server</string>
+  </array>
+  <key>RunAtLoad</key>         <true/>
+  <key>KeepAlive</key>         <true/>
+  <key>StandardOutPath</key>   <string>/tmp/m3-embed.log</string>
+  <key>StandardErrorPath</key> <string>/tmp/m3-embed.log</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/ai.m3.embed.plist
+```
+
+---
+
+## 4. Ingest a directory
 
 Just tell your agent:
 
@@ -123,7 +191,7 @@ For images and audio: convert them to text first with your favorite tool (`tesse
 
 ---
 
-## 4. Search what you ingested
+## 5. Search what you ingested
 
 Just ask:
 
@@ -133,21 +201,21 @@ The agent returns the matching paragraphs with their source file and section hea
 
 ---
 
-## 5. Backfilling old conversations (optional)
+## 6. Backfilling old conversations (optional)
 
 If you had conversations before installing M3, ingest them in one shot per format. The cursor (`memory/.chatlog_ingest_cursor.json`) tracks what's already in so re-running is safe.
 
 ```bash
 # Claude Code
-python bin/chatlog_ingest.py --format claude-code \
+python3 bin/chatlog_ingest.py --format claude-code \
     ~/Library/Application\ Support/Claude/projects/<project-hash>/*.jsonl
 
 # Gemini CLI
-python bin/chatlog_ingest.py --format gemini-cli \
+python3 bin/chatlog_ingest.py --format gemini-cli \
     ~/.gemini/tmp/*/logs.json
 
 # OpenCode (uses the Claude Code JSONL shape)
-python bin/chatlog_ingest.py --format claude-code \
+python3 bin/chatlog_ingest.py --format claude-code \
     ~/Library/Application\ Support/opencode/**/*.jsonl
 ```
 
@@ -158,7 +226,7 @@ python bin/chatlog_ingest.py --format claude-code \
 - **New conversations**: auto-captured (Claude / Gemini hooks).
 - **Old conversations**: one `chatlog_ingest.py` call per client.
 - **Directories**: `files_ingest` when you want fresh indexing.
-- **Stale-file watcher**: `python -m files_memory.tools watch --directory ~/Documents`.
+- **Stale-file watcher**: `python3 -m files_memory.tools watch --directory ~/Documents`.
 
 ### macOS-specific notes
 
