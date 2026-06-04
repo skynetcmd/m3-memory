@@ -21,7 +21,34 @@ pipx install m3-memory
 m3 setup
 ```
 
-If you're missing any of pipx/git/sqlite3, install them once with your package manager (`apt`, `dnf`, `pacman`, `zypper`, `apk`) — the [Linux install reference](install_linux.md) has the exact commands per distro.
+> **PEP 668 error (`externally-managed-environment`)?** Your system Python is
+> managed by the OS package manager. Install pipx via the package manager
+> instead of pip:
+> ```bash
+> # Debian/Ubuntu/Mint
+> sudo apt install pipx python3-venv
+>
+> # Fedora/RHEL/Rocky
+> sudo dnf install pipx
+>
+> # Arch/Manjaro
+> sudo pacman -S python-pipx
+>
+> # Alpine
+> sudo apk add pipx
+> ```
+> Then re-run `pipx install m3-memory`.
+>
+> **No sudo?** If you're in the `sudo` group but have no tty (e.g. running
+> over SSH inside `curl | bash`), open a second shell and run the package
+> manager command there as root, then continue in your original shell.
+> If you have no sudo access at all, ask a sysadmin to install `pipx` for
+> you, or use a virtualenv:
+> ```bash
+> python3 -m venv ~/.venv/m3 && source ~/.venv/m3/bin/activate
+> pip install m3-memory
+> m3 setup
+> ```
 
 ---
 
@@ -97,7 +124,62 @@ bash bin/start_mcp_proxy.sh --background
 
 ---
 
-## 3. Ingest a directory
+## 3. Embedder (Tier-2 service — optional but recommended)
+
+The **Tier-1 in-process GGUF embedder** is active from the moment m3 starts — no extra steps. The **Tier-2 embed server** (port 8082) improves cold-start performance but is optional. M3 works fully without it.
+
+### Install the binary first
+
+```bash
+m3 embedder install-gpu   # downloads the prebuilt wheel — no Rust needed for CPU
+```
+
+This installs the `m3-embed-server` binary via a prebuilt PyPI wheel. Despite the name, it works on CPU-only machines.
+
+### Register as a systemd user service (recommended if systemd --user is available)
+
+```bash
+m3 embedder install       # registers + starts the systemd --user unit
+```
+
+> **systemd --user not available?** This fails on containers, SSH sessions
+> without a D-Bus user session (`Failed to connect to user scope bus`), and
+> minimal images. Use the nohup path below instead.
+
+### Run directly (containers, SSH sessions, no systemd)
+
+```bash
+M3_EMBED_GGUF=~/bge-m3-GGUF-Q4_K_M.gguf \
+    nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &
+```
+
+To start automatically on boot without systemd:
+
+```bash
+crontab -e
+# Add this line:
+@reboot M3_EMBED_GGUF=~/bge-m3-GGUF-Q4_K_M.gguf m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &
+```
+
+### Keep the systemd service alive across logout (headless / server)
+
+If `loginctl` is available:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+Without this, a `systemd --user` service stops when your last session exits. Not needed with the nohup/cron approach.
+
+### Verify
+
+```bash
+m3 doctor   # shows Tier-1 / Tier-2 status and embed roundtrip latency
+```
+
+---
+
+## 4. Ingest a directory
 
 Just tell your agent:
 
@@ -125,7 +207,7 @@ For images and audio: convert them to text first with your favorite tool (`tesse
 
 ---
 
-## 4. Search what you ingested
+## 5. Search what you ingested
 
 Just ask:
 
@@ -135,21 +217,21 @@ The agent returns the matching paragraphs with their source file and section hea
 
 ---
 
-## 5. Backfilling old conversations (optional)
+## 6. Backfilling old conversations (optional)
 
 If you had conversations before installing M3, ingest them in one shot per format. The cursor (`memory/.chatlog_ingest_cursor.json`) tracks what's already in so re-running is safe.
 
 ```bash
 # Claude Code
-python bin/chatlog_ingest.py --format claude-code \
+python3 bin/chatlog_ingest.py --format claude-code \
     ~/.config/claude/projects/<project-hash>/*.jsonl
 
 # Gemini CLI
-python bin/chatlog_ingest.py --format gemini-cli \
+python3 bin/chatlog_ingest.py --format gemini-cli \
     ~/.gemini/tmp/*/logs.json
 
 # OpenCode (uses the Claude Code JSONL shape)
-python bin/chatlog_ingest.py --format claude-code \
+python3 bin/chatlog_ingest.py --format claude-code \
     ~/.local/share/opencode/**/*.jsonl
 ```
 
