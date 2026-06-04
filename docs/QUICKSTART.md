@@ -52,20 +52,49 @@ agy plugin install https://github.com/skynetcmd/m3-memory
 ### Windows
 
 ```powershell
-winget install -e --id Python.Python.3.12 Git.Git SQLite.SQLite
-pip install m3-memory
+# Prerequisites (elevated PowerShell once):
+winget install -e --id Python.Python.3.12
+winget install -e --id Git.Git
+winget install -e --id SQLite.SQLite
+
+# Install m3 as your normal user (pipx recommended — auto-manages PATH):
+pip install --user pipx
+pipx ensurepath
+# Open a new terminal, then:
+pipx install m3-memory
 m3 setup
 ```
 
-If `pip install --user` puts the `m3.exe` shim somewhere not on PATH,
-see the [Windows install gotchas](./install_windows.md#common-gotchas).
+> **`m3` not found after install?** pip puts `m3.exe` in
+> `%APPDATA%\Python\Python312\Scripts\` — add that to your user PATH, or
+> use pipx which handles PATH automatically. Full details:
+> [install_windows.md § Common gotchas](./install_windows.md#common-gotchas).
 
 ### Manual / older Linux / pip route
 
 ```bash
-pip install m3-memory
+pipx install m3-memory   # recommended — isolates m3 and manages PATH automatically
 m3 setup
 ```
+
+> **`pipx` not installed?** Install it via your package manager:
+> ```bash
+> sudo apt install pipx          # Debian/Ubuntu/Mint
+> sudo dnf install pipx          # Fedora/RHEL
+> sudo pacman -S python-pipx     # Arch
+> brew install pipx              # macOS
+> ```
+> Or with pip (may hit PEP 668 on managed Python — see below):
+> ```bash
+> pip install --user pipx && pipx ensurepath
+> ```
+>
+> **PEP 668 error (`externally-managed-environment`)?** Your system Python is
+> OS-managed. Install pipx via the package manager above, or use a virtualenv:
+> ```bash
+> python3 -m venv ~/.venv/m3 && source ~/.venv/m3/bin/activate
+> pip install m3-memory && m3 setup
+> ```
 
 `m3 setup` is the recommended path — interactive wizard, sensible
 defaults. Power users can still run individual steps with `m3 install-m3`,
@@ -216,7 +245,7 @@ Google AI, `grok-*` → xAI, `sonar-*` → Perplexity. Set
 
 **Foreground (development):**
 ```bash
-python bin/mcp_proxy.py
+python3 bin/mcp_proxy.py
 # or:
 bash bin/start_mcp_proxy.sh           # POSIX only — prints URL and tails stdout
 ```
@@ -240,7 +269,7 @@ Start-Process -WindowStyle Hidden `
 ```
 
 **Boot-time autostart:**
-- Linux: systemd user unit running `python bin/mcp_proxy.py` with `Restart=on-failure`
+- Linux: systemd user unit running `python3 bin/mcp_proxy.py` with `Restart=on-failure` (containers/SSH without D-Bus: use a `@reboot` cron entry instead)
 - macOS: launchd `~/Library/LaunchAgents/ai.m3-memory.mcp-proxy.plist` with `KeepAlive` + `RunAtLoad`
 - Windows: Task Scheduler `At log on` → `python.exe bin\mcp_proxy.py`, or NSSM for a real service
 
@@ -298,10 +327,10 @@ added-memories section, or OpenClaw's SQLite, use
 itself.
 
 ```bash
-python bin/migrate_flat_memory.py --dry-run                    # preview
-python bin/migrate_flat_memory.py                              # migrate + verify
-python bin/migrate_flat_memory.py --sources claude,gemini      # subset
-python bin/migrate_flat_memory.py --include-rules              # also import CLAUDE.md etc.
+python3 bin/migrate_flat_memory.py --dry-run                    # preview
+python3 bin/migrate_flat_memory.py                              # migrate + verify
+python3 bin/migrate_flat_memory.py --sources claude,gemini      # subset
+python3 bin/migrate_flat_memory.py --include-rules              # also import CLAUDE.md etc.
 ```
 
 ### Disable your host agent's built-in memory
@@ -347,7 +376,7 @@ If the memory you wrote comes back, everything is working.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "Embedding failed" or "Connection refused" | Sovereign CPU embedder not running | `m3 embedder status`; if not running, `m3 embedder start` (or `m3 embedder install` first time) |
+| "Embedding failed" or "Connection refused" | Sovereign CPU embedder not running | `m3 embedder status`; if not running: `m3 embedder install-gpu` (installs binary), then `m3 embedder install` (registers service), or just `m3 embedder start` if already installed |
 | "m3: command not found" | Package not on PATH | `pip install m3-memory` and check `which m3` (`mcp-memory` is the backwards-compatible alias) |
 | Memory tools don't appear in agent | Config not loaded | Check JSON syntax, ensure `"mcpServers"` key, restart agent fully |
 | Search returns nothing in new session | Different working directory | Run from same directory, or set `M3_MEMORY_ROOT` env var |
