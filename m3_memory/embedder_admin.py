@@ -300,7 +300,11 @@ def cmd_install_gpu(args: argparse.Namespace) -> int:
     from m3_memory import rust_core_install
 
     allow_source = not getattr(args, "no_source_fallback", False)
-    rc = rust_core_install.install_rust_core(allow_source_fallback=allow_source)
+    backend = getattr(args, "backend", None) or None
+    rc = rust_core_install.install_rust_core(
+        allow_source_fallback=allow_source,
+        backend=backend,
+    )
     if rc == 0:
         print("[OK] m3-core-rs installed; restart any running embedder service.")
     return rc
@@ -331,6 +335,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--no-source-fallback", action="store_true",
         help="Fail instead of building from source when no prebuilt wheel matches "
              "this platform/Python.",
+    )
+    p_install_gpu.add_argument(
+        "--backend", choices=["cpu", "cuda", "vulkan", "metal"], default=None,
+        help="Override backend detection (cpu/cuda/vulkan/metal). Use when "
+             "auto-detection picks the wrong backend — e.g. Vulkan tools are "
+             "installed system-wide but no Vulkan GPU is present, so pass "
+             "--backend cpu to force the CPU prebuilt wheel.",
     )
     p_install_gpu.set_defaults(func=cmd_install_gpu)
 

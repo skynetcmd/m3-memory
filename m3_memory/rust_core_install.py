@@ -324,13 +324,38 @@ def install_from_source(choice: BackendChoice, *,
 
 
 def install_rust_core(os_tok: Optional[str] = None, *,
-                      allow_source_fallback: bool = True) -> int:
+                      allow_source_fallback: bool = True,
+                      backend: Optional[str] = None) -> int:
     """Top-level: detect backend, install prebuilt wheel, fall back to source.
 
+    Args:
+        os_tok: Override the OS token (windows/linux/macos). Defaults to
+            auto-detection via host_os().
+        allow_source_fallback: If False, fail instead of building from source
+            when no prebuilt wheel matches this platform/Python.
+        backend: Explicit backend override (cpu/cuda/vulkan/metal). Skips
+            auto-detection entirely. Use when detection picks the wrong backend
+            (e.g. Vulkan tools present but no Vulkan GPU).
+
     Returns 0 on success, non-zero otherwise. Used by the wizard and the
-    `m3 install-gpu` CLI command.
+    `m3 embedder install-gpu` CLI command.
     """
-    choice = detect_backend(os_tok)
+    if backend is not None:
+        os_tok = os_tok or host_os()
+        if (os_tok, backend) not in _VALID:
+            valid_backends = [b for o, b in _VALID if o == os_tok]
+            print(
+                f"[rust-core] invalid backend '{backend}' for {os_tok}. "
+                f"Valid options: {', '.join(sorted(valid_backends))}",
+                file=sys.stderr,
+            )
+            return 2
+        choice = BackendChoice(os_tok, backend, f"explicit --backend override")
+        print(f"[rust-core] backend override: {choice.package}")
+    else:
+        choice = detect_backend(os_tok)
+        print(f"[rust-core] detected backend: {choice.package} ({choice.reason})")
+
     if (choice.os_tok, choice.backend) not in _VALID:
         print(f"[rust-core] unsupported combination "
               f"{choice.os_tok}-{choice.backend}", file=sys.stderr)
