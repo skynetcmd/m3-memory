@@ -25,6 +25,18 @@ step so you see what's being elevated.
 > If you have no root access at all, re-run with `--skip-prereqs` once an
 > admin has installed pipx, git, and sqlite3 for you.
 
+> **Installing as root / want m3 accessible to the root user?**
+> The installer refuses to run as root by design — a root-owned pipx install
+> can't be reached by normal-user agents. The correct approach is to install
+> as a normal user (e.g. `bob`) and point root's Claude at that install via
+> the MCP server config. One command to get started:
+> ```bash
+> su - bob
+> curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
+> ```
+> Then see **[install_root_as_user.md](install_root_as_user.md)** for the
+> full walkthrough: permissions, MCP wiring, chatlog hooks, and linger setup.
+
 **Cautious version** (audit first):
 
 ```bash
