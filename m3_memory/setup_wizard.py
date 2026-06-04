@@ -548,28 +548,52 @@ def _step_cpu_sovereign_embedder() -> bool:
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         _warn(f"CPU embedder install did not complete: {e}")
         # m3 still works without it (the embed cascade falls through to the
-        # Python/HTTP tier) — so this is non-fatal. But print clear, per-OS
-        # instructions for getting the always-on embedder, because the most
-        # common cause is OS-specific (Windows needs elevation; mac/Linux may
-        # need the m3-embed-server binary or a linger setting).
+        # Python/HTTP tier) — so this is non-fatal. Print clear, per-OS
+        # instructions for getting the always-on embedder.
         print()
         print("  To get the always-on CPU embedder, follow the steps for your OS:")
         if sys.platform == "win32":
             print("    Windows — the embedder registers as a Windows Service, which")
             print("    needs Administrator rights. Open an *Administrator* terminal and run:")
-            print("        m3 embedder install")
+            print("        m3 embedder install-gpu   # installs the binary first")
+            print("        m3 embedder install       # registers the service")
         elif sys.platform == "darwin":
             print("    macOS — the embedder installs as a launchd user agent (no sudo).")
-            print("    Re-run, and if it still fails the m3-embed-server binary is")
-            print("    likely missing — install the Rust core, then retry:")
+            print("    If the binary is missing, install it first, then retry:")
+            print("        m3 embedder install-gpu")
             print("        m3 embedder install")
         else:
-            print("    Linux — the embedder installs as a `systemd --user` unit (no sudo).")
-            print("    Re-run `m3 embedder install`. A `--user` service stops at logout;")
-            print("    to keep it running across logout / on a headless box also run:")
-            print("        loginctl enable-linger \"$USER\"")
+            # Linux: two common failure modes — missing binary and missing systemd user session.
+            has_systemctl = bool(shutil.which("systemctl"))
+            has_loginctl  = bool(shutil.which("loginctl"))
+            print("    Linux — step 1: install the binary (no Rust needed, prebuilt wheel):")
+            print("        m3 embedder install-gpu")
+            print()
+            if has_systemctl:
+                print("    Step 2: register and start via systemd --user:")
+                print("        m3 embedder install")
+                print()
+                print("    If `m3 embedder install` fails with a dbus/systemd error")
+                print("    (container, SSH session without a user session bus),")
+                print("    run the server directly instead:")
+            else:
+                print("    systemctl not found — run the server directly:")
+            gguf_hint = os.environ.get("M3_EMBED_GGUF", "~/bge-m3-GGUF-Q4_K_M.gguf")
+            print(f"        M3_EMBED_GGUF={gguf_hint} \\")
+            print( "            nohup m3-embed-server > ~/.m3/engine/embed-server.log 2>&1 &")
+            print()
+            print("    To start automatically on boot (no systemd needed):")
+            print("        crontab -e   # then add:")
+            print(f"        @reboot M3_EMBED_GGUF={gguf_hint} m3-embed-server >> ~/.m3/engine/embed-server.log 2>&1 &")
+            if has_systemctl and has_loginctl:
+                print()
+                print("    To keep the systemd service running after logout (headless / server):")
+                print("        loginctl enable-linger \"$USER\"")
+            elif has_systemctl and not has_loginctl:
+                print()
+                print("    (loginctl not found — linger not available on this system)")
         print()
-        print("  Until then, m3 still embeds via its Python/HTTP fallback tier.")
+        print("  Until then, m3 still embeds via its in-process Tier-1 / HTTP fallback tier.")
         return True  # non-fatal
 
 
