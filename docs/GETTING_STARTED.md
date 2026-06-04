@@ -35,6 +35,12 @@ m3 setup
 /plugin install m3@skynetcmd
 ```
 
+> **No GitHub SSH key?** The `owner/repo` shorthand uses SSH. If you get "Premature close" or "ERR_STREAM_PREMATURE_CLOSE", use the HTTPS URL:
+> ```
+> /plugin marketplace add https://github.com/skynetcmd/m3-memory
+> /plugin install m3@skynetcmd
+> ```
+
 That gets you 15 `/m3:*` slash commands (`/m3:health`, `/m3:search`, `/m3:save`, …) plus auto-wired hooks. See [the plugin reference](./claude_code_plugin.md).
 
 **Google Antigravity users — install as a plugin directly:**

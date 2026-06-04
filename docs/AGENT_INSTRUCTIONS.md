@@ -19,7 +19,7 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 **Why:** Built-in flat-file memory is per-host and invisible to other agents on the fleet. m3-memory is the shared, contradiction-aware, bitemporal store that every participating agent reads from — using two systems in parallel fragments context and defeats the point of the project.
 
-**If the m3-memory MCP server is not registered in your client**, stop and tell the user. Do not fall back to a built-in memory system silently. Registration steps for each client (Claude Code, Gemini CLI, Aider, OpenCode, etc.) are in [QUICKSTART.md](./QUICKSTART.md).
+**If the m3-memory MCP server is not registered in your client**, stop and tell the user. Do not fall back to a built-in memory system silently. Registration steps for each client (Claude Code, Gemini CLI, Aider, OpenCode, etc.) are in [QUICKSTART.md](./QUICKSTART.md). Quick fix for Claude Code: `claude mcp add --global memory m3` (the `--global` flag is required — without it the MCP only activates in the directory where the command was run).
 
 ## 🚨 Silent Failure Detection — Mandatory Session Start Check
 
@@ -342,7 +342,7 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 | Tool | When to Use |
 |------|-------------|
 | `memory_cost_report()` | Check session operation counts (embed calls, tokens, searches, writes) |
-| `embedder_status()` | Check the status of the local sovereign embedder server (port 8081). |
+| `embedder_status()` | Check the status of the local sovereign embedder server (port 8082). |
 | `chroma_sync(direction)` | Manual sync with ChromaDB. Use `push`, `pull`, or `both`. |
 
 ---
@@ -350,7 +350,7 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 ### Reaching tools that aren't in your startup surface
 
 Only the **essentials** (the main searches + writes) are registered at session
-start; the rest of the 101 tools load on demand. You never need to drop to raw
+start; the rest load on demand. You never need to drop to raw
 `sqlite3` or shell out via Bash to touch a tool — that fallback is a tool-spec
 gap, not a missing capability. Use the dispatcher instead:
 
@@ -470,8 +470,9 @@ vector/semantic retrieval across the fleet, leave `embed` at its default
 
 ```bash
 /m3:health                                    # Check m3-memory install, hooks, chatlog DB
-python bin/test_memory_bridge.py              # 41 end-to-end tests
-python bin/benchmark_memory.py                # Retrieval quality benchmarks
+m3 doctor                                     # CLI equivalent
+python3 bin/test_memory_bridge.py             # end-to-end tests
+python3 bin/benchmark_memory.py               # Retrieval quality benchmarks
 ```
 
 See [M3_HEALTH_FAQ.md](M3_HEALTH_FAQ.md) for how to read and act on `/m3:health` output — quick reference for developers and general users.
