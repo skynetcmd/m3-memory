@@ -5,13 +5,14 @@ Cross-platform (Windows, macOS, Linux). Reads the Gemini CLI hook envelope
 from stdin, runs chatlog_ingest.py, and SCREAMS loudly if capture fails,
 writing a fallback file to ~/.m3/unsaved_chats/ so no session is silently lost.
 
-All events get full scream-on-fail — AfterModel (per-turn) is on parity with
-Claude's Stop hook.
+AfterModel (per-turn) is on full parity with Claude's Stop hook — scream on fail.
+
+Handles: AfterModel (per-turn), PreCompress, SessionEnd
 
 Envelope (stdin JSON):
   { "session_id": "...", "transcript_path": "...",
     "cwd": "...", "hook_event_name": "AfterModel" | "PreCompress" | "SessionEnd",
-    "reason": "exit" | "clear" | ... }
+    "reason": "exit" | "clear" | "logout" | "prompt_input_exit" | "other" }
 """
 import json
 import os
@@ -20,6 +21,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+AGENT = "gemini"
+FORMAT = "gemini-cli"
+
+
+# ── Shared core (parity across all m3 agent hooks) ───────────────────────────
 
 def find_repo_root() -> Path:
     m3_home = os.environ.get("M3_HOME")
@@ -38,16 +44,16 @@ def find_python(repo: Path) -> str:
     return sys.executable
 
 
-def write_fallback(transcript: str, session_id: str, event: str,
-                   variant: str, reason: str) -> Path:
+def write_fallback(transcript: str, session_id: str, agent: str,
+                   event: str, variant: str, reason: str) -> Path:
     ts = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     sid = (session_id or "unknown")[:8]
     save_dir = Path.home() / ".m3" / "unsaved_chats"
     save_dir.mkdir(parents=True, exist_ok=True)
-    fallback = save_dir / f"m3_unsaved_gemini_{sid}_{ts}.md"
+    fallback = save_dir / f"m3_unsaved_{agent}_{sid}_{ts}.md"
     content = f"""# M3 CHATLOG NOT SAVED - {ts}
 
-**Agent:** gemini-cli
+**Agent:** {agent}
 **Event:** {event}
 **Session:** {session_id}
 **Transcript path:** {transcript}
@@ -56,7 +62,7 @@ def write_fallback(transcript: str, session_id: str, event: str,
 This session's chatlog was NOT captured by m3-memory.
 
 To recover manually:
-    python bin/chatlog_ingest.py --format gemini-cli \\
+    python bin/chatlog_ingest.py --format {FORMAT} \\
         --transcript-path "{transcript}" \\
         --variant {variant}
 """
@@ -64,7 +70,7 @@ To recover manually:
     return fallback
 
 
-def scream(reason: str, fallback: Path, event: str) -> None:
+def scream(reason: str, fallback: Path, agent: str, event: str) -> None:
     border = "=" * 70
     try:
         display = "~/.m3/unsaved_chats/" + fallback.name
@@ -74,7 +80,7 @@ def scream(reason: str, fallback: Path, event: str) -> None:
 {border}
   M3 CHATLOG NOT SAVED - SESSION CONTEXT WILL BE LOST
 
-  Agent  : gemini-cli ({event})
+  Agent  : {agent} ({event})
   Reason : {reason}
   Saved  : {display}
 
@@ -84,52 +90,13 @@ def scream(reason: str, fallback: Path, event: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def main() -> int:
-    raw = sys.stdin.read().strip()
-    if not raw:
-        print("gemini_cli_onexit: empty stdin envelope", file=sys.stderr)
-        return 1
-
+def run_ingest(py: str, ingest: Path, extra_args: list) -> tuple:
+    """Run ingest, return (written, error, returncode)."""
     try:
-        envelope = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"gemini_cli_onexit: malformed JSON envelope: {e}", file=sys.stderr)
-        return 1
-
-    transcript = envelope.get("transcript_path", "")
-    session_id = envelope.get("session_id", "")
-    event_name = envelope.get("hook_event_name", "")
-    reason_field = envelope.get("reason", "")
-
-    if not transcript:
-        print("gemini_cli_onexit: envelope missing transcript_path", file=sys.stderr)
-        return 1
-
-    variant_map = {
-        "AfterModel":   "after_model",
-        "PreCompress":  "pre_compress",
-        "SessionEnd":   f"session_end_{reason_field}" if reason_field else "session_end",
-    }
-    variant = variant_map.get(event_name, "gemini_cli")
-
-    repo = find_repo_root()
-    ingest = repo / "bin" / "chatlog_ingest.py"
-    if not ingest.exists():
-        reason = f"chatlog_ingest.py not found under {repo} — set M3_HOME"
-        fallback = write_fallback(transcript, session_id, event_name, variant, reason)
-        scream(reason, fallback, event_name)
-        return 1
-
-    py = find_python(repo)
-    cmd = [py, str(ingest), "--format", "gemini-cli",
-           "--transcript-path", transcript, "--variant", variant]
-    if session_id:
-        cmd += ["--session-id", session_id]
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            [py, str(ingest)] + extra_args,
+            capture_output=True, text=True, timeout=60)
         output = result.stdout.strip()
-
         result_json = None
         for line in reversed(output.splitlines()):
             line = line.strip()
@@ -139,27 +106,67 @@ def main() -> int:
                     break
                 except json.JSONDecodeError:
                     pass
-
         written = int(result_json.get("written", 0)) if result_json else 0
         error = result_json.get("error") if result_json else "m3 ingest failed or unreachable"
-
-        if written == 0 or error:
-            reason = error if error else "0 rows written — m3 may be down or unreachable"
-            fallback = write_fallback(transcript, session_id, event_name, variant, reason)
-            scream(reason, fallback, event_name)
-
-        return result.returncode
-
+        return written, error, result.returncode
     except subprocess.TimeoutExpired:
-        reason = "ingest timed out after 60s — m3 unreachable"
-        fallback = write_fallback(transcript, session_id, event_name, variant, reason)
-        scream(reason, fallback, event_name)
-        return 1
+        return 0, "ingest timed out after 60s — m3 unreachable", 1
     except Exception as e:
-        reason = f"ingest failed: {e}"
-        fallback = write_fallback(transcript, session_id, event_name, variant, reason)
-        scream(reason, fallback, event_name)
+        return 0, f"ingest failed: {e}", 1
+
+
+# ── Agent-specific main ───────────────────────────────────────────────────────
+
+def main() -> int:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        print(f"{AGENT} hook: empty stdin envelope", file=sys.stderr)
         return 1
+
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"{AGENT} hook: malformed JSON envelope: {e}", file=sys.stderr)
+        return 1
+
+    transcript = envelope.get("transcript_path", "")
+    session_id = envelope.get("session_id", "")
+    event_name = envelope.get("hook_event_name", "")
+    reason_field = envelope.get("reason", "")  # Gemini-specific: exit reason
+
+    if not transcript:
+        print(f"{AGENT} hook: envelope missing transcript_path", file=sys.stderr)
+        return 1
+
+    # Gemini-specific variant mapping
+    variant_map = {
+        "AfterModel":  "after_model",
+        "PreCompress": "pre_compress",
+        "SessionEnd":  f"session_end_{reason_field}" if reason_field else "session_end",
+    }
+    variant = variant_map.get(event_name, "gemini_cli")
+
+    repo = find_repo_root()
+    ingest = repo / "bin" / "chatlog_ingest.py"
+    if not ingest.exists():
+        reason = f"chatlog_ingest.py not found under {repo} — set M3_HOME"
+        fallback = write_fallback(transcript, session_id, AGENT, event_name, variant, reason)
+        scream(reason, fallback, AGENT, event_name)
+        return 1
+
+    py = find_python(repo)
+    args = ["--format", FORMAT, "--transcript-path", transcript, "--variant", variant]
+    if session_id:
+        args += ["--session-id", session_id]
+
+    written, error, rc = run_ingest(py, ingest, args)
+
+    if written == 0 or error:
+        reason = error if error else "0 rows written — m3 may be down or unreachable"
+        fallback = write_fallback(transcript, session_id, AGENT, event_name, variant, reason)
+        scream(reason, fallback, AGENT, event_name)
+
+    return rc
 
 
 if __name__ == "__main__":
