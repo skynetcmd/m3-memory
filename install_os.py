@@ -104,7 +104,7 @@ def install_node_manager():
             if res.returncode == 0:
                 print(f"  -> Found existing nvm: {res.stdout.strip()}")
                 return
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             pass
 
         # 2. Check for existing standalone Node.js (vulnerable to conflicts)
@@ -113,7 +113,7 @@ def install_node_manager():
             if res.returncode == 0:
                 print(f"  ⚠️ Warning: Found standalone Node.js ({res.stdout.strip()}).")
                 print("     nvm-windows works best if standalone Node.js is uninstalled first.")
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             pass
 
         # 3. Try to install nvm-windows via winget
@@ -127,7 +127,7 @@ def install_node_manager():
                 return
             else:
                 print("  -> winget install failed. You may need to install it manually.")
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError):
             print("  -> winget not found. Please install nvm-windows manually: https://github.com/coreybutler/nvm-windows/releases")
 
     else:
@@ -136,7 +136,10 @@ def install_node_manager():
         try:
             subprocess.run(["fnm", "--version"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print("  -> fnm already installed.")
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError):
+            # PermissionError: fnm binary exists on the system but is not
+            # executable by this user (e.g. installed system-wide for another
+            # user). Treat as not installed and install into the user's home.
             run_cmd(["bash", "-c", "curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell"])
             print("  -> fnm installed. Please follow the terminal instructions to add it to your shell.")
 
