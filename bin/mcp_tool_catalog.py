@@ -21,6 +21,7 @@ is an update primitive, not a delete; do not chain it to "clean up" clutter.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -1280,8 +1281,8 @@ TOOLS: list[ToolSpec] = [
             },
             "required": [],
         },
-        impl=memory_maintenance.memory_maintenance_impl,
-        is_async=False,
+        impl=lambda **kw: asyncio.to_thread(memory_maintenance.memory_maintenance_impl, **kw),
+        is_async=True,
         validators=(),
         default_allowed=False,
         inject_agent_id=False,
