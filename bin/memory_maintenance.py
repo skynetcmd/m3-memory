@@ -682,4 +682,18 @@ if __name__ == "__main__":
         logger_name="memory_maintenance",
     )
 
-    print(memory_maintenance_impl())
+    import time as _time
+    _MAX_RETRIES = 3
+    _RETRY_DELAY = 30  # seconds — wait for any concurrent MCP write transaction to finish
+    for _attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            print(memory_maintenance_impl())
+            break
+        except sqlite3.OperationalError as _e:
+            if "database is locked" not in str(_e) or _attempt == _MAX_RETRIES:
+                raise
+            logger.warning(
+                f"database is locked (attempt {_attempt}/{_MAX_RETRIES}), "
+                f"retrying in {_RETRY_DELAY}s — MCP server may be mid-write"
+            )
+            _time.sleep(_RETRY_DELAY)
