@@ -191,7 +191,11 @@ def _build_extractor(
             payload = {"model": profile.model, "max_tokens": profile.max_tokens,
                        "messages": [{"role": "user", "content": body}]}
             if profile.system:
-                payload["system"] = profile.system
+                if getattr(profile, "cache_system", False):
+                    payload["system"] = [{"type": "text", "text": profile.system,
+                                          "cache_control": {"type": "ephemeral"}}]
+                else:
+                    payload["system"] = profile.system
             if profile.temperature is not None:
                 payload["temperature"] = profile.temperature
             headers = {"Content-Type": "application/json", "x-api-key": token,

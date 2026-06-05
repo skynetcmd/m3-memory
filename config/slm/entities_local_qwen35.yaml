@@ -1,0 +1,51 @@
+# qwen/qwen3.5-9b entity-graph extractor (local LM Studio, Anthropic /v1/messages).
+# v2-synced prompt. System prompt is static/cacheable — schema in prompt, not per-call.
+# Used for LME-S COMPUTE backfill 2026-06. Validated 6.6s/call, clean JSON.
+url: http://127.0.0.1:1234/v1/messages
+model: default
+api_key_service: LM_API_TOKEN
+timeout_s: 240.0
+temperature: 0
+backend: anthropic
+cache_system: true
+system: "Extract personal-life entities and relationships from ONE chat turn (the user\
+  \ speaking).\n\nEntity types (use only these): person, place, organization, event,\
+  \ date, quantity, preference, product, topic.\n\nPredicates (use only these):\n\
+  \  family_of       person -> person (kinship; relation word in \"role\": sister/brother/mom/...)\n\
+  \  knows           person -> person (non-family tie; \"role\": friend/coworker/neighbor/...)\n\
+  \  owns            person -> product/object (possessions/acquisitions: books, courses,\
+  \ plants, ...)\n  prefers         person -> preference/product (favorite/love/enjoy)\n\
+  \  has_participant event -> person (who was there)\n  has_location    event -> place\n\
+  \  has_time        event -> date (\"when\" holds the time phrase verbatim)\n  has_quantity\
+  \    entity -> quantity (a stated count; \"qty\" holds it as a string)\n  mentions\
+  \        catch-all — use ONLY if nothing above fits\n\nCANONICAL NAME RULES:\n-\
+  \ canonical_name is the BARE noun, singular, no count/possessive: \"3 sisters\"\
+  \ -> \"sister\"; \"my engagement ring\" -> \"engagement ring\"; \"8 edX courses\"\
+  \ -> \"edX course\".\n- mention_text is the EXACT surface span the user wrote (keep\
+  \ number/possessive): \"3 sisters\", \"my engagement ring\", \"8 edX courses\".\n\
+  - A counted kinship (\"3 sisters\") is type=person, predicate=family_of, role=sister,\
+  \ qty=\"3\".\n\nSUBJECT RULE: the speaker is \"User\". family_of/knows/owns/prefers\
+  \ edges go FROM User. family_of ONLY for blood/marriage kin (sister, mom, cousin,\
+  \ husband...). A friend, colleague, neighbor, or named acquaintance is knows, NOT\
+  \ family_of.\n\nEVENT PARTICIPANTS: has_participant goes FROM the event TO each\
+  \ person actually present. Do NOT add User unless the text says User attended. Emit\
+  \ one has_participant per named attendee.\n\nSALIENCE: extract only PERSONAL FACTS\
+  \ — relationships, possessions/acquisitions, events the user did/attended. SKIP\
+  \ abstract topics, discussion subjects, and assistant suggestions. Better to emit\
+  \ 1 correct fact than 5 noisy ones.\n\n\"when\" RULE: put ONLY a time expression\
+  \ in \"when\" — a date or relative phrase like \"last Saturday\", \"a month ago\"\
+  , \"today\". If no time phrase, set \"when\" to \"\". NEVER put a clause or sentence\
+  \ in \"when\". Do NOT resolve the date; copy verbatim.\n\nOutput ONLY one-line JSON:\n\
+  {\"entities\":[{\"canonical_name\":\"...\",\"entity_type\":\"...\",\"mention_text\"\
+  :\"...\",\"attrs\":{\"role\":\"...\",\"when\":\"...\",\"qty\":\"...\"}}],\"relationships\"\
+  :[{\"from_entity\":\"...\",\"to_entity\":\"...\",\"predicate\":\"...\"}]}\n\nIf\
+  \ the text contains no personal facts output exactly:\n{\"entities\":[], \"relationships\"\
+  :[]}\n\nNo markdown, no code fences, no commentary. JSON only.\n"
+labels:
+- extracted
+fallback: extracted
+post:
+  format: '{text}'
+max_tokens: 4096
+input_max_chars: 4000
+anthropic_version: '2023-06-01'
