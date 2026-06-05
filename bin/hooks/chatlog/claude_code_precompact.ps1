@@ -65,5 +65,61 @@ if (-not [string]::IsNullOrWhiteSpace($sessionId)) {
     $argsList += @("--session-id", $sessionId)
 }
 
-& $py @argsList
-exit $LASTEXITCODE
+$ErrorActionPreference = "Continue"
+$result = & $py @argsList 2>&1
+$exitCode = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+
+# Parse result to check if anything was written
+$written = 0
+$ingestError = $null
+try {
+    # Extract just the JSON object from output (ingest may mix log lines + JSON)
+    $jsonLine = ($result | Out-String) -split "`n" | Where-Object { $_ -match '^\s*\{' } | Select-Object -Last 1
+    $resultJson = $jsonLine | ConvertFrom-Json -ErrorAction Stop
+    $written = [int]($resultJson.written)
+    $ingestError = $resultJson.error
+} catch {
+    $ingestError = "m3 ingest failed or unreachable"
+}
+
+# Scream if m3 failed to capture (0 written or error)
+if ($written -eq 0 -or -not [string]::IsNullOrWhiteSpace($ingestError)) {
+    $ts = Get-Date -Format "yyyy-MM-dd-HH-mm-ss"
+    $fallbackDir = Join-Path $env:USERPROFILE ".claude"
+    if (-not (Test-Path $fallbackDir)) { New-Item -ItemType Directory -Force $fallbackDir | Out-Null }
+    $fallbackFile = Join-Path $fallbackDir "m3_unsaved_chatlog_$ts.md"
+
+    $reason = if (-not [string]::IsNullOrWhiteSpace($ingestError)) { $ingestError } else { "0 rows written (m3 may be down or unreachable)" }
+
+    $content = @"
+# ⚠️ M3 CHATLOG NOT SAVED — $ts
+
+**Event:** $eventName
+**Session:** $sessionId
+**Transcript path:** $transcript
+**Reason:** $reason
+
+This session's chatlog was NOT captured by m3-memory.
+To recover: run the ingest manually against the transcript path above.
+
+    python bin/chatlog_ingest.py --format claude-code --transcript-path "$transcript" --variant $variant
+"@
+
+    $content | Out-File -FilePath $fallbackFile -Encoding utf8
+
+    $banner = @"
+
+╔══════════════════════════════════════════════════════════════════╗
+║  🚨 M3 CHATLOG NOT SAVED — SESSION CONTEXT WILL BE LOST 🚨      ║
+║                                                                  ║
+║  Reason : $($reason.PadRight(58).Substring(0,58))  ║
+║  Saved  : $($fallbackFile.PadRight(58).Substring(0,58))  ║
+║                                                                  ║
+║  Fix: restart m3 MCP, then re-run ingest on transcript above.   ║
+╚══════════════════════════════════════════════════════════════════╝
+"@
+    Write-Host $banner -ForegroundColor Red
+}
+
+exit $exitCode
