@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from m3_memory import rust_core_install as rci  # noqa: E402
 
-
 # ── name mapping (must mirror build_wheel.py) ──────────────────────────────────
 
 @pytest.mark.parametrize("os_tok,backend,expected", [
@@ -104,7 +103,7 @@ class _FakeProc:
 def test_install_prebuilt_argv(monkeypatch):
     captured = {}
 
-    def fake_run(argv, env=None):
+    def fake_run(argv, env=None, **kwargs):
         captured["argv"] = argv
         return _FakeProc(0)
 
@@ -121,7 +120,7 @@ def test_install_prebuilt_argv(monkeypatch):
 def test_install_from_source_passes_features(monkeypatch):
     captured = {}
     monkeypatch.setattr(rci.subprocess, "run",
-                        lambda argv, env=None: captured.update(argv=argv) or _FakeProc(0))
+                        lambda argv, env=None, **kwargs: captured.update(argv=argv) or _FakeProc(0))
     choice = rci.BackendChoice("linux", "vulkan", "test")
     rci.install_from_source(choice, git_tag="v2026.05.30")
     argv = captured["argv"]
@@ -134,7 +133,7 @@ def test_install_from_source_passes_features(monkeypatch):
 def test_install_from_source_cpu_no_features(monkeypatch):
     captured = {}
     monkeypatch.setattr(rci.subprocess, "run",
-                        lambda argv, env=None: captured.update(argv=argv) or _FakeProc(0))
+                        lambda argv, env=None, **kwargs: captured.update(argv=argv) or _FakeProc(0))
     rci.install_from_source(rci.BackendChoice("linux", "cpu", "test"))
     assert "--config-settings" not in captured["argv"]
 
