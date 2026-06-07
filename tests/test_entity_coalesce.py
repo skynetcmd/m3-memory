@@ -124,7 +124,13 @@ def test_embed_tier_info_dry_run_no_hint():
 def tmp_entity_db(tmp_path, monkeypatch):
     """A minimal agent_memory.db with an `entities` table + a few rows."""
     db = tmp_path / "agent_memory.db"
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(db, timeout=30)
+    # Match production: WAL lets the m3_sdk pool (5 connections) and any test
+    # reader coexist without an exclusive-lock fight. A plain journal here makes
+    # the pool's later WAL-mode switch (apply_pragmas) contend and fail under
+    # CI's slower I/O with "database is locked" (m3_sdk.py:494).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(
         """
         CREATE TABLE entities (
@@ -177,7 +183,7 @@ def test_dry_run_detects_and_quarantines_without_writing(tmp_entity_db):
     # nothing written: candidates table empty
     assert ec.list_coalesce_candidates(limit=99) == []
     # quarantine flag NOT applied in dry-run
-    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"], timeout=30)
     q = conn.execute("SELECT count(*) FROM entities WHERE coalesce_state='quarantined'").fetchone()[0]
     conn.close()
     assert q == 0
@@ -190,7 +196,7 @@ def test_real_run_persists_quarantine_and_fuzzy_candidate(tmp_entity_db):
     assert "error" not in r, r.get("error")
     assert r["prune"]["quarantined"] == 3
     # quarantine persisted
-    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"], timeout=30)
     q = conn.execute("SELECT count(*) FROM entities WHERE coalesce_state='quarantined'").fetchone()[0]
     conn.close()
     assert q == 3
@@ -242,7 +248,7 @@ def test_apply_creates_reversible_overlay_then_unapply_restores(tmp_entity_db):
     assert res["applied"] >= 1
     cid = res["clusters_touched"][0]
 
-    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"], timeout=30)
     # overlay written: a same_as edge + a clustered member, NO entity deleted
     sa = conn.execute("SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
     clustered = conn.execute("SELECT count(*) FROM entities WHERE coalesce_state='clustered'").fetchone()[0]
@@ -254,7 +260,7 @@ def test_apply_creates_reversible_overlay_then_unapply_restores(tmp_entity_db):
     # reverse: unapply fully restores (drop edge + clear cluster_id)
     rev = ec.unapply_cluster(cid, db_path=os.environ["M3_MEMORY_DB"])
     assert rev["reverted_members"] >= 1
-    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"], timeout=30)
     assert conn.execute("SELECT count(*) FROM entities WHERE cluster_id=?", (cid,)).fetchone()[0] == 0
     assert conn.execute(
         "SELECT count(*) FROM entity_relationships WHERE predicate='same_as'"
@@ -272,7 +278,7 @@ def test_unapply_tombstones_and_strips_alias_and_blocks_auto_remerge(tmp_entity_
     res = ec.apply_coalescence(include_auto_merge=True, dry_run=False, db_path=db)
     cid = res["clusters_touched"][0]
 
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(db, timeout=30)
     # alias was written on the representative (the same_as edge's to_entity)
     rep_alias_rows = conn.execute(
         "SELECT json_extract(r.attributes_json,'$.aliases') "
@@ -288,7 +294,7 @@ def test_unapply_tombstones_and_strips_alias_and_blocks_auto_remerge(tmp_entity_
     rev = ec.unapply_cluster(cid, db_path=db)
     assert rev["reverted_members"] >= 1
 
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(db, timeout=30)
     # (1) candidate tombstoned -> NOT 'merge', so auto-merge filter skips it
     action = conn.execute(
         "SELECT review_action FROM entity_coalesce_candidates WHERE uuid=?", (cand_uuid,)
@@ -304,7 +310,7 @@ def test_unapply_tombstones_and_strips_alias_and_blocks_auto_remerge(tmp_entity_
 
     # (3a) auto-merge does NOT resurrect the tombstoned cluster
     again = ec.apply_coalescence(include_auto_merge=True, dry_run=False, db_path=db)
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(db, timeout=30)
     sa = conn.execute(
         "SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
     conn.close()
@@ -313,7 +319,7 @@ def test_unapply_tombstones_and_strips_alias_and_blocks_auto_remerge(tmp_entity_
     # (3b) explicit-uuid re-apply IS allowed (deliberate human act)
     redo = ec.apply_coalescence(candidate_uuids=[cand_uuid], dry_run=False, db_path=db)
     assert redo["applied"] == 1
-    conn = sqlite3.connect(db)
+    conn = sqlite3.connect(db, timeout=30)
     sa2 = conn.execute(
         "SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
     conn.close()
@@ -323,7 +329,7 @@ def test_unapply_tombstones_and_strips_alias_and_blocks_auto_remerge(tmp_entity_
 def test_apply_dry_run_writes_nothing(tmp_entity_db):
     ec.coalesce_detect(dry_run=False, max_pairs=50)
     ec.apply_coalescence(include_auto_merge=True, dry_run=True)  # dry-run needs no guard
-    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"], timeout=30)
     sa = conn.execute("SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
     conn.close()
     assert sa == 0  # dry-run applied nothing
@@ -344,7 +350,7 @@ def test_apply_refuses_real_write_without_target_or_confirm(tmp_entity_db):
     assert res["applied"] == 0
     assert "refused" in res.get("error", "")
     # nothing written
-    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"])
+    conn = sqlite3.connect(os.environ["M3_MEMORY_DB"], timeout=30)
     sa = conn.execute("SELECT count(*) FROM entity_relationships WHERE predicate='same_as'").fetchone()[0]
     conn.close()
     assert sa == 0
