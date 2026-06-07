@@ -15,10 +15,24 @@ def _isolate_env(monkeypatch, tmp_path):
     monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
     monkeypatch.setenv("M3_DATABASE", str(tmp_path / "test.db"))
     monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
-    # Force fresh module load
+    # Force fresh module load so each doctor test re-reads the env above.
+    # CRITICAL: snapshot and RESTORE the purged modules on teardown. Without
+    # restore, the whole rest of the pytest session runs with memory.* modules
+    # re-initialized under THIS test's env (tmp M3_DATABASE, M3_SKIP_MIGRATIONS,
+    # and config defaults like ELBOW_MIN_INPUT=20) — which silently broke
+    # test_elbow_trim, test_oxidation_probe, test_memory_search_routed, etc.
+    # when they happened to run after this file. (Order-dependent CI reds.)
+    saved = {m: sys.modules[m] for m in list(sys.modules) if m.startswith("memory.")}
+    saved["memory"] = sys.modules.get("memory")
     for mod in list(sys.modules):
         if mod.startswith("memory."):
             del sys.modules[mod]
+    yield
+    for mod in [m for m in sys.modules if m.startswith("memory.")]:
+        del sys.modules[mod]
+    for name, module in saved.items():
+        if module is not None:
+            sys.modules[name] = module
 
 
 def test_shim_identity_preserved(monkeypatch):
