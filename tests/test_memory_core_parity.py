@@ -94,20 +94,49 @@ def _capture_value(obj) -> str | None:
         return "<unrepr>"
 
 
+# Names whose presence/kind is environment-dependent, not a stable API contract,
+# so they must not be snapshotted. `m3_core_rs` is the optional native extension:
+# it's a module when the wheel is installed and `None` when absent or disabled
+# via M3_CORE_RS_DISABLE — so its snapshot "kind" flips module<->constant between
+# a dev box (ext present) and CI (ext absent), which is not an API change.
+_ENV_DEPENDENT_NAMES = frozenset({"m3_core_rs"})
+
+
 def _is_public(name: str) -> bool:
     """A symbol is 'public' for our purposes if it doesn't start with __
     AND it's not an obvious re-exported standard-library or third-party module."""
     if name.startswith("__"):
         return False
+    if name in _ENV_DEPENDENT_NAMES:
+        return False
     return True
 
 
 def _build_snapshot():
-    """Import memory_core and walk its module dict. Returns a JSON-safe dict."""
+    """Import memory_core and walk its FULL public surface. Returns a JSON-safe dict.
+
+    memory_core re-exports most of its public API lazily via a PEP-562
+    `__getattr__` + `_LAZY_IMPORTS` table (see bin/memory_core.py). Those names
+    are NOT in `vars(memory_core)` until first accessed, but they ARE reported
+    by `dir()` (the module defines `__dir__`). Walking `vars()` alone therefore
+    captured only the ~83 eagerly-bound symbols and missed ~230 lazy ones —
+    making the snapshot depend on whatever happened to be materialized by import
+    order, which is exactly the non-determinism this parity test must avoid.
+
+    Build the name set from `dir()` and resolve each via `getattr` so every lazy
+    re-export is materialized and captured deterministically.
+    """
     import memory_core  # noqa: F401 — picked up by the snapshot
     symbols = {}
-    for name, obj in vars(memory_core).items():
+    for name in dir(memory_core):
         if not _is_public(name):
+            continue
+        try:
+            obj = getattr(memory_core, name)
+        except AttributeError:
+            # A name advertised by __dir__ but not resolvable — record as absent
+            # so a genuine break still shows up rather than silently vanishing.
+            symbols[name] = {"kind": "unresolved", "signature": None, "value_repr": None}
             continue
         # Skip standard-library and third-party modules that memory_core
         # imports into its namespace. We only care about its OWN symbols
