@@ -88,6 +88,31 @@ def _restore_memory_modules():
         sys.modules[name] = mod
 
 
+@pytest.fixture(autouse=True)
+def _close_db_pools():
+    """Close every cached M3Context SQLite pool after each test.
+
+    M3Context.for_db() caches contexts (each owning a 5-connection pool) in a
+    16-entry LRU and NEVER closes them between tests — so pooled connections to
+    every test's tmp DB accumulate, holding open file handles + WAL locks. Under
+    CI's slower I/O that cross-test contention surfaces as OperationalError:
+    database is locked (m3_sdk.py:494) in test_entity_* / resolution-tuning,
+    which passed locally only because fast local I/O dodged the race. WAL mode
+    alone wasn't enough — the leaked pooled connections are the real cause.
+
+    m3_sdk._cleanup() closes all pools and clears the cache (it's the same
+    routine registered atexit). Run it as teardown so each test starts with no
+    inherited open connections. Best-effort: a missing/funny m3_sdk must not
+    break unrelated tests.
+    """
+    yield
+    try:
+        import m3_sdk
+        m3_sdk._cleanup()
+    except Exception:  # noqa: BLE001 — teardown hygiene must never fail a test
+        pass
+
+
 # Minimal memory_items schema sufficient for chatlog writes. Embeddings and
 # FTS5 tables are created lazily by specific fixtures that need them.
 #
