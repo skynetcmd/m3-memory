@@ -51,16 +51,27 @@ def _probe_tier1() -> dict[str, Any]:
     res["gguf_path"] = gguf or None
     if gguf:
         res["gguf_exists"] = os.path.exists(gguf)
+    # Tier-1 configured-ness is determined by the GGUF, NOT by whether the native
+    # extension imports. With no GGUF (or a missing one), tier-1 is a deliberate
+    # skip — 'not-configured' — regardless of m3_core_rs. Decide this FIRST: a
+    # box without the optional extension (e.g. CI) would otherwise fall through
+    # the import-failure return below and report 'offline', which is wrong.
+    if not gguf or not res["gguf_exists"]:
+        res["status"] = "not-configured"
+        if gguf and not res["gguf_exists"]:
+            res["error"] = f"GGUF path set but file missing: {gguf}"
+        # Still record whether the extension is importable for diagnostics.
+        try:
+            import m3_core_rs  # noqa: F401
+            res["m3_core_rs_importable"] = True
+        except Exception:  # noqa: BLE001 — informational only on this path
+            pass
+        return res
     try:
         import m3_core_rs  # noqa: F401
         res["m3_core_rs_importable"] = True
     except Exception as e:
         res["error"] = f"m3_core_rs import: {type(e).__name__}: {e}"
-        return res
-    if not gguf or not res["gguf_exists"]:
-        res["status"] = "not-configured"
-        if gguf and not res["gguf_exists"]:
-            res["error"] = f"GGUF path set but file missing: {gguf}"
         return res
     try:
         from memory import embed as _embed_mod
