@@ -1,11 +1,12 @@
 """m3-memory doctor — health probes and DB repair, split per concern.
 
-Three narrow modules, plus a thin CLI dispatcher (`memory_doctor.py` at
+Narrow modules, plus a thin CLI dispatcher (`memory_doctor.py` at
 `bin/` keeps its name for backward compatibility):
 
 - `db_repair`           — legacy DB repair (timestamps, relationships, JSON)
 - `cascade_probe`       — wrapper around `memory.doctor.memory_doctor_impl`
 - `embed_server_probe`  — shells out to the Rust `m3-embed-server doctor`
+- `oxidation_probe`     — reports m3_core_rs presence / staleness (report-only)
 
 Each module's public entry point returns an int exit code (0=pass,
 non-zero=fail-this-phase). The CLI aggregates the worst code across

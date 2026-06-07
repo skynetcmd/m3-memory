@@ -39,10 +39,16 @@ MODES = ["fts5", "hybrid", "semantic", "exact", ""]
 
 
 def _py_sanitize(query, max_len=500):
-    """The pure-Python _sanitize_fts body, regardless of m3_core_rs presence."""
+    """The pure-Python _sanitize_fts body, regardless of m3_core_rs presence.
+
+    Mirrors the two-pass fts.py body: operator words removed, then every
+    non-word/non-space character replaced with a space (FTS5-MATCH allowlist).
+    """
     if len(query) > max_len:
         query = query[:max_len]
-    return ftsmod._FTS_OPERATORS.sub(" ", query).strip()
+    query = ftsmod._FTS_OPERATORS.sub(" ", query)
+    query = ftsmod._FTS_NON_TERM.sub(" ", query)
+    return query.strip()
 
 
 def _py_compile(query, mode):
@@ -51,7 +57,8 @@ def _py_compile(query, mode):
         query.startswith("'") and query.endswith("'")
     )
     if is_exact_query:
-        return f'"{query[1:-1]}"', True
+        inner = query[1:-1].replace('"', '""')
+        return f'"{inner}"', True
     clean = _py_sanitize(query)
     clean = ftsmod._sanitize_for_searchable(clean)
     if not clean.strip():
