@@ -3,10 +3,20 @@
 The probe is report-only: it must ALWAYS return 0 (a pure-Python or stale-wheel
 deployment is supported, not a failure) and must distinguish three states —
 not-installed, installed-and-current, installed-but-stale — in its output.
+
+Capture note: these tests use contextlib.redirect_stdout rather than pytest's
+capsys. In the full suite, earlier tests (and the llama.cpp native lib) perform
+fd-level stdout manipulation that can leave capsys seeing nothing — capturing
+the probe's print() directly into a StringIO is immune to that ordering effect.
+The probe reads `config` via `from memory import config` *inside* run(), so we
+patch attributes on that exact module object (imported the same way here) to
+guarantee the patch and the probe see the same `config`.
 """
 from __future__ import annotations
 
+import io
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,39 +29,47 @@ from doctor import oxidation_probe  # noqa: E402
 from memory import config  # noqa: E402
 
 
-def _set_rs(monkeypatch, value):
+def _set_rs(monkeypatch, value, disabled=False):
     monkeypatch.setattr(config, "m3_core_rs", value, raising=False)
-    monkeypatch.setattr(config, "_OXIDATION_DISABLED", False, raising=False)
+    monkeypatch.setattr(config, "_OXIDATION_DISABLED", disabled, raising=False)
 
 
-def test_returns_zero_when_not_installed(monkeypatch, capsys):
+def _run_capture() -> tuple[int, str]:
+    """Run the probe, returning (exit_code, stdout). Ordering-proof capture."""
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = oxidation_probe.run()
+    return rc, buf.getvalue()
+
+
+def test_returns_zero_when_not_installed(monkeypatch):
     _set_rs(monkeypatch, None)
-    assert oxidation_probe.run() == 0
-    out = capsys.readouterr().out
+    rc, out = _run_capture()
+    assert rc == 0
     assert "not installed" in out
 
 
-def test_returns_zero_when_disabled(monkeypatch, capsys):
-    monkeypatch.setattr(config, "m3_core_rs", object(), raising=False)
-    monkeypatch.setattr(config, "_OXIDATION_DISABLED", True, raising=False)
-    assert oxidation_probe.run() == 0
-    assert "disabled" in capsys.readouterr().out
+def test_returns_zero_when_disabled(monkeypatch):
+    _set_rs(monkeypatch, object(), disabled=True)
+    rc, out = _run_capture()
+    assert rc == 0
+    assert "disabled" in out
 
 
-def test_reports_current_when_all_present(monkeypatch, capsys):
+def test_reports_current_when_all_present(monkeypatch):
     # A fake extension exposing every expected function.
     fake = SimpleNamespace(__version__="9.9.9")
     for name, _why in oxidation_probe._EXPECTED:
         setattr(fake, name, lambda *a, **k: None)
     _set_rs(monkeypatch, fake)
 
-    assert oxidation_probe.run() == 0
-    out = capsys.readouterr().out
+    rc, out = _run_capture()
+    assert rc == 0
     assert "current" in out
     assert "STALE" not in out
 
 
-def test_reports_stale_when_functions_missing(monkeypatch, capsys):
+def test_reports_stale_when_functions_missing(monkeypatch):
     # Expose all but the two FTS functions — the real stale-wheel case.
     fake = SimpleNamespace(__version__="1.0.0")
     for name, _why in oxidation_probe._EXPECTED:
@@ -60,20 +78,19 @@ def test_reports_stale_when_functions_missing(monkeypatch, capsys):
         setattr(fake, name, lambda *a, **k: None)
     _set_rs(monkeypatch, fake)
 
-    assert oxidation_probe.run() == 0  # report-only: never fails the run
-    out = capsys.readouterr().out
+    rc, out = _run_capture()
+    assert rc == 0  # report-only: never fails the run
     assert "STALE" in out
     assert "sanitize_fts" in out
     assert "compile_fts_query" in out
 
 
-def test_never_raises_on_bad_config(monkeypatch, capsys):
+def test_never_raises_on_bad_config(monkeypatch):
     # Even if m3_core_rs is a hostile object, the probe must not crash the doctor.
     class Boom:
         def __getattr__(self, name):
             raise RuntimeError("boom")
 
     _set_rs(monkeypatch, Boom())
-    # hasattr swallows the AttributeError path; RuntimeError from __getattr__
-    # would propagate through hasattr as False, so the probe still completes.
-    assert oxidation_probe.run() == 0
+    rc, _out = _run_capture()
+    assert rc == 0
