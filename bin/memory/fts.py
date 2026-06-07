@@ -114,28 +114,58 @@ _EVENT_PROPER_NOUN = re.compile(r"\b([A-Z][a-z]{2,})\b")
 # ──────────────────────────────────────────────────────────────────────────────
 # FTS5 sanitization
 # ──────────────────────────────────────────────────────────────────────────────
-# Strips FTS5 operators from user input so a query like "AND OR NOT *(foo)" can't
-# turn into a parse error or query injection. Operator words are matched as
-# whole words; bracket / wildcard punctuation is matched anywhere.
-_FTS_OPERATORS = re.compile(r"\b(OR|AND|NOT|NEAR)\b|[*()\[\]{}]")
+# Neutralizes FTS5 query syntax in user input so an arbitrary phrase can never
+# turn into a parse error or query injection. Two passes:
+#
+#   1. Operator WORDS (OR/AND/NOT/NEAR) — dangerous even though alphanumeric, so
+#      a punctuation strip alone won't catch them. Matched as whole words.
+#   2. Every non-(word|whitespace) CHARACTER → space. This is an ALLOWLIST, not
+#      a blocklist: in an FTS5 MATCH a *bare* term, almost all punctuation is a
+#      syntax error or operator — `-`/`:`/`{` silently change the parse
+#      ("gpt-4o" -> column-negation -> `no such column: 4o`), while `/ ! . , ; @
+#      = < > ~ | # $ % & \` ( ) [ ] *` raise outright. A whitelist regex that
+#      enumerated "bad" chars repeatedly missed cases (`-`, then `:`, then `/`)
+#      and shipped a content-dependent ("intermittent") crash: any search with a
+#      model name / hyphenated id / range / field:value threw, while plain-word
+#      searches worked. Replacing with a space (not deleting) aligns the query
+#      with the default tokenizer, which already splits indexed content on these
+#      same characters — so `gpt-4o` -> `gpt 4o` still matches the stored row.
+#
+# Quoted exact-phrase queries are handled by `_compile_fts_query` BEFORE this
+# function is reached, so stripping quotes here is safe for that path.
+# `_FTS_OPERATORS` keeps its name (re-exported through the memory_core shim and
+# referenced by tests/test_fts_parity.py) but now matches operator WORDS only;
+# punctuation is handled by the broader `_FTS_NON_TERM` allowlist below.
+_FTS_OPERATORS = re.compile(r"\b(OR|AND|NOT|NEAR)\b")
+_FTS_NON_TERM = re.compile(r"[^\w\s]", re.UNICODE)
 
 
 def _sanitize_fts(query: str, max_len: int = 500) -> str:
-    """Strip FTS5 operators from user input to prevent query injection.
+    """Neutralize FTS5 query syntax in user input to prevent injection / crashes.
+
+    Returns a string safe to drop into an FTS5 `MATCH` as bare terms: operator
+    words removed, all non-word/non-space characters replaced with spaces.
 
     Oxidation: routed through m3_core_rs.sanitize_fts (byte-exact Rust port,
-    no regex engine) when the extension is present; the regex body below is the
-    parity fallback. Parity gated by tests/test_fts_parity.py.
+    no regex engine) when the extension exposes it; the regex body below is the
+    parity fallback. Parity gated by tests/test_fts_parity.py. Note the Rust
+    port MUST mirror the allowlist below — see crates/m3-fts/src/lib.rs.
     """
     _rs = config.m3_core_rs
-    if _rs is not None:
+    # hasattr guard: older installed wheels predate the FTS bindings (the
+    # function is simply absent). Probe explicitly instead of catching the
+    # AttributeError — a bare except here is what silently masked a stale wheel
+    # falling back to Python for days (see DESIGN §3, fail loud not silent).
+    if _rs is not None and hasattr(_rs, "sanitize_fts"):
         try:
             return _rs.sanitize_fts(query, max_len)
-        except Exception:  # noqa: BLE001 — FFI hiccup falls back to Python
+        except Exception:  # noqa: BLE001 — genuine FFI hiccup falls back to Python
             pass
     if len(query) > max_len:
         query = query[:max_len]
-    return _FTS_OPERATORS.sub(" ", query).strip()
+    query = _FTS_OPERATORS.sub(" ", query)
+    query = _FTS_NON_TERM.sub(" ", query)
+    return query.strip()
 
 
 # Mirror of the SQLite mi_fts_insert trigger sanitization. The trigger
@@ -174,16 +204,22 @@ def _compile_fts_query(query: str, mode: str) -> tuple[str, bool]:
     unique (query, mode). Parity gated by tests/test_fts_parity.py.
     """
     _rs = config.m3_core_rs
-    if _rs is not None:
+    # hasattr guard mirrors _sanitize_fts: older wheels lack compile_fts_query,
+    # and a bare except would silently mask the stale-wheel fallback (DESIGN §3).
+    if _rs is not None and hasattr(_rs, "compile_fts_query"):
         try:
             return tuple(_rs.compile_fts_query(query, mode))
-        except Exception:  # noqa: BLE001 — FFI hiccup falls back to Python
+        except Exception:  # noqa: BLE001 — genuine FFI hiccup falls back to Python
             pass
     is_exact_query = (query.startswith('"') and query.endswith('"')) or (
         query.startswith("'") and query.endswith("'")
     )
     if is_exact_query:
-        return f'"{query[1:-1]}"', True
+        # Escape interior double-quotes by doubling them — FTS5's own escape
+        # rule. Without this, an input like `"alpha"beta"` re-wraps to the
+        # unterminated string `"alpha"beta"` and FTS5 MATCH raises.
+        inner = query[1:-1].replace('"', '""')
+        return f'"{inner}"', True
     clean = _sanitize_fts(query)
     clean = _sanitize_for_searchable(clean)
     if not clean.strip():
