@@ -4,7 +4,7 @@ Provides:
 - Async write queue (asyncio.Queue) with flush-on-size/interval
 - Spill-to-disk backpressure at memory/chatlog_spill/YYYYMMDD.jsonl
 - chatlog_write_impl / chatlog_write_bulk_impl — enqueue + flush
-- chatlog_search_impl — delegates to memory_core.memory_search_scored_impl
+- chatlog_search_impl — FTS5 + facet filters over chat_log rows
 - chatlog_promote_impl — ATTACH DATABASE cross-DB copy (separate/hybrid) or UPDATE (integrated)
 - chatlog_list_conversations_impl
 - chatlog_cost_report_impl — aggregates tokens/cost from metadata_json
@@ -44,6 +44,11 @@ VALID_PROVIDERS = frozenset({
     "deepseek", "mistral", "meta", "other",
 })
 MAX_CONTENT_LEN = 50_000
+# Hard cap on search result rows. Defends the API boundary against pathological
+# `k` (DESIGN §4/§6): SQLite treats `LIMIT -1` as UNBOUNDED, so a negative k
+# would otherwise dump the entire chatlog into memory + JSON. k is clamped into
+# [1, MAX_SEARCH_K] before it reaches any query.
+MAX_SEARCH_K = 1_000
 
 # Price table — USD per 1M tokens. Unknown entries → cost_usd stays null (no fake zeros).
 # Keys: (provider, model_id_prefix_or_exact). Lookup walks exact first, then prefix.
@@ -550,7 +555,7 @@ def _derive_title(role: str, content: str, host_agent: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Search — delegates to memory_core.memory_search_scored_impl
+# Search — FTS5 + facet filters over chat_log rows (via _chatlog_search_separate)
 # ---------------------------------------------------------------------------
 
 async def chatlog_search_impl(
@@ -568,7 +573,9 @@ async def chatlog_search_impl(
     """Keyword/vector/hybrid search over chat_log rows in the configured chat log DB.
 
     Returns a JSON string with {"results": [...], "count": N, "db_path": "...", "mode": "..."}."""
-    import memory_core
+    # Clamp k at the boundary: negative -> SQLite LIMIT -1 is UNBOUNDED (would
+    # dump the whole chatlog); 0 -> never useful; huge -> unbounded Python/JSON.
+    k = max(1, min(int(k), MAX_SEARCH_K))
 
     # Ensure flushes complete before searching (best-effort)
     await _flush_once()
@@ -578,33 +585,28 @@ async def chatlog_search_impl(
     chatlog_path = os.path.abspath(chatlog_config.chatlog_db_path())
     main_path = os.path.abspath(resolve_db_path(None))
 
-    # When the chatlog DB is the same file as the active main DB, delegate to
-    # memory_core's full-featured search (vector/hybrid/fts). When they
-    # differ, fall back to the FTS-only path against the chatlog DB.
-    if chatlog_path == main_path:
-        results_json = await memory_core.memory_search_scored_impl(
-            query=query, k=k, type_filter="chat_log",
-            conversation_id=conversation_id, agent_id=agent_id,
-            search_mode=search_mode, since=since, until=until,
-        )
-        return json.dumps({
-            "results": json.loads(results_json).get("results", []),
-            "count":   json.loads(results_json).get("count", 0),
-            "db_path": chatlog_path,
-            "unified": True,
-        })
-
+    # Both the unified (chatlog DB == main DB) and separate cases go through
+    # _chatlog_search_separate. In the unified case get_chatlog_conn() resolves
+    # to the main pool, so this queries the same rows a delegation to
+    # memory_core.memory_search_scored_impl would have — but it honors every
+    # filter (agent_id/since/until/host_agent/provider/model_id) and returns a
+    # consistent result shape. The old delegation branch was dead from the
+    # start: it forwarded agent_id/since/until, none of which
+    # memory_search_scored_impl ever accepted (it takes agent_filter/as_of),
+    # so it raised TypeError the first time the unified path actually ran.
+    unified = chatlog_path == main_path
     return await _chatlog_search_separate(
         query=query, k=k, conversation_id=conversation_id,
         host_agent=host_agent, provider=provider, model_id=model_id,
         agent_id=agent_id, since=since, until=until, db_path=chatlog_path,
+        unified=unified,
     )
 
 
 async def _chatlog_search_separate(
     query: str, k: int, conversation_id: str, host_agent: str,
     provider: str, model_id: str, agent_id: str, since: str, until: str,
-    db_path: str,
+    db_path: str, unified: bool = False,
 ) -> str:
     from m3_sdk import M3Context
     ctx = M3Context.for_db(None)
@@ -636,8 +638,16 @@ async def _chatlog_search_separate(
 
         where = " AND ".join(clauses)
 
+        # Distinguish three cases:
+        #   - no query supplied (blank/whitespace) -> browse: latest rows by time
+        #   - query supplied, sanitizes to tokens   -> FTS MATCH search
+        #   - query supplied but ALL operator chars  -> zero results, NOT a browse
+        # The third case matters: a user searching "---" or ":::" specified a
+        # term; silently returning the latest rows (as the old `if fts_query`
+        # fall-through did) is a misleading false-positive, not a search.
+        has_query = bool(query.strip())
+        fts_query = _sanitize_fts(query) if has_query else ""
         with ctx.get_chatlog_conn() as conn:
-            fts_query = _sanitize_fts(query) if query.strip() else ""
             if fts_query:
                 sql = (
                     "SELECT mi.id, mi.title, mi.content, mi.metadata_json, mi.created_at, "
@@ -648,6 +658,9 @@ async def _chatlog_search_separate(
                     "ORDER BY rank LIMIT ?"
                 )
                 rows = conn.execute(sql, [fts_query] + params + [k]).fetchall()
+            elif has_query:
+                # Query given but no matchable tokens survived sanitization.
+                rows = []
             else:
                 sql = (
                     "SELECT id, title, content, metadata_json, created_at, "
@@ -679,7 +692,7 @@ async def _chatlog_search_separate(
     return json.dumps({
         **result,
         "db_path": db_path,
-        "unified": False,
+        "unified": unified,
     })
 
 
