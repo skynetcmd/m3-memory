@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""m3-memory doctor — thin CLI dispatcher over the three doctor phases.
+"""m3-memory doctor — thin CLI dispatcher over the doctor phases.
 
 Phases (each in its own module under bin/doctor/):
 
   - db_repair          legacy DB fixes (timestamps, relationships, JSON)
   - cascade_probe      embedding-cascade health (delegates to memory.doctor)
   - embed_server_probe Rust-side `m3-embed-server doctor` subprocess
+  - oxidation_probe    m3_core_rs native-extension presence/staleness report
 
 Each phase can be skipped via --skip-*. Exit code is the maximum across
-the non-skipped phases (most-severe wins).
+the non-skipped phases (most-severe wins). The embed-server and oxidation
+phases are report-only and never bump the exit code.
 
 Design note: this file is intentionally thin — narrow CLI + phase
 dispatch only. Logic lives in the bin/doctor/ submodules so each can be
@@ -46,6 +48,10 @@ def main() -> int:
     parser.add_argument(
         "--skip-embed-server", action="store_true",
         help="Skip the Rust-side m3-embed-server doctor subprocess.",
+    )
+    parser.add_argument(
+        "--skip-oxidation", action="store_true",
+        help="Skip the m3_core_rs native-extension status report.",
     )
     parser.add_argument(
         "--fix", action="store_true",
@@ -94,6 +100,13 @@ def main() -> int:
         # legitimately run m3 without `m3 embedder install`, and a missing
         # binary is not a Python-side failure.
         embed_server_probe.run()
+
+    if not args.skip_oxidation:
+        from doctor import oxidation_probe
+        # Report-only: a pure-Python deployment (no/old wheel) is supported, so
+        # this never bumps the exit code — it surfaces a stale wheel that would
+        # otherwise degrade silently.
+        oxidation_probe.run()
 
     return exit_code
 
