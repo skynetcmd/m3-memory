@@ -254,6 +254,17 @@ def create_full_main_schema(db_path) -> None:
     """
     template = _get_template_db()
     shutil.copyfile(str(template), str(db_path))
+    # Put the copy in WAL mode (production default) so the m3_sdk pool's 5
+    # connections and any raw test connection coexist without an exclusive-lock
+    # fight. Without this, under CI's slower I/O the pool's WAL-mode switch
+    # contends with a test reader and fails with "database is locked"
+    # (m3_sdk.py:494) — the cause of flaky test_entity_* / resolution-tuning reds.
+    _wal = sqlite3.connect(str(db_path), timeout=30)
+    try:
+        _wal.execute("PRAGMA journal_mode=WAL")
+        _wal.commit()
+    finally:
+        _wal.close()
 
 
 @pytest.fixture(scope="session")
