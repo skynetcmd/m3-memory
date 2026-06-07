@@ -2,6 +2,15 @@
 
 # Add bin/ directory to Python path so tests can import bin modules
 import os as _os
+
+# Short-circuit cli._ensure_utf8's Windows UTF-8 re-exec for the whole test
+# session. That helper runs at IMPORT time of m3_memory.cli (module-level call);
+# on Windows, when the interpreter wasn't launched with -X utf8, it spawns a
+# subprocess and sys.exit()s — which aborts any test that imports cli with a
+# bare SystemExit (e.g. test_installer::test_auto_install_opt_out_via_env).
+# Setting this sentinel makes _ensure_utf8 return immediately. Must be set
+# BEFORE any test imports cli, so it lives at conftest import time.
+_os.environ.setdefault("_M3_UTF8_REEXEC", "1")
 import shutil
 import sqlite3
 import subprocess
@@ -14,6 +23,31 @@ import pytest
 _BIN_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "bin")
 if _BIN_DIR not in sys.path:
     sys.path.insert(0, _BIN_DIR)
+
+
+def embed_backend_reachable() -> bool:
+    """True iff a tier-2 embedding backend answers a TCP connect quickly.
+
+    Used to gate SLO / integration tests whose premise REQUIRES a reachable
+    embedder (warm-cascade latency, tier-4 redaction roundtrip). On CI there is
+    no embedder, so every cascade probe waits out its full retry/backoff and the
+    sub-3s SLO can't hold — that's an environment limitation, not a regression.
+    A fast 0.5s connect probe distinguishes the two without coupling the test to
+    the network's timeout behavior.
+    """
+    import re
+    import socket
+
+    url = _os.environ.get("M3_EMBED_FALLBACK_URL", "http://127.0.0.1:8082")
+    m = re.search(r"://([^:/]+):(\d+)", url)
+    if not m:
+        return False
+    host, port = m.group(1), int(m.group(2))
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
 
 
 @pytest.fixture(autouse=True)
