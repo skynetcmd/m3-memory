@@ -1,5 +1,7 @@
 """pytest configuration and fixtures for chatlog + main-DB tests."""
 
+# Add bin/ directory to Python path so tests can import bin modules
+import os as _os
 import shutil
 import sqlite3
 import subprocess
@@ -9,11 +11,47 @@ from pathlib import Path
 
 import pytest
 
-# Add bin/ directory to Python path so tests can import bin modules
-import os as _os
 _BIN_DIR = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "bin")
 if _BIN_DIR not in sys.path:
     sys.path.insert(0, _BIN_DIR)
+
+
+@pytest.fixture(autouse=True)
+def _restore_memory_modules():
+    """Heal `sys.modules` pollution of the memory.* namespace after each test.
+
+    Several tests deliberately purge / reimport `memory_core` and `memory.*`
+    (e.g. test_doctor's _isolate_env, the shim-identity test, the parity tests)
+    to exercise a fresh import under a specific env. When they don't restore
+    afterward, the rest of the session runs against a half-initialized or
+    re-initialized module set — config globals revert to defaults
+    (ELBOW_MIN_INPUT 5->20), monkeypatches target a stale `config`, and
+    `import memory_core` returns a broken cached module. That surfaced as
+    order-dependent CI reds that pass in isolation: test_oxidation_probe,
+    test_elbow_trim, test_entity_coalesce, test_memory_core_parity, etc.
+
+    Snapshot the memory-namespace modules before the test; after it, drop any
+    that were added/replaced and restore the originals. Tests that intentionally
+    reimport still see their fresh module DURING the test; the next test starts
+    from the original, fully-initialized objects.
+    """
+    def _snapshot():
+        return {
+            name: mod for name, mod in sys.modules.items()
+            if name == "memory_core" or name == "memory" or name.startswith("memory.")
+        }
+
+    before = _snapshot()
+    yield
+    after_names = {
+        name for name in sys.modules
+        if name == "memory_core" or name == "memory" or name.startswith("memory.")
+    }
+    # Remove modules the test introduced/replaced, then restore the originals.
+    for name in after_names - before.keys():
+        del sys.modules[name]
+    for name, mod in before.items():
+        sys.modules[name] = mod
 
 
 # Minimal memory_items schema sufficient for chatlog writes. Embeddings and
