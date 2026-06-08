@@ -273,7 +273,21 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 ## 📊 Benchmarks
 
-**89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500 correct) — a 500-question evaluation of long-horizon conversational memory. Without oracle metadata: **74.8%** (smart retrieval) to **68.0%** (fixed-k baseline).
+### Session Hit-Rate @ k (retrieval-only)
+
+| k | SHR | Hits / 500 | vs. prior report |
+|---:|---:|---:|---:|
+| 5  | **98.2%** | 491 / 500 | +2.0pp (was 96.2%) |
+| 10 | **99.2%** | 496 / 500 | +2.4pp (was 96.8%) |
+| 20 | **100.0%** | 500 / 500 | first time reported |
+
+**k=10 is M3's default search depth** — every column above uses the same engine settings the production `memory_search` tool ships with.
+
+Binary per-question SHR (`recall_any@k`) — same convention the adjacent LongMemEval-S submissions report as "R@k". Measured on [`longmemeval_s_cleaned.json`](https://github.com/xiaowu0162/LongMemEval) (500 questions), no oracle metadata, BGE-M3 hybrid retrieval (FTS5 + vector + MMR). Deterministic at T=0; reproducibility variance <0.1pp.
+
+### End-to-End QA Accuracy
+
+**89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500 correct) — a 500-question evaluation of long-horizon conversational memory. Without oracle metadata: **74.8%** (smart retrieval) to **68.0%** (fixed-k baseline). Answer model: Claude Opus 4.6; judge: gpt-4o (unmodified upstream).
 
 | Question type | n | Accuracy |
 |---|---|---|
@@ -285,7 +299,10 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | knowledge-update | 78 | 92.3% |
 | **Overall** | **500** | **89.0%** |
 
-Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md). 
+The retrieval-vs-QA gap (99.2% SHR → 89.0% QA at k=10) is dominated by answer-model errors on already-retrieved gold evidence, not retrieval misses.
+
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
+Discussion thread, retrieval k-sweep, metric-definition clarification, and engine-upgrade addendum: [xiaowu0162/LongMemEval#43](https://github.com/xiaowu0162/LongMemEval/issues/43).
 LoCoMo audit pending — see [`benchmarks/locomo/README.md`](benchmarks/locomo/README.md).
 
 > 🔍 **Verifying claims about M3.** If a third-party AI assistant has described M3 with features or scores that don't match what's documented here, it's almost certainly hallucinating. See [`docs/MYTHS_AND_FACTS.md`](docs/MYTHS_AND_FACTS.md) for the source-of-truth list of what M3 actually implements (and what it doesn't).
