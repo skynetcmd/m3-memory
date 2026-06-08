@@ -1,51 +1,135 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Roadmap
 
-> Current version: **v2026.4.12b** — active development. Priorities shift based on community feedback; open an issue to vote on a feature.
+> Current version: **v2026.6.8.1** — actively maintained. Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
 
-## ✅ Shipped
+## ✅ Shipped — 2026-Q2 highlights
 
-### v2026.04.06 — Production Release (April 6, 2026)
+Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); grouped by theme below rather than version-by-version.
+
+### Cross-platform install hardening (v2026.6.8.0 → v2026.6.8.1)
+
+- [x] `install.sh` upgrades in place — no more "repo already exists" abort on re-run
+- [x] Project Oxidation wheel installs into the pipx venv (not the sibling `repo/.venv` `mcp-memory` couldn't see)
+- [x] 3-tier wheel install cascade — PyPI prebuilt → GitHub Release prebuilt → recommend source build
+- [x] GitHub Release fallback is **required** for size-capped Linux CUDA (464 MB) and Windows CUDA (122 MB) wheels — both exceed PyPI's 100 MiB cap
+- [x] `M3_EMBED_GGUF` auto-discovery + persistence — `~/.zshrc` / `~/.bashrc` on Unix, `setx` on Windows, plus the `memory` MCP server `env` block in `~/.claude/settings.json` and `~/.gemini/settings.json`
+- [x] Build-tools preflight catches missing Rust toolchain — probes `~/.rustup/toolchains/<triple>/bin/cargo` in addition to PATH
+
+### m3-core-rs 3.6.6 wheels (v2026.06.07)
+
+- [x] 28 wheels: 7 (os × backend) combinations × cp311–cp314
+- [x] PyPI distribution for 20 wheels (5 backends fit under the 100 MiB cap: `macos-metal`, `linux-cpu`, `linux-vulkan`, `windows-cpu`, `windows-vulkan`)
+- [x] GitHub Release for all 28 — `linux-cuda` and `windows-cuda` stay GH-only by size policy
+- [x] In-process Tier-1 embedder — Metal / CUDA / Vulkan / CPU backends
+- [x] Sovereign Tier-2 HTTP embedder (`m3-embed-server`, BGE-M3 on port 8082) as launchd / systemd / Windows Service
+
+### Retrieval quality + LongMemEval-S benchmarks (v2026.6.6.0, v2026.6.8.1)
+
+- [x] **99.2% SHR @ k=10** on LongMemEval-S — full sweep **98.2% / 99.2% / 100.0%** @ k=5/10/20 (BGE-M3 hybrid FTS5 + vector + MMR; k=10 is M3's default search depth)
+- [x] **89.0% E2E QA** on LongMemEval-S (445 / 500, Claude Opus 4.6 answerer, gpt-4o judge, unmodified upstream)
+- [x] FTS5 sanitizer rewrite — allowlist tokenization fixes search crashes on queries containing hyphens, colons, `field:value` tokens (`gpt-4o`, `claude-code`, `100-200MB`, …)
+- [x] LongMemEval-S benchmark harness shipped under `benchmarks/longmemeval/`
+- [x] Live methodology + k-sweep + engine-upgrade addendum discussion: [xiaowu0162/LongMemEval#43](https://github.com/xiaowu0162/LongMemEval/issues/43)
+
+### Files-memory subsystem (v2026.5.18.0 → v2026.5.29.5)
+
+- [x] 26-tool files-memory layer — directory ingestion, hierarchical chunking, ascension to core memory, watch-mode staleness review
+- [x] Files entity-linking + fact-extraction with bug fixes (v2026.5.29.4 / .5)
+- [x] Modular `memory_core` refactor — submodule extraction with shim-preserved identity (no public surface drift; 322+ symbols snapshot-fingerprinted)
+
+### Entity coalescing (v2026.5.29.7 → v2026.5.30.0)
+
+- [x] Entity coalescing v1 → v2 — dedup/merge across mentions, structured `{a, b, score, title_a, title_b}` return per pair
+- [x] MCP tool catalog registration for entity ops; CLI exit-code fix
+
+### Engine v3 — bitemporal + decoupled roots (v2026.6.1.0)
+
+- [x] Polars-accelerated bitemporal history analytics (pure-Python fallback retained; Polars optional)
+- [x] Doctor quick-repair mode — `m3 doctor --fix` with `--dry-run` preview
+- [x] SDK oxidation — Rust-backed FFI shims for `sysinfo`, advisory file locking (`fs2`), atomic circuit breakers (PyO3)
+- [x] Decoupled config/engine roots (`M3_CONFIG_ROOT` / `M3_ENGINE_ROOT`) for clean security boundaries
+
+### Multi-agent reach
+
+- [x] **Hermes Agent** memory-provider plugin (file-based, vendored under `m3_memory/integrations/hermes/`)
+- [x] **Antigravity** CLI/Desktop wiring via `~/.gemini/antigravity-cli/settings.json`
+- [x] **OpenClaw** local proxy on `localhost:9000/v1` (no native MCP — bridged)
+- [x] Chatlog capture hooks — Claude Code (Stop + PreCompact, zero-gap) and Gemini CLI (SessionEnd)
+- [x] curate-memory + curate-chatlog subagents with UUID-integrity defense (v2026.6.8.0)
+
+### Compliance + privacy
+
+- [x] FIPS 140-3 strict execution mode (`M3_FIPS_MODE=1`)
+- [x] GDPR Article 17 (`gdpr_forget`) + Article 20 (`gdpr_export`) as MCP tools
+- [x] Per-conversation isolation enforced at the SQL layer (`WHERE conversation_id = ?` baked in)
+- [x] Audit log entry via `_record_history` for every destructive op
+- [x] Content-safety regex hardening (CodeQL #29, v2026.5.18.1)
+
+### Windows hardening (v2026.5.29.3, .6)
+
+- [x] Installer crash fixed
+- [x] UTF-8 mode forced — eliminates the cp1252 emoji/box-drawing crash class
+- [x] WMI-safe OS detection — no `platform.system()` hangs on Py3.14
+
+### Sustained engineering
+
+- [x] **105 MCP tools** (was 66 at v2026.4.12b)
+- [x] **563 end-to-end tests** (was 193 at v2026.4.12b)
+- [x] PyPI Trusted Publishing via OIDC — no token in CI
+- [x] Pre-push tool-catalog drift gate + bench-data leakage scan (`.githooks/pre-push`)
+- [x] CodeQL security gates + periodic Bandit + pip-audit + secrets-scan reports under [`docs/audits/`](./audits/)
+
+---
+
+## ✅ Shipped — Foundation (2026-Q1)
+
+### v2026.4.12b — Conversation Grouping & Refresh Lifecycle (April 12)
+
+- [x] `conversation_id` on `memory_write` / `memory_search` / `memory_update`
+- [x] Refresh lifecycle — `refresh_on`, `refresh_reason`, `memory_refresh_queue`
+- [x] Reversible migration system with backup/restore
+
+### v2026.4.12 — Multi-Agent Orchestration (April 12)
+
+- [x] Agent registry, handoffs, notifications, task trees
+- [x] `m3-team` CLI for multi-agent teams from YAML
+- [x] MCP proxy v2 — catalog-driven dispatch
+- [x] License → Apache 2.0
+
+### v2026.4.8 — PyPI Launch (April 10)
+
+- [x] `pip install m3-memory` works out-of-the-box
+- [x] `mcp-memory` CLI entry point auto-starts the server
+- [x] `publish.yml` GitHub Actions — automated PyPI publish via OIDC
+
+### v2026.04.06 — Initial Production Release (April 6)
 
 - [x] Core memory system — write, search, update, delete, link
 - [x] Hybrid retrieval — FTS5 + vector similarity + MMR re-ranking
 - [x] Contradiction detection and bitemporal versioning
 - [x] Knowledge graph with 8 relationship types
-- [x] GDPR compliance — `gdpr_forget` (Article 17), `gdpr_export` (Article 20)
 - [x] Cross-device sync — SQLite ↔ PostgreSQL ↔ ChromaDB
 - [x] LLM auto-classification, conversation summarization, memory consolidation
-- [x] 66 MCP tools, 193 end-to-end tests
-
-### v2026.4.8 — PyPI Launch (April 10, 2026)
-
-- [x] `pip install m3-memory` works out-of-the-box
-- [x] `mcp-memory` CLI entry point auto-starts the server
-- [x] `publish.yml` GitHub Actions — automated PyPI publish via OIDC
-- [x] ROADMAP.md with community voting
-
-### v2026.4.12 — Multi-Agent Orchestration (April 12, 2026)
-
-- [x] Agent registry, handoffs, notifications, and task trees
-- [x] `m3-team` CLI for multi-agent teams from YAML
-- [x] MCP proxy v2 — catalog-driven dispatch, 57 tools (66 total)
-- [x] License → Apache 2.0
-
-### v2026.4.12b — Conversation Grouping & Refresh Lifecycle (April 12, 2026)
-
-- [x] `conversation_id` on memory_write / memory_search / memory_update
-- [x] Refresh lifecycle — `refresh_on`, `refresh_reason`, `memory_refresh_queue`
-- [x] Reversible migration system with backup/restore
-- [x] 193 end-to-end tests
 
 ---
 
-## 📦 Next — Distribution & Deployment
+## 🚧 In progress
+
+- [ ] **LoCoMo audit** — harness scaffolded under `benchmarks/locomo/`; full run pending
+- [ ] **Linux CUDA smoke-test automation** — wheels currently rely on manual verification on real NVIDIA hardware before each release
+- [ ] **Per-project PyPI publish tokens** — replace the account-wide token used during the m3-core-rs 3.6.6 first-upload window
+- [ ] **Description / metadata consistency** — keep `pyproject.toml`, GitHub repo description, README header tagline, and `docs/COMPARISON.md` claims in sync across releases
+
+---
+
+## 📦 Planned — Distribution & Deployment
 
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
-- [ ] **`setup.sh` / `install_os.py` polish** — OS-aware one-liner that validates deps and prints a ready-to-paste `mcp.json` snippet
 - [ ] **TestPyPI dry-run CI gate** — catch packaging regressions before every release
+- [ ] **Homebrew formula** — `brew install m3-memory` (macOS / Linuxbrew)
 
 ---
 
@@ -53,7 +137,7 @@
 
 - [ ] **Web dashboard** — lightweight local UI (FastAPI + HTMX) to browse memories, inspect knowledge graph, run GDPR operations
 - [ ] **Real-time contradiction log** — surfaced in dashboard and via `memory_verify` tool
-- [ ] **Search explain mode** — show FTS5 score + vector score + MMR penalty breakdown for every result
+- [ ] **Search explain mode** — show FTS5 score + vector score + MMR penalty breakdown for every result (today: `memory_suggest` returns these; UX still spartan)
 - [ ] **Prometheus metrics endpoint** — latency, write/read counts, cache hit rates
 - [ ] **Grafana dashboard template** — pre-built panels for memory health
 
@@ -62,20 +146,19 @@
 ## 👥 Planned — Multi-Agent & Collaboration
 
 - [ ] **Shared memory namespaces** — optional scoped memory pools across multiple local agents
-- [ ] **Agent identity model** — per-agent memory isolation with explicit cross-agent read grants
+- [ ] **Agent identity model** — per-agent memory isolation with explicit cross-agent read grants (today: per-`agent_id` scoping at the SQL layer; the cross-agent grant primitive is still implicit)
 - [ ] **Remote P2P sync** — encrypted memory replication over WireGuard / Tailscale without a central server
 - [ ] **Memory access audit log** — who read/wrote what and when (GDPR Article 30 record)
 
 ---
 
-## 🏆 Planned — Benchmark Suite & Stability
+## 🏆 Planned — Benchmark & Stability
 
-- [ ] **Public benchmark suite** — MRR, Hit@5, latency vs. Mem0 / LangMem / raw ChromaDB on standard datasets
-- [ ] **Formal accuracy regression CI** — block merges that degrade retrieval quality
+- [ ] **Public benchmark suite** — MRR, Hit@5, latency vs. Mem0 / LangMem / raw ChromaDB on standard datasets (LongMemEval-S already published — see Shipped above)
+- [ ] **Formal accuracy regression CI** — block merges that degrade retrieval quality (today: behavior baseline at `tests/capture_retrieval_baseline.py` is the local gate)
 - [ ] **Stable public API** — `m3_memory.sdk` Python API with semver guarantees
 - [ ] **Full documentation site** — MkDocs or Docusaurus with API reference, tutorials, architecture deep-dives
 - [ ] **Plugin system** — register custom memory types, custom embedders, custom sync backends
-- [ ] **Project Oxidation** — optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)) for hot-path ops. Six operations wired and parity-verified; remaining work (benchmarking, NER model export, route cutover) tracked in [OXIDATION_TODO.md](./OXIDATION_TODO.md).
 
 ---
 
