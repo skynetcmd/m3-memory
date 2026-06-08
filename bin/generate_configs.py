@@ -1,123 +1,136 @@
 import json
 import os
+import shutil
 import sys
 
-# Add bin to path for m3_sdk
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-try:
-    from m3_sdk import get_m3_root
-except ImportError:
-    def get_m3_root() -> str:
-        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
 def generate_configs():
-    """Updates gemini-settings.json and claude-settings.json with current project paths."""
-    m3_memory_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # For tool wiring, we always use the actual repo root where bin/ lives.
-    # But for state, the code now defaults to get_m3_root().
-    config_dir = os.path.join(m3_memory_root, "config")
+    """Generates gemini-settings.json and claude-settings.json from templates."""
+    # m3_repo_root  = the repo directory (where bin/ lives)
+    # m3_state_root = parent of repo = M3_MEMORY_ROOT for bridge env vars
+    m3_repo_root  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    m3_state_root = os.path.dirname(m3_repo_root)
+    config_dir    = os.path.join(m3_repo_root, "config")
 
-    # Detect the working python command for this platform.
-    # Prefer "python3" only if "python" is unavailable (rare on modern installs).
-    python_cmd = "python"
-    if os.name != "nt":
-        import shutil
-        if not shutil.which("python") and shutil.which("python3"):
-            python_cmd = "python3"
-    files_to_update = ["gemini-settings.json", "claude-settings.json"]
+    # Prefer python3 on non-Windows; fall back to python only if python3 absent.
+    if os.name == "nt":
+        python_cmd = "python"
+    else:
+        python_cmd = "python3" if shutil.which("python3") else "python"
 
-    for filename in files_to_update:
-        file_path = os.path.join(config_dir, filename)
-        if not os.path.exists(file_path):
-            print(f"Skipping {filename}: File not found.")
-            continue
+    # M3_EMBED_GGUF: use env override, else auto-detect the standard LMStudio path.
+    embed_gguf = os.environ.get("M3_EMBED_GGUF", "")
+    if not embed_gguf:
+        candidate = os.path.expanduser(
+            "~/.lmstudio/models/deepsweet/bge-m3-GGUF-Q4_K_M/bge-m3-GGUF-Q4_K_M.gguf"
+        )
+        if os.path.exists(candidate):
+            embed_gguf = candidate
 
-        with open(file_path, 'r') as f:
+    def repo(path):
+        return os.path.join(m3_repo_root, path).replace("\\", "/")
+
+    def mcp_server(script, extra_env=None):
+        env = {"M3_MEMORY_ROOT": m3_state_root.replace("\\", "/")}
+        if extra_env:
+            env.update(extra_env)
+        return {"command": python_cmd, "args": [repo(f"bin/{script}")], "env": env}
+
+    hook_cmd = f"/bin/sh {repo('bin/hooks/chatlog/claude_code_precompact.sh')}"
+    hook_entry = [{"hooks": [{"type": "command", "command": hook_cmd}]}]
+
+    memory_env = {}
+    if embed_gguf:
+        memory_env["M3_EMBED_GGUF"] = embed_gguf.replace("\\", "/")
+
+    mcp_servers = {
+        "custom_pc_tool": mcp_server("custom_tool_bridge.py"),
+        "grok_intel":     mcp_server("grok_bridge.py"),
+        "web_research":   mcp_server("web_research_bridge.py"),
+        "memory":         mcp_server("memory_bridge.py", memory_env),
+        "debug_agent":    mcp_server("debug_agent_bridge.py"),
+    }
+
+    # ── claude-settings.json ──────────────────────────────────────────────────
+    claude = {
+        "model": "opus",
+        "hooks": {
+            "PreCompact": hook_entry,
+            "Stop":       hook_entry,
+        },
+        "statusLine": {
+            "type":    "command",
+            "command": f"{python_cmd} {repo('bin/statusline-command.sh')}",
+        },
+        "enabledPlugins": {"m3@skynetcmd": True},
+        "extraKnownMarketplaces": {
+            "skynetcmd": {"source": {"source": "github", "repo": "skynetcmd/m3-memory"}}
+        },
+        "skipDangerousModePermissionPrompt": True,
+        "mcpServers": mcp_servers,
+    }
+    _write_json(os.path.join(config_dir, "claude-settings.json"), claude)
+    print(f"Generated claude-settings.json ({python_cmd}, M3_MEMORY_ROOT={m3_state_root})")
+
+    # ── gemini-settings.json ──────────────────────────────────────────────────
+    gemini_path = os.path.join(config_dir, "gemini-settings.json")
+    if os.path.exists(gemini_path):
+        with open(gemini_path) as f:
             try:
-                data = json.load(f)
+                gemini = json.load(f)
             except json.JSONDecodeError:
-                print(f"Error decoding {filename}. Skipping.")
-                continue
+                gemini = {}
+    else:
+        gemini = {}
 
-        # Update MCP server paths and python command
-        if "mcpServers" in data:
-            for server_name, server_config in data["mcpServers"].items():
-                if "command" in server_config and server_config["command"] in ("python", "python3"):
-                    server_config["command"] = python_cmd
-
-                # Inject M3_MEMORY_ROOT into the env block
-                if "env" not in server_config:
-                    server_config["env"] = {}
-                server_config["env"]["M3_MEMORY_ROOT"] = get_m3_root().replace("\\", "/")
-
-                if "args" in server_config and len(server_config["args"]) > 0:
-                    script_path = server_config["args"][0]
-                    script_name = os.path.basename(script_path)
-                    new_path = os.path.join(m3_memory_root, "bin", script_name).replace("\\", "/")
-                    server_config["args"][0] = new_path
-                    print(f"Updated {server_name} in {filename} to {python_cmd} {new_path}")
-
-        # Update statusLine command in claude-settings
-        if filename == "claude-settings.json" and "statusLine" in data:
-            cmd = data["statusLine"].get("command", "")
-            # Pattern: python3 /path/to/bin/script.sh or script.py
-            parts = cmd.split()
-            if parts:
-                script_name = os.path.basename(parts[-1])
-                new_cmd = f"{python_cmd} {os.path.join(m3_memory_root, 'bin', script_name).replace(chr(92), '/')}"
-                data["statusLine"]["command"] = new_cmd
-                print(f"Updated statusLine in {filename}")
-
-        temp_file = file_path + ".tmp"
-        try:
-            with open(temp_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            os.replace(temp_file, file_path)
-            print(f"Successfully saved {filename} (atomically)")
-        except Exception as e:
-            print(f"Failed to save {filename}: {e}")
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-
-    # Generate .mcp.json for Claude Code project-level MCP registration
-    mcp_json_path = os.path.join(m3_memory_root, ".mcp.json")
-    bridge_scripts = [
-        ("custom_pc_tool", "custom_tool_bridge.py"),
-        ("memory", "memory_bridge.py"),
-        ("grok_intel", "grok_bridge.py"),
-        ("web_research", "web_research_bridge.py"),
-        ("debug_agent", "debug_agent_bridge.py"),
-    ]
-    mcp_data = {"mcpServers": {}}
-    for name, script in bridge_scripts:
-        mcp_data["mcpServers"][name] = {
-            "command": python_cmd,
-            "args": [os.path.join(m3_memory_root, "bin", script).replace("\\", "/")]
+    gemini["mcpServers"] = mcp_servers
+    if "general" not in gemini:
+        gemini["general"] = {
+            "sessionRetention": {"enabled": True, "maxAge": "30d", "warningAcknowledged": True}
         }
-    temp_mcp = mcp_json_path + ".tmp"
-    try:
-        with open(temp_mcp, 'w') as f:
-            json.dump(mcp_data, f, indent=2)
-        os.replace(temp_mcp, mcp_json_path)
-        print(f"Generated .mcp.json with {python_cmd}")
-    except Exception as e:
-        print(f"Failed to generate .mcp.json: {e}")
-        if os.path.exists(temp_mcp):
-            os.remove(temp_mcp)
+    if "security" not in gemini:
+        gemini["security"] = {"auth": {"selectedType": "gemini-api-key"}}
 
-    # Update .aider.conf.yml (Code Quality Bug #8)
-    aider_path = os.path.join(m3_memory_root, ".aider.conf.yml")
+    _write_json(gemini_path, gemini)
+    print(f"Generated gemini-settings.json ({python_cmd})")
+
+    # ── .mcp.json (Claude Code project-level MCP registration) ───────────────
+    mcp_data = {"mcpServers": {
+        name: {"command": python_cmd, "args": [repo(f"bin/{script}")]}
+        for name, script in [
+            ("custom_pc_tool", "custom_tool_bridge.py"),
+            ("memory",         "memory_bridge.py"),
+            ("grok_intel",     "grok_bridge.py"),
+            ("web_research",   "web_research_bridge.py"),
+            ("debug_agent",    "debug_agent_bridge.py"),
+        ]
+    }}
+    _write_json(os.path.join(m3_repo_root, ".mcp.json"), mcp_data)
+    print(f"Generated .mcp.json ({python_cmd})")
+
+    # ── .aider.conf.yml ───────────────────────────────────────────────────────
+    aider_path = os.path.join(m3_repo_root, ".aider.conf.yml")
     if os.path.exists(aider_path):
-        with open(aider_path, 'r') as f:
+        with open(aider_path) as f:
             content = f.read()
-
-        # Replace placeholder with absolute path
-        new_content = content.replace("[M3_MEMORY_ROOT]", m3_memory_root.replace("\\", "/"))
-
+        new_content = content.replace("[M3_MEMORY_ROOT]", m3_repo_root.replace("\\", "/"))
         if new_content != content:
-            with open(aider_path, 'w') as f:
+            with open(aider_path, "w") as f:
                 f.write(new_content)
             print("Updated [M3_MEMORY_ROOT] in .aider.conf.yml")
+
+
+def _write_json(path, data):
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"Failed to write {os.path.basename(path)}: {e}")
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
 
 if __name__ == "__main__":
     generate_configs()
