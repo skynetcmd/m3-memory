@@ -143,8 +143,23 @@ def install_node_manager():
             run_cmd(["bash", "-c", "curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell"])
             print("  -> fnm installed. Please follow the terminal instructions to add it to your shell.")
 
-def setup_oxidation(pip_exe):
-    """Prompts the user to install Project Oxidation (Rust compute core)."""
+def setup_oxidation():
+    """Prompts the user to install Project Oxidation (Rust compute core).
+
+    Delegates to m3_memory.rust_core_install, which:
+      - Auto-detects the right backend (Metal on macOS, CUDA/Vulkan/CPU on
+        Linux+Windows) and picks the matching prebuilt PyPI wheel
+        (m3-core-rs-<os>-<backend>).
+      - Falls back to a source build with the correct Cargo features
+        (--features embedded-metal / embedded-cuda / embedded-vulkan) if no
+        prebuilt wheel matches this platform/Python.
+      - Installs into the *current* Python (sys.executable — the pipx venv
+        where mcp-memory itself runs), NOT a sibling repo/.venv that
+        mcp-memory can't see.
+
+    The non-interactive code path (env M3_INSTALL_OXIDATION=1/0) lets
+    install.sh / install.ps1 drive this unattended.
+    """
     print("\n" + "="*50)
     print("🦀 PROJECT OXIDATION: HIGH-PERFORMANCE RUST CORE")
     print("="*50)
@@ -153,28 +168,58 @@ def setup_oxidation(pip_exe):
     print("  - Massive speedups: 1.3x to 520x (AVERAGE 85x BENEFIT) on hot paths.")
     print("  - Instantaneous vector math & cosine similarity.")
     print("  - Ultra-fast hybrid search ranking and chatlog redaction.")
-    print("\n[NOTE] This requires a one-time setup of Rust/C++ build tools.")
-    print("The performance gains will apply to every subsequent M3 interaction.")
+    print("\n[NOTE] Prebuilt wheels are tried first (no toolchain needed).")
+    print("Source fallback requires Rust + a C/C++ compiler.")
 
-    choice = input("\nWould you like to install Project Oxidation now? [y/N]: ").strip().lower()
+    # Non-interactive override for install.sh / install.ps1.
+    env_choice = os.environ.get("M3_INSTALL_OXIDATION", "").strip().lower()
+    if env_choice in ("0", "false", "no", "n"):
+        choice = "n"
+    elif env_choice in ("1", "true", "yes", "y"):
+        choice = "y"
+    else:
+        try:
+            choice = input(
+                "\nWould you like to install Project Oxidation now? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            # Piped stdin exhausted (e.g. `printf '\n' | install-m3`).
+            # Default to skip — caller can run `m3 embedder install-gpu` later.
+            choice = "n"
+
     if choice in ("y", "yes"):
-        system = _os_name()
-        if system == "Windows":
+        if _os_name() == "Windows":
             print("\n[*] Checking for Windows C++ Build Tools...")
             script = os.path.join(BASE_DIR, "install_oxidation_buildtools.ps1")
             if os.path.exists(script):
-                print("  -> Please run this script in an ADMINISTRATOR PowerShell to install build tools:")
-                print(f"     powershell -ExecutionPolicy Bypass -File {script}")
-                input("\nPress Enter AFTER you have run the build tools script (or to attempt install anyway)...")
+                print("  -> If the source-fallback build fails, run this script in an")
+                print("     ADMINISTRATOR PowerShell first:")
+                print(f"       powershell -ExecutionPolicy Bypass -File {script}")
 
-        print("\n[*] Installing m3-core-rs from git...")
-        run_cmd([pip_exe, "install",
-                 "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"])
-        print("✅ Project Oxidation installed successfully!")
+        print("\n[*] Installing m3-core-rs (prebuilt wheel preferred)...")
+        try:
+            # Local import: m3_memory is importable here because install_os.py
+            # is launched under the same interpreter that runs mcp-memory (the
+            # pipx venv). This avoids the historical bug where setup_oxidation
+            # installed into repo/.venv/bin/pip, leaving the pipx-installed
+            # mcp-memory unable to import m3_core_rs.
+            from m3_memory.rust_core_install import install_rust_core
+        except ImportError as e:
+            print(f"  ⚠️  m3_memory.rust_core_install not importable ({e}).")
+            print("     Skipping Oxidation. Install later via: m3 embedder install-gpu")
+            return
+
+        rc = install_rust_core()
+        if rc == 0:
+            print("✅ Project Oxidation installed successfully!")
+        else:
+            print(f"⚠️  Project Oxidation install returned exit {rc}.")
+            print("    The CPU embedder still serves embeddings (Tier-2 HTTP).")
+            print("    Retry later: m3 embedder install-gpu")
     else:
         print(
-            "Skipping Project Oxidation. You can install it later via:\n"
-            "  pip install 'm3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py'"
+            "Skipping Project Oxidation. Install it later via:\n"
+            "  m3 embedder install-gpu"
         )
 
 def main():
@@ -218,7 +263,9 @@ def main():
         run_cmd([pip_exe, "install", "fastmcp", "httpx", "numpy", "keyring", "cryptography", "psycopg2-binary"])
 
     # 4. Project Oxidation (Rust Core)
-    setup_oxidation(pip_exe)
+    # No pip_exe arg — setup_oxidation installs into the current interpreter
+    # (the pipx venv where mcp-memory runs), not into repo/.venv.
+    setup_oxidation()
 
     # 5. Initialize local SQLite Database Schema
     print("\n[5/6] Initializing local Agent Memory schema...")
