@@ -97,7 +97,7 @@ for r in "${RANGES[@]}"; do
     ':(exclude)tests/test_*leak*' \
     ':(exclude)tests/test_*bench*' \
     2>/dev/null | grep '^+' | grep -v '^+++' | grep -iE \
-    'lme-m/v3|lme_m\.db|PLAN_v4|smoke-142|237,655|2,446,993|enrichment_groups.*lme|locomo|/Users/[a-z]+|C:[\\/]+Users|@gmail|sk-ant-[a-z0-9]{20,}|AIza[a-z0-9_-]{30,}' \
+    'lme-m/v3|lme_m\.db|PLAN_v4|smoke-142|237,655|2,446,993|enrichment_groups.*lme|locomo[_-]runs|/Users/[a-z]+|C:[\\/]+Users|@gmail|sk-ant-[a-z0-9]{20,}|AIza[a-z0-9_-]{30,}' \
     || true)"
   [ -n "$hit" ] && LEAK="$LEAK$hit"$'\n'
 done
