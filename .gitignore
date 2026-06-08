@@ -101,7 +101,6 @@ keyring.db
 .aider.model.metadata.json
 .aider.tags.cache.v4/
 !.aider/protocols.md
-!.aider.conf.yml
 
 # OpenClaw runtime config (contains tokens & session data)
 examples/sandbox-openclaw/.openclaw/
@@ -131,8 +130,11 @@ benchmarks/longmemeval/LME-*.json
 benchmarks/longmemeval/refs/
 docs/tools/probe_ingest_cost.md
 
-# Generated MCP config (machine-specific paths; run bin/generate_configs.py to create)
+# Generated configs (machine-specific paths; run bin/generate_configs.py to create)
 .mcp.json
+.aider.conf.yml
+config/claude-settings.json
+config/gemini-settings.json
 
 # Local migration state (machine-specific)
 memory/.migrate_config.json
