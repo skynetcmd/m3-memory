@@ -7,7 +7,7 @@
 
 # M3 Memory
 
-Local-first Agentic Memory Layer Framework for MCP Agents • 105 tools • Hybrid search (FTS5 + vector + MMR) • Directory ingestion & file-memory • GDPR • FIPS 140-3 ready • 100% local
+Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 ready · 100% local (fully offline) or cloud capable
 
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
