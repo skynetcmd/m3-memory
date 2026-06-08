@@ -427,3 +427,266 @@ def test_gather_plan_interactive_decouple_and_fips(monkeypatch):
     assert any("FIPS" in c for c in calls)
 
 
+# ────────────────────────────────────────────────────────────────────────
+# _step_install_m3 — must pass --force (macOS install hardening)
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_step_install_m3_passes_force(monkeypatch):
+    """Wizard must pass --force to install-m3 so re-running `m3 setup` (and
+    install.sh) upgrades in place instead of aborting with `repo already
+    exists`. install_m3() preserves user data on --force, so this is safe
+    and a no-op on fresh installs.
+    """
+    captured: list = []
+
+    class _FakeProc:
+        returncode = 0
+
+    def fake_run(cmd, *args, **kwargs):
+        captured.append(cmd)
+        return _FakeProc()
+
+    monkeypatch.setattr(setup_wizard, "_run", fake_run)
+
+    plan = setup_wizard.SetupPlan()
+    plan.capture_mode = "both"
+    assert setup_wizard._step_install_m3(plan) is True
+
+    assert len(captured) == 1
+    cmd = captured[0]
+    assert "install-m3" in cmd
+    assert "--force" in cmd, (
+        f"_step_install_m3 must pass --force; got: {cmd}"
+    )
+    assert "--non-interactive" in cmd
+    assert "--capture-mode" in cmd
+
+
+# ────────────────────────────────────────────────────────────────────────
+# _persist_embed_gguf — Fix #7: M3_EMBED_GGUF persistence
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_persist_embed_gguf_writes_zshrc(monkeypatch, tmp_path):
+    """Non-interactive run writes the export to ~/.zshrc (zsh shell)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".zshrc").write_text("# existing rc\n", encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr(sys, "platform", "darwin")  # not win32
+
+    setup_wizard._persist_embed_gguf("/path/to/bge-m3.gguf", non_interactive=True)
+
+    content = (home / ".zshrc").read_text(encoding="utf-8")
+    assert "M3_EMBED_GGUF" in content
+    assert '"/path/to/bge-m3.gguf"' in content
+    # Original content is preserved
+    assert "# existing rc" in content
+
+
+def test_persist_embed_gguf_idempotent(monkeypatch, tmp_path):
+    """Re-running doesn't append a second export line."""
+    home = tmp_path / "home"
+    home.mkdir()
+    rc = home / ".zshrc"
+    rc.write_text(
+        '# already set\nexport M3_EMBED_GGUF="/old/path.gguf"\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    setup_wizard._persist_embed_gguf("/new/path.gguf", non_interactive=True)
+
+    content = rc.read_text(encoding="utf-8")
+    assert content.count("M3_EMBED_GGUF") == 1, (
+        "Expected exactly one M3_EMBED_GGUF entry; got duplicate writes"
+    )
+    # Pre-existing path is left untouched (user already configured it)
+    assert "/old/path.gguf" in content
+
+
+def test_persist_embed_gguf_patches_claude_settings(monkeypatch, tmp_path):
+    """Adds env.M3_EMBED_GGUF to the 'memory' MCP entry in claude settings."""
+    import json
+
+    home = tmp_path / "home"
+    home.mkdir()
+    claude_dir = home / ".claude"
+    claude_dir.mkdir()
+    settings = claude_dir / "settings.json"
+    settings.write_text(json.dumps({
+        "mcpServers": {"memory": {"command": "mcp-memory"}},
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    setup_wizard._persist_embed_gguf("/path/to/bge-m3.gguf", non_interactive=True)
+
+    cfg = json.loads(settings.read_text(encoding="utf-8"))
+    mem = cfg["mcpServers"]["memory"]
+    assert mem.get("env", {}).get("M3_EMBED_GGUF") == "/path/to/bge-m3.gguf", (
+        f"Expected env wired on memory MCP entry; got: {mem}"
+    )
+
+
+def test_persist_embed_gguf_skips_settings_without_memory_entry(monkeypatch, tmp_path):
+    """If settings.json has no 'memory' entry yet, we don't pre-create it —
+    the per-agent wiring step later in setup is responsible for that."""
+    import json
+
+    home = tmp_path / "home"
+    home.mkdir()
+    claude_dir = home / ".claude"
+    claude_dir.mkdir()
+    settings = claude_dir / "settings.json"
+    settings.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    setup_wizard._persist_embed_gguf("/path/to/bge-m3.gguf", non_interactive=True)
+
+    cfg = json.loads(settings.read_text(encoding="utf-8"))
+    # No memory entry was conjured up out of nothing
+    assert "memory" not in cfg.get("mcpServers", {})
+
+
+def test_persist_embed_gguf_uses_setx_on_windows(monkeypatch, tmp_path):
+    """Windows uses `setx` instead of writing a shell rc — setx is the
+    canonical way to persist user env vars across reboot."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    captured: list = []
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "SUCCESS: Specified value was saved."
+        stderr = ""
+
+    def fake_run(cmd, *args, **kwargs):
+        captured.append(cmd)
+        return _FakeResult()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    setup_wizard._persist_embed_gguf("C:\\path\\bge-m3.gguf", non_interactive=True)
+
+    # Exactly one setx call with the right env var and path
+    assert len(captured) == 1
+    cmd = captured[0]
+    assert cmd[0] == "setx"
+    assert cmd[1] == "M3_EMBED_GGUF"
+    assert cmd[2] == "C:\\path\\bge-m3.gguf"
+
+    # No Unix rc files were created (we did NOT fall through to the Unix path)
+    assert not (home / ".zshrc").exists()
+    assert not (home / ".bashrc").exists()
+
+
+def test_persist_embed_gguf_patches_mcp_settings_on_windows(monkeypatch, tmp_path):
+    """The MCP settings.json env wiring must run on Windows too — Claude
+    Code on Windows reads %USERPROFILE%\\.claude\\settings.json, and the
+    spawned MCP server doesn't inherit the user env from the GUI process."""
+    import json
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude").mkdir()
+    settings = home / ".claude" / "settings.json"
+    settings.write_text(json.dumps({
+        "mcpServers": {"memory": {"command": "mcp-memory"}},
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(sys, "platform", "win32")
+    # Stub setx so the shell-env step doesn't try to execute a real binary.
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **kw: mock.Mock(returncode=0, stdout="", stderr=""))
+
+    setup_wizard._persist_embed_gguf("C:\\path\\bge-m3.gguf", non_interactive=True)
+
+    cfg = json.loads(settings.read_text(encoding="utf-8"))
+    mem = cfg["mcpServers"]["memory"]
+    assert mem.get("env", {}).get("M3_EMBED_GGUF") == "C:\\path\\bge-m3.gguf"
+
+
+def test_persist_embed_gguf_setx_failure_is_non_fatal(monkeypatch, tmp_path):
+    """A setx crash on Windows warns but does not abort — the GGUF is still
+    set in the current process, and that's enough for the rest of setup."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    def boom(*a, **kw):
+        raise OSError("setx not found")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+
+    # Should not raise
+    setup_wizard._persist_embed_gguf("C:\\path\\bge-m3.gguf", non_interactive=True)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# _pick_unix_shell_rc — Linux/macOS shell rc selection
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_pick_unix_shell_rc_prefers_zsh_when_shell_env_zsh(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    assert setup_wizard._pick_unix_shell_rc() == home / ".zshrc"
+
+
+def test_pick_unix_shell_rc_prefers_bashrc_when_shell_env_bash(monkeypatch, tmp_path):
+    """Linux default (bash) lands on ~/.bashrc — distinct from macOS default."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    assert setup_wizard._pick_unix_shell_rc() == home / ".bashrc"
+
+
+def test_pick_unix_shell_rc_falls_back_to_existing_file(monkeypatch, tmp_path):
+    """Unknown SHELL — pick whichever rc actually exists."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text("# ksh", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("SHELL", "/usr/local/bin/ksh")
+    assert setup_wizard._pick_unix_shell_rc() == home / ".profile"
+
+
+# ────────────────────────────────────────────────────────────────────────
+# _discover_bge_m3_gguf — Linux LM Studio default path
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_discover_finds_gguf_in_linux_lmstudio_cache(monkeypatch, tmp_path):
+    """LM Studio on Linux stores models under ~/.cache/lm-studio/models —
+    the discovery cascade must include that path."""
+    home = tmp_path / "home"
+    linux_lm = home / ".cache" / "lm-studio" / "models"
+    linux_lm.mkdir(parents=True)
+    target = linux_lm / "bge-m3-Q4_K_M.gguf"
+    target.write_bytes(b"fake")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    found = setup_wizard._discover_bge_m3_gguf()
+    assert found is not None
+    assert Path(found) == target
+
+
