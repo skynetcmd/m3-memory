@@ -3,6 +3,45 @@
 M3 Cognitive & Observability Portal.
 FastAPI + HTMX unified local control center for Graph Exploration & KB Browsing.
 Listens on port 8088 by default.
+
+Requirements
+------------
+Python 3.11+ and the packages pinned in repo-root ``requirements.txt``
+(at minimum: ``fastapi>=0.136.1``, ``uvicorn>=0.46.0``, plus the m3 deps
+imported below: ``m3_sdk``, ``memory.db``, ``memory.search``,
+``memory_maintenance``).
+
+Install (run from the repo root)
+--------------------------------
+The recommended path on every platform is an isolated virtualenv at
+``.venv/`` so the system Python stays clean.
+
+macOS (Homebrew Python is PEP 668 "externally managed" — do NOT
+``pip install`` into it directly):
+
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/python bin/dashboard_server.py
+
+Linux (same pattern; on Debian/Ubuntu you may need ``apt install
+python3-venv`` first):
+
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/python bin/dashboard_server.py
+
+Windows (PowerShell):
+
+    py -3 -m venv .venv
+    .venv\\Scripts\\pip install -r requirements.txt
+    .venv\\Scripts\\python bin\\dashboard_server.py
+
+Common failure
+--------------
+``ModuleNotFoundError: No module named 'uvicorn'`` (or ``fastapi``)
+means the interpreter you launched with does not have the deps
+installed — re-run the install step above using the same interpreter
+you intend to launch the server with (typically ``.venv``).
 """
 
 from __future__ import annotations
