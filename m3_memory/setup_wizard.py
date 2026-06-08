@@ -438,8 +438,10 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
                 os.environ["M3_EMBED_GGUF"] = discovered
                 plan.embed_gguf = discovered
                 _ok(f"  M3_EMBED_GGUF set for this session: {discovered}")
-                _say("  (to persist: add to your shell rc OR "
-                     "let the wizard's m3-embed-server install pin it)")
+                # Persist so every new shell and every MCP server spawn picks
+                # it up automatically. Without this, tier-1 falls back to
+                # tier-2 the next time anything reads the env.
+                _persist_embed_gguf(discovered, non_interactive=args.non_interactive)
     else:
         _say("  no BGE-M3 GGUF auto-discovered; tier-2 (:8082) will serve all embeds")
         _say("  (set M3_EMBED_GGUF later to enable tier-1; see EMBEDDER_ARCHITECTURE.md)")
@@ -484,15 +486,176 @@ def _kill_process_windows(pid: int) -> bool:
         return False
 
 
+def _persist_embed_gguf(gguf_path: str, *, non_interactive: bool) -> None:
+    """Persist M3_EMBED_GGUF so new shells + spawned MCP servers see it.
+
+    Two surfaces, both idempotent and cross-platform:
+
+      1. Shell env — so `mcp-memory doctor` and other CLI invocations see
+         the var without the wizard's process being in scope:
+           - Unix (macOS / Linux): append `export M3_EMBED_GGUF=...` to
+             ~/.zshrc on zsh, ~/.bashrc on bash, ~/.profile fallback.
+           - Windows: `setx M3_EMBED_GGUF <path>` writes to the user env
+             (HKCU\\Environment), so new cmd / PowerShell sessions inherit
+             it. setx does NOT update the current process or other open
+             shells — that's fine, the wizard's own os.environ is already set.
+
+      2. The 'memory' MCP server entry's `env` block in
+         ~/.claude/settings.json and ~/.gemini/settings.json. MCP servers
+         are spawned by Claude Code / Gemini CLI as subprocesses that DO NOT
+         inherit the user's interactive shell env on macOS (launchd) or
+         Windows (GUI process tree). Without this, the shell rc alone never
+         reaches them. Same code path on all 3 platforms — Path.home()
+         resolves correctly on each.
+
+    Failure on any surface is reported as a warning but does not abort:
+    the GGUF is still set in *this* process, which is enough for the
+    rest of setup. Best-effort across surfaces matches the wizard's
+    overall posture (post-install steps print warnings, don't crash).
+    """
+    _persist_embed_gguf_shell(gguf_path, non_interactive=non_interactive)
+    _persist_embed_gguf_mcp(gguf_path)
+
+
+def _persist_embed_gguf_shell(gguf_path: str, *, non_interactive: bool) -> None:
+    """Persist M3_EMBED_GGUF for new shell sessions (per-platform mechanism)."""
+    if sys.platform == "win32":
+        # Windows: setx writes to HKCU\Environment. Persists across reboot;
+        # new cmd / PowerShell sessions see it. The current process and
+        # other already-open shells are unaffected (by design).
+        if not non_interactive and not _ask_yes_no(
+            "  Persist M3_EMBED_GGUF to your Windows user environment (setx)?",
+            default=True,
+        ):
+            _warn(f"    skipped — set it later: setx M3_EMBED_GGUF \"{gguf_path}\"")
+            return
+        try:
+            result = subprocess.run(
+                ["setx", "M3_EMBED_GGUF", gguf_path],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            _warn(f"    setx failed ({e}); set it later: setx M3_EMBED_GGUF \"{gguf_path}\"")
+            return
+        if result.returncode == 0:
+            _ok(f"    persisted M3_EMBED_GGUF via setx (new shells will see it)")
+        else:
+            stderr = (result.stderr or result.stdout or "").strip()
+            _warn(f"    setx exited {result.returncode}: {stderr}")
+        return
+
+    # Unix: append `export M3_EMBED_GGUF=...` to the appropriate shell rc.
+    rc_path = _pick_unix_shell_rc()
+
+    if not non_interactive and not _ask_yes_no(
+        f"  Persist M3_EMBED_GGUF to {rc_path}?", default=True
+    ):
+        _warn(f"    skipped — set it later: echo 'export M3_EMBED_GGUF={gguf_path}' >> {rc_path}")
+        return
+
+    try:
+        existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
+    except OSError as e:
+        _warn(f"    could not read {rc_path} ({e}); skipping shell rc persistence")
+        return
+
+    if "M3_EMBED_GGUF" in existing:
+        _ok(f"    M3_EMBED_GGUF already present in {rc_path}")
+        return
+
+    block = (
+        "\n# Added by m3 setup — tier-1 in-process BGE-M3 embedder\n"
+        f'export M3_EMBED_GGUF="{gguf_path}"\n'
+    )
+    try:
+        with rc_path.open("a", encoding="utf-8") as f:
+            f.write(block)
+        _ok(f"    persisted M3_EMBED_GGUF -> {rc_path}")
+    except OSError as e:
+        _warn(f"    failed to write {rc_path} ({e})")
+
+
+def _pick_unix_shell_rc() -> Path:
+    """Pick the shell rc file most likely to be read on this Unix system.
+
+    Order:
+      1. ~/.zshrc if SHELL points at zsh (macOS default since Catalina)
+      2. ~/.bashrc if SHELL points at bash (most Linux distros)
+      3. First existing among (~/.zshrc, ~/.bashrc, ~/.bash_profile, ~/.profile)
+      4. Default to ~/.zshrc (covers fresh macOS Spotlight users)
+    """
+    home = Path.home()
+    shell = os.environ.get("SHELL", "")
+    if "zsh" in shell:
+        return home / ".zshrc"
+    if "bash" in shell:
+        return home / ".bashrc"
+    for candidate in (home / ".zshrc", home / ".bashrc",
+                      home / ".bash_profile", home / ".profile"):
+        if candidate.exists():
+            return candidate
+    return home / ".zshrc"
+
+
+def _persist_embed_gguf_mcp(gguf_path: str) -> None:
+    """Patch the 'memory' MCP server entry's env block on every platform.
+
+    MCP servers are spawned by Claude Code / Gemini CLI as subprocesses; on
+    macOS (launchd) and Windows (GUI process tree) they do not inherit the
+    user's interactive shell env. Setting the env on the MCP server entry
+    itself is the only reliable way the spawned server sees M3_EMBED_GGUF.
+
+    Same code on all 3 platforms — Path.home() resolves to ~/, %USERPROFILE%,
+    or /home/<user> as appropriate.
+    """
+    for label, settings_path in (
+        ("Claude Code", Path.home() / ".claude" / "settings.json"),
+        ("Gemini CLI",  Path.home() / ".gemini" / "settings.json"),
+    ):
+        if not settings_path.is_file():
+            continue
+        try:
+            cfg = json.loads(settings_path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError) as e:
+            _warn(f"    {settings_path} is unreadable ({e}); skipping {label} env wiring")
+            continue
+        mcp = cfg.get("mcpServers")
+        if not isinstance(mcp, dict) or "memory" not in mcp:
+            # Memory MCP not yet registered — per-agent wiring step (later
+            # in setup) will create it. We don't pre-create here to avoid
+            # racing the wiring step's idempotency check.
+            continue
+        server = mcp["memory"]
+        env = server.setdefault("env", {})
+        if env.get("M3_EMBED_GGUF") == gguf_path:
+            _ok(f"    M3_EMBED_GGUF already set on {label} memory MCP entry")
+            continue
+        env["M3_EMBED_GGUF"] = gguf_path
+        try:
+            settings_path.write_text(
+                json.dumps(cfg, indent=2) + "\n", encoding="utf-8"
+            )
+            _ok(f"    set M3_EMBED_GGUF on {label} memory MCP entry ({settings_path})")
+        except OSError as e:
+            _warn(f"    failed to write {settings_path} ({e})")
+
+
 def _discover_bge_m3_gguf() -> str | None:
     """Mirror of m3-embed-server's discovery cascade (B5). Probes the same
     paths so the wizard's auto-discovery matches what `m3-embed-server`
     will pick up at install time.
+
+    Cross-platform notes:
+      - ~/.lmstudio/models works on macOS and Windows (LM Studio's default
+        on both — Path.home() handles the home-dir resolution per-OS).
+      - ~/Library/Application Support/LM Studio/models is macOS-specific.
+      - ~/.cache/lm-studio/models is LM Studio's Linux default (XDG cache).
     """
     home = Path.home()
     candidate_dirs = [
         home / ".lmstudio" / "models",
         home / "Library" / "Application Support" / "LM Studio" / "models",
+        home / ".cache" / "lm-studio" / "models",   # Linux LM Studio default (XDG)
         home / ".cache" / "m3" / "models",
         home / ".m3-memory" / "_assets" / "embedder",
         home / "models",
@@ -509,10 +672,16 @@ def _discover_bge_m3_gguf() -> str | None:
 
 
 def _step_install_m3(plan: SetupPlan) -> bool:
-    """Run install-m3 with the wizard's chosen capture-mode."""
+    """Run install-m3 with the wizard's chosen capture-mode.
+
+    Always passes --force so re-running `m3 setup` (or `install.sh`) upgrades
+    in place instead of aborting with "repo already exists". install_m3()
+    preserves user data (chatlog DB, .json/.jsonl state) across --force, so
+    this is non-destructive for upgrades and a no-op for fresh installs.
+    """
     _say("Step 1/5: fetching m3-memory system payload (install-m3)")
     cmd = [sys.executable, "-m", "m3_memory.cli", "install-m3",
-           "--non-interactive", "--capture-mode", plan.capture_mode]
+           "--non-interactive", "--force", "--capture-mode", plan.capture_mode]
     if plan.endpoint:
         cmd += ["--endpoint", plan.endpoint]
     if plan.cognitive_loop:
