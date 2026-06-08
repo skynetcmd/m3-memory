@@ -209,13 +209,21 @@ def setup_oxidation():
             print("     Skipping Oxidation. Install later via: m3 embedder install-gpu")
             return
 
-        rc = install_rust_core()
+        # allow_source_fallback=False: the curl-install.sh flow should not
+        # silently launch a multi-minute Rust+cmake build that surprises the
+        # user. If both prebuilt paths miss, install_rust_core prints a
+        # multi-line recommendation (prereqs + manual command). The user can
+        # then opt in deliberately via `m3 embedder install-gpu`.
+        rc = install_rust_core(allow_source_fallback=False)
         if rc == 0:
             print("✅ Project Oxidation installed successfully!")
         else:
-            print(f"⚠️  Project Oxidation install returned exit {rc}.")
-            print("    The CPU embedder still serves embeddings (Tier-2 HTTP).")
-            print("    Retry later: m3 embedder install-gpu")
+            # install_rust_core already printed the recommendation. Keep
+            # this terse — repeating it would just push the helpful info
+            # off the user's screen.
+            print(f"\n⚠️  Project Oxidation prebuilt unavailable (exit {rc}).")
+            print("    Embeddings still work via the tier-2 HTTP fallback.")
+            print("    See above for source-build steps if you want native speed.")
     else:
         print(
             "Skipping Project Oxidation. Install it later via:\n"
