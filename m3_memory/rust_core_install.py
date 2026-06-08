@@ -465,41 +465,50 @@ def install_from_github_release(
     print(f"[rust-core] downloading {wheel_name} "
           f"({wheel_size / (1024*1024):.1f} MiB)...")
 
-    tmp_path: Optional[str] = None
+    # Download into a temp DIR, keeping the original filename: pip parses
+    # the wheel filename per PEP 427 to identify the package, so the file
+    # must be named e.g. m3_core_rs_macos_metal-3.6.6-cp314-cp314-macosx_11_0_arm64.whl
+    # — a random NamedTemporaryFile path like /tmp/tmpXXXX.whl is rejected
+    # by pip with "Invalid wheel filename (wrong number of parts)".
+    tmp_dir = tempfile.mkdtemp(prefix="m3-core-rs-")
+    wheel_path = os.path.join(tmp_dir, wheel_name)
     try:
-        with tempfile.NamedTemporaryFile(suffix=".whl", delete=False) as tmp:
-            tmp_path = tmp.name
-            chunk_size = 1024 * 1024  # 1 MiB
-            downloaded = 0
-            next_progress = 10 * 1024 * 1024  # progress dot every 10 MiB
-            try:
-                with urllib.request.urlopen(wheel_url, timeout=300) as resp:
-                    while True:
-                        chunk = resp.read(chunk_size)
-                        if not chunk:
-                            break
-                        tmp.write(chunk)
-                        downloaded += len(chunk)
-                        if downloaded >= next_progress:
-                            print(f"[rust-core]   ... "
-                                  f"{downloaded / (1024*1024):.0f} MiB",
-                                  file=sys.stderr)
-                            next_progress += 10 * 1024 * 1024
-            except (urllib.error.URLError, OSError) as e:
-                print(f"[rust-core] wheel download failed "
-                      f"({type(e).__name__}: {e})", file=sys.stderr)
-                return 1
+        downloaded = 0
+        try:
+            with urllib.request.urlopen(wheel_url, timeout=300) as resp, \
+                 open(wheel_path, "wb") as out:
+                chunk_size = 1024 * 1024            # 1 MiB
+                next_progress = 10 * 1024 * 1024    # heartbeat every 10 MiB
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded >= next_progress:
+                        print(f"[rust-core]   ... "
+                              f"{downloaded / (1024*1024):.0f} MiB",
+                              file=sys.stderr)
+                        next_progress += 10 * 1024 * 1024
+        except (urllib.error.URLError, OSError) as e:
+            print(f"[rust-core] wheel download failed "
+                  f"({type(e).__name__}: {e})", file=sys.stderr)
+            return 1
+
+        if downloaded == 0:
+            print(f"[rust-core] wheel download yielded 0 bytes", file=sys.stderr)
+            return 1
+
         print(f"[rust-core] downloaded {downloaded / (1024*1024):.1f} MiB; "
               f"installing via pip...")
         return _pip_install_with_pep668_fallback(
-            "install", "--force-reinstall", "--no-deps", tmp_path,
+            "install", "--force-reinstall", "--no-deps", wheel_path,
         )
     finally:
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except OSError:
+            pass
 
 
 def install_from_source(choice: BackendChoice, *,
