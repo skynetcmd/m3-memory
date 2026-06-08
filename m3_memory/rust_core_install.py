@@ -30,10 +30,10 @@ from typing import Optional
 from m3_memory._platform import os_name as _os_name
 
 # Release this m3-memory build expects. Bump in lockstep with the m3-core-rs
-# release tag (v2026.05.30 == 3.5.30). Used as the version pin for both the
+# release tag (v2026.06.07 == 3.6.6). Used as the version pin for both the
 # prebuilt PyPI install and the source-build fallback.
-M3_CORE_RS_VERSION = "3.5.30"
-M3_CORE_RS_GIT_TAG = "v2026.05.30"
+M3_CORE_RS_VERSION = "3.6.6"
+M3_CORE_RS_GIT_TAG = "v2026.06.07"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).
@@ -257,31 +257,249 @@ def install_prebuilt(choice: BackendChoice, *, version: str = M3_CORE_RS_VERSION
     )
 
 
+def _find_executable(candidates: list[str]) -> Optional[str]:
+    """Return the first executable from candidates that exists and runs.
+
+    A binary that exists but isn't executable by the current user is
+    treated as absent (same end-user symptom: the build can't invoke it).
+    """
+    for cmd in candidates:
+        path = shutil.which(cmd)
+        if path:
+            try:
+                subprocess.run([path, "--version"], capture_output=True, timeout=5)
+                return path
+            except (PermissionError, OSError):
+                pass  # binary exists but not executable for this user
+    return None
+
+
+def _find_cargo() -> Optional[str]:
+    """Locate cargo, including rustup-installed toolchains not on PATH.
+
+    The friction case (2026-06-07): user had rustup-installed Rust but
+    ~/.cargo/bin wasn't sourced, so `shutil.which("cargo")` returned None
+    even though cargo was at ~/.rustup/toolchains/<triple>/bin/cargo. The
+    source-build then failed mid-compile with a cryptic error after pip
+    had already pulled all deps. Probing rustup's toolchain dirs catches
+    this and lets us report a clean missing-prereq error up front.
+    """
+    found = _find_executable(["cargo"])
+    if found:
+        return found
+
+    # ~/.cargo/bin is rustup's "current toolchain" symlink dir
+    candidate = os.path.expanduser("~/.cargo/bin/cargo")
+    if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        return candidate
+
+    # Toolchain-specific dirs (rustup default install w/o PATH wiring)
+    rustup_home = os.path.expanduser(os.environ.get("RUSTUP_HOME", "~/.rustup"))
+    toolchains_dir = os.path.join(rustup_home, "toolchains")
+    if os.path.isdir(toolchains_dir):
+        try:
+            for toolchain in os.listdir(toolchains_dir):
+                candidate = os.path.join(toolchains_dir, toolchain, "bin", "cargo")
+                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                    return candidate
+        except OSError:
+            pass
+    return None
+
+
 def _check_build_tools() -> list[str]:
     """Return a list of missing build tools needed for a source build.
 
-    Checks for cmake and a C++ compiler. Both must be executable by the
-    current user — a binary that exists but isn't executable is reported
-    as missing (same symptom as absent).
+    Checks for cmake, a C++ compiler, and the Rust toolchain (cargo). All
+    must be executable by the current user — a binary that exists but
+    isn't executable is reported as missing (same symptom as absent).
+
+    Rust check probes rustup's toolchain dirs in addition to PATH — see
+    _find_cargo for the rationale.
     """
     missing = []
-    for tool, candidates in [
-        ("cmake",   ["cmake"]),
-        ("C++ compiler", ["c++", "g++", "clang++"]),
-    ]:
-        found = False
-        for cmd in candidates:
-            path = shutil.which(cmd)
-            if path:
-                try:
-                    subprocess.run([path, "--version"], capture_output=True, timeout=5)
-                    found = True
-                    break
-                except (PermissionError, OSError):
-                    pass  # binary exists but not executable for this user
-        if not found:
-            missing.append(tool)
+    if not _find_executable(["cmake"]):
+        missing.append("cmake")
+    if not _find_executable(["c++", "g++", "clang++"]):
+        missing.append("C++ compiler")
+    if not _find_cargo():
+        missing.append("Rust (cargo)")
     return missing
+
+
+def _print_manual_build_recommendation(
+    choice: BackendChoice, *, pypi_rc: int, release_rc: int
+) -> None:
+    """Print a multi-line, actionable recommendation when both prebuilt
+    paths missed and the caller has disabled auto-source-build.
+
+    Two audiences read this:
+      - The curl-install.sh user who saw "Project Oxidation" prompt say yes.
+        For them, the wheel isn't critical — tier-2 HTTP keeps embeddings
+        working. They need to know that (so they don't think they're broken)
+        AND how to opt into the optional build if they want the speed.
+      - Operators triaging a CI/non-interactive deploy. They need the exact
+        repro: package name, version, and the explicit command to run.
+    """
+    feats = ",".join(choice.features) if choice.features else "(none)"
+    install_rust_cmd = (
+        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+    )
+    print(
+        f"\n[rust-core] No prebuilt wheel available for {choice.package} "
+        f"{M3_CORE_RS_VERSION} on this Python.\n"
+        f"            PyPI returned exit {pypi_rc}; "
+        f"GitHub Release returned exit {release_rc}.\n"
+        f"\n"
+        f"            Embeddings still work without it: the tier-2 HTTP\n"
+        f"            embedder (m3-embed-server on port 8082) serves every\n"
+        f"            request. The native wheel just makes embeddings\n"
+        f"            5-10x faster (in-process Rust vs HTTP round-trip).\n"
+        f"\n"
+        f"            To install the native wheel by compiling from source:\n"
+        f"\n"
+        f"            1. Install prerequisites:\n"
+        f"                 macOS:          xcode-select --install && brew install cmake\n"
+        f"                 Debian/Ubuntu:  sudo apt install cmake build-essential\n"
+        f"                 Fedora/RHEL:    sudo dnf install cmake gcc-c++\n"
+        f"                 Arch:           sudo pacman -S cmake base-devel\n"
+        f"                 Windows:        install Visual Studio Build Tools (C++ workload)\n"
+        f"\n"
+        f"            2. Install the Rust toolchain (if not already present):\n"
+        f"                 {install_rust_cmd}\n"
+        f"                 source \"$HOME/.cargo/env\"\n"
+        f"\n"
+        f"            3. Run the source-build path explicitly:\n"
+        f"                 m3 embedder install-gpu\n"
+        f"\n"
+        f"            (Will build {choice.package} from "
+        f"{M3_CORE_RS_GIT_TAG} with features: {feats}.)\n",
+        file=sys.stderr,
+    )
+
+
+# GitHub Release fallback — owner/repo for the published-wheels release.
+# Kept module-level so tests can monkeypatch and so a fork can override
+# without touching the install logic.
+M3_CORE_RS_GH_REPO = "skynetcmd/m3-core-rs"
+
+
+def install_from_github_release(
+    choice: BackendChoice, *,
+    version: str = M3_CORE_RS_VERSION,
+    git_tag: str = M3_CORE_RS_GIT_TAG,
+    repo: str = M3_CORE_RS_GH_REPO,
+) -> int:
+    """Try to install the matching prebuilt wheel from the GitHub Release.
+
+    Sits between install_prebuilt (PyPI) and install_from_source. The
+    GitHub Release is the canonical home for wheels too large for PyPI's
+    100 MiB cap (Linux CUDA static build is 464 MB) and a defensive
+    fallback for every other backend when PyPI is missing the right
+    version. Public release only — unauthenticated GitHub API; draft
+    releases are invisible here by design.
+
+    Wheel naming convention (set by m3-core-rs/crates/m3-core-py/build_wheel.py):
+        m3_core_rs_<os>_<backend>-<version>-cp<py>-cp<py>-<platform_tag>.whl
+    The platform tag varies per backend (manylinux_2_17 for Linux CPU,
+    bare linux_x86_64 for Linux CUDA static, macosx_*_arm64, win_amd64, ...).
+    We match by the deterministic prefix — `m3_core_rs_<os>_<backend>-<ver>-cp<py>-`
+    — and pick the single asset that starts with it. If multiple match,
+    pick the first (sorted) so the choice is deterministic across runs.
+
+    Returns 0 on success, non-zero on any failure (API miss, no asset,
+    download failure, pip rejection). On non-zero the caller falls through
+    to install_from_source.
+    """
+    import json
+    import tempfile
+    import urllib.error
+    import urllib.request
+
+    py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    asset_prefix = f"m3_core_rs_{choice.os_tok}_{choice.backend}-{version}-{py_tag}-"
+
+    print(f"[rust-core] looking for GitHub Release asset matching "
+          f"{asset_prefix}*.whl  (repo={repo}, tag={git_tag})")
+
+    api_url = f"https://api.github.com/repos/{repo}/releases/tags/{git_tag}"
+    try:
+        req = urllib.request.Request(
+            api_url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "m3-memory-installer",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            release = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            print(f"[rust-core] release {git_tag} not found on GitHub "
+                  f"(may be draft or not yet published); skipping Release fallback",
+                  file=sys.stderr)
+        else:
+            print(f"[rust-core] GitHub API HTTP {e.code} fetching {git_tag}; "
+                  f"skipping Release fallback", file=sys.stderr)
+        return 1
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        print(f"[rust-core] GitHub API fetch failed ({type(e).__name__}: {e}); "
+              f"skipping Release fallback", file=sys.stderr)
+        return 1
+
+    assets = release.get("assets") or []
+    matches = sorted(
+        (a for a in assets if str(a.get("name", "")).startswith(asset_prefix)),
+        key=lambda a: a["name"],
+    )
+    if not matches:
+        print(f"[rust-core] no Release asset matches {asset_prefix}*.whl "
+              f"({len(assets)} assets in {git_tag})", file=sys.stderr)
+        return 1
+
+    asset = matches[0]
+    wheel_url = asset["browser_download_url"]
+    wheel_name = asset["name"]
+    wheel_size = asset.get("size", 0)
+    print(f"[rust-core] downloading {wheel_name} "
+          f"({wheel_size / (1024*1024):.1f} MiB)...")
+
+    tmp_path: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".whl", delete=False) as tmp:
+            tmp_path = tmp.name
+            chunk_size = 1024 * 1024  # 1 MiB
+            downloaded = 0
+            next_progress = 10 * 1024 * 1024  # progress dot every 10 MiB
+            try:
+                with urllib.request.urlopen(wheel_url, timeout=300) as resp:
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        tmp.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded >= next_progress:
+                            print(f"[rust-core]   ... "
+                                  f"{downloaded / (1024*1024):.0f} MiB",
+                                  file=sys.stderr)
+                            next_progress += 10 * 1024 * 1024
+            except (urllib.error.URLError, OSError) as e:
+                print(f"[rust-core] wheel download failed "
+                      f"({type(e).__name__}: {e})", file=sys.stderr)
+                return 1
+        print(f"[rust-core] downloaded {downloaded / (1024*1024):.1f} MiB; "
+              f"installing via pip...")
+        return _pip_install_with_pep668_fallback(
+            "install", "--force-reinstall", "--no-deps", tmp_path,
+        )
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 def install_from_source(choice: BackendChoice, *,
@@ -300,13 +518,20 @@ def install_from_source(choice: BackendChoice, *,
     if missing:
         print(
             f"[rust-core] source build requires: {', '.join(missing)}\n"
-            "  On Debian/Ubuntu:  sudo apt install cmake build-essential\n"
-            "  On Fedora/RHEL:    sudo dnf install cmake gcc-c++\n"
-            "  On Arch:           sudo pacman -S cmake base-devel\n"
-            "  If cmake/c++ exists but gives 'Permission denied', the binary\n"
-            "  is not executable by this user — ask an admin to fix permissions\n"
-            "  or install the package for this user's distro.\n"
-            "  CPU embedding (Tier-1/Tier-2) works without this.",
+            "  cmake + C++:\n"
+            "    Debian/Ubuntu:  sudo apt install cmake build-essential\n"
+            "    Fedora/RHEL:    sudo dnf install cmake gcc-c++\n"
+            "    Arch:           sudo pacman -S cmake base-devel\n"
+            "    macOS:          xcode-select --install && brew install cmake\n"
+            "  Rust toolchain:\n"
+            "    All platforms:  curl --proto '=https' --tlsv1.2 -sSf "
+            "https://sh.rustup.rs | sh -s -- -y\n"
+            "    Then source the env: source \"$HOME/.cargo/env\"\n"
+            "  If cmake/c++/cargo exists but gives 'Permission denied', the\n"
+            "  binary is not executable by this user — ask an admin to fix\n"
+            "  permissions or install the package for this user's distro.\n"
+            "  Embeddings still work without this: Tier-2 HTTP fallback serves\n"
+            "  every embed request (no native build needed).",
             file=sys.stderr,
         )
         return 1
@@ -361,22 +586,36 @@ def install_rust_core(os_tok: Optional[str] = None, *,
               f"{choice.os_tok}-{choice.backend}", file=sys.stderr)
         return 2
 
+    # Three-tier install cascade:
+    #   1. PyPI prebuilt — fastest path, no toolchain.
+    #   2. GitHub Release prebuilt — defensive fallback for size-capped builds
+    #      (Linux CUDA wheel is 464 MB, can never go on PyPI) and for any
+    #      backend where PyPI is missing this version.
+    #   3. Source build — last resort, needs Rust + cmake + C++ + backend SDK.
     rc = install_prebuilt(choice)
     if rc == 0:
-        print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION}")
+        print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
+              f"(PyPI prebuilt)")
+        return 0
+
+    print(f"[rust-core] PyPI prebuilt unavailable for {choice.package} "
+          f"(pip exit {rc}); trying GitHub Release fallback.", file=sys.stderr)
+    rc_gh = install_from_github_release(choice)
+    if rc_gh == 0:
+        print(f"[rust-core] installed {choice.package} {M3_CORE_RS_VERSION} "
+              f"(GitHub Release)")
         return 0
 
     if not allow_source_fallback:
-        print(f"[rust-core] no prebuilt wheel for {choice.package} on this "
-              f"platform/Python (pip exit {rc}); source fallback disabled.",
-              file=sys.stderr)
-        return rc
+        _print_manual_build_recommendation(choice, pypi_rc=rc, release_rc=rc_gh)
+        return rc_gh
 
-    print(f"[rust-core] no prebuilt wheel for {choice.package} "
-          f"(pip exit {rc}); falling back to source build.", file=sys.stderr)
-    rc = install_from_source(choice)
-    if rc != 0:
-        print(f"[rust-core] source build failed (exit {rc}). The CPU embedder "
-              f"still serves embeddings; see docs/EMBED_DEPLOYMENT.md.",
+    print(f"[rust-core] no prebuilt wheel available for {choice.package} "
+          f"(PyPI={rc}, Release={rc_gh}); falling back to source build.",
+          file=sys.stderr)
+    rc_src = install_from_source(choice)
+    if rc_src != 0:
+        print(f"[rust-core] source build failed (exit {rc_src}). The CPU "
+              f"embedder still serves embeddings; see docs/EMBED_DEPLOYMENT.md.",
               file=sys.stderr)
-    return rc
+    return rc_src

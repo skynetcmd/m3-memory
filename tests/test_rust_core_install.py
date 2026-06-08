@@ -138,34 +138,242 @@ def test_install_from_source_cpu_no_features(monkeypatch):
     assert "--config-settings" not in captured["argv"]
 
 
-def test_install_rust_core_prebuilt_success_no_fallback(monkeypatch):
+def test_install_rust_core_prebuilt_success_skips_fallbacks(monkeypatch):
+    """PyPI prebuilt succeeds — neither GitHub Release nor source attempted."""
     calls = []
-    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 0)
-    monkeypatch.setattr(rci, "install_from_source", lambda c, **k: calls.append("source") or 0)
+    monkeypatch.setattr(rci, "install_prebuilt",
+                        lambda c, **k: calls.append("prebuilt") or 0)
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: calls.append("github") or 0)
+    monkeypatch.setattr(rci, "install_from_source",
+                        lambda c, **k: calls.append("source") or 0)
     monkeypatch.setattr(rci, "detect_backend",
                         lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
     rc = rci.install_rust_core()
     assert rc == 0
-    assert calls == ["prebuilt"]  # source NOT attempted
+    assert calls == ["prebuilt"]
 
 
-def test_install_rust_core_falls_back_to_source(monkeypatch):
+def test_install_rust_core_falls_back_pypi_to_github(monkeypatch):
+    """PyPI fails -> GitHub Release succeeds -> source NOT attempted.
+
+    Locks in the 3-tier order: PyPI -> GitHub Release -> source.
+    """
     calls = []
-    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 1)
-    monkeypatch.setattr(rci, "install_from_source", lambda c, **k: calls.append("source") or 0)
+    monkeypatch.setattr(rci, "install_prebuilt",
+                        lambda c, **k: calls.append("prebuilt") or 1)
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: calls.append("github") or 0)
+    monkeypatch.setattr(rci, "install_from_source",
+                        lambda c, **k: calls.append("source") or 0)
+    monkeypatch.setattr(rci, "detect_backend",
+                        lambda os_tok=None: rci.BackendChoice("macos", "metal", "t"))
+    rc = rci.install_rust_core()
+    assert rc == 0
+    assert calls == ["prebuilt", "github"]
+
+
+def test_install_rust_core_falls_back_all_three_tiers(monkeypatch):
+    """PyPI + GitHub Release both fail -> source build attempted."""
+    calls = []
+    monkeypatch.setattr(rci, "install_prebuilt",
+                        lambda c, **k: calls.append("prebuilt") or 1)
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: calls.append("github") or 1)
+    monkeypatch.setattr(rci, "install_from_source",
+                        lambda c, **k: calls.append("source") or 0)
     monkeypatch.setattr(rci, "detect_backend",
                         lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
     rc = rci.install_rust_core()
     assert rc == 0
-    assert calls == ["prebuilt", "source"]
+    assert calls == ["prebuilt", "github", "source"]
 
 
-def test_install_rust_core_no_fallback_when_disabled(monkeypatch):
+def test_install_rust_core_no_source_fallback_when_disabled(monkeypatch):
+    """allow_source_fallback=False -> PyPI + GitHub Release attempted, then
+    recommendation printed and source build NOT triggered. The curl install.sh
+    flow passes False so users aren't surprised by a multi-minute Rust build.
+    """
     calls = []
-    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 1)
-    monkeypatch.setattr(rci, "install_from_source", lambda c, **k: calls.append("source") or 0)
+    monkeypatch.setattr(rci, "install_prebuilt",
+                        lambda c, **k: calls.append("prebuilt") or 1)
+    monkeypatch.setattr(rci, "install_from_github_release",
+                        lambda c, **k: calls.append("github") or 1)
+    monkeypatch.setattr(rci, "install_from_source",
+                        lambda c, **k: calls.append("source") or 0)
     monkeypatch.setattr(rci, "detect_backend",
-                        lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
+                        lambda os_tok=None: rci.BackendChoice("macos", "metal", "t"))
     rc = rci.install_rust_core(allow_source_fallback=False)
+    assert rc != 0
+    assert calls == ["prebuilt", "github"]  # source NOT attempted
+
+
+# ── GitHub Release fallback ────────────────────────────────────────────────────
+
+
+class _FakeRespCtx:
+    """Mimics urlopen()'s context-manager + .read() interface."""
+    def __init__(self, payload: bytes, chunks: int = 0):
+        self._payload = payload
+        self._chunks = chunks
+        self._offset = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            data = self._payload[self._offset:]
+            self._offset = len(self._payload)
+            return data
+        data = self._payload[self._offset:self._offset + size]
+        self._offset += len(data)
+        return data
+
+
+def _gh_release_payload(asset_names: list[str]) -> bytes:
+    """Build a minimal GitHub release JSON with the named assets."""
+    import json as _json
+    return _json.dumps({
+        "tag_name": "v2026.06.07",
+        "assets": [
+            {
+                "name": name,
+                "size": 1024,
+                "browser_download_url": f"https://example.com/{name}",
+            }
+            for name in asset_names
+        ],
+    }).encode("utf-8")
+
+
+def test_github_release_finds_and_installs_matching_asset(monkeypatch):
+    """Picks the m3_core_rs_<os>_<backend>-<ver>-<py>-*.whl that matches
+    the current Python and pip-installs the downloaded file.
+    """
+    py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    matching_name = f"m3_core_rs_macos_metal-3.6.6-{py_tag}-{py_tag}-macosx_11_0_arm64.whl"
+    payload = _gh_release_payload([
+        f"m3_core_rs_macos_metal-3.6.6-cp310-cp310-macosx_11_0_arm64.whl",  # wrong py
+        matching_name,                                                       # match
+        f"m3_core_rs_linux_cuda-3.6.6-{py_tag}-{py_tag}-linux_x86_64.whl",   # wrong os
+    ])
+
+    urlopen_calls = []
+    fake_wheel = b"PK\x03\x04" + b"fake wheel" * 100  # ZIP-ish header so it looks plausible
+
+    def fake_urlopen(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else req
+        urlopen_calls.append(url)
+        if "api.github.com" in url:
+            return _FakeRespCtx(payload)
+        return _FakeRespCtx(fake_wheel)
+
+    # install_from_github_release imports urllib lazily — patch the global
+    # module so the lazy import in the function picks up our fake.
+    import urllib.request as _ur
+    monkeypatch.setattr(_ur, "urlopen", fake_urlopen)
+
+    pip_argv = []
+    monkeypatch.setattr(rci, "_pip_install_with_pep668_fallback",
+                        lambda *a: pip_argv.append(a) or 0)
+
+    choice = rci.BackendChoice("macos", "metal", "test")
+    rc = rci.install_from_github_release(choice)
+    assert rc == 0
+
+    # We made two HTTPS calls: GH API for the release, then wheel download
+    assert any("api.github.com" in u for u in urlopen_calls)
+    assert any(matching_name in u for u in urlopen_calls)
+
+    # pip got our temp wheel path
+    assert len(pip_argv) == 1
+    args = pip_argv[0]
+    assert args[0] == "install"
+    assert "--force-reinstall" in args
+    assert "--no-deps" in args
+    assert args[-1].endswith(".whl")
+
+
+def test_github_release_404_returns_nonzero(monkeypatch):
+    """Draft / missing release -> 1 (caller falls through). Don't raise."""
+    import urllib.request as _ur
+    import urllib.error as _ue
+
+    def fake_urlopen(req, timeout=None):
+        raise _ue.HTTPError(
+            url="https://api.github.com/...", code=404, msg="Not Found",
+            hdrs=None, fp=None,
+        )
+
+    monkeypatch.setattr(_ur, "urlopen", fake_urlopen)
+    choice = rci.BackendChoice("macos", "metal", "test")
+    rc = rci.install_from_github_release(choice)
     assert rc == 1
-    assert calls == ["prebuilt"]  # no source build
+
+
+def test_github_release_no_matching_asset_returns_nonzero(monkeypatch):
+    """API succeeds but no asset starts with the expected prefix."""
+    import urllib.request as _ur
+    py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    payload = _gh_release_payload([
+        f"m3_core_rs_linux_cpu-3.6.6-{py_tag}-{py_tag}-manylinux2014.whl",
+        # No macos_metal asset
+    ])
+
+    monkeypatch.setattr(_ur, "urlopen",
+                        lambda req, timeout=None: _FakeRespCtx(payload))
+
+    choice = rci.BackendChoice("macos", "metal", "test")
+    rc = rci.install_from_github_release(choice)
+    assert rc == 1
+
+
+def test_github_release_network_error_returns_nonzero(monkeypatch):
+    """OSError / URLError on API request -> 1 (don't raise)."""
+    import urllib.request as _ur
+
+    def boom(req, timeout=None):
+        raise OSError("network unreachable")
+
+    monkeypatch.setattr(_ur, "urlopen", boom)
+    choice = rci.BackendChoice("macos", "metal", "test")
+    rc = rci.install_from_github_release(choice)
+    assert rc == 1
+
+
+# ── build-tool preflight (cargo via rustup toolchains) ─────────────────────────
+
+
+def test_check_build_tools_includes_rust(monkeypatch):
+    """Source build needs Rust — _check_build_tools must catch missing cargo."""
+    # No cmake, no C++, no cargo, no rustup dirs.
+    monkeypatch.setattr(rci.shutil, "which", lambda x: None)
+    monkeypatch.setattr(rci.os.path, "isfile", lambda p: False)
+    monkeypatch.setattr(rci.os.path, "isdir", lambda p: False)
+    missing = rci._check_build_tools()
+    assert "Rust (cargo)" in missing
+
+
+def test_find_cargo_via_rustup_toolchain(monkeypatch, tmp_path):
+    """cargo not on PATH but rustup toolchain dir holds it -> found."""
+    # No cargo on PATH and no ~/.cargo/bin/cargo
+    monkeypatch.setattr(rci.shutil, "which", lambda x: None)
+
+    rustup_home = tmp_path / "rustup"
+    toolchain_bin = rustup_home / "toolchains" / "stable-aarch64-apple-darwin" / "bin"
+    toolchain_bin.mkdir(parents=True)
+    cargo_path = toolchain_bin / "cargo"
+    cargo_path.write_text("#!/bin/sh\necho cargo\n", encoding="utf-8")
+    cargo_path.chmod(0o755)
+
+    monkeypatch.setenv("RUSTUP_HOME", str(rustup_home))
+    monkeypatch.setenv("HOME", str(tmp_path / "home-without-cargo"))  # no ~/.cargo
+
+    found = rci._find_cargo()
+    assert found is not None
+    assert "cargo" in found
+    assert "toolchains" in found
