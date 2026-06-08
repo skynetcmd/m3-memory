@@ -27,6 +27,10 @@ import sys
 
 IS_WIN = sys.platform == "win32"
 
+# Subprocess timeout for pg_sync.py. First-run full syncs can take several
+# minutes; delta syncs are much faster. Override with M3_PG_SYNC_TIMEOUT (seconds).
+PG_SYNC_TIMEOUT = int(os.environ.get("M3_PG_SYNC_TIMEOUT", "600"))
+
 BASE    = pathlib.Path(__file__).parent.parent.resolve()
 LOG_DIR = BASE / "logs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -61,7 +65,9 @@ def _resolve_dbs() -> list[pathlib.Path]:
 
     Priority:
       1. M3_SYNC_DBS env var (explicit override; colon- or comma-separated paths).
-      2. Repo defaults: agent_memory.db (required) + agent_chatlog.db (skip if absent).
+      2. m3_sdk.resolve_db_path() — the same Homecoming-aware resolver used by
+         chroma_sync_cli.py (honours M3_ENGINE_ROOT / M3_MEMORY_ROOT / M3_DATABASE).
+      3. Repo-relative fallback (memory/agent_memory.db) if m3_sdk is not importable.
 
     Bench DBs and any other databases are NOT auto-detected — set M3_SYNC_DBS
     if you self-host a custom layout.
@@ -69,16 +75,23 @@ def _resolve_dbs() -> list[pathlib.Path]:
     raw = os.environ.get("M3_SYNC_DBS", "")
     if raw:
         parts = [p.strip() for p in raw.replace(",", ":").split(":") if p.strip()]
-    else:
-        parts = list(_DEFAULT_DBS)
+        resolved = []
+        for p in parts:
+            path = pathlib.Path(p)
+            if not path.is_absolute():
+                path = BASE / path
+            resolved.append(path.resolve())
+        return resolved
 
-    resolved = []
-    for p in parts:
-        path = pathlib.Path(p)
-        if not path.is_absolute():
-            path = BASE / path
-        resolved.append(path.resolve())
-    return resolved
+    # No explicit override — use the same DB resolver as chroma_sync_cli.py so
+    # both sync paths always agree on where the live database lives.
+    try:
+        from m3_sdk import resolve_db_path
+        return [pathlib.Path(resolve_db_path()).resolve()]
+    except Exception as exc:
+        log.warning(f"m3_sdk.resolve_db_path() unavailable ({exc}); falling back to repo default")
+        path = BASE / _DEFAULT_DBS[0]
+        return [path.resolve()]
 
 
 # ── Network check ─────────────────────────────────────────────────────────────
@@ -115,7 +128,7 @@ def run_pg_sync_for_db(db_path: pathlib.Path, dry_run: bool) -> bool:
         from _task_runtime import no_window_kwargs
         result = subprocess.run(
             [str(PY), str(BASE / "bin" / "pg_sync.py"), "--db", str(db_path)],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=PG_SYNC_TIMEOUT,
             **no_window_kwargs(),
         )
         for line in (result.stdout + result.stderr).splitlines():
@@ -128,7 +141,7 @@ def run_pg_sync_for_db(db_path: pathlib.Path, dry_run: bool) -> bool:
             log.error(f"pg_sync exited with code {result.returncode} for {db_path.stem}")
             return False
     except subprocess.TimeoutExpired:
-        log.error(f"pg_sync timed out after 120s for {db_path.stem}")
+        log.error(f"pg_sync timed out after {PG_SYNC_TIMEOUT}s for {db_path.stem}")
         return False
     except Exception as e:
         log.error(f"pg_sync failed for {db_path.stem}: {type(e).__name__}: {e}")
