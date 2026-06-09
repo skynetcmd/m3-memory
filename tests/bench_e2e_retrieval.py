@@ -44,12 +44,12 @@ No memory row content is emitted, so the output is safe to share.
 Usage:  python tests/bench_e2e_retrieval.py
 """
 
-import os
-import sys
 import json
-import time
+import os
 import statistics
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -98,6 +98,7 @@ def run_worker(arm: str) -> int:
     os.chdir(str(REPO))  # so the default DB path (memory/agent_memory.db) resolves
 
     import asyncio
+
     import memory_core as mc
 
     rust_active = not mc._OXIDATION_DISABLED
@@ -117,7 +118,7 @@ def run_worker(arm: str) -> int:
         for q in QUERIES:
             try:
                 vec, model = await orig_embed(q)
-            except Exception as e:
+            except Exception:
                 vec, model = None, ""
             vec_cache[q] = (vec, model)
 

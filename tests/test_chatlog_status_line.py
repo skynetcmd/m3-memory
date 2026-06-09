@@ -1,6 +1,7 @@
 """Tests for bin/chatlog_status_line.py — one-line status indicators."""
 
 import json
+
 import pytest
 
 

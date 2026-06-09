@@ -1,16 +1,16 @@
-import os
-import sys
-import subprocess
-import platform
 import glob
+import platform
+import subprocess
+import sys
 from pathlib import Path
+
 
 def main():
     if platform.system() == "Windows":
         sys.stdout.reconfigure(encoding='utf-8')
-    
+
     m3_memory_root = Path(__file__).parent.resolve()
-    
+
     if platform.system() == "Windows":
         venv_python = m3_memory_root / ".venv" / "Scripts" / "python.exe"
     else:
@@ -25,7 +25,7 @@ def main():
     logs_dir.mkdir(exist_ok=True)
 
     test_files = glob.glob(str(m3_memory_root / "bin" / "test_*.py"))
-    
+
     # Metadata for tests: {filename: (expected_time_str, timeout_seconds)}
     TEST_METADATA = {
         "test_knowledge.py": ("5-10s", 30),
@@ -52,7 +52,7 @@ def main():
         log_file = logs_dir / f"{test_name}.log"
 
         print(f"--- Running {test_name} (Expected: {expected_time}, Timeout: {timeout_seconds}s) ---")
-        
+
         try:
             result = subprocess.run(
                 [str(venv_python), str(f_path)],
@@ -61,7 +61,7 @@ def main():
                 encoding='utf-8',
                 errors='replace'
             )
-            
+
             with open(log_file, "w", encoding='utf-8') as log:
                 if result.stdout:
                     log.write(result.stdout)

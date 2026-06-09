@@ -1,7 +1,8 @@
 import os
 import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 # Add bin to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
@@ -33,8 +34,8 @@ async def test_get_best_embed_success():
     mock_client = AsyncMock()
     mock_resp = MagicMock() # MagicMock for sync methods like raise_for_status
     mock_resp.status_code = 200
-    
-    # httpx response.json() is NOT a coroutine, but we mocked it as one 
+
+    # httpx response.json() is NOT a coroutine, but we mocked it as one
     # if we used AsyncMock. We need to be careful.
     # In llm_failover.py it's called as: data = response.json() (sync)
     mock_resp.json.return_value = {
@@ -44,7 +45,7 @@ async def test_get_best_embed_success():
         ]
     }
     mock_client.get.return_value = mock_resp
-    
+
     with patch("llm_failover.LLM_ENDPOINTS", ["http://localhost:1234/v1"]):
         result = await llm_failover.get_best_embed(mock_client, "token")
         assert result is not None
@@ -65,7 +66,7 @@ async def test_get_best_llm_size_sorting():
         ]
     }
     mock_client.get.return_value = mock_resp
-    
+
     with patch("llm_failover.LLM_ENDPOINTS", ["http://localhost:1234/v1"]):
         result = await llm_failover.get_best_llm(mock_client, "token")
         assert result is not None

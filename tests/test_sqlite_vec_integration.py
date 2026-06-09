@@ -9,11 +9,12 @@ Verifies:
 from __future__ import annotations
 
 import os
-import sys
 import sqlite3
 import struct
-import pytest
+import sys
 from unittest import mock
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
@@ -31,7 +32,7 @@ def test_detect_sqlite_vec_active():
             return mock_res
 
     conn = sqlite3.connect(":memory:", factory=ActiveConnection)
-    
+
     assert _detect_sqlite_vec(conn) is True
     assert executed == ["SELECT vec_version()"]
 
@@ -49,6 +50,7 @@ def test_detect_sqlite_vec_inactive():
 async def test_search_uses_sqlite_vec_when_active(monkeypatch):
     """When sqlite-vec is active, semantic search uses vec_distance_cosine directly in SQL."""
     import memory_core
+
     from memory import search
 
     # Set skip migrations flag
@@ -72,7 +74,7 @@ async def test_search_uses_sqlite_vec_when_active(monkeypatch):
 
     # Record executed SQL queries
     executed_queries = []
-    
+
     class MockCursor:
         def fetchall(self):
             # Return dummy database hits with bm25_score
@@ -128,6 +130,7 @@ async def test_search_uses_sqlite_vec_when_active(monkeypatch):
 async def test_search_falls_back_when_sqlite_vec_inactive(monkeypatch):
     """When sqlite-vec is inactive, search falls back to FFI/Python _cosine_batch_packed."""
     import memory_core
+
     from memory import search
 
     # Set skip migrations flag
@@ -151,7 +154,7 @@ async def test_search_falls_back_when_sqlite_vec_inactive(monkeypatch):
 
     # Record executed SQL queries
     executed_queries = []
-    
+
     class MockCursor:
         def fetchall(self):
             # Return dummy database hit with a packed float32 [1.0, 0.0, 0.0] embedding (length 12)

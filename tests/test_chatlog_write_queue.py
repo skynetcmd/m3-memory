@@ -1,14 +1,10 @@
 """Tests for bin/chatlog_core.py — write queue, validation, and flush."""
 
-import asyncio
 import json
-import os
+
 import pytest
-import tempfile
-import sqlite3
 
-
-from conftest import isolate_chatlog_env, create_memory_items_schema
+from conftest import create_memory_items_schema, isolate_chatlog_env
 
 
 @pytest.fixture

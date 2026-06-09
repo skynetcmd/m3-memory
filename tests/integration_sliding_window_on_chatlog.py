@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import math
 import os
-import random
 import sqlite3
 import sys
 import time
@@ -42,9 +41,8 @@ os.environ.setdefault("M3_EMBED_SEQ_MAX", "8")
 os.environ.setdefault("M3_EMBED_N_BATCH", "8192")
 os.environ.setdefault("M3_EMBED_N_UBATCH", "8192")
 
-import memory_core as mc  # noqa: E402
 import m3_core_rs  # noqa: E402
-
+import memory_core as mc  # noqa: E402
 
 CHATLOG_DB = Path(r"C:\Users\bhaba\m3-memory\memory\agent_chatlog.db")
 N_SHORT = 5
@@ -242,7 +240,7 @@ def main():
         print(f"  OK: write rejected ({e})")
     c.close()
 
-    print(f"\n=== SUMMARY ===")
+    print("\n=== SUMMARY ===")
     print(f"  pass: {total_pass}")
     print(f"  fail: {total_fail}")
     if failures:

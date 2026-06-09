@@ -1,6 +1,5 @@
 """Tests for bin/chatlog_redaction.py — secret scrubbing and PII redaction."""
 
-import pytest
 
 
 def test_scrub_disabled_returns_unchanged():
@@ -231,7 +230,7 @@ def test_compile_errors_reported():
     }
 
     chatlog_redaction.compile_patterns(config)
-    errors = chatlog_redaction.get_compile_errors()
+    chatlog_redaction.get_compile_errors()
 
     # Should have at least one error (depending on strictness)
     # This test is lenient — exact behavior depends on error reporting

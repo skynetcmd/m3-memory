@@ -1,5 +1,6 @@
 import re
 
+
 def fix_custom_tool_bridge():
     path = "bin/custom_tool_bridge.py"
     with open(path, "r", encoding="utf-8") as f:
@@ -13,7 +14,7 @@ def fix_custom_tool_bridge():
     )
     content = content.replace("conn.commit()", "")
     content = content.replace("finally:\n        if conn:\n            conn.close()", "")
-    
+
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
@@ -49,7 +50,7 @@ def fix_memory_core():
     content = content.replace("def _conn() -> sqlite3.Connection:", "def _conn() -> Any:")
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
-        
+
 def fix_debug_agent():
     path = "bin/debug_agent_bridge.py"
     with open(path, "r", encoding="utf-8") as f:

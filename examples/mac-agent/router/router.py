@@ -1,7 +1,8 @@
 import os
 import sys
-import httpx
 from datetime import datetime
+
+import httpx
 from fastapi import APIRouter, HTTPException
 
 # Add project root to path for bin imports

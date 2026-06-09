@@ -20,13 +20,9 @@ memory_bridge under controlled env vars.
 """
 from __future__ import annotations
 
-import importlib
 import json
 import os
 import sys
-from typing import Iterable
-
-import pytest
 
 # conftest.py already puts bin/ on sys.path. Belt-and-suspenders so this
 # file is also importable in isolation:
@@ -38,7 +34,6 @@ if _BIN not in sys.path:
 import mcp_tool_catalog
 import tool_domains
 import tool_loader
-
 
 # ── tool_domains.py ──────────────────────────────────────────────────────────
 

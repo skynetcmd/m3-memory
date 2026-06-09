@@ -137,17 +137,17 @@ async def main():
     print("\n[1/3] embedder_status...")
     status = await capture_embedder_status()
     (BASELINE_DIR / "embedder_status.json").write_text(json.dumps(status, indent=2, sort_keys=True, default=str))
-    print(f"  wrote embedder_status.json")
+    print("  wrote embedder_status.json")
 
     print("\n[2/3] embed smoke (100 rows)...")
     embed_data = await capture_embed_smoke()
     (BASELINE_DIR / "embed_smoke.json").write_text(json.dumps(embed_data, indent=2, sort_keys=True))
-    print(f"  wrote embed_smoke.json")
+    print("  wrote embed_smoke.json")
 
     print("\n[3/3] search smoke (50 queries)...")
     search_data = await capture_search_smoke()
     (BASELINE_DIR / "search_smoke.json").write_text(json.dumps(search_data, indent=2, sort_keys=True))
-    print(f"  wrote search_smoke.json")
+    print("  wrote search_smoke.json")
 
     print("\nBaseline capture complete.")
 

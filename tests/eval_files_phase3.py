@@ -36,8 +36,8 @@ def _print_gate(name: str, ok: bool, detail: str = ""):
 # Gate: P3.0 — provenance (sidecar + CLI flag)
 # ──────────────────────────────────────────────────────────────────────────────
 def gate_provenance(tmp: Path) -> tuple[bool, str]:
-    from files_memory.ingest import ingest_path
     from files_memory.index import files_index
+    from files_memory.ingest import ingest_path
 
     corpus = tmp / "p30_corpus"
     corpus.mkdir()
@@ -122,8 +122,8 @@ def gate_carry_forward(tmp: Path, use_llm: bool) -> tuple[bool, str]:
 # ──────────────────────────────────────────────────────────────────────────────
 def gate_promotability(tmp: Path) -> tuple[bool, str]:
     from files_memory.ingest import ingest_path
-    from files_memory.search import files_search
     from files_memory.promotability import files_promotable
+    from files_memory.search import files_search
 
     db = tmp / "p32.db"
     eval_corpus = _HERE / "eval_corpus"
@@ -150,8 +150,8 @@ def gate_promotability(tmp: Path) -> tuple[bool, str]:
 # Gate: P3.3 — semantic dedup
 # ──────────────────────────────────────────────────────────────────────────────
 def gate_dedup(tmp: Path) -> tuple[bool, str]:
-    from files_memory.ingest import ingest_path
     from files_memory.dedup import files_dedup, list_dedup_candidates, review_dedup_candidate
+    from files_memory.ingest import ingest_path
 
     corpus = tmp / "p33_corpus"
     corpus.mkdir()

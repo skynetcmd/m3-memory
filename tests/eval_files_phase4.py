@@ -17,7 +17,6 @@ Run:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import shutil
 import sys
@@ -92,8 +91,12 @@ def gate_watch_detects_and_cooldown(tmp: Path) -> tuple[bool, str]:
 # ──────────────────────────────────────────────────────────────────────────────
 def gate_corpus_crud(tmp: Path) -> tuple[bool, str]:
     from files_memory.corpora import (
-        corpus_create, corpus_list, corpus_get, corpus_set,
-        corpus_delete, resolve_default_corpus,
+        corpus_create,
+        corpus_delete,
+        corpus_get,
+        corpus_list,
+        corpus_set,
+        resolve_default_corpus,
     )
     db = tmp / "p43.db"
 
@@ -132,7 +135,7 @@ def gate_corpus_crud(tmp: Path) -> tuple[bool, str]:
     if after is not None:
         return False, f"beta should be gone, got {after}"
 
-    return True, f"create/list/set/delete + default-flag transition correct"
+    return True, "create/list/set/delete + default-flag transition correct"
 
 
 # ──────────────────────────────────────────────────────────────────────────────

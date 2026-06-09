@@ -1,19 +1,19 @@
 """Tests for Tier 4 Cloud Enclave failover, PII redaction, and keyring lookup."""
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import uuid
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # Ensure bin is in python path
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "bin"))
 
 import memory.config as config
-from memory.embed import _embed, _embed_many, get_embed_breaker_state, reset_embed_breakers
+from memory.embed import _embed, get_embed_breaker_state, reset_embed_breakers
 
 
 @pytest.fixture(autouse=True)
@@ -21,16 +21,16 @@ def clean_breakers(monkeypatch):
     reset_embed_breakers()
     # Ultimate cache buster: force content hash to be unique every time to guarantee cache misses
     monkeypatch.setattr("memory.embed._content_hash", lambda t: str(uuid.uuid4()))
-    
+
     # Mock best LLM failover globally to avoid real network requests
     async def mock_get_best_embed(*args, **kwargs):
         return None
     monkeypatch.setattr("memory.embed.get_best_embed", mock_get_best_embed)
     monkeypatch.setattr("llm_failover.get_best_embed", mock_get_best_embed)
-    
+
     # Bypass migrations globally to avoid DB lock contention
     monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
-    
+
     yield
     reset_embed_breakers()
 
@@ -68,7 +68,7 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
 
     # Mock embedded and CPU fallback to fail
     monkeypatch.setattr("memory.embed._get_embedded_embedder", lambda: None)
-    
+
     # Mock best LLM failover to fail
     async def mock_get_best_embed(*args, **kwargs):
         return None
@@ -99,7 +99,7 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
 
     # Let's request an embedding with sensitive data
     vec, model = await _embed("My secret key is sk-proj-12345678901234567890 and email is test@domain.com")
-    
+
     assert vec == [0.1, 0.2, 0.3, 0.4]
     assert len(posted_payloads) == 1
     # Verify PII was redacted!
@@ -140,7 +140,7 @@ async def test_tier4_circuit_breaker(monkeypatch):
     # First attempt -> Fail
     vec, _ = await _embed("hello")
     assert vec is None
-    
+
     # Second attempt -> Fail
     vec, _ = await _embed("hello")
     assert vec is None

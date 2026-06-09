@@ -32,6 +32,7 @@ def test_scored_impl_has_floor_bindings_before_callback_resolution():
     function body than the call to _resolve_mc_callbacks().
     """
     import ast
+
     import memory.search as ms
 
     src = open(ms.__file__).read()
@@ -86,6 +87,7 @@ def test_callback_resolution_is_wrapped_in_try_except():
     """`_resolve_mc_callbacks()` is best-effort — if it raises, the call
     site must catch and continue, falling through to the floor bindings."""
     import ast
+
     import memory.search as ms
 
     src = open(ms.__file__).read()
@@ -125,7 +127,8 @@ def test_dedup_skips_self_pairs_when_multi_embed_rows_exist():
     self-pair guard the loop emits a (X, X, 1.0) pair. This test stubs
     the DB read to force the multi-row case and confirms no self-pair
     survives."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
+
     import memory_maintenance as mm
 
     # Two rows with the SAME memory_id but DIFFERENT embeddings (default+enriched).
@@ -180,6 +183,7 @@ def test_dedup_skips_self_pairs_rust_path():
     `m3_core_rs.cosine_batch_packed_flat`, but we can confirm the source
     has the `if ids[i] == ids[j]: continue` guard in the Rust branch."""
     import inspect
+
     import memory_maintenance as mm
 
     src = inspect.getsource(mm.memory_dedup_impl)
