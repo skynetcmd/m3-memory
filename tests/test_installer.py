@@ -5,12 +5,10 @@ with git + tarball both mocked. Does NOT hit the network.
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 import tarfile
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -265,7 +263,6 @@ def test_doctor_reports_resolved_bridge(tmp_path, monkeypatch, capsys):
 def test_auto_install_opt_out_via_env(monkeypatch, tmp_path):
     """M3_AUTO_INSTALL=0 is an absolute opt-out: _auto_install returns None
     in both TTY and non-TTY modes, regardless of what install_m3 would do."""
-    import importlib
     from m3_memory import cli, installer
 
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
@@ -374,7 +371,6 @@ def test_safe_tar_member_rejects_path_traversal(tmp_path):
     """_safe_tar_member drops tarball entries whose paths escape dest_root
     (classic tarslip CVE class). These are the inputs we'd see from a
     maliciously-crafted tarball claiming to be a GitHub release."""
-    import tarfile
     from m3_memory.installer import _safe_tar_member
 
     dest = tmp_path / "dest"

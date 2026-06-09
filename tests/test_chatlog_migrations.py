@@ -1,8 +1,7 @@
 """Tests for chatlog schema migrations."""
 
-import sqlite3
 import os
-import pytest
+import sqlite3
 
 
 def test_bootstrap_migration_creates_schema(tmp_path):

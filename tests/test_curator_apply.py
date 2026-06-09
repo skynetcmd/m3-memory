@@ -11,7 +11,6 @@ expected rows get modified and the result dict has the expected shape.
 """
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import sys
@@ -310,6 +309,7 @@ def test_chatlog_dedup_uses_active_database_for_routing():
     active_database and uses it inside the dedup branch.
     """
     import inspect
+
     import curator_apply
 
     src = inspect.getsource(curator_apply.apply_chatlog_plan)

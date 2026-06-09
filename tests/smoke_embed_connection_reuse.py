@@ -32,7 +32,6 @@ sys.path.insert(0, str(ROOT / "bin"))
 
 import httpx  # noqa: E402
 
-
 FALLBACK_URL = (os.environ.get("M3_EMBED_FALLBACK_URL") or "http://127.0.0.1:8082").rstrip("/")
 N_CALLS = 10
 
@@ -66,7 +65,6 @@ async def _main() -> int:
 
     client = memory_core._get_embed_client()
     # Sanity: confirm Limits are tuned (not httpx defaults of 10/5/5s).
-    pool = getattr(client, "_transport", None)
     print(f"[info] embed client: {client!r}")
     print(
         f"[info] tuned pool: max_conns={memory_core._EMBED_HTTP_MAX_CONNS} "

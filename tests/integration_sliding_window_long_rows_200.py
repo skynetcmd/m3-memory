@@ -30,8 +30,8 @@ os.environ.setdefault("M3_EMBED_SEQ_MAX", "8")
 os.environ.setdefault("M3_EMBED_N_BATCH", "8192")
 os.environ.setdefault("M3_EMBED_N_UBATCH", "8192")
 
-import memory_core as mc  # noqa: E402
 import m3_core_rs  # noqa: E402
+import memory_core as mc  # noqa: E402
 
 DBS = [
     Path(r"C:\Users\bhaba\m3-memory\memory\agent_chatlog.db"),
@@ -74,7 +74,7 @@ def sample_long_rows(n_per_db: int):
 
 def main():
     print(f"Config: MAX={mc.MAX_CHARS_PER_CHUNK} OVL={mc.MIN_OVERLAP_CHARS} STRIDE={mc.STRIDE_CHARS}")
-    print(f"DBs (read-only):")
+    print("DBs (read-only):")
     for db in DBS:
         print(f"  - {db}")
     print(f"\nSampling up to {N_TOTAL_PER_DB} long rows from each DB (LENGTH(content) > {mc.MAX_CHARS_PER_CHUNK})...")
@@ -220,7 +220,7 @@ def main():
     total_wall = time.perf_counter() - t_run
     N = len(rows)
 
-    print(f"\n=== TIMING ===")
+    print("\n=== TIMING ===")
     print(f"  total wall: {total_wall:.1f}s")
     print(f"  rows/sec: {N/total_wall:.1f}")
     print(f"  chunks/sec: {total_chunks/total_wall:.1f}")
@@ -234,25 +234,25 @@ def main():
     print(f"  partial_ok:    {counters['partial_ok']}  ({100*counters['partial_ok']/N:.1f}%)")
     print(f"  all_fail:      {counters['all_fail']}  ({100*counters['all_fail']/N:.1f}%)")
 
-    print(f"\n=== PER-DB BREAKDOWN ===")
+    print("\n=== PER-DB BREAKDOWN ===")
     for db_label, pc in per_db_counters.items():
         n = pc["rows"]
         print(f"  {db_label} (N={n}):")
         print(f"    multi_chunk={pc['multi_chunk']} all_ok={pc['all_chunks_ok']} partial={pc['partial_ok']} all_fail={pc['all_fail']}")
 
-    print(f"\n=== n_chunks distribution ===")
+    print("\n=== n_chunks distribution ===")
     for nc in sorted(n_chunks_hist):
         print(f"  n_chunks={nc:>3}: {n_chunks_hist[nc]:>4} rows  ({100*n_chunks_hist[nc]/N:.1f}%)")
 
-    print(f"\n=== chunk char-length distribution (5000-char bins) ===")
+    print("\n=== chunk char-length distribution (5000-char bins) ===")
     for bucket in sorted(chunk_char_hist):
         print(f"  [{bucket:>6}, {bucket+5000:>6}): {chunk_char_hist[bucket]:>5} chunks")
 
-    print(f"\n=== chunk approx-token distribution (1000-token bins, chars/4) ===")
+    print("\n=== chunk approx-token distribution (1000-token bins, chars/4) ===")
     for bucket in sorted(chunk_tok_hist):
         print(f"  [{bucket:>5}, {bucket+1000:>5}): {chunk_tok_hist[bucket]:>5} chunks")
 
-    print(f"\n=== DENSE OVERFLOW (chunks tokenized > 8192) ===")
+    print("\n=== DENSE OVERFLOW (chunks tokenized > 8192) ===")
     print(f"  failed-chunk count: {len(dense_overflow_rows)}")
     print(f"  failed-row count:   {len(set(r['memory_id'] for r in dense_overflow_rows))}")
     if dense_overflow_rows:
@@ -263,7 +263,7 @@ def main():
         if ratios:
             print(f"  observed chars/token: min={min(ratios):.2f}, max={max(ratios):.2f}, median={sorted(ratios)[len(ratios)//2]:.2f}")
         # Sample dense-overflow rows
-        print(f"\n  Sample of overflowing chunks (first 8):")
+        print("\n  Sample of overflowing chunks (first 8):")
         for r in dense_overflow_rows[:8]:
             cpt = f"{r['chars_per_token']:.2f}" if r['chars_per_token'] else "n/a"
             print(
@@ -272,13 +272,13 @@ def main():
                 f"tokens={r['reported_tokens']} chars/tok={cpt}"
             )
 
-    print(f"\n=== OTHER EMBED FAILURES (non-overflow) ===")
+    print("\n=== OTHER EMBED FAILURES (non-overflow) ===")
     print(f"  count: {len(other_failures)}")
     for r in other_failures[:5]:
         print(f"    {r['memory_id'][:8]}: {r['err'][:120]}")
 
     # Recommendation
-    print(f"\n=== IMPLICATION ===")
+    print("\n=== IMPLICATION ===")
     if dense_overflow_rows:
         n_failed_rows = len(set(r['memory_id'] for r in dense_overflow_rows))
         pct = 100 * n_failed_rows / N
