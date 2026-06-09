@@ -131,6 +131,19 @@ def parse_observations(text: str) -> list[dict]:
         sup_hint = o.get("supersedes_hint")
         if sup_hint is not None and not isinstance(sup_hint, str):
             sup_hint = None
+        # Per-observation source turn. The Observer prompt asks for the
+        # turn_index this fact came from; carry it through so each observation
+        # links to the SPECIFIC turn it was extracted from (precise provenance /
+        # citation), rather than the whole session. Coerce to int; None when the
+        # model omitted/garbled it (content-overlap attribution then fills it).
+        # Accept a single int or the first of a list.
+        sti = o.get("source_turn_index")
+        if isinstance(sti, list):
+            sti = sti[0] if sti else None
+        try:
+            sti = int(sti) if sti is not None else None
+        except (TypeError, ValueError):
+            sti = None
         out.append({
             "text": t[:500],
             "observation_date": obs_date,
@@ -138,8 +151,34 @@ def parse_observations(text: str) -> list[dict]:
             "relative_date": rel_date,
             "confidence": max(0.0, min(1.0, conf)),
             "supersedes_hint": sup_hint,
+            "source_turn_index": sti,
         })
     return out
+
+
+def _attribute_turn(obs: dict, turns: list[tuple]) -> "int | None":
+    """Resolve an observation to its source turn by content overlap when the
+    model did not emit a usable source_turn_index.
+
+    turns: (id, content, role, turn_index, ts) tuples. Returns the turn_index of
+    the best-matching USER turn (token-overlap of the obs text against turn
+    content), or None if no turn shares >=2 content tokens. Deterministic; no
+    model call. A defensive fallback so observation provenance is still resolved
+    when the model's self-reported index is missing or wrong."""
+    import re as _re
+    def toks(s: str) -> set:
+        return {w for w in _re.findall(r"[a-z0-9]{3,}", (s or "").lower())}
+    o_toks = toks(obs.get("text", ""))
+    if not o_toks:
+        return None
+    best_idx, best_score = None, 0
+    for t in turns:
+        if (t[2] or "user") != "user":
+            continue  # facts are about the user's turns
+        score = len(o_toks & toks(str(t[1] or "")))
+        if score > best_score:
+            best_score, best_idx = score, t[3]
+    return best_idx if best_score >= 2 else None
 
 
 async def call_observer(
@@ -504,10 +543,32 @@ async def process_conversation(
     else:
         counters["last_partial_failure_chunks"] = 0
 
-    source_turn_ids = [t[0] for t in turns]
+    all_turn_ids = [t[0] for t in turns]
+    # Per-observation source-turn provenance (opt-in, default OFF for behavior
+    # stability). DEFAULT: every observation carries the whole session's turn
+    # list in source_turn_ids — the long-standing behavior every caller expects.
+    # When M3_OBSERVER_PRECISE_PROVENANCE=1: link each observation to the SPECIFIC
+    # turn it came from (model-reported source_turn_index, with a content-overlap
+    # fallback), so downstream callers can cite the exact source turn, trace
+    # supersession to a single statement, and link an observation to one message.
+    # The fallback (_attribute_turn) only runs under the flag, so the default
+    # path is unchanged and adds no per-observation work.
+    precise = os.environ.get("M3_OBSERVER_PRECISE_PROVENANCE", "0") == "1"
+    idx_to_id = {t[3]: t[0] for t in turns} if precise else {}
     for obs in observations:
+        if precise:
+            sti = obs.get("source_turn_index")
+            if sti is None or sti not in idx_to_id:
+                sti = _attribute_turn(obs, turns)  # deterministic fallback
+            if sti is not None and sti in idx_to_id:
+                src_ids = [idx_to_id[sti]]         # the specific source turn
+            else:
+                src_ids = all_turn_ids             # unresolved -> whole session
+                counters["addr_fallback_session"] = counters.get("addr_fallback_session", 0) + 1
+        else:
+            src_ids = all_turn_ids                 # default: whole session (unchanged)
         obs_id = await write_observation(
-            obs, target_variant, user_id, conversation_id, source_turn_ids,
+            obs, target_variant, user_id, conversation_id, src_ids,
             source_group_id=source_group_id,
             session_id=source_session_id,
         )
