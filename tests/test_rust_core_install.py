@@ -257,7 +257,7 @@ def test_github_release_finds_and_installs_matching_asset(monkeypatch):
     py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
     matching_name = f"m3_core_rs_macos_metal-3.6.6-{py_tag}-{py_tag}-macosx_11_0_arm64.whl"
     payload = _gh_release_payload([
-        f"m3_core_rs_macos_metal-3.6.6-cp310-cp310-macosx_11_0_arm64.whl",  # wrong py
+        "m3_core_rs_macos_metal-3.6.6-cp310-cp310-macosx_11_0_arm64.whl",  # wrong py
         matching_name,                                                       # match
         f"m3_core_rs_linux_cuda-3.6.6-{py_tag}-{py_tag}-linux_x86_64.whl",   # wrong os
     ])
@@ -300,8 +300,8 @@ def test_github_release_finds_and_installs_matching_asset(monkeypatch):
 
 def test_github_release_404_returns_nonzero(monkeypatch):
     """Draft / missing release -> 1 (caller falls through). Don't raise."""
-    import urllib.request as _ur
     import urllib.error as _ue
+    import urllib.request as _ur
 
     def fake_urlopen(req, timeout=None):
         raise _ue.HTTPError(

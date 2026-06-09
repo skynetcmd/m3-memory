@@ -1,7 +1,7 @@
 import os
-import sys
-import platform
 import re
+import sys
+
 
 def is_valid_ip(ip):
     """Validate IP address format."""
@@ -52,6 +52,7 @@ def get_platform_instructions(var_name):
 
 import argparse
 
+
 def list_secrets():
     """List all tracked environment variables and their current values."""
     print("--- Current Environment Variable Values ---")
@@ -64,7 +65,7 @@ def list_secrets():
 def main():
     parser = argparse.ArgumentParser(description="Validate or list environment variables.")
     parser.add_argument("-l", "--list", help="List values of environment variables (e.g., -l secrets)", metavar="MODE")
-    
+
     args, unknown = parser.parse_known_args()
 
     if args.list == "secrets":
@@ -87,8 +88,8 @@ def main():
                 errors_found += 1
             else:
                 print(f"\n⚠️  Warning: Optional environment variable '{var_name}' is not set.")
-            
-            print(f"   To set it permanently, use the command for your OS:")
+
+            print("   To set it permanently, use the command for your OS:")
             instructions = get_platform_instructions(var_name)
             for platform_name, command in instructions.items():
                 print(f"   - {platform_name}: {command}")

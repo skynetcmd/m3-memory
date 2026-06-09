@@ -1,4 +1,3 @@
-import importlib
 import os
 import sys
 
@@ -12,19 +11,21 @@ def trim_legacy(monkeypatch):
     """Binds the documented small-pool overrides on the config module so the trim
     fires on the 5-element pools these tests use. Defaults (MIN_INPUT=20)
     skip trimming for pools under 20.
-    
+
     Using monkeypatch.setattr directly on the config module object avoids
     reload-based state leakage or sys.modules mismatch errors across tests.
     """
     import sys
+
     import memory_core
+
     from memory import search
-    
+
     # Directly patch memory.search's config module reference for maximum resilience
     monkeypatch.setattr(search.config, "ELBOW_MIN_INPUT", 3)
     monkeypatch.setattr(search.config, "ELBOW_MIN_RETURN", 1)
     monkeypatch.setattr(search.config, "ELBOW_ABS_THRESHOLD", 0.0)
-    
+
     for name, module in list(sys.modules.items()):
         if hasattr(module, "ELBOW_MIN_INPUT"):
             monkeypatch.setattr(module, "ELBOW_MIN_INPUT", 3)

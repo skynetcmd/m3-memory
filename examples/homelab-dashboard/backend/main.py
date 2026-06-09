@@ -1,13 +1,14 @@
+import os
+import subprocess
+import sys
+
+import httpx
+import ujson
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import httpx
-from bs4 import BeautifulSoup
-import ujson
-import subprocess
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
-import os
-import sys
+from fastapi.staticfiles import StaticFiles
 
 # Import auth_utils from the parent bin directory
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bin")))
@@ -98,12 +99,12 @@ async def get_homepage_data():
             response.raise_for_status()
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-        
+
         soup = BeautifulSoup(response.text, "html.parser")
         next_data_script = soup.find("script", id="__NEXT_DATA__")
         if not next_data_script:
             raise HTTPException(status_code=500, detail="NEXT_DATA not found")
-        
+
         try:
             data = ujson.loads(next_data_script.string)
             props = data.get("props", {}).get("pageProps", {})
@@ -140,7 +141,7 @@ async def get_os_health():
     """Reports health telemetry for M3 Memory."""
     if not M3Context:
         return {"status": "error", "error": "M3 SDK not found. Ensure backend is running within project root."}
-    
+
     ctx = M3Context()
     health = {
         "status": "healthy",

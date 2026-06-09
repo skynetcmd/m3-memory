@@ -11,11 +11,8 @@ unit tests — we test the state module's behavior, not the runner).
 """
 from __future__ import annotations
 
-import os
 import sqlite3
 import sys
-import tempfile
-import time
 from pathlib import Path
 
 import pytest

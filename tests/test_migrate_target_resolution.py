@@ -14,8 +14,6 @@ import subprocess
 import sys
 import unittest.mock as mock
 
-import pytest
-
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN_DIR = os.path.join(REPO_ROOT, "bin")
 if BIN_DIR not in sys.path:

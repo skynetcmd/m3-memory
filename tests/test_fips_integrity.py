@@ -10,10 +10,11 @@ Exit criteria (Milestone 2):
     DEFAULT backend (standard cryptography library).
   • No silent fallback from wolfSSL to stdlib under FIPS mode.
 """
-import os
-import sys
 import hashlib
 import importlib
+import os
+import sys
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))

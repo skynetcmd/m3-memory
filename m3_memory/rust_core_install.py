@@ -432,7 +432,7 @@ def install_from_github_release(
                 "User-Agent": "m3-memory-installer",
             },
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310 - static https GitHub API URL
             release = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         if e.code == 404:
@@ -462,6 +462,16 @@ def install_from_github_release(
     wheel_url = asset["browser_download_url"]
     wheel_name = asset["name"]
     wheel_size = asset.get("size", 0)
+
+    # The download URL comes from the GitHub API response, i.e. external data.
+    # Pin the scheme to https before opening so a tampered/unexpected response
+    # can't redirect the installer to file:// (local-file read) or a plaintext
+    # http downgrade. Fail loud rather than fetch an untrusted scheme.
+    if not wheel_url.lower().startswith("https://"):
+        print(f"[rust-core] refusing non-https asset URL ({wheel_url!r}); "
+              f"skipping Release fallback", file=sys.stderr)
+        return 1
+
     print(f"[rust-core] downloading {wheel_name} "
           f"({wheel_size / (1024*1024):.1f} MiB)...")
 
@@ -475,8 +485,8 @@ def install_from_github_release(
     try:
         downloaded = 0
         try:
-            with urllib.request.urlopen(wheel_url, timeout=300) as resp, \
-                 open(wheel_path, "wb") as out:
+            resp = urllib.request.urlopen(wheel_url, timeout=300)  # nosec B310 - https scheme validated above
+            with resp, open(wheel_path, "wb") as out:
                 chunk_size = 1024 * 1024            # 1 MiB
                 next_progress = 10 * 1024 * 1024    # heartbeat every 10 MiB
                 while True:
@@ -496,7 +506,7 @@ def install_from_github_release(
             return 1
 
         if downloaded == 0:
-            print(f"[rust-core] wheel download yielded 0 bytes", file=sys.stderr)
+            print("[rust-core] wheel download yielded 0 bytes", file=sys.stderr)
             return 1
 
         print(f"[rust-core] downloaded {downloaded / (1024*1024):.1f} MiB; "
@@ -584,7 +594,7 @@ def install_rust_core(os_tok: Optional[str] = None, *,
                 file=sys.stderr,
             )
             return 2
-        choice = BackendChoice(os_tok, backend, f"explicit --backend override")
+        choice = BackendChoice(os_tok, backend, "explicit --backend override")
         print(f"[rust-core] backend override: {choice.package}")
     else:
         choice = detect_backend(os_tok)

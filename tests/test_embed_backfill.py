@@ -14,7 +14,6 @@ The embed_many call is mocked to keep tests offline; we assert:
 from __future__ import annotations
 
 import argparse
-import asyncio
 import os
 import sqlite3
 import sys

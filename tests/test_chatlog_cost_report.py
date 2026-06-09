@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+
 import pytest
 
 
@@ -121,7 +122,6 @@ def _seed_cost_data(db_path):
 
 def test_cost_report_aggregates_by_provider(cost_report_db):
     """Cost report groups by provider and aggregates costs."""
-    import chatlog_core
 
     # We'll test the aggregation logic by reading the DB
     conn = sqlite3.connect(str(cost_report_db))

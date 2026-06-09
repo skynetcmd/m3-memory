@@ -1,9 +1,9 @@
 from fastapi import FastAPI
-from router.router import router as router_router
 from memory.memory_api import router as memory_router
+from router.router import router as router_router
 from tools.filesystem import router as fs_router
-from tools.router_call import router as llm_tool_router
 from tools.home_discovery import router as home_router
+from tools.router_call import router as llm_tool_router
 
 app = FastAPI(title="mac-agent")
 

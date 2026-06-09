@@ -23,8 +23,6 @@ import json
 import os
 import sys
 
-import pytest
-
 # conftest.py already puts bin/ on sys.path; belt-and-suspenders for isolation.
 _HERE = os.path.dirname(__file__)
 _BIN = os.path.normpath(os.path.join(_HERE, "..", "bin"))
@@ -32,8 +30,6 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import mcp_tool_catalog
-import tool_domains
-
 
 # Path to the shipped files corpus DB, resolved relative to the repo root so
 # the test runs from any cwd.

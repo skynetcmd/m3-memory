@@ -15,13 +15,10 @@ The PG cursor is a lightweight fake that accepts execute_values-style calls.
 
 from __future__ import annotations
 
-import os
 import pathlib
 import sqlite3
 import sys
 import types
-
-import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "bin"))

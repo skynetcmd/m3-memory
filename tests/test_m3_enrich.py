@@ -6,7 +6,6 @@ DB schema use a minimum-schema fixture similar to test_observer.py.
 """
 from __future__ import annotations
 
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -76,8 +75,9 @@ def test_resolve_db_returns_none_when_missing(tmp_path, monkeypatch):
 
 
 def test_build_type_allowlist_default():
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         include_summaries=False, include_notes=False,
         include_types=None, only_use_types=None,
@@ -87,8 +87,9 @@ def test_build_type_allowlist_default():
 
 
 def test_build_type_allowlist_with_summaries_and_notes():
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         include_summaries=True, include_notes=True,
         include_types=None, only_use_types=None,
@@ -101,8 +102,9 @@ def test_build_type_allowlist_with_summaries_and_notes():
 
 def test_build_type_allowlist_extra_types():
     """--include-types ADDS to the active default (extends, not replaces)."""
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         include_summaries=False, include_notes=False,
         include_types="decision,plan,fact", only_use_types=None,
@@ -120,8 +122,9 @@ def test_build_type_allowlist_extra_types():
 def test_resolve_default_types_per_db():
     """--core picks broad core types; --chatlog stays message-shaped;
     neither flag falls back to legacy chatlog default."""
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     core_args = argparse.Namespace(core_only=True, chatlog_only=False)
     chat_args = argparse.Namespace(core_only=False, chatlog_only=True)
     none_args = argparse.Namespace(core_only=False, chatlog_only=False)
@@ -134,8 +137,9 @@ def test_resolve_default_types_per_db():
 
 def test_build_type_allowlist_core_default_includes_decision_plan():
     """--core with no other flags broadens the default to include decision/plan/fact."""
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         core_only=True, chatlog_only=False,
         include_summaries=False, include_notes=False,
@@ -148,8 +152,9 @@ def test_build_type_allowlist_core_default_includes_decision_plan():
 
 def test_build_type_allowlist_include_types_extends_core_default():
     """--include-types is additive: keeps the --core default AND adds the new types."""
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         core_only=True, chatlog_only=False,
         include_summaries=False, include_notes=False,
@@ -166,8 +171,9 @@ def test_build_type_allowlist_include_types_extends_core_default():
 
 def test_build_type_allowlist_only_use_types_replaces_default():
     """--only-use-types fully replaces the default. Escape hatch for narrow lists."""
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         core_only=True, chatlog_only=False,
         include_summaries=False, include_notes=False,
@@ -179,8 +185,9 @@ def test_build_type_allowlist_only_use_types_replaces_default():
 
 def test_build_type_allowlist_only_use_types_with_include_summaries():
     """--only-use-types replaces default, but --include-summaries still extends after."""
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         core_only=False, chatlog_only=False,
         include_summaries=True, include_notes=False,
@@ -192,8 +199,9 @@ def test_build_type_allowlist_only_use_types_with_include_summaries():
 
 def test_build_type_allowlist_skips_observation_in_extra_types():
     """ALWAYS_SKIP_TYPES (observation) cannot be re-added via either flag."""
-    import m3_enrich
     import argparse
+
+    import m3_enrich
     args = argparse.Namespace(
         include_summaries=False, include_notes=False,
         include_types="observation,decision", only_use_types=None,
@@ -426,8 +434,8 @@ def test_observation_enqueue_idempotent(stub_db, monkeypatch):
 def test_drain_queue_mode_handles_empty_queue(stub_db, monkeypatch, capsys):
     """--drain-queue with no pending rows should print 'queue empty' and
     exit 0 — not crash or block."""
-    import asyncio
     import argparse
+    import asyncio
 
     monkeypatch.setenv("M3_DATABASE", str(stub_db))
     # The local-SLM profile resolves LM_API_TOKEN via get_api_key; on CI
@@ -477,7 +485,6 @@ def test_chatlog_ingest_auto_enrich_gated_by_env(monkeypatch):
     """chatlog_ingest.py only enqueues when M3_AUTO_ENRICH=1. We can't easily
     end-to-end test the full ingest pipeline here, but we can verify the
     truthy-check by inspecting the source — as a defensive sanity check."""
-    import inspect
     import importlib
     spec = importlib.util.find_spec("chatlog_ingest")
     assert spec is not None, "chatlog_ingest must be importable for E1"

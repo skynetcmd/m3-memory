@@ -8,9 +8,7 @@ Verifies:
 from __future__ import annotations
 
 import os
-import sqlite3
 import sys
-import pytest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
@@ -52,13 +50,13 @@ def test_compute_bitemporal_diffs_polars_fallback(monkeypatch):
     # Python has standard import mechanism, we mock importlib or just raise ImportError
     # inside compute_bitemporal_diffs_impl's try block.
     # To test this, we can run with polars available (if installed) or check fallback.
-    
+
     # 1. Fallback result
     fallback_res = history.compute_bitemporal_diffs_impl(history_rows)
-    
+
     # 2. Polars result (mocked or real)
     try:
-        import polars as pl
+        import polars  # noqa: F401 - availability probe; only has_polars is used
         has_polars = True
     except ImportError:
         has_polars = False
@@ -87,7 +85,7 @@ def test_get_bitemporal_timeline_empty(monkeypatch):
             return mock_res
 
     monkeypatch.setattr(history, "_db", lambda: MockDB())
-    
+
     out = history.get_bitemporal_timeline_impl("mem1")
     assert "No bitemporal history found" in out
 
@@ -122,9 +120,9 @@ def test_get_bitemporal_timeline_populated(monkeypatch):
             return mock_res
 
     monkeypatch.setattr(history, "_db", lambda: MockDB())
-    
+
     out = history.get_bitemporal_timeline_impl("mem1")
-    
+
     assert "Bitemporal Change Timeline for mem1" in out
     assert "mutated 'title': 'A' -> 'B'" in out
     assert "mutated 'title': 'B' -> 'C'" in out

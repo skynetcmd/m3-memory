@@ -254,8 +254,9 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         print("    - RUN ALONGSIDE default memories to extend Hermes' capability with long-term vector search.")
         print("  For complete setup guidance, see the newly created documentation at:")
         try:
-            from m3_sdk import get_m3_root
             from pathlib import Path as _Path
+
+            from m3_sdk import get_m3_root
             _doc_path = f"file:///{_Path(get_m3_root()).resolve().as_posix()}/docs/HERMES.md"
         except Exception:
             _doc_path = "docs/HERMES.md"
@@ -538,7 +539,7 @@ def _persist_embed_gguf_shell(gguf_path: str, *, non_interactive: bool) -> None:
             _warn(f"    setx failed ({e}); set it later: setx M3_EMBED_GGUF \"{gguf_path}\"")
             return
         if result.returncode == 0:
-            _ok(f"    persisted M3_EMBED_GGUF via setx (new shells will see it)")
+            _ok("    persisted M3_EMBED_GGUF via setx (new shells will see it)")
         else:
             stderr = (result.stderr or result.stdout or "").strip()
             _warn(f"    setx exited {result.returncode}: {stderr}")
@@ -905,8 +906,9 @@ def _wire_hermes() -> bool:
     print("    1. Add m3-memory's bin/ to PYTHONPATH in Hermes' launch environment.")
     print("    2. Enable and select 'm3' inside `hermes plugins` to replace/run alongside default memory.")
     try:
-        from m3_sdk import get_m3_root
         from pathlib import Path as _Path
+
+        from m3_sdk import get_m3_root
         _doc_path = f"file:///{_Path(get_m3_root()).resolve().as_posix()}/docs/HERMES.md"
     except Exception:
         _doc_path = "docs/HERMES.md"

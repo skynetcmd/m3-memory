@@ -24,11 +24,8 @@ import os
 import subprocess
 import sys
 import textwrap
-import time
-from pathlib import Path
 
 import pytest
-
 
 GGUF = os.environ.get("M3_TEST_GGUF")
 

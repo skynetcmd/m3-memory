@@ -534,7 +534,6 @@ async def test_auto_route_thresholds_are_overridable(monkeypatch):
 
 def _make_stub_db(rows):
     """Return a minimal stub _db() context manager that yields the given rows."""
-    import sqlite3
 
     class StubCursor:
         def __init__(self, r):
@@ -569,6 +568,7 @@ async def test_federation_fires_on_low_confidence_scoped_query(monkeypatch):
     - The federated hit carries _explanation.source='federated_chroma_scoped'.
     """
     import struct
+
     import memory_core as mc
 
     # Fake 1-dim embedding: q_vec and row embedding are identical → cosine = 1.0
@@ -670,6 +670,7 @@ async def test_federation_skipped_on_strong_local_hits(monkeypatch):
     5 local hits at score 0.9 → local_top_score 0.9 >= 0.65 and len >= 3 → no federation.
     """
     import struct
+
     import memory_core as mc
 
     dummy_vec = [0.1] * 4
@@ -747,6 +748,7 @@ async def test_federation_skipped_on_conversation_id_filter(monkeypatch):
     _skip_federated_hard=True, so _query_chroma must not be called.
     """
     import struct
+
     import memory_core as mc
 
     dummy_vec = [0.1] * 4
@@ -1373,8 +1375,10 @@ def test_displacement_guard_env_var_override(monkeypatch):
 @pytest.mark.asyncio
 async def test_fts_short_circuit_bypasses_embedding(monkeypatch, tmp_path):
     """Verify that highly specific FTS exact match triggers the short-circuit and completely bypasses embedding."""
-    import memory_core as mc
     import sqlite3
+
+    import memory_core as mc
+
     from conftest import create_full_main_schema
 
     db_path = tmp_path / "test_short_circuit.db"
@@ -1429,8 +1433,10 @@ async def test_fts_short_circuit_bypasses_embedding(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_fts_short_circuit_conversational_skip(monkeypatch, tmp_path):
     """Verify that generic conversational query is skipped for short-circuit, calling embed normally."""
-    import memory_core as mc
     import sqlite3
+
+    import memory_core as mc
+
     from conftest import create_full_main_schema
 
     db_path = tmp_path / "test_short_circuit_skip.db"
@@ -1476,9 +1482,9 @@ async def test_fts_short_circuit_conversational_skip(monkeypatch, tmp_path):
 
 def test_elbow_quality_gating_floor(monkeypatch):
     """Verify that elbow-trimming is bypassed when the top candidate's similarity is below 0.75."""
-    import memory_core as mc
     import memory.config
-    
+    import memory_core as mc
+
     # 1. Top score is 0.70 (< 0.75) -> Should bypass trimming entirely and keep all
     hits_low = [
         (0.70, {"id": "mem1"}),
@@ -1488,12 +1494,12 @@ def test_elbow_quality_gating_floor(monkeypatch):
         (0.44, {"id": "mem5"}),
         (0.42, {"id": "mem6"}),
     ]
-    
+
     # Mock ELBOW_MIN_INPUT to 5 so it triggers on these pools
     monkeypatch.setattr(memory.config, "ELBOW_MIN_INPUT", 5)
     # Mock ELBOW_MIN_RETURN to 3 so it is allowed to trim below 6 elements
     monkeypatch.setattr(memory.config, "ELBOW_MIN_RETURN", 3)
-    
+
     out_low = mc._trim_by_elbow(hits_low, sensitivity=1.0)
     assert len(out_low) == len(hits_low), "Should bypass trimming when top similarity < 0.75"
 
@@ -1506,6 +1512,6 @@ def test_elbow_quality_gating_floor(monkeypatch):
         (0.38, {"id": "mem5"}),
         (0.36, {"id": "mem6"}),
     ]
-    
+
     out_high = mc._trim_by_elbow(hits_high, sensitivity=1.5)
     assert len(out_high) < len(hits_high), "Should trim candidates when top similarity is high and drop occurs"

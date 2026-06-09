@@ -9,13 +9,10 @@ These tests verify the guard at the unit level without spinning up the full
 memory_write pipeline.
 """
 
-import os
-import struct
-import sqlite3
 import asyncio
+import sqlite3
+import struct
 from contextlib import contextmanager
-
-import pytest
 
 
 def _pack_vec(vec: list[float]) -> bytes:

@@ -27,10 +27,16 @@ warn but still load (operator may have relaxed for a service account).
 No hardcoded fallback. If no source yields a token the script exits 2
 with a setup hint covering both input shapes.
 """
-import argparse, json, os, stat, subprocess, sys, time
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
-import urllib.request, urllib.parse
 
 DD_URL = os.environ.get('DD_URL', 'http://10.21.40.54:8080')
 
@@ -159,7 +165,7 @@ SCANNERS = [
     ('bandit',    ['bandit', '-r', '{repo}', '-c', '{repo}/pyproject.toml', '-f', 'json', '-o', '{out}/bandit.json', '--exit-zero'], 'bandit.json', 'Bandit Scan'),
     ('pip-audit', ['bash', '-c', 'find {repo} -name requirements*.txt | head -1 | xargs -I R pip-audit -r R -f json -o {out}/pip-audit.json || echo [] > {out}/pip-audit.json'], 'pip-audit.json', 'pip-audit Scan'),
     ('checkov',   ['checkov', '-d', '{repo}', '-o', 'sarif', '--output-file-path', '{out}', '--quiet', '--soft-fail'], 'results_sarif.sarif', 'SARIF'),
-    
+
     # Auxiliary Scanners
     ('osv-scanner',['osv-scanner', '-r', '{repo}', '--format', 'json', '--output', '{out}/osv-scanner.json'], 'osv-scanner.json', 'OSV Scan'),
     ('safety',    ['safety', 'check', '-r', '{repo}/requirements.txt', '--json', '--output', '{out}/safety.json'], 'safety.json', 'Safety Scan'),

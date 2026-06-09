@@ -10,7 +10,6 @@ No DB writes; this exercises the recovery LOGIC, not the SQL inserts.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sqlite3
 import sys
@@ -30,9 +29,8 @@ os.environ.setdefault("M3_EMBED_SEQ_MAX", "8")
 os.environ.setdefault("M3_EMBED_N_BATCH", "8192")
 os.environ.setdefault("M3_EMBED_N_UBATCH", "8192")
 
-import memory_core as mc  # noqa: E402
 import m3_core_rs  # noqa: E402
-
+import memory_core as mc  # noqa: E402
 
 CHATLOG_DB = Path(r"C:\Users\bhaba\m3-memory\memory\agent_chatlog.db")
 KNOWN_BAD_IDS = [
@@ -71,7 +69,7 @@ def main():
         print("No known-bad rows found in DB; nothing to test.")
         sys.exit(1)
 
-    print(f"Loading in-process Rust embedder...")
+    print("Loading in-process Rust embedder...")
     t0 = time.perf_counter()
     embedder = m3_core_rs.EmbeddedEmbedder(os.environ["M3_EMBED_GGUF"])
     dim = embedder.embedding_dim()

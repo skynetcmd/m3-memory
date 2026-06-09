@@ -1,8 +1,5 @@
 import os
 import sys
-import tempfile
-import shutil
-from pathlib import Path
 
 import pytest
 
@@ -16,7 +13,6 @@ from memory_core import (
     task_list_impl,
     task_update_impl,
 )
-
 
 # ── Isolation: route every _db() call to a fresh temp DB ─────────────────────
 # Without this, task_create_impl targets the production DB (or whatever
@@ -34,8 +30,9 @@ def _isolated_db(monkeypatch, tmp_path):
     the new path. M3_SKIP_MIGRATIONS=1 prevents a second migrate_memory
     subprocess since the template is already at the latest version.
     """
-    from conftest import create_full_main_schema
     import memory.db as _mdb
+
+    from conftest import create_full_main_schema
 
     db_path = tmp_path / "tombstone_test.db"
     create_full_main_schema(db_path)

@@ -1,5 +1,5 @@
-import os
 import json
+import os
 
 # --- CONFIGURATION ---
 PROJECT_NAME = os.path.basename(os.getcwd())
@@ -9,7 +9,7 @@ EXCLUDE_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'dist', 'build'}
 def setup_mcp_configs():
     """Configures Claude Code and Gemini CLI to see your Local MLX and Web Tools."""
     print("🔧 Configuring MCP Bridges...")
-    
+
     # Claude Code Config (Standard Path)
     claude_config_path = os.path.expanduser("~/.claude/settings.json")
     claude_config = {
@@ -24,7 +24,7 @@ def setup_mcp_configs():
             }
         }
     }
-    
+
     os.makedirs(os.path.dirname(claude_config_path), exist_ok=True)
     with open(claude_config_path, 'w') as f:
         json.dump(claude_config, f, indent=2)
@@ -33,20 +33,20 @@ def setup_mcp_configs():
 def create_project_manifest():
     """Uses Gemini's context window to index the project for $0.01."""
     print("🧠 Generating Project Manifest via Gemini...")
-    
+
     file_structure = []
     for root, dirs, files in os.walk("."):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
         for file in files:
             file_structure.append(os.path.join(root, file))
-    
+
     # This manifest is what we feed to Gemini CLI to 'prime' its 2M context
     manifest = {
         "project": PROJECT_NAME,
         "files": file_structure,
         "instructions": "Use this map to find files. Do not read them all at once; only read what is needed for the specific task."
     }
-    
+
     with open(MEMORY_FILE, 'w') as f:
         json.dump(manifest, f, indent=2)
     print(f"✅ Created {MEMORY_FILE}. Feed this to Gemini CLI for instant project awareness.")
@@ -54,14 +54,14 @@ def create_project_manifest():
 def generate_bash_shortcuts():
     """Creates the 'Smart Handoff' commands for your terminal."""
     print("📜 Creating terminal shortcuts...")
-    
+
     shortcuts = """
 # AI Agentic Shortcuts
 alias ai-research="gemini 'Using Perplexity, research the latest version of my project dependencies and save to RESEARCH.md'"
 alias ai-audit="pbpaste | lms prompt --model deepseek-r1-70b 'Review this code for bugs and security flaws.'"
 alias ai-do="claude --model claude-3-7-sonnet 'Read RESEARCH.md and the project manifest, then implement the changes.'"
     """
-    
+
     with open("ai_shortcuts.sh", "w") as f:
         f.write(shortcuts)
     print("✅ Created ai_shortcuts.sh. Run 'source ai_shortcuts.sh' to activate.")

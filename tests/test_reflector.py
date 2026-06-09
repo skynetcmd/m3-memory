@@ -6,10 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import sqlite3
 import sys
-import uuid
 from pathlib import Path
 
 import httpx

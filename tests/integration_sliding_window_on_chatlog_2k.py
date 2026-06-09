@@ -45,8 +45,8 @@ os.environ.setdefault("M3_EMBED_SEQ_MAX", "8")
 os.environ.setdefault("M3_EMBED_N_BATCH", "8192")
 os.environ.setdefault("M3_EMBED_N_UBATCH", "8192")
 
-import memory_core as mc  # noqa: E402
 import m3_core_rs  # noqa: E402
+import memory_core as mc  # noqa: E402
 
 CHATLOG_DB = Path(r"C:\Users\bhaba\m3-memory\memory\agent_chatlog.db")
 CSV_OUT = Path(r"C:\Users\bhaba\m3-memory\.scratch\integration_chunking_2k.csv")
@@ -185,7 +185,7 @@ def main():
     total_wall = time.perf_counter() - t_run
 
     # =============== Report ===============
-    print(f"\n=== TIMING ===")
+    print("\n=== TIMING ===")
     print(f"  total wall: {total_wall:.1f}s")
     print(f"  total embed time: {total_embed_s:.1f}s")
     print(f"  rows/sec: {N_TOTAL/total_wall:.1f}")
@@ -193,22 +193,22 @@ def main():
     print(f"  total chunks: {total_chunks}")
     print(f"  chunks/row avg: {total_chunks/N_TOTAL:.2f}")
 
-    print(f"\n=== ROW BUCKETS ===")
+    print("\n=== ROW BUCKETS ===")
     print(f"  single_chunk rows: {counters['single_chunk']}  ({100*counters['single_chunk']/N_TOTAL:.1f}%)")
     print(f"  multi_chunk rows:  {counters['multi_chunk']}  ({100*counters['multi_chunk']/N_TOTAL:.1f}%)")
     print(f"  all_chunks_ok:     {counters['all_chunks_ok']}  ({100*counters['all_chunks_ok']/N_TOTAL:.1f}%)")
     print(f"  partial_ok:        {counters['partial_ok']}")
     print(f"  all_fail:          {counters['all_fail']}")
 
-    print(f"\n=== n_chunks distribution ===")
+    print("\n=== n_chunks distribution ===")
     for nc in sorted(n_chunks_hist):
         print(f"  n_chunks={nc:>3}: {n_chunks_hist[nc]:>4} rows  ({100*n_chunks_hist[nc]/N_TOTAL:.1f}%)")
 
-    print(f"\n=== chunk char-length distribution (5000-char bins) ===")
+    print("\n=== chunk char-length distribution (5000-char bins) ===")
     for bucket in sorted(chunk_char_hist):
         print(f"  [{bucket:>6}, {bucket+5000:>6}): {chunk_char_hist[bucket]:>5} chunks")
 
-    print(f"\n=== chunk approx-token distribution (1000-token bins, chars/4) ===")
+    print("\n=== chunk approx-token distribution (1000-token bins, chars/4) ===")
     for bucket in sorted(chunk_tok_hist):
         print(f"  [{bucket:>5}, {bucket+1000:>5}): {chunk_tok_hist[bucket]:>5} chunks")
 
@@ -219,7 +219,7 @@ def main():
     if len(dense_overflow_rows) > 10:
         print(f"  ... and {len(dense_overflow_rows)-10} more")
 
-    print(f"\n=== OTHER EMBED FAILURES ===")
+    print("\n=== OTHER EMBED FAILURES ===")
     print(f"  count: {len(embed_failures)} rows")
     for mid, rc, err in embed_failures[:10]:
         print(f"  {mid[:8]} raw_chars={rc}  err: {err[:120]}")

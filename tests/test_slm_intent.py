@@ -127,6 +127,7 @@ def test_list_profiles_discovers_yaml_files(tmp_path, monkeypatch):
 def test_profile_search_dir_stacking(tmp_path, monkeypatch):
     """Multiple dirs in M3_SLM_PROFILES_DIR resolve first-match-wins."""
     import os
+
     import slm_intent
 
     dir_a = tmp_path / "a"
@@ -435,8 +436,8 @@ def test_parse_profile_rejects_unknown_backend(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_call_model_openai_body_shape(tmp_path, monkeypatch):
     """_call_model with backend=openai sends OpenAI chat/completions body."""
-    import slm_intent
     import httpx
+    import slm_intent
 
     _write_profile(tmp_path / "default.yaml", api_key_service=None)
     monkeypatch.setenv("M3_SLM_PROFILES_DIR", str(tmp_path))
@@ -475,8 +476,8 @@ async def test_call_model_openai_body_shape(tmp_path, monkeypatch):
 async def test_call_model_anthropic_body_shape(tmp_path, monkeypatch):
     """_call_model with backend=anthropic sends Anthropic messages body,
     with system as a top-level field wrapped in cache_control."""
-    import slm_intent
     import httpx
+    import slm_intent
 
     _write_profile(tmp_path / "a.yaml", backend="anthropic", api_key_service=None)
     monkeypatch.setenv("M3_SLM_PROFILES_DIR", str(tmp_path))
@@ -518,8 +519,8 @@ async def test_call_model_anthropic_body_shape(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_call_model_anthropic_no_cache(tmp_path, monkeypatch):
     """When cache_system=False, system is sent as a plain string."""
-    import slm_intent
     import httpx
+    import slm_intent
 
     _write_profile(
         tmp_path / "a.yaml",
@@ -552,8 +553,8 @@ async def test_call_model_anthropic_no_cache(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_call_model_anthropic_uses_x_api_key(tmp_path, monkeypatch):
     """When an API key resolves, anthropic backend uses x-api-key header."""
-    import slm_intent
     import httpx
+    import slm_intent
 
     _write_profile(tmp_path / "a.yaml", backend="anthropic", api_key_service="FAKE_KEY_SVC")
     monkeypatch.setenv("M3_SLM_PROFILES_DIR", str(tmp_path))
