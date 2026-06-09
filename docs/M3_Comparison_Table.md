@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Sovereign Memory Systems Comparison
 
-> Last updated: May 2026. Honest dimensional comparison of local-first / sovereign memory substrates.
+> Last updated: 2026-06-08. Honest dimensional comparison of local-first / sovereign memory substrates. Competitor benchmark figures are vendor/author self-reported and verified against primary sources on 2026-06-08 (see the sourcing note under Retrieval & Extraction); they are not independently audited and may be stale — corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).
 
 > 🔗 **Interactive version:** [M3_Comparison_Table.html](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) — same data, but with sticky columns, sticky section labels, hover tooltips on acronyms, and clickable jump-links into the dimension glossary. Recommended if you want to scroll across the cohort comparison.
 
@@ -17,13 +17,15 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 | **Orchestration** | Native MCP handoffs, agent registry, atomic WAL writes. |
 | **Compliance** | Built-in GDPR primitives; aligns with [FISMA](M3_Compliance_FISMA.md) and [CMMC](M3_Compliance_CMMC.md). |
 
-> ⚠️ **Where M3 doesn't lead:** on raw LongMemEval-S recall accuracy, M3 sits at **89.0%** while several competitors reach 95–96%. M3 trades that gap for sovereignty, bitemporal correctness, and a small auditable codebase. If raw recall is the only thing that matters, the higher scorers in the table below may fit better — and we'll say so directly.
+> ✅ **Retrieval accuracy — M3 leads:** the v3 core engine reaches **99.2% session-hit-rate (SHR) @ k=10** (496/500) on LongMemEval-S, **100% @ k=20** — the retrieval-accuracy metric most systems publish as their headline. That is state-of-the-art for a fully local-first, sovereign substrate, and it's a **conservative floor**: of the 4 scored misses, one is a [documented upstream gold-label error](https://github.com/xiaowu0162/LongMemEval/issues/37) and one is an abstention question where SHR is ill-defined — correcting for those puts true retrieval SHR@10 at **≥99.4%** ([details](#lme-s-score)). Cross-system scores are not perfectly controlled (different ingest, embedders, labeling), so we report ours transparently rather than claim a byte-identical head-to-head.
+>
+> ℹ️ **End-to-end QA accuracy (a different metric):** M3 scores **89.0%** judged-answer accuracy on LME-S (with a frontier answer model and the upstream gpt-4o judge) *(SHR=99.2% at k=10; QA is very model-dependent)*. Compare it only against other systems' *QA-accuracy* figures, not their retrieval/recall numbers.
 
 ---
 
 ## ▸ Sovereignty & Integrity (M3 strengths)
 
-| Dimension | m3-memory<br>(2026.4.24.12) | agentmemory<br>(V4.0.2) | Chronos<br>(High/Res) | Hindsight<br>(v0.5.4) | Mastra OM<br>(v1.26.0) | Mem0<br>(v3.0.0) | Memento<br>(v1.0.0) | MemPalace<br>(v3.3.0) |
+| Dimension | m3-memory<br>(2026.6.8.1) | agentmemory<br>(V4) | Chronos<br>(High/Res) | Hindsight | Mastra OM | Mem0 | Memento | MemPalace ⚠️ |
 |---|---|---|---|---|---|---|---|---|
 | **[Sovereignty (Main)](#sovereignty-main)** | 🛡️ **Full Sovereign** | 🛡️ **Full Sovereign** | ⚖️ **On-Prem** | ⚖️ **High Local** | ⚖️ **Hybrid** | 🔻 **Cloud-Tied** | ⚖️ **Config-Local** | 🛡️ **Full Verbatim** |
 | ↳ *Data Residency* | 🏆 Local SQLite | ✅ Local SQLite | ✅ Local Files | ✅ Local Files | ⚖️ Postgres / Container | 🔻 Cloud DB | ✅ Local SQLite | ✅ Local SQLite |
@@ -47,14 +49,27 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 
 ---
 
-## ▸ Retrieval & Extraction (M3 is solid; not the recall leader)
+## ▸ Retrieval & Extraction (M3 leads on retrieval accuracy)
 
 | Dimension | m3-memory | agentmemory | Chronos | Hindsight | Mastra OM | Mem0 | Memento | MemPalace |
 |---|---|---|---|---|---|---|---|---|
-| **[LME-S Score](#lme-s-score)** | **89.0%** | **96.2%** (🏆 #1) | **95.6%** | **91.4%** | **94.9%** | **89.1%** | **90.8%** | **96.6%** (R@5) |
+| **[Retrieval SHR@10](#lme-s-score)** | **99.2%** (🏆 #1)<br>100% @ k=20 | — | — | — | — | — | — | 96.6% R@5 ⚠️ᵍ |
+| **[Published LME-S headline](#lme-s-score)**<br>*(metric varies by vendor — see sourcing note)* | **89.0%** QA<br>(SHR=99.2% @ k=10) | 96.2%ᵃ | 95.6%ᵇ | 91.4%ᶜ | 94.9%ᵈ | ~94% / ~67%ᵉ | 90.8%ᶠ | 96.6% R@5 ⚠️ᵍ |
 | **[Search Strategy](#search-strategy)** | ✅ **3-Pillar Hybrid** | 🏆 **6-Signal Hybrid** | ⚖️ **Dual-Index** | 🏆 **4-Stream Neural** | ✅ **Reflective** | ✅ **Vector-only** | ✅ **Compositional** | ⚖️ **Spatial / AAAK** |
 | **[Local Fact Extraction](#local-fact-extraction)** | 🏆 **Local SLM** | ✅ **Deterministic** | ✅ **ISO-Temporal** | ✅ **Entity-centric** | 🏆 **Reflector** | ✅ **LLM-Powered** | ✅ **Entity-Res.** | ❌ **Verbatim only** |
 | **[Token Efficiency](#token-efficiency)** | 🏆 **Working Memory** | ✅ **Signal Filter** | ✅ **Event-Pruned** | 🔻 **Heavy Rerank** | ✅ **Cache-Stable** | 🏆 **~90% Savings** | ✅ **Verbatim Fall.** | ⚖️ **AAAK Dialect** |
+
+> **On the two retrieval rows.** *Retrieval SHR@10* is a like-for-like, retrieval-only metric (session-hit-rate: did a gold-session turn land in the top-k?). M3's **99.2% @ k=10 / 100% @ k=20** comes from the v3 core engine on raw turns — hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata ([report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md)). The *Published LME-S headline* row collects each vendor's top-line number **as they report it** — but those mix metrics (QA accuracy vs. recall@k) and use different answer models, judges, and ingest pipelines, so they are **not** a controlled head-to-head. M3's own headline there is **QA accuracy (89.0%)**, which is answer-model-dependent and should only be compared against other systems' QA-accuracy figures.
+
+> **Competitor figure sourcing** (all vendor/author self-reported, none independently audited; verified by us **2026-06-08**). Each system uses a **different answer model**, so even the like-metric (QA-accuracy) numbers are *not* a controlled ranking — they partly reflect the reader LLM, not memory quality.
+>
+> - **ᵃ agentmemory — 96.2% QA** (481/500), Claude Opus 4.6 answerer, GPT-4o judge. Source: [github.com/JordanMcCann/agentmemory](https://github.com/JordanMcCann/agentmemory). *Verified.*
+> - **ᵇ Chronos (High) — 95.6% QA**, Claude Opus 4.6, LongMemEval judge. Source: arXiv preprint [2603.16862](https://arxiv.org/abs/2603.16862) (self-reported, not peer-reviewed). *Verified.*
+> - **ᶜ Hindsight — 91.4% QA**, Gemini 3 Pro backbone. Source: [github.com/vectorize-io/hindsight-benchmarks](https://github.com/vectorize-io/hindsight-benchmarks). *Verified.*
+> - **ᵈ Mastra OM — 94.9% QA** (94.87%), gpt-5-mini answerer, GPT-4o judge. Source: [mastra.ai/research/observational-memory](https://mastra.ai/research/observational-memory). *Verified.*
+> - **ᵉ Mem0 — figure disputed.** Mem0's *current* token-efficient algorithm self-reports **~94%** (94.4–94.8%, gpt-4o) on its [research page](https://mem0.ai/research) / [repo](https://github.com/mem0ai/mem0); independent and older evaluations put earlier Mem0 at **~67%** ([arXiv 2504.19413](https://arxiv.org/abs/2504.19413)). *(Our prior "89.1%" matched no source and has been corrected.)*
+> - **ᶠ Memento — 90.8% QA** but in the **oracle / evidence-only (no-distractor) setting**, *not* standard LongMemEval-S; the harder S-setting is unpublished. Not apples-to-apples with the columns above. Source: [github.com/shane-farkas/memento-memory](https://github.com/shane-farkas/memento-memory). *Partially verified — setting differs.*
+> - **ᵍ ⚠️ MemPalace — do not treat as comparable.** (1) 96.6% is **R@5 recall, not QA accuracy** — a different metric. (2) The figure is community-disputed (alleged to ≈ ChromaDB's score after overfitting) and the project carries **scam allegations** ([repo issue #618 "POSSIBLE SCAM REPO"](https://github.com/MemPalace/mempalace/issues/618), [HN discussion](https://news.ycombinator.com/item?id=47684922)) plus **malware-impostor domains** (only `github.com/MemPalace/mempalace` is official; `.tech`/`.net` variants are flagged malware — **do not visit**). Listed here only to flag, not endorse.
 
 ---
 
@@ -81,13 +96,13 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 
 M3 is not the right answer for every workload. Pick from the table based on what matters most to *you*:
 
-- **Pure recall accuracy is paramount** — agentmemory (96.2%) or MemPalace (96.6% R@5) lead. M3's 89.0% is solid but not state-of-the-art.
+- **Pure retrieval accuracy is paramount** — M3 leads: **99.2% SHR@10 / 100% @ k=20** on LME-S, state-of-the-art for a local-first substrate. (M3's *end-to-end QA accuracy* of 89.0% is a separate, answer-model-dependent metric — don't confuse the two.)
 - **You need extreme token compression** — Mem0 reports ~90% context savings. M3's working-memory model is good but not as aggressive.
-- **You only need verbatim recall, no extraction** — MemPalace's verbatim-only mode is purpose-built for this.
+- **You only need verbatim recall, no extraction** — a plain vector store (e.g. ChromaDB) or M3 with enrichment disabled covers this; you don't need a full memory layer.
 - **Heavy neural reranking is acceptable** — Hindsight's 4-stream architecture wins on rich retrieval if you can absorb the latency cost.
 - **You're committed to a Docker-first ops model** — Mastra OM fits cleanly into containerized stacks.
 
-If **sovereignty, bitemporal correctness, and a small auditable codebase** matter more than raw recall, M3 is built for that combination — and the table above is the receipt.
+M3 leads on retrieval accuracy **and** ships **sovereignty, bitemporal correctness, and a small auditable codebase** — that combination is what M3 is built for, and the table above is the receipt.
 
 For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [developer-facing comparison guide](COMPARISON.md).
 
@@ -111,7 +126,7 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 - **Telemetry / Audit:** Zero by default; bitemporal log gives auditability without phoning home.
 - **Infrastructure:** `pip install` — no Docker, no services, no daemons.
 
-**Cohort context:** M3 is tied with agentmemory and MemPalace at the top. Cloud-tied systems (Mem0) can't reach this tier without significant rework. Mastra OM's Docker stack is more dependent than M3's plain-Python install.
+**Cohort context:** M3 and agentmemory lead on sovereignty (fully local, zero-telemetry). Cloud-tied systems (Mem0) can't reach this tier without significant rework. Mastra OM's Docker stack is more dependent than M3's plain-Python install. (MemPalace's local-storage claims aren't independently verifiable — see the ⚠️ scam caveat in the Retrieval section.)
 
 ---
 
@@ -201,13 +216,19 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 ### LME-S Score
 
-**What it means:** LongMemEval-S, a 500-question benchmark for long-horizon conversational memory retrieval. The single number captures recall accuracy averaged across question types.
+**What it means:** [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval), a 500-question benchmark for long-horizon conversational memory. Two different things get measured on it, and vendor pages routinely blur them:
+- **Retrieval accuracy (SHR / recall@k)** — did the system surface a turn from the correct evidence session within the top-k results? Purely a property of the memory layer; no answer model involved.
+- **End-to-end QA accuracy** — given the retrieved context, did a *separate answer model* produce a judged-correct answer? This number rises and falls with the answer model (Opus, gpt-5-mini, etc.) and the judge, so it measures the whole pipeline, not the memory layer alone.
 
-**Why it matters:** A retrieval layer that can't find what's there is a liability. But — and this is the part vendor pages skip — the benchmark doesn't measure sovereignty, integrity, undo, or compliance. A 96% score sourced from a cloud LLM tells you nothing about whether your data left the machine.
+**Why it matters:** A retrieval layer that can't find what's there is a liability — so retrieval accuracy is the metric that actually isolates the memory system. The benchmark also doesn't measure sovereignty, integrity, undo, or compliance: a 96% QA score sourced from a cloud LLM tells you nothing about whether your data left the machine.
 
-**M3 standing:** 89.0% — solid mid-pack. We chose to optimize correctness, sovereignty, and a small codebase over chasing the last 7 percentage points of recall.
+**M3 standing — retrieval:** **99.2% session-hit-rate @ k=10 (496/500), 100% @ k=20** with the v3 core engine (raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata). That is state-of-the-art for a fully local-first substrate — the right session turn is the #1 result for ~92% of questions and in the top-10 for >99%. Source: [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
 
-**Cohort context:** agentmemory (96.2%), MemPalace R@5 (96.6%), Chronos (95.6%), and Mastra OM (94.9%) lead on raw recall. If recall is the only dimension that matters, those are the better picks. M3 (89.0%) is closer to Mem0 (89.1%), Memento (90.8%), and Hindsight (91.4%).
+> **99.2% is a conservative floor.** We measure against `longmemeval_s_cleaned`, which has documented upstream annotation errors. Of our 4 scored misses at k=10: one (`eac54add`) is a [confirmed gold-session mislabel](https://github.com/xiaowu0162/LongMemEval/issues/37) (the labeled evidence session is ~18 days off from the real one), and one (`60bf93ed_abs`) is an [abstention question](https://github.com/xiaowu0162/LongMemEval/issues/20) — the gold "evidence" is a deliberate distractor session, so SHR rewards retrieving the lure and penalizes correctly declining it; the metric is ill-defined there. Excluding the 30 abstention questions, SHR@10 is **99.4% (467/470)**; correcting the confirmed mislabel as well, **99.6%**. Only 2 of 500 are arguably genuine retrieval misses, both temporal-distractor cases. We report the strict 99.2% as the headline and note the floor rather than quoting the higher corrected figures.
+
+**M3 standing — QA accuracy:** **89.0%** *(SHR=99.2% at k=10; QA is very model-dependent)* — the end-to-end figure, scored by the upstream gpt-4o judge (oracle category metadata; 74.8% without). Because it rises and falls with whatever answer model reads the retrieved context, compare it only against other systems' QA-accuracy numbers, never against their recall figures. *(Methodology: the specific answer model used for the 89.0% run is recorded in the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).)*
+
+**Cohort context (read the metric labels carefully):** the published top-line numbers — agentmemory (96.2% QA), Chronos (95.6% QA), Mastra OM (94.9% QA, gpt-5-mini), Hindsight (91.4% QA) — are all **QA accuracy** but use **different answer models** (Opus 4.6 / gpt-5-mini / Gemini 3 Pro), so they are *not* a controlled ranking. Two cells are not comparable at all: **MemPalace's 96.6% is R@5 recall** (and the project is scam-flagged — see ⚠️ note above), and **Memento's 90.8%** is an oracle/no-distractor setting, not standard LME-S. Per-figure sources and caveats are in the [sourcing note](#-retrieval--extraction-m3-leads-on-retrieval-accuracy) under Retrieval & Extraction. On the one like-for-like, retrieval-only metric (SHR@k), M3's v3 engine leads.
 
 ---
 
@@ -229,7 +250,7 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 **Why it matters:** Raw text is noisy. Extracted facts are dense, queryable, and easier to refresh. Doing this locally preserves sovereignty.
 
-**M3 standing:** SOTA — dedicated local SLM pipeline (LM Studio / Ollama / vLLM compatible).
+**M3 standing:** SOTA — dedicated local SLM pipeline (LM Studio / Ollama / vLLM compatible) feeding a typed knowledge graph. The entity-graph layer ships a stock entity-type and predicate vocabulary and is **user-configurable**: point `M3_ENTITY_VOCAB_YAML` at your own profile to swap or extend the vocabulary for your domain, with no code changes.
 
 **Cohort context:** Mastra OM's reflector matches M3 in capability but runs in the cloud. Mem0's LLM-powered extraction is strong on quality but breaks sovereignty. MemPalace's verbatim-only design skips extraction entirely.
 

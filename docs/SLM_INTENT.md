@@ -480,5 +480,5 @@ Or just restart the process.
 
 - [`docs/CHATLOG.md`](CHATLOG.md) — how the chatlog subsystem works today; a future integration could call `classify_intent(profile="chatlog")` on each inbound turn.
 - [`docs/CLI_REFERENCE.md`](CLI_REFERENCE.md) — `bin/augment_memory.py` uses `extract_entities` via the `entity_extract` profile.
-- [`docs/CHANGELOG_2026.md`](CHANGELOG_2026.md) — the April 21 entry documents the landing of this subsystem.
+- [`CHANGELOG.md`](../CHANGELOG.md) — the April 21 entry documents the landing of this subsystem.
 - `bin/slm_intent.py` — the module docstring repeats the profile-format reference and adds a `_selftest()` for operators.

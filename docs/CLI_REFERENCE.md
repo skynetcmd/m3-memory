@@ -101,7 +101,7 @@ wiring can consume:
 | Env | Role |
 | --- | --- |
 | `M3_SLM_CLASSIFIER` | Master gate for `bin/slm_intent.py`. Off by default. |
-| `M3_INTENT_ROUTING` | Separate gate for the retrieval-side consumer (role-boost + predecessor-pull in `memory_core`). Off by default. |
+| `M3_INTENT_ROUTING` | Separate gate for the retrieval-side consumer (role-boost + predecessor-pull in `memory_core`). On by default; set `0` to disable. |
 | `M3_SLM_PROFILE` | Named profile to load; defaults to `default` (reads `config/slm/default.yaml`). |
 | `M3_SLM_PROFILES_DIR` | `os.pathsep`-separated list of dirs searched before `config/slm/`. Bench harnesses stack their own dir here. |
 

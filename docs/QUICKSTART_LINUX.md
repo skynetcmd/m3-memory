@@ -244,4 +244,4 @@ python3 bin/chatlog_ingest.py --format claude-code \
 - **Directories**: `files_ingest` when you want fresh indexing.
 - **Stale-file watcher**: `python -m files_memory.tools watch --directory ~/Documents`.
 
-Need more? [Full install reference](install_linux.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All 96 MCP tools](MCP_TOOLS.md)
+Need more? [Full install reference](install_linux.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All MCP tools](MCP_TOOLS.md)
