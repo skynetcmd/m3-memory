@@ -93,19 +93,43 @@ These knobs change how results are ranked. Defaults are safe — override only i
 | `M3_SHORT_TURN_THRESHOLD` | `20` | Character-length threshold below which the ranker applies a length penalty (floor 0.3×). Suppresses filler turns like "ok cool" from dominating rank. |
 | `M3_TITLE_MATCH_BOOST` | `0.05` | Multiplier for the title-overlap boost: if a fraction `f` of query tokens appear in the title, add `M3_TITLE_MATCH_BOOST * f` to the final score. Set to `0` to disable. |
 | `M3_IMPORTANCE_WEIGHT` | `0.05` | Weight of the caller-supplied `importance` field (0.0–1.0) in final ranking. Set to `0` to ignore importance entirely. |
+| `M3_INTENT_ROUTING` | `1` | Retrieval-side intent routing (role-boost + predecessor-pull). On by default; set `0` to disable. Distinct from the SLM intent classifier (`M3_SLM_CLASSIFIER`, off by default). |
+| `M3_ROUTER_TEMPORAL_K_BUMP` | `5` | Extra `k` added when a query is routed as temporal (e.g. contains "when", "before", "days ago"), widening verbatim retrieval for date-sensitive questions. |
+| `SUPERSEDES_PENALTY` | `0.5` | At retrieval time, an older fact that has been superseded by a newer one is demoted by this multiplier (0.5 = ranked at half score). Set to `1.0` to disable demotion. |
+| `CONTRADICTION_TITLE_GATE` | `loose` | How contradiction detection decides two memories are about the same thing: `strict` (legacy — require a title substring match), `loose` (cosine + type + content-diff, default), or `off` (no title check). |
+| `CONTRADICTION_TYPE_EXCLUSIONS` | `conversation` | Comma-separated memory `type`s skipped during contradiction checks. |
 
-### Ingestion Enrichment (opt-in)
+#### Adaptive-k elbow trim
 
-All off by default. These change how much work each `memory_write` does and can multiply the row count on chatty conversations — turn them on deliberately. They only fire for `type="message"` rows written with a `conversation_id`; other writes are unaffected.
+After MMR, results can be trimmed at a score-distribution "elbow" so large pools don't return long noisy tails. Defaults are conservative.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `M3_INGEST_WINDOW_CHUNKS` | `0` | On writes, emit a `type="summary"` row every N turns that concatenates the previous N message bodies. Captures Q&A pairs that single-turn embeds miss. |
+| `M3_ELBOW_MIN_INPUT` | `20` | Minimum pool size before elbow trimming is considered; smaller pools are returned untrimmed. |
+| `M3_ELBOW_MIN_RETURN` | `8` | Floor on how many results the elbow trim may leave — never trims below this. |
+| `M3_ELBOW_ABS_THRESHOLD` | `0.05` | Minimum score drop (slope) that counts as an elbow; below this the pool is treated as flat and not trimmed. |
+
+#### Expansion-displacement guard
+
+When a query triggers expansion (graph hops, session expansion), this guard keeps expanded rows from displacing strong primary hits unless they clear a score margin — preventing result volatility.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_EXPANSION_DISPLACEMENT_MARGIN` | `2.0` | An expanded row may outrank a primary result only if its score exceeds the primary's by this multiplier. |
+| `M3_EXPANSION_PROTECTED_RANKS` | `3` | The top-N primary results are protected from displacement by expanded rows entirely. |
+
+### Ingestion Enrichment
+
+**On by default.** These deterministic (no-LLM) heuristics enrich `type="message"` rows written with a `conversation_id`; other writes are unaffected. They add lightweight summary/event rows that improve retrieval recall, but on chatty conversations they multiply the row count — set any of them to `0` to opt out. (Set `M3_INGEST_WINDOW_CHUNKS=0 M3_INGEST_GIST_ROWS=0 M3_INGEST_EVENT_ROWS=0` for the lean, one-row-per-turn behavior.)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_INGEST_WINDOW_CHUNKS` | `1` | On writes, emit a `type="summary"` row every N turns that concatenates the previous N message bodies. Captures Q&A pairs that single-turn embeds miss. Set `0` to disable. |
 | `M3_INGEST_WINDOW_SIZE` | `3` | Number of consecutive turns combined into each window chunk when `M3_INGEST_WINDOW_CHUNKS=1`. |
-| `M3_INGEST_GIST_ROWS` | `0` | On writes, emit a heuristic `type="summary"` gist row for the conversation once it passes the minimum-turn threshold and every stride thereafter. Deterministic; no LLM. |
-| `M3_INGEST_GIST_MIN_TURNS` | `8` | Minimum turns in a conversation before the first gist row is emitted. |
-| `M3_INGEST_GIST_STRIDE` | `8` | After the first gist, emit a new one every N additional turns. |
-| `M3_INGEST_EVENT_ROWS` | `0` | Regex-extract event sentences (`<ProperNoun> <verb> ... <date hint>`) from each message and emit one `type="event_extraction"` row per match, linked back via `references`. Deterministic; no LLM. |
+| `M3_INGEST_GIST_ROWS` | `1` | On writes, emit a heuristic `type="summary"` gist row for the conversation once it passes the minimum-turn threshold and every stride thereafter. Deterministic; no LLM. Set `0` to disable. |
+| `M3_INGEST_GIST_MIN_TURNS` | `10` | Minimum turns in a conversation before the first gist row is emitted. |
+| `M3_INGEST_GIST_STRIDE` | `5` | After the first gist, emit a new one every N additional turns. |
+| `M3_INGEST_EVENT_ROWS` | `1` | Regex-extract event sentences (`<ProperNoun> <verb> ... <date hint>`) from each message and emit one `type="event_extraction"` row per match, linked back via `references`. Deterministic; no LLM. Set `0` to disable. |
 | `M3_QUERY_TYPE_ROUTING` | `0` | Retrieval-side: when a query matches "When/what date/which day" plus a proper noun, shift `vector_weight` to `0.3` (BM25-heavy) so the named-entity signal isn't diluted by embedding similarity. |
 
 **Always-on:** resolved temporal anchors from `metadata.temporal_anchors` are now automatically prefixed to the embed text as `[YYYY-MM-DD] …` so vector and FTS searches can hit absolute dates even when the source text says "yesterday". No flag; free when anchors are absent.
@@ -144,11 +168,11 @@ If only the small model is loaded, `get_best_llm` picks it automatically — no 
 
 ## Fact Enrichment
 
-Optional SLM-distillation pipeline to extract atomic facts from stored memories. **Off by default.** See ARCHITECTURE.md for design overview.
+SLM-distillation pipeline to extract atomic facts from stored memories. **On by default** — `memory_write` enqueues fact extraction unless you turn it off. It only does work when a fact-extraction SLM endpoint is reachable (set via `M3_FACT_ENRICHED_URL`/`MODEL` or the `fact_enriched.yaml` profile); with no endpoint configured the queue simply no-ops. Because it calls a local LLM per write, it adds latency and (for chatty workloads) row volume — set `M3_ENABLE_FACT_ENRICHED=0` to disable. See ARCHITECTURE.md for design overview.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `M3_ENABLE_FACT_ENRICHED` | `false` | Master gate. Set to `true`/`1`/`yes` to enable fact extraction on writes. |
+| `M3_ENABLE_FACT_ENRICHED` | `true` | Master gate. On by default; set to `0`/`false`/`no` to disable fact extraction on writes. |
 | `M3_FACT_ENRICH_CONCURRENCY` | `2` | Maximum concurrent SLM enrichment tasks. Higher values parallelize fact extraction; lower values reduce latency jitter on write paths. |
 | `M3_FACT_ENRICH_MAX_ATTEMPTS` | `5` | Maximum retries for failed enrichment queue items before they are marked as poison (poisoned items remain visible in queue with `last_error` for manual inspection). |
 | `M3_FACT_ENRICHED_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `fact_enriched.yaml` profile `url` field. |
@@ -158,11 +182,12 @@ Optional SLM-distillation pipeline to extract atomic facts from stored memories.
 
 ## Entity-Relation Graph
 
-Optional SLM-extraction pipeline to build a typed knowledge graph of entities and relationships from stored memories. **Off by default.** See ARCHITECTURE.md for design overview.
+SLM-extraction pipeline to build a typed knowledge graph of entities and relationships from stored memories. **On by default** — writes are queued for entity extraction unless you turn it off. Like fact enrichment, it only does work when an extraction SLM endpoint is reachable (`M3_ENTITY_GRAPH_URL`/`MODEL` or the `entity_graph.yaml` profile); with no endpoint the queue no-ops. It calls a local LLM per write, so it adds latency — set `M3_ENABLE_ENTITY_GRAPH=0` to disable. The entity-type and predicate vocabulary is user-configurable via `M3_ENTITY_VOCAB_YAML` (see below). See ARCHITECTURE.md for design overview.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `M3_ENABLE_ENTITY_GRAPH` | `false` | Master gate. Off by default; nothing extracted unless set to `true`/`1`/`yes`. |
+| `M3_ENABLE_ENTITY_GRAPH` | `true` | Master gate. On by default; set to `0`/`false`/`no` to disable entity extraction on writes. |
+| `M3_ENTITY_VOCAB_YAML` | (`config/lists/entity_graph_default.yaml`) | Path to the entity-type + predicate vocabulary profile. Swap or author your own to retune the graph schema for your domain — no code changes. The stock vocabulary defines a 7-type / 34-predicate schema spanning general, human-life, and technical domains. |
 | `M3_ENTITY_EXTRACT_CONCURRENCY` | `2` | Maximum concurrent SLM extraction tasks. Mirrors fact_enriched concurrency tuning. |
 | `M3_ENTITY_EXTRACT_MAX_ATTEMPTS` | `5` | Queue retry cap before poisoned-item exclusion. Failed items remain in extraction queue with `last_error` for manual inspection. |
 | `M3_ENTITY_RESOLVE_FUZZY_MIN` | `0.8` | Minimum token-Jaccard similarity score for fuzzy-match resolution tier. Entities with canonical names matching above this threshold within the same type are merged. |

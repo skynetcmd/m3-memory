@@ -234,4 +234,4 @@ python3 bin/chatlog_ingest.py --format claude-code \
 - The embedder builds with Metal acceleration on Apple Silicon — no extra flags needed.
 - LaunchAgents for boot-time watch-mode go in `~/Library/LaunchAgents/`.
 
-Need more? [Full install reference](install_macos.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All 96 MCP tools](MCP_TOOLS.md)
+Need more? [Full install reference](install_macos.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All MCP tools](MCP_TOOLS.md)

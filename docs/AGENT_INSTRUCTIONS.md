@@ -125,7 +125,7 @@ If information changes or conflicts with existing memory:
 M3 automatically detects contradictions, creates superseding relationships, and preserves history via bitemporal versioning.
 
 ### 4. Leverage the Knowledge Graph
-When you retrieve memories, explore connections using `memory_graph` (1–3 hop traversal with the 8 supported relationship types).
+When you retrieve memories, explore connections using `memory_graph` (1–3 hop traversal with the 9 supported relationship types).
 
 ### 5. Treat M3 Memory as Your Long-Term Brain
 - Use it relentlessly for continuity.

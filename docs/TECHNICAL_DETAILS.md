@@ -358,7 +358,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `M3_SHORT_TURN_THRESHOLD` | 20 | Character-length threshold below which the ranker applies a length penalty (floor 0.3×) to suppress filler turns like "ok cool". |
 | `M3_TITLE_MATCH_BOOST` | 0.05 | Per-query-token-overlap boost applied when the title echoes query tokens. Set to 0 to disable. |
 | `M3_IMPORTANCE_WEIGHT` | 0.05 | Weight of the caller-supplied `importance` field in final ranking. Set to 0 to ignore importance during ranking. |
-| `M3_INGEST_WINDOW_CHUNKS` | 0 | Emit a rolling `type="summary"` row every `M3_INGEST_WINDOW_SIZE` turns of a conversation. Off by default. |
+| `M3_INGEST_WINDOW_CHUNKS` | 1 | Emit a rolling `type="summary"` row every `M3_INGEST_WINDOW_SIZE` turns of a conversation. On by default; set `0` to disable. |
 | `M3_INGEST_WINDOW_SIZE` | 3 | Turns combined into each window chunk when window chunks are enabled. |
 | `M3_INGEST_GIST_ROWS` | 0 | Emit a heuristic per-conversation gist row once the turn count passes `M3_INGEST_GIST_MIN_TURNS`, and every `M3_INGEST_GIST_STRIDE` after. Deterministic; no LLM. |
 | `M3_INGEST_GIST_MIN_TURNS` | 8 | Threshold before the first gist is written. |

@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 96 MCP tools. 563 end-to-end tests. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools. 563 end-to-end tests. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -40,7 +40,7 @@ Write a fact that conflicts with an existing one? M3 detects it automatically. T
 
 ### 🕸️ Knowledge Graph
 
-Memories aren't isolated — they form a web. M3 automatically links related memories on write (cosine >0.7) and supports 7 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`. Traverse the graph up to 3 hops with a single tool call.
+Memories aren't isolated — they form a web. M3 automatically links related memories on write (cosine >0.7) and supports 9 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`. Traverse the graph up to 3 hops with a single tool call.
 
 ### 🧹 Self-Maintaining
 
@@ -150,9 +150,13 @@ Every feature is tested — not just the happy path:
 
 ### Retrieval Quality
 
-Headline benchmark: **89.0% on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)**
-(445/500 correct on a 500-question long-horizon conversational memory
-suite). Per-category breakdown, ablations, and full methodology live in
+Headline benchmark on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)
+(500-question long-horizon conversational memory suite):
+**99.2% retrieval session-hit-rate @ k=10** (496/500; 100% @ k=20) with the v3
+core engine — the retrieval-only metric memory systems publish as their headline.
+Separately, **89.0% end-to-end QA accuracy** (445/500) *(SHR=99.2% @ k=10; QA is
+very model-dependent)* — a different metric that also depends on the answer model.
+Per-category breakdown, ablations, and full methodology live in
 the [README's Benchmarks section](../README.md#-benchmarks) and
 [`benchmarks/longmemeval/README.md`](../benchmarks/longmemeval/README.md).
 

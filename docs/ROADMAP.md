@@ -75,7 +75,7 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 
 ### Sustained engineering
 
-- [x] **105 MCP tools** (was 66 at v2026.4.12b)
+- [x] **100+ MCP tools** (was 66 at v2026.4.12b)
 - [x] **563 end-to-end tests** (was 193 at v2026.4.12b)
 - [x] PyPI Trusted Publishing via OIDC — no token in CI
 - [x] Pre-push tool-catalog drift gate + bench-data leakage scan (`.githooks/pre-push`)
@@ -109,13 +109,19 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 - [x] Core memory system — write, search, update, delete, link
 - [x] Hybrid retrieval — FTS5 + vector similarity + MMR re-ranking
 - [x] Contradiction detection and bitemporal versioning
-- [x] Knowledge graph with 8 relationship types
+- [x] Knowledge graph (9 memory-link relationship types; entity-graph layer with a user-configurable 34-predicate vocabulary via `M3_ENTITY_VOCAB_YAML`)
 - [x] Cross-device sync — SQLite ↔ PostgreSQL ↔ ChromaDB
 - [x] LLM auto-classification, conversation summarization, memory consolidation
 
 ---
 
 ## 🚧 In progress
+
+**Available now — stabilizing.** These subsystems are **shipped and usable today** (`pip install` includes them) but are still being hardened on real workloads before we feature them publicly in the README. Try them and please file issues.
+
+- [x] **Web dashboard / observability portal** (`bin/dashboard_server.py`) — local FastAPI + HTMX UI: multi-DB overview, graph explorer, KB browser, conflict & audit log, background maintenance launcher. Run `python bin/dashboard_server.py` (listens on `127.0.0.1:8088`; override via `M3_DASHBOARD_HOST`/`M3_DASHBOARD_PORT`).
+- [x] **Autonomous cognitive loop** (`bin/m3_cognitive_loop.py`) — background daemon running four enrichment stages: entity extraction, observation extraction, reflection (contradiction resolution), temporal resolution.
+- [x] **Observer & Reflector SLM stages** (`bin/run_observer.py`, `bin/run_reflector.py`) — LLM-based semantic contradiction detection beyond embeddings.
 
 - [ ] **LoCoMo audit** — harness scaffolded under `benchmarks/locomo/`; full run pending
 - [ ] **Linux CUDA smoke-test automation** — wheels currently rely on manual verification on real NVIDIA hardware before each release
@@ -135,7 +141,8 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 
 ## 📈 Planned — Observability & Web UI
 
-- [ ] **Web dashboard** — lightweight local UI (FastAPI + HTMX) to browse memories, inspect knowledge graph, run GDPR operations
+> The **web dashboard** has shipped and is listed under [In progress / Available now](#-in-progress); the items below extend it.
+
 - [ ] **Real-time contradiction log** — surfaced in dashboard and via `memory_verify` tool
 - [ ] **Search explain mode** — show FTS5 score + vector score + MMR penalty breakdown for every result (today: `memory_suggest` returns these; UX still spartan)
 - [ ] **Prometheus metrics endpoint** — latency, write/read counts, cache hit rates
