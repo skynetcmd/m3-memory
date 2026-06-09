@@ -380,3 +380,71 @@ def test_write_observation_falls_back_to_observation_date_when_referenced_null(b
     # Should fall back to observation_date when referenced_date is None.
     assert vf == "2024-04-15"
     conn.close()
+
+
+# ── Per-observation source-turn provenance ──────────────────────────────────
+# Opt-in via M3_OBSERVER_PRECISE_PROVENANCE=1 (default OFF keeps the long-standing
+# whole-session source_turn_ids behavior). When enabled, each observation links
+# to the specific turn it was extracted from: the model self-reports
+# source_turn_index, and a deterministic content-overlap fallback (_attribute_turn)
+# resolves it when the model omits or garbles it. These tests cover the two
+# building blocks (parser carry-through + fallback), which are flag-independent.
+
+def test_parse_observations_carries_source_turn_index():
+    import run_observer
+    text = json.dumps({"observations": [
+        {"text": "User went to Paris.", "observation_date": "2023-05-22",
+         "referenced_date": None, "relative_date": None, "confidence": 0.95,
+         "supersedes_hint": None, "source_turn_index": 4},
+    ]})
+    out = run_observer.parse_observations(text)
+    assert len(out) == 1
+    assert out[0]["source_turn_index"] == 4
+
+
+def test_parse_observations_source_turn_index_coercions():
+    import run_observer
+    base = {"text": "User did a thing.", "observation_date": "2023-05-22",
+            "confidence": 0.95}
+    cases = [
+        ({"source_turn_index": "3"}, 3),       # numeric string -> int
+        ({"source_turn_index": [7, 9]}, 7),    # list -> first element
+        ({"source_turn_index": "abc"}, None),  # garbage -> None
+        ({"source_turn_index": None}, None),   # explicit null -> None
+        ({}, None),                             # omitted -> None
+    ]
+    for extra, expected in cases:
+        text = json.dumps({"observations": [{**base, **extra}]})
+        out = run_observer.parse_observations(text)
+        assert len(out) == 1
+        assert out[0]["source_turn_index"] == expected, f"{extra} -> {expected}"
+
+
+def test_attribute_turn_matches_by_content_overlap():
+    import run_observer
+    # turns: (id, content, role, turn_index, ts)
+    turns = [
+        ("c::0", "I have three sisters and a brother", "user", 0, None),
+        ("c::1", "That's a big family!", "assistant", 1, None),
+        ("c::2", "I also bought a new road bike last week", "user", 2, None),
+    ]
+    assert run_observer._attribute_turn({"text": "User has three sisters"}, turns) == 0
+    assert run_observer._attribute_turn({"text": "User bought a road bike"}, turns) == 2
+
+
+def test_attribute_turn_returns_none_without_overlap():
+    import run_observer
+    turns = [("c::0", "I have three sisters", "user", 0, None)]
+    # No shared content tokens -> unresolved (caller falls back to session-wide).
+    assert run_observer._attribute_turn({"text": "User enjoys opera music"}, turns) is None
+
+
+def test_attribute_turn_ignores_assistant_turns():
+    import run_observer
+    # The matching content is only in an assistant turn; facts are about the
+    # user, so it must not attribute to the assistant turn.
+    turns = [
+        ("c::0", "ok thanks", "user", 0, None),
+        ("c::1", "Your flight to Tokyo departs at noon", "assistant", 1, None),
+    ]
+    assert run_observer._attribute_turn({"text": "User flight to Tokyo"}, turns) is None
