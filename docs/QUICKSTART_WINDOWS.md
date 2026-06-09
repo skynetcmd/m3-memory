@@ -258,4 +258,4 @@ python bin\chatlog_ingest.py --format claude-code `
 - **GPU acceleration** — CUDA autodetected if `nvcc` is on PATH; Vulkan also supported. Run `m3 embedder install-gpu` after installing CUDA Toolkit. Vulkan / DirectML builds: [EMBED_DEPLOYMENT.md](EMBED_DEPLOYMENT.md).
 - **PowerShell 7+** recommended: `winget install Microsoft.PowerShell`.
 
-Need more? [Full install reference](install_windows.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All 96 MCP tools](MCP_TOOLS.md)
+Need more? [Full install reference](install_windows.md) · [Files-memory tool reference](tools/files_memory.md) · [Chat-log reference](CHATLOG.md) · [All MCP tools](MCP_TOOLS.md)

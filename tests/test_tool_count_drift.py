@@ -102,12 +102,14 @@ def test_manifest_tool_records_are_well_formed():
         assert len(t["summary"]) <= 100, (t["name"], t["summary"])
 
 
-def _catalog_total_claims(text: str) -> list[int]:
-    """Every '`N` tools' number in `text` that is a catalog-total claim.
+def _exact_tool_count_claims(text: str) -> list[int]:
+    """Every exact '`N` tools' number left in `text` after stripping the
+    legitimate domain/module subcounts.
 
-    Subcount exceptions (domain/phase counts) are stripped out first so they
-    don't get flagged as drift. The numbers from the remaining occurrences
-    are returned for assertion against the live count.
+    Under the "100+ tools" policy this should be empty for every gated doc:
+    the catalog total is never spelled out in prose, and the only exact
+    "N tools" phrases allowed are the subcount exceptions (which are stripped
+    here). A non-empty result means someone reintroduced a hardcodable total.
     """
     cleaned = _NONCOUNT_RE.sub("", text)
     for exc in _SUBCOUNT_EXCEPTIONS:
@@ -115,26 +117,24 @@ def _catalog_total_claims(text: str) -> list[int]:
     return [int(m.group(1)) for m in _TOOLS_RE.finditer(cleaned)]
 
 
-def test_doc_tool_counts_match_catalog():
-    """Every catalog-total 'N tools' claim in the docs equals the live count.
+def test_prose_does_not_hardcode_catalog_total():
+    """No gated doc may spell out an exact catalog-total 'N tools' number.
 
-    Fails if any single site drifts — forcing the doc number to track the
-    catalog. Domain/phase subcounts (see _SUBCOUNT_EXCEPTIONS) are excluded.
+    The catalog total has exactly one exact home (the generated manifest);
+    public prose says "100+ tools". Domain/module subcounts
+    (_SUBCOUNT_EXCEPTIONS) are the only exact "N tools" phrases permitted.
+    Anything else is a drift hazard and must be rephrased "100+ tools" (or
+    whitelisted as a subcount). The manifest↔catalog exactness is still
+    pinned by test_manifest_count_matches_catalog above.
     """
-    computed = _computed_count()
-    mismatches: list[str] = []
-    checked = 0
+    offenders: list[str] = []
     for path in _DOC_FILES:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        for n in _catalog_total_claims(text):
-            checked += 1
-            if n != computed:
-                mismatches.append(f"{os.path.relpath(path, _ROOT)}: '{n} tools'")
+        for n in _exact_tool_count_claims(text):
+            offenders.append(f"{os.path.relpath(path, _ROOT)}: '{n} tools'")
 
-    assert checked > 0, "no 'N tools' claims found — did the docs move?"
-    assert not mismatches, (
-        f"Doc tool-count drift (live catalog has {computed} non-meta tools): "
-        f"{mismatches}. Update the doc(s) and re-run "
-        f"`python bin/gen_tool_manifest.py`."
+    assert not offenders, (
+        "Hardcoded exact tool-count(s) found in prose — rephrase as "
+        f"'100+ tools' or whitelist as a subcount: {offenders}"
     )

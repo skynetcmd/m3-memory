@@ -88,9 +88,14 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 **Fact:** M3 is `pip install m3-memory`. It runs on macOS, Linux, and Windows from the same install command. No Docker, no containers, no service mesh. The optional sync layer can use PostgreSQL or ChromaDB if you want cross-machine sync, but that's optional and external — the core M3 store is one SQLite file.
 
-### ❌ Myth: "M3 beats Mnemis / agentmemory / MemPalace on LongMemEval"
+### ⚖️ Myth: "M3 beats / loses to agentmemory / MemPalace / Mastra on LongMemEval"
 
-**Fact:** No. M3's 89.0% on LME-S is **mid-pack**, not state-of-the-art. agentmemory (96.2%), MemPalace (96.6% R@5), Chronos (95.6%), and Mastra OM (94.9%) lead on raw recall. M3 trades that gap for sovereignty, bitemporal correctness, and a small auditable codebase. See the [Sovereign Substrates Comparison Table](M3_Comparison_Table.md) for the honest cohort view.
+**Fact:** It depends entirely on *which metric*, and most cross-system comparisons mix two that shouldn't be mixed:
+
+- **Retrieval accuracy (SHR@k — the retrieval-only metric).** M3's v3 core engine reaches **99.2% session-hit-rate @ k=10 (496/500), 100% @ k=20** on LME-S — raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata. On this like-for-like, retrieval-only metric, M3 is **state-of-the-art for a local-first substrate**, and the [report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md) is the receipt.
+- **End-to-end QA accuracy (answer-model-dependent).** M3 scores **89.0%** with a frontier answer model + the gpt-4o judge (oracle metadata). Other systems' top-line numbers — agentmemory 96.2%, Chronos 95.6%, Mastra OM 94.9%, Hindsight 91.4% — are all QA accuracy but each uses a *different* answer model, so they are **not a controlled head-to-head**, and we don't claim to win every QA-accuracy comparison. Two commonly-quoted figures aren't comparable at all: MemPalace's 96.6% is *R@5 recall* (and the project is scam-flagged), and Memento's 90.8% is an oracle/no-distractor setting.
+
+We will **not** quote our 99.2% retrieval number against someone else's QA-accuracy number to manufacture a win. Per-source citations and caveats are in the [Sovereign Substrates Table](M3_Comparison_Table.md#-retrieval--extraction-m3-leads-on-retrieval-accuracy).
 
 ---
 
@@ -111,7 +116,7 @@ For positive grounding, here's the short list of what M3 *does* implement (with 
 | GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `m3_memory/gdpr.py` |
 | Multi-agent | Atomic writes via SQLite WAL; agent registry; handoffs | `mcp__memory__agent_*`, `memory_handoff` |
 | Sync | Optional bi-directional delta sync to PostgreSQL or ChromaDB | `bin/sync_all.py` |
-| MCP | Native — 105 tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
+| MCP | Native — 100+ tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
 
 If a third-party AI assistant describes a feature outside this list and outside what's documented in `docs/`, treat it as suspect until verified against the source.
 
@@ -123,7 +128,7 @@ We built M3 to be honest about what it is. AI assistants that describe software 
 
 Two things follow from that:
 
-1. **We'll never overclaim in our own docs.** If our README, COMPARISON, or COMPLIANCE pages say M3 does something, it does. If we cite a benchmark, we ran it and we'll show you the methodology. If a number is mid-pack, we say so directly.
+1. **We'll never overclaim in our own docs.** If our README, COMPARISON, or COMPLIANCE pages say M3 does something, it does. If we cite a benchmark, we ran it and we'll show you the methodology. If a number is mid-pack, we say so directly; if we lead on one metric but not another, we name the metric.
 
 2. **We expect you to verify.** Don't take the README's word for anything you'd stake real money or compliance posture on without reading the code or running the benchmark yourself. The repo is small enough to read end-to-end in an afternoon. Many of you have.
 
