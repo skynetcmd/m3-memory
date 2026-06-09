@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Roadmap
 
-> Current version: **v2026.6.8.1** — actively maintained. Priorities shift based on community feedback; open an issue to vote on a feature.
+> Current version: **v2026.6.8.2** — actively maintained. Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
 
