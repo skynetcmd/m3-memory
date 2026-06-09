@@ -252,5 +252,5 @@ The `test_slm_intent.py` module demonstrates this end-to-end.
   exercised by ~60 of the pytest cases
 - [`docs/SLM_INTENT.md`](SLM_INTENT.md) — SLM classifier subsystem (tested
   by `tests/test_slm_intent.py`)
-- [`docs/CHANGELOG_2026.md`](CHANGELOG_2026.md) — dated record of which test
+- [`CHANGELOG.md`](../CHANGELOG.md) — dated record of which test
   counts landed with which refactor
