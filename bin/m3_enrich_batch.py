@@ -369,7 +369,15 @@ async def _ingest_one_group(
     # of embedder serial time per slice; gather'd writes drop that to
     # ~8-10s for the same workload while staying well under embedder
     # capacity.
-    source_turn_ids = [t[0] for t in turns]
+    all_turn_ids = [t[0] for t in turns]
+    # Per-observation source-turn provenance (opt-in via M3_OBSERVER_PRECISE_PROVENANCE,
+    # default OFF — same flag + semantics as run_observer.process_conversation, so both
+    # drivers agree). Default: every observation carries the whole session's turn list.
+    # When enabled: link each observation to the specific turn it came from
+    # (model-reported source_turn_index + content-overlap fallback), so callers can cite
+    # the exact source turn. turns are (id, content, role, turn_index, ts).
+    precise = os.environ.get("M3_OBSERVER_PRECISE_PROVENANCE", "0") == "1"
+    idx_to_id = {t[3]: t[0] for t in turns} if precise else {}
     # Lift source session_id from the first turn's metadata so observations
     # can be traced back to the LongMemEval session. Required for SHR scoring
     # (memory 914843f8, 2026-05-05); mirrors run_observer.process_conversation.
@@ -388,10 +396,17 @@ async def _ingest_one_group(
     sem = asyncio.Semaphore(8)
     async def _write_one(obs: dict) -> bool:
         nonlocal n_chunk_failed, last_err
+        if precise:
+            sti = obs.get("source_turn_index")
+            if sti is None or sti not in idx_to_id:
+                sti = observer._attribute_turn(obs, turns)
+            src_ids = [idx_to_id[sti]] if (sti is not None and sti in idx_to_id) else all_turn_ids
+        else:
+            src_ids = all_turn_ids
         async with sem:
             try:
                 obs_id = await observer.write_observation(
-                    obs, target_variant, user_id, conv_id, source_turn_ids,
+                    obs, target_variant, user_id, conv_id, src_ids,
                     source_group_id=group_id,
                     session_id=source_session_id,
                 )
