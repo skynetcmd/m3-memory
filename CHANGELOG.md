@@ -42,6 +42,20 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ---
 
+## [2026.6.8.2] - 2026-06-08 — Documentation accuracy pass
+
+Documentation-only release; no code or behavior changes.
+
+### Documentation
+- **Comparison accuracy & sourcing.** Competitor benchmark figures in the Sovereign Substrates table verified against primary sources and corrected/cited; metric mismatches (recall vs. QA accuracy) and a disputed/scam-flagged entry are now clearly caveated.
+- **Retrieval vs. QA metric framing.** README, comparison table, core-features, and myths pages distinguish retrieval session-hit-rate (the metric most systems publish) from end-to-end QA accuracy (answer-model-dependent), with sourcing notes.
+- **Default-state corrections.** Docs now reflect that entity-graph, fact-enrichment, the ingestion-enrichment heuristics, and intent routing are on by default, with cost/disable guidance.
+- **Knowledge-graph configurability** documented (`M3_ENTITY_VOCAB_YAML`; stock 7-type / 34-predicate vocabulary); relationship-type count standardized to 9 across docs.
+- **Tool-count drift policy** — public prose now says "100+ tools" (exact count pinned only in the generated manifest + drift test).
+- Newly documented retrieval/ranking env knobs (elbow trim, expansion-displacement guard, contradiction gates, temporal-k-bump); ROADMAP refreshed.
+
+---
+
 ## [2026.6.8.1] - 2026-06-08 — LongMemEval-S retrieval results
 
 ### Added
