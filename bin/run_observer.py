@@ -592,25 +592,49 @@ async def drain_variant_mode(args, profile, token: str) -> None:
     # The bench corpus stores conversation_id in metadata_json.session_id (its
     # original LME-S identifier) — we use that as the conversation grouping
     # key here.
+    # Source memory types to drain. Default = live message/conversation. Corpora
+    # stored under another type (e.g. an imported chat_log corpus) override via
+    # --source-type. Allowlist-validated so the value is never unsafely interpolated.
+    _ALLOWED_SRC_TYPES = {"message", "conversation", "chat_log"}
+    src_types = [t.strip() for t in (getattr(args, "source_type", None) or "message,conversation").split(",") if t.strip()]
+    bad = [t for t in src_types if t not in _ALLOWED_SRC_TYPES]
+    if bad:
+        sys.exit(f"ERROR: --source-type values not allowed: {bad} (allowed: {sorted(_ALLOWED_SRC_TYPES)})")
+    type_ph = ",".join(["?"] * len(src_types))
+    # Variant filter: sentinel '__none__' selects NULL-variant rows (SQL '= NULL'
+    # never matches — must be 'IS NULL'); any other value is an exact match.
+    if args.source_variant == "__none__":
+        variant_clause = "mi.variant IS NULL"
+        variant_params: list = []
+    else:
+        variant_clause = "mi.variant = ?"
+        variant_params = [args.source_variant]
+    # qid scoping column: production chatlog keys on user_id; corpora where the
+    # scoping id lives in the conversation_id column (one row-group per instance)
+    # use --qid-column conversation_id. Validated against an allowlist.
+    qid_col = getattr(args, "qid_column", None) or "user_id"
+    if qid_col not in ("user_id", "conversation_id"):
+        sys.exit(f"ERROR: --qid-column must be user_id or conversation_id, got {qid_col!r}")
     with mc._db() as db:
-        sql = """
+        sql = f"""
         SELECT mi.id,
                mi.content,
                json_extract(mi.metadata_json, '$.role') AS role,
-               COALESCE(json_extract(mi.metadata_json, '$.turn_index'), 0) AS turn_index,
+               COALESCE(json_extract(mi.metadata_json, '$.turn_index'),
+                        json_extract(mi.metadata_json, '$.turn_idx'), 0) AS turn_index,
                mi.created_at,
                mi.metadata_json,
                json_extract(mi.metadata_json, '$.session_id') AS conversation_id,
                mi.user_id
         FROM memory_items mi
-        WHERE mi.variant = ?
+        WHERE {variant_clause}
           AND COALESCE(mi.is_deleted, 0) = 0
-          AND mi.type IN ('message', 'conversation')
+          AND mi.type IN ({type_ph})
         """
-        params: list = [args.source_variant]
+        params: list = [*variant_params, *src_types]
         if qid_filter:
             placeholder = ",".join(["?"] * len(qid_filter))
-            sql += f" AND mi.user_id IN ({placeholder})"
+            sql += f" AND mi.{qid_col} IN ({placeholder})"
             params.extend(qid_filter)
         sql += " ORDER BY mi.user_id, conversation_id, turn_index"
         if args.limit:
@@ -766,7 +790,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Phase D Observer drainer (Mastra-style three-date observations)")
     ap.add_argument("--source-variant", default=None,
                     help="Variant-mode: pull conversations from this variant. "
-                         "When set, drains the entire variant; ignores observation_queue.")
+                         "When set, drains the entire variant; ignores observation_queue. "
+                         "Sentinel '__none__' selects rows whose variant IS NULL.")
+    ap.add_argument("--source-type", default=None,
+                    help="Comma-separated source memory types to drain "
+                         "(default: message,conversation; allowed: message,conversation,chat_log).")
+    ap.add_argument("--qid-column", default=None,
+                    help="Column the --qids-file ids filter on: user_id (default) or "
+                         "conversation_id (for corpora where the scoping id lives there).")
     ap.add_argument("--target-variant", default="",
                     help="Variant tag for emitted observation rows. Empty = production default (NULL).")
     ap.add_argument("--limit", type=int, default=None,
