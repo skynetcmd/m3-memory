@@ -1,6 +1,8 @@
 import os
 import sqlite3
+
 from fastapi import APIRouter
+
 from .embeddings import embed
 
 DB_PATH = os.getenv("MEMORY_DB_PATH", "memory/store.sqlite")

@@ -1,11 +1,10 @@
 """Performance tests for chatlog subsystem (marked slow)."""
 
-import asyncio
 import time
-import pytest
-import sqlite3
 
-from conftest import isolate_chatlog_env, create_memory_items_schema
+import pytest
+
+from conftest import create_memory_items_schema, isolate_chatlog_env
 
 
 @pytest.fixture
@@ -115,8 +114,9 @@ async def test_chatlog_perf_batch_write_latency(perf_test_env):
 @pytest.mark.slow
 def test_chatlog_perf_metadata_construction():
     """Measure metadata_json construction for 1000 items."""
-    import chatlog_core
     import time
+
+    import chatlog_core
 
     start = time.time()
 
@@ -145,8 +145,9 @@ def test_chatlog_perf_metadata_construction():
 @pytest.mark.slow
 def test_chatlog_perf_validation():
     """Measure validation overhead for 1000 items."""
-    import chatlog_core
     import time
+
+    import chatlog_core
 
     start = time.time()
 

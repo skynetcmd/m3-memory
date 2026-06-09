@@ -33,7 +33,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import memory_core  # noqa: E402
-
 from dispatch import DispatchLimits, DispatchResult, dispatch  # noqa: E402
 
 # Terminals that mean "do not retry this notification" — ack it.
@@ -135,7 +134,6 @@ async def tick(team: dict, http: httpx.AsyncClient, limits: DispatchLimits,
     """One polling pass. Returns total dispatches handled this tick."""
     providers = team["providers"]
     kinds = team["orchestrator"]["notification_kinds"]
-    agents_by_name = {a["name"]: a for a in team["agents"]}
 
     jobs: list = []
     for agent in team["agents"]:

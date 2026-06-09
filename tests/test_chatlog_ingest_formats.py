@@ -5,10 +5,10 @@ actually emit. If upstream changes either schema these tests surface the drift.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
+
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -161,7 +161,7 @@ def test_infer_provider(model, expected):
 
 # ─── End-to-end: --transcript-path ingest via _ingest() ───────────────────────
 
-from conftest import isolate_chatlog_env, create_memory_items_schema
+from conftest import create_memory_items_schema, isolate_chatlog_env
 
 
 @pytest.fixture
@@ -179,7 +179,8 @@ def ingest_env(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ingest_claude_code_from_file_writes_real_rows(ingest_env):
-    import chatlog_ingest, chatlog_core
+    import chatlog_core
+    import chatlog_ingest
     fixture = os.path.join(FIXTURES, "claude_code_sample.jsonl")
 
     result = await chatlog_ingest._ingest("claude-code", fixture,
@@ -207,7 +208,8 @@ async def test_ingest_claude_code_from_file_writes_real_rows(ingest_env):
 
 @pytest.mark.asyncio
 async def test_ingest_gemini_from_file_writes_real_rows(ingest_env):
-    import chatlog_ingest, chatlog_core
+    import chatlog_core
+    import chatlog_ingest
     fixture = os.path.join(FIXTURES, "gemini_session_sample.json")
 
     result = await chatlog_ingest._ingest("gemini-cli", fixture,
@@ -221,7 +223,8 @@ async def test_ingest_gemini_from_file_writes_real_rows(ingest_env):
 
 @pytest.mark.asyncio
 async def test_ingest_antigravity_from_file_writes_real_rows(ingest_env):
-    import chatlog_ingest, chatlog_core
+    import chatlog_core
+    import chatlog_ingest
     fixture = os.path.join(FIXTURES, "gemini_session_sample.json")
 
     result = await chatlog_ingest._ingest("antigravity-cli", fixture,
@@ -236,7 +239,8 @@ async def test_ingest_antigravity_from_file_writes_real_rows(ingest_env):
 @pytest.mark.asyncio
 async def test_ingest_is_idempotent_via_cursor(ingest_env):
     """Second invocation on the same transcript skips already-seen uuids."""
-    import chatlog_ingest, chatlog_core
+    import chatlog_core
+    import chatlog_ingest
     fixture = os.path.join(FIXTURES, "claude_code_sample.jsonl")
 
     first = await chatlog_ingest._ingest("claude-code", fixture, "", "test")
@@ -264,7 +268,9 @@ async def test_ingest_session_override_mismatch_prefers_transcript(ingest_env, c
     sessionId, log a warning and let the transcript's value win on both the
     rows and the cursor — one identifier across the pipeline."""
     import logging
-    import chatlog_ingest, chatlog_core
+
+    import chatlog_core
+    import chatlog_ingest
     fixture = os.path.join(FIXTURES, "claude_code_sample.jsonl")
 
     with caplog.at_level(logging.WARNING, logger="chatlog_ingest"):

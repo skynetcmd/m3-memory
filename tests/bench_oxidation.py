@@ -33,13 +33,12 @@ MEASUREMENT METHOD
 Run: ``python tests/bench_oxidation.py``
 """
 
-import os
-import sys
-import time
-import struct
 import hashlib
+import os
 import sqlite3
 import statistics
+import sys
+import time
 
 # --------------------------------------------------------------------------
 # skip-guard: hard deps
@@ -62,18 +61,18 @@ _BIN = os.path.join(os.path.dirname(_HERE), "bin")
 if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
-from embedding_utils import cosine as py_cosine
-from embedding_utils import batch_cosine as py_batch_cosine
-from embedding_utils import unpack as eu_unpack
-
 # crypto_provider.get_sha256 is the production Python baseline for sha256;
 # with M3_CRYPTO_BACKEND=DEFAULT it is hashlib.sha256(...).hexdigest().
 from crypto_provider import get_sha256 as py_get_sha256
+from embedding_utils import batch_cosine as py_batch_cosine
+from embedding_utils import cosine as py_cosine
+from embedding_utils import unpack as eu_unpack
 
 # Force the pure-Python redaction path so we can call _scrub_python directly
 # regardless of whether the Rust core is loaded by the module.
 os.environ["M3_CORE_RS_DISABLE"] = "1"
 import chatlog_redaction
+
 py_scrub = chatlog_redaction._scrub_python
 
 DIM = 1024

@@ -9,9 +9,9 @@ assert the enricher ran with the expected inputs.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
-import asyncio
 
 import pytest
 
@@ -26,7 +26,6 @@ async def test_enricher_receives_content_and_metadata_dict(monkeypatch):
     - second arg is a dict (metadata decoded from JSON if stored as string)
     - concurrency is bounded by the supplied semaphore
     """
-    import memory_core
 
     calls: list[tuple[str, dict]] = []
     max_in_flight = 0
@@ -92,6 +91,7 @@ async def test_enricher_receives_content_and_metadata_dict(monkeypatch):
 async def test_signature_includes_kwargs():
     """Verify memory_write_bulk_impl exposes the new kwargs."""
     import inspect
+
     import memory_core
 
     sig = inspect.signature(memory_core.memory_write_bulk_impl)
@@ -120,7 +120,6 @@ async def test_enriched_text_persisted_to_metadata(monkeypatch):
 
     # Spy on prepared list just before DB insert by replacing the
     # context-manager that does the INSERT.
-    orig_db = memory_core._db
     class _FakeDB:
         def __enter__(self): return self
         def __exit__(self, *a): return False
@@ -151,13 +150,6 @@ async def test_enriched_text_persisted_to_metadata(monkeypatch):
     ]
     await memory_core.memory_write_bulk_impl(items, embed_key_enricher=enricher)
 
-    # Find the metadata rows for each id
-    by_id = {}
-    for meta in captured_prepared_after_enrichment:
-        # metadata_json from INSERT doesn't include the id; match by content
-        # via the surrounding row... we can't here, so just check aggregate:
-        pass
-
     # Easier assertion: the enriched item's metadata should have
     # `enriched_embed_text`; the pass-through item's metadata should NOT.
     # Since we can't distinguish by id above, assert the counts instead.
@@ -177,6 +169,7 @@ async def test_enriched_text_persisted_to_metadata(monkeypatch):
 async def test_dual_embed_signature():
     """memory_write_bulk_impl exposes dual_embed kwarg, default False."""
     import inspect
+
     import memory_core
 
     sig = inspect.signature(memory_core.memory_write_bulk_impl)

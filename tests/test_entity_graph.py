@@ -1308,8 +1308,9 @@ async def test_extractor_idempotent_on_reextraction(monkeypatch, tmp_path):
 async def test_extractor_validates_invalid_entity_type(monkeypatch, tmp_path, caplog):
     """SLM returns entity with entity_type='invalid_thing'; it is rejected.
     No entity row is created; a debug log is emitted."""
-    import memory_core
     import logging
+
+    import memory_core
 
     db_path = tmp_path / "test.db"
     _create_entity_graph_schema(db_path)
@@ -1353,8 +1354,9 @@ async def test_extractor_validates_invalid_entity_type(monkeypatch, tmp_path, ca
 async def test_extractor_validates_invalid_predicate(monkeypatch, tmp_path, caplog):
     """SLM returns relationship with predicate='invented_predicate'; it is rejected.
     Entities are created normally; only the relationship is dropped."""
-    import memory_core
     import logging
+
+    import memory_core
 
     db_path = tmp_path / "test.db"
     _create_entity_graph_schema(db_path)
@@ -1627,7 +1629,7 @@ def test_load_entity_vocab_defaults():
     import memory_core
 
     types, preds = memory_core.load_entity_vocab(None)
-    
+
     # Verify content is identical to module constants
     assert types == memory_core.VALID_ENTITY_TYPES, (
         f"Loaded types {types} != module constant {memory_core.VALID_ENTITY_TYPES}"
@@ -1635,7 +1637,7 @@ def test_load_entity_vocab_defaults():
     assert preds == memory_core.VALID_ENTITY_PREDICATES, (
         f"Loaded predicates {preds} != module constant {memory_core.VALID_ENTITY_PREDICATES}"
     )
-    
+
     # Verify they match the bootstrap defaults
     assert types == memory_core._DEFAULT_VALID_ENTITY_TYPES, (
         f"Types {types} != bootstrap default {memory_core._DEFAULT_VALID_ENTITY_TYPES}"
@@ -1647,9 +1649,9 @@ def test_load_entity_vocab_defaults():
 
 def test_load_entity_vocab_custom_yaml(tmp_path):
     """load_entity_vocab with custom YAML loads only specified types/predicates."""
+
     import memory_core
-    from pathlib import Path
-    
+
     # Create a custom YAML with a subset
     custom_yaml = tmp_path / "custom.yaml"
     custom_yaml.write_text("""
@@ -1662,9 +1664,9 @@ entity_predicates:
 metadata:
   description: "Custom test vocabulary"
 """)
-    
+
     types, preds = memory_core.load_entity_vocab(str(custom_yaml))
-    
+
     # Verify only the custom content is loaded
     assert types == frozenset({"thing", "artifact"}), f"Expected {{'thing', 'artifact'}}, got {types}"
     assert preds == frozenset({"created_by", "modified_on"}), f"Expected {{'created_by', 'modified_on'}}, got {preds}"
@@ -1673,7 +1675,7 @@ metadata:
 def test_load_entity_vocab_empty_yaml_falls_back_to_defaults(tmp_path):
     """load_entity_vocab with empty lists falls back to defaults."""
     import memory_core
-    
+
     # Create a YAML with empty lists
     placeholder_yaml = tmp_path / "placeholder.yaml"
     placeholder_yaml.write_text("""
@@ -1683,9 +1685,9 @@ metadata:
   description: "Empty placeholder"
   status: "tbd"
 """)
-    
+
     types, preds = memory_core.load_entity_vocab(str(placeholder_yaml))
-    
+
     # Should fall back to defaults
     assert types == memory_core._DEFAULT_VALID_ENTITY_TYPES, (
         f"Empty types should fall back to defaults; got {types}"
@@ -1697,14 +1699,15 @@ metadata:
 
 def test_module_constants_match_default_yaml():
     """Regression test: VALID_ENTITY_TYPES and VALID_ENTITY_PREDICATES equal what's in entity_graph_default.yaml."""
-    import memory_core
     from pathlib import Path
-    
+
+    import memory_core
+
     yaml_path = Path(__file__).parent.parent / "config" / "lists" / "entity_graph_default.yaml"
     assert yaml_path.exists(), f"Default YAML not found at {yaml_path}"
-    
+
     types, preds = memory_core.load_entity_vocab(str(yaml_path))
-    
+
     # The byte-identity invariant: module constants must equal what the YAML loads
     assert types == memory_core.VALID_ENTITY_TYPES, (
         f"Types from YAML {types} != module constant {memory_core.VALID_ENTITY_TYPES}"

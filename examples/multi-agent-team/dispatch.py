@@ -33,8 +33,8 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
-import memory_core              # noqa: E402
-import mcp_tool_catalog         # noqa: E402
+import mcp_tool_catalog  # noqa: E402
+import memory_core  # noqa: E402
 from agent_protocol import AgentProtocol  # noqa: E402
 
 

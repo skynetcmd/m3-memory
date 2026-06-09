@@ -11,8 +11,6 @@ from __future__ import annotations
 import os
 import sys
 
-import pytest
-
 # conftest.py already puts bin/ on sys.path; belt-and-suspenders for isolation.
 _HERE = os.path.dirname(__file__)
 _BIN = os.path.normpath(os.path.join(_HERE, "..", "bin"))

@@ -272,7 +272,7 @@ async def main():
         if not BASELINE_PATH.exists():
             print(f"No baseline at {BASELINE_PATH} — capturing fresh.")
         else:
-            print(f"M3_RETRIEVAL_REFRESH_BASELINE set — overwriting baseline.")
+            print("M3_RETRIEVAL_REFRESH_BASELINE set — overwriting baseline.")
         current = await capture()
         BASELINE_PATH.write_text(json.dumps(current, indent=2, sort_keys=True))
         print(f"  wrote baseline: {BASELINE_PATH}")

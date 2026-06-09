@@ -62,7 +62,6 @@ far above 1e-9. Demanding 1e-9 would be a false failure caused purely by
 float32 representation, not by an implementation divergence.
 """
 
-import math
 
 import pytest
 
@@ -70,8 +69,8 @@ m3_core_rs = pytest.importorskip("m3_core_rs")
 np = pytest.importorskip("numpy")
 
 # conftest.py puts bin/ on sys.path.
-from embedding_utils import cosine as py_cosine
 from embedding_utils import batch_cosine as py_batch_cosine
+from embedding_utils import cosine as py_cosine
 
 TOL = 1e-5
 _MMR_LAMBDA = 0.7

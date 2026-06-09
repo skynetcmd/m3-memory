@@ -24,7 +24,6 @@ import pytest
 
 from m3_memory import setup_wizard
 
-
 # ────────────────────────────────────────────────────────────────────────
 # _discover_bge_m3_gguf
 # ────────────────────────────────────────────────────────────────────────
@@ -293,7 +292,6 @@ def test_find_hermes_plugins_dir_via_localappdata(monkeypatch, tmp_path):
 
 def test_gather_plan_interactive_defaults(monkeypatch):
     """When agents are detected, interactive gather_plan defaults are optimal (True)."""
-    import argparse
     detected = setup_wizard.AgentTargets(
         claude=True, gemini=True, antigravity=True,
         opencode=True, openclaw=True, hermes=True

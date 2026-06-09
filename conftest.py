@@ -6,8 +6,10 @@ fixture forces M3_DATABASE / CHATLOG_DB_PATH / memory_core.DB_PATH to a
 per-test tmp dir for every test that runs.
 """
 from __future__ import annotations
+
 import sys
 from pathlib import Path
+
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent

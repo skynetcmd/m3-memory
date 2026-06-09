@@ -1,7 +1,7 @@
 import json
 import os
 import shutil
-import sys
+
 
 def generate_configs():
     """Generates gemini-settings.json and claude-settings.json from templates."""

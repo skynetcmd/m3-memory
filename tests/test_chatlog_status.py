@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import time
+
 import pytest
 
 
@@ -156,10 +157,9 @@ def test_status_redaction_config(status_test_env):
 def test_status_cold_call_performance(status_test_env):
     """chatlog_status_impl completes in reasonable time (< 200ms)."""
     import chatlog_status
-    import time
 
     start = time.time()
-    result = chatlog_status.chatlog_status_impl()
+    chatlog_status.chatlog_status_impl()
     elapsed_ms = (time.time() - start) * 1000
 
     assert elapsed_ms < 200, f"Status call took {elapsed_ms:.1f}ms, expected < 200ms"
@@ -168,7 +168,6 @@ def test_status_cold_call_performance(status_test_env):
 def test_status_with_existing_state(status_test_env):
     """Status reads existing state file if present."""
     import chatlog_status
-    import chatlog_config
 
     state_file = status_test_env["state_file"]
     state_data = {
