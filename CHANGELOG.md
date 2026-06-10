@@ -42,22 +42,26 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ### Changed
 
-- **LLM failover default is now LM Studio only; Ollama is opt-in** (`bin/llm_failover.py`).
+- **LLM failover only probes endpoints you opt into** (`bin/llm_failover.py`).
   Previously the default endpoint list probed both LM Studio (`:1234`) **and** Ollama
   (`:11434`) on every LLM/embed discovery. A connect to a non-listening localhost port
   does not always fail fast (on Windows it can block up to the full connect timeout
-  rather than returning instantly as on Linux), so users who do **not** run Ollama were
-  paying a repeated probe cost — in long write-heavy runs (enrichment, entity
-  extraction) this added up to a severe slowdown.
+  rather than returning instantly as on Linux), so a user running only one provider
+  paid a repeated probe cost for the absent one — in long write-heavy runs (enrichment,
+  entity extraction) this compounded into a severe slowdown.
 
-  **Action required for Ollama users:** re-enable the Ollama failover endpoint with
-  **either**
-  - `export M3_ENABLE_OLLAMA_FAILOVER=1` (appends the default `http://localhost:11434/v1`), **or**
-  - list your endpoints explicitly via `LLM_ENDPOINTS_CSV` (e.g.
-    `LLM_ENDPOINTS_CSV="http://localhost:1234/v1,http://localhost:11434/v1"`).
+  Each built-in local endpoint is now **independently toggleable**, so neither
+  single-provider group pays for the other's probe:
+  - `M3_ENABLE_LMSTUDIO_FAILOVER` — default `1` (on). **Ollama-only users set this to `0`**
+    to skip the LM Studio probe.
+  - `M3_ENABLE_OLLAMA_FAILOVER` — default `0` (off). **Ollama users set this to `1`** to
+    probe `http://localhost:11434/v1`.
+  - `LLM_ENDPOINTS_CSV` — explicit list, **overrides both toggles** (full control; also
+    the path for multi-machine LAN failover).
 
-  No action needed for LM Studio / llama.cpp / vLLM users — the default already points
-  at `:1234`, and `LLM_ENDPOINTS_CSV` (if you set it) is unchanged and still wins.
+  No action needed for the common LM Studio / llama.cpp / vLLM-on-`:1234` setup — that
+  is the default. Ollama users: set `M3_ENABLE_OLLAMA_FAILOVER=1` (and optionally
+  `M3_ENABLE_LMSTUDIO_FAILOVER=0` if you don't also run LM Studio).
 
   Also: the failover **connect timeout** dropped from `1.0s` to `0.3s` (override with
   `M3_LLM_CONNECT_TIMEOUT`) to further bound the cost of probing any absent endpoint.
