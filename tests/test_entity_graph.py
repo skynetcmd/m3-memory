@@ -195,6 +195,14 @@ def _create_entity_graph_schema(db_path):
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_eeq_memory_id ON entity_extraction_queue(memory_id);
         CREATE INDEX IF NOT EXISTS idx_eeq_attempts ON entity_extraction_queue(attempts, enqueued_at);
+
+        CREATE TABLE IF NOT EXISTS entity_embeddings (
+            entity_id   TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+            embedding   BLOB NOT NULL,
+            embed_model TEXT,
+            dim         INTEGER,
+            created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
     """)
     conn.commit()
     conn.close()
@@ -634,6 +642,87 @@ async def test_resolution_cosine_separate_when_below_threshold(monkeypatch, tmp_
             "SELECT COUNT(*) FROM entities WHERE entity_type='person'"
         ).fetchone()[0]
     assert count == 2, f"Expected 2 separate entity rows, got {count}"
+
+
+# ---------------------------------------------------------------------------
+# Test 9b — Store-once: tier-3 cosine persists + reuses candidate vectors
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_resolution_cosine_stores_and_reuses_candidate_vectors(monkeypatch, tmp_path):
+    """Store-once (migration 032): the first cosine resolve against a candidate
+    embeds + persists that candidate's name vector to entity_embeddings; a later
+    resolve (in-process cache cleared) reads the stored blob instead of
+    re-embedding the candidate. Verifies both the persistence and the
+    embed-call reduction that gives the bench-scale speedup.
+
+    Stubs the embedder at memory.embed._embed (the path _embed_canonical_cached
+    actually calls) and clears the name-embed cache so the stub is always hit —
+    see test_entity_resolution_tuning.py for why memory_core._embed isn't enough.
+    """
+    import memory.entity as me
+    import memory.embed as me_embed
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setattr(me, "ENTITY_RESOLVE_FUZZY_MIN", 0.85)
+    monkeypatch.setattr(me, "ENTITY_RESOLVE_COSINE_MIN", 0.99)  # high → never merge, force full candidate scan
+
+    embed_calls: list[str] = []
+
+    async def stub_embed(text: str):
+        embed_calls.append(text)
+        # Distinct, non-colinear vectors so nothing merges under COSINE_MIN=0.99.
+        table = {
+            "Acme Robotics": ([1.0, 0.0, 0.0], "stub"),
+            "Globex Dynamics": ([0.0, 1.0, 0.0], "stub"),
+        }
+        return table.get(text, ([0.0, 0.0, 1.0], "stub"))
+
+    monkeypatch.setattr(me_embed, "_embed", stub_embed)
+    me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+
+    # Seed one candidate entity of type 'organization'.
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        seed_id = me._create_entity("Acme Robotics", "organization", {}, conn)
+        conn.commit()
+
+    # First cosine resolve of a novel org name: misses exact+fuzzy, scans the
+    # candidate, embeds query + candidate, and PERSISTS the candidate vector.
+    me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+    embed_calls.clear()
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        r1 = await me._resolve_entity_async("Globex Dynamics", "organization", conn)
+        conn.commit()
+        stored = conn.execute(
+            "SELECT COUNT(*) FROM entity_embeddings WHERE entity_id=?", (seed_id,)
+        ).fetchone()[0]
+
+    assert r1 is None, "Distinct vectors under COSINE_MIN=0.99 must not merge"
+    assert stored == 1, f"Candidate vector should be persisted once; got {stored} rows"
+    assert "Acme Robotics" in embed_calls, "First pass must embed the candidate"
+    pass1_candidate_embeds = embed_calls.count("Acme Robotics")
+    assert pass1_candidate_embeds == 1
+
+    # Second cosine resolve with the in-process cache cleared: the candidate
+    # vector must come from the STORE, not a re-embed.
+    me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+    embed_calls.clear()
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        r2 = await me._resolve_entity_async("Globex Dynamics", "organization", conn)
+
+    assert r2 is None
+    assert "Acme Robotics" not in embed_calls, (
+        f"Stored candidate vector must be reused, not re-embedded; embed_calls={embed_calls}"
+    )
+    # Only the query name should be embedded on the second pass.
+    assert embed_calls == ["Globex Dynamics"], (
+        f"Second pass should embed only the query name; got {embed_calls}"
+    )
 
 
 # ---------------------------------------------------------------------------
