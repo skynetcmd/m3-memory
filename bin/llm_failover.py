@@ -15,26 +15,41 @@ import httpx
 
 logger = logging.getLogger("llm_failover")
 
-# Failover order. Default is LM Studio only (OpenAI-compat on :1234). Ollama
-# (:11434) is OPT-IN — a probe to an unconfigured provider is not free on every
-# platform (a connect to a non-listening localhost port can block up to the full
-# connect timeout rather than failing in <1ms, e.g. on Windows), and that cost is
-# paid on every discovery for a provider the user may not run. So we don't probe
-# Ollama unless the user asks for it:
-#   - set M3_ENABLE_OLLAMA_FAILOVER=1 to append the default Ollama endpoint, or
-#   - list endpoints explicitly via LLM_ENDPOINTS_CSV (full control).
+# Failover order. We only probe endpoints the user actually opts into — a probe
+# to an unconfigured provider is not free on every platform (a connect to a
+# non-listening localhost port can block up to the full connect timeout rather
+# than failing in <1ms, e.g. on Windows), and that cost is paid on every
+# discovery for a provider the user may not run.
 #
-# For multi-machine LAN failover, set LLM_ENDPOINTS_CSV env var, e.g.:
-#   LLM_ENDPOINTS_CSV="http://localhost:1234/v1,http://laptop.local:1234/v1,http://desktop.local:1234/v1"
+# Two built-in local endpoints, each independently toggleable so neither
+# single-provider group pays for the other's probe:
+#   - LM Studio (:1234) — ON by default (most common). Disable with
+#     M3_ENABLE_LMSTUDIO_FAILOVER=0 (e.g. Ollama-only users).
+#   - Ollama (:11434)   — OFF by default. Enable with
+#     M3_ENABLE_OLLAMA_FAILOVER=1.
+# Or take full control (overrides both toggles) with LLM_ENDPOINTS_CSV — also
+# the path for Ollama-only, custom order, or multi-machine LAN failover, e.g.:
+#   LLM_ENDPOINTS_CSV="http://localhost:11434/v1"
+#   LLM_ENDPOINTS_CSV="http://localhost:1234/v1,http://laptop.local:1234/v1"
 _LMSTUDIO_ENDPOINT = "http://localhost:1234/v1"
 _OLLAMA_ENDPOINT = "http://localhost:11434/v1"
+
+
+def _flag(name: str, default: bool) -> bool:
+    v = os.environ.get(name, "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes")
+
 
 _endpoints_csv = os.environ.get("LLM_ENDPOINTS_CSV", "").strip()
 if _endpoints_csv:
     LLM_ENDPOINTS = [ep.strip() for ep in _endpoints_csv.split(",") if ep.strip()]
 else:
-    LLM_ENDPOINTS = [_LMSTUDIO_ENDPOINT]
-    if os.environ.get("M3_ENABLE_OLLAMA_FAILOVER", "").strip() in ("1", "true", "yes"):
+    LLM_ENDPOINTS = []
+    if _flag("M3_ENABLE_LMSTUDIO_FAILOVER", True):
+        LLM_ENDPOINTS.append(_LMSTUDIO_ENDPOINT)
+    if _flag("M3_ENABLE_OLLAMA_FAILOVER", False):
         LLM_ENDPOINTS.append(_OLLAMA_ENDPOINT)
 
 # Model filtering patterns

@@ -166,13 +166,16 @@ If only the small model is loaded, `get_best_llm` picks it automatically — no 
 
 #### Endpoint discovery & failover
 
-The default discovery endpoint is **LM Studio only** (`http://localhost:1234/v1`). Endpoints are probed on first use; an absent one is skipped, but probing a provider you don't run is not free on every platform (on Windows a connect to a non-listening port can block up to the connect timeout), so the default does not probe Ollama.
+M3 only probes endpoints you opt into. Probing a provider you don't run is not free on every platform (on Windows a connect to a non-listening port can block up to the connect timeout), so each built-in local endpoint is independently toggleable — neither single-provider group pays for the other's probe. By default only **LM Studio** (`http://localhost:1234/v1`) is probed.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `M3_ENABLE_OLLAMA_FAILOVER` | _(unset)_ | Set to `1`/`true`/`yes` to **append** the default Ollama endpoint (`http://localhost:11434/v1`) to the failover list. **Ollama users: set this**, or use `LLM_ENDPOINTS_CSV`. |
-| `LLM_ENDPOINTS_CSV` | _(unset)_ | Comma-separated endpoint list, probed in order. Overrides the default entirely (takes precedence over `M3_ENABLE_OLLAMA_FAILOVER`). Use for Ollama-only, multi-machine LAN failover, or any custom order — e.g. `"http://localhost:1234/v1,http://localhost:11434/v1"`. |
+| `M3_ENABLE_LMSTUDIO_FAILOVER` | `1` (on) | Probe the LM Studio endpoint (`http://localhost:1234/v1`). Set to `0` if you don't run LM Studio (e.g. **Ollama-only users**) to skip its probe. |
+| `M3_ENABLE_OLLAMA_FAILOVER` | `0` (off) | Set to `1`/`true`/`yes` to also probe the Ollama endpoint (`http://localhost:11434/v1`). **Ollama users: set this.** |
+| `LLM_ENDPOINTS_CSV` | _(unset)_ | Comma-separated endpoint list, probed in order. **Overrides both toggles** — full control. Use for Ollama-only, multi-machine LAN failover, or any custom order — e.g. `"http://localhost:11434/v1"` or `"http://localhost:1234/v1,http://laptop.local:1234/v1"`. |
 | `M3_LLM_CONNECT_TIMEOUT` | `0.3` | Per-endpoint connect timeout in seconds. Raise for slow remote LAN endpoints. |
+
+Examples: **LM Studio only** (default) — no config. **Ollama only** — `M3_ENABLE_LMSTUDIO_FAILOVER=0 M3_ENABLE_OLLAMA_FAILOVER=1` (or just `LLM_ENDPOINTS_CSV="http://localhost:11434/v1"`). **Both** — `M3_ENABLE_OLLAMA_FAILOVER=1`.
 
 ---
 
