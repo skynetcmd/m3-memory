@@ -990,6 +990,34 @@ async def _embed_canonical_cached(canonical_name: str) -> list[float] | None:
     return vec
 
 
+async def prime_entity_name_cache(names: list[str]) -> int:
+    """Pre-warm the canonical-name embed cache for a batch of names in ONE
+    batched embed call. Resolution then hits the warm cache via
+    _embed_canonical_cached instead of embedding each name individually.
+
+    The single-item embed kernel is GPU-starved (~15-200ms/name depending on
+    device contention); batching many names through _embed_many amortizes that
+    to ~1ms/name (measured ~13x on this GPU). A bulk extractor that knows all of
+    a batch's entity names up front should call this before the resolve loop.
+
+    Only embeds names not already cached. Returns the number newly cached.
+    Best-effort: a failed embed for one name just leaves it uncached (the resolve
+    path will embed it individually later)."""
+    todo = [n for n in dict.fromkeys(names) if n and n not in _ENTITY_NAME_EMBED_CACHE]
+    if not todo:
+        return 0
+    results = await _embed_many(todo)
+    newly = 0
+    for name, (vec, _model) in zip(todo, results):
+        if vec is None:
+            continue
+        if len(_ENTITY_NAME_EMBED_CACHE) >= ENTITY_NAME_EMBED_CACHE_MAX:
+            _ENTITY_NAME_EMBED_CACHE.clear()
+        _ENTITY_NAME_EMBED_CACHE[name] = vec
+        newly += 1
+    return newly
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Status probe
 # ──────────────────────────────────────────────────────────────────────────────
