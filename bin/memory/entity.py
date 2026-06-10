@@ -63,6 +63,75 @@ from .db import _ENTITY_COUNT_QUERY, _db, _gate_active
 from .embed import _embed_canonical_cached
 from .util import sha256_hex as _sha256_hex
 
+# Store-once entity-name vectors (migration 032). Tier-3 cosine resolution loads
+# candidate vectors from the entity_embeddings table instead of re-embedding the
+# candidate canonical_names on every cold resolve. A candidate that has no stored
+# vector yet is embedded once and persisted (lazy backfill); subsequent resolves
+# read the blob. This keeps tiers 1-2 (exact, fuzzy) entirely embed-free — only
+# the cosine tier touches the embedder, and only for the query name + any
+# not-yet-stored candidates. (Storing eagerly on entity creation, by contrast,
+# would inject an embed call into the previously embed-free create path.)
+
+
+def _entity_embeddings_available(db) -> bool:
+    """True if the entity_embeddings table exists in this DB. Older DBs that
+    predate migration 032 won't have it; callers fall back to the
+    embed-each-candidate path so behavior is preserved everywhere."""
+    try:
+        row = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entity_embeddings'"
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
+def _load_entity_vectors(db, entity_ids: list[str]) -> dict[str, list[float]]:
+    """Bulk-load stored name vectors for the given entity ids. Returns
+    {entity_id: vector}; ids with no stored vector are simply absent."""
+    if not entity_ids:
+        return {}
+    from embedding_utils import unpack as _unpack
+
+    out: dict[str, list[float]] = {}
+    # Chunk the IN-list to stay under SQLite's variable limit.
+    for i in range(0, len(entity_ids), 500):
+        chunk = entity_ids[i : i + 500]
+        ph = ",".join("?" * len(chunk))
+        try:
+            rows = db.execute(
+                f"SELECT entity_id, embedding FROM entity_embeddings WHERE entity_id IN ({ph})",
+                chunk,
+            ).fetchall()
+        except Exception:
+            return out
+        for r in rows:
+            eid = r["entity_id"] if hasattr(r, "keys") else r[0]
+            blob = r["embedding"] if hasattr(r, "keys") else r[1]
+            try:
+                out[eid] = _unpack(blob)
+            except Exception:
+                continue
+    return out
+
+
+def _store_entity_vector(db, entity_id: str, vec: list[float], model: str | None) -> None:
+    """Persist one entity's name vector (idempotent). Best-effort: never raises
+    into the resolution path — a storage failure just means a future resolve
+    re-embeds this candidate, same as before store-once."""
+    if not vec:
+        return
+    from embedding_utils import pack as _pack
+
+    try:
+        db.execute(
+            "INSERT OR REPLACE INTO entity_embeddings (entity_id, embedding, embed_model, dim) "
+            "VALUES (?, ?, ?, ?)",
+            (entity_id, _pack(vec), model, len(vec)),
+        )
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug(f"entity vector store failed for {entity_id}: {e}")
+
 
 def _enable_entity_graph_gate() -> bool:
     """Auto-activate the entity graph when EITHER the env var is set OR
@@ -298,10 +367,15 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
 
     # Tier 3: embedding cosine within same entity_type.
     # Cap candidates to 100 most-recently created to bound the comparison.
-    # Each canonical_name is embedded at most once per process via
-    # _embed_canonical_cached — successive lookups against the same
-    # candidate set hit the cache after warmup, avoiding the O(N) embed
-    # calls per new entity that previously dominated wall time.
+    #
+    # Store-once (migration 032): candidate name vectors are loaded from the
+    # entity_embeddings table rather than re-embedded each cold resolve. A
+    # candidate with no stored vector is embedded once and persisted, so the
+    # next resolve reads the blob. At scale this turns an ~101-embed cold
+    # resolve into a 1-embed one (only the new query name). When the table is
+    # absent (DBs predating migration 032) we fall back to embedding each
+    # candidate via the in-process cache — identical behavior to before
+    # store-once.
     candidates = db.execute(
         "SELECT id, canonical_name FROM entities WHERE entity_type = ? ORDER BY created_at DESC LIMIT 100",
         (entity_type,),
@@ -313,35 +387,51 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
     if qvec is None:
         return None
 
-    # Tier-A perf: try the batched-cosine path.
-    if _config.m3_core_rs is not None:
-        valid_candidates = []
-        cvecs = []
-        for c in candidates:
-            cvec = await _embed_canonical_cached(c["canonical_name"])
-            if cvec is not None:
-                cvecs.append(cvec)
-                valid_candidates.append(c)
-        if not cvecs:
-            return None
+    use_store = _entity_embeddings_available(db)
+    stored = _load_entity_vectors(db, [c["id"] for c in candidates]) if use_store else {}
 
+    async def _candidate_vec(c) -> list[float] | None:
+        """Vector for a candidate: stored blob if present, else embed once and
+        (when the store exists) persist for next time."""
+        v = stored.get(c["id"])
+        if v is not None:
+            return v
+        v = await _embed_canonical_cached(c["canonical_name"])
+        if v is not None and use_store:
+            _store_entity_vector(db, c["id"], v, _config.EMBED_MODEL if hasattr(_config, "EMBED_MODEL") else None)
+        return v
+
+    valid_candidates = []
+    cvecs = []
+    for c in candidates:
+        cvec = await _candidate_vec(c)
+        if cvec is not None:
+            cvecs.append(cvec)
+            valid_candidates.append(c)
+    if not cvecs:
+        return None
+
+    if use_store:
+        # Persist newly-embedded candidate vectors in one commit so the work
+        # isn't lost if the surrounding transaction rolls back later.
+        try:
+            db.commit()
+        except Exception:
+            pass
+
+    best_score, best_id = 0.0, None
+    if _config.m3_core_rs is not None:
         # Single FFI call to compute all cosine similarities in parallel.
         scores = _config.m3_core_rs.cosine_batch(qvec, cvecs)
-        best_score, best_id = 0.0, None
         for i, s in enumerate(scores):
             if s > best_score:
                 best_score, best_id = s, valid_candidates[i]["id"]
     else:
-        # Legacy/Python path.
         from .util import _cosine
-        best_score, best_id = 0.0, None
-        for c in candidates:
-            cvec = await _embed_canonical_cached(c["canonical_name"])
-            if cvec is None:
-                continue
+        for i, cvec in enumerate(cvecs):
             s = _cosine(qvec, cvec)
             if s > best_score:
-                best_score, best_id = s, c["id"]
+                best_score, best_id = s, valid_candidates[i]["id"]
 
     if best_score >= ENTITY_RESOLVE_COSINE_MIN and best_id is not None:
         return best_id
