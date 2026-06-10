@@ -44,8 +44,21 @@ def _skip_migrations_for_template_db(monkeypatch):
     The template is already at HEAD migrations, so re-running them inside
     the test process is wasted work that also tends to fail when the test
     DB lives in tmp (paths differ from the backup-dir defaults).
+
+    Also clears the module-global canonical-name embed cache before and after
+    each test. Several tests here stub `memory.embed._embed`/`_embed_many` and
+    prime that cache with synthetic vectors; left dirty, those vectors leak into
+    later tests (even across files) and skew real resolution. Clearing here keeps
+    every test hermetic regardless of order.
     """
     monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
+    try:
+        import memory.embed as _me_embed
+        _me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+        yield
+        _me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+    except ImportError:
+        yield
 
 
 def _create_entity_graph_schema(db_path):
@@ -723,6 +736,109 @@ async def test_resolution_cosine_stores_and_reuses_candidate_vectors(monkeypatch
     assert embed_calls == ["Globex Dynamics"], (
         f"Second pass should embed only the query name; got {embed_calls}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 9c — Store-once deferred-write buffer (concurrent-safe flush)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_store_once_deferred_buffer_flush(monkeypatch, tmp_path):
+    """Under deferred_entity_vector_writes(), cosine resolution buffers candidate
+    vectors instead of writing them mid-resolve (which would fight SQLite's single
+    writer under concurrency). flush_entity_vectors() then persists them serially.
+    Verifies: nothing is written to entity_embeddings during the deferred phase,
+    and the flush writes exactly the buffered rows.
+    """
+    import memory.entity as me
+    import memory.embed as me_embed
+
+    db_path = tmp_path / "test.db"
+    _create_entity_graph_schema(db_path)
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setattr(me, "ENTITY_RESOLVE_FUZZY_MIN", 0.85)
+    monkeypatch.setattr(me, "ENTITY_RESOLVE_COSINE_MIN", 0.99)  # never merge → full candidate scan
+
+    async def stub_embed(text: str):
+        table = {
+            "Acme Robotics": ([1.0, 0.0, 0.0], "stub"),
+            "Globex Dynamics": ([0.0, 1.0, 0.0], "stub"),
+        }
+        return table.get(text, ([0.0, 0.0, 1.0], "stub"))
+
+    monkeypatch.setattr(me_embed, "_embed", stub_embed)
+    me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        seed_id = me._create_entity("Acme Robotics", "organization", {}, conn)
+        conn.commit()
+
+    me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        # Resolve inside the deferral context: candidate vector must be buffered,
+        # NOT written to entity_embeddings yet.
+        with me.deferred_entity_vector_writes() as buf:
+            r = await me._resolve_entity_async("Globex Dynamics", "organization", conn)
+            mid_phase = conn.execute(
+                "SELECT COUNT(*) FROM entity_embeddings"
+            ).fetchone()[0]
+            assert r is None
+            assert mid_phase == 0, (
+                f"No vectors should be written during the deferred phase; got {mid_phase}"
+            )
+            assert len(buf) == 1, f"Candidate vector should be buffered; buf={buf}"
+            assert buf[0][0] == seed_id
+
+            # Flush serially → now the row is persisted.
+            n = me.flush_entity_vectors(conn, buf)
+
+        assert n == 1, f"flush should write the one buffered row; got {n}"
+        after = conn.execute("SELECT COUNT(*) FROM entity_embeddings").fetchone()[0]
+        assert after == 1, f"Flushed vector should be persisted; got {after}"
+
+
+# ---------------------------------------------------------------------------
+# Test 9d — Batched name-cache priming (the GLiNER bulk-extractor speedup)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_prime_entity_name_cache_batches(monkeypatch):
+    """prime_entity_name_cache embeds a batch of names in ONE _embed_many call and
+    populates _ENTITY_NAME_EMBED_CACHE, so subsequent _embed_canonical_cached hits
+    are cache reads (no per-name _embed). This is what cuts the GLiNER extractor's
+    ~90%-embed batch cost. Verifies: one batched call, cache populated, already-
+    cached names skipped."""
+    import memory.embed as me_embed
+
+    me_embed._ENTITY_NAME_EMBED_CACHE.clear()
+
+    many_calls: list[list[str]] = []
+
+    async def stub_embed_many(texts):
+        many_calls.append(list(texts))
+        return [([float(len(t)), 0.0, 0.0], "stub") for t in texts]
+
+    async def stub_embed(text):  # must NOT be hit when priming covers the name
+        raise AssertionError(f"individual _embed called for {text!r} after priming")
+
+    monkeypatch.setattr(me_embed, "_embed_many", stub_embed_many)
+    monkeypatch.setattr(me_embed, "_embed", stub_embed)
+
+    n = await me_embed.prime_entity_name_cache(["Alice", "Bob", "Alice", "Carol"])
+    assert n == 3, f"3 distinct names should be cached; got {n}"
+    assert len(many_calls) == 1, "all names embedded in ONE batched call"
+    assert sorted(many_calls[0]) == ["Alice", "Bob", "Carol"], "deduped before embed"
+
+    # Cached names now resolve via the cache (stub_embed would raise if hit).
+    v = await me_embed._embed_canonical_cached("Alice")
+    assert v == [5.0, 0.0, 0.0]  # len("Alice")=5
+
+    # Priming again is a no-op for already-cached names.
+    many_calls.clear()
+    n2 = await me_embed.prime_entity_name_cache(["Alice", "Bob"])
+    assert n2 == 0 and many_calls == [], "already-cached names skip the embed call"
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,8 @@ is its only caller and that function is entity-specific.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -115,11 +117,70 @@ def _load_entity_vectors(db, entity_ids: list[str]) -> dict[str, list[float]]:
     return out
 
 
+# Deferred-write buffer for store-once vectors. SQLite is single-writer: when many
+# resolve loops run concurrently (e.g. a batched extractor), having each one write
+# its newly-embedded candidate vectors mid-resolve makes them all contend for the
+# write lock and livelock under busy_timeout. The buffer lets a concurrent caller
+# collect new vectors during the parallel resolve phase, then flush them ONCE,
+# serially, outside that phase. Default is write-through (buffer inactive) so
+# single-threaded callers and the existing tests are unaffected.
+_DEFERRED_ENTITY_VECTORS: "contextvars.ContextVar[list[tuple[str, list[float], str | None]] | None]" = (
+    contextvars.ContextVar("_DEFERRED_ENTITY_VECTORS", default=None)
+)
+
+
+@contextlib.contextmanager
+def deferred_entity_vector_writes():
+    """Within this context, _store_entity_vector buffers vectors instead of
+    writing them; the buffered rows are returned to the caller to flush serially
+    via flush_entity_vectors(). Use around a concurrent batch of resolves so the
+    vector writes don't fight SQLite's single writer mid-resolve."""
+    buf: list[tuple[str, list[float], str | None]] = []
+    token = _DEFERRED_ENTITY_VECTORS.set(buf)
+    try:
+        yield buf
+    finally:
+        _DEFERRED_ENTITY_VECTORS.reset(token)
+
+
+def flush_entity_vectors(db, buffered: list[tuple[str, list[float], str | None]]) -> int:
+    """Write buffered (entity_id, vec, model) rows in one transaction. Serial by
+    construction — call from a single task after a concurrent resolve phase.
+    Returns the number of rows written. Best-effort: never raises."""
+    if not buffered:
+        return 0
+    from embedding_utils import pack as _pack
+
+    written = 0
+    try:
+        db.executemany(
+            "INSERT OR REPLACE INTO entity_embeddings (entity_id, embedding, embed_model, dim) "
+            "VALUES (?, ?, ?, ?)",
+            [(eid, _pack(vec), model, len(vec)) for eid, vec, model in buffered if vec],
+        )
+        written = len(buffered)
+        try:
+            db.commit()
+        except Exception:
+            pass
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug(f"entity vector flush failed ({len(buffered)} rows): {e}")
+    return written
+
+
 def _store_entity_vector(db, entity_id: str, vec: list[float], model: str | None) -> None:
     """Persist one entity's name vector (idempotent). Best-effort: never raises
     into the resolution path — a storage failure just means a future resolve
-    re-embeds this candidate, same as before store-once."""
+    re-embeds this candidate, same as before store-once.
+
+    If a deferred-write buffer is active (see deferred_entity_vector_writes), the
+    vector is appended to it instead of written now, so concurrent resolves don't
+    contend for SQLite's write lock; the caller flushes serially afterward."""
     if not vec:
+        return
+    buf = _DEFERRED_ENTITY_VECTORS.get()
+    if buf is not None:
+        buf.append((entity_id, vec, model))
         return
     from embedding_utils import pack as _pack
 
@@ -411,9 +472,11 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
     if not cvecs:
         return None
 
-    if use_store:
-        # Persist newly-embedded candidate vectors in one commit so the work
-        # isn't lost if the surrounding transaction rolls back later.
+    if use_store and _DEFERRED_ENTITY_VECTORS.get() is None:
+        # Write-through path: persist newly-embedded candidate vectors in one
+        # commit so the work isn't lost if the surrounding transaction rolls back.
+        # When deferral is active the vectors are in the caller's buffer instead —
+        # skip the commit so concurrent resolves don't contend for the write lock.
         try:
             db.commit()
         except Exception:
