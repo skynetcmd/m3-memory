@@ -27,10 +27,16 @@ logger = logging.getLogger("llm_failover")
 #     M3_ENABLE_LMSTUDIO_FAILOVER=0 (e.g. Ollama-only users).
 #   - Ollama (:11434)   — OFF by default. Enable with
 #     M3_ENABLE_OLLAMA_FAILOVER=1.
-# Or take full control (overrides both toggles) with LLM_ENDPOINTS_CSV — also
-# the path for Ollama-only, custom order, or multi-machine LAN failover, e.g.:
-#   LLM_ENDPOINTS_CSV="http://localhost:11434/v1"
-#   LLM_ENDPOINTS_CSV="http://localhost:1234/v1,http://laptop.local:1234/v1"
+# Running your own server (llama.cpp, vLLM, LocalAI, a remote box, …)? Point at it
+# with M3_LLM_URL — a single OpenAI-compatible /v1 base URL, tried FIRST. Setting it
+# also turns OFF the LM Studio default probe (you've told us your endpoint, so we
+# don't also probe :1234) unless you explicitly re-enable it. Example:
+#   M3_LLM_URL="http://localhost:8080/v1"        # llama-server
+#   M3_LLM_URL="http://gpu-box.local:8000/v1"    # remote vLLM
+#
+# Or take full control (overrides M3_LLM_URL and both toggles) with LLM_ENDPOINTS_CSV
+# — the path for an ordered multi-endpoint failover / multi-machine LAN, e.g.:
+#   LLM_ENDPOINTS_CSV="http://localhost:8080/v1,http://gpu-box.local:8000/v1"
 _LMSTUDIO_ENDPOINT = "http://localhost:1234/v1"
 _OLLAMA_ENDPOINT = "http://localhost:11434/v1"
 
@@ -43,14 +49,22 @@ def _flag(name: str, default: bool) -> bool:
 
 
 _endpoints_csv = os.environ.get("LLM_ENDPOINTS_CSV", "").strip()
+_custom_url = os.environ.get("M3_LLM_URL", "").strip()
 if _endpoints_csv:
+    # Explicit ordered list — full control, overrides everything below.
     LLM_ENDPOINTS = [ep.strip() for ep in _endpoints_csv.split(",") if ep.strip()]
 else:
     LLM_ENDPOINTS = []
-    if _flag("M3_ENABLE_LMSTUDIO_FAILOVER", True):
-        LLM_ENDPOINTS.append(_LMSTUDIO_ENDPOINT)
+    if _custom_url:
+        LLM_ENDPOINTS.append(_custom_url)
+    # A custom URL implies "this is my server" — don't auto-probe LM Studio unless
+    # the user explicitly opted in. With no custom URL, LM Studio stays on by default.
+    if _flag("M3_ENABLE_LMSTUDIO_FAILOVER", default=not _custom_url):
+        if _LMSTUDIO_ENDPOINT not in LLM_ENDPOINTS:
+            LLM_ENDPOINTS.append(_LMSTUDIO_ENDPOINT)
     if _flag("M3_ENABLE_OLLAMA_FAILOVER", False):
-        LLM_ENDPOINTS.append(_OLLAMA_ENDPOINT)
+        if _OLLAMA_ENDPOINT not in LLM_ENDPOINTS:
+            LLM_ENDPOINTS.append(_OLLAMA_ENDPOINT)
 
 # Model filtering patterns
 EMBED_EXCLUSIONS = ("embed", "nomic", "jina", "bge", "minilm", "e5")
