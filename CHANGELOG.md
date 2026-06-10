@@ -66,6 +66,16 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
   set `M3_ENABLE_OLLAMA_FAILOVER=1` (and `M3_ENABLE_LMSTUDIO_FAILOVER=0` if you don't
   also run LM Studio). llama.cpp / vLLM / custom-server users: set `M3_LLM_URL`.
 
+- **Setup wizard detects your LLM runtime and persists the matching failover vars**
+  (`m3_memory/setup_wizard.py`, new preflight Probe 5). The wizard now probes
+  `:1234` (LM Studio) and `:11434` (Ollama), and — if a custom `M3_LLM_URL` /
+  `LLM_ENDPOINTS_CSV` isn't already set — offers to persist the right opt-in vars
+  (e.g. enables Ollama and disables the dead LM Studio probe for an Ollama-only box).
+  Persistence mirrors `M3_EMBED_GGUF`: shell rc (`setx` on Windows) **and** the memory
+  MCP server's `env` block in Claude/Gemini settings, so spawned MCP servers see it.
+  If no local runtime is detected it prints the one-liners for LM Studio / Ollama /
+  llama.cpp.
+
   Also: the failover **connect timeout** dropped from `1.0s` to `0.3s` (override with
   `M3_LLM_CONNECT_TIMEOUT`) to further bound the cost of probing any absent endpoint.
 

@@ -447,7 +447,91 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
         _say("  no BGE-M3 GGUF auto-discovered; tier-2 (:8082) will serve all embeds")
         _say("  (set M3_EMBED_GGUF later to enable tier-1; see EMBEDDER_ARCHITECTURE.md)")
 
+    # ── Probe 5: LLM endpoint detection + failover wiring ───────────────
+    # Enrichment features (auto-classify, summarize) discover a chat model via
+    # bin/llm_failover.py, which only probes endpoints the user opts into.
+    # Detect which local runtime is actually reachable and persist the matching
+    # opt-in vars, so a non-LM-Studio user (Ollama / llama.cpp / custom) doesn't
+    # silently get an unreachable default — and doesn't pay a probe for a
+    # provider they don't run.
+    _probe_llm_endpoints(plan, args)
+
     return ok
+
+
+# Built-in local endpoints the failover layer knows (kept in sync with
+# bin/llm_failover.py). Detection here drives which opt-in vars we persist.
+_LLM_RUNTIMES = (
+    # (label, url, env var that enables it, value to set)
+    ("LM Studio", "http://localhost:1234/v1", "M3_ENABLE_LMSTUDIO_FAILOVER", "1"),
+    ("Ollama",    "http://localhost:11434/v1", "M3_ENABLE_OLLAMA_FAILOVER", "1"),
+)
+
+
+def _endpoint_reachable(base_url: str, timeout: float = 0.4) -> bool:
+    """True if an OpenAI-compatible /v1/models responds at base_url. Fast-fail:
+    an absent localhost port should return quickly. An explicit *connect* timeout
+    bounds the platform-dependent worst case (on Windows a connect to a dead port
+    can otherwise block past a plain total timeout)."""
+    try:
+        import httpx
+    except ImportError:
+        return False
+    url = base_url.rstrip("/") + "/models"
+    try:
+        r = httpx.get(url, timeout=httpx.Timeout(timeout, connect=timeout))
+        return r.status_code < 500
+    except Exception:
+        return False
+
+
+def _probe_llm_endpoints(plan: "SetupPlan", args: argparse.Namespace) -> None:
+    """Detect the reachable local LLM runtime(s) and persist the failover opt-in
+    vars to match. Mirrors the M3_EMBED_GGUF persistence (shell rc + MCP env)."""
+    # If the user already pinned a custom server, honor it — just confirm.
+    custom = os.environ.get("M3_LLM_URL", "").strip()
+    csv = os.environ.get("LLM_ENDPOINTS_CSV", "").strip()
+    if csv:
+        _ok(f"  LLM endpoints pinned via LLM_ENDPOINTS_CSV ({csv}); leaving as-is")
+        return
+    if custom:
+        live = _endpoint_reachable(custom)
+        _ok(f"  M3_LLM_URL set ({custom}) — {'reachable' if live else 'NOT reachable yet'}")
+        return
+
+    reachable = [(label, url, var, val) for (label, url, var, val) in _LLM_RUNTIMES
+                 if _endpoint_reachable(url)]
+    if not reachable:
+        _say("  no local LLM runtime detected on :1234 (LM Studio) or :11434 (Ollama)")
+        _say("  enrichment features need a chat model. Point M3 at your server with one of:")
+        _say("    LM Studio (default) — just load a model on :1234")
+        _say('    Ollama              — export M3_ENABLE_OLLAMA_FAILOVER=1')
+        _say('    llama.cpp / vLLM     — export M3_LLM_URL="http://localhost:8080/v1"')
+        _say("  (see ENVIRONMENT_VARIABLES.md → Endpoint discovery & failover)")
+        return
+
+    for label, url, var, val in reachable:
+        _ok(f"  detected {label} reachable at {url}")
+        # LM Studio is on by default — only persist the explicit enable for the
+        # non-default ones, and an explicit disable for LM Studio if it's absent.
+        already = os.environ.get(var, "").strip()
+        if already in ("1", "true", "yes"):
+            continue
+        if var == "M3_ENABLE_LMSTUDIO_FAILOVER":
+            continue  # default already on; nothing to persist
+        if args.non_interactive or _ask_yes_no(
+            f"  Enable {label} for enrichment (persist {var}=1)?", default=True
+        ):
+            os.environ[var] = val
+            _persist_env_var(var, val, non_interactive=args.non_interactive)
+
+    # If LM Studio is NOT reachable but something else is, disable its probe so
+    # the user stops paying for a dead :1234 connect on every discovery.
+    lmstudio_live = any(label == "LM Studio" for label, *_ in reachable)
+    if not lmstudio_live and os.environ.get("M3_ENABLE_LMSTUDIO_FAILOVER", "").strip() not in ("0", "false", "no"):
+        _say("  LM Studio (:1234) not reachable — disabling its probe to avoid a dead connect")
+        os.environ["M3_ENABLE_LMSTUDIO_FAILOVER"] = "0"
+        _persist_env_var("M3_ENABLE_LMSTUDIO_FAILOVER", "0", non_interactive=args.non_interactive)
 
 
 # ── B15 helpers ──────────────────────────────────────────────────────────
@@ -637,6 +721,90 @@ def _persist_embed_gguf_mcp(gguf_path: str) -> None:
                 json.dumps(cfg, indent=2) + "\n", encoding="utf-8"
             )
             _ok(f"    set M3_EMBED_GGUF on {label} memory MCP entry ({settings_path})")
+        except OSError as e:
+            _warn(f"    failed to write {settings_path} ({e})")
+
+
+def _persist_env_var(name: str, value: str, *, non_interactive: bool) -> None:
+    """Generic env-var persistence — shell rc + memory MCP env block, mirroring
+    _persist_embed_gguf for arbitrary name/value (e.g. failover opt-in vars).
+    Best-effort across surfaces; warnings don't abort."""
+    _persist_env_var_shell(name, value, non_interactive=non_interactive)
+    _persist_env_var_mcp(name, value)
+
+
+def _persist_env_var_shell(name: str, value: str, *, non_interactive: bool) -> None:
+    """Persist <name>=<value> for new shell sessions (per-platform)."""
+    if sys.platform == "win32":
+        if not non_interactive and not _ask_yes_no(
+            f"  Persist {name} to your Windows user environment (setx)?", default=True
+        ):
+            _warn(f'    skipped — set it later: setx {name} "{value}"')
+            return
+        try:
+            result = subprocess.run(
+                ["setx", name, value], capture_output=True, text=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            _warn(f'    setx failed ({e}); set it later: setx {name} "{value}"')
+            return
+        if result.returncode == 0:
+            _ok(f"    persisted {name} via setx (new shells will see it)")
+        else:
+            _warn(f"    setx exited {result.returncode}: {(result.stderr or result.stdout or '').strip()}")
+        return
+
+    rc_path = _pick_unix_shell_rc()
+    if not non_interactive and not _ask_yes_no(
+        f"  Persist {name} to {rc_path}?", default=True
+    ):
+        _warn(f"    skipped — set it later: echo 'export {name}={value}' >> {rc_path}")
+        return
+    try:
+        existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
+    except OSError as e:
+        _warn(f"    could not read {rc_path} ({e}); skipping shell rc persistence")
+        return
+    # Idempotent: if the exact assignment is already present, do nothing; if a
+    # stale value for the same var exists, append the new one (last wins in sh).
+    if f"export {name}={value}" in existing or f'export {name}="{value}"' in existing:
+        _ok(f"    {name}={value} already present in {rc_path}")
+        return
+    block = f'\n# Added by m3 setup — LLM endpoint failover\nexport {name}="{value}"\n'
+    try:
+        with rc_path.open("a", encoding="utf-8") as f:
+            f.write(block)
+        _ok(f"    persisted {name} -> {rc_path}")
+    except OSError as e:
+        _warn(f"    failed to write {rc_path} ({e})")
+
+
+def _persist_env_var_mcp(name: str, value: str) -> None:
+    """Set <name>=<value> on the 'memory' MCP server env block in Claude/Gemini
+    settings, so the spawned MCP server (which doesn't inherit shell env on
+    macOS/Windows) sees it. Mirrors _persist_embed_gguf_mcp."""
+    for label, settings_path in (
+        ("Claude Code", Path.home() / ".claude" / "settings.json"),
+        ("Gemini CLI",  Path.home() / ".gemini" / "settings.json"),
+    ):
+        if not settings_path.is_file():
+            continue
+        try:
+            cfg = json.loads(settings_path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError) as e:
+            _warn(f"    {settings_path} is unreadable ({e}); skipping {label} env wiring")
+            continue
+        mcp = cfg.get("mcpServers")
+        if not isinstance(mcp, dict) or "memory" not in mcp:
+            continue
+        env = mcp["memory"].setdefault("env", {})
+        if env.get(name) == value:
+            _ok(f"    {name} already set on {label} memory MCP entry")
+            continue
+        env[name] = value
+        try:
+            settings_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+            _ok(f"    set {name} on {label} memory MCP entry ({settings_path})")
         except OSError as e:
             _warn(f"    failed to write {settings_path} ({e})")
 
