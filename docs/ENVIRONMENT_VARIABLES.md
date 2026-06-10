@@ -170,12 +170,17 @@ M3 only probes endpoints you opt into. Probing a provider you don't run is not f
 
 | Variable | Default | Effect |
 |---|---|---|
-| `M3_ENABLE_LMSTUDIO_FAILOVER` | `1` (on) | Probe the LM Studio endpoint (`http://localhost:1234/v1`). Set to `0` if you don't run LM Studio (e.g. **Ollama-only users**) to skip its probe. |
+| `M3_LLM_URL` | _(unset)_ | A single OpenAI-compatible `/v1` base URL for **your own server** (llama.cpp, vLLM, LocalAI, a remote box). Tried **first**. Setting it also turns off the LM Studio default probe (you've named your endpoint), so a custom-server user gets no stray `:1234` probe. Re-add LM Studio with `M3_ENABLE_LMSTUDIO_FAILOVER=1` if you want it as a fallback. |
+| `M3_ENABLE_LMSTUDIO_FAILOVER` | `1` (on; `0` when `M3_LLM_URL` is set) | Probe the LM Studio endpoint (`http://localhost:1234/v1`). Set to `0` if you don't run LM Studio (e.g. **Ollama-only users**) to skip its probe. |
 | `M3_ENABLE_OLLAMA_FAILOVER` | `0` (off) | Set to `1`/`true`/`yes` to also probe the Ollama endpoint (`http://localhost:11434/v1`). **Ollama users: set this.** |
-| `LLM_ENDPOINTS_CSV` | _(unset)_ | Comma-separated endpoint list, probed in order. **Overrides both toggles** — full control. Use for Ollama-only, multi-machine LAN failover, or any custom order — e.g. `"http://localhost:11434/v1"` or `"http://localhost:1234/v1,http://laptop.local:1234/v1"`. |
+| `LLM_ENDPOINTS_CSV` | _(unset)_ | Comma-separated endpoint list, probed in order. **Overrides `M3_LLM_URL` and both toggles** — full control. Use for an ordered multi-endpoint / multi-machine LAN failover — e.g. `"http://localhost:8080/v1,http://gpu-box.local:8000/v1"`. |
 | `M3_LLM_CONNECT_TIMEOUT` | `0.3` | Per-endpoint connect timeout in seconds. Raise for slow remote LAN endpoints. |
 
-Examples: **LM Studio only** (default) — no config. **Ollama only** — `M3_ENABLE_LMSTUDIO_FAILOVER=0 M3_ENABLE_OLLAMA_FAILOVER=1` (or just `LLM_ENDPOINTS_CSV="http://localhost:11434/v1"`). **Both** — `M3_ENABLE_OLLAMA_FAILOVER=1`.
+Examples by runtime:
+- **LM Studio** (default) — no config.
+- **Ollama only** — `M3_ENABLE_LMSTUDIO_FAILOVER=0 M3_ENABLE_OLLAMA_FAILOVER=1` (or `LLM_ENDPOINTS_CSV="http://localhost:11434/v1"`).
+- **llama.cpp / vLLM / LocalAI / remote** — `M3_LLM_URL="http://localhost:8080/v1"` (no LM Studio probe; add `M3_ENABLE_LMSTUDIO_FAILOVER=1` to keep it as a fallback).
+- **Multiple endpoints in a specific order** — `LLM_ENDPOINTS_CSV="url1,url2,…"`.
 
 ---
 

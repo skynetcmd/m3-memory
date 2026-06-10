@@ -161,11 +161,15 @@ Pick whichever fits your hardware and runtime:
 | **llama.cpp** | `llama-server -m qwen2.5-0.5b-instruct-q8_0.gguf` | ~500 MB |
 | **vLLM / LocalAI** | Any HF-compatible 0.5B–1B instruct model | varies |
 
-> **Ollama users:** endpoint discovery probes LM Studio (`:1234`) by default only.
-> Enable Ollama with `export M3_ENABLE_OLLAMA_FAILOVER=1`. If you **only** run Ollama,
-> also skip the LM Studio probe with `export M3_ENABLE_LMSTUDIO_FAILOVER=0` (or just set
-> `LLM_ENDPOINTS_CSV="http://localhost:11434/v1"`). See
-> [ENVIRONMENT_VARIABLES → Endpoint discovery & failover](ENVIRONMENT_VARIABLES.md#endpoint-discovery--failover).
+> **Pointing M3 at your runtime:** endpoint discovery probes LM Studio (`:1234`) by
+> default only. Adjust for your setup:
+> - **Ollama** — `export M3_ENABLE_OLLAMA_FAILOVER=1` (add `M3_ENABLE_LMSTUDIO_FAILOVER=0`
+>   if you don't also run LM Studio).
+> - **llama.cpp / vLLM / LocalAI / remote** — `export M3_LLM_URL="http://localhost:8080/v1"`
+>   (your server is tried first; the LM Studio probe is auto-disabled).
+> - **Multiple endpoints, specific order** — `export LLM_ENDPOINTS_CSV="url1,url2,…"`.
+>
+> See [ENVIRONMENT_VARIABLES → Endpoint discovery & failover](ENVIRONMENT_VARIABLES.md#endpoint-discovery--failover).
 
 M3 picks the largest loaded chat model for enrichment. If you only want
 embedding-based memory, skip this — those features simply become no-ops.
