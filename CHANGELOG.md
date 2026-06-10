@@ -50,18 +50,21 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
   paid a repeated probe cost for the absent one — in long write-heavy runs (enrichment,
   entity extraction) this compounded into a severe slowdown.
 
-  Each built-in local endpoint is now **independently toggleable**, so neither
-  single-provider group pays for the other's probe:
-  - `M3_ENABLE_LMSTUDIO_FAILOVER` — default `1` (on). **Ollama-only users set this to `0`**
-    to skip the LM Studio probe.
+  Endpoint selection is now fully under the user's control, so no single-provider
+  group pays for another's probe:
+  - `M3_LLM_URL` — a single OpenAI-compatible `/v1` base URL for **your own server**
+    (llama.cpp, vLLM, LocalAI, remote box), tried first. Setting it turns off the LM
+    Studio default probe — a custom-server user gets no stray `:1234` probe.
+  - `M3_ENABLE_LMSTUDIO_FAILOVER` — default `1` (on; `0` when `M3_LLM_URL` is set).
+    **Ollama-only users set this to `0`** to skip the LM Studio probe.
   - `M3_ENABLE_OLLAMA_FAILOVER` — default `0` (off). **Ollama users set this to `1`** to
     probe `http://localhost:11434/v1`.
-  - `LLM_ENDPOINTS_CSV` — explicit list, **overrides both toggles** (full control; also
-    the path for multi-machine LAN failover).
+  - `LLM_ENDPOINTS_CSV` — explicit ordered list, **overrides `M3_LLM_URL` and both
+    toggles** (full control; the path for multi-machine LAN failover).
 
-  No action needed for the common LM Studio / llama.cpp / vLLM-on-`:1234` setup — that
-  is the default. Ollama users: set `M3_ENABLE_OLLAMA_FAILOVER=1` (and optionally
-  `M3_ENABLE_LMSTUDIO_FAILOVER=0` if you don't also run LM Studio).
+  No action needed for the common LM Studio setup — that is the default. Ollama users:
+  set `M3_ENABLE_OLLAMA_FAILOVER=1` (and `M3_ENABLE_LMSTUDIO_FAILOVER=0` if you don't
+  also run LM Studio). llama.cpp / vLLM / custom-server users: set `M3_LLM_URL`.
 
   Also: the failover **connect timeout** dropped from `1.0s` to `0.3s` (override with
   `M3_LLM_CONNECT_TIMEOUT`) to further bound the cost of probing any absent endpoint.
