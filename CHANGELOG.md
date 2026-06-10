@@ -40,6 +40,28 @@ Work-in-progress; not yet released. Tracking under `bin/dashboard_server.py`.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
+### Changed
+
+- **LLM failover default is now LM Studio only; Ollama is opt-in** (`bin/llm_failover.py`).
+  Previously the default endpoint list probed both LM Studio (`:1234`) **and** Ollama
+  (`:11434`) on every LLM/embed discovery. A connect to a non-listening localhost port
+  does not always fail fast (on Windows it can block up to the full connect timeout
+  rather than returning instantly as on Linux), so users who do **not** run Ollama were
+  paying a repeated probe cost — in long write-heavy runs (enrichment, entity
+  extraction) this added up to a severe slowdown.
+
+  **Action required for Ollama users:** re-enable the Ollama failover endpoint with
+  **either**
+  - `export M3_ENABLE_OLLAMA_FAILOVER=1` (appends the default `http://localhost:11434/v1`), **or**
+  - list your endpoints explicitly via `LLM_ENDPOINTS_CSV` (e.g.
+    `LLM_ENDPOINTS_CSV="http://localhost:1234/v1,http://localhost:11434/v1"`).
+
+  No action needed for LM Studio / llama.cpp / vLLM users — the default already points
+  at `:1234`, and `LLM_ENDPOINTS_CSV` (if you set it) is unchanged and still wins.
+
+  Also: the failover **connect timeout** dropped from `1.0s` to `0.3s` (override with
+  `M3_LLM_CONNECT_TIMEOUT`) to further bound the cost of probing any absent endpoint.
+
 ---
 
 ## [2026.6.8.2] - 2026-06-08 — Documentation accuracy pass

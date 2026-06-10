@@ -164,6 +164,16 @@ M3 does not pin a specific chat model. `bin/llm_failover.py` discovers whatever 
 
 If only the small model is loaded, `get_best_llm` picks it automatically — no env var needed. If you also load a larger generation model on the same endpoint, it will currently be preferred for every feature (per-feature routing to prefer small-for-enrichment is on the roadmap). See [QUICKSTART → Optional: load a small chat model](QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
+#### Endpoint discovery & failover
+
+The default discovery endpoint is **LM Studio only** (`http://localhost:1234/v1`). Endpoints are probed on first use; an absent one is skipped, but probing a provider you don't run is not free on every platform (on Windows a connect to a non-listening port can block up to the connect timeout), so the default does not probe Ollama.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `M3_ENABLE_OLLAMA_FAILOVER` | _(unset)_ | Set to `1`/`true`/`yes` to **append** the default Ollama endpoint (`http://localhost:11434/v1`) to the failover list. **Ollama users: set this**, or use `LLM_ENDPOINTS_CSV`. |
+| `LLM_ENDPOINTS_CSV` | _(unset)_ | Comma-separated endpoint list, probed in order. Overrides the default entirely (takes precedence over `M3_ENABLE_OLLAMA_FAILOVER`). Use for Ollama-only, multi-machine LAN failover, or any custom order — e.g. `"http://localhost:1234/v1,http://localhost:11434/v1"`. |
+| `M3_LLM_CONNECT_TIMEOUT` | `0.3` | Per-endpoint connect timeout in seconds. Raise for slow remote LAN endpoints. |
+
 ---
 
 ## Fact Enrichment
