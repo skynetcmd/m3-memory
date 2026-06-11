@@ -147,7 +147,7 @@ facts can later be promoted into curated `memory.db` with `files_promote`.
 The full reference for all 21 files_memory tools lives at
 [`docs/tools/files_memory.md`](tools/files_memory.md). The design
 rationale and phasing detail is in
-[`docs/FILE_INGESTION_PLAN.md`](FILE_INGESTION_PLAN.md).
+[`docs/decisions/FILE_INGESTION_PLAN.md`](decisions/FILE_INGESTION_PLAN.md).
 
 ## Eval gates
 
