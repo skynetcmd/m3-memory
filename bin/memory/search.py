@@ -1574,6 +1574,10 @@ async def memory_search_routed_impl(
     variant: str = "",
     as_of: str = "",
     conversation_id: str = "",
+    # ADR-0001: union the materialized bypass_surface for this scope (rank-independent
+    # recall). Default off ⇒ byte-identical to pre-ADR output (the auto_route invariant).
+    bypass_surface: bool = False,
+    bypass_surface_cap: int = 0,                            # 0 = use built cap; >0 = read-time truncate
     explain: bool = False,
     extra_columns=None,
     recency_bias: float = 0.0,
@@ -2017,6 +2021,68 @@ async def memory_search_routed_impl(
                         _capture_dict["superseded_demoted"] = len(superseded_ids)
             except Exception as e:
                 logger.debug(f"supersedence-aware demotion failed: {e}")
+
+    # ── ADR-0001 bypass-surface union (rank-independent recall) ──────────────
+    # Off by default ⇒ output byte-identical to pre-ADR. When on, union the
+    # materialized surface for THIS scope as additive low-score hits — never
+    # displacing the relevance-ranked results, only adding coverage.
+    if bypass_surface:
+        # Scope isolation (ADR-0001 §7): inherit the caller's exact scope predicate.
+        # Empty conversation_id would be a cross-scope read — refuse, never default.
+        if not conversation_id:
+            raise ValueError(
+                "memory_search_routed_impl: bypass_surface=True requires conversation_id "
+                "(scope isolation — never an un-scoped surface read; ADR-0001 §7)"
+            )
+        try:
+            already = {
+                item.get("id")
+                for _s, item in final_hits
+                if isinstance(item, dict) and item.get("id")
+            }
+            params: list = [conversation_id]
+            scope_clause = ""
+            if scope:
+                scope_clause += " AND scope = ?"
+                params.append(scope)
+            if user_id:
+                scope_clause += " AND user_id = ?"
+                params.append(user_id)
+            with _db() as db:
+                surf_rows = db.execute(
+                    f"SELECT memory_id FROM bypass_surface "
+                    f"WHERE conversation_id = ?{scope_clause}",
+                    params,
+                ).fetchall()
+                surf_ids = [r[0] for r in surf_rows if r[0] not in already]
+                # Read-time cap (ADR-0001 §10 Q4): a request for fewer than were built
+                # truncates here; it cannot exceed what was built. Log when clamped so
+                # it is never a silent ceiling (§3 fail-loud spirit).
+                if bypass_surface_cap and len(surf_ids) > bypass_surface_cap:
+                    logger.debug(
+                        f"bypass_surface: clamping {len(surf_ids)} surfaced -> "
+                        f"{bypass_surface_cap} (read-time cap) for conv {conversation_id}"
+                    )
+                    surf_ids = surf_ids[:bypass_surface_cap]
+                if surf_ids:
+                    placeholders = ",".join("?" * len(surf_ids))
+                    item_rows = db.execute(
+                        f"SELECT id, title, type, conversation_id FROM memory_items "
+                        f"WHERE id IN ({placeholders})",
+                        surf_ids,
+                    ).fetchall()
+                    for r in item_rows:
+                        final_hits.append((0.0, {
+                            "id": r["id"],
+                            "title": r["title"] or "",
+                            "type": r["type"],
+                            "conversation_id": r["conversation_id"],
+                            "bypass_surface": True,
+                        }))
+        except ValueError:
+            raise
+        except Exception as e:  # pragma: no cover - additive leg must never break search
+            logger.debug(f"bypass_surface union failed (non-fatal): {e}")
 
     return final_hits
 

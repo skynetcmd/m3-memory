@@ -1143,3 +1143,228 @@ def entity_get_impl(entity_id: str, depth: int = 1) -> dict:
             "successors": successors,
             "linked_memories": linked_memories,
         }
+
+
+# ── Bypass-surface builder (ADR-0001) ────────────────────────────────────────
+# Materialize the rank-independent recall surface into the bypass_surface table
+# (migration 033). The retrieval path then reads it with one scope-isolated indexed
+# seek instead of recomputing surfacing per query (ADR-0001 §0, §8).
+
+# Default per-question cap, overridable via env (ADR-0001 §10 Q4). 300 = the
+# validated operating point. A hard MAX guards pathological env input (§4).
+_BYPASS_SURFACE_CAP_DEFAULT = 300
+_BYPASS_SURFACE_CAP_MAX = 5000
+
+# Coarse question/strategy -> entity-type surfacing rules. Mirrors the validated
+# prototype: recall-biased, over-match rather than miss. Strategy gating is applied
+# by the CALLER passing `strategy` (ADR-0001 §10 Q1/Q2: core has no router yet, so
+# strategy is a passed-in param; a per-strategy on/off + cap multiplier is applied
+# here from the policy below). When the router lands, it feeds this same param.
+_BYPASS_STRATEGY_POLICY: dict[str, dict] = {
+    "COMPUTE":   {"enabled": True,  "cap_frac": 1.0},   # aggressive: every instance
+    "FACT":      {"enabled": True,  "cap_frac": 0.25},  # conservative: avoid flooding
+    "ASSISTANT": {"enabled": False, "cap_frac": 0.0},   # ranking problem, not surfacing
+    "PROSE":     {"enabled": False, "cap_frac": 0.0},   # answer-style, not surfacing
+    "VERIFY":    {"enabled": True,  "cap_frac": 0.25},  # production; reserved
+}
+_BYPASS_DEFAULT_POLICY = {"enabled": True, "cap_frac": 1.0}
+
+# The cap is spent on type-RELEVANT mentions, not arbitrary entity-bearing items (the
+# fidelity bug the reproduction bench caught — untyped surfacing crowds out gold turns
+# under the cap). HOW types are chosen is the CALLER's policy, supplied as:
+#   category_for : {conversation_id: category}   — each scope's category
+#   type_rules   : {category: (entity_type, ...)} — category -> entity types to surface
+# Core stays generic: it does NOT embed question-text regexes or domain categories (those
+# would be deployment/benchmark-specific). A scope whose category resolves to no types
+# surfaces NOTHING (conservative — avoids flooding). The wildcard category "*" in
+# type_rules, if provided, is the fallback for scopes with no/unknown category.
+_BYPASS_WILDCARD_CATEGORY = "*"
+
+# Cap-priority ordering (ADR-0001). When the cap binds, WHICH typed mentions survive
+# must be DETERMINISTIC and meaningful — a bare LIMIT is planner-dependent (a silent
+# correctness bug: adding an index shifted results 85->81% on the bench). Whitelist
+# (never raw SQL — §6); each maps to an ORDER BY over the GROUP BY mi.id aggregate.
+# 'confidence' is the real-world-sensible DEFAULT: keep the highest-signal typed
+# mentions (GLiNER span score), measured best on the bench (+5pp over arbitrary).
+# memory_id tie-break makes every ordering fully deterministic. Callers (e.g. a bench)
+# may override via order_by=.
+_BYPASS_ORDER_BY: dict[str, str] = {
+    "confidence": "ORDER BY MAX(mie.confidence) DESC, mi.id",
+    "recency":    "ORDER BY MAX(mi.created_at) DESC, mi.id",
+    "stable":     "ORDER BY mi.id",  # deterministic, signal-agnostic
+}
+_BYPASS_ORDER_DEFAULT = "confidence"
+
+
+def _resolve_bypass_cap() -> int:
+    """Effective base cap from M3_BYPASS_SURFACE_CAP (default 300), bounded by MAX."""
+    raw = os.environ.get("M3_BYPASS_SURFACE_CAP")
+    try:
+        cap = int(raw) if raw else _BYPASS_SURFACE_CAP_DEFAULT
+    except (TypeError, ValueError):
+        cap = _BYPASS_SURFACE_CAP_DEFAULT
+    return max(1, min(cap, _BYPASS_SURFACE_CAP_MAX))
+
+
+def build_bypass_surface(
+    conversation_ids: "list[str] | None" = None,
+    *,
+    scope: str = "agent",
+    user_id: "str | None" = None,
+    cap: "int | None" = None,
+    strategy_for: "dict[str, str] | str | None" = None,
+    category_for: "dict[str, str] | str | None" = None,
+    type_rules: "dict[str, tuple] | None" = None,
+    order_by: str = "confidence",
+) -> dict:
+    """Materialize bypass_surface for the given scopes (ADR-0001).
+
+    Modes (ADR-0001 §10 Q2):
+      * Full build:        conversation_ids=None -> (re)build every conversation in scope.
+      * Incremental:       conversation_ids=[...] -> rebuild ONLY those (DELETE + re-insert).
+                           The caller that mutated the entities passes its dirty list; the
+                           builder does NOT auto-detect change.
+
+    Scope-correct (ADR-0001 §7): every query is filtered by conversation_id + scope
+    (+ user_id when given). An empty conversation_id in the list raises (no global scan).
+
+    `strategy_for` (ADR-0001 §10 Q1): per-conversation strategy gating. Either a
+    {conversation_id: strategy} map, a single strategy string applied to all, or None
+    (treated as the default policy = surface, full cap). Core has no strategy router yet,
+    so the caller supplies this; when a router lands it feeds the same param.
+
+    `category_for` ({conversation_id: category} map or single string) + `type_rules`
+    ({category: (entity_type, ...)}): the CALLER's rules-based-rule policy. Each scope's
+    category resolves through type_rules to the entity types to surface, so the cap is
+    spent on type-RELEVANT mentions (the reproduction-bench fidelity fix). Core embeds no
+    question regexes or domain categories — the caller (a future strategy_router, or the
+    bench) supplies both. A `"*"` key in type_rules is the fallback for unknown category.
+    A scope resolving to no types surfaces nothing (conservative — avoids flooding).
+
+    Returns a structured summary (never a string) — ADR-0001 §3.
+    """
+    base_cap = cap if cap is not None else _resolve_bypass_cap()
+    if isinstance(strategy_for, str):
+        default_strategy: "str | None" = strategy_for
+        strat_map: dict[str, str] = {}
+    else:
+        default_strategy = None
+        strat_map = strategy_for or {}
+    if isinstance(category_for, str):
+        default_category: "str | None" = category_for
+        cat_map: dict[str, str] = {}
+    else:
+        default_category = None
+        cat_map = category_for or {}
+    rules = type_rules or {}
+    # Whitelist the ordering — unknown value falls back to the default, never raw SQL (§6).
+    order_clause = _BYPASS_ORDER_BY.get(order_by, _BYPASS_ORDER_BY[_BYPASS_ORDER_DEFAULT])
+
+    built_scopes = 0
+    rows_written = 0
+    skipped_off = 0
+
+    with _db() as db:
+        # Resolve the scope set. Full build enumerates conversations present in scope;
+        # incremental uses the caller's explicit list (each validated non-empty).
+        if conversation_ids is None:
+            params: list = [scope]
+            uid_clause = ""
+            if user_id:
+                uid_clause = " AND user_id = ?"
+                params.append(user_id)
+            cids = [
+                r[0] for r in db.execute(
+                    f"SELECT DISTINCT conversation_id FROM memory_items "
+                    f"WHERE conversation_id IS NOT NULL AND conversation_id != '' "
+                    f"AND scope = ?{uid_clause}",
+                    params,
+                ).fetchall()
+            ]
+        else:
+            cids = []
+            for c in conversation_ids:
+                if not c:
+                    raise ValueError("build_bypass_surface: empty conversation_id "
+                                     "(would trigger a cross-scope scan) — ADR-0001 §7")
+                cids.append(c)
+
+        for cid in cids:
+            strategy = strat_map.get(cid, default_strategy)
+            policy = (_BYPASS_STRATEGY_POLICY.get(strategy, _BYPASS_DEFAULT_POLICY)
+                      if strategy is not None else _BYPASS_DEFAULT_POLICY)
+
+            # Incremental: clear this scope's existing surface rows before re-inserting.
+            db.execute("DELETE FROM bypass_surface WHERE conversation_id = ?", (cid,))
+            built_scopes += 1
+
+            if not policy["enabled"]:
+                skipped_off += 1
+                continue
+
+            eff_cap = max(1, int(base_cap * policy["cap_frac"]))
+
+            # Category -> entity-type filter (caller's rules) so the cap is spent on
+            # type-RELEVANT mentions, not arbitrary entity-bearing items (fidelity fix).
+            category = cat_map.get(cid, default_category)
+            etypes = set(rules.get(category, ()) if category is not None else ())
+            if not etypes:
+                etypes = set(rules.get(_BYPASS_WILDCARD_CATEGORY, ()))  # caller fallback
+            if not etypes:
+                # No types resolved for this scope: surface nothing (conservative).
+                continue
+
+            # Entity-mention surface: memory_items in THIS scope carrying an entity of a
+            # matched type, capped. Scope-isolated by construction (mi.conversation_id=?).
+            # The observation surface is added by the caller's enrichment layer separately
+            # (ADR-0001 §10 Q3) and is conditional on enrichment having run.
+            uid_clause = " AND mi.user_id = ?" if user_id else ""
+            type_ph = ",".join("?" * len(etypes))
+            q_params: list = [cid, scope]
+            if user_id:
+                q_params.append(user_id)
+            q_params.extend(sorted(etypes))
+            q_params.append(eff_cap)
+            # Deterministic cap priority (whitelisted ORDER BY — never raw SQL, §6).
+            # GROUP BY mi.id so one row per item; the aggregate ordering decides which
+            # items survive the cap. order_clause is from the whitelist only.
+            surfaced = db.execute(
+                f"SELECT mi.id FROM memory_item_entities mie "
+                f"JOIN memory_items mi ON mi.id = mie.memory_id "
+                f"JOIN entities e ON e.id = mie.entity_id "
+                f"WHERE mi.conversation_id = ? AND mi.scope = ?{uid_clause} "
+                f"AND e.entity_type IN ({type_ph}) "
+                f"GROUP BY mi.id "
+                f"{order_clause} "
+                f"LIMIT ?",
+                q_params,
+            ).fetchall()
+
+            if surfaced:
+                db.executemany(
+                    "INSERT OR IGNORE INTO bypass_surface "
+                    "(conversation_id, memory_id, source, strategy, user_id, scope, cap) "
+                    "VALUES (?, ?, 'entity', ?, ?, ?, ?)",
+                    [(cid, r[0], strategy, user_id, scope, eff_cap) for r in surfaced],
+                )
+                rows_written += len(surfaced)
+
+        try:
+            db.commit()
+        except Exception:  # pragma: no cover - defensive
+            pass
+        # Keep planner stats fresh for the new table (ADR-0001 §8 — the prototype
+        # showed the planner needs ANALYZE to pick the scope index).
+        try:
+            db.execute("ANALYZE bypass_surface")
+            db.commit()
+        except Exception:  # pragma: no cover
+            pass
+
+    return {
+        "scopes_built": built_scopes,
+        "scopes_skipped_off_policy": skipped_off,
+        "rows_written": rows_written,
+        "cap": base_cap,
+        "mode": "incremental" if conversation_ids is not None else "full",
+    }
