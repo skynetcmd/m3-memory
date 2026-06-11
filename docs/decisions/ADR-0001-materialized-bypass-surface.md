@@ -1,6 +1,6 @@
 # ADR-0001 — Materialized bypass-surface for rank-independent recall
 
-- **Status:** Draft (review before implementation)
+- **Status:** Draft — open questions resolved 2026-06-11 (§10); ready for Accept on review
 - **Date:** 2026-06-11
 - **Authority:** `../DESIGN_PHILOSOPHIES.md` (the seven tenets)
 - **Validation:** prototyped and measured on an internal retrieval benchmark (held
@@ -67,15 +67,23 @@ spec, not a direct port of the prototype).
 
 ## 4. Effectiveness — pre-registered metric (§5)
 
-**Pre-registered before implementation:**
+**Pre-registered before implementation — TWO bars, both binding (§5):**
 
-> On the internal retrieval benchmark (the §8 representative corpus), the materialized
-> surface must **reproduce the validated per-query path within ±0.5pp** on both recall
-> measures (mean recall and % of questions with all answer-bearing turns surfaced), with
-> **zero regression** on question classes where the policy is off (recall unchanged vs.
-> base, exact). If the materialized path does not match the per-query path within ±0.5pp,
-> it does not merge — the table is wrong, not the metric. (Absolute targets are recorded
-> in the internal bench report, not here.)
+> **(a) Effectiveness bar (absolute).** The materialized surface must lift recall over the
+> ranked-only baseline by a pre-registered absolute margin, with **zero regression** on
+> question classes where the policy is off. The absolute thresholds (baseline, target
+> mean-recall, target % all-turns-surfaced) are **fixed and binding**, recorded in the
+> internal bench report (held privately for bench-data discipline; not reproduced here).
+> This is the falsifiable "does it actually work" gate — it is NOT optional just because
+> the numbers live elsewhere.
+>
+> **(b) Reproduction bar.** On the same corpus the materialized read must **reproduce the
+> validated per-query path within ±0.5pp** on both recall measures. This guards that the
+> table-driven read is faithful to the function it replaces — a wrong table fails here
+> even if it happens to clear (a).
+>
+> Merge requires BOTH: clears the absolute effectiveness bar AND matches the per-query
+> path within ±0.5pp. Miss either → does not merge.
 
 - Behavior baseline: extend `tests/capture_retrieval_baseline.py` with N deterministic
   bypass-surface queries, byte-fingerprinted, so future refactors can't silently drift.
@@ -158,23 +166,84 @@ CREATE INDEX idx_bypass_surface_scope ON bypass_surface(conversation_id, scope, 
   run `test_tool_count_drift` / `test_mcp_catalog_manifest_fresh`, update prose counts
   (per CLAUDE.md pre-push discipline).
 
-## 10. Open questions for review
+## 10. Decisions (resolved 2026-06-11)
 
-1. **Read-path placement:** a `bypass_surface=True` flag on `memory_search_routed`
-   (preferred — no new tool), vs. a standalone surface read. → leaning flag.
-2. **Build trigger:** explicit `build_bypass_surface()` call / CLI, vs. an incremental
-   hook on entity write (heavier, risks write-path latency — §8 says no). → leaning
-   explicit + incremental-dirty-scope, never inline on write.
-3. **Observation source dependency:** the obs surface needs a consolidated-observation
-   layer to exist for the scope. In core that's the optional fact-enrichment/observer
-   output — so the obs half of the surface is **conditional on enrichment being enabled**;
-   entity half always available. Spec'd as: `source IN ('entity','observation')`, obs rows
-   only present where the observer ran.
-4. **Cap semantics across scopes:** the prototype's per-question cap was tuned on the
-   enumeration class. Core default + per-
-   strategy override; expose as config (`M3_BYPASS_SURFACE_CAP`), not hardcoded.
-5. **Migration down-path:** `DROP TABLE bypass_surface` is a clean down (derived data,
-   no loss) — confirm that's acceptable vs. preserving.
+The five open questions, each resolved against the tenets and grounded in existing core
+patterns (not assumption):
+
+1. **Read-path placement → RESOLVED: a flag on the routed search, not a new tool.**
+   The read folds into `memory_search_routed_impl` (`bin/memory/search.py`) as
+   `bypass_surface: bool = False`. No new MCP tool ⇒ no catalog growth, no manifest-regen
+   churn, no `test_tool_count_drift` gate to satisfy (§12). The flag, when set, does a
+   scoped indexed seek and unions the result into the routed hits (low-score, additive,
+   never displacing ranked results). Re-exported through the `memory_core` shim,
+   identity-preserving (§2).
+   - **Scope isolation (§7):** the bypass seek **inherits the caller's exact scope
+     predicate** — the same `conversation_id IN (…) AND scope = ? [AND user_id = ?]` the
+     routed search already enforces. When the routed search spans multiple conversations
+     (multi-db / org scope), the bypass seek carries the *same* set, never a broader one.
+     It is never a single un-scoped `WHERE turn_id …` lookup. Empty/missing scope raises
+     (it inherits the routed path's mandatory-scope contract — §7), so bypass cannot widen
+     the blast radius of a query beyond what the caller was already authorized to see.
+
+2. **Build trigger → RESOLVED: explicit builder with caller-supplied dirty-scope IDs;
+   NEVER inline on write.** A `build_bypass_surface(conversation_ids=None, scope=…,
+   cap=…)` in `bin/memory/entity.py` (CLI + callable). Two modes, one code path:
+   - **Full build:** `conversation_ids=None` → (re)build every scope. First-run path.
+   - **Incremental rebuild:** the caller passes the **list of changed scope IDs / PKs**
+     (`conversation_ids=[…]`); the builder rebuilds *only those* — deletes their existing
+     `bypass_surface` rows (`DELETE … WHERE conversation_id IN (…)`) and re-inserts. This
+     is the steady-state path: whoever mutated the entities (an ingest job, an enrichment
+     pass, a curation run) already knows which scopes it touched, so it hands that list to
+     the builder. **The builder does NOT auto-detect change** — change-detection lives with
+     the caller that caused the change. This keeps surfacing off the hot write path (§8)
+     while making incremental updates an O(changed-scopes) operation, not a full rebuild.
+   An inline hook on entity write is rejected — it would put surfacing work on the write
+   path and blow the §8 latency budget. The surface is derived data; it lags a write until
+   the next (incremental or full) builder call.
+
+3. **Observation source dependency → RESOLVED: conditional, entity-half always present.**
+   `source IN ('entity','observation')`. The entity half is always buildable (entity
+   tables always exist). The observation half is built **only where the observer /
+   fact-enrichment layer ran** for that scope (it is opt-in via `M3_ENABLE_FACT_ENRICHED`,
+   per ARCHITECTURE §enrichment). The builder writes `obs` rows only for scopes with
+   observations; absence is normal, not an error (§3 empty≠error). Documented so a
+   deployment without enrichment still gets the entity-surface lift.
+
+4. **Cap semantics → RESOLVED: `M3_BYPASS_SURFACE_CAP` env var, default 300.** The
+   per-question cap is read from `M3_BYPASS_SURFACE_CAP` (matching the
+   `M3_EMBED_CHUNK_MAX_CHARS` / `M3_ENABLE_ENTITY_GRAPH` convention in `bin/memory/`),
+   **defaulting to 300** (the prototype's validated operating point). A per-strategy
+   multiplier in the policy scales it (aggressive class = full cap, conservative = a
+   fraction); nothing hardcoded. The resolved cap is stored on each surface row (`cap`
+   column) so a build is auditable and a later build at a different cap is detectable.
+   - **Read-time vs build-time cap:** the table stores the already-capped set per scope.
+     A read-time request for a *lower* cap truncates the stored set (cheap, no rebuild); a
+     *higher* read-time cap cannot exceed what was built — it requires a rebuild at the
+     higher cap. The read path therefore never silently under-delivers: if the effective
+     read cap > built cap, it surfaces what's stored and is a no-op beyond it (documented,
+     not a silent ceiling — §3 fail-loud spirit: log when a read cap is clamped to built).
+   A module `MAX` constant bounds pathological env inputs (§4 result-set caps).
+
+5. **Migration down-path → RESOLVED: `DROP TABLE` is correct — confirmed by precedent.**
+   The closest analog, `entity_embeddings` (migration 032), is a derived store-once table
+   whose `032_…down.sql` is exactly `DROP TABLE IF EXISTS entity_embeddings;`. The
+   bypass-surface is likewise pure derived data (rebuildable from entities + observations),
+   so `033_…down.sql` = `DROP TABLE IF EXISTS bypass_surface;`. No data loss on rollback.
+
+### Correction to §7 (GDPR) discovered while resolving Q5
+
+`entity_embeddings` uses `REFERENCES entities(id) ON DELETE CASCADE`, and ADR drafts
+assumed `bypass_surface` could likewise rely on FK cascade for `gdpr_forget`. **It cannot
+rely on cascade alone.** The actual `gdpr_forget` implementation
+(`bin/memory_maintenance.py`) purges by an **explicit enumerated list** of
+`DELETE FROM <table> WHERE …` (memory_embeddings, memory_relationships, chroma_sync_queue,
+memory_history, memory_items) — it does not depend on SQLite cascade firing. Therefore
+**`bypass_surface` MUST be added to that explicit `gdpr_forget` table list** (a `DELETE
+FROM bypass_surface WHERE conversation_id IN (…)` / `WHERE user_id = ?`), in addition to
+an FK for defense-in-depth. This is a concrete merge requirement, not optional — without
+it, erased users' surfaced turn pointers would persist. (§9 transitivity is satisfied by
+explicit enumeration, per the repo's actual pattern.)
 
 ## 11. Validation plan (before merge)
 
@@ -183,7 +252,9 @@ CREATE INDEX idx_bypass_surface_scope ON bypass_surface(conversation_id, scope, 
 2. `EXPLAIN QUERY PLAN` on the read path shows the index seek (§8).
 3. P50/P95/P99 within budget via `bench_memory.py` (§8).
 4. Behavior baseline captured + parity test green (§3, §11).
-5. `gdpr_forget` on a test user removes its surface rows (FK cascade) (§9).
+5. `gdpr_forget` on a test user removes its surface rows — via the explicit
+   `DELETE FROM bypass_surface` added to `memory_maintenance.gdpr_forget` (NOT cascade
+   alone; see §10 correction) (§9).
 6. Scope-isolation test: a query for conversation A never returns B's turns (§7).
 
 ---
