@@ -400,6 +400,15 @@ def gdpr_forget_impl(user_id: str) -> str:
             db.execute(f"DELETE FROM chroma_sync_queue WHERE memory_id IN ({placeholders})", item_ids)
             # Delete history
             db.execute(f"DELETE FROM memory_history WHERE memory_id IN ({placeholders})", item_ids)
+            # Delete materialized bypass-surface rows (ADR-0001 §7/§9). The surface FK
+            # cascades, but gdpr_forget purges by EXPLICIT enumeration and must not rely
+            # on cascade firing — so delete here too. Guarded: table may not exist on a
+            # DB migrated below v033. By memory_id (the surfaced pointer) AND user_id.
+            try:
+                db.execute(f"DELETE FROM bypass_surface WHERE memory_id IN ({placeholders})", item_ids)
+                db.execute("DELETE FROM bypass_surface WHERE user_id = ?", (user_id,))
+            except sqlite3.OperationalError:
+                pass  # table absent (pre-v033) — nothing to purge
             # Hard-delete the items themselves
             db.execute("DELETE FROM memory_items WHERE user_id = ?", (user_id,))
 
