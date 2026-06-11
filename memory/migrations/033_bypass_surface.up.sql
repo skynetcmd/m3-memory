@@ -19,6 +19,17 @@
 -- GDPR (ADR-0001 §7/§9): the FK ON DELETE CASCADE is defense-in-depth, but gdpr_forget
 -- in bin/memory_maintenance.py purges by EXPLICIT enumeration and does not rely on
 -- cascade — so bypass_surface is ALSO added to that enumeration. Both, by design.
+--
+-- LESSON (applying this out-of-band): if you CREATE this table directly (not via the
+-- migrate runner), you MUST also record the version row, or the lazy auto-migrator
+-- (db._ensure_sync_tables) sees version<33, re-spawns `migrate_memory up`, and races the
+-- CREATE → "database is locked" loop. The schema_versions column is `filename` (NOT
+-- NULL) — INSERT with the wrong column name (e.g. `name`) makes `INSERT OR IGNORE`
+-- silently no-op, leaving the version unstamped and the lock-loop intact. Correct:
+--   INSERT OR IGNORE INTO schema_versions(version, filename)
+--     VALUES (33, '033_bypass_surface.up.sql');
+-- then verify the row exists rather than trusting OR IGNORE. (Prefer the migrate runner,
+-- which stamps correctly; this note is for direct/out-of-band application.)
 CREATE TABLE IF NOT EXISTS bypass_surface (
     conversation_id TEXT NOT NULL,
     memory_id       TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
