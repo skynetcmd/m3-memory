@@ -3,7 +3,7 @@
 > Status: 2026-05-17. Per-tool doc, Phase 6.2 of the `memory_core` modularization.
 > Audience: someone debugging entity-side bugs — extraction misses, fuzzy
 > resolution drift, queue runner stuck, MCP read-side anomalies. Companion to
-> `docs/MEMORY_ENTITY_EXTRACTION_PLAN.md` (the Phase 6 plan) and
+> `docs/decisions/MEMORY_ENTITY_EXTRACTION_PLAN.md` (the Phase 6 plan) and
 > `docs/MEMORY_CORE_MODULARIZATION.md` (per-commit log).
 
 ---
@@ -261,7 +261,7 @@ patterns) for the comparative analysis.
 
 If a fix touches anything in this table, the surface is bigger than
 `entity.py` alone — start by reading
-`docs/MEMORY_ENTITY_EXTRACTION_PLAN.md` §"Out of scope".
+`docs/decisions/MEMORY_ENTITY_EXTRACTION_PLAN.md` §"Out of scope".
 
 ---
 
@@ -303,7 +303,7 @@ unrelated to the extraction itself.
 ## Cross-references
 
 - Plan + per-commit log:
-  [`docs/MEMORY_ENTITY_EXTRACTION_PLAN.md`](../MEMORY_ENTITY_EXTRACTION_PLAN.md)
+  [`docs/decisions/MEMORY_ENTITY_EXTRACTION_PLAN.md`](../decisions/MEMORY_ENTITY_EXTRACTION_PLAN.md)
 - Modularization status (now includes Phase 6):
   [`docs/MEMORY_CORE_MODULARIZATION.md`](../MEMORY_CORE_MODULARIZATION.md)
 - Lessons (mutable-identity, lazy imports, parity snapshot):

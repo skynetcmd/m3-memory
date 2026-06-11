@@ -3,7 +3,7 @@
 > Status: 2026-05-17. Per-tool reference for the `files_memory` package.
 > Audience: someone wiring the file-ingestion pipeline into an agent
 > workflow or debugging a specific tool. Design context:
-> `docs/FILE_INGESTION_PLAN.md`. Source under `bin/files_memory/`.
+> `docs/decisions/FILE_INGESTION_PLAN.md`. Source under `bin/files_memory/`.
 
 The files-memory layer ships a separate `files.db` store (default
 `~/.m3/files_database.db`) alongside the core `memory.db`. It walks a
@@ -320,7 +320,7 @@ python -m files_memory.tools watch --directory ~/Documents/notes \
 
 ## Cross-references
 
-- `docs/FILE_INGESTION_PLAN.md` — design rationale + phasing detail
+- `docs/decisions/FILE_INGESTION_PLAN.md` — design rationale + phasing detail
 - `tests/eval_files_ingest.py` — P1 acceptance gate (22 Q-A pairs)
 - `tests/eval_files_phase2.py` — P2 extraction + ascension + staleness
 - `tests/eval_files_phase3.py` — P3 provenance + carry-forward + dedup + rename + promotability
