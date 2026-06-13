@@ -127,12 +127,62 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
     return counts
 
 
+def _recent_write_count(config: chatlog_config.ChatlogConfig,
+                        window_min: int = 15) -> int:
+    """Count chat_log rows WRITTEN in the last `window_min` minutes.
+
+    This is the TRUE capture-health signal: it reflects whether writes are
+    actually landing in the DB right now. Use it instead of
+    config.host_agents[*].enabled — that flag only records whether a per-turn
+    shell hook was wired into settings.json at init time, and reads False even
+    when the Stop-hook / MCP write path is capturing perfectly (confirmed
+    2026-06-13: status showed every hook enabled=False while 94 rows/15min were
+    landing). Reporting the wiring flag as "capture status" produced a permanent
+    false alarm for the CLAUDE.md session-start check. Returns -1 on query error
+    (distinct from a real 0 = nothing written).
+    """
+    from m3_sdk import resolve_db_path
+
+    db = os.path.abspath(resolve_db_path(None))
+    if not os.path.exists(db):
+        return -1
+    try:
+        conn = sqlite3.connect(db, timeout=5)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM memory_items WHERE type='chat_log' "
+                "AND created_at > datetime('now', ?)",
+                (f"-{int(window_min)} minutes",),
+            ).fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return -1
+
+
 def _compute_warnings(
     state: dict[str, Any],
     config: chatlog_config.ChatlogConfig,
     row_counts: dict[str, int],
+    recent_writes: int = -1,
+    recent_window_min: int = 15,
 ) -> list[str]:
     warnings = []
+
+    # PRIMARY capture-health signal: did anything actually get WRITTEN recently?
+    # Driven by recent_writes (a real DB count), NOT host_agents[*].enabled — see
+    # _recent_write_count for why the wiring flag is not a capture signal. Only
+    # warn when total chatlog rows exist (a fresh/empty install legitimately has
+    # 0 recent writes and should not scream).
+    total_rows = row_counts.get("main_chat_log_rows", 0) or row_counts.get("chatlog_rows", 0)
+    if recent_writes == 0 and total_rows > 0:
+        warnings.append(
+            f"NO chatlog writes in last {recent_window_min}min "
+            "(capture may be down — verify before trusting memory)"
+        )
+    elif recent_writes < 0:
+        warnings.append("could not query recent chatlog writes (capture status unknown)")
 
     if config.redaction.enabled:
         regex_errors = state.get("redaction", {}).get("regex_errors", [])
@@ -172,6 +222,8 @@ def chatlog_status_impl() -> str:
     config = chatlog_config.resolve_config()
     state = _load_state_file()
     row_counts = _get_row_counts(config)
+    recent_window_min = 15
+    recent_writes = _recent_write_count(config, recent_window_min)
 
     main_db = os.path.abspath(resolve_db_path(None))
     chatlog_db = os.path.abspath(config.db_path)
@@ -204,8 +256,22 @@ def chatlog_status_impl() -> str:
             "bytes": state.get("spill", {}).get("bytes", 0),
             "oldest_ms_ago": state.get("spill", {}).get("oldest_ms_ago"),
         },
+        # TRUE capture-health signal — reflects actual recent writes to the DB,
+        # not whether a per-turn shell hook was wired. Consumers (CLAUDE.md
+        # session-start check, m3:status, m3:health) should read THIS, not
+        # hooks[*].wired. recent_rows == -1 means the query failed (unknown).
+        "capture": {
+            "healthy": recent_writes > 0,
+            "recent_rows": recent_writes,
+            "window_min": recent_window_min,
+        },
         "hooks": {
             name: {
+                # `wired`: a per-turn shell hook is configured in settings for this
+                # agent. This is NOT a capture signal — the Stop-hook / MCP write
+                # path captures even when wired is False. Kept (was misnamed
+                # `enabled`) for back-compat: `enabled` is aliased to `wired`.
+                "wired": spec.enabled,
                 "enabled": spec.enabled,
                 "last_write_ms_ago": state.get("hooks", {}).get(name, {}).get("last_write_ms_ago"),
             }
@@ -217,7 +283,8 @@ def chatlog_status_impl() -> str:
             "regex_errors": state.get("redaction", {}).get("regex_errors", []),
         },
         "last_write_at": state.get("last_write_at"),
-        "warnings": _compute_warnings(state, config, row_counts),
+        "warnings": _compute_warnings(state, config, row_counts,
+                                      recent_writes, recent_window_min),
     }
 
     return json.dumps(result, indent=2)
