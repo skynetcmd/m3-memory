@@ -187,15 +187,26 @@ def _strip_m3_hook_entries(hook_list, repo_root_fwd):
     return kept
 
 
-def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False):
+def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False,
+                            keep_status_line=False):
     """Idempotently merge m3's hooks + statusLine + mcpServers into the user's live
     Claude Code settings.json. Safe to re-run (upgrades): m3-owned entries are
     replaced in place — never duplicated. User-owned keys/hooks are preserved.
+
+    statusLine consent: we never silently replace a status line that differs from
+    our own. If the live one differs, the user is asked (default YES — adopt m3's
+    statusline-command.sh); pass keep_status_line=True to decline non-interactively.
+    When we DO replace it, the prior statusLine JSON is saved verbatim to a sidecar
+    m3_prior_statusline_{YYYY.MM.DD}-{HH.MM.SS}.md beside settings.json before the
+    overwrite, so the previous setup is preserved and restorable. settings.json is
+    strict JSON (no // comments), so the prior config is stashed in a file, not
+    inline-commented.
 
     Returns a dict: {"changed": bool, "path": str, "diff": str}. Generic across
     OSes and users — all paths derive from this file's location.
     """
     import difflib
+    from datetime import datetime
 
     repo_root = _m3_repo_root()
     repo_root_fwd = repo_root.replace("\\", "/")
@@ -230,12 +241,55 @@ def install_claude_settings(settings_path=None, assume_yes=False, dry_run=False)
     if live_hooks:
         live["hooks"] = live_hooks
 
-    # 2. statusLine — only adopt m3's if none set, or the existing one is m3's
-    #    (so we upgrade our own path but never clobber a user's custom status line).
+    # 2. statusLine — never silently replace a status line that differs from ours.
+    #    Adopt m3's default (statusline-command.sh) when: nothing is set, OR the
+    #    current one is already m3's exact default (idempotent path upgrade), OR the
+    #    user consents. The prior statusLine is preserved to a sidecar file first.
     cur_status = live.get("statusLine")
     cur_cmd = cur_status.get("command", "") if isinstance(cur_status, dict) else ""
-    if not cur_status or _is_m3_command(cur_cmd, repo_root_fwd):
-        live["statusLine"] = m3["statusLine"]
+    m3_status = m3["statusLine"]
+    m3_cmd = m3_status.get("command", "")
+
+    if not cur_status:
+        live["statusLine"] = m3_status            # none set — just adopt ours
+    elif cur_cmd == m3_cmd:
+        pass                                       # already exactly ours — no-op
+    else:
+        # Differs from ours. Decide whether to adopt — default YES, but ask unless
+        # told otherwise; never replace when the user opted to keep theirs.
+        if keep_status_line:
+            adopt = False
+        elif assume_yes or dry_run:
+            adopt = True                           # default yes for headless/dry-run
+        else:
+            try:
+                resp = input(
+                    "\nReplace your current status line with m3's "
+                    "(statusline-command.sh)? [Y/n] "
+                ).strip().lower()
+            except EOFError:
+                resp = ""
+            adopt = resp in ("", "y", "yes")       # default yes on empty
+        if adopt:
+            # Preserve the prior statusLine to a timestamped sidecar before swap.
+            if not dry_run:
+                ts = datetime.now().strftime("%Y.%m.%d-%H.%M.%S")
+                sidecar = os.path.join(
+                    os.path.dirname(os.path.abspath(settings_path)),
+                    f"m3_prior_statusline_{ts}.md",
+                )
+                body = (
+                    f"# Prior Claude statusLine (replaced by m3 install {ts})\n\n"
+                    "Your previous `statusLine` was replaced by m3's "
+                    "`statusline-command.sh`. To restore it, copy the JSON below "
+                    "back into the `statusLine` key of your settings.json.\n\n"
+                    "```json\n"
+                    + json.dumps(cur_status, indent=2) + "\n```\n"
+                )
+                with open(sidecar, "w", encoding="utf-8") as f:
+                    f.write(body)
+                print(f"Saved prior status line to {sidecar}")
+            live["statusLine"] = m3_status
 
     # 3. mcpServers — merge by key: m3 keys overwrite, foreign servers preserved.
     live_mcp = live.get("mcpServers", {}) if isinstance(live.get("mcpServers"), dict) else {}
@@ -288,9 +342,14 @@ if __name__ == "__main__":
     ap.add_argument("--yes", action="store_true", help="Apply without prompting")
     ap.add_argument("--dry-run", action="store_true",
                     help="Show the diff but write nothing")
+    ap.add_argument("--keep-status-line", action="store_true",
+                    help="Don't replace an existing custom status line (default is "
+                         "to adopt m3's statusline-command.sh, preserving the prior "
+                         "one to a timestamped sidecar file)")
     a = ap.parse_args()
 
     if a.install_claude:
-        install_claude_settings(a.settings_path, assume_yes=a.yes, dry_run=a.dry_run)
+        install_claude_settings(a.settings_path, assume_yes=a.yes, dry_run=a.dry_run,
+                                keep_status_line=a.keep_status_line)
     else:
         generate_configs()
