@@ -89,6 +89,28 @@ config = {
     }
 }
 
-log("\n=== Paste this into ~/.claude/settings.json mcpServers ===")
+# 6. Detect a Claude Code install and offer the recommended hook install.
+#    This is the SAFE, re-runnable path: it merges m3's SessionStart capture-check
+#    hook + PreCompact/Stop hooks + statusLine + mcpServers into the live
+#    settings.json idempotently (an upgrade replaces m3's own entries in place —
+#    no duplicate or conflicting lines), backing up first and prompting before
+#    writing. Prefer this over the manual paste below.
+claude_dir = pathlib.Path(os.path.expanduser("~")) / ".claude"
+if claude_dir.is_dir():
+    log("")
+    log("Detected a Claude Code install (~/.claude).")
+    log("RECOMMENDED (safe, re-runnable): auto-install m3 hooks + statusLine + MCP")
+    log("servers into ~/.claude/settings.json. Re-running upgrades in place without")
+    log("duplicate or conflicting lines, and backs up your current settings first:")
+    log("")
+    log(f'    "{PY}" "{BASE / "bin" / "generate_configs.py"}" --install-claude')
+    log("")
+    log("Add --yes to skip the confirmation prompt, or --dry-run to preview only.")
+else:
+    log("")
+    log("No ~/.claude install detected. To wire m3 into Claude Code later, run:")
+    log(f'    "{PY}" "{BASE / "bin" / "generate_configs.py"}" --install-claude')
+
+log("\n=== Manual fallback — paste this into ~/.claude/settings.json mcpServers ===")
 print(json.dumps({"mcpServers": config}, indent=2))
 log("Setup complete.")
