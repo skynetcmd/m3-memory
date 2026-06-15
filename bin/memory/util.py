@@ -30,7 +30,7 @@ else:
 
 from . import config
 
-__all__ = ["sha256_hex", "_batch_cosine", "_cosine", "_cosine_batch_packed", "_check_content_safety"]
+__all__ = ["sha256_hex", "_batch_cosine", "_cosine", "_cosine_batch_packed", "_cosine_batch_maxpool_packed", "_check_content_safety"]
 import logging
 import re
 
@@ -147,3 +147,39 @@ def _cosine_batch_packed(query, blobs, dim: int) -> list[float]:
             logger.debug(f"cosine_batch_packed Rust path failed, falling back: {e}")
     matrix = _unpack_many(blobs, dim=dim)
     return _batch_cosine(query, matrix)
+
+
+def _cosine_batch_maxpool_packed(anchors, blobs, dim: int) -> list[float]:
+    """Max-pooled multi-anchor cosine: per candidate blob, `max_j cosine(anchors[j], cand)`.
+
+    The "max-similarity" rerank signal: max-cosine-to-any of several anchor vectors
+    beats a single centroid anchor for topically-dispersed targets, because the
+    centroid averages away sharp matches that max-sim preserves. Pushes the whole
+    N-candidate × M-anchor matrix op into the Rust core (`cosine_batch_maxpool_packed`,
+    rayon, GIL-released) so the caller never runs a per-anchor FFI loop.
+
+    `anchors` is a list of M query vectors (each length `dim`); `blobs` is a list of raw
+    packed candidate embeddings. Both are packed into contiguous flat byte buffers for the
+    Rust entry point. Empty anchors -> all -1.0 (no signal). A wrong-length blob scores 0.0.
+    Falls back to pure-Python `max(cosine ...)` when the Rust symbol is absent (older wheel)
+    or the FFI errors — so retrieval never fails on a stale core.
+    """
+    if not blobs:
+        return []
+    if not anchors:
+        return [-1.0] * len(blobs)
+    rs = config.m3_core_rs
+    if rs is not None and hasattr(rs, "cosine_batch_maxpool_packed"):
+        try:
+            import struct
+            anchor_buf = b"".join(struct.pack(f"{len(a)}f", *a) for a in anchors)
+            cand_buf = b"".join(blobs)
+            return rs.cosine_batch_maxpool_packed(anchor_buf, cand_buf, dim)
+        except Exception as e:  # noqa: BLE001 — fall back rather than fail retrieval
+            logger.debug(f"cosine_batch_maxpool_packed Rust path failed, falling back: {e}")
+    # Pure-Python / fallback: unpack candidates once, max cosine over anchors per candidate.
+    matrix = _unpack_many(blobs, dim=dim)
+    out = []
+    for v in matrix:
+        out.append(max((_cosine(a, v) for a in anchors), default=-1.0))
+    return out
