@@ -124,7 +124,6 @@ def _extract_last_json_object(output: str):
         return None
     depth = 0
     in_str = False
-    escaped = False
     for i in range(end, -1, -1):
         ch = output[i]
         if in_str:
