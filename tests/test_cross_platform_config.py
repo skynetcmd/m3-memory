@@ -14,12 +14,10 @@ to simulate each OS and inspect the generated command strings. bin/ is on sys.pa
 via tests/conftest.py.
 """
 
-import json
 import os
 
-import pytest
-
 import generate_configs as g
+import pytest
 
 
 def _all_commands(settings):
