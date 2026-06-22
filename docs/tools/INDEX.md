@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-05-31T19:54:42.393296+00:00._
+_Generated 2026-06-22T03:40:38.303150+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -66,13 +66,14 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_enrich_batch_parallel.py](m3_enrich_batch_parallel.md) | m3_enrich_batch_parallel — launch N pipelined batch workers against |  |
 | [bin/m3_enrich_report.py](m3_enrich_report.md) | Summarize an m3_enrich run from enrichment_groups + enrichment_runs. |  |
 | [bin/m3_entities.py](m3_entities.md) | m3_entities — build entity-graph rows from your core/chatlog DBs. |  |
+| [bin/m3_entities_gliner.py](m3_entities_gliner.md) | m3_entities_gliner — fast local entity extraction via GLiNER (zero-shot NER). |  |
 | [bin/m3_sdk.py](m3_sdk.md) | (no docstring) |  |
 | [bin/macbook_status_server.py](macbook_status_server.md) | MacBook network & LM Studio status server for Homepage dashboard. | yes |
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |
 | [bin/memory_bridge.py](memory_bridge.md) | (no docstring) |  |
 | [bin/memory_core.py](memory_core.md) | Core memory primitives: single + bulk write, search, enrichment, emitters. |  |
-| [bin/memory_doctor.py](memory_doctor.md) | m3-memory doctor — thin CLI dispatcher over the three doctor phases. |  |
+| [bin/memory_doctor.py](memory_doctor.md) | m3-memory doctor — thin CLI dispatcher over the doctor phases. |  |
 | [bin/memory_maintenance.py](memory_maintenance.md) | (no docstring) |  |
 | [bin/memory_sync.py](memory_sync.md) | (no docstring) |  |
 | [bin/migrate_entity_vocab.py](migrate_entity_vocab.md) | One-shot migration: rename v1 entity vocabulary to v2-aligned names. |  |

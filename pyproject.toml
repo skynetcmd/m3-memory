@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.6.8.2"
+version = "2026.6.21.0"
 description = "Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
@@ -80,6 +80,10 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2.0,<4"]
+# Local zero-shot NER for bin/m3_entities_gliner.py — a fast on-device
+# alternative to the LLM-based entity extractor. Optional by design: core runs
+# fully without it (bin/m3_entities.py needs no extra deps). Pulls torch.
+entity-ner = ["gliner>=0.2.26"]
 # "Project Oxidation" Rust compute core is installed manually until
 # m3-core-rs publishes wheels to PyPI:
 #   pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"

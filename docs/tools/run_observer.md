@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: a4bb7336724c
-mtime_utc: 2026-05-05T15:47:23.000318+00:00
-generated_utc: 2026-05-06T23:11:45.612804+00:00
+sha1: 5c51f6bd0a04
+mtime_utc: 2026-06-09T13:47:00.544516+00:00
+generated_utc: 2026-06-12T20:00:05.464436+00:00
 private: false
 ---
 
@@ -39,7 +39,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 704)
+- `def main()` (line 789)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -48,7 +48,9 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--source-variant` | Variant-mode: pull conversations from this variant. When set, drains the entire variant; ignores observation_queue. | None |  | str |  |
+| `--source-variant` | Variant-mode: pull conversations from this variant. When set, drains the entire variant; ignores observation_queue. Sentinel '__none__' selects rows whose variant IS NULL. | None |  | str |  |
+| `--source-type` | Comma-separated source memory types to drain (default: message,conversation; allowed: message,conversation,chat_log). | None |  | str |  |
+| `--qid-column` | Column the --qids-file ids filter on: user_id (default) or conversation_id (for corpora where the scoping id lives there). | None |  | str |  |
 | `--target-variant` | Variant tag for emitted observation rows. Empty = production default (NULL). | `` |  | str |  |
 | `--limit` | Cap source rows in variant mode (for smokes). | None |  | int |  |
 | `--concurrency` | Concurrent Observer SLM calls. | `4` |  | int |  |
@@ -60,6 +62,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 ## Environment variables read
 
 - `M3_DATABASE`
+- `M3_OBSERVER_PRECISE_PROVENANCE`
 - `OBSERVER_PROFILE`
 
 ---
