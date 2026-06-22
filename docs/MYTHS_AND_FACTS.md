@@ -53,9 +53,9 @@ No SDEs, no manifolds. Just rule-based maintenance running on a SQLite database.
 
 **Fact:** M3 has **GDPR primitives** — `gdpr_forget` (Article 17 right to erasure) and `gdpr_export` (Article 20 data portability) — exposed as MCP tools. We also publish [FISMA / NIST 800-53](M3_Compliance_FISMA.md) and [CMMC 2.0 / NIST 800-171](M3_Compliance_CMMC.md) alignment notes. There is no EU AI Act module. If/when one exists, it'll be documented in [COMPLIANCE.md](COMPLIANCE.md).
 
-### ❌ Myth: "M3 verified 89.0% on LongMemEval-S by Berkeley RDI / on the official leaderboard"
+### ❌ Myth: "M3 verified 92.0% on LongMemEval-S by Berkeley RDI / on the official leaderboard"
 
-**Fact:** The **89.0%** number is real — see the [README benchmarks section](../README.md#-benchmarks) for the per-category breakdown (445/500 correct on LME-S). It was measured by the M3 team using the public LongMemEval-S harness on local hardware. **We have not had a third-party lab verify it.** If you see "verified by [Lab Name]" attached to that number from any source other than this repository, it's a confabulation.
+**Fact:** The **92.0%** number (no oracle metadata, 460/500 correct on LME-S) is real — see the [README benchmarks section](../README.md#-benchmarks) for the per-category breakdown. It was measured by the M3 team using the public LongMemEval-S harness on local hardware. **We have not had a third-party lab verify it.** If you see "verified by [Lab Name]" attached to that number from any source other than this repository, it's a confabulation.
 
 ### ❌ Myth: "M3 doesn't do fact extraction" *or* "M3 forces you to use its extraction layer"
 
@@ -93,7 +93,7 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 **Fact:** It depends entirely on *which metric*, and most cross-system comparisons mix two that shouldn't be mixed:
 
 - **Retrieval accuracy (SHR@k — the retrieval-only metric).** M3's v3 core engine reaches **99.2% session-hit-rate @ k=10 (496/500), 100% @ k=20** on LME-S — raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata. On this like-for-like, retrieval-only metric, M3 is **state-of-the-art for a local-first substrate**, and the [report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md) is the receipt.
-- **End-to-end QA accuracy (answer-model-dependent).** M3 scores **89.0%** with a frontier answer model + the gpt-4o judge (oracle metadata). Other systems' top-line numbers — agentmemory 96.2%, Chronos 95.6%, Mastra OM 94.9%, Hindsight 91.4% — are all QA accuracy but each uses a *different* answer model, so they are **not a controlled head-to-head**, and we don't claim to win every QA-accuracy comparison. Two commonly-quoted figures aren't comparable at all: MemPalace's 96.6% is *R@5 recall* (and the project is scam-flagged), and Memento's 90.8% is an oracle/no-distractor setting.
+- **End-to-end QA accuracy (answer-model-dependent).** M3 scores **92.0%** with a frontier answer model + the gpt-4o judge and **no oracle metadata** (routing inferred at runtime). Other systems' top-line numbers — agentmemory 96.2%, Chronos 95.6%, Mastra OM 94.9%, Hindsight 91.4% — are all QA accuracy but each uses a *different* answer model, so they are **not a controlled head-to-head**, and we don't claim to win every QA-accuracy comparison. Two commonly-quoted figures aren't comparable at all: MemPalace's 96.6% is *R@5 recall* (and the project is scam-flagged), and Memento's 90.8% is an oracle/no-distractor setting.
 
 We will **not** quote our 99.2% retrieval number against someone else's QA-accuracy number to manufacture a win. Per-source citations and caveats are in the [Sovereign Substrates Table](M3_Comparison_Table.md#-retrieval--extraction-m3-leads-on-retrieval-accuracy).
 

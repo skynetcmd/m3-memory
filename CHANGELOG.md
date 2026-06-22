@@ -40,6 +40,21 @@ Work-in-progress; not yet released. Tracking under `bin/dashboard_server.py`.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
+### Benchmarks
+
+- **LongMemEval-S v3 — 92.0% end-to-end QA with no oracle metadata** (460/500).
+  The v3 production configuration infers all routing signals from the question
+  text at runtime (inferred 4-way strategy router; no dataset `question_type`
+  labels at answer time), Claude Opus 4.6 answerer, unmodified upstream gpt-4o
+  judge. This supersedes the earlier oracle-routed **89.0%** headline as the
+  published LME-S QA figure; retrieval session-hit-rate is unchanged at
+  **100% @ k=20** (99.2% @ k=10). Full methodology, per-type and per-strategy
+  breakdowns, and a routing-error analysis are in
+  [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md);
+  the preserved oracle-routed report is at
+  [`LME-S_v1_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_v1_Benchmarking_Report.md).
+  Discussion: [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49).
+
 ### Changed
 
 - **LLM failover only probes endpoints you opt into** (`bin/llm_failover.py`).

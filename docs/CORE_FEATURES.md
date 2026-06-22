@@ -154,7 +154,7 @@ Headline benchmark on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)
 (500-question long-horizon conversational memory suite):
 **99.2% retrieval session-hit-rate @ k=10** (496/500; 100% @ k=20) with the v3
 core engine — the retrieval-only metric memory systems publish as their headline.
-Separately, **89.0% end-to-end QA accuracy** (445/500) *(SHR=99.2% @ k=10; QA is
+Separately, **92.0% end-to-end QA accuracy** (460/500, no oracle metadata) *(SHR=100% @ k=20; QA is
 very model-dependent)* — a different metric that also depends on the answer model.
 Per-category breakdown, ablations, and full methodology live in
 the [README's Benchmarks section](../README.md#-benchmarks) and
