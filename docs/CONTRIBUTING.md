@@ -78,7 +78,8 @@ benchmarks/             Benchmark harnesses and result catalogs (not shipped on 
 Benchmark harnesses live under `benchmarks/<suite>/` and are **not part of the published PyPI package** — they require a repository checkout. Each suite directory has its own `README.md` with the exact commands, dataset setup, and result catalog.
 
 ```bash
-# LongMemEval-S (stock config, 89.0% overall)
+# LongMemEval-S (v1 oracle-routed stock config, 89.0% overall;
+# the v3 no-oracle 92.0% flow is documented in the LME-S report)
 python benchmarks/longmemeval/bench_longmemeval.py
 
 # See per-suite README for ablations, baselines, and environment variables
