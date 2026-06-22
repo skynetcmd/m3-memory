@@ -169,6 +169,7 @@ docs/audits/enrich-run-*.md
 # everything else (harness, plans, runs, refs) is private to bench/lme.
 benchmarks/longmemeval/*
 !benchmarks/longmemeval/LME-S_Benchmarking_Report.md
+!benchmarks/longmemeval/LME-S_v1_Benchmarking_Report.md
 
 # LoCoMo bench territory — only the public README ships on main; the audit
 # is pending and the harness lives on private/locomo until results land.

@@ -228,7 +228,7 @@
         </div>
 
         <div class="candor">
-            <strong>Where M3 doesn't lead:</strong> on raw <span class="acronym" title="LongMemEval — benchmark for long-horizon conversational memory retrieval">LongMemEval</span> recall accuracy, M3 sits at <strong>89.0%</strong> while several competitors reach 95–96%. M3 trades that gap for sovereignty, bitemporal correctness, and a small auditable codebase. If raw recall is the only thing that matters, the higher scorers in the table below may fit better — and we'll say so directly.
+            <strong>How to read the table:</strong> M3 leads on <em>retrieval</em> accuracy — <strong>100% session-hit-rate @ k=20</strong> (99.2% @ k=10) on <span class="acronym" title="LongMemEval — benchmark for long-horizon conversational memory retrieval">LongMemEval-S</span>. Its <em>end-to-end QA accuracy</em> is <strong>92.0%</strong> with no oracle metadata — a separate, answer-model-dependent metric. Several competitors publish higher top-line numbers, but those mix QA accuracy with recall@k and use different answer models, so they are not a controlled head-to-head. M3 trades any QA-accuracy gap for sovereignty, bitemporal correctness, and a small auditable codebase.
         </div>
     </div>
 
@@ -275,7 +275,7 @@
                 <!-- ▸ Group 3: Retrieval — M3 is solid but not best-in-class -->
                 <tr class="group-row"><td class="group-label" colspan="2">▸ Retrieval &amp; Extraction (M3 is solid; not the recall leader)</td><td class="group-rest" colspan="7"></td></tr>
 
-                <tr class="main-row"><td><a href="#lme-s-score"><strong><span class="acronym" title="LongMemEval-S — single-question benchmark for long-horizon conversational memory">LME-S Score</span></strong></a></td><td><strong>89.0%</strong></td><td><strong>96.2%</strong> (🏆 #1)</td><td><strong>95.6%</strong></td><td><strong>91.4%</strong></td><td><strong>94.9%</strong></td><td><strong>89.1%</strong></td><td><strong>90.8%</strong></td><td><strong>96.6%</strong> (R@5)</td></tr>
+                <tr class="main-row"><td><a href="#lme-s-score"><strong><span class="acronym" title="LongMemEval-S — single-question benchmark for long-horizon conversational memory">LME-S Score</span></strong></a></td><td><strong>92.0%</strong> (no oracle)</td><td><strong>96.2%</strong> (🏆 #1)</td><td><strong>95.6%</strong></td><td><strong>91.4%</strong></td><td><strong>94.9%</strong></td><td><strong>89.1%</strong></td><td><strong>90.8%</strong></td><td><strong>96.6%</strong> (R@5)</td></tr>
                 <tr class="main-row"><td><a href="#search-strategy"><strong>Search Strategy</strong></a></td><td>✅ <strong>3-Pillar Hybrid</strong></td><td>🏆 <strong>6-Signal Hybrid</strong></td><td>⚖️ <strong>Dual-Index</strong></td><td>🏆 <strong>4-Stream Neural</strong></td><td>✅ <strong>Reflective</strong></td><td>✅ <strong>Vector-only</strong></td><td>✅ <strong>Compositional</strong></td><td>⚖️ <strong>Spatial / AAAK</strong></td></tr>
                 <tr class="main-row"><td><a href="#local-fact-extraction"><strong>Local Fact Extraction</strong></a></td><td>🏆 <strong>Local <span class="acronym" title="Small Language Model">SLM</span></strong></td><td>✅ <strong>Deterministic</strong></td><td>✅ <strong>ISO-Temporal</strong></td><td>✅ <strong>Entity-centric</strong></td><td>🏆 <strong>Reflector</strong></td><td>✅ <strong><span class="acronym" title="Large Language Model">LLM</span>-Powered</strong></td><td>✅ <strong>Entity-Res.</strong></td><td>❌ <strong>Verbatim only</strong></td></tr>
                 <tr class="main-row"><td><a href="#token-efficiency"><strong>Token Efficiency</strong></a></td><td>🏆 <strong>Working Memory</strong></td><td>✅ <strong>Signal Filter</strong></td><td>✅ <strong>Event-Pruned</strong></td><td>🔻 <strong>Heavy Rerank</strong></td><td>✅ <strong>Cache-Stable</strong></td><td>🏆 <strong>~90% Savings</strong></td><td>✅ <strong>Verbatim Fall.</strong></td><td>⚖️ <strong>AAAK Dialect</strong></td></tr>
@@ -303,7 +303,7 @@
         <h2>When another tool fits better</h2>
         <p>M3 is not the right answer for every workload. Pick from the table based on what matters most to <em>you</em>:</p>
         <ul>
-            <li><strong>Pure recall accuracy is paramount</strong> — agentmemory (96.2%) or MemPalace (96.6% R@5) lead. M3's 89.0% is solid but not state-of-the-art.</li>
+            <li><strong>Top-line QA accuracy is paramount</strong> — agentmemory (96.2%) or MemPalace (96.6% R@5) publish higher numbers. M3's 92.0% no-oracle QA is strong; on pure <em>retrieval</em> recall (100% SHR @ k=20) M3 is state-of-the-art for a local-first substrate.</li>
             <li><strong>You need extreme token compression</strong> — Mem0 reports ~90% context savings. M3's working-memory model is good but not as aggressive.</li>
             <li><strong>You only need verbatim recall, no extraction</strong> — MemPalace's verbatim-only mode is purpose-built for this.</li>
             <li><strong>Heavy neural reranking is acceptable</strong> — Hindsight's 4-stream architecture wins on rich retrieval if you can absorb the latency cost.</li>
@@ -392,8 +392,8 @@
             <div class="term-header"><h3>LME-S Score</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
             <p><strong>What it means:</strong> <span class="acronym" title="LongMemEval — benchmark for long-horizon conversational memory">LongMemEval</span>-S, a 500-question benchmark for long-horizon conversational memory retrieval. The single number captures recall accuracy averaged across question types.</p>
             <p><strong>Why it matters:</strong> A retrieval layer that can't find what's there is a liability. But — and this is the part vendor pages skip — the benchmark doesn't measure sovereignty, integrity, undo, or compliance. A 96% score sourced from a cloud LLM tells you nothing about whether your data left the machine.</p>
-            <p><strong>M3 standing:</strong> 89.0% — solid mid-pack. We chose to optimize correctness, sovereignty, and a small codebase over chasing the last 7 percentage points of recall.</p>
-            <p><strong>Cohort context:</strong> agentmemory (96.2%), MemPalace R@5 (96.6%), Chronos (95.6%), and Mastra OM (94.9%) lead on raw recall. If recall is the only dimension that matters, those are the better picks. M3 (89.0%) is closer to Mem0 (89.1%), Memento (90.8%), and Hindsight (91.4%).</p>
+            <p><strong>M3 standing:</strong> 92.0% end-to-end QA accuracy with no oracle metadata (100% retrieval SHR @ k=20). We optimize correctness, sovereignty, and a small codebase — and the no-oracle QA number is strong without privileged dataset labels.</p>
+            <p><strong>Cohort context:</strong> agentmemory (96.2%), MemPalace R@5 (96.6%), Chronos (95.6%), and Mastra OM (94.9%) publish higher top-line numbers, but those mix QA accuracy with recall@k and use different answer models — not a controlled head-to-head. M3 (92.0% no-oracle QA) sits alongside Hindsight (91.4%) and Memento (90.8%, oracle/no-distractor setting).</p>
         </div>
 
         <div class="term" id="search-strategy">

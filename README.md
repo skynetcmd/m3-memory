@@ -287,22 +287,22 @@ Binary per-question SHR (`recall_any@k`) — same convention the adjacent LongMe
 
 ### End-to-End QA Accuracy
 
-**89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500 correct) — a 500-question evaluation of long-horizon conversational memory. Without oracle metadata: **74.8%** (smart retrieval) to **68.0%** (fixed-k baseline). Answer model: Claude Opus 4.6; judge: gpt-4o (unmodified upstream).
+**92.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (460/500 correct) — a 500-question evaluation of long-horizon conversational memory — with **no oracle metadata** (routing inferred from the question text at runtime). Answer model: Claude Opus 4.6; judge: gpt-4o (unmodified upstream).
 
 | Question type | n | Accuracy |
 |---|---|---|
-| single-session-user | 70 | 91.4% |
-| single-session-assistant | 56 | 94.6% |
-| single-session-preference | 30 | 93.3% |
-| multi-session | 133 | 85.0% |
-| temporal-reasoning | 133 | 86.5% |
-| knowledge-update | 78 | 92.3% |
-| **Overall** | **500** | **89.0%** |
+| single-session-user | 70 | 94.3% |
+| single-session-assistant | 56 | 96.4% |
+| single-session-preference | 30 | 80.0% |
+| multi-session | 133 | 87.2% |
+| temporal-reasoning | 133 | 95.5% |
+| knowledge-update | 78 | 93.6% |
+| **Overall** | **500** | **92.0%** |
 
-The retrieval-vs-QA gap (99.2% SHR → 89.0% QA at k=10) is dominated by answer-model errors on already-retrieved gold evidence, not retrieval misses.
+The retrieval-vs-QA gap (100% SHR @ k=20 → 92.0% QA) is dominated by answer-model errors on already-retrieved gold evidence, not retrieval misses.
 
-Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
-Discussion thread, retrieval k-sweep, metric-definition clarification, and engine-upgrade addendum: [xiaowu0162/LongMemEval#43](https://github.com/xiaowu0162/LongMemEval/issues/43).
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md). The earlier oracle-routed results (v1, 89.0%) are preserved at [`LME-S_v1_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_v1_Benchmarking_Report.md).
+Discussion threads: [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49) (v3, no-oracle) and [#43](https://github.com/xiaowu0162/LongMemEval/issues/43) (v1).
 LoCoMo audit pending — see [`benchmarks/locomo/README.md`](benchmarks/locomo/README.md).
 
 > 🔍 **Verifying claims about M3.** If a third-party AI assistant has described M3 with features or scores that don't match what's documented here, it's almost certainly hallucinating. See [`docs/MYTHS_AND_FACTS.md`](docs/MYTHS_AND_FACTS.md) for the source-of-truth list of what M3 actually implements (and what it doesn't).
