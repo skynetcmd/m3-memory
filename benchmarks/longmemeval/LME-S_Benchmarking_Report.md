@@ -1,212 +1,200 @@
-# LongMemEval-S (LME-S) Benchmark
--------------------------
+# LME-S Benchmark – m3-Memory v3
+
+**92.0% question accuracy · 100% retrieval session hit-rate @ k=20**
+*No oracle data · Opus 4.6 answerer · GPT-4o judge*
+
+> Benchmark harnesses live in `benchmarks/` and require a repository checkout; see [`CONTRIBUTING.md`](../../CONTRIBUTING.md). They are not shipped on PyPI.
+> Results are based on m3-memory engine `v2026.6.8.2-22-gaf65067` (commit `af650678`).
+> The earlier oracle-routed results are preserved at [`LME-S_v1_Benchmarking_Report.md`](LME-S_v1_Benchmarking_Report.md) (v1, 89.0% with oracle category metadata).
 
 
-2026.05.19 -- Hot off the press
-------------------
-M3's new smart engine has fresh retrieval numbers for LME-S. Throughout this section the metric is **session-hit-rate@k** — the fraction of questions where at least one of the top-k retrieved turns belongs to the question's gold-evidence session. It is the same metric the public LME-S report quotes (stock M3 = 96.8% @ k=10), so the comparison below is like-for-like.
+This report evaluates the production **no-oracle** LongMemEval-S configuration for m3-memory. Unlike the [v1 report](LME-S_v1_Benchmarking_Report.md), which used oracle dataset `question_type` labels for routing, this v3 configuration infers all routing signals from the question text at runtime and does not use privileged dataset metadata.
 
-We're doing accuracy (QA) measurements and will publish those soon. But since so many systems highlight retrieval numbers alongside accuracy, we wanted to give you the data to do an apples-to-apples comparison.
+On [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval), v3 achieves:
 
-**These are raw-retrieval numbers — no knowledge graph.** Retrieval is over the raw conversation turns: hybrid FTS5 keyword + BGE-M3 vector cosine + MMR diversification, nothing more. There is no knowledge-graph construction, no LLM-extracted entities or relations, and no enrichment layer behind these figures. Retrieval is 100% lossless — the system returns verbatim turns, never a compressed or paraphrased summary. A separate **KG-enriched** leg is in progress and will be published as its own table; this report is the raw baseline it will be measured against.
+> **92.0% accuracy — 460/500**
 
-What this means: on LME-S benchmark data, m3 places a correct-session turn as the **#1** result for **~92%** of questions, and within the top 10 for **99%** — that saves you tokens and time.
+This exceeds the v1 oracle headline of **89.0%**, but it is not a clean single-variable ablation. The v3 run differs from v1 in answer model, prompts, routing, and retrieval configuration.
 
-# Session-hit-rate@k with the new m3 engine
+## Summary
 
-**Engine:** m3-memory v2026.5.18.1 (`a639ee8c`) + m3-core-rs CUDA, BGE-M3 (Q4_K_M) embeddings, hybrid scoring + MMR diversification, per-instance `conversation_id` scoping.
+| Configuration | Oracle Labels? | Answerer | Routing | Accuracy |
+|---|---:|---|---|---:|
+| v1 | Yes | Opus 4.6 | Oracle `question_type` | 89.0% |
+| v3 | No | Opus 4.6 | Inferred 4-way strategy router | **92.0%** |
 
-**Leg:** `m3-search` — raw retrieval, no KG. m3-memory's production `memory_search_scored_impl` over raw turns: hybrid FTS5 + BGE-M3 vector + MMR. No knowledge graph, no LLM enrichment, no oracle category knobs, no smart-retrieval, no rerank.
+v3 uses:
 
-**N:** 500 instances. Source: `lme_s.db` ingested from `longmemeval_s_cleaned.json`.
+- **Answerer**: Opus 4.6
+- **Routing**: inferred 4-way strategy classifier: `FACT`, `COMPUTE`, `PROSE`, `ASSISTANT`
+- **Prompting**: strategy-specific frontier prompts
+- **Retrieval**: v3 production `combined-cf` precision-L3 surface
+- **Judge**: GPT-4o using the unmodified upstream LongMemEval judge
 
----
+The inferred router reaches **91.4% agreement** with the canonical post hoc mapping from LongMemEval question types to strategies. This agreement score is reported for analysis only; oracle labels are not used during answering.
 
-## Session-hit-rate by k
-
-A hit means at least one of the top-k retrieved turns shares a `session_idx` with one of the question's gold-flagged turns. This is the metric the public LME-S report quotes (stock M3 = 96.8% @ k=10).
-
-| Question type             |   N | k=1   | k=2   | k=3   | k=5   | k=10  | k=20   |
-|---------------------------|----:|------:|------:|------:|------:|------:|-------:|
-| knowledge-update          |  78 | 97.4% | 98.7% | 98.7% |100.0% |100.0% | 100.0% |
-| multi-session             | 133 | 94.0% | 95.5% | 97.7% | 98.5% | 99.2% | 100.0% |
-| single-session-assistant  |  56 | 98.2% | 98.2% | 98.2% | 98.2% |100.0% | 100.0% |
-| single-session-preference |  30 | 66.7% | 83.3% | 90.0% | 96.7% |100.0% | 100.0% |
-| single-session-user       |  70 | 92.9% | 92.9% | 95.7% | 98.6% | 98.6% | 100.0% |
-| temporal-reasoning        | 133 | 88.7% | 91.0% | 92.5% | 94.7% | 97.7% | 100.0% |
-| **OVERALL**               | **500** | **91.8%** | **94.0%** | **95.8%** | **97.6%** | **99.0%** | **100.0%** |
-
----
-
-## Turn-hit-rate by k
-
-A stricter variant counts a hit only when at least one of the top-k retrieved turns is *itself* a gold-flagged turn (not merely a turn from the gold session). On LongMemEval-S every gold turn maps to exactly one session, so a question's "first gold hit" rank is identical under both metrics — the turn-hit-rate table is bit-identical to the session-hit-rate table above. The two would diverge only on a corpus where two distinct sessions can both be gold for the same question. No separate table is shown for that reason.
+One example, `bc8a6e93_abs`, produced non-JSON output and was counted as incorrect. The reported 92.0% is therefore a conservative score under the current harness behavior.
 
 ---
 
-## Comparison to the public LME-S report
+## Results by Canonical Question Type
 
-| Metric | Public LME-S report (stock M3) | New engine (m3-search, this report) | Delta |
+| Question Type | n | v3 Accuracy — No Oracle | v1 Accuracy — with Oracle |
 |---|---:|---:|---:|
-| Session-hit-rate@k=10 | 96.8% | **99.0%** | +2.2pp |
+| single-session-user | 70 | 94.3% — 66/70 | 91.4% |
+| single-session-assistant | 56 | 96.4% — 54/56 | 94.6% |
+| single-session-preference | 30 | **80.0% — 24/30** | 93.3% |
+| multi-session | 133 | 87.2% — 116/133 | 85.0% |
+| temporal-reasoning | 133 | 95.5% — 127/133 | 86.5% |
+| knowledge-update | 78 | 93.6% — 73/78 | 92.3% |
+| **Overall** | **500** | **92.0% — 460/500** | **89.0%** |
 
-The public report's matched cell is session-hit-rate@k=10 = 96.8%. The new engine reaches **99.0%** at the same (k, metric), and **100%** at k=20.
+The largest improvements over v1 are in reasoning-heavy categories, especially **temporal-reasoning**. The main regression is in **single-session-preference**, where v3 drops from 93.3% to 80.0%. This suggests that preference-style questions remain the weakest area for the no-oracle strategy-routed configuration.
 
 ---
 
-## Method notes
+## Accuracy by Inferred Strategy
 
-- Retrieval: m3-memory's `memory_search_scored_impl` called per-instance with `conversation_id=instance_id`, k=20, MMR enabled, no recency bias, no adaptive-k, no rerank. All defaults are the m3 production path's defaults except where overridden by the apples-to-apples adapter (`pipeline/m3_search_adapter.py`).
-- Embeddings: in-process BGE-M3 GGUF Q4_K_M via `m3_core_rs.EmbeddedEmbedder` (Rust llama.cpp, CUDA), tag `bge-m3-GGUF-Q4_K_M.gguf`. Query and corpus share the same embedder; no cross-space cosine.
-- Substrate: `lme_s_m3.db` sidecar built from `lme_s.db` by `pipeline/m3_search_adapter.py build`, holding 246,750 items / 500 conversations / FTS5 + embeddings populated.
-- Run wall: ~32 s for 500 instances on a single RTX 5080 at concurrency=1 (the m3-memory search is single-threaded per call).
-- Reproducibility: deterministic at temp=0 / no MMR randomness; same DB + same engine SHA produces bit-identical results.
+The table below reports accuracy by the strategy inferred at runtime. These buckets are not identical to the canonical LongMemEval question-type buckets because routing is performed from question text only.
 
-## Acknowledged gaps
+| Inferred Strategy | n | Correct | Accuracy |
+|---|---:|---:|---:|
+| COMPUTE | 273 | 255 | 93.4% |
+| FACT | 143 | 129 | 90.2% |
+| ASSISTANT | 56 | 54 | 96.4% |
+| PROSE | 28 | 22 | 78.6% |
+| **Overall** | **500** | **460** | **92.0%** |
 
-- These numbers are **retrieval hit-rate**, not QA accuracy. The public report's headline 89.0% is QA accuracy with a gpt-4o judge. See the Phase 5/6 follow-up for QA numbers on the same retrieval feed.
-- **This leg uses no knowledge graph and no LLM enrichment.** Retrieval is embedding-only: hybrid FTS5 + BGE-M3 vector cosine + MMR over the raw turns. The numbers above therefore do not depend on any extraction model.
-- A separate **KG-enriched** leg is in progress. To keep the methodology fully local-first, its knowledge graph is being extracted with a local model (Qwen 3.5-9B) rather than a frontier API; those KG-enriched hit-rates will be published as their own table once the extraction completes.
-- No rerank, no chain-of-note, no category-aware knobs, no time-aware expansion. These are the public report's "smart-retrieval" levers; this table is the no-knobs base case.
+`COMPUTE` performs strongly, consistent with the gains observed on temporal and multi-session reasoning questions. `ASSISTANT` is also high-performing. `PROSE`, which primarily handles preference-like inference, remains the most challenging strategy bucket.
 
-Original LME-S Benchmark report: April 2026
--------------------------------------------
-Without retrieval, the answer model scores 6–9%. With M3 Memory's hybrid retrieval, it reaches **89.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (445/500) — the 500-question long-horizon conversational memory benchmark from Wu et al., 2024.
+---
 
-The 89.0% result uses oracle category metadata from the dataset. Without oracle metadata, accuracy is **74.8%** (smart retrieval with time-aware expansion) to **68.0%** (fixed-k baseline). Both numbers matter: the first measures the retrieval + answer ceiling; the second measures what the system achieves without privileged information.
+## How many errors come from routing?
 
-## Result
+Because routing is inferred at runtime (no oracle labels), a natural question is how much of the 8% error rate is attributable to the router sending a question to the wrong strategy bucket, versus answer-side behavior.
 
-| Question type | n | Accuracy |
-|---|---|---|
-| single-session-user | 70 | 91.4% |
-| single-session-assistant | 56 | 94.6% |
-| single-session-preference | 30 | 93.3% |
-| multi-session | 133 | 85.0% |
-| temporal-reasoning | 133 | 86.5% |
-| knowledge-update | 78 | 92.3% |
-| **Overall** | **500** | **89.0%** |
+Of the **40 errors** (out of 500), **5 (12.5%) were misrouted** — in every case a `COMPUTE` question (multi-session or temporal) that the regex router placed in the `FACT` bucket:
 
-Answer model: Claude Opus 4.6. Judge: the upstream LongMemEval gpt-4o judge, unmodified — the same judge used in the original paper and on the leaderboard.
+| Question type | Canonical strategy | Inferred strategy | Count |
+|---|---|---|---|
+| multi-session / temporal | COMPUTE | FACT | 5 |
 
-**Retrieval session hit-rate at k=10: 96.8%** — the fraction of questions where at least one turn from the gold evidence session appears in the top-10 retrieved turns.
+Inspecting each misrouted failure, only **~2–3 are plausibly *caused* by the misroute** — the cases that needed `COMPUTE`'s sum/enumerate behavior (e.g. "page count of the **two** novels," answered as two separate numbers rather than summed). The remaining misrouted cases fail for reasons independent of routing: a simple stated-fact lookup the wrong value was read from (where `FACT` is arguably the correct bucket anyway), and one unanswerable `_abs` question that should have been abstained on (an abstention failure, not a routing failure).
 
-Raw artifact: [`results.json`](./results.json).
+So **routing mistakes account for at most 12.5% of errors (5/40), and realistically ~7.5% (3/40)** once miscause is excluded. The other ~88–93% of errors are answer-side — evidence interpretation, computation, preference inference, and abstention — consistent with the near-ceiling retrieval result. The inferred router (91.4% post-hoc agreement) is **not the dominant error source**; closing the answer-side gap (especially preference inference) is the larger opportunity.
 
-## Retrieval contribution
+---
 
-To measure the effect of retrieval, we run the same evaluation with retrieval disabled. Two no-retrieval baselines account for prompt effects: a neutral prompt and a RAG-aware empty-context prompt.
+## Retrieval
 
-| Question type | n | Neutral prompt | RAG-aware empty | Stock M3 | Delta (vs RAG-aware) |
+The answer surface is the v3 production `combined-cf` precision-L3 leg. Session Hit-Rate (SHR) — the fraction of questions where at least one turn from the gold evidence session appears in the top-k retrieved turns — for the production search engine (`m3-search`) by question type:
+
+| Question type | n | k=5 | k=10 | k=20 | k=50 |
 |---|---|---|---|---|---|
-| single-session-user | 70 | 8.6% | 8.6% | 91.4% | +82.8pp |
-| single-session-assistant | 56 | 0.0% | 19.6% | 94.6% | +75.0pp |
-| single-session-preference | 30 | 3.3% | 0.0% | 93.3% | +93.3pp |
-| multi-session | 133 | 8.3% | 9.0% | 85.0% | +76.0pp |
-| temporal-reasoning | 133 | 6.0% | 5.3% | 86.5% | +81.2pp |
-| knowledge-update | 78 | 7.7% | 7.7% | 92.3% | +84.6pp |
-| **Overall** | **500** | **6.4%** | **8.4%** | **89.0%** | **+80.6pp** |
+| single-session-user | 70 | 98.6% | 100.0% | 100.0% | 100.0% |
+| single-session-assistant | 56 | 100.0% | 100.0% | 100.0% | 100.0% |
+| single-session-preference | 30 | 100.0% | 100.0% | 100.0% | 100.0% |
+| multi-session | 133 | 98.5% | 99.2% | 100.0% | 100.0% |
+| temporal-reasoning | 133 | 97.7% | 98.5% | 100.0% | 100.0% |
+| knowledge-update | 78 | 100.0% | 100.0% | 100.0% | 100.0% |
+| **Overall** | **500** | **98.8%** | **99.4%** | **100.0%** | **100.0%** |
 
-Together these bound the no-retrieval floor. Retrieval supplies the evidence; the answer model reads and reasons over it.
+SHR reaches **100% @ k=20** for every question type — for all 500 examples, a turn from the relevant session is present in the top-20 retrieved turns (matching the published v1 SHR; LongMemEval issue #43).
 
-The ss-assistant baseline jumps from 0.0% to 19.6% under the RAG-aware prompt due to a gpt-4o judge artifact: the judge credits natural-phrasing abstentions as correct on 11 non-abstention questions. This adds ~2.2pp to the baseline but does not change the overall conclusion — the no-retrieval floor remains under 10%.
-
-## Category-aware ablation
-
-Having established that retrieval drives the majority of performance, we next examine which retrieval choices matter.
-
-The stock 89.0% run uses oracle category labels from the dataset to select per-category retrieval policies (k values, session expansion, recency bias, role weighting, and answer scaffolds). Removing all category-aware policies drops accuracy from 89.0% → 68.0% (−21pp).
-
-| Question type | n | Stock M3 | No category knobs | Delta |
-|---|---|---|---|---|
-| single-session-user | 70 | 91.4% | 82.9% | −8.6 |
-| single-session-assistant | 56 | 94.6% | 75.0% | −19.6 |
-| single-session-preference | 30 | 93.3% | 73.3% | −20.0 |
-| multi-session | 133 | 85.0% | 57.1% | −27.9 |
-| temporal-reasoning | 133 | 86.5% | 57.1% | −29.4 |
-| knowledge-update | 78 | 92.3% | 84.6% | −7.7 |
-| **Overall** | **500** | **89.0%** | **68.0%** | **−21.0** |
-
-Session hit-rate remains high (95.2% @ k=10): session-level recall is necessary but insufficient. The drop is concentrated in reasoning-heavy categories (multi-session −27.9pp, temporal −29.4pp), where the system needs broader context assembly — larger k, session expansion, or temporal anchoring — not just finding the right session.
-
-To isolate where the gains come from, we decompose performance relative to the no-retrieval baseline (8.4%):
-
-- **Retrieval alone (no category signals):** 68.0% (+59.6pp)
-- **Category-aware policies:** +21.0pp additional
-
-The `--no-category-knobs` flag bundles multiple interacting policies into a single switch. The 21pp effect reflects these interactions; isolating individual contributions (e.g., temporal expansion vs. answer scaffolds) is future work.
-
-Adaptive k selection — trimming retrieved turns by score-distribution elbow, with no oracle metadata — reaches 72.6% (Δ+4.6pp over the no-knobs baseline, within ±0.7pp reproducibility variance).
-
-Smart retrieval — combining adaptive k with time-aware expansion (date-proximity boosting, neighbor-session expansion, temporal-cue detection) — reaches **74.8%** (Δ+6.8pp over no-knobs). The largest gains are in temporal-reasoning (+10.6pp) and multi-session (+6.1pp), the two categories most affected by the knobs removal. The remaining 14.2pp gap to stock M3 is primarily answer-side scaffolds and category-specific k values, not retrieval strategy.
-
-### Retrieval configurations tested
-
-| Config | Category metadata | Adaptive k | Time-aware expansion | Overall |
-|---|---|---|---|---|
-| Stock M3 | Oracle (from dataset) | No (fixed k=10/20) | No | 89.0% |
-| Smart retrieval | None | Yes (elbow trim) | Yes | 74.8% |
-| Adaptive-k | None | Yes (elbow trim) | No | 72.6% |
-| No category knobs | None | No (fixed k=10) | No | 68.0% |
-| No retrieval (RAG-aware) | N/A | N/A | N/A | 8.4% |
-| No retrieval (neutral) | N/A | N/A | N/A | 6.4% |
+SHR is a session-level recall metric: it confirms the relevant session is in the retrieved context, but not that the answerer selects the correct evidence span, distinguishes updated facts, performs the required computation, resolves temporal ordering, infers preferences, or abstains when unsupported. The gap between **100% SHR @ k=20** and **92.0% QA accuracy** therefore points to answer-side limitations — evidence interpretation, computation, temporal reasoning, preference inference, formatting, and abstention — rather than retrieval failure. This is consistent with the routing-error analysis above: routing accounts for at most ~12.5% of errors, and the remainder are answer-side.
 
 ## Method
 
-- **Dataset**: `longmemeval_s_cleaned.json`, 500 instances. Each instance is an isolated conversational history and one question with a known answer.
-- **Ingest**: every turn is written to M3 Memory with its session date, role, referenced dates extracted from content, and a `question_id` scope so instances never bleed into each other.
-- **Retrieval**: M3 Memory's `memory_search` — hybrid FTS5 keyword + vector cosine + MMR diversity re-ranking. No model trained on LongMemEval.
-- **Answer**: Claude Opus 4.6 reads the top retrieved turns and answers using the official LongMemEval per-task prompts.
-- **Judge**: the upstream LongMemEval gpt-4o judge, unmodified.
+### Dataset
 
-Retrieval uses the same `memory_search_scored_impl` that every M3 Memory agent uses. The benchmark script is a thin driver; there is no shadow retrieval stack.
+- Benchmark: LongMemEval-S
+- Size: 500 examples
+- Evaluation target: exact LongMemEval judge outcome using the unmodified upstream LongMemEval judge harness (GPT-4o)
 
-## Reproduce
+### Retrieval
 
-```bash
-pip install m3-memory
-git clone https://github.com/skynetcmd/m3-memory && cd m3-memory
+- Surface: `combined-cf`
+- Retrieval profile: precision-L3
+- Session Hit-Rate: 100% @ k=20
 
-export ANTHROPIC_API_KEY=...
-export OPENAI_API_KEY=...
+### Routing
 
-python bin/bench_longmemeval.py                    # stock (89.0%)
-python bin/bench_longmemeval.py --smart-retrieval --skip-ingest    # smart retrieval (74.8%)
-python bin/bench_longmemeval.py --adaptive-k --skip-ingest         # adaptive-k (72.6%)
-python bin/bench_longmemeval.py --no-category-knobs --skip-ingest  # ablation (68.0%)
-python bin/bench_longmemeval.py --no-memory        # neutral baseline (6.4%)
-python bin/bench_longmemeval.py --rag-aware-empty  # RAG-aware baseline (8.4%)
-```
+- Router: regex-based strategy classifier in `pipeline/strategy_router.py`
+- Runtime inputs: question text only
+- Oracle metadata: not used
+- Post hoc agreement with canonical mapping: 91.4%
 
-Wall-clock on a single RTX 5080: ~50 min ingest, ~75 min judged answer phase. Baselines and `--skip-ingest` runs reuse an existing DB.
+The router maps questions into four answer strategies:
+
+- `FACT`
+- `COMPUTE`
+- `PROSE`
+- `ASSISTANT`
+
+### Answering
+
+- Model: Opus 4.6
+- Prompt set: `config/answerer_prompts/lme_strategy_frontier.yaml`
+- Prompting: per-strategy frontier prompts
+- Oracle labels: not used
+
+### Judging
+
+- Judge: GPT-4o
+- Judge harness: unmodified upstream LongMemEval judge
+
+---
 
 ## Caveats
 
-- **Reproducibility**: Claude Opus 4.6 and gpt-4o are non-deterministic at temperature 0. Re-runs produce ≈89.0% ± 0.7pp. Differences under 1pp are noise.
-- **Answer model**: this evaluation uses Claude Opus 4.6, a frontier-class model. The baselines show the contribution is retrieval, not parametric knowledge — but a weaker answer model would lower the ceiling.
-- **Judge**: single gpt-4o judge, unmodified. No human or secondary LLM validation. The ss-assistant abstention artifact above is one known bias.
-- **Oracle metadata**: the stock 89.0% uses dataset category labels. Without them, accuracy drops to 68–75%. A production system would need to infer task signals at runtime.
-- **Bundled ablation**: the `--no-category-knobs` flag disables multiple policies simultaneously. Per-knob isolation is not yet available.
-- **Cross-system comparisons are uncontrolled**: different systems use different answer models, prompts, judges, and configurations. Scores below are not directly comparable.
+This result should be interpreted as a strong production no-oracle configuration, not as a clean ablation against v1.
 
-## Design space
+Compared with v1, v3 changes multiple factors:
 
-Long-horizon memory systems make different architectural bets. Cross-system scores are not directly comparable — answer models, prompts, and judges differ.
+1. answer model,
+2. answer prompts,
+3. routing method,
+4. retrieval surface,
+5. strategy taxonomy.
 
-| System | Architecture | Multi-session | Temporal | Overall | Answer model | Oracle metadata? |
-|---|---|---|---|---|---|---|
-| [Mastra OM](https://mastra.ai/research/observational-memory) | Ingest-heavy: observer + reflector compression | 87.2% | 95.5% | 94.9% | gpt-5-mini | None |
-| M3 Memory (stock) | Retrieval-heavy: raw turns + hybrid search | 85.0% | 86.5% | 89.0% | Opus 4.6 | Category labels |
-| M3 Memory (no metadata) | Same, category knobs disabled | 57.1% | 57.1% | 68.0% | Opus 4.6 | None |
-| [Ensue](https://ensue.dev/blog/beating-memory-benchmarks/) | Time-aware expansion + configurable windows | — | — | ~86% | Unknown | None |
-| [Hindsight](https://github.com/vectorize-io/hindsight) | Reflection pre-pass: LLM writes insights at ingest | 87.2% | — | — | Unknown | None |
+Therefore, the improvement from **89.0% oracle** to **92.0% no-oracle** should not be attributed to routing alone. The result demonstrates that the full v3 production configuration performs strongly without privileged labels.
 
-**M3**: retrieval at read-time over raw turns. *Upside*: simplicity and zero fidelity loss. *Tradeoff*: query-time evidence assembly, which currently depends on category-aware policies for reasoning-heavy tasks.
+Additional caveats:
 
-**Mastra OM**: ingest-heavy compression with a three-date temporal model. *Upside*: 95.5% temporal reasoning with no retrieval step. *Tradeoff*: ingest cost and compression loss on scattered low-priority facts.
+- One non-JSON answer was counted as incorrect.
+- Strategy agreement is measured post hoc and does not imply use of oracle labels.
+- Session-level retrieval success does not guarantee complete evidence utilization.
+- Preference-style questions remain the clearest weakness.
 
-**Ensue**: time-aware retrieval — temporal-cue parsing, date-proximity filtering, and neighbor-session expansion over raw history. *Upside*: proven retrieval-paradigm approach to temporal reasoning without oracle metadata.
+---
 
-Without oracle metadata, smart retrieval (time-aware expansion + adaptive k) recovers roughly a third of the 21pp gap, reaching 74.8%. The remaining 14pp is primarily answer-side scaffolds — closing it within the retrieval paradigm via runtime task inference is the next milestone.
+## Reproduction
 
-See the [LongMemEval leaderboard](https://github.com/xiaowu0162/LongMemEval#leaderboard) for the current field.
+```bash
+# Answer phase
+LME_STRATEGY_PROMPTS=lme_strategy_frontier.yaml \
+python pipeline/05_answer.py \
+  --backend batch \
+  --batch-provider anthropic \
+  --model claude-opus-4-6 \
+  --strategy-route \
+  --leg-tag combined-cf \
+  --answerer-tag opus46@frontier-strategy \
+  --max-tokens 1024
+```
+
+```bash
+# Judge phase
+python pipeline/06_judge.py \
+  --backend batch \
+  --top-k 10 \
+  --answerer-model opus46@frontier-strategy
+```
+
+---
+
+## Conclusion
+
+The v3 production no-oracle configuration achieves **92.0%** on LongMemEval-S, outperforming the earlier v1 oracle-reported score of **89.0%**. The result is driven by a stronger answerer, strategy-specific prompting, inferred runtime routing, and high-recall retrieval.
+
+The main remaining opportunity is preference-style reasoning, where `single-session-preference` and `PROSE` examples underperform relative to the rest of the benchmark.

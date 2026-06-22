@@ -29,6 +29,7 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 
 - [x] **99.2% SHR @ k=10** on LongMemEval-S — full sweep **98.2% / 99.2% / 100.0%** @ k=5/10/20 (BGE-M3 hybrid FTS5 + vector + MMR; k=10 is M3's default search depth)
 - [x] **89.0% E2E QA** on LongMemEval-S (445 / 500, Claude Opus 4.6 answerer, gpt-4o judge, unmodified upstream)
+- [x] **92.0% E2E QA — no oracle metadata** on LongMemEval-S (460 / 500, v3 inferred strategy routing, Claude Opus 4.6 answerer, gpt-4o judge) — supersedes the oracle-routed 89.0% headline; see the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md) and [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49)
 - [x] FTS5 sanitizer rewrite — allowlist tokenization fixes search crashes on queries containing hyphens, colons, `field:value` tokens (`gpt-4o`, `claude-code`, `100-200MB`, …)
 - [x] LongMemEval-S benchmark harness shipped under `benchmarks/longmemeval/`
 - [x] Live methodology + k-sweep + engine-upgrade addendum discussion: [xiaowu0162/LongMemEval#43](https://github.com/xiaowu0162/LongMemEval/issues/43)
