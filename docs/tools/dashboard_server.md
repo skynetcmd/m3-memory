@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: 74e7c796de77
-mtime_utc: 2026-05-31T18:57:47.132714+00:00
-generated_utc: 2026-05-31T18:58:02.588220+00:00
+sha1: 052561351b81
+mtime_utc: 2026-06-09T02:42:18.250087+00:00
+generated_utc: 2026-06-12T20:00:04.921426+00:00
 private: false
 ---
 
@@ -13,6 +13,45 @@ private: false
 M3 Cognitive & Observability Portal.
 FastAPI + HTMX unified local control center for Graph Exploration & KB Browsing.
 Listens on port 8088 by default.
+
+Requirements
+------------
+Python 3.11+ and the packages pinned in repo-root ``requirements.txt``
+(at minimum: ``fastapi>=0.136.1``, ``uvicorn>=0.46.0``, plus the m3 deps
+imported below: ``m3_sdk``, ``memory.db``, ``memory.search``,
+``memory_maintenance``).
+
+Install (run from the repo root)
+--------------------------------
+The recommended path on every platform is an isolated virtualenv at
+``.venv/`` so the system Python stays clean.
+
+macOS (Homebrew Python is PEP 668 "externally managed" — do NOT
+``pip install`` into it directly):
+
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/python bin/dashboard_server.py
+
+Linux (same pattern; on Debian/Ubuntu you may need ``apt install
+python3-venv`` first):
+
+    python3 -m venv .venv
+    .venv/bin/pip install -r requirements.txt
+    .venv/bin/python bin/dashboard_server.py
+
+Windows (PowerShell):
+
+    py -3 -m venv .venv
+    .venv\Scripts\pip install -r requirements.txt
+    .venv\Scripts\python bin\dashboard_server.py
+
+Common failure
+--------------
+``ModuleNotFoundError: No module named 'uvicorn'`` (or ``fastapi``)
+means the interpreter you launched with does not have the deps
+installed — re-run the install step above using the same interpreter
+you intend to launch the server with (typically ``.venv``).
 
 ---
 
@@ -52,16 +91,16 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `cmd`` (line 2887)
+- `subprocess.Popen()  → `cmd`` (line 2923)
 
 **sqlite**
 
-- `sqlite3.connect()  → `chatlog_db`` (line 1919)
-- `sqlite3.connect()  → `files_db`` (line 1928)
-- `sqlite3.connect()  → `main_db`` (line 1892)
-- `sqlite3.connect()  → `main_db`` (line 1914)
-- `sqlite3.connect()  → `selected_db_path`` (line 2055)
-- `sqlite3.connect()  → `selected_db_path`` (line 2228)
+- `sqlite3.connect()  → `chatlog_db`` (line 1956)
+- `sqlite3.connect()  → `files_db`` (line 1965)
+- `sqlite3.connect()  → `main_db`` (line 1929)
+- `sqlite3.connect()  → `main_db`` (line 1951)
+- `sqlite3.connect()  → `selected_db_path`` (line 2092)
+- `sqlite3.connect()  → `selected_db_path`` (line 2265)
 
 
 ---
@@ -72,7 +111,6 @@ _(no argparse arguments detected)_
 - `fastapi (FastAPI, Form, HTTPException, Request)`
 - `fastapi.responses (HTMLResponse, JSONResponse, StreamingResponse)`
 - `files_memory.search (files_search)`
-- `memory (config)`
 - `memory.config (FILES_DB_PATH)`
 - `memory.db (_db)`
 - `memory.db (_record_history)`

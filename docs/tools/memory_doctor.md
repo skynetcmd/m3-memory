@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: 131f9e5af4cd
-mtime_utc: 2026-05-30T18:38:21.561007+00:00
-generated_utc: 2026-05-31T18:42:52.888348+00:00
+sha1: 50be027acd63
+mtime_utc: 2026-06-07T00:52:26.586430+00:00
+generated_utc: 2026-06-12T20:00:05.336730+00:00
 private: false
 ---
 
@@ -10,16 +10,18 @@ private: false
 
 ## Purpose
 
-m3-memory doctor — thin CLI dispatcher over the three doctor phases.
+m3-memory doctor — thin CLI dispatcher over the doctor phases.
 
 Phases (each in its own module under bin/doctor/):
 
   - db_repair          legacy DB fixes (timestamps, relationships, JSON)
   - cascade_probe      embedding-cascade health (delegates to memory.doctor)
   - embed_server_probe Rust-side `m3-embed-server doctor` subprocess
+  - oxidation_probe    m3_core_rs native-extension presence/staleness report
 
 Each phase can be skipped via --skip-*. Exit code is the maximum across
-the non-skipped phases (most-severe wins).
+the non-skipped phases (most-severe wins). The embed-server and oxidation
+phases are report-only and never bump the exit code.
 
 Design note: this file is intentionally thin — narrow CLI + phase
 dispatch only. Logic lives in the bin/doctor/ submodules so each can be
@@ -29,7 +31,7 @@ tested in isolation.
 
 ## Entry points
 
-- `def main()` (line 31)
+- `def main()` (line 33)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -41,6 +43,9 @@ tested in isolation.
 | `--skip-repair` | Skip the legacy DB-repair phase (read-only health check). | `False` |  | store_true |  |
 | `--skip-cascade` | Skip the embedding-cascade health probe. | `False` |  | store_true |  |
 | `--skip-embed-server` | Skip the Rust-side m3-embed-server doctor subprocess. | `False` |  | store_true |  |
+| `--skip-oxidation` | Skip the m3_core_rs native-extension status report. | `False` |  | store_true |  |
+| `--fix` | Run quick-repair mode to auto-fix common deployment issues. | `False` |  | store_true |  |
+| `--dry-run` | Use with --fix to simulate repair steps without making changes. | `False` |  | store_true |  |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 
 ---
@@ -68,6 +73,8 @@ _(no subprocess / http / sqlite calls detected)_
 - `doctor (cascade_probe)`
 - `doctor (db_repair)`
 - `doctor (embed_server_probe)`
+- `doctor (oxidation_probe)`
+- `memory.doctor (memory_doctor_fix_impl)`
 
 ---
 

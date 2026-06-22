@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_sdk.py
-sha1: 8f9c407c10e5
-mtime_utc: 2026-05-31T16:08:17.248463+00:00
-generated_utc: 2026-05-31T18:42:52.826381+00:00
+sha1: 567d08967442
+mtime_utc: 2026-06-01T00:55:33.508776+00:00
+generated_utc: 2026-06-12T20:00:05.232818+00:00
 private: false
 ---
 
@@ -64,17 +64,17 @@ _(no conventional entry point detected)_
 
 **subprocess**
 
-- `os.execv()  → `sys.executable`` (line 173)
+- `os.execv()  → `sys.executable`` (line 194)
 
 **http**
 
-- `httpx.AsyncClient()` (line 627)
-- `httpx.AsyncClient()` (line 630)
+- `httpx.AsyncClient()` (line 705)
+- `httpx.AsyncClient()` (line 708)
 
 **sqlite**
 
-- `sqlite3.connect()  → `path`` (line 290)
-- `sqlite3.connect()  → `self.db_path`` (line 466)
+- `sqlite3.connect()  → `path`` (line 311)
+- `sqlite3.connect()  → `self.db_path`` (line 487)
 
 
 ---
@@ -85,6 +85,7 @@ _(no conventional entry point detected)_
 - `contextvars`
 - `dotenv (load_dotenv)`
 - `httpx`
+- `m3_core_rs`
 - `m3_core_rs (format_log)`
 - `psutil`
 - `psycopg2`

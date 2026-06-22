@@ -40,6 +40,10 @@ Work-in-progress; not yet released. Tracking under `bin/dashboard_server.py`.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
+---
+
+## [2026.6.21.0] — 2026-06-21
+
 ### Benchmarks
 
 - **LongMemEval-S v3 — 92.0% end-to-end QA with no oracle metadata** (460/500).
@@ -54,6 +58,23 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
   the preserved oracle-routed report is at
   [`LME-S_v1_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_v1_Benchmarking_Report.md).
   Discussion: [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49).
+
+### Added
+
+- **Local GLiNER entity extractor** (`bin/m3_entities_gliner.py`) — an optional,
+  on-device zero-shot NER alternative to the LLM-based extractor in
+  `bin/m3_entities.py`. Runs in-process (GPU/CPU), no LLM endpoint or API cost,
+  and is dramatically faster per turn for the entity-extraction step. Reuses the
+  existing `memory_core._run_entity_extractor` write path, so entity-resolve,
+  bitemporal `valid_from` inheritance, vocabulary validation, and idempotent
+  re-runs all behave identically to the LLM path. Install via the new
+  `entity-ner` extra: `pip install 'm3-memory[entity-ner]'` (pulls `gliner` +
+  `torch`); core runs fully without it.
+
+### Docs
+
+- Regenerated the tool inventory (`docs/tools/`), MCP catalog
+  (`docs/tools/MCP_CATALOG.json`), and MCP tool listing (`docs/MCP_TOOLS.md`).
 
 ### Changed
 

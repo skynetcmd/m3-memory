@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_memory.py
-sha1: 7a892ce10501
-mtime_utc: 2026-05-24T12:05:50.604664+00:00
-generated_utc: 2026-05-31T18:42:52.591733+00:00
+sha1: 3e0fb45d1ae8
+mtime_utc: 2026-06-01T02:03:20.705401+00:00
+generated_utc: 2026-06-12T20:00:04.676843+00:00
 private: true
 ---
 

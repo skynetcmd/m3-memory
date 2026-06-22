@@ -1,8 +1,8 @@
 ---
 tool: validate_env.py
-sha1: 38c2483eaf2a
-mtime_utc: 2026-04-18T20:37:50.820608+00:00
-generated_utc: 2026-05-24T12:09:08.846819+00:00
+sha1: 6066daaf19cd
+mtime_utc: 2026-06-09T04:46:44.882224+00:00
+generated_utc: 2026-06-12T20:00:05.794521+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 64)
+- `def main()` (line 65)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -49,7 +49,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `platform`
+_(only stdlib)_
 
 ---
 
