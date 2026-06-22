@@ -1,8 +1,8 @@
 ---
 tool: bin/generate_configs.py
-sha1: cbf2299d1cc4
-mtime_utc: 2026-05-21T15:00:20.157251+00:00
-generated_utc: 2026-05-24T12:09:07.884297+00:00
+sha1: a45baa77c535
+mtime_utc: 2026-06-15T02:02:26.870982+00:00
+generated_utc: 2026-06-19T20:00:04.009566+00:00
 private: false
 ---
 
@@ -22,19 +22,25 @@ _(no module docstring — update the source file.)_
 
 ## CLI flags / arguments
 
-_(no argparse arguments detected)_
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--install-claude` | Merge hooks+statusLine+mcpServers into ~/.claude/settings.json | `False` |  | store_true |  |
+| `--settings-path` | Override target settings.json path | None |  | str |  |
+| `--yes` | Apply without prompting | `False` |  | store_true |  |
+| `--dry-run` | Show the diff but write nothing | `False` |  | store_true |  |
+| `--keep-status-line` | Don't replace an existing custom status line (default is to adopt m3's statusline-command.sh, preserving the prior one to a timestamped sidecar file) | `False` |  | store_true |  |
 
 ---
 
 ## Environment variables read
 
-_(none detected)_
+- `M3_EMBED_GGUF`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_sdk (get_m3_root)`
+_(none detected)_
 
 ---
 
@@ -46,7 +52,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-_(only stdlib)_
+- `difflib`
 
 ---
 
@@ -54,6 +60,7 @@ _(only stdlib)_
 
 - `.aider.conf.yml`
 - `.mcp.json`
+- `Merge hooks+statusLine+mcpServers into ~/.claude/settings.json`
 - `claude-settings.json`
 - `gemini-settings.json`
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/benchmark_memory.py
-sha1: 143eb8d26a82
-mtime_utc: 2026-05-24T12:05:50.605654+00:00
-generated_utc: 2026-05-31T18:42:52.594833+00:00
+sha1: 20c820bece3d
+mtime_utc: 2026-06-01T02:03:20.709401+00:00
+generated_utc: 2026-06-12T20:00:04.685067+00:00
 private: true
 ---
 
@@ -36,7 +36,7 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
-- `memory_core (memory_write_impl, memory_search_impl, memory_delete_impl, _db)`
+- `memory_core (memory_delete_impl, memory_search_impl, memory_write_impl)`
 
 ---
 

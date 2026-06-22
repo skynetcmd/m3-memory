@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_status.py
-sha1: b1d1cb569315
-mtime_utc: 2026-05-31T09:01:46.146475+00:00
-generated_utc: 2026-05-31T18:42:52.648781+00:00
+sha1: 7c7c484086e9
+mtime_utc: 2026-06-13T11:52:16.549729+00:00
+generated_utc: 2026-06-19T20:00:03.798500+00:00
 private: false
 ---
 
@@ -23,7 +23,7 @@ Cold call <50ms (no full table scans).
 
 ## Entry points
 
-- `def main()` (line 679)
+- `def main()` (line 746)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -56,14 +56,15 @@ Cold call <50ms (no full table scans).
 
 **subprocess**
 
-- `subprocess.run()  → `cmd`` (line 415)
+- `subprocess.run()  → `cmd`` (line 482)
 
 **sqlite**
 
 - `sqlite3.connect()  → `chatlog_db`` (line 80)
+- `sqlite3.connect()  → `db`` (line 150)
 - `sqlite3.connect()  → `files_db`` (line 112)
-- `sqlite3.connect()  → `main_db`` (line 242)
-- `sqlite3.connect()  → `main_db`` (line 259)
+- `sqlite3.connect()  → `main_db`` (line 309)
+- `sqlite3.connect()  → `main_db`` (line 326)
 - `sqlite3.connect()  → `main_db`` (line 66)
 
 
