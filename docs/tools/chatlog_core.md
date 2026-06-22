@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_core.py
-sha1: 58ee2117761e
-mtime_utc: 2026-05-30T15:09:39.170606+00:00
-generated_utc: 2026-05-31T18:42:52.613139+00:00
+sha1: 30d0b7ace74b
+mtime_utc: 2026-06-07T00:52:26.585431+00:00
+generated_utc: 2026-06-12T20:00:04.740984+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ Provides:
 - Async write queue (asyncio.Queue) with flush-on-size/interval
 - Spill-to-disk backpressure at memory/chatlog_spill/YYYYMMDD.jsonl
 - chatlog_write_impl / chatlog_write_bulk_impl — enqueue + flush
-- chatlog_search_impl — delegates to memory_core.memory_search_scored_impl
+- chatlog_search_impl — FTS5 + facet filters over chat_log rows
 - chatlog_promote_impl — ATTACH DATABASE cross-DB copy (separate/hybrid) or UPDATE (integrated)
 - chatlog_list_conversations_impl
 - chatlog_cost_report_impl — aggregates tokens/cost from metadata_json
@@ -55,7 +55,6 @@ _(none detected)_
 - `m3_sdk (M3Context, active_database)`
 - `m3_sdk (M3Context, resolve_db_path)`
 - `m3_sdk (resolve_db_path)`
-- `memory_core`
 - `memory_core (_sanitize_fts)`
 
 ---

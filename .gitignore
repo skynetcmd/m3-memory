@@ -50,6 +50,7 @@ memory/.migrate_config.json
 
 # Scratch / temp files
 .scratch/
+scratch/
 logs/
 x.xx*
 x.xxx*

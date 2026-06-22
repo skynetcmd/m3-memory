@@ -1,8 +1,8 @@
 ---
 tool: bin/bench_longmemeval.py
-sha1: cc5543f2a4e7
-mtime_utc: 2026-05-31T07:42:38.486157+00:00
-generated_utc: 2026-05-31T18:42:52.587396+00:00
+sha1: b23b0fe51f7c
+mtime_utc: 2026-06-01T02:03:20.704399+00:00
+generated_utc: 2026-06-12T20:00:04.667186+00:00
 private: true
 ---
 
@@ -80,9 +80,8 @@ _(none detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
-- `memory_core`
 - `memory_core (DB_PATH)`
-- `memory_core (memory_write_bulk_impl, memory_search_scored_impl, _db)`
+- `memory_core (_db, memory_search_scored_impl, memory_write_bulk_impl)`
 
 ---
 

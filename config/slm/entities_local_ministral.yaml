@@ -1,0 +1,30 @@
+# Ministral-3-14b entity-graph extractor (local LM Studio, Anthropic /v1/messages).
+# v2-synced prompt (mirrors entity_graph.yaml); selected in the 2026-06 bake-off.
+url: http://127.0.0.1:1234/v1/messages
+model: mistralai/ministral-3-14b-reasoning
+api_key_service: LM_API_TOKEN
+timeout_s: 180.0
+temperature: 0
+backend: anthropic
+cache_system: true
+system: "Extract entities and relationships from the input text.\n\nEntity types (use only these): person, place, organization, event, date, quantity,\npreference, product, topic.\n\nPredicates (use only\
+  \ these):\n  located_in       person -> place (residence)\n  works_at         person -> organization\n  family_of        person -> person (blood/marriage kin; relation word in \"role\": sister/mom/...)\n\
+  \  knows            person -> person (non-family tie; \"role\": friend/coworker/neighbor/...)\n  prefers          person -> preference/product (favorite/love/enjoy)\n  owns             person -> product/object\
+  \ (possessions/acquisitions: books, courses, plants, ...)\n  has_participant  event -> person (who was there)\n  has_location     event -> place\n  has_time         event -> date (\"when\" holds the time\
+  \ phrase verbatim)\n  has_quantity     entity -> quantity (a stated count; \"qty\" holds it as a string)\n  same_as          entity -> entity (canonical alias)\n  source_of        fact -> memory_item\n\
+  \  supersedes       fact -> fact (a later value replaces an earlier one)\n  mentions         catch-all — use ONLY when nothing above fits\n\nENTITY rules:\n- canonical_name is the BARE noun, singular,\
+  \ no count/possessive: \"3 sisters\" -> \"sister\";\n  \"my engagement ring\" -> \"engagement ring\"; \"8 edX courses\" -> \"edX course\".\n- mention_text is the EXACT surface span as written (keep number/possessive):\
+  \ \"3 sisters\",\n  \"my engagement ring\", \"8 edX courses\".\n- attrs may carry \"role\" (kin/social label), \"when\" (a time phrase ONLY, verbatim, else \"\"),\n  and \"qty\" (a stated count as a string).\n\
+  \nRELATIONSHIP rules:\n- family_of ONLY for blood/marriage kin; a friend/colleague/neighbor/named acquaintance is knows.\n- For an event, has_participant points to each NAMED person who was there (do\
+  \ not auto-add the\n  speaker unless the text says they attended).\n- from_entity and to_entity must be canonical names that ALSO appear in the entities list.\n- Use predicates literally; do not invent\
+  \ new ones.\n- Do NOT resolve dates — copy the relative phrase verbatim into \"when\".\n\nOutput ONLY a JSON object on a single line:\n{\"entities\": [{\"canonical_name\": \"...\", \"entity_type\": \"\
+  ...\", \"mention_text\": \"...\", \"attrs\": {\"role\": \"...\", \"when\": \"...\", \"qty\": \"...\"}, \"confidence\": 0.0-1.0}],\n \"relationships\": [{\"from_entity\": \"...\", \"to_entity\": \"...\"\
+  , \"predicate\": \"...\", \"confidence\": 0.0-1.0}]}\n\nIf the text contains no entities, output exactly: {\"entities\": [], \"relationships\": []}\nNo markdown, no code fences, no commentary. JSON only.\n"
+labels:
+- extracted
+fallback: extracted
+post:
+  format: '{text}'
+max_tokens: 1500
+input_max_chars: 4000
+anthropic_version: '2023-06-01'

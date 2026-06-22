@@ -2,7 +2,7 @@
 tool: bin/pg_sync.sh
 sha1: 93fc8f59b314
 mtime_utc: 2026-04-06T00:25:00.987104+00:00
-generated_utc: 2026-05-31T19:54:42.237208+00:00
+generated_utc: 2026-06-22T03:40:38.143342+00:00
 private: false
 ---
 

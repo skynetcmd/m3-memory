@@ -1,8 +1,8 @@
 ---
 tool: scripts/metadata_filler.py
-sha1: 6a562a75d6ca
-mtime_utc: 2026-04-06T00:25:01.015417+00:00
-generated_utc: 2026-05-24T12:09:08.789060+00:00
+sha1: 845e8d08c970
+mtime_utc: 2026-06-09T04:46:44.855219+00:00
+generated_utc: 2026-06-12T20:00:05.753971+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 78)
+- `def main()` (line 77)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -43,7 +43,7 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 79)
+- `sqlite3.connect()  → `DB_PATH`` (line 78)
 
 
 ---
