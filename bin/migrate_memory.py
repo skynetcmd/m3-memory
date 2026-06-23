@@ -669,8 +669,14 @@ def cmd_up(args):
         os.makedirs(os.path.dirname(target.db_path), exist_ok=True)
         conn = sqlite3.connect(target.db_path)
         try:
-            conn.execute("PRAGMA busy_timeout = 5000;")
-            conn.execute("PRAGMA locking_mode = EXCLUSIVE;")
+            conn.execute("PRAGMA busy_timeout = 30000;")
+            # Do NOT set locking_mode = EXCLUSIVE here. The m3 MCP memory server
+            # keeps agent_memory.db open continuously in WAL mode, so an EXCLUSIVE
+            # lock can never be granted — the migration fails with "database is
+            # locked" regardless of busy_timeout (and db._ensure_sync_tables then
+            # re-spawns it every sync, the lock-loop documented in 033). Normal WAL
+            # locking + a generous busy_timeout lets online migrations coexist with
+            # the live server.
         except sqlite3.Error as e:
             logger.warning(f"Could not set lock/timeout pragmas: {e}")
         try:
@@ -746,8 +752,14 @@ def cmd_down(args):
 
         conn = sqlite3.connect(target.db_path)
         try:
-            conn.execute("PRAGMA busy_timeout = 5000;")
-            conn.execute("PRAGMA locking_mode = EXCLUSIVE;")
+            conn.execute("PRAGMA busy_timeout = 30000;")
+            # Do NOT set locking_mode = EXCLUSIVE here. The m3 MCP memory server
+            # keeps agent_memory.db open continuously in WAL mode, so an EXCLUSIVE
+            # lock can never be granted — the migration fails with "database is
+            # locked" regardless of busy_timeout (and db._ensure_sync_tables then
+            # re-spawns it every sync, the lock-loop documented in 033). Normal WAL
+            # locking + a generous busy_timeout lets online migrations coexist with
+            # the live server.
         except sqlite3.Error as e:
             logger.warning(f"Could not set lock/timeout pragmas: {e}")
         try:
