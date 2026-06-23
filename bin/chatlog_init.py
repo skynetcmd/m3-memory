@@ -486,8 +486,8 @@ def show_claude_code_settings_snippet(config: ChatlogConfig) -> None:
     # Use forward slashes on Windows. PowerShell accepts them, and unlike
     # backslash-escaped paths they survive whatever shell interpretation
     # layer Claude Code uses when invoking Stop / PreCompact hooks.
-    # Observed: C:\\Users\\bhaba\\... paths showed up stripped in the
-    # Claude Code hook error as "CUsersbhaba..." — the shell chain ate
+    # Observed: C:\\Users\\<user>\\... paths showed up stripped in the
+    # Claude Code hook error as "CUsers<user>..." — the shell chain ate
     # the escape sequences. Forward slashes sidestep the whole class.
     ps1 = os.path.join(BASE_DIR, "bin", "hooks", "chatlog",
                        "claude_code_precompact.ps1").replace("\\", "/")

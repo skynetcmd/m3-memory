@@ -269,7 +269,7 @@ def _register_antigravity_mcp() -> Optional[str]:
             if appdata:
                 win_candidate = Path(appdata) / "agy" / "bin" / "agy.exe"
                 if not win_candidate.exists():
-                    # check if the folder C:\Users\bhaba\.gemini\antigravity-cli exists (our App Data dir)
+                    # check if ~/.gemini/antigravity-cli exists (our App Data dir)
                     if not (Path.home() / ".gemini" / "antigravity-cli").is_dir():
                         return None
             else:
