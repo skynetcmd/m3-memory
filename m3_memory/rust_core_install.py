@@ -37,8 +37,12 @@ M3_CORE_RS_GIT_TAG = "v2026.06.07"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).
+# CPU uses `embedded` (CPU-only llama.cpp) so every build ships an in-process
+# BGE-M3 EmbeddedEmbedder — m3 must always have a default bge-m3 embedder, not
+# depend on the embed-server being present. A source-fallback CPU build thus
+# needs a C/C++ compiler + cmake.
 _BACKEND_FEATURES: dict[str, list[str]] = {
-    "cpu": [],
+    "cpu": ["embedded"],
     "cuda": ["embedded-cuda"],
     "vulkan": ["embedded-vulkan"],
     "metal": ["embedded-metal"],
