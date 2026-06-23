@@ -131,8 +131,8 @@ source ~/.zshrc
 **Quick wiring:**
 
 ```bash
-# Claude Code (--global writes to ~/.claude/settings.json, available in all projects)
-claude mcp add --global memory m3
+# Claude Code (--scope user writes to the user config, available in all projects)
+claude mcp add --scope user memory m3
 
 # Gemini CLI
 m3 chatlog init --apply-gemini
