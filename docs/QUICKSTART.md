@@ -184,7 +184,7 @@ wizard or add an agent later, here's the manual recipe per agent.
 **Claude Code** — the [plugin route](./claude_code_plugin.md) is recommended. Manual:
 
 ```bash
-claude mcp add --global memory m3
+claude mcp add --scope user memory m3
 ```
 
 Or edit `~/.claude/settings.json`:

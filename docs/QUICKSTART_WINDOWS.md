@@ -91,7 +91,7 @@ Then `/plugin reload` (or restart Claude Code). The plugin auto-registers the MC
 If you'd rather wire it by hand:
 
 ```powershell
-claude mcp add --global memory m3
+claude mcp add --scope user memory m3
 ```
 
 ### Gemini CLI

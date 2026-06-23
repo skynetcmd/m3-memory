@@ -59,7 +59,7 @@ add an agent later, run these by hand:
 
 ```bash
 # Claude Code
-claude mcp add --global memory m3
+claude mcp add --scope user memory m3
 
 # Gemini CLI (auto-wired by m3 setup; re-run if Gemini was installed AFTER m3)
 m3 chatlog init --apply-gemini

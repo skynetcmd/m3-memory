@@ -19,7 +19,7 @@ All persistent state goes through the `memory` MCP server: `memory_search` befor
 
 **Why:** Built-in flat-file memory is per-host and invisible to other agents on the fleet. m3-memory is the shared, contradiction-aware, bitemporal store that every participating agent reads from — using two systems in parallel fragments context and defeats the point of the project.
 
-**If the m3-memory MCP server is not registered in your client**, stop and tell the user. Do not fall back to a built-in memory system silently. Registration steps for each client (Claude Code, Gemini CLI, Aider, OpenCode, etc.) are in [QUICKSTART.md](./QUICKSTART.md). Quick fix for Claude Code: `claude mcp add --global memory m3` (the `--global` flag is required — without it the MCP only activates in the directory where the command was run).
+**If the m3-memory MCP server is not registered in your client**, stop and tell the user. Do not fall back to a built-in memory system silently. Registration steps for each client (Claude Code, Gemini CLI, Aider, OpenCode, etc.) are in [QUICKSTART.md](./QUICKSTART.md). Quick fix for Claude Code: `claude mcp add --scope user memory m3` (the `--scope user` flag is required — without it the MCP only activates in the directory where the command was run, since `claude mcp add` defaults to `local` scope).
 
 ## 🚨 Silent Failure Detection — Mandatory Session Start Check
 

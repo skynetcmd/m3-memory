@@ -965,14 +965,16 @@ def _wire_claude(capture_mode: str) -> bool:
     if not shutil.which("claude"):
         _warn("Claude CLI not on PATH; skipping Claude wiring")
         return False
-    _say("  · registering m3 MCP in Claude Code (global scope)")
+    _say("  · registering m3 MCP in Claude Code (user scope)")
     try:
-        # --global writes to ~/.claude/settings.json so the MCP is available
-        # in every project, not just the one the wizard was run from.
+        # `--scope user` writes to the user-level config so the MCP is available
+        # in every project, not just the one the wizard was run from. (The CLI's
+        # default is `local`; there is no `--global` flag — passing it makes
+        # `claude mcp add` exit with "unknown option" and register nothing.)
         # `claude mcp add` is idempotent; an existing entry just prints a warning.
-        subprocess.run(["claude", "mcp", "add", "--global", "memory", "m3"], check=False)
+        subprocess.run(["claude", "mcp", "add", "--scope", "user", "memory", "m3"], check=False)
     except FileNotFoundError:
-        _warn("`claude` CLI failed to invoke; manual: `claude mcp add --global memory m3`")
+        _warn("`claude` CLI failed to invoke; manual: `claude mcp add --scope user memory m3`")
         return False
     return True
 
