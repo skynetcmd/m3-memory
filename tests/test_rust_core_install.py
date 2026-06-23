@@ -243,7 +243,7 @@ def _gh_release_payload(asset_names: list[str]) -> bytes:
     """Build a minimal GitHub release JSON with the named assets."""
     import json as _json
     return _json.dumps({
-        "tag_name": "v2026.06.07",
+        "tag_name": rci.M3_CORE_RS_GIT_TAG,
         "assets": [
             {
                 "name": name,
@@ -260,11 +260,12 @@ def test_github_release_finds_and_installs_matching_asset(monkeypatch):
     the current Python and pip-installs the downloaded file.
     """
     py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
-    matching_name = f"m3_core_rs_macos_metal-3.6.6-{py_tag}-{py_tag}-macosx_11_0_arm64.whl"
+    ver = rci.M3_CORE_RS_VERSION
+    matching_name = f"m3_core_rs_macos_metal-{ver}-{py_tag}-{py_tag}-macosx_11_0_arm64.whl"
     payload = _gh_release_payload([
-        "m3_core_rs_macos_metal-3.6.6-cp310-cp310-macosx_11_0_arm64.whl",  # wrong py
+        f"m3_core_rs_macos_metal-{ver}-cp310-cp310-macosx_11_0_arm64.whl",  # wrong py
         matching_name,                                                       # match
-        f"m3_core_rs_linux_cuda-3.6.6-{py_tag}-{py_tag}-linux_x86_64.whl",   # wrong os
+        f"m3_core_rs_linux_cuda-{ver}-{py_tag}-{py_tag}-linux_x86_64.whl",   # wrong os
     ])
 
     urlopen_calls = []
@@ -325,7 +326,7 @@ def test_github_release_no_matching_asset_returns_nonzero(monkeypatch):
     import urllib.request as _ur
     py_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
     payload = _gh_release_payload([
-        f"m3_core_rs_linux_cpu-3.6.6-{py_tag}-{py_tag}-manylinux2014.whl",
+        f"m3_core_rs_linux_cpu-{rci.M3_CORE_RS_VERSION}-{py_tag}-{py_tag}-manylinux2014.whl",
         # No macos_metal asset
     ])
 

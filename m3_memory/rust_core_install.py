@@ -30,10 +30,10 @@ from typing import Optional
 from m3_memory._platform import os_name as _os_name
 
 # Release this m3-memory build expects. Bump in lockstep with the m3-core-rs
-# release tag (v2026.06.07 == 3.6.6). Used as the version pin for both the
+# release tag (v2026.06.22 == 3.6.22). Used as the version pin for both the
 # prebuilt PyPI install and the source-build fallback.
-M3_CORE_RS_VERSION = "3.6.6"
-M3_CORE_RS_GIT_TAG = "v2026.06.07"
+M3_CORE_RS_VERSION = "3.6.22"
+M3_CORE_RS_GIT_TAG = "v2026.06.22"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).
