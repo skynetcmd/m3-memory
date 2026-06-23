@@ -31,7 +31,7 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 | ↳ *Data Residency* | 🏆 Local SQLite | ✅ Local SQLite | ✅ Local Files | ✅ Local Files | ⚖️ Postgres / Container | 🔻 Cloud DB | ✅ Local SQLite | ✅ Local SQLite |
 | ↳ *Extraction Compute* | 🏆 Local SLM | ✅ Deterministic | ✅ ISO-Temporal | ✅ Neural / Local | 🔻 Cloud Reflector | 🔻 Cloud LLM | ⚖️ User-Defined | ❌ Verbatim only |
 | ↳ *Telemetry / Audit* | 🏆 Zero / Bitemporal | ✅ Zero / Merkle | ✅ Event Logs | ✅ Internal | ⚖️ Usage Logs | 🔻 SaaS Metrics | ✅ Zero / Merkle | 🛡️ Total Dark |
-| ↳ *Infrastructure* | 🏆 Native Python + SQLite | ✅ Native Python | ⚖️ Linux / Python | ⚖️ Py / Services | 🔻 Docker stack | ✅ SDK / API | ✅ Native Python | ✅ Native Python |
+| ↳ *Infrastructure* | 🏆 Native Python + SQLite (optional in-process Rust core) | ✅ Native Python | ⚖️ Linux / Python | ⚖️ Py / Services | 🔻 Docker stack | ✅ SDK / API | ✅ Native Python | ✅ Native Python |
 | **[Data Integrity](#data-integrity)** | 🏆 **Bitemporal Logic + Undo** | 🏆 **Merkle Tree** | ✅ **Event Logs** | ✅ **Traceable** | ⚖️ **DB-Level only** | 🔻 **Managed only** | 🏆 **Merkle-Audit** | 🔻 **JSON Desync Risk** |
 | **[Bitemporal & Undo](#bitemporal--undo)** | 🏆 **Full bitemp + Undo** | ⚖️ **Temporal sig.** | ✅ **Audit log** | ✅ **Traceable** | ✅ **3-Date Anchor** | 🔻 **No Undo** | 🏆 **Merkle-Audit** | ❌ **Verbatim only** |
 | **[Privacy / GDPR](#privacy--gdpr)** | 🏆 **Native GDPR tools** | ✅ **Local-only** | ✅ **On-Prem** | ✅ **Local-only** | ⚖️ **Hybrid** | 🔻 **No native** | ✅ **Local-only** | 🛡️ **Total sovereignty** |
@@ -118,7 +118,7 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 **Why it matters:** If your data *can't* leave the machine — for legal, contractual, or personal reasons — every external dependency is a compliance risk and an attack surface.
 
-**M3 standing:** Full Sovereign. Local SQLite, local SLM extraction, zero telemetry, native Python — runs on a laptop or in an air-gapped enclave with the same code path.
+**M3 standing:** Full Sovereign. Local SQLite, local SLM extraction, zero telemetry, native Python with an optional in-process Rust acceleration core (`m3_core_rs`) that ships as a local wheel — no service, no daemon, graceful pure-Python fallback — runs on a laptop or in an air-gapped enclave with the same code path.
 
 **Sub-dimensions:**
 - **Data Residency:** Local SQLite — single file, portable, inspectable.
