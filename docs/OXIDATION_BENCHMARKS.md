@@ -81,39 +81,57 @@ Rust path does zero-copy. That makes the packed wins larger than the list-based
 cosine/MMR above — this is the realistic production comparison, not a
 list-of-floats convenience API. Reproduce with `python tests/bench_oxidation_fts_packed.py`.
 
-Output-verified (Rust == Python), real DB vectors (5016 × dim-1024), 2026-06-22:
+Output-verified (Rust == Python), real DB vectors (5016 × dim-1024), measured on
+the freshly built CUDA wheel (8/8 native paths), 2026-06-22:
 
 | Operation | Input size | Python median | Rust median | Speedup | Verdict |
 |---|---|---:|---:|---:|---|
-| `mmr_rerank_scored_packed` | pool=150, k=50 | 10738.575 ms | 14.502 ms | **740.50×** | rust faster |
-| `mmr_rerank_scored_packed` | pool=24, k=8 | 40.041 ms | 0.054 ms | **736.05×** | rust faster |
-| `cosine_batch_packed` | corpus=100 | 7.657 ms | 0.042 ms | **182.75×** | rust faster |
-| `cosine_batch_packed` | corpus=1000 | 76.383 ms | 0.525 ms | 145.35× | rust faster |
-| `cosine_batch_packed` | corpus=5000 | 382.186 ms | 4.133 ms | 92.48× | rust faster |
+| `mmr_rerank_scored_packed` | pool=150, k=50 | 10446.155 ms | 12.348 ms | **846.01×** | rust faster |
+| `mmr_rerank_scored_packed` | pool=24, k=8 | 38.168 ms | 0.054 ms | **701.61×** | rust faster |
+| `cosine_batch_packed` | corpus=100 | 7.676 ms | 0.043 ms | **177.68×** | rust faster |
+| `cosine_batch_packed` | corpus=1000 | 76.076 ms | 0.656 ms | 115.99× | rust faster |
+| `cosine_batch_packed` | corpus=5000 | 391.826 ms | 4.045 ms | 96.87× | rust faster |
 
 The packed MMR at pool=150 is the most extreme honest number in the suite: the
-pure-Python path (unpack 150 blobs, then O(n²) cosine) takes **~10.7 seconds**;
-Rust does it in ~14.5 ms — ~740×. This is the path production actually takes when
+pure-Python path (unpack 150 blobs, then O(n²) cosine) takes **~10.4 seconds**;
+Rust does it in ~12 ms — ~846×. This is the path production actually takes when
 reranking a full candidate page, which is why it is wired to Rust by default.
 
-## Not yet benched — stale installed wheel
+## FTS + lexical-overlap functions
 
-Four expected native paths are **absent from the wheel installed in this
-environment**, so they currently run the pure-Python fallback and could not be
-benched against Rust here:
+The FTS query helpers and token-Jaccard scorers. These are small string
+operations, so the FFI boundary is a larger fraction of the cost and the wins are
+more modest than the vector paths — but all are net-positive. `compile_fts_query`
+is benched **uncached**; production wraps it in `@lru_cache(2048)`, so the FFI
+crossing is paid once per unique `(query, mode)`. Output-verified, 2026-06-22:
 
-| Function | Status |
-|---|---|
-| `sanitize_fts` | missing from installed wheel — Python fallback active |
-| `compile_fts_query` | missing from installed wheel — Python fallback active |
-| `token_jaccard` | missing from installed wheel — Python fallback active |
-| `token_jaccard_batch` | missing from installed wheel — Python fallback active |
-| `rank_hybrid_packed` | present in source; no isolated Python baseline to bench against (its fallback is the whole legacy ranking path) |
+| Operation | Input size | Python median | Rust median | Speedup | Verdict |
+|---|---|---:|---:|---:|---|
+| `token_jaccard_batch` | cands=500 | 1.539 ms | 0.146 ms | **10.58×** | rust faster |
+| `token_jaccard_batch` | cands=50 | 153.500 µs | 20.400 µs | 7.52× | rust faster |
+| `sanitize_fts` | long 60tok | 7.800 µs | 1.300 µs | 6.00× | rust faster |
+| `sanitize_fts` | short 6tok | 1.900 µs | 0.600 µs | 3.17× | rust faster |
+| `compile_fts_query` | mode=hybrid | 2.100 µs | 0.700 µs | 3.00× | rust faster |
+| `compile_fts_query` | mode=fts5 | 2.400 µs | 0.900 µs | 2.67× | rust faster |
+| `token_jaccard` | single, 12tok | 3.100 µs | 2.200 µs | 1.41× | rust faster |
 
-The functions exist in the `m3-core-rs` source (`crates/m3-fts`, `m3-vector`) but
-the installed wheel predates them — the `oxidation_probe` doctor check reports
-**3/8 expected native paths present (STALE)**. To bench (and to actually get the
-native paths in production), rebuild/reinstall the wheel from current source
-(`maturin develop --release` in the `m3-core-rs` checkout), then re-run
-`tests/bench_oxidation_fts_packed.py` — it already covers all six functions and
-will exercise the four FTS/jaccard paths once the wheel exposes them.
+## `rank_hybrid_packed` — intentionally not benched
+
+`rank_hybrid_packed` is present in the wheel but is **not** in this suite: it has
+no isolated Python baseline to compare against. Its fallback is the whole legacy
+ranking path in `memory/search.py` (sort + MMR + temporal/recency boosts
+intertwined with row-dict assembly), so a faithful like-for-like micro-benchmark
+would mean reconstructing that path. It is omitted rather than benched against a
+non-equivalent stub.
+
+## Wheel-staleness note (resolved 2026-06-22)
+
+When this suite was first authored, the installed wheel was **stale** — the
+`oxidation_probe` doctor check reported only **3/8 native paths present**, so
+`sanitize_fts`, `compile_fts_query`, `token_jaccard`, `token_jaccard_batch`, and
+`rank_hybrid_packed` were silently running the Python fallback in production. The
+wheel was rebuilt from current `m3-core-rs` source (Windows + CUDA, crate 3.6.6)
+and reinstalled; the probe now reports **8/8 native paths present (current)** and
+the FTS/jaccard numbers above are from that fresh wheel. If `oxidation_probe`
+ever reports STALE again, rebuild via `crates/m3-core-py/build_wheel.py
+--backend <cpu|cuda|vulkan> --os <…> --release` and re-run this benchmark.
