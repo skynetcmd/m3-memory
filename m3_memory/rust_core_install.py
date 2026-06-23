@@ -481,7 +481,7 @@ def install_from_github_release(
 
     # Download into a temp DIR, keeping the original filename: pip parses
     # the wheel filename per PEP 427 to identify the package, so the file
-    # must be named e.g. m3_core_rs_macos_metal-3.6.6-cp314-cp314-macosx_11_0_arm64.whl
+    # must be named e.g. m3_core_rs_macos_metal-3.6.22-cp314-cp314-macosx_11_0_arm64.whl
     # — a random NamedTemporaryFile path like /tmp/tmpXXXX.whl is rejected
     # by pip with "Invalid wheel filename (wrong number of parts)".
     tmp_dir = tempfile.mkdtemp(prefix="m3-core-rs-")
