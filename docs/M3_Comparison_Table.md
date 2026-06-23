@@ -118,7 +118,7 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 **Why it matters:** If your data *can't* leave the machine — for legal, contractual, or personal reasons — every external dependency is a compliance risk and an attack surface.
 
-**M3 standing:** Full Sovereign. Local SQLite, local SLM extraction, zero telemetry, native Python with an optional in-process Rust acceleration core (`m3_core_rs`) that ships as a local wheel — no service, no daemon, graceful pure-Python fallback — runs on a laptop or in an air-gapped enclave with the same code path. The Rust core gives large per-operation wins where it matters (~258× MMR rerank, 11–15× redaction, 2.5–3.2× cosine; [benchmarks](OXIDATION_BENCHMARKS.md)) without adding any external dependency.
+**M3 standing:** Full Sovereign. Local SQLite, local SLM extraction, zero telemetry, native Python with an optional in-process Rust acceleration core (`m3_core_rs`) that ships as a local wheel — no service, no daemon, graceful pure-Python fallback — runs on a laptop or in an air-gapped enclave with the same code path. The Rust core gives large per-operation wins where it matters (up to ~720× on packed MMR rerank, ~90–180× on packed batch-cosine, 11–15× redaction; [benchmarks](OXIDATION_BENCHMARKS.md)) without adding any external dependency.
 
 **Sub-dimensions:**
 - **Data Residency:** Local SQLite — single file, portable, inspectable.
