@@ -78,7 +78,7 @@ from typing import Any
 
 import migrate_memory
 import yaml
-from m3_sdk import M3Context
+from m3_sdk import M3Context, resolve_db_path
 
 # Python 3.12+ sqlite3 datetime adapter deprecation fix
 sqlite3.register_adapter(datetime, lambda val: val.isoformat())
@@ -1058,8 +1058,10 @@ def main():
     )
     parser.add_argument(
         "--db",
-        default=os.path.join(BASE_DIR, "memory", "agent_memory.db"),
-        help="Path to the SQLite database to sync (default: memory/agent_memory.db)",
+        default=None,
+        help="Path to the SQLite database to sync. Default: the SDK-resolved "
+             "canonical path (M3_DATABASE env / engine root / populated legacy "
+             "store) — never a hardcoded repo-relative guess.",
     )
     parser.add_argument(
         "--manifest",
@@ -1073,7 +1075,12 @@ def main():
     )
     args = parser.parse_args()
 
-    db_path = os.path.abspath(args.db)
+    # Single source of truth for "where the DB lives": defer to the SDK resolver
+    # so the pre-flight existence check below targets the same populated DB the
+    # actual sync uses (migrate_memory.targets() also resolves via resolve_db_path).
+    # A hardcoded repo-relative default would fail the check on a populated engine/
+    # install and abort the sync before it ever ran — the M3_MEMORY_ROOT drift.
+    db_path = resolve_db_path(args.db)  # explicit --db wins; else canonical resolution
     db_stem = pathlib.Path(db_path).stem  # e.g. "agent_memory"
 
     # Resolve manifest
