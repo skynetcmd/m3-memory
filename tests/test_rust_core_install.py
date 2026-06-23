@@ -34,10 +34,11 @@ def test_all_valid_combos_have_features():
     for os_tok, backend in rci._VALID:
         choice = rci.BackendChoice(os_tok, backend, "test")
         assert choice.backend in rci._BACKEND_FEATURES
-        # cpu has no features; gpu backends have exactly one embedded-* feature
+        # Every backend ships an in-process embedder: cpu uses the plain
+        # `embedded` feature (CPU llama.cpp); gpu backends use `embedded-<gpu>`.
         feats = choice.features
         if backend == "cpu":
-            assert feats == []
+            assert feats == ["embedded"]
         else:
             assert feats == [f"embedded-{backend}"]
 
@@ -130,12 +131,16 @@ def test_install_from_source_passes_features(monkeypatch):
     assert "build-args=--features embedded-vulkan" in argv
 
 
-def test_install_from_source_cpu_no_features(monkeypatch):
+def test_install_from_source_cpu_passes_embedded_feature(monkeypatch):
+    # CPU now builds --features embedded (in-process BGE-M3), so the source
+    # fallback passes it to maturin via pip config-settings.
     captured = {}
     monkeypatch.setattr(rci.subprocess, "run",
                         lambda argv, env=None, **kwargs: captured.update(argv=argv) or _FakeProc(0))
     rci.install_from_source(rci.BackendChoice("linux", "cpu", "test"))
-    assert "--config-settings" not in captured["argv"]
+    assert "--config-settings" in captured["argv"]
+    idx = captured["argv"].index("--config-settings")
+    assert captured["argv"][idx + 1] == "build-args=--features embedded"
 
 
 def test_install_rust_core_prebuilt_success_skips_fallbacks(monkeypatch):
