@@ -22,7 +22,7 @@ Usage:
     python bin/migrate_flat_memory.py
     python bin/migrate_flat_memory.py --sources claude,gemini
     python bin/migrate_flat_memory.py --include-rules
-    python bin/migrate_flat_memory.py --claude-project-slug C--Users-bhaba-m3-memory
+    python bin/migrate_flat_memory.py --claude-project-slug C--Users-<user>-m3-memory
 """
 from __future__ import annotations
 
