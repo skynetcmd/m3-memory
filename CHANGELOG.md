@@ -42,6 +42,28 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ---
 
+## [2026.6.23.2] — 2026-06-23 — Installer fixes: Claude Code MCP scope + initial-sync DB path
+
+### Fixed
+
+- **Claude Code MCP wiring during `m3 setup`.** The wizard registered the
+  `memory` MCP with `claude mcp add --global`, but that flag does not exist —
+  the CLI exited with "unknown option" and registered nothing, so the server
+  never landed in user scope. Now uses `claude mcp add --scope user` (the
+  correct flag for "available in every project"; the CLI defaults to `local`).
+  The same broken command was corrected in all install/quickstart docs and the
+  agent instructions.
+- **Initial install sync falsely reporting failure.** `pg_sync` defaulted its
+  `--db` to a hardcoded repo-relative path (`memory/agent_memory.db`). On an
+  engine-rooted install the real DB lives at `engine/agent_memory.db`, so the
+  pre-flight existence check aborted before the sync — which already resolves
+  its real targets via the SDK — ever ran, surfacing a misleading "not on the
+  private network" warning. `--db` now defers to the SDK's canonical
+  `resolve_db_path()` (the single source of truth, guarded against the
+  `M3_MEMORY_ROOT` drift); an explicit `--db` still wins.
+
+---
+
 ## [2026.6.21.0] — 2026-06-21
 
 ### Benchmarks
