@@ -28,7 +28,7 @@ chromadb-client>=1.5.8,<2
 sqlglot>=30.6.0,<31
 
 # --- Security & Auth ---
-cryptography>=46.0.7,<48
+cryptography>=48.0.1,<49
 keyring>=25.7.0,<26
 pywin32>=311; sys_platform == 'win32'
 
