@@ -77,7 +77,11 @@ MAIN_DB_PATH = os.environ.get("M3_DATABASE") or _resolve_engine_file("agent_memo
 STATE_FILE = _resolve_engine_file(".chatlog_state.json")
 SPILL_DIR = _resolve_engine_file("chatlog_spill")
 INGEST_CURSOR = _resolve_engine_file(".chatlog_ingest_cursor.json")
-CHATLOG_MIGRATIONS_DIR = _resolve_engine_file("chatlog_migrations")
+# Migration DDL ships WITH the code, not in the relocatable engine data root —
+# mirror the main runner (migrate_memory.MIGRATIONS_DIR = BASE_DIR/memory/migrations).
+# Using _resolve_engine_file here was a bug: it pointed at <engine>/chatlog_migrations,
+# which homecoming never populates, so the chatlog DB could never be bootstrapped.
+CHATLOG_MIGRATIONS_DIR = os.path.join(BASE_DIR, "memory", "chatlog_migrations")
 
 VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider"))
 VALID_PROVIDERS: frozenset[str] = frozenset((
