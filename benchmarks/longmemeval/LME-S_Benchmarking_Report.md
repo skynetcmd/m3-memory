@@ -16,6 +16,23 @@ On [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval), v3 achieves:
 
 This exceeds the v1 oracle headline of **89.0%**, but it is not a clean single-variable ablation. The v3 run differs from v1 in answer model, prompts, routing, and retrieval configuration.
 
+## Two different metrics — retrieval accuracy vs. end-to-end QA accuracy
+
+LongMemEval-S is reported with two metrics that measure fundamentally different things. Vendor pages routinely blur them; this report keeps them strictly separate.
+
+| | **Retrieval accuracy (SHR / recall@k)** | **End-to-end QA accuracy** |
+|---|---|---|
+| **What it measures** | Did the memory layer surface a turn from the correct evidence session within the top-k results? | Did the full pipeline (retrieve → route → answer) produce the *judged-correct* answer? |
+| **Depends on** | The memory system only — retrieval + ranking. **No answer model involved.** | Memory system **and** the answer model, prompts, and judge. |
+| **Isolates** | The substrate. This is the like-for-like number that actually compares memory systems. | The whole stack. Heavily influenced by the reader LLM, so it is **not** a clean memory-layer measure. |
+| **m3 v3 result** | **99.2% @ k=10 (496/500), 100% @ k=20** | **92.0% (460/500)** |
+
+**Retrieval accuracy — m3's core strength.** On the binary per-question `recall_any@k` convention (the "R@k" the adjacent LongMemEval submissions report), the v3 core engine reaches **99.2% session-hit-rate @ k=10 and 100% @ k=20** — raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata. The right evidence session is in the top-10 for >99% of questions and in the top-20 for **all 500**. This is state-of-the-art for a fully local-first substrate and is the metric that isolates what the memory layer actually does. (Per-question-type SHR is in the [Retrieval](#retrieval) section; its overall k=10 figure is 99.4% under a slightly different per-type aggregation — both round to ~99%.)
+
+**End-to-end QA accuracy — strong, but answer-model-dependent.** With **no oracle metadata** (routing inferred from the question text at runtime), the full v3 configuration scores **92.0% (460/500)** using a frontier answerer (Opus 4.6) and the unmodified upstream gpt-4o judge. Because this number rides on the reader LLM, it should only be compared against *other systems' QA-accuracy figures*, never against their retrieval/recall numbers.
+
+**Why the gap, and why it matters.** The distance between **100% SHR @ k=20** and **92.0% QA** is the honest signal: when the correct evidence session is present for every question, the remaining ~8% of errors are **answer-side** — evidence-span selection, computation, temporal ordering, preference inference, formatting, and abstention — **not** retrieval failures. A memory layer that can't find what's there is a liability; m3's retrieval essentially removes that failure mode, leaving the residual error where it belongs: in the reader model. See [Retrieval](#retrieval) for the full breakdown.
+
 ## Summary
 
 | Configuration | Oracle Labels? | Answerer | Routing | Accuracy |
