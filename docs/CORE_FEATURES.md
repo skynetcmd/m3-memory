@@ -157,8 +157,8 @@ core engine — the retrieval-only metric memory systems publish as their headli
 Separately, **92.0% end-to-end QA accuracy** (460/500, no oracle metadata) *(SHR=100% @ k=20; QA is
 very model-dependent)* — a different metric that also depends on the answer model.
 Per-category breakdown, ablations, and full methodology live in
-the [README's Benchmarks section](../README.md#-benchmarks) and
-[`benchmarks/longmemeval/README.md`](../benchmarks/longmemeval/README.md).
+the [README's Benchmarks section](../README.md#-benchmarks) and the
+[LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
 
 For local development, `bin/benchmark_memory.py` runs a small smoke-test
 suite (Hit@1 / Hit@5 / MRR / latency) against the configured embedder —

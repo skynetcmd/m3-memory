@@ -1,10 +1,12 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Comparison Guide
 
-> Last updated: April 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
+> Last updated: June 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
 Several tools address agentic memory. This document explains where M3 Memory fits relative to each, and when a different tool is the better choice.
 
 > 💡 Looking for a head-to-head against other **sovereign / local-first memory substrates** (agentmemory, Chronos, Hindsight, Mastra OM, Memento, MemPalace)? See the [Sovereign Memory Systems comparison table](M3_Comparison_Table.md) (also available as an [interactive version](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) with sticky columns and tooltip glossary) — different cohort, different decision.
+
+> 📊 **Retrieval accuracy (the metric that isolates the memory layer).** M3's **v3 core engine** reaches **99.2% retrieval session-hit-rate @ k=10 (496/500) and 100% @ k=20** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) — raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata. SHR (session hit-rate) **is** retrieval accuracy: it measures whether the correct evidence session is surfaced, with no answer model involved — the like-for-like, retrieval-only metric memory systems publish as their headline. Separately, the same v3 config scores **92.0% end-to-end QA accuracy** (460/500, no oracle metadata) — a different, answer-model-dependent metric. Receipts, per-category breakdown, and full methodology: the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
 
 ---
 
