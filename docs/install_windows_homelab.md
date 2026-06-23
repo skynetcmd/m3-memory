@@ -149,7 +149,7 @@ $env:CHROMA_BASE_URL = "http://YOUR_SERVER_IP:8000"
 
 ```powershell
 # Claude Code
-claude mcp add --global memory m3
+claude mcp add --scope user memory m3
 
 # Gemini CLI
 m3 chatlog init --apply-gemini

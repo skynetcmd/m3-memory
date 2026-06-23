@@ -148,7 +148,7 @@ source ~/.bashrc
 
 ```bash
 # Claude Code
-claude mcp add --global memory m3
+claude mcp add --scope user memory m3
 
 # Gemini CLI
 m3 chatlog init --apply-gemini
