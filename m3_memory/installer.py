@@ -629,13 +629,81 @@ def _post_install(
         print()
         print("post-install: no action needed (sqlite3 present, no Gemini CLI detected, no prompts).")
         print("              run `mcp-memory doctor` anytime to re-check.")
-        return
+    else:
+        print()
+        print("post-install:")
+        for msg in messages:
+            print(f"  {msg}")
+        print("  run `mcp-memory doctor` to re-check anytime.")
 
+    # Always end with the data-durability reminder — install/upgrade are the
+    # natural moments to nudge the user about backups.
+    _print_backup_reminder()
+
+
+def _detect_cdw_target() -> "Optional[str]":
+    """Return the configured data-warehouse host (no credentials), or None.
+
+    A CDW is "configured" if PG_URL resolves (env var or the encrypted vault)
+    OR a SYNC_TARGET_IP / POSTGRES_SERVER is set. We return only the host so the
+    reminder can name where data is auto-syncing — never the password from
+    PG_URL.
+    """
+    # 1. Explicit warehouse IP/host (sync_all.py uses these).
+    host = os.environ.get("POSTGRES_SERVER") or os.environ.get("SYNC_TARGET_IP")
+    if host:
+        return host.strip()
+
+    # 2. PG_URL — from env, or the encrypted vault. Parse out ONLY the host.
+    pg_url = os.environ.get("PG_URL", "").strip()
+    if not pg_url:
+        try:
+            # Resolve via the SDK's secret vault without spinning up a full
+            # context if it's not importable in this environment.
+            import sys as _sys
+            _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+            from m3_sdk import M3Context  # type: ignore
+            pg_url = (M3Context.for_db().get_secret("PG_URL") or "").strip()
+        except Exception:  # noqa: BLE001 — vault not available / not installed yet
+            pg_url = ""
+    if pg_url:
+        try:
+            from urllib.parse import urlparse
+            return urlparse(pg_url).hostname  # host only — drops user:pass
+        except Exception:  # noqa: BLE001
+            return "your configured PostgreSQL warehouse"
+    return None
+
+
+def _print_backup_reminder() -> None:
+    """Remind the user to back up their databases regularly.
+
+    Branches on whether a CDW (PostgreSQL data warehouse) is configured:
+      - No CDW: a plain "back up your local DBs" reminder.
+      - CDW configured: note that auto-sync to the warehouse exists (and where),
+        but that it is NOT a substitute for backups — the warehouse itself, and
+        the local DBs, should be backed up to the user's risk tolerance.
+    """
+    cdw = _detect_cdw_target()
     print()
-    print("post-install:")
-    for msg in messages:
-        print(f"  {msg}")
-    print("  run `mcp-memory doctor` to re-check anytime.")
+    print("  " + "-" * 68)
+    print("  DATA SAFETY — back up your databases regularly")
+    print("  Your memories, chatlog, and file index live in SQLite DBs under your")
+    print("  engine root (M3_ENGINE_ROOT, default ~/.m3/engine). They are NOT")
+    print("  backed up automatically by install/upgrade.")
+    if cdw:
+        print()
+        print(f"  • You DO have auto-syncing configured to a data warehouse ({cdw}).")
+        print("    That replicates your memories across machines, but it is NOT a")
+        print("    backup: a deletion or corruption syncs too, and the warehouse")
+        print("    itself is a single store. Back up BOTH the warehouse and your")
+        print("    local DBs on a cadence that matches your risk tolerance.")
+    else:
+        print()
+        print("  • Copy ~/.m3/engine/*.db somewhere safe periodically (or set up an")
+        print("    automated backup). Tip: a data warehouse for cross-machine sync")
+        print("    can be configured later (see docs/SYNC.md).")
+    print("  " + "-" * 68)
 
 
 def install_m3(
