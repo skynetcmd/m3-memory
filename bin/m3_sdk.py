@@ -64,6 +64,19 @@ def get_governor_pacing(telemetry: dict) -> dict:
     load = max(telemetry.get("cpu_total", 0.0), telemetry.get("ram_total", 0.0), telemetry.get("gpu_total", 0.0))
     elapsed = time.time() - _LAST_USER_INTERACTION
 
+    # Native fast-path: the Rust governor is the source-of-truth for this ladder
+    # (crate m3-governor, exposed as m3_core_rs.Governor). It returns a dict
+    # key-for-key identical to the Python fallback below. Mirrors the
+    # try-native/except-fallback convention used by migration_lock(). A missing
+    # or older wheel (no Governor attr) falls through to pure Python.
+    if not M3_CORE_RS_DISABLE:
+        try:
+            import m3_core_rs
+            if hasattr(m3_core_rs, "Governor"):
+                return m3_core_rs.Governor(INITIAL_LIMIT, LIMIT_THRESHOLD).decide(load, elapsed)
+        except Exception:
+            pass  # fall through to the pure-Python ladder
+
     # 1. Critical Mode (Overall load >= LIMIT_THRESHOLD)
     if LIMIT_THRESHOLD != 100 and load >= LIMIT_THRESHOLD:
         return {"background": "HALTED", "interactive_delay": 30.0} # 30s-60s delay
