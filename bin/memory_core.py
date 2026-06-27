@@ -162,6 +162,7 @@ _LAZY_IMPORTS = {
     "_conn": "memory.db",
     "_db": "memory.db",
     "_enqueue_access_stamps": "memory.db",
+    "_enqueue_write": "memory.db",
     "_ensure_sync_tables": "memory.db",
     "_gate_active": "memory.db",
     "_gate_count_query": "memory.db",
