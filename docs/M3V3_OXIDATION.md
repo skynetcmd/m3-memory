@@ -75,28 +75,60 @@ In short: **a scheduler asks "what time is it?"; the governor asks "is now a goo
 time?"** For background maintenance on a machine a human is also using, the
 second question is the right one.
 
-### Migrating off cron / schtasks (the setup wizard)
+### Migrating off cron / schtasks
 
-`m3 setup` detects existing m3 scheduled tasks and offers — by default — to
-replace the governor-eligible ones with the governor, so they don't double-fire
-alongside it. The split is deliberate:
+There are three ways to move legacy scheduled tasks onto the governor; all share
+the same detection/removal logic in `bin/governor_migration.py`.
+
+**1. The setup wizard.** `m3 setup` detects existing m3 scheduled tasks and
+offers — by default — to replace the governor-eligible ones (skip with
+`m3 setup --no-governor-migration`).
+
+**2. The standalone command.**
+
+```
+m3 governor status     # report which legacy tasks are still installed
+m3 governor migrate    # remove the governor-eligible ones (prompts; --yes to skip)
+```
+
+**3. `m3 doctor` nags.** The doctor's governor probe reports `NAG` whenever a
+governor-eligible scheduled task is still installed (it would *double-fire*
+alongside the governor — running on the clock, ignoring load), and prints the
+one-command fix. It never fails the doctor run; leaving the schedules is a
+supported-but-suboptimal choice.
+
+**The split is deliberate:**
 
 - **Migrated to the governor** (periodic, interruptible, resource-using):
   `AgentOS_HourlySync`, `AgentOS_ChatlogEmbedSweep`, `AgentOS_ObservationDrain`,
   `AgentOS_Maintenance`, `AgentOS_WeeklyAuditor`.
-- **Left on their schedule** (the governor cannot/should not own them):
+- **Left on their schedule** (the governor cannot/should not own them, and the
+  tooling says so explicitly):
   `AgentOS_SecretRotator` — security/compliance-anchored; rotation must run on a
-  fixed cadence, not "whenever the host is idle." `AgentOS_CognitiveLoop` —
-  already a keepalive service that calls the governor *inside* its loop, not a
+  fixed cadence, not "whenever the host is idle" (an always-busy machine would
+  defer rotation indefinitely — a security regression). `AgentOS_CognitiveLoop`
+  — already a keepalive service that calls the governor *inside* its loop, not a
   periodic scheduler entry.
 
-If the wizard lacks the privilege to remove a task (e.g. a Windows task owned by
-another user, or a system crontab), it prints the exact **elevated, OS-specific
-commands** to remove them cleanly at the end of its run — `schtasks /Delete` on
-Windows, `crontab` edits on macOS/Linux. The governor itself is already active
-in-process; removing the legacy schedule just stops the duplicate fire. Use
-`m3 setup --no-governor-migration` to skip this entirely. The detection logic
-lives in `bin/governor_migration.py`.
+**Cross-OS behavior** (Windows / macOS / Linux all supported):
+
+| OS | Eligible tasks live as | Detection | Privileged removal command shown |
+|---|---|---|---|
+| Windows | `schtasks` tasks (`AgentOS_*`) | `schtasks /Query /TN` | `schtasks /Delete /TN "<name>" /F` (elevated) |
+| macOS | user `crontab` lines | `crontab -l` by command marker | `crontab -l \| grep -v '<marker>' \| crontab -` |
+| Linux | user `crontab` lines | `crontab -l` by command marker | same, plus a `sudo crontab -u <user>` hint for system crontabs |
+
+A detail that matters for parity: on Unix the `AgentOS_HourlySync` cron line
+invokes the `pg_sync.sh` wrapper (which delegates to `sync_all.py`), so detection
+matches `pg_sync.sh` — matching `sync_all.py` (the Windows task action) would
+miss it. The cognitive loop is detected by launchd-plist / systemd-unit presence
+on Unix, not by cron.
+
+If in-process removal lacks privilege (a Windows task owned by another user, a
+system crontab), the wizard, `m3 governor migrate`, and `m3 doctor` all print the
+exact **elevated, OS-specific commands** to remove the task cleanly, then a
+re-run of `m3 doctor` confirms the nag is gone. The governor itself is already
+active in-process; removing the legacy schedule just stops the duplicate fire.
 
 ### Implementation
 
