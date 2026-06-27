@@ -1,8 +1,8 @@
 # M3-v3 Phase C — Rust Oxidation Implementation Plan
 
 **Scope:** the two remaining Milestone 4 Rust items, both in the separate repo
-`github.com/skynetcmd/m3-core-rs` (local clone: `C:/users/bhaba/m3-core-rs`,
-`main` @ `c34fa4a`):
+`github.com/skynetcmd/m3-core-rs` (built from a local clone, base `main` @
+`c34fa4a`):
 
 1. Oxidize the Adaptive Governor cooldown/threshold checks into `m3-core-py`.
 2. Create the `m3-ingest-rs` crate for the filesystem-watcher directory walk +
