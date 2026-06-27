@@ -75,6 +75,29 @@ In short: **a scheduler asks "what time is it?"; the governor asks "is now a goo
 time?"** For background maintenance on a machine a human is also using, the
 second question is the right one.
 
+### Migrating off cron / schtasks (the setup wizard)
+
+`m3 setup` detects existing m3 scheduled tasks and offers — by default — to
+replace the governor-eligible ones with the governor, so they don't double-fire
+alongside it. The split is deliberate:
+
+- **Migrated to the governor** (periodic, interruptible, resource-using):
+  `AgentOS_HourlySync`, `AgentOS_ChatlogEmbedSweep`, `AgentOS_ObservationDrain`,
+  `AgentOS_Maintenance`, `AgentOS_WeeklyAuditor`.
+- **Left on their schedule** (the governor cannot/should not own them):
+  `AgentOS_SecretRotator` — security/compliance-anchored; rotation must run on a
+  fixed cadence, not "whenever the host is idle." `AgentOS_CognitiveLoop` —
+  already a keepalive service that calls the governor *inside* its loop, not a
+  periodic scheduler entry.
+
+If the wizard lacks the privilege to remove a task (e.g. a Windows task owned by
+another user, or a system crontab), it prints the exact **elevated, OS-specific
+commands** to remove them cleanly at the end of its run — `schtasks /Delete` on
+Windows, `crontab` edits on macOS/Linux. The governor itself is already active
+in-process; removing the legacy schedule just stops the duplicate fire. Use
+`m3 setup --no-governor-migration` to skip this entirely. The detection logic
+lives in `bin/governor_migration.py`.
+
 ### Implementation
 
 The pacing ladder is implemented once, in Rust, as the source of truth
