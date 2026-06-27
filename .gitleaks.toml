@@ -17,8 +17,10 @@ description = "Public test/demo tokens + benchmark datasets + scanner self-outpu
 # each entry.
 paths = [
     # Redaction test fixtures contain realistic-looking tokens as INPUT
-    # to the scrubber. The test proves redaction works.
+    # to the scrubber. The test proves redaction works — the strings are
+    # synthetic (e.g. jwt.io demo tokens), never real credentials.
     '''tests/test_chatlog_redaction\.py''',
+    '''tests/test_redaction_parity\.py''',
 
     # LongMemEval + LoCoMo benchmark datasets contain conversational
     # turns that may include JWT demo strings, example credentials, etc.

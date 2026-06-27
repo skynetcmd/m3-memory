@@ -1,0 +1,16 @@
+# Semgrep ignore for m3-memory.
+#
+# Redaction test fixtures embed synthetic secret-shaped strings (jwt.io demo
+# JWTs, fake tokens) as INPUT to the scrubber; the tests prove redaction works.
+# Semgrep's secrets rules flag them as hard-coded credentials — they are not
+# real secrets. Keep in sync with the .gitleaks.toml allowlist.
+tests/test_chatlog_redaction.py
+tests/test_redaction_parity.py
+
+# Benchmark datasets (LongMemEval / LoCoMo) contain public conversational
+# turns that may include demo credentials/JWTs as downloaded from source.
+data/longmemeval/
+data/locomo/
+
+# Scanner self-output.
+scan-reports/
