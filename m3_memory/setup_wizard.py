@@ -351,9 +351,12 @@ def _detect_governor_eligible_tasks() -> list[str]:
 
 # ── execution phase ───────────────────────────────────────────────────────────
 
-def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    """Shell out, streaming output. Returns the completed process."""
-    return subprocess.run(cmd, check=check)
+def _run(cmd: list[str], *, check: bool = True, env: "dict | None" = None) -> subprocess.CompletedProcess:
+    """Shell out, streaming output. Returns the completed process.
+
+    `env`, when given, replaces the child's environment (used to strip
+    PYTHONPATH so a stale repo payload can't shadow the installed package)."""
+    return subprocess.run(cmd, check=check, env=env)
 
 
 def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
@@ -883,6 +886,38 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     this is non-destructive for upgrades and a no-op for fresh installs.
     """
     _say("Step 1/5: fetching m3-memory system payload (install-m3)")
+
+    # Subprocess-time package-shadow guard. The wizard's own preflight checks
+    # `import m3_memory` in THIS process, but the install-m3 CHILD can resolve
+    # a different (stale) m3_memory if the repo payload is ahead of the pipx
+    # venv on the child's sys.path (a PYTHONPATH / cwd-derived entry). Letting
+    # the stale copy run install_m3() --force can rmtree the repo with old
+    # logic (2026-06-08 incident). Two defenses:
+    #   1. Strip PYTHONPATH for the child so the repo payload can't shadow the
+    #      installed package.
+    #   2. Probe the child's resolved m3_memory.__file__ and abort on mismatch.
+    child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    try:
+        import m3_memory as _wiz_pkg
+        wiz_path = Path(_wiz_pkg.__file__).resolve()
+        probe = subprocess.run(
+            [sys.executable, "-c", "import m3_memory,sys; print(m3_memory.__file__)"],
+            capture_output=True, text=True, env=child_env, timeout=30,
+        )
+        child_path = Path(probe.stdout.strip()).resolve() if probe.stdout.strip() else None
+        if child_path is not None and child_path != wiz_path:
+            _err(
+                "subprocess would load a STALE m3_memory package:\n"
+                f"    wizard uses : {wiz_path}\n"
+                f"    child uses  : {child_path}\n"
+                "  Refusing to run install-m3 with the wrong copy (it could wipe "
+                "the repo with stale logic). Clear PYTHONPATH / stale __pycache__ "
+                "and re-run `m3 setup`."
+            )
+            return False
+    except Exception as e:  # noqa: BLE001 — probe is best-effort; don't block install on it
+        _warn(f"could not verify subprocess package resolution: {e} (continuing)")
+
     cmd = [sys.executable, "-m", "m3_memory.cli", "install-m3",
            "--non-interactive", "--force", "--capture-mode", plan.capture_mode]
     if plan.endpoint:
@@ -890,7 +925,7 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     if plan.cognitive_loop:
         cmd.append("--cognitive-loop")
     try:
-        _run(cmd)
+        _run(cmd, env=child_env)
         _ok("payload installed")
         return True
     except subprocess.CalledProcessError as e:

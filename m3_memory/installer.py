@@ -677,8 +677,21 @@ def install_m3(
         shutil.rmtree(repo_path)
 
     print(f"fetching m3-memory {tag} -> {repo_path}")
-    if not _git_clone(tag, repo_path):
-        print("  git not found; falling back to GitHub tarball")
+    # _git_clone returns False only when git is missing; it RAISES on any other
+    # failure (network, bad tag, exit 128). Because we already rmtree'd the old
+    # repo above, an uncaught raise here would leave the user with a vanished
+    # repo and no replacement (the 2026-06-08 incident). So fall back to the
+    # GitHub tarball on EITHER path — missing git OR a failed clone.
+    cloned = False
+    try:
+        cloned = _git_clone(tag, repo_path)
+    except Exception as e:  # noqa: BLE001 — any clone failure -> try the tarball
+        print(f"  git clone failed ({type(e).__name__}: {e}); falling back to GitHub tarball")
+        # A partial clone may have left a dir behind; clear it so the tarball
+        # extracts into a clean path.
+        shutil.rmtree(repo_path, ignore_errors=True)
+    if not cloned:
+        print("  falling back to GitHub tarball")
         _download_tarball(tag, repo_path)
 
     bridge = repo_path / "bin" / "memory_bridge.py"
