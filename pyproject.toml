@@ -84,6 +84,13 @@ postgres = ["psycopg[binary]>=3.2.0,<4"]
 # alternative to the LLM-based entity extractor. Optional by design: core runs
 # fully without it (bin/m3_entities.py needs no extra deps). Pulls torch.
 entity-ner = ["gliner>=0.2.26"]
+# Native SQLite vector search via the sqlite-vec extension. The loader at
+# bin/sqlite_pragmas.py loads it opportunistically (sqlite_vec.load(conn)) and
+# the semantic-search path in bin/memory/search.py uses the vec0 functions when
+# present. Optional by design: core runs fully without it (the Python/numpy
+# cosine path is the fallback). The PyPI wheel ships the platform-native
+# extension binary, so no separate compilation/bundling step is needed.
+vector = ["sqlite-vec>=0.1.6"]
 # "Project Oxidation" Rust compute core is installed manually until
 # m3-core-rs publishes wheels to PyPI:
 #   pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"
