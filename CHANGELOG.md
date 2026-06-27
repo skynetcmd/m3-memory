@@ -44,6 +44,10 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ## [2026.6.27.0] — 2026-06-27 — M3-v3 oxidation: governor, native ingest hashing, sqlite-vec
 
+> **⚠️ Recommended for all users.** This release is the new baseline.
+> **Versions prior to 2026.6.27.0 will not be supported after July 2026** —
+> please upgrade (`m3 update`, or `pip install -U m3-memory`).
+
 Pairs with m3-core-rs **3.6.27** (release tag `v2026.06.27`); the pin in
 `m3_memory/rust_core_install.py` is bumped in lockstep.
 

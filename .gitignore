@@ -194,3 +194,7 @@ docs/DESIGN_PHILOSOPHIES.md
 .agent_os_salt
 .agents/
 .antigravitycli/
+
+# Per-machine local Claude Code settings — contains user-specific paths/permissions.
+# Never tracked: it is machine-local config, not shared project config.
+.claude/settings.local.json
