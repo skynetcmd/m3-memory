@@ -117,6 +117,34 @@ def find_bridge() -> Optional[Path]:
     return None
 
 
+def _safe_copy_sqlite(src: Path, dst: Path) -> None:
+    """Copy a SQLite database WAL-safely via the Online Backup API.
+
+    A plain file copy of a DB the m3 MCP server has open can miss pages still in
+    the `-wal` file or capture a torn write. The backup API produces a
+    transactionally-consistent single-file snapshot (it checkpoints the WAL into
+    the destination). Falls back to a plain copy only if the source isn't a
+    valid SQLite file (e.g. a 0-byte placeholder) so non-DB `.db` files still
+    get preserved rather than dropped.
+    """
+    try:
+        src_conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=10)
+        try:
+            dst_conn = sqlite3.connect(str(dst))
+            try:
+                with dst_conn:
+                    src_conn.backup(dst_conn)
+            finally:
+                dst_conn.close()
+        finally:
+            src_conn.close()
+    except sqlite3.Error:
+        # Not a usable SQLite DB (corrupt / empty / locked-exclusive) — fall
+        # back to a byte copy so we still preserve *something* rather than lose
+        # the file entirely.
+        shutil.copy2(src, dst)
+
+
 def _git_clone(tag: str, dest: Path) -> bool:
     """Shallow-clone REPO_URL at ``tag`` into ``dest``. Returns True on success,
     False if ``git`` is missing. Raises on any other subprocess failure."""
@@ -670,8 +698,17 @@ def install_m3(
                 # Keep .db / .json (chatlog config + state) / .jsonl (cursor).
                 # The migrations/ subdir ships with the repo and will be
                 # restored by the new clone, so we don't preserve it.
-                if item.is_file() and item.suffix in (".db", ".json", ".jsonl"):
-                    shutil.copy2(item, preserved_dir / item.name)
+                if not (item.is_file() and item.suffix in (".db", ".json", ".jsonl")):
+                    continue
+                dst = preserved_dir / item.name
+                if item.suffix == ".db":
+                    # A plain file copy of a live SQLite DB can miss in-WAL pages
+                    # or capture a torn write if the server has the DB open.
+                    # Use the SQLite Online Backup API, which produces a
+                    # transactionally-consistent snapshot including the WAL.
+                    _safe_copy_sqlite(item, dst)
+                else:
+                    shutil.copy2(item, dst)
             print(f"  preserving {sum(1 for _ in preserved_dir.iterdir())} user-data file(s) across update")
         print(f"  removing existing {repo_path}")
         shutil.rmtree(repo_path)
