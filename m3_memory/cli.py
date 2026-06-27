@@ -256,6 +256,18 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return code
 
 
+def _cmd_governor(args: argparse.Namespace) -> int:
+    """Dispatch `m3 governor <status|migrate>` to bin/governor_cli.py."""
+    if not _resolve_bin_script("governor_cli.py"):
+        print("governor command requires the project payload (run `m3 install`).")
+        return 1
+    sub = getattr(args, "governor_cmd", None) or "status"
+    argv = [sub]
+    if sub == "migrate" and getattr(args, "yes", False):
+        argv.append("--yes")
+    return _run_bin_script("governor_cli.py", argv)
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the bridge with the streamable-http transport for claude.ai connectors.
 
@@ -877,6 +889,17 @@ Examples:
         help="Print paths, resolved bridge, and install status.",
     )
     p_doctor.set_defaults(func=_cmd_doctor)
+
+    p_governor = subparsers.add_parser(
+        "governor",
+        help="Inspect / migrate legacy scheduled tasks to the background governor.",
+    )
+    gov_sub = p_governor.add_subparsers(dest="governor_cmd", metavar="<status|migrate>")
+    gov_sub.add_parser("status", help="Report governor-eligible scheduled tasks still installed.")
+    p_gov_mig = gov_sub.add_parser("migrate", help="Remove governor-eligible scheduled tasks.")
+    p_gov_mig.add_argument("--yes", "-y", action="store_true",
+                           help="Skip the confirmation prompt (headless use).")
+    p_governor.set_defaults(func=_cmd_governor)
 
     p_serve = subparsers.add_parser(
         "serve",

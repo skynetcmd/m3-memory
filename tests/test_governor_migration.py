@@ -36,9 +36,49 @@ def test_privileged_commands_linux_uses_crontab(monkeypatch):
     cmds = gm.privileged_removal_commands(["AgentOS_HourlySync"])
     joined = "\n".join(cmds)
     assert "crontab -e" in joined
-    # Uses the script marker, not the AgentOS_* name, for the grep one-liner.
-    assert "sync_all.py" in joined
+    # CRITICAL cross-OS correctness: the HourlySync cron line invokes the
+    # `pg_sync.sh` wrapper (NOT sync_all.py, which only appears in the Windows
+    # task action). Matching sync_all.py would miss the Unix cron entry.
+    assert "pg_sync.sh" in joined
+    assert "sync_all.py" not in joined
     assert "sudo" in joined  # system-crontab hint present
+
+
+def test_privileged_commands_macos_uses_crontab(monkeypatch):
+    monkeypatch.setattr(gm, "_os_name", lambda: "Darwin")
+    cmds = gm.privileged_removal_commands(["AgentOS_Maintenance"])
+    joined = "\n".join(cmds)
+    assert "crontab -e" in joined
+    assert "memory_maintenance.py" in joined
+
+
+def test_hourlysync_marker_is_pg_sync_sh():
+    # Guard against regression: the Unix detection marker must match the actual
+    # crontab.template line, which uses pg_sync.sh.
+    assert gm._UNIX_CRON_MARKERS["AgentOS_HourlySync"] == "pg_sync.sh"
+    # Cognitive loop is NOT a cron marker (it's a service).
+    assert "AgentOS_CognitiveLoop" not in gm._UNIX_CRON_MARKERS
+
+
+def test_cognitive_loop_detected_as_service(monkeypatch, tmp_path):
+    # On Linux the cognitive loop is a systemd unit; detection must find it by
+    # service-file presence, not crontab.
+    monkeypatch.setattr(gm, "_os_name", lambda: "Linux")
+    svc = tmp_path / "m3-cognitive-loop.service"
+    svc.write_text("[Unit]\n")
+    monkeypatch.setattr(
+        gm, "_unix_service_paths",
+        lambda: {"AgentOS_CognitiveLoop": str(svc)},
+    )
+
+    class _R:
+        returncode = 0
+        stdout = ""  # empty crontab
+
+    monkeypatch.setattr(gm.subprocess, "run", lambda *a, **k: _R())
+    out = gm.detect_scheduled_tasks()
+    assert "AgentOS_CognitiveLoop" in out["not_migratable_present"]
+    assert out["eligible"] == []
 
 
 def test_privileged_commands_empty_for_no_tasks():

@@ -103,8 +103,7 @@ def _list_installed_task_names() -> set[str]:
             pass
         return names
 
-    # Unix: cron entries carry the script basenames, not the AgentOS_* names.
-    # Map each scheduler name to the script its crontab line invokes.
+    # Unix: cron entries carry the invoked command, not the AgentOS_* name.
     try:
         r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         cron = r.stdout if r.returncode == 0 else ""
@@ -113,20 +112,50 @@ def _list_installed_task_names() -> set[str]:
     for name, marker in _UNIX_CRON_MARKERS.items():
         if marker and marker in cron:
             names.add(name)
+    # The cognitive loop is a launchd/systemd service, not a cron line — detect
+    # it by service-file presence.
+    for name, path in _unix_service_paths().items():
+        if path and os.path.exists(path):
+            names.add(name)
     return names
 
 
-# Map AgentOS_* names to the script basename that appears in the Unix crontab
-# line, so detection works on macOS/Linux where cron carries scripts not names.
+# Map AgentOS_* names to the token that appears in the Unix CRON line, so
+# detection works on macOS/Linux where cron carries the invoked command, not the
+# AgentOS_* task name. NOTE the HourlySync line invokes the `pg_sync.sh` wrapper
+# (which delegates to sync_all.py) — matching `sync_all.py` would MISS it, since
+# only the .sh path appears in the crontab. See bin/crontab.template.
+#
+# AgentOS_CognitiveLoop is intentionally absent: on Unix it is NOT a cron entry —
+# it is a launchd agent / systemd --user unit (see _UNIX_SERVICE_PATHS). It is
+# detected by service-file presence instead.
 _UNIX_CRON_MARKERS = {
-    "AgentOS_HourlySync": "sync_all.py",
+    "AgentOS_HourlySync": "pg_sync.sh",
     "AgentOS_ChatlogEmbedSweep": "chatlog_embed_sweeper.py",
     "AgentOS_ObservationDrain": "m3_enrich.py",
     "AgentOS_Maintenance": "memory_maintenance.py",
     "AgentOS_WeeklyAuditor": "weekly_auditor.py",
     "AgentOS_SecretRotator": "secret_rotator.py",
-    "AgentOS_CognitiveLoop": "m3_cognitive_loop.py",
 }
+
+
+def _unix_service_paths() -> dict[str, str]:
+    """AgentOS_* names → the launchd/systemd file path that means "installed".
+
+    macOS uses a launchd plist; Linux uses a systemd --user unit. Only the
+    cognitive loop is a service (the rest are cron). Resolved at call time so
+    ``~`` expands for the current user."""
+    if _os_name() == "Darwin":
+        return {
+            "AgentOS_CognitiveLoop":
+                os.path.expanduser("~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist"),
+        }
+    if _os_name() == "Linux":
+        return {
+            "AgentOS_CognitiveLoop":
+                os.path.expanduser("~/.config/systemd/user/m3-cognitive-loop.service"),
+        }
+    return {}
 
 
 def try_remove_scheduled_tasks(names: list[str]) -> tuple[list[str], list[str]]:
@@ -192,33 +221,50 @@ def try_remove_scheduled_tasks(names: list[str]) -> tuple[list[str], list[str]]:
 def privileged_removal_commands(names: list[str]) -> list[str]:
     """OS-specific commands an admin can run to remove the named tasks cleanly.
 
-    Returned as copy-pasteable lines (one command per task) for the wizard's
-    end-of-run summary when in-process removal lacked permission.
+    Returned as copy-pasteable lines for the wizard's end-of-run summary (and
+    `m3 doctor`) when in-process removal lacked permission. Handles all three
+    supported OSes:
+      - Windows: `schtasks /Delete` per task (run elevated / as the task owner).
+      - macOS / Linux: per-task `crontab` one-liners (cron entries), plus
+        `launchctl`/`systemctl` for the cognitive-loop service if it appears.
     """
     if not names:
         return []
     os_name = _os_name()
+
     if os_name == "Windows":
-        # Run from an ELEVATED (Administrator) PowerShell/cmd.
+        # Run from an ELEVATED (Administrator) PowerShell/cmd, or as the user
+        # that owns the task.
         return [f'schtasks /Delete /TN "{name}" /F' for name in names]
-    if os_name == "Darwin":
-        # macOS cron is per-user; a system entry would be under /etc or a
-        # LaunchDaemon. Most installs are user crontab — `crontab -e` is the
-        # clean editor path; the grep -v one-liner removes by script marker.
-        cmds = ["# Edit your crontab and delete the m3 lines:", "crontab -e"]
-        for name in names:
-            m = _UNIX_CRON_MARKERS.get(name, name)
-            cmds.append(f"# or remove {name} non-interactively:")
-            cmds.append(f"crontab -l | grep -v '{m}' | crontab -")
-        return cmds
-    # Linux
-    cmds = ["# Edit your crontab and delete the m3 lines:", "crontab -e"]
-    for name in names:
-        m = _UNIX_CRON_MARKERS.get(name, name)
-        cmds.append(f"# or remove {name} non-interactively:")
-        cmds.append(f"crontab -l | grep -v '{m}' | crontab -")
-    cmds.append("# If installed as a system/root crontab, prefix with sudo:")
-    cmds.append("#   sudo crontab -l -u <user> | grep -v 'm3' | sudo crontab -u <user> -")
+
+    # Unix (Darwin / Linux). Split cron-backed tasks from the service-backed
+    # cognitive loop so each gets the right removal command.
+    cron_names = [n for n in names if n in _UNIX_CRON_MARKERS]
+    service_names = [n for n in names if n in _unix_service_paths()]
+
+    cmds: list[str] = []
+    if cron_names:
+        cmds.append("# Cron tasks — edit your crontab and delete the m3 lines:")
+        cmds.append("crontab -e")
+        cmds.append("# ...or remove each non-interactively by its command marker:")
+        for name in cron_names:
+            marker = _UNIX_CRON_MARKERS[name]
+            cmds.append(f"crontab -l | grep -v '{marker}' | crontab -   # {name}")
+        cmds.append("# If it was installed as another user's / a system crontab, use sudo:")
+        cmds.append("#   sudo crontab -u <user> -l | grep -v 'm3-memory' | sudo crontab -u <user> -")
+
+    if service_names:
+        # Only reached if a service-backed task is in the failed set; in practice
+        # the cognitive loop is not-migratable, but keep this correct.
+        if os_name == "Darwin":
+            cmds.append("# Cognitive-loop launchd agent:")
+            cmds.append("launchctl unload ~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist")
+            cmds.append("rm ~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist")
+        else:  # Linux
+            cmds.append("# Cognitive-loop systemd --user unit:")
+            cmds.append("systemctl --user disable --now m3-cognitive-loop.service")
+            cmds.append("rm ~/.config/systemd/user/m3-cognitive-loop.service")
+            cmds.append("systemctl --user daemon-reload")
     return cmds
 
 
