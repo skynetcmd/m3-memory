@@ -267,7 +267,7 @@ This project represents the **M3-v3 Lifecycle**. It is organized into 5 developm
 - [x] Add rayon data-parallel acceleration to `mmr_rerank` and `mmr_rerank_scored` in `m3-vector`
 - [ ] Oxidize the Adaptive Governor cooldown state and user thresholds checks inside `m3-core-py`
 - [ ] Oxidize the incremental directory walk and hash checks of the Filesystem Watcher in `m3-ingest-rs`
-- [ ] Add async batch writing queues in `db.py` to scale concurrent write performance
+- [x] Add async batch writing queues in `db.py` to scale concurrent write performance (`WriteQueueDaemon`)
 - [ ] Rebuild Rust wheel and publish (currently building with `maturin develop --release`)
 
 ### Milestone 5: Pre-Compiled Infrastructure & CTE Filters 🚧 IN PROGRESS
