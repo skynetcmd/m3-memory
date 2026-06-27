@@ -160,7 +160,12 @@ SCANNERS = [
     # Core Scanners
     ('gitleaks',  ['gitleaks', 'detect', '--source', '{repo}', '--report-format', 'json', '--report-path', '{out}/gitleaks.json', '--no-banner', '--exit-code', '0'], 'gitleaks.json', 'Gitleaks Scan'),
     ('trufflehog',['trufflehog', 'filesystem', '{repo}', '--json', '--no-update', '--only-verified', '--exclude-paths', '/data/bin/trufflehog_exclude.txt'], 'trufflehog.jsonl', 'Trufflehog Scan'),
-    ('trivy',     ['trivy', 'fs', '--scanners', 'vuln,secret,misconfig', '--format', 'json', '--output', '{out}/trivy.json', '{repo}'], 'trivy.json', 'Trivy Scan'),
+    # --secret-config points at the scanned repo's trivy-secret.yaml so its
+    # path-scoped allow-rules apply. The scanner's CWD is /data/repos (not the
+    # repo root), so trivy would otherwise NOT auto-load the repo's config and
+    # would re-flag in-repo secret-scanner fixtures. A missing config path is a
+    # safe no-op (verified). Likewise --config for the main trivy.yaml.
+    ('trivy',     ['trivy', 'fs', '--scanners', 'vuln,secret,misconfig', '--secret-config', '{repo}/trivy-secret.yaml', '--config', '{repo}/trivy.yaml', '--format', 'json', '--output', '{out}/trivy.json', '{repo}'], 'trivy.json', 'Trivy Scan'),
     ('semgrep',   ['semgrep', '--config=p/ci', '--sarif', '--output={out}/semgrep.sarif', '--quiet', '--metrics=off', '{repo}'], 'semgrep.sarif', 'SARIF'),
     ('bandit',    ['bandit', '-r', '{repo}', '-c', '{repo}/pyproject.toml', '-f', 'json', '-o', '{out}/bandit.json', '--exit-zero'], 'bandit.json', 'Bandit Scan'),
     ('pip-audit', ['bash', '-c', 'find {repo} -name requirements*.txt | head -1 | xargs -I R pip-audit -r R -f json -o {out}/pip-audit.json || echo [] > {out}/pip-audit.json'], 'pip-audit.json', 'pip-audit Scan'),
