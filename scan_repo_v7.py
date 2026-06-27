@@ -177,6 +177,26 @@ SCANNERS = [
     ('scancode',  ['scancode', '--json-pp', '{out}/scancode.json', '--license', '--copyright', '--info', '--quiet', '{repo}'], 'scancode.json', 'ScanCode Scan'),
     ('kubescape', ['kubescape', 'scan', '{repo}', '--format', 'sarif', '--output', '{out}/kubescape.sarif'], 'kubescape.sarif', 'SARIF'),
 
+    # Rust supply-chain — m3-core-rs is a Cargo workspace; the rest of the suite
+    # scans Python only. cargo-audit reads Cargo.lock against the RustSec
+    # advisory DB; cargo-deny adds license/banned-crate/duplicate checks. Both
+    # need a Cargo.lock (a binary-shipping project SHOULD commit it); they
+    # no-op cleanly (empty report) when absent so Python-only repos don't error.
+    ('cargo-audit', ['bash', '-c', 'if [ -f {repo}/Cargo.lock ]; then cargo-audit audit --file {repo}/Cargo.lock --json > {out}/cargo-audit.json 2>/dev/null || true; else echo "{}" > {out}/cargo-audit.json; fi'], 'cargo-audit.json', 'CargoAudit Scan'),
+    ('cargo-deny',  ['bash', '-c', 'if [ -f {repo}/Cargo.toml ]; then (cd {repo} && cargo-deny --format json check advisories bans 2>{out}/cargo-deny.json) || true; else echo "" > {out}/cargo-deny.json; fi'], 'cargo-deny.json', None),
+
+    # SBOM + binary scan — syft builds a CycloneDX SBOM across ALL ecosystems
+    # (Python, Rust, bundled C in the wheels); grype scans it for CVEs. Covers
+    # the shipped artifact contents nothing else sees.
+    ('syft',      ['bash', '-c', 'syft scan dir:{repo} -o cyclonedx-json={out}/sbom.cdx.json -q 2>/dev/null || echo "{}" > {out}/sbom.cdx.json'], 'sbom.cdx.json', 'CycloneDX Scan'),
+    ('grype',     ['bash', '-c', 'grype dir:{repo} -o sarif > {out}/grype.sarif 2>/dev/null || echo "{}" > {out}/grype.sarif'], 'grype.sarif', 'SARIF'),
+
+    # GitHub Actions security — zizmor is purpose-built for CI workflow security
+    # (template injection, unpinned actions, excessive permissions). More
+    # accurate than checkov's GHA heuristics (which false-positive on version
+    # strings). No-ops when the repo has no .github/workflows.
+    ('zizmor',    ['bash', '-c', 'if [ -d {repo}/.github/workflows ]; then zizmor --format sarif {repo}/.github/workflows > {out}/zizmor.sarif 2>/dev/null || echo "{}" > {out}/zizmor.sarif; else echo "{}" > {out}/zizmor.sarif; fi'], 'zizmor.sarif', 'SARIF'),
+
     # Quality Scanners - Mypy now uses repo root + excludes to avoid duplicate module name errors
     ('ruff',      ['ruff', 'check', '--format', 'sarif', '--output-file', '{out}/ruff.sarif', '{repo}/bin', '{repo}/memory', '{repo}/m3_memory'], 'ruff.sarif', 'SARIF'),
     ('mypy',      ['mypy', '{repo}', '--ignore-missing-imports', '--explicit-package-bases', '--exclude', 'examples/', '--exclude', 'tests/', '--exclude', 'benchmarks/'], 'mypy.txt', None),
