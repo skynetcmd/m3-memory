@@ -196,3 +196,43 @@ remote without the per-CLAUDE.md audit + user confirmation.
 **Fallback guarantee:** every oxidized path keeps its pure-Python implementation
 as the `except`-branch fallback, gated by `M3_CORE_RS_DISABLE`. A missing/old
 wheel must never break m3-memory — only make it slower.
+
+---
+
+## Phase D — benchmark results (pre-registered per DESIGN_PHILOSOPHIES §5)
+
+Targets were registered *before* measuring. Results:
+
+| Gate | Target | Result | Verdict |
+|---|---|---|---|
+| Retrieval do-no-harm | zero byte drift on `capture_retrieval_baseline.py` | byte-identical (60 queries × 3 variants), baseline captured on `main`, compared on the feature branch | ✅ PASS |
+| Batch-hash speedup | native `hash_files` ≥ 2× serial Python on ≥ 200 files | 6.45× (500 files × 64 KiB), 6.96× (1000 × 128 KiB), parity OK | ✅ PASS |
+| WriteQueueDaemon | concurrent wall-clock < per-write-commit baseline | ~100× **slower** on bursts (437 ms vs 5 ms / 200 writes) | ❌ FAIL → reverted |
+
+### Why the WriteQueueDaemon was reverted (the instructive negative result)
+
+The in-process `WriteQueueDaemon` failed because it sits in the gap between the
+fast case and the slow case:
+
+- **Intra-process bursts are already fast.** SQLite WAL on the single pooled
+  `_db()` connection commits 200 rows in ~16 ms. The daemon's 100 ms
+  aggregation window (× ⌈N/50⌉ batches) is pure added sleep latency — 4 batches
+  × 100 ms = 400 ms, matching the measured 437 ms.
+- **The real contention is multi-process.** A dedicated benchmark (W separate
+  processes, each its own connection, same DB) reproduced the
+  `database is locked` storm: 8 procs × 250 writes = 638 ms with 15 lock-retries
+  at a 50 ms `busy_timeout`; 16 × 200 = 1073 ms / 93 retries at 20 ms. An
+  in-process asyncio queue **cannot coordinate separate processes**, so it never
+  reaches this workload.
+- **m3 already handles the multi-process case.** Re-running the storm with m3's
+  real `PRAGMA busy_timeout = 30000` (`sqlite_pragmas.py`) drove lock-retries to
+  **zero** — writers wait politely instead of erroring. The residual throughput
+  gap (per-write fsync across processes; serialized 1-writer batching is ~50×
+  faster) is closed by the **existing** `memory_write_bulk_impl` /
+  `memory_write_batch_impl` batch APIs.
+
+**Lesson for a future engineer:** do NOT re-add an in-process write queue to
+"scale concurrent writes." The intra-process path is WAL-fast already; the
+slow path is cross-process and needs either a single cross-process writer
+(daemon + IPC) or — the pragmatic answer m3 already ships — `busy_timeout` +
+the bulk-write APIs for ingest sweeps.
