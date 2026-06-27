@@ -188,6 +188,9 @@ class SetupPlan:
     config_root: Optional[str] = None
     engine_root: Optional[str] = None
     fips_mode: bool = False
+    # Replace governor-eligible cron/schtasks entries with the Adaptive
+    # Background Workload Governor. Default on; gated by --no-governor-migration.
+    migrate_to_governor: bool = True
 
 
 # ── prompt phase ──────────────────────────────────────────────────────────────
@@ -220,6 +223,8 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
             if not plan.engine_root:
                 plan.engine_root = os.path.expanduser("~/.m3/engine")
         plan.fips_mode = bool(getattr(args, "fips_mode", False))
+        # Default ON; --no-governor-migration sets args.no_governor_migration=True.
+        plan.migrate_to_governor = not bool(getattr(args, "no_governor_migration", False))
         return plan
 
     # ── interactive prompts ───────────────────────────────────────────────────
@@ -312,7 +317,36 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         default=False,
     )
 
+    # Offer to replace legacy scheduled tasks with the governor — but only if
+    # any governor-eligible scheduler entries are actually installed, so we
+    # never prompt about a no-op.
+    found = _detect_governor_eligible_tasks()
+    if found:
+        print()
+        print("  Adaptive Background Workload Governor:")
+        print("    Found existing m3 scheduled task(s) that the governor can take over:")
+        for name in found:
+            print(f"      • {name}")
+        print("    The governor paces these by host load + idle time instead of a rigid")
+        print("    clock — it never competes with you, spreads work over idle time, and")
+        print("    needs no external scheduler. Replacing the cron/schtasks entries")
+        print("    prevents them from double-firing alongside the governor.")
+        plan.migrate_to_governor = _ask_yes_no(
+            "  Replace these scheduled tasks with the governor?", default=True,
+        )
+
     return plan
+
+
+def _detect_governor_eligible_tasks() -> list[str]:
+    """Read-only probe for installed governor-eligible scheduled tasks. Never
+    raises — a missing scheduler tool or import yields an empty list."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        import governor_migration
+        return governor_migration.detect_scheduled_tasks().get("eligible", [])
+    except Exception:
+        return []
 
 
 # ── execution phase ───────────────────────────────────────────────────────────
@@ -1107,6 +1141,45 @@ def _step_wire_agents(plan: SetupPlan) -> bool:
     return True
 
 
+def _step_governor_migration(plan: SetupPlan) -> dict:
+    """Replace governor-eligible scheduled tasks with the governor.
+
+    Returns a dict the summary uses to surface results / privileged commands:
+        {"removed": [...], "failed": [...], "privileged_cmds": [...],
+         "not_migratable": [...]}
+    All keys are always present (possibly empty). Never raises — a scheduler
+    tool that isn't present just yields empty results.
+    """
+    result = {"removed": [], "failed": [], "privileged_cmds": [], "not_migratable": []}
+    if not plan.migrate_to_governor:
+        return result
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        import governor_migration as gm
+    except Exception as e:
+        _warn(f"governor migration unavailable: {e}")
+        return result
+
+    detected = gm.detect_scheduled_tasks()
+    eligible = detected.get("eligible", [])
+    result["not_migratable"] = gm.not_migratable_lines()
+    if not eligible:
+        _say("Governor migration: no governor-eligible scheduled tasks found — nothing to replace.")
+        return result
+
+    _say(f"Governor migration: removing {len(eligible)} legacy scheduled task(s) so the governor can take over...")
+    removed, failed = gm.try_remove_scheduled_tasks(eligible)
+    result["removed"] = removed
+    result["failed"] = failed
+    for name in removed:
+        _ok(f"  removed {name}")
+    if failed:
+        for name in failed:
+            _warn(f"  could not remove {name} (insufficient privilege?) — see end-of-run commands")
+        result["privileged_cmds"] = gm.privileged_removal_commands(failed)
+    return result
+
+
 def _step_doctor() -> bool:
     """Final verification."""
     _say("Step 5/5: running doctor")
@@ -1121,7 +1194,7 @@ def _step_doctor() -> bool:
 
 # ── orchestrator ──────────────────────────────────────────────────────────────
 
-def _summary(plan: SetupPlan) -> None:
+def _summary(plan: SetupPlan, governor_result: Optional[dict] = None) -> None:
     """End-of-run summary so the user knows exactly what to do next."""
     print()
     _ok("Setup complete.")
@@ -1155,10 +1228,52 @@ def _summary(plan: SetupPlan) -> None:
             print("    export M3_FIPS_MODE=1")
         print()
 
+    # ── governor migration results ─────────────────────────────────────────
+    if governor_result:
+        removed = governor_result.get("removed", [])
+        failed = governor_result.get("failed", [])
+        cmds = governor_result.get("privileged_cmds", [])
+        not_migratable = governor_result.get("not_migratable", [])
+
+        if removed or failed or not_migratable:
+            print("Background Workload Governor:")
+        if removed:
+            print(f"  Migrated to the governor (removed {len(removed)} legacy scheduled task(s)):")
+            for name in removed:
+                print(f"    • {name}")
+        if not_migratable:
+            print("  Left on their schedule (the governor cannot take these over):")
+            for line in not_migratable:
+                print(line)
+        if failed:
+            print()
+            _warn(f"Could not remove {len(failed)} scheduled task(s) — insufficient privilege.")
+            print("  Run these PRIVILEGED, OS-specific commands to remove them cleanly,")
+            print("  then the governor (already active in-process) fully owns that work:")
+            print()
+            if _os_name_for_summary() == "Windows":
+                print("  → Open an ELEVATED (Administrator) PowerShell or Command Prompt and run:")
+            else:
+                print("  → Run in your shell (prefix with sudo only if it's a system/root crontab):")
+            for c in cmds:
+                print(f"      {c}")
+        if removed or failed or not_migratable:
+            print()
+
     print("Quick checks:")
     print("  m3 doctor           # verify everything")
     print("  m3 --help           # see every subcommand")
     print()
+
+
+def _os_name_for_summary() -> str:
+    """Thin OS branch for summary phrasing (avoids importing governor_migration
+    just for the OS check)."""
+    if os.name == "nt":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "Darwin"
+    return "Linux"
 
 
 def run_setup(args: argparse.Namespace) -> int:
@@ -1215,8 +1330,9 @@ def run_setup(args: argparse.Namespace) -> int:
     if plan.install_gpu_embedder:
         _step_gpu_embedder()
     _step_wire_agents(plan)
+    governor_result = _step_governor_migration(plan)
     _step_doctor()
-    _summary(plan)
+    _summary(plan, governor_result)
     return 0
 
 
@@ -1276,5 +1392,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fips-mode", action="store_true",
         help="Enable strict M3_FIPS_MODE=1 execution mode and security locks.",
+    )
+    parser.add_argument(
+        "--no-governor-migration", action="store_true",
+        help="Do NOT replace governor-eligible cron/schtasks entries with the "
+             "Adaptive Background Workload Governor. By default the wizard offers "
+             "to remove legacy scheduled tasks the governor can take over.",
     )
     parser.set_defaults(func=run_setup)
