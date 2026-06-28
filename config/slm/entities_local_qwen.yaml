@@ -136,9 +136,9 @@ system: |
     `text-embedding-bge-m3`.
   - `datetime`: ISO `YYYY-MM-DD` ONLY. Never extract relative phrases
     ("yesterday", "last week", "next Tuesday").
-  - `host`: hostnames with prefixes `pve-`, `TryNode`, or trailing
-    `.skynet`. Examples: `pve-n5-pro`, `host-c`, `TryNodeA2`,
-    `host-a.local`.
+  - `host`: hostnames with prefixes `pve-`, `TryNode`, or a trailing
+    LAN domain suffix. Examples: `pve-node-a`, `pve-node-b`, `TryNodeA2`,
+    `primary-host.lan`.
   - `container`: "LXC <n>" or "VM <n>". Example: `LXC 503`, `VM 501`.
 
   ## DO NOT EXTRACT — FORCE-DROP THESE
