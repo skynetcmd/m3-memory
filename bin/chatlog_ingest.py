@@ -298,6 +298,13 @@ def _commit_cursor(items: list[dict], session_id: str, cursor: dict) -> None:
 def _make_agent_id(host_agent: str) -> str:
     user = os.environ.get("USER") or os.environ.get("USERNAME", "unknown")
     host = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
+    # Windows hostnames are case-insensitive and COMPUTERNAME is the canonical
+    # uppercase form. Ingestion under shells that don't inherit COMPUTERNAME
+    # (git-bash / WSL -> platform.node() returns mixed case, e.g. "HostPc") would
+    # otherwise fork the agent_id away from the canonical "HOSTPC". Normalize on
+    # Windows only; leave case-significant POSIX hostnames untouched.
+    if os.name == "nt":
+        host = host.upper()
     return f"{host_agent}:{user}@{host}"
 
 
