@@ -44,6 +44,37 @@ def _warn(msg: str) -> None:
 def _err(msg: str) -> None:
     print(_color("31", f"[X] {msg}"), file=sys.stderr, flush=True)
 
+# Transient single-line progress for long, line-by-line sequences (per-package
+# installs, per-section embeds). On a TTY each call REWRITES the same line
+# (carriage-return + clear-to-end-of-line) so a 20-line "installing X / installed
+# X" wall collapses to one self-updating status line. When stdout is NOT a TTY
+# (piped, redirected, non-interactive SSH, CI) it degrades to a normal newline
+# print so logs stay complete and grep-able. Call once more with done=True (or
+# follow with a plain _ok) to commit a final newline so the next output starts
+# on its own line.
+_PROGRESS_ACTIVE = False
+
+def _progress(msg: str, *, done: bool = False) -> None:
+    global _PROGRESS_ACTIVE
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+        # Non-interactive: every step on its own line (full, parseable log).
+        print(f"    {msg}", flush=True)
+        return
+    # Interactive: rewrite the current line. \r returns to col 0; \033[K clears
+    # to end of line so a shorter message doesn't leave stale trailing chars.
+    end = "\n" if done else ""
+    sys.stdout.write(f"\r\033[K    {msg}{end}")
+    sys.stdout.flush()
+    _PROGRESS_ACTIVE = not done
+
+def _progress_done() -> None:
+    """Commit a newline if a transient progress line is still open (TTY only)."""
+    global _PROGRESS_ACTIVE
+    if _PROGRESS_ACTIVE and sys.stdout.isatty():
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    _PROGRESS_ACTIVE = False
+
 
 def _ask_yes_no(question: str, default: bool) -> bool:
     suffix = " [Y/n]" if default else " [y/N]"

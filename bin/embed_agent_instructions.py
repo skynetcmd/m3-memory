@@ -26,6 +26,22 @@ def _db_path() -> str:
     """Resolve DB path lazily so M3_DATABASE / --database win over the default."""
     return resolve_db_path(None)
 
+
+def _progress(msg: str, *, done: bool = False) -> None:
+    """Single self-updating status line on a TTY; one line each when not.
+
+    On an interactive terminal each call rewrites the same line (carriage-return
+    + clear-to-EOL) so a long per-item loop collapses to one updating line. When
+    stdout is not a TTY (piped/redirected/non-interactive SSH/CI) it prints a
+    normal newline so the full log is preserved. Pass done=True on the last call
+    to commit a trailing newline.
+    """
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+        print(f"  {msg}", flush=True)
+        return
+    sys.stdout.write(f"\r\033[K  {msg}" + ("\n" if done else ""))
+    sys.stdout.flush()
+
 # Legacy constant for any importers that still reach in for the default.
 DB_PATH = os.path.join(BASE_DIR, "memory", "agent_memory.db")
 
@@ -262,7 +278,12 @@ async def main() -> None:
         )
         item_id = result.replace("Created: ", "").strip()
         written_ids.append(item_id)
-        print(f"  {i:2}. {title[:55]:<55} → {item_id[:8]}…")
+        # Transient on a TTY: collapses the N-section wall to one updating line;
+        # full per-line log when piped/non-interactive. Final line commits a \n.
+        _progress(
+            f"{i:2}/{len(SECTIONS)}  {title[:55]:<55} → {item_id[:8]}…",
+            done=(i == len(SECTIONS)),
+        )
 
     # ── Step 3: verify all embeddings landed ──────────────────────────────────
     print("\n[3/3] Verifying embeddings...")
