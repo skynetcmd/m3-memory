@@ -252,7 +252,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from m3_memory.installer import doctor
-    code = doctor()
+    code = doctor(fix=getattr(args, "fix", False))
 
     # Also run the project-specific doctor if payload is installed
     if _resolve_bin_script("memory_doctor.py"):
@@ -924,6 +924,11 @@ Examples:
     p_doctor = subparsers.add_parser(
         "doctor",
         help="Full diagnostics: paths, resolved bridge, embedder, chatlog, crypto.",
+    )
+    p_doctor.add_argument(
+        "--fix", action="store_true",
+        help="Repoint any agent MCP configs (Claude/Gemini/Antigravity/...) "
+             "whose bridge/root paths are dead or moved, to the live install.",
     )
     p_doctor.set_defaults(func=_cmd_doctor)
 
