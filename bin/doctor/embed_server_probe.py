@@ -8,6 +8,7 @@ prevents this phase from hanging.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -30,9 +31,18 @@ def run() -> int:
         return 0
     print()
     print("=== Rust-side service health (m3-embed-server doctor) ===")
+    # Quiet the llama.cpp/GGML backend's own stderr chatter — model-load notices
+    # ("vocab missing newline token, using special_pad_id instead") and Metal
+    # teardown lines ("ggml_metal_free", "llama_context ...") are INFO-level and
+    # harmless for an embedding model, but with inherited stderr they interleave
+    # with this probe's stdout and scroll the readable summary off-screen.
+    # GGML_LOG_LEVEL=4 (error-only) suppresses them while still surfacing real
+    # errors. Respect an operator-set value so power users can opt back in.
+    env = {**os.environ, "GGML_LOG_LEVEL": os.environ.get("GGML_LOG_LEVEL", "4")}
     try:
         r = subprocess.run(
-            [exe, "doctor"], capture_output=False, text=True, timeout=TIMEOUT_SECS,
+            [exe, "doctor"], capture_output=False, text=True,
+            timeout=TIMEOUT_SECS, env=env,
         )
         return r.returncode
     except subprocess.TimeoutExpired:
