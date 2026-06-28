@@ -242,89 +242,199 @@ def _download_tarball(tag: str, dest: Path) -> None:
 
 # ───────── post-install helpers (tasks #8–#11 in plan memory 776d3729) ─────────
 
-def _register_gemini_mcp() -> Optional[str]:
-    """Write a `memory` MCP entry to ~/.gemini/settings.json if Gemini CLI exists.
+def _m3_state_root() -> Path:
+    """The M3_MEMORY_ROOT used in generated MCP env blocks (parent of the repo).
 
-    Idempotent: leaves an existing `memory` entry untouched. Returns a short
-    status string for user-facing logging, or None if Gemini CLI isn't on PATH
-    (in which case we stay quiet — not every install has Gemini).
+    Honors M3_MEMORY_ROOT; otherwise the config dir's root (~/.m3 today). This is
+    the value written as ``M3_MEMORY_ROOT`` into each agent's MCP ``env`` so the
+    bridge resolves the decoupled engine/config roots consistently.
+    """
+    root = os.environ.get("M3_MEMORY_ROOT")
+    if root:
+        return Path(root).expanduser()
+    # config_dir() is <root>/config-ish; its parent is the state root (~/.m3).
+    return config_dir()
+
+
+def _canonical_bridge_path() -> Optional[Path]:
+    """The bridge path a freshly-written agent config SHOULD point at.
+
+    Prefers the live, resolved bridge (find_bridge: env > config > dev-sibling)
+    so the config tracks whatever is actually running. Returns None only when no
+    bridge can be found at all (system not installed).
+    """
+    b = find_bridge()
+    return Path(b).resolve() if b else None
+
+
+def _canonical_memory_env() -> dict:
+    """The env block every agent's ``memory`` MCP server should carry.
+
+    Single source of truth shared by install-time registration and
+    ``doctor --fix`` self-heal, so the two never drift apart again.
+    """
+    state_root = str(_m3_state_root()).replace("\\", "/")
+    cfg = load_config()
+    eng = cfg.get("M3_ENGINE_ROOT") or os.environ.get("M3_ENGINE_ROOT") \
+        or str(_m3_state_root() / "engine")
+    conf = cfg.get("M3_CONFIG_ROOT") or os.environ.get("M3_CONFIG_ROOT") \
+        or str(_m3_state_root() / "config")
+    env = {
+        "M3_MEMORY_ROOT": state_root,
+        "M3_ENGINE_ROOT": str(eng).replace("\\", "/"),
+        "M3_CONFIG_ROOT": str(conf).replace("\\", "/"),
+    }
+    bridge = _canonical_bridge_path()
+    if bridge:
+        env["M3_BRIDGE_PATH"] = str(bridge).replace("\\", "/")
+    embed = os.environ.get("M3_EMBED_GGUF")
+    if not embed:
+        cand = Path.home() / ".lmstudio" / "models" / "deepsweet" \
+            / "bge-m3-GGUF-Q4_K_M" / "bge-m3-GGUF-Q4_K_M.gguf"
+        if cand.is_file():
+            embed = str(cand)
+    if embed:
+        env["M3_EMBED_GGUF"] = str(embed).replace("\\", "/")
+    return env
+
+
+def _canonical_memory_server() -> dict:
+    """The canonical ``memory`` MCP server entry (command + args + env).
+
+    Uses an explicit interpreter + bridge-path arg (the schema that actually
+    works), NOT a bare ``{"command": "mcp-memory"}`` console-script — that older
+    shape could not carry the decoupled-root env and is what caused configs to
+    drift. Falls back to the console script only if no bridge/interpreter can be
+    resolved (degraded, but better than nothing).
+    """
+    bridge = _canonical_bridge_path()
+    if bridge:
+        # Prefer the interpreter that imports m3 cleanly: the running one.
+        python_cmd = sys.executable.replace("\\", "/")
+        return {
+            "command": python_cmd,
+            "args": [str(bridge).replace("\\", "/")],
+            "env": _canonical_memory_env(),
+        }
+    return {"command": "mcp-memory", "env": _canonical_memory_env()}
+
+
+def _path_is_stale(value: object) -> bool:
+    """True if ``value`` looks like a filesystem path that no longer exists.
+
+    Used to decide whether an existing ``memory`` entry must be repointed. Only
+    flags absolute-ish paths (containing a separator) so we never misjudge a bare
+    console-script name like ``mcp-memory`` or ``python`` as stale.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    looks_like_path = ("/" in value) or ("\\" in value) or value.endswith(".py")
+    if not looks_like_path:
+        return False
+    return not Path(value).expanduser().exists()
+
+
+def _memory_entry_needs_repoint(entry: object) -> bool:
+    """Does an existing agent ``memory`` MCP entry point at dead/moved paths?
+
+    Returns True when the command, any arg, or any M3_* path-like env value
+    references a file that no longer exists — the split-brain signature.
+    """
+    if not isinstance(entry, dict):
+        return True
+    if _path_is_stale(entry.get("command")):
+        return True
+    for a in entry.get("args", []) or []:
+        if _path_is_stale(a):
+            return True
+    env = entry.get("env", {}) or {}
+    for k, v in env.items():
+        # Only path-bearing env vars matter here; M3_BRIDGE_PATH / roots / gguf.
+        if k.startswith("M3_") and _path_is_stale(v):
+            return True
+    return False
+
+
+def _heal_agent_settings(settings_file: Path, *, force: bool = False) -> Optional[str]:
+    """Repoint a single agent's ``memory`` MCP entry to the canonical config.
+
+    This FIXES the historical bug where registration skipped an already-present
+    ``memory`` entry even when its paths were dead (the split-brain that survived
+    upgrades). Behavior:
+      - no file / unparseable      -> leave alone, report
+      - no ``memory`` entry        -> add the canonical one
+      - entry present but stale    -> repoint (back up first)
+      - entry present and healthy  -> no-op (unless force=True)
+    Returns a short status string, or None when nothing was actionable.
+    """
+    if not settings_file.is_file():
+        return None
+    try:
+        data = json.loads(settings_file.read_text(encoding="utf-8")) or {}
+    except (OSError, json.JSONDecodeError):
+        return f"[!] {settings_file} is unreadable; skipping (hand-edited?)"
+
+    servers = data.setdefault("mcpServers", {})
+    existing = servers.get("memory")
+    if existing is not None and not force and not _memory_entry_needs_repoint(existing):
+        return None  # healthy — stay quiet
+
+    canonical = _canonical_memory_server()
+    if existing == canonical:
+        return None
+
+    # Back up before any rewrite so the prior config is always restorable.
+    if existing is not None:
+        bak = settings_file.with_suffix(settings_file.suffix + ".m3bak")
+        try:
+            bak.write_text(settings_file.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
+    servers["memory"] = canonical
+    settings_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    verb = "repointed" if existing is not None else "registered"
+    return f"[+] {verb} 'memory' MCP in {settings_file}"
+
+
+def _register_gemini_mcp() -> Optional[str]:
+    """Register/repoint the ``memory`` MCP entry in ~/.gemini/settings.json.
+
+    Idempotent AND self-healing: unlike the old version, an already-present but
+    STALE ``memory`` entry (dead bridge/root paths from a moved install) is
+    repointed to the canonical layout instead of being skipped. Returns None when
+    Gemini CLI isn't present (we stay quiet — not every box has Gemini).
     """
     gemini_bin = shutil.which("gemini")
     if not gemini_bin:
-        # Also check the common non-interactive npm-global path (which may not
-        # be on PATH yet — see _fix_npm_global_path below).
         npm_candidate = Path.home() / ".npm-global" / "bin" / "gemini"
-        if not npm_candidate.exists():
+        if not npm_candidate.exists() and not (Path.home() / ".gemini").is_dir():
             return None
 
     settings_dir = Path.home() / ".gemini"
     settings_file = settings_dir / "settings.json"
     settings_dir.mkdir(parents=True, exist_ok=True)
-
-    existing: dict = {}
-    if settings_file.is_file():
-        try:
-            existing = json.loads(settings_file.read_text(encoding="utf-8")) or {}
-        except (OSError, json.JSONDecodeError):
-            # Refuse to clobber a file we can't parse — user may have hand-edited.
-            return f"[!] {settings_file} is unreadable; skipping Gemini MCP registration"
-
-    mcp_servers = existing.setdefault("mcpServers", {})
-    if "memory" in mcp_servers:
-        return f"[=] Gemini MCP 'memory' already registered in {settings_file}"
-
-    mcp_servers["memory"] = {"command": "mcp-memory"}
-    settings_file.write_text(
-        json.dumps(existing, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return f"[+] registered 'memory' MCP in {settings_file}"
+    return _heal_agent_settings(settings_file)
 
 
 def _register_antigravity_mcp() -> Optional[str]:
-    """Write a `memory` MCP entry to ~/.gemini/antigravity-cli/settings.json if Antigravity CLI exists.
+    """Register/repoint the ``memory`` MCP entry in Antigravity's settings.json.
 
-    Idempotent: leaves an existing `memory` entry untouched. Returns a short
-    status string for user-facing logging, or None if Antigravity CLI isn't on PATH.
+    Same self-healing behavior as ``_register_gemini_mcp``. Returns None when
+    Antigravity CLI / its app-data dir isn't present.
     """
     agy_bin = shutil.which("agy")
-    if not agy_bin:
-        # Also check the common AppData / local candidate paths
-        candidate = Path.home() / ".local" / "bin" / "agy"
-        if not candidate.exists():
-            # Check Windows AppData Local candidate
-            appdata = os.environ.get("LOCALAPPDATA")
-            if appdata:
-                win_candidate = Path(appdata) / "agy" / "bin" / "agy.exe"
-                if not win_candidate.exists():
-                    # check if ~/.gemini/antigravity-cli exists (our App Data dir)
-                    if not (Path.home() / ".gemini" / "antigravity-cli").is_dir():
-                        return None
-            else:
-                if not (Path.home() / ".gemini" / "antigravity-cli").is_dir():
-                    return None
-
     settings_dir = Path.home() / ".gemini" / "antigravity-cli"
-    settings_file = settings_dir / "settings.json"
+    if not agy_bin:
+        candidate = Path.home() / ".local" / "bin" / "agy"
+        appdata = os.environ.get("LOCALAPPDATA")
+        win_candidate = Path(appdata) / "agy" / "bin" / "agy.exe" if appdata else None
+        if not candidate.exists() and not (win_candidate and win_candidate.exists()) \
+                and not settings_dir.is_dir():
+            return None
+
     settings_dir.mkdir(parents=True, exist_ok=True)
-
-    existing: dict = {}
-    if settings_file.is_file():
-        try:
-            existing = json.loads(settings_file.read_text(encoding="utf-8")) or {}
-        except (OSError, json.JSONDecodeError):
-            return f"[!] {settings_file} is unreadable; skipping Antigravity MCP registration"
-
-    mcp_servers = existing.setdefault("mcpServers", {})
-    if "memory" in mcp_servers:
-        return f"[=] Antigravity MCP 'memory' already registered in {settings_file}"
-
-    mcp_servers["memory"] = {"command": "mcp-memory"}
-    settings_file.write_text(
-        json.dumps(existing, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return f"[+] registered 'memory' MCP in {settings_file}"
+    settings_file = settings_dir / "settings.json"
+    return _heal_agent_settings(settings_file)
 
 
 def _sqlite3_cli_hint() -> Optional[str]:
@@ -1232,7 +1342,77 @@ def status() -> int:
     return 0 if s["verdict"] == "healthy" else 1
 
 
-def doctor() -> int:
+def _known_agent_settings() -> "list[tuple[str, Path]]":
+    """Known agent MCP settings files, by host label.
+
+    Only files that exist are worth scanning; callers filter. Kept in one place
+    so doctor's scan and ``--fix`` heal cover the same set of hosts.
+    """
+    home = Path.home()
+    return [
+        ("Claude Code", home / ".claude" / "settings.json"),
+        ("Gemini CLI",  home / ".gemini" / "settings.json"),
+        ("Antigravity", home / ".gemini" / "antigravity-cli" / "settings.json"),
+        ("OpenCode",    home / ".opencode" / "settings.json"),
+        ("Aider",       home / ".aider" / "settings.json"),
+    ]
+
+
+def _scan_agent_configs() -> "list[tuple[str, Path, bool]]":
+    """Return (label, path, needs_repoint) for every existing agent config that
+    declares a ``memory`` MCP entry. ``needs_repoint`` is True when its paths are
+    dead/moved — the split-brain signature ``doctor --fix`` repairs.
+    """
+    out = []
+    for label, path in _known_agent_settings():
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            out.append((label, path, True))  # unreadable counts as a problem
+            continue
+        entry = (data.get("mcpServers") or {}).get("memory")
+        if entry is None:
+            continue  # host present but m3 not wired there — not our concern here
+        out.append((label, path, _memory_entry_needs_repoint(entry)))
+    return out
+
+
+def _agent_config_section() -> None:
+    """Doctor section: per-host m3 ``memory`` MCP config health (read-only)."""
+    scanned = _scan_agent_configs()
+    print()
+    print("agent MCP configs:")
+    if not scanned:
+        print("  (no agent config declares an m3 'memory' server)")
+        return
+    any_bad = False
+    for label, path, bad in scanned:
+        if bad:
+            any_bad = True
+            print(f"  [X] {label:<12} {path}  -> bridge/root paths are dead or moved")
+        else:
+            print(f"  [OK] {label:<12} {path}")
+    if any_bad:
+        print("  [i] Run `m3 doctor --fix` to repoint the broken configs to the live install.")
+
+
+def _heal_all_agents(*, force: bool = False) -> int:
+    """Repoint every broken (or all, if force) agent ``memory`` config. Returns
+    the count of files changed. Used by ``m3 doctor --fix`` and ``m3 setup``.
+    """
+    changed = 0
+    for label, path in _known_agent_settings():
+        msg = _heal_agent_settings(path, force=force)
+        if msg:
+            print(f"  {msg}")
+            if msg.lstrip().startswith("[+]"):
+                changed += 1
+    return changed
+
+
+def doctor(fix: bool = False) -> int:
     """Print diagnostic info and return 0 on healthy, 1 on missing payload."""
     from m3_memory import __version__
 
@@ -1298,6 +1478,14 @@ def doctor() -> int:
     _embedder_tier_section()
 
     _crypto_section()
+
+    if fix:
+        print()
+        print("agent MCP configs: applying --fix (repointing broken configs)")
+        n = _heal_all_agents()
+        print(f"  {n} config(s) repointed." if n else "  nothing to repoint — all healthy.")
+    else:
+        _agent_config_section()
 
     print()
     bridge = find_bridge()
