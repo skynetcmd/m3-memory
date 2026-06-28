@@ -86,6 +86,10 @@ def test_config_roundtrip(tmp_path, monkeypatch):
 
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
     monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    # save_config() copies these env vars into the config when present; clear
+    # them so the roundtrip is hermetic on decoupled-roots machines.
+    for _v in ("M3_CONFIG_ROOT", "M3_ENGINE_ROOT", "M3_FIPS_MODE"):
+        monkeypatch.delenv(_v, raising=False)
 
     assert installer.load_config() == {}
     installer.save_config({"bridge_path": "/a/b", "version": "1.0"})

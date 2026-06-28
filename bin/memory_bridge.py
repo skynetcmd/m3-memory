@@ -281,6 +281,28 @@ if __name__ == "__main__":
         )
     except Exception as _e:
         logger.debug(f"version-drift check skipped: {type(_e).__name__}: {_e}")
+    # B: canonical-path guard. If this bridge is being run from a path that
+    # disagrees with the recorded install (config bridge_path / M3_BRIDGE_PATH),
+    # the launching agent config is stale (the split-brain signature). Warn but
+    # never abort — the bridge still works from wherever it was started.
+    try:
+        from pathlib import Path as _Path
+        _self = _Path(__file__).resolve()
+        _want = _os.environ.get("M3_BRIDGE_PATH")
+        if not _want:
+            try:
+                from m3_memory.installer import load_config as _lc
+                _want = (_lc() or {}).get("bridge_path")
+            except Exception:
+                _want = None
+        if _want and _Path(_want).expanduser().resolve() != _self:
+            logger.warning(
+                "this bridge (%s) differs from the recorded install (%s) — the "
+                "launching agent config may be stale. Run `m3 doctor --fix` to repoint it.",
+                _self, _want,
+            )
+    except Exception as _e:
+        logger.debug(f"canonical-path guard skipped: {type(_e).__name__}: {_e}")
     if _LAZY_MODE:
         logger.info(
             f"Lazy mode: registered {len(_REGISTERED)} essentials+meta tools at startup "
