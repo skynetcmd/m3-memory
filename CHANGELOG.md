@@ -42,6 +42,49 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ---
 
+## [2026.6.27.0] — 2026-06-27 — M3-v3 oxidation: governor, native ingest hashing, sqlite-vec
+
+> **⚠️ Recommended for all users.** This release is the new baseline.
+> **Versions prior to 2026.6.27.0 will not be supported after July 2026** —
+> please upgrade (`m3 update`, or `pip install -U m3-memory`).
+
+Pairs with m3-core-rs **3.6.27** (release tag `v2026.06.27`); the pin in
+`m3_memory/rust_core_install.py` is bumped in lockstep.
+
+### Added
+
+- **Adaptive Background Workload Governor.** Background maintenance (dedup, PG
+  sync, embedding backfill, cognitive loops) is now paced by live host load +
+  idle time instead of a rigid clock — it never competes with foreground work,
+  spreads work over idle time, and needs no external scheduler. Thresholds are
+  user-selectable via `M3_GOVERNOR_INITIAL_THRESHOLD` / `M3_GOVERNOR_LIMIT_THRESHOLD`.
+  The pacing ladder has a native Rust source of truth (`m3_core_rs.Governor`)
+  with an identical pure-Python fallback. See `docs/M3V3_OXIDATION.md`.
+- **`m3 setup` migrates legacy cron/schtasks to the governor.** The wizard
+  detects governor-eligible scheduled tasks and offers (by default) to remove
+  them so they don't double-fire; when removal needs elevation it prints the
+  exact privileged, OS-specific commands. `--no-governor-migration` opts out.
+- **`m3 governor <status|migrate>` command** and an **`m3 doctor` nag** that
+  reports when governor-eligible scheduled tasks are still installed, with the
+  one-command fix. Cross-platform (Windows schtasks / macOS + Linux crontab).
+- **Native parallel ingestion hashing.** The files-memory staleness sweep now
+  batch-hashes changed files through the rayon-parallel `m3_core_rs.hash_files`
+  (~6–7× faster than the serial Python loop on large sets), with a graceful
+  Python fallback. Single-file hashing stays Python (faster for one small file).
+- **`sqlite-vec` optional extra.** `pip install "m3-memory[vector]"` provides
+  the native `vec0` SQLite vector-search extension (the loader + query path
+  already existed; this declares the dependency). Optional by design.
+
+### Notes
+
+- A `WriteQueueDaemon` write-batching prototype was evaluated and **reverted**:
+  benchmarking showed an in-process queue can't fix the multi-process
+  `database is locked` contention it targeted (m3's `busy_timeout` + the
+  existing bulk-write APIs already handle that), and it only added latency to
+  the already-fast intra-process path. See `docs/M3V3_OXIDATION.md`.
+
+---
+
 ## [2026.6.23.2] — 2026-06-23 — Installer fixes: Claude Code MCP scope + initial-sync DB path
 
 ### Fixed

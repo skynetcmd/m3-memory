@@ -19,6 +19,7 @@ from embedding_utils import (
 )
 from m3_sdk import M3Context, resolve_db_path
 
+from . import config as _wcfg
 from . import embed as _embed_mod
 from .config import (
     AUTO_RELATED_LINK,
@@ -115,6 +116,40 @@ def _ctx() -> M3Context:
     return M3Context.for_db(resolve_db_path(None))
 
 
+def _observer_confidence_from_metadata(metadata) -> "float | None":
+    """Pull the Observer SLM's per-observation confidence (0.6–1.0) out of a
+    memory's metadata_json, if present. Returns None on any parse miss so the
+    caller falls back to provenance-only confidence."""
+    try:
+        meta = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
+        if isinstance(meta, dict) and meta.get("confidence") is not None:
+            return float(meta["confidence"])
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return None
+
+
+def _derive_confidence(*, source, change_agent, metadata, explicit=-1.0) -> float:
+    """Resolve a memory's first-class `confidence` in [0,1]. An explicit value
+    (>= 0) overrides derivation; otherwise aggregate from provenance + any
+    Observer-SLM confidence in metadata. Pure — no DB."""
+    from . import confidence as _conf
+    if explicit is not None and explicit >= 0.0:
+        return _conf.clamp01(float(explicit))
+    return _conf.aggregate(
+        source=source,
+        change_agent=change_agent,
+        observer_confidence=_observer_confidence_from_metadata(metadata),
+    )
+
+
+def _is_missing_confidence_column(exc) -> bool:
+    """True when `exc` is the 'no confidence column' error raised on a DB that
+    predates migration 035 — the one error the write path tolerates."""
+    msg = str(exc).lower()
+    return "confidence" in msg and ("no column named" in msg or "no such column" in msg)
+
+
 def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related", db=None) -> str:
     """Creates a directional link between two memory items. Valid types:
     related, supports, contradicts, extends, supersedes, references,
@@ -128,7 +163,7 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     return f"Linked {from_id} --[{relationship_type}]--> {to_id}"
 
 async def memory_write_impl(
-type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: "set[str] | None" = None, entity_extractor: "Callable[[str], Awaitable[dict]] | None" = None, entity_extractor_variant_allowlist: "set[str] | None" = None):
+type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="", importance=0.5, source="agent", embed=True, user_id="", scope="agent", valid_from="", valid_to="", auto_classify=False, conversation_id="", refresh_on="", refresh_reason="", variant=None, embed_text=None, confidence: float = -1.0, fact_enricher: "Callable[[str], Awaitable[list[dict]]] | None" = None, fact_enricher_variant_allowlist: "set[str] | None" = None, entity_extractor: "Callable[[str], Awaitable[dict]] | None" = None, entity_extractor_variant_allowlist: "set[str] | None" = None):
     _resolve_mc_callbacks()
     """Internal implementation for memory_write. Contradiction detection is automatic.
 
@@ -233,8 +268,28 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
         )
         # NOTE: chroma_sync_queue insert moved below into the `if vec:` block
         # so embed failures don't leave orphan queue rows.
-        db.execute("UPDATE memory_items SET content_hash = ? WHERE id = ?",
-                   (_sha256_hex((content or "").encode("utf-8")), item_id))
+        # Stamp content_hash and (knowledge-maintenance P1) first-class confidence
+        # in ONE post-INSERT UPDATE on the common path (§4 efficiency: no extra
+        # statement). Confidence is derived from provenance + the Observer SLM's
+        # own per-observation confidence. On a DB that predates migration 035
+        # (no `confidence` column) the combined UPDATE raises and we fall back to
+        # a content_hash-only UPDATE — ABSENCE-TOLERANT, core INSERT never at risk.
+        # NULL confidence reads as "fall back to importance" everywhere, so
+        # flag-off behavior is unchanged.
+        _chash = _sha256_hex((content or "").encode("utf-8"))
+        _conf = _derive_confidence(
+            source=source, change_agent=agent, metadata=metadata, explicit=confidence
+        )
+        try:
+            db.execute(
+                "UPDATE memory_items SET content_hash = ?, confidence = ? WHERE id = ?",
+                (_chash, _conf, item_id),
+            )
+        except Exception as e:  # noqa: BLE001 — pre-035 DB lacks `confidence`
+            if not _is_missing_confidence_column(e):
+                raise
+            db.execute("UPDATE memory_items SET content_hash = ? WHERE id = ?",
+                       (_chash, item_id))
 
     vec = None
     if embed:
@@ -1144,12 +1199,19 @@ async def _check_contradictions(
     """
     superseded: list[str] = []
     related: list[tuple[str, float]] = []
+    corroborated: list[str] = []
     try:
         with _db() as db:
-            # Find top-5 similar memories of the same type
+            # Find top similar memories of the same type. Normally scoped to the
+            # same agent (an agent contradicting its OWN past statement). But
+            # corroboration is cross-agent by nature (consensus = different
+            # sources agreeing), so when it's enabled we drop the agent filter
+            # from the scan and re-apply same-agent scoping only to the
+            # CONTRADICTION branch below — one scan serves both (§4).
             where = "mi.is_deleted = 0 AND mi.type = ? AND mi.id != ?"
             params = [type_, item_id]
-            if agent_id:
+            _agent_scoped = bool(agent_id) and not _wcfg.CORROBORATION
+            if _agent_scoped:
                 where += " AND mi.agent_id = ?"
                 params.append(agent_id)
             # Resolve scope gate at call time so tests that monkeypatch
@@ -1165,7 +1227,7 @@ async def _check_contradictions(
                 where += " AND mi.variant = ?"
                 params.append(variant)
             rows = db.execute(
-                f"SELECT mi.id, mi.title, mi.content, me.embedding FROM memory_items mi "
+                f"SELECT mi.id, mi.title, mi.content, mi.agent_id, me.embedding FROM memory_items mi "
                 f"JOIN memory_embeddings me ON mi.id = me.memory_id WHERE {where} LIMIT 200",
                 params
             ).fetchall()
@@ -1191,12 +1253,28 @@ async def _check_contradictions(
                 ))
                 content_differs = (row["content"] or "").strip() != (content or "").strip()
 
+                # Corroboration (Phase 2, flag-gated): a near-identical re-write
+                # (high cosine AND same content) corroborates the existing memory
+                # instead of standing as an orphan duplicate. Handled here — in the
+                # same scan — so we don't re-run cosine (§4). Recorded against the
+                # OLD row; the caller skips creating extra links for it.
+                if (not content_differs and _wcfg.CORROBORATION
+                        and score >= _wcfg.CORROBORATION_THRESHOLD):
+                    corroborated.append(row["id"])
+                    continue
+
                 if CONTRADICTION_TITLE_GATE == "strict":
                     fires = titles_match and content_differs
                 elif CONTRADICTION_TITLE_GATE == "loose":
                     fires = content_differs
                 else:  # 'off'
                     fires = True
+
+                # When corroboration broadened the scan to be agent-agnostic,
+                # keep contradiction's original same-agent semantics: only an
+                # agent's OWN prior memory is superseded as a contradiction.
+                if fires and agent_id and not _agent_scoped:
+                    fires = (row["agent_id"] or "") == agent_id
 
                 if fires:
                     # Contradiction detected — supersede old memory via the
@@ -1214,10 +1292,51 @@ async def _check_contradictions(
                             row["id"], item_id, close_at=_close_at, db=db,
                             prev_value=row["content"],
                         )
+                        # Record the contradiction in the ledger (Phase 2) so the
+                        # corroboration/contradiction history is complete and
+                        # auditable. Best-effort, absence-tolerant (no-op pre-036).
+                        if _wcfg.CORROBORATION:
+                            try:
+                                from . import trust as _trust
+                                t = _trust.get_agent_trust(db, agent_id)
+                                _trust.record_corroboration(
+                                    db, row["id"], source_kind="contradiction",
+                                    source_ref=(agent_id or item_id),
+                                    trust_at_write=t, delta=-t,
+                                )
+                            except Exception as ce:  # noqa: BLE001
+                                logger.debug(f"contradiction ledger skipped: {ce}")
                     superseded.append(row["id"])
                     logger.info(f"Memory {item_id} supersedes {row['id']} (contradiction detected, valid_to={_close_at})")
             elif score > 0.7:
                 related.append((row["id"], score))
+
+        # Apply corroboration side-effects (Phase 2): for each near-identical
+        # match, record a corroboration event from the NEW write's source against
+        # the EXISTING memory and re-aggregate its confidence. Idempotent per
+        # (memory, source) via the ledger's unique index. Best-effort — a ledger
+        # failure must never fail the core write — and absence-tolerant on pre-036
+        # DBs (trust helpers degrade to no-ops). The new item itself remains; the
+        # corroboration strengthens the existing memory it duplicates.
+        if corroborated:
+            from . import trust as _trust
+            src_kind = "agent" if agent_id else "unknown"
+            with _db() as db:
+                for old_id in corroborated:
+                    try:
+                        t = _trust.get_agent_trust(db, agent_id)
+                        if _trust.record_corroboration(
+                            db, old_id, source_kind=src_kind,
+                            source_ref=(agent_id or "unknown"),
+                            trust_at_write=t, delta=t,
+                        ):
+                            _trust.reaggregate_confidence(db, old_id)
+                            logger.info(
+                                f"Memory {item_id} corroborates {old_id} "
+                                f"(score>={_wcfg.CORROBORATION_THRESHOLD}, trust={t:.2f})"
+                            )
+                    except Exception as ce:  # noqa: BLE001
+                        logger.debug(f"corroboration of {old_id} skipped: {ce}")
     except Exception as e:
         logger.debug(f"Contradiction check failed: {e}")
     return superseded, related

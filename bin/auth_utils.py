@@ -174,39 +174,36 @@ _PBKDF2_LEGACY_ITERATIONS = 100_000
 
 def _derive_raw_key(master_key: str, iterations: int = _PBKDF2_ITERATIONS) -> bytes:
     """
-    Derives a raw 32-byte key from the master key using PBKDF2HMAC.
+    Derives a raw 32-byte key from the master key using PBKDF2-HMAC-SHA256.
     Uses a per-device salt for protection against rainbow tables.
+
+    Routed through crypto_provider so key derivation honors the FIPS boundary
+    (M3_FIPS_MODE -> wolfCrypt; fatal on any miss). Output is byte-identical to
+    the prior direct PBKDF2HMAC path on the DEFAULT backend, so existing
+    encrypted secrets decrypt unchanged.
     """
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from crypto_provider import provider
 
     salt = _get_device_salt()
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=iterations,
-    )
-    return kdf.derive(master_key.encode("utf-8"))
+    return provider.pbkdf2_sha256(master_key.encode("utf-8"), salt, iterations, 32)
 
 
 def _get_fernet(master_key: str, iterations: int = _PBKDF2_ITERATIONS):
     """
-    Derives a Fernet encryption object from the master key using PBKDF2HMAC.
+    Derives a Fernet encryption object from the master key (legacy decrypt path).
     Uses a per-device salt for protection against rainbow tables.
+
+    The KDF is routed through crypto_provider (FIPS boundary); Fernet itself is
+    the non-FIPS legacy cipher and is reached only for decrypting pre-migration
+    secrets — never for new writes (those use AES-256-GCM). Under M3_FIPS_STRICT
+    this path is refused entirely (see FIPS_MODULE_BOUNDARY.md).
     """
+    from crypto_provider import provider
     from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
     salt = _get_device_salt()
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=iterations,
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(master_key.encode("utf-8")))
+    raw = provider.pbkdf2_sha256(master_key.encode("utf-8"), salt, iterations, 32)
+    key = base64.urlsafe_b64encode(raw)
     return Fernet(key)
 
 

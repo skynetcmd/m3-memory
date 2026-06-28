@@ -7,11 +7,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.6.23.2"
-description = "Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 ready · 100% local (fully offline) or cloud capable"
+version = "2026.6.27.0"
+description = "Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
 license = "Apache-2.0"
+# Ship the LICENSE and the Apache NOTICE (attribution to skynetCMD) in every
+# sdist/wheel — setuptools>=77 packages these globs into the distribution.
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [
     { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" },
@@ -84,6 +87,13 @@ postgres = ["psycopg[binary]>=3.2.0,<4"]
 # alternative to the LLM-based entity extractor. Optional by design: core runs
 # fully without it (bin/m3_entities.py needs no extra deps). Pulls torch.
 entity-ner = ["gliner>=0.2.26"]
+# Native SQLite vector search via the sqlite-vec extension. The loader at
+# bin/sqlite_pragmas.py loads it opportunistically (sqlite_vec.load(conn)) and
+# the semantic-search path in bin/memory/search.py uses the vec0 functions when
+# present. Optional by design: core runs fully without it (the Python/numpy
+# cosine path is the fallback). The PyPI wheel ships the platform-native
+# extension binary, so no separate compilation/bundling step is needed.
+vector = ["sqlite-vec>=0.1.6"]
 # "Project Oxidation" Rust compute core is installed manually until
 # m3-core-rs publishes wheels to PyPI:
 #   pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"
@@ -225,6 +235,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "slow: long-running tests (>1s); use -m 'not slow' to skip",
+    "real_is_current: opt out of the rust_core_install is_rust_core_current autouse stub",
 ]
 
 [tool.bandit]

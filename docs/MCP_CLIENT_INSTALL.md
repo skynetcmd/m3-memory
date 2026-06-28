@@ -26,7 +26,7 @@ clients manually or understand what the wizard does.
    m3 embedder status
    ```
    Expected: `running`.
-3. **(Optional) Configure tier-1 in-process GGUF** for ~10-100× faster
+3. **(Optional) Configure tier-1 in-process GGUF** for ~10-85× faster
    embeds on the hot path. Set in your shell or per-client env:
    ```bash
    export M3_EMBED_GGUF=/path/to/bge-m3-GGUF-Q4_K_M.gguf

@@ -1,8 +1,8 @@
 ---
 tool: bin/setup_secret.py
-sha1: e8a4f8c2dc53
-mtime_utc: 2026-05-01T09:15:53.144020+00:00
-generated_utc: 2026-05-24T12:09:08.467774+00:00
+sha1: 18701eba92f8
+mtime_utc: 2026-06-28T01:37:56.913933+00:00
+generated_utc: 2026-06-28T01:47:14.619901+00:00
 private: false
 ---
 
@@ -13,7 +13,9 @@ private: false
 Interactive CLI for adding API keys to the m3-memory encrypted vault.
 
 Keys are stored in the synchronized_secrets table via auth_utils.set_api_key,
-which Fernet-encrypts the value against AGENT_OS_MASTER_KEY from the OS keyring.
+which encrypts the value with AES-256-GCM (FIPS-approved, via crypto_provider)
+under a key derived from AGENT_OS_MASTER_KEY (from the OS keyring). Legacy
+Fernet ciphertexts are still decryptable and auto-migrate to AES-GCM on read.
 
 Usage:
     python bin/setup_secret.py              # interactive add
@@ -24,7 +26,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 286)
+- `def main()` (line 288)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -57,10 +59,10 @@ Usage:
 
 **sqlite**
 
-- `sqlite3.connect()  → `_db_path()`` (line 106)
-- `sqlite3.connect()  → `_db_path()`` (line 128)
-- `sqlite3.connect()  → `_db_path()`` (line 152)
-- `sqlite3.connect()  → `_db_path()`` (line 241)
+- `sqlite3.connect()  → `_db_path()`` (line 108)
+- `sqlite3.connect()  → `_db_path()`` (line 130)
+- `sqlite3.connect()  → `_db_path()`` (line 154)
+- `sqlite3.connect()  → `_db_path()`` (line 243)
 
 
 ---

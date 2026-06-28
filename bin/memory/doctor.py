@@ -48,6 +48,19 @@ def _probe_tier1() -> dict[str, Any]:
         "error": None,
     }
     gguf = os.environ.get("M3_EMBED_GGUF") or ""
+    res["gguf_source"] = "env" if gguf else None
+    # When the env var is unset, tier-1 now auto-detects a bge-m3 GGUF in the
+    # canonical model dirs (default on). Reflect that here so doctor reports the
+    # path tier-1 will ACTUALLY use, not a misleading 'not-configured'.
+    if not gguf and os.environ.get("M3_EMBED_GGUF_AUTODETECT", "1") != "0":
+        try:
+            from memory.embed import discover_bge_m3_gguf
+            detected = discover_bge_m3_gguf()
+            if detected:
+                gguf = detected
+                res["gguf_source"] = "auto-detected"
+        except Exception:  # noqa: BLE001 — discovery is best-effort
+            pass
     res["gguf_path"] = gguf or None
     if gguf:
         res["gguf_exists"] = os.path.exists(gguf)
@@ -229,7 +242,7 @@ async def memory_doctor_impl() -> dict[str, Any]:
         if not tier1["gguf_path"]:
             recommendations.append(
                 "Set M3_EMBED_GGUF to a BGE-M3 GGUF path to enable tier-1 "
-                "in-process embedding (10-100x faster than HTTP fallback)."
+                "in-process embedding (~10-85x faster than HTTP fallback)."
             )
         elif not tier1["gguf_exists"]:
             issues.append(

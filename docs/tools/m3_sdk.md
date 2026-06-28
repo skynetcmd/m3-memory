@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_sdk.py
-sha1: 567d08967442
-mtime_utc: 2026-06-01T00:55:33.508776+00:00
-generated_utc: 2026-06-12T20:00:05.232818+00:00
+sha1: 9328be9670d7
+mtime_utc: 2026-06-27T22:18:37.159143+00:00
+generated_utc: 2026-06-27T23:22:27.470389+00:00
 private: false
 ---
 
@@ -64,17 +64,18 @@ _(no conventional entry point detected)_
 
 **subprocess**
 
-- `os.execv()  → `sys.executable`` (line 194)
+- `os.execv()  → `sys.executable`` (line 320)
+- `subprocess.run()  → `['tasklist', '/fi', f'PID eq {pid}', '/nh']`` (line 208)
 
 **http**
 
-- `httpx.AsyncClient()` (line 705)
-- `httpx.AsyncClient()` (line 708)
+- `httpx.AsyncClient()` (line 831)
+- `httpx.AsyncClient()` (line 834)
 
 **sqlite**
 
-- `sqlite3.connect()  → `path`` (line 311)
-- `sqlite3.connect()  → `self.db_path`` (line 487)
+- `sqlite3.connect()  → `path`` (line 437)
+- `sqlite3.connect()  → `self.db_path`` (line 613)
 
 
 ---

@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-06-22T03:40:38.303150+00:00._
+_Generated 2026-06-28T01:57:28.279877+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -51,9 +51,11 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
 | [bin/gen_tool_manifest.py](gen_tool_manifest.md) | Generate a machine-readable tool-catalog manifest at docs/tools/MCP_CATALOG.json. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
+| [bin/governor_cli.py](governor_cli.md) | `m3 governor <status\|migrate>` — inspect and migrate legacy scheduled tasks |  |
 | [bin/grok_bridge.py](grok_bridge.md) | (no docstring) |  |
 | [bin/homecoming.py](homecoming.md) | bin/homecoming.py — "Homecoming" migration script for m3-memory. |  |
 | [bin/install_schedules.py](install_schedules.md) | M3 Memory: Cross-Platform Schedule Installer. |  |
+| [bin/install_wolfssl.py](install_wolfssl.md) | install_wolfssl.py — build the OPEN-SOURCE wolfSSL library from official |  |
 | [bin/llm_failover.py](llm_failover.md) | LLM Failover Module |  |
 | [bin/m3_autoenrich.py](m3_autoenrich.md) | Toggle the M3_AUTO_ENRICH env var on/off, cross-platform. |  |
 | [bin/m3_chatlog_backfill_embed.py](m3_chatlog_backfill_embed.md) | m3_chatlog_backfill_embed — Embed unembedded rows in core memory + chatlog. |  |

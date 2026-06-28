@@ -15,6 +15,25 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch, tmp_path):
     monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
+    # Determinism across hosts: on a dev box with the native m3_core_rs wheel
+    # installed AND a persisted M3_EMBED_GGUF (in the user environment), the
+    # tier-1 probe would load the REAL embedder — on CUDA that's a multi-second
+    # cold start (model + CUDA context), blowing the <5s SLO assertions and
+    # making these tests pass/fail by host rather than by code. These tests are
+    # about probe TIMEOUT/parallelism behavior and classification, not real
+    # embedding. Pin M3_CORE_RS_DISABLE=1 so tier-1 is deterministically
+    # 'not-configured' regardless of the host's wheel/GGUF state.
+    monkeypatch.setenv("M3_CORE_RS_DISABLE", "1")
+    # Neutralize the tier-3 PRIMARY embed endpoint too. Otherwise the roundtrip
+    # probe's cascade falls through tier-1 (disabled) + tier-2 (TEST-NET) to the
+    # real LM Studio at :1234 on a dev box — which answers slowly (observed 400s
+    # + retry/backoff), pushing the <5s SLO over. Pin the primary at a TEST-NET
+    # (RFC 5737) address so every tier fails FAST and deterministically, which is
+    # exactly the "broken corpus, every probe hits its timeout" state these SLO
+    # tests claim to measure. Also disable the on-by-default LM Studio probe.
+    monkeypatch.setenv("M3_LLM_URL", "http://198.51.100.2:9")
+    monkeypatch.setenv("M3_ENABLE_LMSTUDIO_FAILOVER", "0")
+    monkeypatch.setenv("M3_ENABLE_OLLAMA_FAILOVER", "0")
     monkeypatch.setenv("M3_DATABASE", str(tmp_path / "test.db"))
     monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
     # Force fresh module load so each doctor test re-reads the env above.
@@ -24,13 +43,23 @@ def _isolate_env(monkeypatch, tmp_path):
     # and config defaults like ELBOW_MIN_INPUT=20) — which silently broke
     # test_elbow_trim, test_oxidation_probe, test_memory_search_routed, etc.
     # when they happened to run after this file. (Order-dependent CI reds.)
-    saved = {m: sys.modules[m] for m in list(sys.modules) if m.startswith("memory.")}
+    #
+    # Also purge `llm_failover`: it builds its LLM_ENDPOINTS list from env vars
+    # ONCE at import time (M3_LLM_URL / M3_ENABLE_*). If it was already imported
+    # before this fixture set the hermetic env above, the cascade's tier-3
+    # primary still points at the REAL LM Studio (:1234), so the roundtrip probe
+    # hits it (observed 400 + retry/backoff) and the <5s SLO blows. Purging it
+    # forces a reimport that reads the TEST-NET endpoint we pinned.
+    def _is_purge_target(m):
+        return m.startswith("memory.") or m == "llm_failover"
+
+    saved = {m: sys.modules[m] for m in list(sys.modules) if _is_purge_target(m)}
     saved["memory"] = sys.modules.get("memory")
     for mod in list(sys.modules):
-        if mod.startswith("memory."):
+        if _is_purge_target(mod):
             del sys.modules[mod]
     yield
-    for mod in [m for m in sys.modules if m.startswith("memory.")]:
+    for mod in [m for m in sys.modules if _is_purge_target(m)]:
         del sys.modules[mod]
     for name, module in saved.items():
         if module is not None:
@@ -70,9 +99,14 @@ async def test_returns_required_top_level_keys():
 
 
 @pytest.mark.asyncio
-async def test_tier1_not_configured_when_no_gguf():
-    """When M3_EMBED_GGUF is unset, tier_1.status is 'not-configured'
-    (not 'offline' or 'broken' — it's a deliberate-skip state)."""
+async def test_tier1_not_configured_when_no_gguf(monkeypatch):
+    """When M3_EMBED_GGUF is unset AND auto-detect is off, tier_1.status is
+    'not-configured' (a deliberate-skip state, not 'offline'/'broken').
+
+    Auto-detect is disabled here so the test is deterministic regardless of
+    whether the host happens to have a bge-m3 GGUF in a canonical dir — that
+    auto-detect path is covered separately."""
+    monkeypatch.setenv("M3_EMBED_GGUF_AUTODETECT", "0")
     from memory.doctor import memory_doctor_impl
     out = await memory_doctor_impl()
     assert out["tier_1"]["status"] == "not-configured"

@@ -1,3 +1,8 @@
+# Attribution: the Apache LICENSE + NOTICE (attribution to skynetCMD) ship in
+# the sdist. license-files in pyproject.toml also packages them into the wheel.
+include LICENSE
+include NOTICE
+
 # Ship the vendored Hermes Agent memory-provider plugin in the sdist. (In the
 # wheel it's carried as package-data; see [tool.setuptools.package-data] for
 # m3_memory in pyproject.toml.) The setup wizard's _find_m3_hermes_plugin_src()

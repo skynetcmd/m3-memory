@@ -187,7 +187,7 @@ HEALTH CHECKS:
 
 HOMELAB:
   ChromaDB:   http://10.x.x.x:8000 (Proxmox VMID 501)
-  UniFi API:  https://10.x.x.x:11443/proxy/network/api/s/hh1srtpv/ (always site hh1srtpv)
+  UniFi API:  https://10.x.x.x:11443/proxy/network/api/s/<SITE_ID>/ (always use your site ID)
   SSH:        UXG <UXG_USER>@<UXG_IP> | Controller root@<CONTROLLER_IP> | pve-database-host root@<PVE_IP> — see OS keyring for actual values""",
     ),
     (

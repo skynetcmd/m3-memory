@@ -328,7 +328,11 @@ def test_gather_plan_interactive_defaults(monkeypatch):
     assert plan.targets.openclaw is True
     assert plan.targets.hermes is True
     assert plan.capture_mode == "both"
-    assert plan.install_gpu_embedder is False
+    # F1: the Project Oxidation native wheel is a SAFE attempt (non-fatal,
+    # auto-falls-back to pure-Python), so the interactive default is now ON —
+    # but the source-build last resort stays opt-in (default False).
+    assert plan.install_gpu_embedder is True
+    assert plan.allow_native_source_build is False
 
 
 def test_wire_opencode_writes_json(monkeypatch, tmp_path):
@@ -406,14 +410,22 @@ def test_gather_plan_interactive_decouple_and_fips(monkeypatch):
     calls = []
     def mock_ask_yes_no(question, default):
         calls.append(question)
-        if "decoupled" in question:
+        # The separate-config+database-folders prompt (formerly "decoupled").
+        if "separate config" in question or "folders" in question:
             return True
+        # The FIPS "build wolfSSL now?" follow-up — accept it.
+        return default
+
+    choice_calls = []
+    def mock_ask_choice(question, choices, default):
+        choice_calls.append(question)
+        # FIPS is now a tiered choice (off/mode/strict) — pick 'mode'.
         if "FIPS" in question:
-            return True
-        return False
+            return "mode"
+        return default
 
     monkeypatch.setattr(setup_wizard, "_ask_yes_no", mock_ask_yes_no)
-    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda q, choices, default: default)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", mock_ask_choice)
 
     plan = setup_wizard._gather_plan(detected, args)
 
@@ -421,8 +433,9 @@ def test_gather_plan_interactive_decouple_and_fips(monkeypatch):
     assert plan.config_root is not None
     assert plan.engine_root is not None
     assert plan.fips_mode is True
-    assert any("decoupled" in c for c in calls)
-    assert any("FIPS" in c for c in calls)
+    assert plan.fips_strict is False  # 'mode' tier, not strict
+    assert any("separate config" in c or "folders" in c for c in calls)
+    assert any("FIPS" in c for c in choice_calls)
 
 
 # ────────────────────────────────────────────────────────────────────────

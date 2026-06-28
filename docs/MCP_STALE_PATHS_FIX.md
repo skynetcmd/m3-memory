@@ -16,7 +16,7 @@ Additionally, `start_mcp_proxy.sh` was using the system `python3`, which might l
 3.  **`repo/bin/test_mcp_proxy.py`**:
     *   Updated usage comments to point to the correct script locations.
 4.  **`~/.gemini/settings.json`**:
-    *   Verified that stale paths were previously updated to `/Users/username/m3-memory/repo/bin/`.
+    *   Verified that stale paths were previously updated to `/Users/<username>/m3-memory/repo/bin/`.
 
 ## Manual Verification
 The MCP proxy was successfully started and verified using the health check endpoint:
@@ -34,7 +34,7 @@ Example for Gemini CLI:
 "mcpServers": {
   "memory": {
     "command": "python3",
-    "args": ["/Users/username/m3-memory/repo/bin/memory_bridge.py"]
+    "args": ["/Users/<username>/m3-memory/repo/bin/memory_bridge.py"]
   }
 }
 ```

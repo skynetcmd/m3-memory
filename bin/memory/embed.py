@@ -176,24 +176,79 @@ def _track_cost_lazy(operation: str, tokens_est: int = 0) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# In-process Rust embedder (opt-in via M3_EMBED_GGUF)
+# In-process Rust embedder (M3_EMBED_GGUF, or auto-detected when unset)
 # ──────────────────────────────────────────────────────────────────────────────
 _EMBED_GGUF_PATH: str | None = (os.environ.get("M3_EMBED_GGUF") or "").strip() or None
 _EMBED_GGUF_MODEL_TAG: str = (
     (os.environ.get("M3_EMBED_GGUF_MODEL_TAG") or "").strip()
     or "bge-m3-GGUF-Q4_K_M.gguf"
 )
+# When M3_EMBED_GGUF is unset, search the canonical model dirs for a bge-m3 GGUF
+# so tier-1 (the ~10-85x faster in-process embedder) activates automatically.
+# Opt out with M3_EMBED_GGUF_AUTODETECT=0. The walk is depth- and time-bounded so
+# a pathological models directory can never stall cold start.
+_EMBED_GGUF_AUTODETECT: bool = os.environ.get("M3_EMBED_GGUF_AUTODETECT", "1") != "0"
+_EMBED_GGUF_WALK_BUDGET_S: float = float(os.environ.get("M3_EMBED_GGUF_WALK_BUDGET", "2.0"))
 _embedded_embedder = None
 _embedded_embed_checked = False
 
 
+def discover_bge_m3_gguf(budget_s: float = _EMBED_GGUF_WALK_BUDGET_S) -> str | None:
+    """Probe the canonical model directories for a bge-m3 GGUF and return its
+    path, or None. Bounded: at most `budget_s` wall-clock and depth ~4 per dir,
+    first match wins. Cross-platform (LM Studio dirs differ per OS; Path.home()
+    resolves the home dir). This is the runtime mirror of the setup wizard's
+    discovery — keep the two in sync (the wizard imports this helper)."""
+    import time
+    from pathlib import Path
+
+    home = Path.home()
+    candidate_dirs = [
+        home / ".lmstudio" / "models",
+        home / "Library" / "Application Support" / "LM Studio" / "models",
+        home / ".cache" / "lm-studio" / "models",   # Linux LM Studio default (XDG)
+        home / ".cache" / "m3" / "models",
+        home / ".m3-memory" / "_assets" / "embedder",
+        home / "models",
+    ]
+    deadline = time.monotonic() + max(0.1, budget_s)
+    for d in candidate_dirs:
+        try:
+            if not d.is_dir():
+                continue
+            base_depth = len(d.parts)
+            for path in d.rglob("*.gguf"):
+                if time.monotonic() > deadline:
+                    logger.debug("bge-m3 GGUF auto-detect: walk budget exceeded")
+                    return None
+                # Bound depth to ~4 below the candidate dir (LM Studio's
+                # org/model/file layout is depth 3; allow one extra).
+                if len(path.parts) - base_depth > 4:
+                    continue
+                name = path.name.lower()
+                if "bge-m3" in name or "bge_m3" in name:
+                    return str(path)
+        except OSError:
+            continue
+    return None
+
+
 def _get_embedded_embedder():
     """Return the in-process EmbeddedEmbedder, or None if unavailable/unsafe."""
-    global _embedded_embedder, _embedded_embed_checked
+    global _embedded_embedder, _embedded_embed_checked, _EMBED_GGUF_PATH
     if _embedded_embed_checked:
         return _embedded_embedder
     _embedded_embed_checked = True
-    if config.m3_core_rs is None or _EMBED_GGUF_PATH is None:
+    if config.m3_core_rs is None:
+        return None
+    # Resolve the GGUF path: explicit env wins; otherwise auto-detect (on by
+    # default). A failed detect leaves tier-1 off and the cascade falls to HTTP.
+    if _EMBED_GGUF_PATH is None and _EMBED_GGUF_AUTODETECT:
+        found = discover_bge_m3_gguf()
+        if found:
+            _EMBED_GGUF_PATH = found
+            logger.info("bge-m3 GGUF auto-detected for tier-1: %s", found)
+    if _EMBED_GGUF_PATH is None:
         return None
     if not hasattr(config.m3_core_rs, "EmbeddedEmbedder"):
         logger.warning(

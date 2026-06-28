@@ -54,6 +54,10 @@ def main() -> int:
         help="Skip the m3_core_rs native-extension status report.",
     )
     parser.add_argument(
+        "--skip-governor", action="store_true",
+        help="Skip the governor scheduled-task migration check.",
+    )
+    parser.add_argument(
         "--fix", action="store_true",
         help="Run quick-repair mode to auto-fix common deployment issues.",
     )
@@ -107,6 +111,13 @@ def main() -> int:
         # this never bumps the exit code — it surfaces a stale wheel that would
         # otherwise degrade silently.
         oxidation_probe.run()
+
+    if not args.skip_governor:
+        from doctor import governor_probe
+        # Report-only: leftover cron/schtasks entries are a suboptimal-but-
+        # supported state, so this never bumps the exit code — it nags and
+        # prints the fix command when the governor should own scheduled work.
+        governor_probe.run()
 
     return exit_code
 

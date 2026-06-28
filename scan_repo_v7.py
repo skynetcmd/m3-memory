@@ -2,8 +2,9 @@
 """Scan orchestrator for the m3-memory security pipeline on LXC 504.
 
 Runs the standard scanner suite (gitleaks / trufflehog / trivy / semgrep /
-bandit / pip-audit / checkov / osv-scanner / safety / scancode / kubescape
-/ ruff / mypy) against a checkout and uploads each report to DefectDojo.
+bandit / pip-audit / checkov / osv-scanner / safety / scancode / shellcheck /
+hadolint / cargo-audit / cargo-deny / syft / grype / zizmor / ruff / mypy)
+against a checkout and uploads each report to DefectDojo.
 
 DefectDojo credential resolution (first non-empty source wins):
   1. DD_TOKEN env var                                  → API Key (direct)
@@ -38,7 +39,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-DD_URL = os.environ.get('DD_URL', 'http://192.0.2.154:8080')
+DD_URL = os.environ.get('DD_URL', 'http://192.0.2.54:8080')
 
 # Scanner talks to DefectDojo over plain HTTP inside the homelab LAN, or HTTPS
 # if deployed differently. Reject any DD_URL scheme outside this whitelist so
@@ -156,11 +157,34 @@ DD_TOKEN = _load_dd_token()
 # Ensure all scanner paths are in the PATH
 os.environ['PATH'] = '/usr/local/bin:/usr/bin:/bin:/root/.local/bin'
 
+# Minimal VALID empty-SARIF fallback. DefectDojo's SARIF importer 500s on a bare
+# `{}` (no version/runs[] keys), so SARIF-emitting scanners must fall back to a
+# well-formed empty document when they find nothing / error. Single-quoted for
+# the bash -c string; the surrounding str.format() needs its own braces escaped,
+# so every literal { is doubled to {{ below.
+EMPTY_SARIF = (
+    '{{"version":"2.1.0",'
+    '"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",'
+    '"runs":[{{"tool":{{"driver":{{"name":"none","rules":[]}}}},"results":[]}}]}}'
+)
+
 SCANNERS = [
     # Core Scanners
-    ('gitleaks',  ['gitleaks', 'detect', '--source', '{repo}', '--report-format', 'json', '--report-path', '{out}/gitleaks.json', '--no-banner', '--exit-code', '0'], 'gitleaks.json', 'Gitleaks Scan'),
+    # gitleaks: secrets + (when present) homelab-PII rules. The PII rules live in
+    # a BOX-ONLY config at /data/bin/gitleaks-pii.toml (NOT in this repo — it
+    # contains the real homelab identifiers it detects, so tracking it would leak
+    # them). That config [extend]s the repo's tracked .gitleaks.toml allowlist; we
+    # substitute __REPO__ into a tmp copy so the extend path resolves to the
+    # scanned repo. If the box config is absent (e.g. a dev workstation), fall
+    # back to the plain default scan — no PII patterns are embedded here.
+    ('gitleaks',  ['bash', '-c', 'PIICFG=/data/bin/gitleaks-pii.toml; if [ -f "$PIICFG" ]; then TMP=$(mktemp); sed "s#__REPO__#{repo}#g" "$PIICFG" > "$TMP"; gitleaks detect --source {repo} --config "$TMP" --report-format json --report-path {out}/gitleaks.json --no-banner --exit-code 0; rm -f "$TMP"; else gitleaks detect --source {repo} --report-format json --report-path {out}/gitleaks.json --no-banner --exit-code 0; fi'], 'gitleaks.json', 'Gitleaks Scan'),
     ('trufflehog',['trufflehog', 'filesystem', '{repo}', '--json', '--no-update', '--only-verified', '--exclude-paths', '/data/bin/trufflehog_exclude.txt'], 'trufflehog.jsonl', 'Trufflehog Scan'),
-    ('trivy',     ['trivy', 'fs', '--scanners', 'vuln,secret,misconfig', '--format', 'json', '--output', '{out}/trivy.json', '{repo}'], 'trivy.json', 'Trivy Scan'),
+    # --secret-config points at the scanned repo's trivy-secret.yaml so its
+    # path-scoped allow-rules apply. The scanner's CWD is /data/repos (not the
+    # repo root), so trivy would otherwise NOT auto-load the repo's config and
+    # would re-flag in-repo secret-scanner fixtures. A missing config path is a
+    # safe no-op (verified). Likewise --config for the main trivy.yaml.
+    ('trivy',     ['trivy', 'fs', '--scanners', 'vuln,secret,misconfig', '--secret-config', '{repo}/trivy-secret.yaml', '--config', '{repo}/trivy.yaml', '--format', 'json', '--output', '{out}/trivy.json', '{repo}'], 'trivy.json', 'Trivy Scan'),
     ('semgrep',   ['semgrep', '--config=p/ci', '--sarif', '--output={out}/semgrep.sarif', '--quiet', '--metrics=off', '{repo}'], 'semgrep.sarif', 'SARIF'),
     ('bandit',    ['bandit', '-r', '{repo}', '-c', '{repo}/pyproject.toml', '-f', 'json', '-o', '{out}/bandit.json', '--exit-zero'], 'bandit.json', 'Bandit Scan'),
     ('pip-audit', ['bash', '-c', 'find {repo} -name requirements*.txt | head -1 | xargs -I R pip-audit -r R -f json -o {out}/pip-audit.json || echo [] > {out}/pip-audit.json'], 'pip-audit.json', 'pip-audit Scan'),
@@ -170,7 +194,34 @@ SCANNERS = [
     ('osv-scanner',['osv-scanner', '-r', '{repo}', '--format', 'json', '--output', '{out}/osv-scanner.json'], 'osv-scanner.json', 'OSV Scan'),
     ('safety',    ['safety', 'check', '-r', '{repo}/requirements.txt', '--json', '--output', '{out}/safety.json'], 'safety.json', 'Safety Scan'),
     ('scancode',  ['scancode', '--json-pp', '{out}/scancode.json', '--license', '--copyright', '--info', '--quiet', '{repo}'], 'scancode.json', 'ScanCode Scan'),
-    ('kubescape', ['kubescape', 'scan', '{repo}', '--format', 'sarif', '--output', '{out}/kubescape.sarif'], 'kubescape.sarif', 'SARIF'),
+
+    # Shell + Dockerfile linting. shellcheck finds quoting/injection/correctness
+    # bugs across the repo's *.sh scripts (install.sh, scan scripts); hadolint
+    # lints Dockerfiles for best-practice + security issues. Both emit SARIF.
+    # Each no-ops cleanly (empty SARIF) when the repo has no matching files, so
+    # they don't error on repos without shell scripts / Dockerfiles.
+    ('shellcheck', ['bash', '-c', 'shf=$(find {repo} -name "*.sh" -not -path "*/.git/*" 2>/dev/null); if [ -n "$shf" ]; then shellcheck -f sarif $shf > {out}/shellcheck.sarif 2>/dev/null; fi; [ -s {out}/shellcheck.sarif ] || echo \'' + EMPTY_SARIF + '\' > {out}/shellcheck.sarif'], 'shellcheck.sarif', 'SARIF'),
+    ('hadolint',   ['bash', '-c', 'df=$(find {repo} -iname "Dockerfile*" -not -path "*/.git/*" 2>/dev/null); if [ -n "$df" ]; then hadolint --format sarif $df > {out}/hadolint.sarif 2>/dev/null; fi; [ -s {out}/hadolint.sarif ] || echo \'' + EMPTY_SARIF + '\' > {out}/hadolint.sarif'], 'hadolint.sarif', 'SARIF'),
+
+    # Rust supply-chain — m3-core-rs is a Cargo workspace; the rest of the suite
+    # scans Python only. cargo-audit reads Cargo.lock against the RustSec
+    # advisory DB; cargo-deny adds license/banned-crate/duplicate checks. Both
+    # need a Cargo.lock (a binary-shipping project SHOULD commit it); they
+    # no-op cleanly (empty report) when absent so Python-only repos don't error.
+    ('cargo-audit', ['bash', '-c', 'if [ -f {repo}/Cargo.lock ]; then cargo-audit audit --file {repo}/Cargo.lock --json > {out}/cargo-audit.json 2>/dev/null || true; else echo "{{}}" > {out}/cargo-audit.json; fi'], 'cargo-audit.json', 'CargoAudit Scan'),
+    ('cargo-deny',  ['bash', '-c', 'if [ -f {repo}/Cargo.toml ]; then (cd {repo} && cargo-deny --format json check advisories bans 2>{out}/cargo-deny.json) || true; else echo "" > {out}/cargo-deny.json; fi'], 'cargo-deny.json', None),
+
+    # SBOM + binary scan — syft builds a CycloneDX SBOM across ALL ecosystems
+    # (Python, Rust, bundled C in the wheels); grype scans it for CVEs. Covers
+    # the shipped artifact contents nothing else sees.
+    ('syft',      ['bash', '-c', 'syft scan dir:{repo} -o cyclonedx-json={out}/sbom.cdx.json -q 2>/dev/null || echo "{{}}" > {out}/sbom.cdx.json'], 'sbom.cdx.json', 'CycloneDX Scan'),
+    ('grype',     ['bash', '-c', 'grype dir:{repo} -o sarif > {out}/grype.sarif 2>/dev/null; [ -s {out}/grype.sarif ] || echo \'' + EMPTY_SARIF + '\' > {out}/grype.sarif'], 'grype.sarif', 'SARIF'),
+
+    # GitHub Actions security — zizmor is purpose-built for CI workflow security
+    # (template injection, unpinned actions, excessive permissions). More
+    # accurate than checkov's GHA heuristics (which false-positive on version
+    # strings). No-ops when the repo has no .github/workflows.
+    ('zizmor',    ['bash', '-c', 'if [ -d {repo}/.github/workflows ]; then zizmor --format sarif {repo}/.github/workflows > {out}/zizmor.sarif 2>/dev/null; fi; [ -s {out}/zizmor.sarif ] || echo \'' + EMPTY_SARIF + '\' > {out}/zizmor.sarif'], 'zizmor.sarif', 'SARIF'),
 
     # Quality Scanners - Mypy now uses repo root + excludes to avoid duplicate module name errors
     ('ruff',      ['ruff', 'check', '--format', 'sarif', '--output-file', '{out}/ruff.sarif', '{repo}/bin', '{repo}/memory', '{repo}/m3_memory'], 'ruff.sarif', 'SARIF'),

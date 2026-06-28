@@ -1,7 +1,11 @@
 FROM node:22-slim
 
 # Install git, C++ build tools (required for OpenClaw's native node-llama-cpp),
-# and runtime utilities requested by the agent
+# and runtime utilities requested by the agent.
+# hadolint ignore=DL3008: this is an example sandbox image; pinning ~15 apt
+# package versions to exact Debian releases would break the build whenever the
+# upstream repo rotates them. Unpinned is the intentional choice for an example.
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git build-essential python3 cmake \
     curl wget iputils-ping jq ffmpeg git-lfs unzip \
