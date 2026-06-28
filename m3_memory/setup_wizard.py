@@ -345,27 +345,44 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         default="both",
     )
 
-    print()
-    print("  Embedder — Project Oxidation native wheel (recommended):")
-    print("    The native in-process embedder (EmbeddedEmbedder) runs BGE-M3")
-    print("    inside the process. With NO GPU it uses a CPU build (still")
-    print("    in-process); with a GPU it auto-detects CUDA / Vulkan / Metal.")
-    print("    Either way it is ~10-85x faster on the embed hot path than the")
-    print("    pure-Python HTTP fallback.")
-    print("    Installing it is a SAFE attempt: if no prebuilt wheel matches")
-    print("    this platform/Python, m3 stays fully functional in pure-Python")
-    print("    (we never auto-compile from source) and prints how to build one.")
-    plan.install_gpu_embedder = _ask_yes_no(
-        "  Install the Project Oxidation native wheel (auto-detects CPU/GPU)?",
-        default=True,
-    )
-    if plan.install_gpu_embedder:
-        # Default OFF — never surprise the user with a multi-minute Rust build.
-        plan.allow_native_source_build = _ask_yes_no(
-            "    If no prebuilt wheel matches, build it from source? "
-            "(needs Rust+cmake+C++; slow)",
-            default=False,
+    # Embedder prompt — only on a FRESH install. On an UPGRADE (the native wheel
+    # is already installed + usable) the decision was already made; re-asking is
+    # noise. Detect via active_embedder_tier()["native"] and keep the embedder
+    # (install step refreshes the wheel) without prompting. The LLM-endpoint
+    # question below is NOT skipped — endpoints legitimately change between runs.
+    _embedder_already_native = False
+    try:
+        from m3_memory.rust_core_install import active_embedder_tier
+        _embedder_already_native = bool(active_embedder_tier().get("native"))
+    except Exception:  # noqa: BLE001 — best-effort; fall through to the prompt
+        _embedder_already_native = False
+
+    if _embedder_already_native:
+        plan.install_gpu_embedder = True  # keep it; install step refreshes the wheel
+        _ok("  Project Oxidation native embedder already installed — keeping it "
+            "(skipping the embedder prompt; this is an upgrade).")
+    else:
+        print()
+        print("  Embedder — Project Oxidation native wheel (recommended):")
+        print("    The native in-process embedder (EmbeddedEmbedder) runs BGE-M3")
+        print("    inside the process. With NO GPU it uses a CPU build (still")
+        print("    in-process); with a GPU it auto-detects CUDA / Vulkan / Metal.")
+        print("    Either way it is ~10-85x faster on the embed hot path than the")
+        print("    pure-Python HTTP fallback.")
+        print("    Installing it is a SAFE attempt: if no prebuilt wheel matches")
+        print("    this platform/Python, m3 stays fully functional in pure-Python")
+        print("    (we never auto-compile from source) and prints how to build one.")
+        plan.install_gpu_embedder = _ask_yes_no(
+            "  Install the Project Oxidation native wheel (auto-detects CPU/GPU)?",
+            default=True,
         )
+        if plan.install_gpu_embedder:
+            # Default OFF — never surprise the user with a multi-minute Rust build.
+            plan.allow_native_source_build = _ask_yes_no(
+                "    If no prebuilt wheel matches, build it from source? "
+                "(needs Rust+cmake+C++; slow)",
+                default=False,
+            )
 
     print()
     print("  Where to store data (recommended: separate folders):")
