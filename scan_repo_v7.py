@@ -38,7 +38,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-DD_URL = os.environ.get('DD_URL', 'http://10.0.0.54:8080')
+DD_URL = os.environ.get('DD_URL', 'http://192.0.2.154:8080')
 
 # Scanner talks to DefectDojo over plain HTTP inside the homelab LAN, or HTTPS
 # if deployed differently. Reject any DD_URL scheme outside this whitelist so

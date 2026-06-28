@@ -18,13 +18,13 @@ import sys
 
 os.environ.setdefault(
     "M3_EMBED_GGUF",
-    r"C:\Users\bhaba\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
+    r"C:\Users\username\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
 )
 # Do NOT set M3_EMBED_FALLBACK_URL — default 127.0.0.1:8082 exercises the
 # real env. If that port isn't listening, the fallback raises ConnectionRefused
 # and the path falls through to M3_EMBED_URL (or returns None).
 
-sys.path.insert(0, r"C:\Users\bhaba\m3-memory\bin")
+sys.path.insert(0, r"C:\Users\username\m3-memory\bin")
 
 from memory_core import (  # noqa: E402
     _embed,
