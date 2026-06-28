@@ -67,6 +67,11 @@ VALID_MEMORY_TYPES = frozenset({
     "task", "code", "config", "observation", "plan", "summary", "snippet",
     "reference", "log", "home", "user_fact", "scratchpad", "auto",
     "knowledge", "event_extraction", "fact_enriched", "chat_log",
+    # Autonomous episodic->semantic abstraction (knowledge-maintenance Phase 4):
+    # a higher-order rollup of many 'observation'/'fact' memories into a stable
+    # belief, distinct from a manual 'summary'. Carries high confidence + links
+    # back to its sources via 'consolidates' edges.
+    "belief",
     # Home-network / infrastructure inventory categories. Pre-existing rows
     # in the store predate the strict catalog (restored 2026-04-17 from the
     # pre-hard-delete archive); widening lets new writes round-trip cleanly.
@@ -1716,6 +1721,27 @@ TOOLS: list[ToolSpec] = [
             "required": ["agent_id"],
         },
         impl=memory_core.agent_get_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="agent_set_trust",
+        description=(
+            "Set an agent's trust score (0.5-1.0, clamped). Trust weights that "
+            "agent's assertions in memory confidence aggregation; 1.0 is neutral. "
+            "Upserts the agent if absent."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id":    {"type": "string", "description": "Unique agent identifier."},
+                "trust_score": {"type": "number", "description": "Trust in [0.5, 1.0]; clamped."},
+            },
+            "required": ["agent_id", "trust_score"],
+        },
+        impl=memory_core.agent_set_trust_impl,
         is_async=False,
         validators=(),
         default_allowed=True,

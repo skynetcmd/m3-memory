@@ -178,7 +178,16 @@ def _find_m3_hermes_plugin_src() -> Optional[Path]:
 class SetupPlan:
     targets: AgentTargets = field(default_factory=AgentTargets)
     capture_mode: str = "both"      # both | stop | precompact | none
-    install_gpu_embedder: bool = False   # CPU fallback always installs; GPU is the choice
+    # Default ON: the native wheel (Project Oxidation) is a SAFE attempt — the
+    # 3-tier install cascade is non-fatal and m3 auto-falls-back to pure-Python
+    # if no wheel matches the platform/Python. We attempt the prebuilt wheel by
+    # default but NEVER auto-compile from source (see install_native_wheel /
+    # --no-native-wheel and allow_native_source_build below).
+    install_gpu_embedder: bool = True
+    # Allow the multi-minute from-source Rust build as the last resort. Default
+    # OFF: a no-matching-wheel host gets the graceful pure-Python fallback +
+    # build-your-own guidance, never a surprise compile.
+    allow_native_source_build: bool = False
     endpoint: Optional[str] = None
     cognitive_loop: bool = False
     # B15: GGUF path discovered + accepted in preflight. Used by the embedder
@@ -187,7 +196,20 @@ class SetupPlan:
     decouple_roots: bool = False
     config_root: Optional[str] = None
     engine_root: Optional[str] = None
+    # FIPS crypto tiers (see docs/FIPS_MODULE_BOUNDARY.md):
+    #   fips_mode   -> M3_FIPS_MODE=1: route crypto through wolfCrypt, fail-closed
+    #                  if absent, accept the open-source build (homelab).
+    #   fips_strict -> M3_FIPS_STRICT=1: additionally require the CMVP-validated
+    #                  wolfCrypt FIPS module (implies fips_mode).
     fips_mode: bool = False
+    fips_strict: bool = False
+    # Offer to build+install open-source wolfSSL during setup when FIPS is on,
+    # so enabling FIPS doesn't leave the user with a fail-closed crash (the flag
+    # requires the lib). Default on in interactive mode.
+    install_wolfssl: bool = False
+    # Replace governor-eligible cron/schtasks entries with the Adaptive
+    # Background Workload Governor. Default on; gated by --no-governor-migration.
+    migrate_to_governor: bool = True
 
 
 # ── prompt phase ──────────────────────────────────────────────────────────────
@@ -210,7 +232,14 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         else:
             plan.targets = detected
         plan.capture_mode = args.capture_mode or "both"
-        plan.install_gpu_embedder = bool(args.install_gpu_embedder)
+        # Native wheel ON by default; --no-native-wheel opts out. The legacy
+        # --install-gpu-embedder flag still forces it on (back-compat) but is
+        # now redundant with the default.
+        plan.install_gpu_embedder = (
+            not bool(getattr(args, "no_native_wheel", False))
+            or bool(args.install_gpu_embedder)
+        )
+        plan.allow_native_source_build = bool(getattr(args, "allow_native_source_build", False))
         plan.decouple_roots = bool(getattr(args, "decouple_roots", False))
         plan.config_root = getattr(args, "config_root", None)
         plan.engine_root = getattr(args, "engine_root", None)
@@ -219,7 +248,13 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
                 plan.config_root = os.path.expanduser("~/.m3/config")
             if not plan.engine_root:
                 plan.engine_root = os.path.expanduser("~/.m3/engine")
-        plan.fips_mode = bool(getattr(args, "fips_mode", False))
+        # FIPS: --fips-strict implies --fips-mode. --install-wolfssl opts into
+        # building the open-source lib unattended.
+        plan.fips_strict = bool(getattr(args, "fips_strict", False))
+        plan.fips_mode = plan.fips_strict or bool(getattr(args, "fips_mode", False))
+        plan.install_wolfssl = bool(getattr(args, "install_wolfssl", False))
+        # Default ON; --no-governor-migration sets args.no_governor_migration=True.
+        plan.migrate_to_governor = not bool(getattr(args, "no_governor_migration", False))
         return plan
 
     # ── interactive prompts ───────────────────────────────────────────────────
@@ -280,22 +315,34 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     )
 
     print()
-    print("  Embedder:")
-    print("    Sovereign baseline: our own BGE-M3 CPU embedder on port 8082.")
-    print("    ALWAYS installs — works with no GPU, no LM Studio, no Ollama,")
-    print("    no internet, no GPU drivers, no model server.")
-    print("    GPU acceleration is opt-in and gives ~10-50x faster embeddings.")
+    print("  Embedder — Project Oxidation native wheel (recommended):")
+    print("    The native in-process embedder (EmbeddedEmbedder) runs BGE-M3")
+    print("    inside the process. With NO GPU it uses a CPU build (still")
+    print("    in-process); with a GPU it auto-detects CUDA / Vulkan / Metal.")
+    print("    Either way it is ~10-85x faster on the embed hot path than the")
+    print("    pure-Python HTTP fallback.")
+    print("    Installing it is a SAFE attempt: if no prebuilt wheel matches")
+    print("    this platform/Python, m3 stays fully functional in pure-Python")
+    print("    (we never auto-compile from source) and prints how to build one.")
     plan.install_gpu_embedder = _ask_yes_no(
-        "  Install GPU-accelerated in-process embedder too? (auto-detects CUDA/Vulkan/Metal)",
-        default=False,
+        "  Install the Project Oxidation native wheel (auto-detects CPU/GPU)?",
+        default=True,
     )
+    if plan.install_gpu_embedder:
+        # Default OFF — never surprise the user with a multi-minute Rust build.
+        plan.allow_native_source_build = _ask_yes_no(
+            "    If no prebuilt wheel matches, build it from source? "
+            "(needs Rust+cmake+C++; slow)",
+            default=False,
+        )
 
     print()
-    print("  Decoupled Directory Scheme:")
-    print("    Configure separate folders for configurations (~/.m3/config) and")
-    print("    databases (~/.m3/engine) to ensure clean security boundaries.")
+    print("  Where to store data (recommended: separate folders):")
+    print("    Keeps your settings (~/.m3/config) and databases (~/.m3/engine) in")
+    print("    tidy, separate folders so they're easy to back up and secure.")
+    print("    (If unsure, just say yes — it's the cleanest layout.)")
     plan.decouple_roots = _ask_yes_no(
-        "  Configure decoupled directories (~/.m3/config and ~/.m3/engine)?",
+        "  Use separate config + database folders (~/.m3/config, ~/.m3/engine)?",
         default=True,
     )
     if plan.decouple_roots:
@@ -305,21 +352,74 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         _say(f"    Engine root: {plan.engine_root}")
 
     print()
-    print("  Strict FIPS 140-3 Security Lock:")
-    print("    Enables strict wolfSSL-based FIPS compliance boundaries for crypto operations.")
-    plan.fips_mode = _ask_yes_no(
-        "  Enable strict FIPS 140-3 compliance execution mode (M3_FIPS_MODE=1)?",
-        default=False,
+    print("  FIPS 140-3 crypto mode (compliance feature — most users: leave OFF):")
+    print("    Only needed if your org requires FIPS-validated cryptography.")
+    print("    off    = default crypto (still uses FIPS-approved algorithms).")
+    print("    mode   = M3_FIPS_MODE: hardened wolfCrypt, fail-closed if absent.")
+    print("             Works with the FREE open-source wolfSSL build.")
+    print("    strict = + M3_FIPS_STRICT: additionally REQUIRE the CMVP-validated")
+    print("             wolfCrypt FIPS module (commercial wolfSSL license).")
+    print("    NOTE: 'mode'/'strict' need the wolfSSL library present, or M3")
+    print("    fails closed on next start. The wizard can build it for you.")
+    fips_choice = _ask_choice(
+        "  FIPS mode?", choices=["off", "mode", "strict"], default="off",
     )
+    plan.fips_mode = fips_choice in ("mode", "strict")
+    plan.fips_strict = fips_choice == "strict"
+    if plan.fips_mode:
+        # Offer to build+install open-source wolfSSL now so FIPS actually works.
+        # (STRICT needs the validated build, which the user obtains commercially;
+        # building the open-source one still lets them validate the plumbing.)
+        if plan.fips_strict:
+            _warn("  strict mode requires the CMVP-validated wolfSSL FIPS module")
+            _warn("  (commercial). The build below produces the OPEN-SOURCE build,")
+            _warn("  which STRICT will refuse — use it to test, then swap in the")
+            _warn("  validated module. See docs/FIPS_MODULE_BOUNDARY.md.")
+        plan.install_wolfssl = _ask_yes_no(
+            "  Build + install open-source wolfSSL now (so FIPS mode works)?",
+            default=True,
+        )
+
+    # Offer to replace legacy scheduled tasks with the governor — but only if
+    # any governor-eligible scheduler entries are actually installed, so we
+    # never prompt about a no-op.
+    found = _detect_governor_eligible_tasks()
+    if found:
+        print()
+        print("  Adaptive Background Workload Governor:")
+        print("    Found existing m3 scheduled task(s) that the governor can take over:")
+        for name in found:
+            print(f"      • {name}")
+        print("    The governor paces these by host load + idle time instead of a rigid")
+        print("    clock — it never competes with you, spreads work over idle time, and")
+        print("    needs no external scheduler. Replacing the cron/schtasks entries")
+        print("    prevents them from double-firing alongside the governor.")
+        plan.migrate_to_governor = _ask_yes_no(
+            "  Replace these scheduled tasks with the governor?", default=True,
+        )
 
     return plan
 
 
+def _detect_governor_eligible_tasks() -> list[str]:
+    """Read-only probe for installed governor-eligible scheduled tasks. Never
+    raises — a missing scheduler tool or import yields an empty list."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        import governor_migration
+        return governor_migration.detect_scheduled_tasks().get("eligible", [])
+    except Exception:
+        return []
+
+
 # ── execution phase ───────────────────────────────────────────────────────────
 
-def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    """Shell out, streaming output. Returns the completed process."""
-    return subprocess.run(cmd, check=check)
+def _run(cmd: list[str], *, check: bool = True, env: "dict | None" = None) -> subprocess.CompletedProcess:
+    """Shell out, streaming output. Returns the completed process.
+
+    `env`, when given, replaces the child's environment (used to strip
+    PYTHONPATH so a stale repo payload can't shadow the installed package)."""
+    return subprocess.run(cmd, check=check, env=env)
 
 
 def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
@@ -429,7 +529,7 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
             _ok(f"  M3_EMBED_GGUF already set: {os.environ['M3_EMBED_GGUF']}")
         else:
             _say(f"  discovered BGE-M3 GGUF: {discovered}")
-            _say("  setting it via M3_EMBED_GGUF gives ~10-100x faster embeds "
+            _say("  setting it via M3_EMBED_GGUF gives ~10-85x faster embeds "
                  "on the hot path (tier-1 in-proc vs tier-2 HTTP)")
             if args.non_interactive or _ask_yes_no(
                 "  Use this GGUF for tier-1 in-proc embedder?", default=True
@@ -810,34 +910,35 @@ def _persist_env_var_mcp(name: str, value: str) -> None:
 
 
 def _discover_bge_m3_gguf() -> str | None:
-    """Mirror of m3-embed-server's discovery cascade (B5). Probes the same
-    paths so the wizard's auto-discovery matches what `m3-embed-server`
-    will pick up at install time.
+    """Discover a bge-m3 GGUF in the canonical model dirs (B5).
 
-    Cross-platform notes:
-      - ~/.lmstudio/models works on macOS and Windows (LM Studio's default
-        on both — Path.home() handles the home-dir resolution per-OS).
-      - ~/Library/Application Support/LM Studio/models is macOS-specific.
-      - ~/.cache/lm-studio/models is LM Studio's Linux default (XDG cache).
-    """
-    home = Path.home()
-    candidate_dirs = [
-        home / ".lmstudio" / "models",
-        home / "Library" / "Application Support" / "LM Studio" / "models",
-        home / ".cache" / "lm-studio" / "models",   # Linux LM Studio default (XDG)
-        home / ".cache" / "m3" / "models",
-        home / ".m3-memory" / "_assets" / "embedder",
-        home / "models",
-    ]
-    for d in candidate_dirs:
-        if not d.is_dir():
-            continue
-        # Walk up to depth 4 looking for *bge[-_]m3*.gguf (case-insensitive)
-        for path in d.rglob("*.gguf"):
-            name = path.name.lower()
-            if "bge-m3" in name or "bge_m3" in name:
-                return str(path)
-    return None
+    Delegates to memory.embed.discover_bge_m3_gguf so the wizard's
+    auto-discovery and the runtime tier-1 auto-detection share ONE bounded
+    implementation (single source of truth — they must not drift). `bin/` is
+    already on sys.path here (added at wizard entry); fall back to the inline
+    cascade only if that import is somehow unavailable."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        from memory.embed import discover_bge_m3_gguf as _discover
+        return _discover()
+    except Exception:  # noqa: BLE001 — keep setup resilient if bin/ isn't importable
+        home = Path.home()
+        candidate_dirs = [
+            home / ".lmstudio" / "models",
+            home / "Library" / "Application Support" / "LM Studio" / "models",
+            home / ".cache" / "lm-studio" / "models",
+            home / ".cache" / "m3" / "models",
+            home / ".m3-memory" / "_assets" / "embedder",
+            home / "models",
+        ]
+        for d in candidate_dirs:
+            if not d.is_dir():
+                continue
+            for path in d.rglob("*.gguf"):
+                name = path.name.lower()
+                if "bge-m3" in name or "bge_m3" in name:
+                    return str(path)
+        return None
 
 
 def _step_install_m3(plan: SetupPlan) -> bool:
@@ -849,6 +950,38 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     this is non-destructive for upgrades and a no-op for fresh installs.
     """
     _say("Step 1/5: fetching m3-memory system payload (install-m3)")
+
+    # Subprocess-time package-shadow guard. The wizard's own preflight checks
+    # `import m3_memory` in THIS process, but the install-m3 CHILD can resolve
+    # a different (stale) m3_memory if the repo payload is ahead of the pipx
+    # venv on the child's sys.path (a PYTHONPATH / cwd-derived entry). Letting
+    # the stale copy run install_m3() --force can rmtree the repo with old
+    # logic (2026-06-08 incident). Two defenses:
+    #   1. Strip PYTHONPATH for the child so the repo payload can't shadow the
+    #      installed package.
+    #   2. Probe the child's resolved m3_memory.__file__ and abort on mismatch.
+    child_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    try:
+        import m3_memory as _wiz_pkg
+        wiz_path = Path(_wiz_pkg.__file__).resolve()
+        probe = subprocess.run(
+            [sys.executable, "-c", "import m3_memory,sys; print(m3_memory.__file__)"],
+            capture_output=True, text=True, env=child_env, timeout=30,
+        )
+        child_path = Path(probe.stdout.strip()).resolve() if probe.stdout.strip() else None
+        if child_path is not None and child_path != wiz_path:
+            _err(
+                "subprocess would load a STALE m3_memory package:\n"
+                f"    wizard uses : {wiz_path}\n"
+                f"    child uses  : {child_path}\n"
+                "  Refusing to run install-m3 with the wrong copy (it could wipe "
+                "the repo with stale logic). Clear PYTHONPATH / stale __pycache__ "
+                "and re-run `m3 setup`."
+            )
+            return False
+    except Exception as e:  # noqa: BLE001 — probe is best-effort; don't block install on it
+        _warn(f"could not verify subprocess package resolution: {e} (continuing)")
+
     cmd = [sys.executable, "-m", "m3_memory.cli", "install-m3",
            "--non-interactive", "--force", "--capture-mode", plan.capture_mode]
     if plan.endpoint:
@@ -856,7 +989,7 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     if plan.cognitive_loop:
         cmd.append("--cognitive-loop")
     try:
-        _run(cmd)
+        _run(cmd, env=child_env)
         _ok("payload installed")
         return True
     except subprocess.CalledProcessError as e:
@@ -935,26 +1068,63 @@ def _step_cpu_sovereign_embedder() -> bool:
         return True  # non-fatal
 
 
-def _step_gpu_embedder() -> bool:
-    """Install the in-process GPU embedder (CUDA / Vulkan / Metal autodetected).
+def _step_gpu_embedder(plan: "SetupPlan") -> bool:
+    """Install the Project Oxidation native in-process embedder.
 
-    Installs the matching prebuilt m3-core-rs wheel from PyPI
-    (``m3-core-rs-<os>-<backend>``); only builds from source (needs a Rust
-    toolchain) when no prebuilt wheel matches this platform/Python. Non-fatal:
-    failure falls back to the CPU embedder.
+    Installs the matching prebuilt m3-core-rs wheel (PyPI, then GitHub
+    Release). With NO GPU this is the CPU build — still the in-process
+    EmbeddedEmbedder, NOT the HTTP fallback. A from-source build is attempted
+    only when the user opted in (plan.allow_native_source_build); otherwise we
+    pass --no-source-fallback so a no-matching-wheel host degrades gracefully
+    to pure-Python instead of triggering a surprise multi-minute compile.
+    Always non-fatal — m3 works either way.
     """
-    _say("Step 3/5: installing GPU-accelerated in-process embedder")
+    _say("Step 3/5: installing Project Oxidation native in-process embedder")
     cmd = [sys.executable, "-m", "m3_memory.cli", "embedder", "install-gpu"]
+    if not plan.allow_native_source_build:
+        cmd.append("--no-source-fallback")
     try:
         _run(cmd)
-        _ok("GPU in-process embedder installed")
+        _ok("Project Oxidation native embedder installed (in-process hot path active)")
         return True
     except subprocess.CalledProcessError as e:
-        _warn(
-            f"GPU embedder install failed (exit {e.returncode}); "
-            "continuing — CPU embedder on port 8082 serves all embeddings."
-        )
+        # rc != 0 here means no prebuilt wheel matched AND source build was
+        # disabled (or failed). Reassure: m3 is fully functional in pure-Python.
+        _warn(f"native wheel not installed (exit {e.returncode}) — that's OK:")
+        try:
+            from m3_memory.rust_core_install import oxidation_fallback_note
+            print(oxidation_fallback_note(indent="    "))
+            print("    To build your own wheel, see docs/BUILD_WHEELS.md or run "
+                  "`m3 embedder install-gpu` with a Rust toolchain installed.")
+        except Exception:  # noqa: BLE001 — reassurance is best-effort
+            print("    m3 stays fully functional via its pure-Python embed path.")
         return True  # non-fatal
+
+
+def _step_install_wolfssl(plan: "SetupPlan") -> bool:
+    """Build + install the open-source wolfSSL so FIPS mode actually works.
+
+    Returns True if a usable wolfSSL is present afterward (so the caller can
+    safely enable M3_FIPS_MODE). Builds from official source via
+    bin/install_wolfssl.py — license-clean, no binary shipped. Non-fatal: a
+    build failure just means we DON'T enable FIPS (and say so), rather than
+    leaving the user with a fail-closed crash.
+    """
+    _say("FIPS: building + installing open-source wolfSSL (from official source)")
+    cmd = [sys.executable, "-m", "m3_memory.cli", "fips", "install-wolfssl"]
+    try:
+        _run(cmd)
+        _ok("wolfSSL installed to ~/.m3/lib — FIPS mode can use it")
+        return True
+    except subprocess.CalledProcessError as e:
+        _warn(f"wolfSSL build failed (exit {e.returncode}).")
+        print("  Install a C toolchain (see docs/FIPS_MODULE_BOUNDARY.md §5), then:")
+        print("    m3 fips install-wolfssl")
+        print("    export M3_FIPS_MODE=1   # (and M3_FIPS_STRICT=1 for the validated module)")
+        return False
+    except FileNotFoundError:
+        _warn("could not invoke the wolfSSL installer; run `m3 fips install-wolfssl` manually.")
+        return False
 
 
 # ── per-agent wiring ──────────────────────────────────────────────────────────
@@ -1107,6 +1277,45 @@ def _step_wire_agents(plan: SetupPlan) -> bool:
     return True
 
 
+def _step_governor_migration(plan: SetupPlan) -> dict:
+    """Replace governor-eligible scheduled tasks with the governor.
+
+    Returns a dict the summary uses to surface results / privileged commands:
+        {"removed": [...], "failed": [...], "privileged_cmds": [...],
+         "not_migratable": [...]}
+    All keys are always present (possibly empty). Never raises — a scheduler
+    tool that isn't present just yields empty results.
+    """
+    result: dict = {"removed": [], "failed": [], "privileged_cmds": [], "not_migratable": []}
+    if not plan.migrate_to_governor:
+        return result
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        import governor_migration as gm
+    except Exception as e:
+        _warn(f"governor migration unavailable: {e}")
+        return result
+
+    detected = gm.detect_scheduled_tasks()
+    eligible = detected.get("eligible", [])
+    result["not_migratable"] = gm.not_migratable_lines()
+    if not eligible:
+        _say("Governor migration: no governor-eligible scheduled tasks found — nothing to replace.")
+        return result
+
+    _say(f"Governor migration: removing {len(eligible)} legacy scheduled task(s) so the governor can take over...")
+    removed, failed = gm.try_remove_scheduled_tasks(eligible)
+    result["removed"] = removed
+    result["failed"] = failed
+    for name in removed:
+        _ok(f"  removed {name}")
+    if failed:
+        for name in failed:
+            _warn(f"  could not remove {name} (insufficient privilege?) — see end-of-run commands")
+        result["privileged_cmds"] = gm.privileged_removal_commands(failed)
+    return result
+
+
 def _step_doctor() -> bool:
     """Final verification."""
     _say("Step 5/5: running doctor")
@@ -1121,7 +1330,7 @@ def _step_doctor() -> bool:
 
 # ── orchestrator ──────────────────────────────────────────────────────────────
 
-def _summary(plan: SetupPlan) -> None:
+def _summary(plan: SetupPlan, governor_result: Optional[dict] = None) -> None:
     """End-of-run summary so the user knows exactly what to do next."""
     print()
     _ok("Setup complete.")
@@ -1153,12 +1362,81 @@ def _summary(plan: SetupPlan) -> None:
             print(f"    export M3_ENGINE_ROOT=\"{plan.engine_root}\"")
         if plan.fips_mode:
             print("    export M3_FIPS_MODE=1")
+            if plan.fips_strict:
+                print("    export M3_FIPS_STRICT=1   # requires the CMVP-validated wolfCrypt")
+            print("    # FIPS needs wolfSSL present (build: m3 fips install-wolfssl).")
+            print("    # Verify + get the SHA-256 to pin: m3 doctor  (crypto section)")
         print()
 
-    print("Quick checks:")
-    print("  m3 doctor           # verify everything")
-    print("  m3 --help           # see every subcommand")
+    # ── governor migration results ─────────────────────────────────────────
+    if governor_result:
+        removed = governor_result.get("removed", [])
+        failed = governor_result.get("failed", [])
+        cmds = governor_result.get("privileged_cmds", [])
+        not_migratable = governor_result.get("not_migratable", [])
+
+        if removed or failed or not_migratable:
+            print("Background Workload Governor:")
+        if removed:
+            print(f"  Migrated to the governor (removed {len(removed)} legacy scheduled task(s)):")
+            for name in removed:
+                print(f"    • {name}")
+        if not_migratable:
+            print("  Left on their schedule (the governor cannot take these over):")
+            for line in not_migratable:
+                print(line)
+        if failed:
+            print()
+            _warn(f"Could not remove {len(failed)} scheduled task(s) — insufficient privilege.")
+            print("  Run these PRIVILEGED, OS-specific commands to remove them cleanly,")
+            print("  then the governor (already active in-process) fully owns that work:")
+            print()
+            if _os_name_for_summary() == "Windows":
+                print("  → Open an ELEVATED (Administrator) PowerShell or Command Prompt and run:")
+            else:
+                print("  → Run in your shell (prefix with sudo only if it's a system/root crontab):")
+            for c in cmds:
+                print(f"      {c}")
+        if removed or failed or not_migratable:
+            print()
+
+    # ── embedder tier (Project Oxidation status) ────────────────────────────
+    try:
+        from m3_memory.rust_core_install import active_embedder_tier
+        tier = active_embedder_tier()
+        print("Embedder (Project Oxidation):")
+        if tier.get("native"):
+            _ok(f"  {tier['summary']}")
+        else:
+            _warn(f"  {tier['summary']}")
+        print()
+    except Exception:  # noqa: BLE001 — summary is best-effort
+        pass
+
+    # ── clear "you're done" closer ──────────────────────────────────────────
+    print("─" * 60)
+    if plan.targets.any():
+        _ok("M3 is installed and live. Restart your agent (above) and your")
+        print("    memory + chatlog start working immediately — nothing else to do.")
+    else:
+        _ok("M3 is installed. No agents were wired — run `m3 setup` again and")
+        print("    pick at least one agent, or add the MCP server by hand.")
     print()
+    print("  Try it:   m3 status      # one-line health check")
+    print("            m3 doctor      # full diagnostics")
+    print("            m3 --help      # every command")
+    print("─" * 60)
+    print()
+
+
+def _os_name_for_summary() -> str:
+    """Thin OS branch for summary phrasing (avoids importing governor_migration
+    just for the OS check)."""
+    if os.name == "nt":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "Darwin"
+    return "Linux"
 
 
 def run_setup(args: argparse.Namespace) -> int:
@@ -1179,7 +1457,12 @@ def run_setup(args: argparse.Namespace) -> int:
     print(f"  agents       : {', '.join(targets) if targets else '(none)'}")
     print(f"  capture mode : {plan.capture_mode}")
     print("  Embedder     : sovereign CPU (BGE-M3 on :8082) — always installed")
-    print(f"  GPU add-on   : {'yes' if plan.install_gpu_embedder else 'no'}")
+    if plan.install_gpu_embedder:
+        src = "prebuilt; source-build if no match" if plan.allow_native_source_build \
+            else "prebuilt only (pure-Python fallback if no match)"
+        print(f"  Oxidation    : native wheel ({src})")
+    else:
+        print("  Oxidation    : skipped (pure-Python embed path)")
     if plan.endpoint:
         print(f"  LLM endpoint : {plan.endpoint}")
     if plan.cognitive_loop:
@@ -1188,21 +1471,43 @@ def run_setup(args: argparse.Namespace) -> int:
     if plan.decouple_roots:
         print(f"    config root: {plan.config_root}")
         print(f"    engine root: {plan.engine_root}")
-    print(f"  strict FIPS  : {'yes' if plan.fips_mode else 'no'}")
+    if plan.fips_strict:
+        print("  FIPS         : strict (M3_FIPS_STRICT — requires validated wolfCrypt)")
+    elif plan.fips_mode:
+        print("  FIPS         : mode (M3_FIPS_MODE — hardened wolfCrypt)")
+    else:
+        print("  FIPS         : off")
+    if plan.fips_mode and plan.install_wolfssl:
+        print("    wolfSSL    : build + install open-source build during setup")
     print()
 
     if not args.non_interactive and not _ask_yes_no("Proceed?", default=True):
         _warn("aborted by user — no changes made")
         return 1
 
-    # Set decoupled paths and FIPS compliance mode in environment so child commands inherit
+    # Set decoupled paths in environment so child commands inherit them.
     if plan.decouple_roots:
         os.environ["M3_CONFIG_ROOT"] = plan.config_root
         os.environ["M3_ENGINE_ROOT"] = plan.engine_root
         os.makedirs(plan.config_root, exist_ok=True)
         os.makedirs(plan.engine_root, exist_ok=True)
+
+    # FIPS: build wolfSSL FIRST (if requested), THEN set the FIPS env vars.
+    # Order matters — setting M3_FIPS_MODE before wolfSSL exists would make every
+    # subsequent step (which imports crypto_provider) fail closed and crash.
+    fips_ready = True
+    if plan.fips_mode and plan.install_wolfssl:
+        fips_ready = _step_install_wolfssl(plan)
     if plan.fips_mode:
-        os.environ["M3_FIPS_MODE"] = "1"
+        if fips_ready:
+            os.environ["M3_FIPS_MODE"] = "1"
+            if plan.fips_strict:
+                os.environ["M3_FIPS_STRICT"] = "1"
+        else:
+            _warn("Not setting M3_FIPS_MODE for this run — wolfSSL is not present,")
+            _warn("so enabling it would fail closed. Install wolfSSL "
+                  "(`m3 fips install-wolfssl`), then export the FIPS vars.")
+            plan.fips_mode = plan.fips_strict = False
 
     # Execute. Step 0 (preflight) and Step 1 (install-m3) can hard-abort.
     if not _step_preflight(plan, args):
@@ -1213,10 +1518,11 @@ def run_setup(args: argparse.Namespace) -> int:
         return 2
     _step_cpu_sovereign_embedder()
     if plan.install_gpu_embedder:
-        _step_gpu_embedder()
+        _step_gpu_embedder(plan)
     _step_wire_agents(plan)
+    governor_result = _step_governor_migration(plan)
     _step_doctor()
-    _summary(plan)
+    _summary(plan, governor_result)
     return 0
 
 
@@ -1250,8 +1556,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument(
         "--install-gpu-embedder", action="store_true",
-        help="Also build and install the GPU-accelerated in-process embedder "
-             "(CUDA / Vulkan / Metal autodetected). Default: CPU fallback only.",
+        help="Force-install the Project Oxidation native in-process embedder "
+             "(CPU/GPU autodetected). Now ON by default — this flag is kept for "
+             "back-compat and is redundant unless paired with a config that "
+             "disabled it.",
+    )
+    parser.add_argument(
+        "--no-native-wheel", action="store_true",
+        help="Do NOT attempt the Project Oxidation native wheel; run pure-Python "
+             "only. m3 stays fully functional but embeds run on the slower HTTP "
+             "fallback path (see docs/BUILD_WHEELS.md).",
+    )
+    parser.add_argument(
+        "--allow-native-source-build", action="store_true",
+        help="If no prebuilt native wheel matches this platform/Python, build it "
+             "from source (needs Rust + cmake + a C++ compiler; multi-minute "
+             "compile). Default: skip the source build and fall back to "
+             "pure-Python.",
     )
     parser.add_argument(
         "--endpoint", default=None,
@@ -1275,6 +1596,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--fips-mode", action="store_true",
-        help="Enable strict M3_FIPS_MODE=1 execution mode and security locks.",
+        help="Enable M3_FIPS_MODE=1 — route crypto through wolfCrypt (hardened, "
+             "fail-closed; accepts the open-source wolfSSL build).",
+    )
+    parser.add_argument(
+        "--fips-strict", action="store_true",
+        help="Enable M3_FIPS_STRICT=1 (implies --fips-mode) — additionally require "
+             "the CMVP-validated wolfCrypt FIPS module (commercial wolfSSL).",
+    )
+    parser.add_argument(
+        "--install-wolfssl", action="store_true",
+        help="When FIPS is enabled, build + install the open-source wolfSSL from "
+             "source during setup so FIPS mode works (avoids a fail-closed crash).",
+    )
+    parser.add_argument(
+        "--no-governor-migration", action="store_true",
+        help="Do NOT replace governor-eligible cron/schtasks entries with the "
+             "Adaptive Background Workload Governor. By default the wizard offers "
+             "to remove legacy scheduled tasks the governor can take over.",
     )
     parser.set_defaults(func=run_setup)

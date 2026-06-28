@@ -265,10 +265,10 @@ This project represents the **M3-v3 Lifecycle**. It is organized into 5 developm
 - [x] Implement Fast-BFS traversal in Rust via `m3-graph` and link to `graph.py` in memory search
 - [x] Implement FTS5 sanitizer in Rust via `m3-fts` and replace python fts parser in `fts.py`
 - [x] Add rayon data-parallel acceleration to `mmr_rerank` and `mmr_rerank_scored` in `m3-vector`
-- [ ] Oxidize the Adaptive Governor cooldown state and user thresholds checks inside `m3-core-py`
-- [ ] Oxidize the incremental directory walk and hash checks of the Filesystem Watcher in `m3-ingest-rs`
-- [ ] Add async batch writing queues in `db.py` to scale concurrent write performance
-- [ ] Rebuild Rust wheel and publish (currently building with `maturin develop --release`)
+- [x] Oxidize the Adaptive Governor cooldown state and user thresholds checks inside `m3-core-py` (crate `m3-governor`, `m3_core_rs.Governor`)
+- [x] Oxidize the incremental directory walk and hash checks of the Filesystem Watcher in `m3-ingest` (`m3_core_rs.fs_walk` / `hash_files`)
+- [~] Add async batch writing queues in `db.py` to scale concurrent write performance — **REVERTED after benchmarking.** An in-process `WriteQueueDaemon` was prototyped and reverted: its 100ms aggregation window only adds latency to the intra-process path (SQLite WAL on the single pooled `_db()` connection already commits 200 rows in ~16ms), and the `database is locked` storm it targeted is a *multi-process* phenomenon an in-process queue cannot coordinate. m3 already handles that case: `PRAGMA busy_timeout=30000` drives lock-retries to zero, and the existing `memory_write_bulk_impl` / `memory_write_batch_impl` batch commits (~50× faster than per-row under contention). See `v3/m3_v3_phase_c_rust_oxidation_plan.md` benchmark note.
+- [~] Rebuild Rust wheel and publish — **local CUDA rebuild + install DONE.** `m3-core-rs-windows-cuda` 3.6.22 (cp314, `backend=cuda`, with `Governor`/`fs_walk`/`hash_files`) built via `build_local.py cuda` and installed into system Python, upgrading from 3.6.6; native governor parity test now runs+passes live. **PyPI/GitHub-release publish still pending user go-ahead** (outward-facing).
 
 ### Milestone 5: Pre-Compiled Infrastructure & CTE Filters 🚧 IN PROGRESS
 - [x] Implement CTE pre-filtering in `bin/memory/search.py` semantic mode (drops to <50 before vector calc)

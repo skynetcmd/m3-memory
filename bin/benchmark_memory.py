@@ -55,7 +55,7 @@ TEST_DATA = [
     {"type": "fact", "title": "Mount Everest Height", "content": "Mount Everest's peak is 8,848.86 meters above sea level."},
     {"type": "decision", "title": "Remote Work Policy", "content": "Team members can work remotely up to 3 days per week starting September."},
     {"type": "config", "title": "Log Level", "content": "Production log level set to WARNING to reduce storage usage."},
-    {"type": "observation", "title": "Battery Drain", "content": "MacBook Pro M3 battery drops 15% faster when running local LLMs."},
+    {"type": "observation", "title": "Battery Drain", "content": "Laptop battery drops 15% faster when running local LLMs."},
     {"type": "task", "title": "Fix Auth Bug", "content": "Fix the race condition in the session refresh token logic."},
     {"type": "code", "title": "Rust Hello World", "content": "fn main() { println!(\"Hello, world!\"); }"},
     {"type": "fact", "title": "First Moon Landing", "content": "Apollo 11 landed on the moon on July 20, 1969, with Neil Armstrong and Buzz Aldrin."},

@@ -33,6 +33,7 @@ class MockLibWolf:
         self.wc_AesGcmEncrypt = MockCFunction(self._wc_AesGcmEncrypt)
         self.wc_AesGcmDecrypt = MockCFunction(self._wc_AesGcmDecrypt)
         self.wc_Sha256Hash = MockCFunction(self._wc_Sha256Hash)
+        self.wc_PBKDF2 = MockCFunction(self._wc_PBKDF2)
         self.PRIVATE_KEY_LOCK = MockCFunction(self._PRIVATE_KEY_LOCK)
         self.PRIVATE_KEY_UNLOCK = MockCFunction(self._PRIVATE_KEY_UNLOCK)
 
@@ -89,6 +90,16 @@ class MockLibWolf:
         in_bytes = ctypes.string_at(in_buf, sz)
         h = hashlib.sha256(in_bytes).digest()
         ctypes.memmove(out_buf, h, 32)
+        return 0
+
+    def _wc_PBKDF2(self, out, passwd, pLen, salt, sLen, iters, kLen, typeH):
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        pw = ctypes.string_at(passwd, pLen)
+        slt = ctypes.string_at(salt, sLen)
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=kLen, salt=slt, iterations=iters)
+        derived = kdf.derive(pw)
+        ctypes.memmove(out, derived, kLen)
         return 0
 
     def _PRIVATE_KEY_LOCK(self):

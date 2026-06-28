@@ -26,6 +26,36 @@
 - **Solution**: Verify the correct embedding model is loaded (e.g., `nomic-embed-text` for Ollama, or check your LM Studio model list).
 - **Solution**: Ensure all devices use the same embedding model and dimension (`EMBED_DIM`, default 1024). Mismatched dimensions break cosine similarity.
 
+## FIPS Crypto Issues
+
+### Crash / RuntimeError: "FIPS mode enabled but … wolfSSL … could not be loaded"
+- **Cause**: `M3_FIPS_MODE` (or `M3_FIPS_STRICT`) is set, but the wolfSSL library
+  isn't installed in a trusted path. FIPS mode **fails closed** by design — it
+  will not silently fall back to non-wolfCrypt crypto.
+- **Solution** — install wolfSSL, then retry:
+  ```bash
+  m3 fips install-wolfssl      # builds open-source wolfSSL into ~/.m3/lib
+  m3 doctor                    # confirm the "crypto (FIPS)" section shows it loaded
+  ```
+- **Or** disable FIPS for now: `unset M3_FIPS_MODE M3_FIPS_STRICT` (Windows:
+  `setx M3_FIPS_MODE ""`).
+
+### "M3_FIPS_STRICT=1 requires the CMVP-validated wolfCrypt FIPS module … OPEN-SOURCE build"
+- **Cause**: `M3_FIPS_STRICT` requires the **commercial, CMVP-validated** wolfCrypt
+  FIPS module, but you have the free **open-source** wolfSSL build.
+- **Solution**: For real FIPS 140-3, obtain the validated module via wolfSSL's
+  commercial channel. For homelab/dev (hardened wolfCrypt without the license),
+  use `M3_FIPS_MODE=1` **without** `M3_FIPS_STRICT`.
+
+### "wolfSSL … failed integrity pin (M3_WOLFSSL_SHA256)"
+- **Cause**: The wolfSSL library's SHA-256 doesn't match your pinned
+  `M3_WOLFSSL_SHA256`. Expected after you intentionally rebuild/upgrade wolfSSL;
+  **investigate** if you didn't.
+- **Solution**: If you trust the new build, re-pin: `m3 doctor` prints the loaded
+  library's SHA-256 — copy it into `M3_WOLFSSL_SHA256`.
+
+See [FIPS_MODULE_BOUNDARY.md](FIPS_MODULE_BOUNDARY.md) for the full model.
+
 ## Scheduled Task Visibility
 
 ### Focus-stealing command prompt windows (Windows)

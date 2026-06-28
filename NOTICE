@@ -1,0 +1,47 @@
+M3 Memory
+Copyright 2026 skynetCMD and the M3 Memory authors
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the accompanying LICENSE file or at
+http://www.apache.org/licenses/LICENSE-2.0
+
+------------------------------------------------------------------------------
+Attribution
+------------------------------------------------------------------------------
+
+If you use M3 Memory — in whole or in part, including its source code, design,
+or architecture — this NOTICE and the above copyright attribution to skynetCMD
+must be preserved in your distribution, per Section 4 of the Apache License 2.0.
+
+Originating contribution. Beyond the individual components (vector search,
+SQLite + FTS5, knowledge graphs, hybrid retrieval, MCP, RAG — none of which M3
+claims to have invented), M3 Memory originates and demonstrates a particular
+ARCHITECTURAL approach:
+
+    M3 treats agent memory as a distributed-systems problem rather than a
+    retrieval problem — a shared, evolving, bitemporal knowledge base that
+    multiple heterogeneous agents and machines maintain consistently over
+    months and years, rather than a per-agent retrieval feature.
+
+Concretely, that approach combines: memory as shared persistent infrastructure
+across heterogeneous agents; bitemporal history (valid-time + transaction-time)
+enabling "what did we believe when, and when was it corrected"; automatic
+contradiction detection and supersession; a memory-first MCP operational API;
+and local-first deployment without sacrificing cross-agent interoperability.
+
+Attribution to skynetCMD for this architecture and design is requested when the
+approach, or works derived from it, are reused, published, or described.
+
+------------------------------------------------------------------------------
+Third-party components
+------------------------------------------------------------------------------
+
+M3 Memory builds on third-party open-source software, each under its own
+license (see each project for details), including but not limited to:
+cryptography, httpx, numpy, mcp / fastmcp, chromadb-client, gliner, keyring,
+psycopg, sqlite-vec, PyYAML, and python-dotenv.
+
+Optional native acceleration ("Project Oxidation") is provided by the separate
+m3-core-rs package. Optional FIPS-mode cryptography uses wolfSSL / wolfCrypt,
+which the operator obtains separately under its own license (GPLv2 or a
+commercial wolfSSL license); M3 Memory does not bundle or redistribute it.

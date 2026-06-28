@@ -4,12 +4,12 @@ Cryptographically signed, tamper-evident audit trail for m3-memory.
 Logs all destructive and mutating operations in a SHA-256 chain-of-trust log.
 """
 
-import hashlib
 import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from crypto_provider import get_sha256
 from m3_sdk import get_m3_root
 
 
@@ -57,9 +57,12 @@ def write_audit_entry(action: str, target_id: str, metadata: Dict[str, Any]) -> 
         "prev_hash": prev_hash
     }
 
-    # 4. Generate canonical string representation (sorted keys, no spaces) for hashing
+    # 4. Generate canonical string representation (sorted keys, no spaces) for hashing.
+    # Route through crypto_provider so the audit chain honors the FIPS boundary
+    # (M3_FIPS_MODE -> wolfCrypt). SHA-256 hex is byte-identical to the prior
+    # hashlib path on the DEFAULT backend, so existing log entries stay verifiable.
     canonical_str = json.dumps(entry, sort_keys=True, separators=(',', ':'))
-    current_hash = hashlib.sha256(canonical_str.encode('utf-8')).hexdigest()
+    current_hash = get_sha256(canonical_str.encode('utf-8'))
 
     # 5. Append signed entry to log
     entry["hash"] = current_hash
@@ -100,7 +103,7 @@ def verify_audit_trail() -> bool:
                     return False
 
                 canonical_str = json.dumps(entry, sort_keys=True, separators=(',', ':'))
-                computed_hash = hashlib.sha256(canonical_str.encode('utf-8')).hexdigest()
+                computed_hash = get_sha256(canonical_str.encode('utf-8'))
 
                 if computed_hash != signature:
                     return False

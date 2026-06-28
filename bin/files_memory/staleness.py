@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .db import _db
-from .identity import file_content_sha256
+from .identity import file_content_sha256, file_content_sha256_batch
 
 logger = logging.getLogger("files_memory.staleness")
 
@@ -203,6 +203,26 @@ def files_staleness_review(
                 logger.debug("walker failed at %s: %s", root, e)
         report.scanned_disk_files = len(disk_paths)
 
+        # 2b. Pre-pass: collect the paths whose mtime bumped so we can hash
+        #     them all at once. Batch hashing routes through the native
+        #     rayon-parallel m3_core_rs.hash_files (GIL released), which is
+        #     far faster than a serial per-file loop on large stale sets.
+        #     Behavior is identical — same digests, same skip-on-error — just
+        #     computed up front instead of inline below.
+        rehash_paths: list[str] = []
+        if rehash:
+            for db_row in db_rows:
+                path = db_row["path_absolute"]
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    continue
+                if _iso_utc(st.st_mtime) > (db_row["date_modified"] or ""):
+                    rehash_paths.append(path)
+        sha_by_path = file_content_sha256_batch(rehash_paths) if rehash_paths else {}
+
         # 3. Classify each db_row.
         for db_row in db_rows:
             path = db_row["path_absolute"]
@@ -231,12 +251,12 @@ def files_staleness_review(
             if not mtime_changed:
                 continue  # not stale, not touched — quiet good.
 
-            # mtime bumped — confirm with sha256.
+            # mtime bumped — confirm with sha256 (precomputed in the batch above).
             if rehash:
-                try:
-                    current_sha = file_content_sha256(path)
-                except OSError as e:
-                    logger.debug("hash failed for %s: %s", path, e)
+                current_sha = sha_by_path.get(path)
+                if current_sha is None:
+                    # Unreadable at hash time — skip, matching the prior
+                    # inline OSError behavior.
                     continue
             else:
                 current_sha = ""

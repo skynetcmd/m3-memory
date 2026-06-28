@@ -15,7 +15,7 @@
 | LM Studio embeddings (host.internal:1234) | ✅ | nomic-embed-text-v1.5, 768-dim |
 | LM Studio inference (host.internal:1234) | ✅ | DeepSeek-R1 70B chat completions — local reasoning |
 | Proxmox web UI (10.x.x.x:8006) | ⚠️ | HTTPS reachable, but requires API auth to do anything useful |
-| UniFi Controller (10.x.x.x:11443) | ⚠️ | HTTPS reachable, requires API auth (site ID: `SITE_ID`) |
+| UniFi Controller (10.x.x.x:11443) | ⚠️ | HTTPS reachable, requires API auth (site ID: `<SITE_ID>`) |
 | /shared filesystem | ✅ | Read-write, visible to all agents |
 | ffmpeg, imagemagick, sqlite3, jq | ✅ | All functional (large media jobs may hit 4GB RAM limit) |
 | Python 3.11.2 | ✅ | Verified; pip available for installs |
@@ -61,7 +61,7 @@ This is the most unique capability I have — direct inference access to a 70B r
 
 13. **Network diagnostics** — DNS lookups, ping sweeps, traceroutes from inside the sandbox. Quick "is X reachable?" checks.
 
-14. **UniFi network monitoring** — With API credentials, pull client lists, bandwidth stats, device inventory. *(Needs: UniFi API credentials. Important: must use site `SITE_ID`, not default — wrong site returns empty results silently.)*
+14. **UniFi network monitoring** — With API credentials, pull client lists, bandwidth stats, device inventory. *(Needs: UniFi API credentials. Important: must use site `<SITE_ID>`, not default — wrong site returns empty results silently.)*
 
 ### 📊 Data & Analysis
 
@@ -112,7 +112,7 @@ This is the most unique capability I have — direct inference access to a 70B r
 
 **Needs one credential:**
 - **#11** Proxmox monitoring (API token)
-- **#14** UniFi monitoring (API credentials + site SITE_ID)
+- **#14** UniFi monitoring (API credentials + site <SITE_ID>)
 
 ---
 

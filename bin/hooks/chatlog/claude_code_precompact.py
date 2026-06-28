@@ -114,10 +114,12 @@ def announce(reason: str, fallback: Path, agent: str, event: str) -> None:
 def _extract_last_json_object(output: str):
     """Return the last balanced top-level {...} JSON object in `output`, or None.
 
-    ingest interleaves log lines with a final pretty-printed JSON object. We scan
-    from the end for the last '}', then walk backwards tracking brace depth
-    (ignoring braces inside strings) to find its matching '{', and json.loads the
-    slice. Handles single-line compact JSON and multi-line pretty JSON alike.
+    ingest interleaves log lines with a final PRETTY-PRINTED JSON object. The old
+    parser scanned for a line *starting with* '{' and json.loads'd that single
+    line — which is just '{' for pretty JSON, so it always raised and reported
+    written=0 (the 1485-bogus-files bug). Scan from the end for the last '}', walk
+    backwards tracking brace depth (ignoring braces in strings), json.loads the
+    slice. Handles compact single-line and multi-line pretty JSON alike.
     """
     end = output.rfind("}")
     if end == -1:
@@ -127,8 +129,6 @@ def _extract_last_json_object(output: str):
     for i in range(end, -1, -1):
         ch = output[i]
         if in_str:
-            # walking backwards: a quote not preceded by an (odd run of) backslash
-            # closes the string. Simplest robust check: count preceding backslashes.
             if ch == '"':
                 bs = 0
                 j = i - 1
@@ -153,7 +153,7 @@ def _extract_last_json_object(output: str):
 
 
 def run_ingest(py: str, ingest: Path, extra_args: list) -> tuple:
-    """Run ingest, return (written, error, returncode)."""
+    """Run ingest, return (written, skipped, failed, error, returncode)."""
     try:
         result = subprocess.run(
             [py, str(ingest)] + extra_args,
@@ -167,13 +167,17 @@ def run_ingest(py: str, ingest: Path, extra_args: list) -> tuple:
         # fallback files over 9 days (2026-06-04..13) while ingest was succeeding.
         # Parse the LAST balanced {...} block from the end of stdout instead.
         result_json = _extract_last_json_object(output)
-        written = int(result_json.get("written", 0)) if result_json else 0
-        error = result_json.get("error") if result_json else "m3 ingest failed or unreachable"
-        return written, error, result.returncode
+        if not result_json:
+            return 0, 0, 1, "m3 ingest failed or unreachable", result.returncode or 1
+        written = int(result_json.get("written", 0))
+        skipped = int(result_json.get("skipped", 0))
+        failed = int(result_json.get("failed", 0))
+        error = result_json.get("error")
+        return written, skipped, failed, error, result.returncode
     except subprocess.TimeoutExpired:
-        return 0, "ingest timed out after 60s — m3 unreachable", 1
+        return 0, 0, 1, "ingest timed out after 60s — m3 unreachable", 1
     except Exception as e:
-        return 0, f"ingest failed: {e}", 1
+        return 0, 0, 1, f"ingest failed: {e}", 1
 
 
 # ── Agent-specific main ───────────────────────────────────────────────────────
@@ -214,16 +218,31 @@ def main() -> int:
     if session_id:
         args += ["--session-id", session_id]
 
-    written, error, rc = run_ingest(py, ingest, args)
+    written, skipped, failed, error, rc = run_ingest(py, ingest, args)
 
-    if written == 0 or error:
-        reason = error if error else "0 rows written — m3 may be down or unreachable"
+    # Success criterion is reachability, NOT written>0. The live MCP server
+    # captures turns itself via chatlog_write; by the time this PreCompact/Stop
+    # hook runs its own ingest, those turns are usually ALREADY in the DB, so
+    # ingest legitimately reports written=0, skipped=N (all deduped). That is a
+    # SUCCESS — the data is safe — not a loss. Treating written==0 as failure
+    # screamed and wrote a bogus ~/.m3/unsaved_chats/ spill file every time the
+    # live capture beat the hook (observed 2026-06-27). A run is a real failure
+    # only when ingest could not reach the DB / genuinely failed: error set,
+    # failed>0, or it parsed/processed nothing at all (written==skipped==0).
+    captured_nothing = (written == 0 and skipped == 0)
+    if error or failed > 0 or captured_nothing:
+        if error:
+            reason = error
+        elif failed > 0:
+            reason = f"{failed} turn(s) failed to write — m3 may be degraded"
+        else:
+            reason = "0 rows seen — transcript empty or m3 unreachable"
         fallback = write_fallback(transcript, session_id, AGENT, event_name, variant, reason)
         scream(reason, fallback, AGENT, event_name)
         announce(reason, fallback, AGENT, event_name)
-        # Force non-zero even if ingest exited 0: a 0-rows "success" is the exact
-        # silent-failure the harness would otherwise swallow. Non-zero makes the
-        # harness surface the hook, complementing the stdout systemMessage.
+        # Force non-zero even if ingest exited 0: a genuine capture failure is the
+        # exact silent-failure the harness would otherwise swallow. Non-zero makes
+        # the harness surface the hook, complementing the stdout systemMessage.
         return rc if rc != 0 else 1
 
     return rc

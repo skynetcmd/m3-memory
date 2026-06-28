@@ -68,17 +68,44 @@ def run() -> int:
     print(f"  status   : installed (version {version})")
     print(f"  functions: {len(present)}/{len(_EXPECTED)} expected native paths present")
 
-    if not missing:
+    # Version staleness — independent of function presence. A wheel can expose
+    # every expected function yet still be an OLD build (carrying bugs already
+    # fixed in a newer release). Compare the installed __version__ against the
+    # version the installer targets. Best-effort: an unknown/unparseable version
+    # is reported but not treated as definitively stale.
+    version_stale = False
+    try:
+        from m3_memory.rust_core_install import (
+            M3_CORE_RS_VERSION,
+            _parse_version,
+        )
+        if version and version != "unknown":
+            if _parse_version(version) < _parse_version(M3_CORE_RS_VERSION):
+                version_stale = True
+                print(f"  version  : STALE — installed {version} < expected "
+                      f"{M3_CORE_RS_VERSION}")
+        else:
+            print("  version  : installed wheel does not report a version "
+                  "(cannot confirm currency)")
+    except Exception as e:  # noqa: BLE001 — probe must never crash the doctor
+        logger.debug("version-staleness check skipped: %s", e)
+
+    if not missing and not version_stale:
         print("  result   : current — all expected native paths active")
         return 0
 
     # Present-but-stale: the wheel is old relative to the Python code's
-    # expectations. Loud, actionable, but non-fatal.
-    print("  result   : STALE — installed wheel is missing expected functions:")
-    for name, why in missing:
-        print(f"             - {name}: {why}")
-    print("  impact   : those paths silently use the slower Python fallback;")
+    # expectations (missing functions) and/or behind the target version. Loud,
+    # actionable, but non-fatal.
+    print("  result   : STALE — reinstall recommended")
+    if missing:
+        print("             missing expected functions:")
+        for name, why in missing:
+            print(f"             - {name}: {why}")
+    if version_stale:
+        print(f"             installed version {version} is behind the target "
+              f"{M3_CORE_RS_VERSION}")
+    print("  impact   : stale paths silently use the slower Python fallback;")
     print("             a stale wheel can also carry bugs already fixed in source.")
-    print("  fix      : rebuild/reinstall m3_core_rs from the current m3-core-rs")
-    print("             (e.g. reinstall the matching wheel or `maturin develop`).")
+    print("  fix      : `m3 embedder install-gpu` (reinstalls the current wheel)")
     return 0

@@ -1,8 +1,8 @@
 ---
 tool: bin/temporal_utils.py
-sha1: 44902296f508
-mtime_utc: 2026-06-02T06:00:31.725243+00:00
-generated_utc: 2026-06-12T20:00:05.555769+00:00
+sha1: cd7664aacc1a
+mtime_utc: 2026-06-27T06:53:36.450867+00:00
+generated_utc: 2026-06-27T23:22:27.894443+00:00
 private: false
 ---
 

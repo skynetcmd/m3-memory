@@ -85,6 +85,38 @@ def test_reports_stale_when_functions_missing(monkeypatch):
     assert "compile_fts_query" in out
 
 
+def test_reports_version_stale_when_functions_present_but_old(monkeypatch):
+    """The new capability: all expected functions present, but the wheel version
+    is BEHIND the target — still flagged STALE (a current function set doesn't
+    prove a current build)."""
+    from m3_memory.rust_core_install import M3_CORE_RS_VERSION  # noqa: F401
+    fake = SimpleNamespace(__version__="0.0.1")  # far below any real target
+    for name, _why in oxidation_probe._EXPECTED:
+        setattr(fake, name, lambda *a, **k: None)
+    _set_rs(monkeypatch, fake)
+
+    rc, out = _run_capture()
+    assert rc == 0
+    assert "STALE" in out
+    assert "behind the target" in out or "< expected" in out
+
+
+def test_unknown_version_is_not_falsely_stale(monkeypatch):
+    """A wheel that exposes every function but reports no version must NOT be
+    declared version-stale (we can't prove it's old) — only noted."""
+    fake = SimpleNamespace()  # no __version__
+    for name, _why in oxidation_probe._EXPECTED:
+        setattr(fake, name, lambda *a, **k: None)
+    _set_rs(monkeypatch, fake)
+
+    rc, out = _run_capture()
+    assert rc == 0
+    # All functions present + unknown version → reported current (not STALE),
+    # but the "does not report a version" note appears.
+    assert "does not report a version" in out
+    assert "STALE" not in out
+
+
 def test_never_raises_on_bad_config(monkeypatch):
     # Even if m3_core_rs is a hostile object, the probe must not crash the doctor.
     class Boom:

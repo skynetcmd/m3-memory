@@ -16,7 +16,9 @@
 #   --endpoint URL                               pin LLM_ENDPOINTS_CSV
 #   --skip-prereqs                               assume pipx/git/sqlite3 already present
 #   --no-setup                                   stop after pipx install (skip the wizard)
-#   --install-gpu-embedder                       also build the in-process GPU embedder (CUDA/Vulkan/Metal)
+#   --no-native-wheel                            skip the Project Oxidation native wheel (pure-Python only)
+#   --allow-native-source-build                  if no prebuilt wheel matches, build from source (slow)
+#   --install-gpu-embedder                       (back-compat) force the native wheel on; now the default
 
 set -euo pipefail
 
@@ -24,15 +26,21 @@ CAPTURE_MODE="both"
 ENDPOINT=""
 SKIP_PREREQS=0
 RUN_SETUP=1
-INSTALL_GPU_EMBEDDER=0
+# Project Oxidation native wheel is attempted BY DEFAULT — it's a safe attempt
+# (m3 stays fully functional in pure-Python if no wheel matches). Source build
+# is NOT attempted unless explicitly opted in.
+NO_NATIVE_WHEEL=0
+ALLOW_NATIVE_SOURCE_BUILD=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --capture-mode)         CAPTURE_MODE="$2"; shift 2 ;;
-        --endpoint)             ENDPOINT="$2"; shift 2 ;;
-        --skip-prereqs)         SKIP_PREREQS=1; shift ;;
-        --no-setup)             RUN_SETUP=0; shift ;;
-        --install-gpu-embedder) INSTALL_GPU_EMBEDDER=1; shift ;;
+        --capture-mode)               CAPTURE_MODE="$2"; shift 2 ;;
+        --endpoint)                   ENDPOINT="$2"; shift 2 ;;
+        --skip-prereqs)               SKIP_PREREQS=1; shift ;;
+        --no-setup)                   RUN_SETUP=0; shift ;;
+        --no-native-wheel)            NO_NATIVE_WHEEL=1; shift ;;
+        --allow-native-source-build)  ALLOW_NATIVE_SOURCE_BUILD=1; shift ;;
+        --install-gpu-embedder)       NO_NATIVE_WHEEL=0; shift ;;
         -h|--help)
             # Self-contained heredoc, not `sed "$0"`: when the script is run
             # via `curl ... | bash`, $0 is "bash" and there is no file to read.
@@ -54,7 +62,9 @@ Flags:
   --endpoint URL                               pin LLM_ENDPOINTS_CSV
   --skip-prereqs                               assume pipx/git/sqlite3 already present
   --no-setup                                   stop after pipx install (skip the wizard)
-  --install-gpu-embedder                       also build the in-process GPU embedder (CUDA/Vulkan/Metal)
+  --no-native-wheel                            skip the Project Oxidation native wheel (pure-Python only)
+  --allow-native-source-build                  if no prebuilt wheel matches, build from source (slow)
+  --install-gpu-embedder                       (back-compat) force the native wheel on; now the default
 USAGE
             exit 0
             ;;
@@ -294,8 +304,13 @@ SETUP_ARGS=(--non-interactive --capture-mode "$CAPTURE_MODE")
 if [[ -n "$ENDPOINT" ]]; then
     SETUP_ARGS+=(--endpoint "$ENDPOINT")
 fi
-if [[ $INSTALL_GPU_EMBEDDER -eq 1 ]]; then
-    SETUP_ARGS+=(--install-gpu-embedder)
+# The native wheel is attempted by default in the wizard; only pass a flag to
+# OPT OUT, or to enable the (slow) source-build fallback.
+if [[ $NO_NATIVE_WHEEL -eq 1 ]]; then
+    SETUP_ARGS+=(--no-native-wheel)
+fi
+if [[ $ALLOW_NATIVE_SOURCE_BUILD -eq 1 ]]; then
+    SETUP_ARGS+=(--allow-native-source-build)
 fi
 
 say "Running: m3 setup ${SETUP_ARGS[*]}"
@@ -308,6 +323,9 @@ cat <<EOF
 Next steps:
   1. Open a new terminal (or run: exec \$SHELL -l) so PATH picks up ~/.local/bin.
   2. Restart any agent (Claude Code, Gemini CLI, OpenCode) so it picks up the m3 MCP server.
-  3. (Optional) Add GPU acceleration to the embedder: m3 embedder install-gpu
+  3. Run 'm3 doctor' — the "embedder (Project Oxidation)" line shows whether the
+     native in-process hot path is active or you're on the pure-Python fallback.
+     If no prebuilt wheel matched your platform, m3 still works fully in
+     pure-Python; to build your own wheel see docs/BUILD_WHEELS.md.
   4. Re-run this script anytime to upgrade and re-verify.
 EOF

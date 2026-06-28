@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 118 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 119 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
@@ -43,6 +43,7 @@ This document provides a comprehensive inventory of all 118 MCP tools available 
 | `agent_list` | Agent Registry & Notifications | List registered agents, optionally filtered by status and/or role. |
 | `agent_offline` | Agent Registry & Notifications | Mark an agent as offline. |
 | `agent_register` | Agent Registry & Notifications | Register an agent (UPSERT). Sets status=active, last_seen=now. |
+| `agent_set_trust` | Agent Registry & Notifications | Set an agent's trust score (0.5-1.0, clamped). Trust weights that agent's assertions in memory confidence aggregation; 1.0 is neutral. Upserts the agent if absent. |
 | `notifications_ack` | Agent Registry & Notifications | Mark one notification as read. |
 | `notifications_ack_all` | Agent Registry & Notifications | Bulk-ack all unread notifications for an agent. Returns count acked. |
 | `notifications_poll` | Agent Registry & Notifications | List notifications addressed to agent_id, newest first. |
@@ -375,7 +376,7 @@ Creates a MemoryItem and optionally embeds it for semantic search. Contradiction
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
-| `type` | `string` | Yes | Memory type. One of: auto, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
+| `type` | `string` | Yes | Memory type. One of: auto, belief, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
 | `content` | `string` | Yes | Memory body (max 50000 chars). | `-` |
 | `title` | `string` | No | Short title. | `` |
 | `metadata` | `string` | No | JSON-encoded metadata object. | `{}` |
@@ -408,7 +409,7 @@ Write a memory whose content is read from a file on disk. Use this when the memo
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `path` | `string` | Yes | Absolute path to a UTF-8 text file on the MCP server host. The file's contents become the memory `content`. | `-` |
-| `type` | `string` | Yes | Memory type. One of: auto, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
+| `type` | `string` | Yes | Memory type. One of: auto, belief, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
 | `title` | `string` | No | Short title. | `` |
 | `metadata` | `string` | No | JSON-encoded metadata object. | `{}` |
 | `agent_id` | `string` | No | Owning agent id. Injected by the orchestrator. | `` |
@@ -798,6 +799,20 @@ Register an agent (UPSERT). Sets status=active, last_seen=now.
 | `role` | `string` | No | Agent role or function. | `` |
 | `capabilities` | `array` | No | List of capabilities. | `[]` |
 | `metadata` | `object` | No | Free-form metadata. | `{}` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+
+### `agent_set_trust`
+
+Set an agent's trust score (0.5-1.0, clamped). Trust weights that agent's assertions in memory confidence aggregation; 1.0 is neutral. Upserts the agent if absent.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `agent_id` | `string` | Yes | Unique agent identifier. | `-` |
+| `trust_score` | `number` | Yes | Trust in [0.5, 1.0]; clamped. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 
 ### `notifications_ack`

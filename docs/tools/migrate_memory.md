@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_memory.py
-sha1: 0cdc4e377a62
-mtime_utc: 2026-06-04T03:35:31.177685+00:00
-generated_utc: 2026-06-12T20:00:05.387803+00:00
+sha1: 2673d1039bc6
+mtime_utc: 2026-06-23T11:26:28.008564+00:00
+generated_utc: 2026-06-26T20:00:04.100891+00:00
 private: false
 ---
 
@@ -41,7 +41,7 @@ transaction already committed.
 
 ## Entry points
 
-- `def main()` (line 951)
+- `def main()` (line 963)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -96,9 +96,9 @@ transaction already committed.
 - `sqlite3.connect()  → `target.db_path`` (line 404)
 - `sqlite3.connect()  → `target.db_path`` (line 602)
 - `sqlite3.connect()  → `target.db_path`` (line 670)
-- `sqlite3.connect()  → `target.db_path`` (line 747)
-- `sqlite3.connect()  → `target.db_path`` (line 809)
-- `sqlite3.connect()  → `target.db_path`` (line 849)
+- `sqlite3.connect()  → `target.db_path`` (line 753)
+- `sqlite3.connect()  → `target.db_path`` (line 821)
+- `sqlite3.connect()  → `target.db_path`` (line 861)
 
 
 ---

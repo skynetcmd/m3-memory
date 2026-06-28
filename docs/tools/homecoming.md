@@ -1,8 +1,8 @@
 ---
 tool: bin/homecoming.py
-sha1: 284f628ef211
-mtime_utc: 2026-05-31T16:08:17.247433+00:00
-generated_utc: 2026-05-31T18:42:52.733344+00:00
+sha1: c2fae488321c
+mtime_utc: 2026-06-27T20:22:35.989938+00:00
+generated_utc: 2026-06-27T23:22:27.234794+00:00
 private: false
 ---
 
@@ -22,7 +22,7 @@ and MOVES configuration files. It does NOT modify system-wide tool settings
 
 ## Entry points
 
-- `def main()` (line 91)
+- `def main()` (line 92)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -49,8 +49,8 @@ _(none detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `dst`` (line 82)
-- `sqlite3.connect()  → `src`` (line 81)
+- `sqlite3.connect()  → `dst`` (line 83)
+- `sqlite3.connect()  → `src`` (line 82)
 
 
 ---
@@ -64,6 +64,7 @@ _(only stdlib)_
 ## File dependencies (repo paths referenced)
 
 - `.db`
+- `agent_chatlog.db`
 - `memory/.chatlog_config.json`
 - `memory/.chatlog_ingest_cursor.json`
 - `memory/.chatlog_state.json`

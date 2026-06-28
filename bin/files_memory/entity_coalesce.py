@@ -190,7 +190,7 @@ def _now() -> str:
 
 def _embed_tier_info(model_seen: Optional[str]) -> dict:
     """Report which embed tier served the run + a §8 perf hint. The in-process
-    tier-1 (~5× faster) records a `*.gguf` model name; the HTTP fallback records
+    tier-1 (~10-85× faster) records a `*.gguf` model name; the HTTP fallback records
     a plain model id (e.g. `text-embedding-bge-m3`). We key off the RECORDED
     model, not M3_EMBED_GGUF — the cascade can resolve the GGUF tier without that
     env var set, so an env-var check wrongly nagged about a slow run that was in
@@ -200,7 +200,7 @@ def _embed_tier_info(model_seen: Optional[str]) -> dict:
     # Only nag when an HTTP-tier model actually served work — not on dry-runs.
     if model_seen is not None and not in_process:
         info["hint"] = ("embedding used the HTTP fallback tier; a local BGE-M3 "
-                        "GGUF serves the ~5x-faster in-process tier (§8).")
+                        "GGUF serves the ~10-85x-faster in-process tier (§8).")
     return info
 
 

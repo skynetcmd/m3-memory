@@ -164,31 +164,53 @@ m3 doctor                # all subsystems healthy?
 
 ---
 
-## FIPS-ready deployment (hardened)
+## FIPS 140-3 deployment-ready (hardened)
 
-For environments requiring **FIPS 140-3** compliance, M3-Memory can be
-configured to use a validated cryptographic module (e.g. wolfSSL/wolfCrypt).
+For environments requiring FIPS-approved cryptography, M3 routes all crypto
+through **wolfCrypt** when configured. M3 is *deployment-ready*, **not** itself
+a validated module — see [`FIPS_MODULE_BOUNDARY.md`](FIPS_MODULE_BOUNDARY.md) for
+the authoritative boundary, the two tiers, and limitations.
 
-1. **Enable FIPS mode:**
+> **Order matters:** FIPS mode **fails closed** — if you set the env vars before
+> wolfSSL is present, M3 will refuse to start. Install wolfSSL FIRST.
+
+1. **Install wolfSSL** (M3 ships no binary — it builds from official source):
 
    ```bash
-   export M3_CRYPTO_BACKEND=WOLFSSL
-   export M3_FIPS_MODE=1
+   m3 fips install-wolfssl        # clones + builds + installs to ~/.m3/lib
    ```
 
-2. **Hardened TLS:**
+   (Or `m3 setup` and choose a FIPS tier — it offers to build wolfSSL for you.)
 
-   In FIPS mode, M3 restricts all internal communication (e.g. to the
-   embedder on port 8082) to **TLS 1.3 only** with FIPS-approved
-   ciphersuites.
+2. **Choose a tier and enable it:**
 
-3. **Key access management:**
+   ```bash
+   # Tier 1 — hardened wolfCrypt, FREE open-source build (homelab/dev):
+   export M3_FIPS_MODE=1
 
-   The secrets vault automatically transitions to **AES-256-GCM** and
-   enforces mandatory `PRIVATE_KEY_UNLOCK` / `LOCK` sequences.
+   # Tier 2 — also REQUIRE the CMVP-validated wolfCrypt FIPS module
+   #          (commercial wolfSSL FIPS license):
+   export M3_FIPS_STRICT=1        # implies M3_FIPS_MODE
+   ```
 
-See the [FIPS Compliance Guide](FIPS_COMPLIANCE.md) for deep technical
-details and control mappings.
+3. **Verify + self-pin:**
+
+   ```bash
+   m3 doctor                       # crypto (FIPS) section: backend, tier, lib path
+   # doctor prints the loaded library's SHA-256 — pin YOUR trusted build:
+   export M3_WOLFSSL_SHA256=<that hash>
+   ```
+
+   M3 loads wolfSSL only from trusted absolute paths it controls (`M3_WOLFSSL_LIB`
+   > `~/.m3/lib` > system dirs) — never the CWD/`%PATH%` — to resist DLL-hijack.
+
+In FIPS mode, internal communication (e.g. to the embedder on port 8082) is
+restricted to **TLS 1.3** with FIPS-approved ciphersuites, and the secrets vault
+uses **AES-256-GCM**.
+
+See the [FIPS Module Boundary](FIPS_MODULE_BOUNDARY.md) and
+[FIPS Compliance Guide](FIPS_COMPLIANCE.md) for deep technical details and
+control mappings.
 
 ---
 

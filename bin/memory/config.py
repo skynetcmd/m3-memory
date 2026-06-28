@@ -181,6 +181,36 @@ SHORT_TURN_THRESHOLD: int = int(os.environ.get("SHORT_TURN_THRESHOLD", "20"))
 TITLE_MATCH_BOOST: float = float(os.environ.get("TITLE_MATCH_BOOST", "0.15"))
 IMPORTANCE_WEIGHT: float = float(os.environ.get("IMPORTANCE_WEIGHT", "0.15"))
 
+# ── Confidence & trust (knowledge-maintenance) ───────────────────────────────
+# All default OFF / neutral: nothing about retrieval changes until explicitly
+# enabled. See docs/plans/KNOWLEDGE_MAINTENANCE_PLAN.md.
+#
+# M3_CONFIDENCE_RANKING: when '1', blend a memory's stored `confidence` into the
+# retrieval score as an additive term (like IMPORTANCE_WEIGHT). Default '0' so
+# flag-off ranking stays byte-identical to today.
+CONFIDENCE_RANKING: bool = os.environ.get("M3_CONFIDENCE_RANKING", "0") == "1"
+# Weight of the confidence term when CONFIDENCE_RANKING is on.
+CONFIDENCE_WEIGHT: float = float(os.environ.get("M3_CONFIDENCE_WEIGHT", "0.10"))
+# Which confidence representation drives ranking: 'transparent' (the stored,
+# user-facing aggregate) or 'bayesian' (the Beta posterior mean kept alongside,
+# for experiments). The displayed `confidence` is always the transparent value.
+CONFIDENCE_MODEL: str = os.environ.get("M3_CONFIDENCE_MODEL", "transparent").lower()
+# When '1', allow the daily maintenance pass to nudge agent trust from observed
+# contradiction/corroboration. Default '0' — explicit agent_set_trust only.
+TRUST_AUTOTUNE: bool = os.environ.get("M3_TRUST_AUTOTUNE", "0") == "1"
+# When '1', allow the background job to run autonomous episodic->semantic
+# belief consolidation. Default '0' — manual/curator-triggered only.
+CONSOLIDATION_AUTO: bool = os.environ.get("M3_CONSOLIDATION_AUTO", "0") == "1"
+# When '1', a near-identical re-write (cosine >= CORROBORATION_THRESHOLD AND same
+# content) records a `corroborates` event + bumps the existing memory's
+# corroboration_count/confidence instead of creating an orphan duplicate row.
+# Default '0' — write behavior is unchanged until explicitly enabled.
+CORROBORATION: bool = os.environ.get("M3_CORROBORATION", "0") == "1"
+# Cosine floor for treating a high-similarity, same-content write as
+# corroboration (vs. CONTRADICTION_THRESHOLD for different-content). Higher than
+# the contradiction threshold so only true near-duplicates corroborate.
+CORROBORATION_THRESHOLD: float = float(os.environ.get("CORROBORATION_THRESHOLD", "0.95"))
+
 # Trim-by-elbow (MMR post-filter) params. Pre-Phase-7+8 the safety knobs
 # defaulted to 20/8/0.05 (scale-aware, prevented the "1-result collapse"
 # at large pools); the refactor lowered them to 5/3/0.08, which made the

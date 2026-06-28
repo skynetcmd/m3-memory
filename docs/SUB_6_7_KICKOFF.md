@@ -74,7 +74,7 @@ Pause and ask the user if any of these fire:
 `origin` (public `skynetcmd/m3-memory`) AND `private-m3-memory-rs` (private mirror) both receive every commit on `main`. Before each push:
 
 ```
-git diff origin/main..HEAD -- '**' | grep -iE 'C:/Users|/Users/[a-z]+|username|10\.[0-9]+\.[0-9]+|192\.168|sk-ant-|AIza|lme-m/v3|lme_m\.db|smoke-142'
+git diff origin/main..HEAD -- '**' | grep -iE 'C:/Users|/Users/[a-z]+|/home/[a-z]+|10\.[0-9]+\.[0-9]+|192\.168|sk-ant-|AIza|lme-m/v3|lme_m\.db|smoke-142'
 ```
 
 Non-empty = stop and scrub before pushing.

@@ -30,10 +30,10 @@ from typing import Optional
 from m3_memory._platform import os_name as _os_name
 
 # Release this m3-memory build expects. Bump in lockstep with the m3-core-rs
-# release tag (v2026.06.22 == 3.6.22). Used as the version pin for both the
+# release tag (v2026.06.27 == 3.6.27). Used as the version pin for both the
 # prebuilt PyPI install and the source-build fallback.
-M3_CORE_RS_VERSION = "3.6.22"
-M3_CORE_RS_GIT_TAG = "v2026.06.22"
+M3_CORE_RS_VERSION = "3.6.27"
+M3_CORE_RS_GIT_TAG = "v2026.06.27"
 
 # Cargo features per backend, mirroring build_wheel.py's _MATRIX (the source
 # fallback passes these to maturin via pip's config-settings).
@@ -54,6 +54,149 @@ _VALID: set[tuple[str, str]] = {
     ("linux", "cpu"), ("linux", "cuda"), ("linux", "vulkan"),
     ("macos", "metal"),
 }
+
+
+# ── canonical Project Oxidation speed framing ────────────────────────────────
+# Single source of truth for every user-facing message about the native wheel.
+# The numbers and framing are deliberate (see project memory, 2026-06-27):
+#
+#   * OXIDATION_SPEEDUP_X — the RELATIVE multiplier (native in-process
+#     EmbeddedEmbedder vs the no-wheel HTTP fallback). Authoritative; the one
+#     figure tests may assert.
+#   * The ABSOLUTE latencies (~10-50 ms with; ~0.3-2.5 s without) are
+#     ILLUSTRATIVE ONLY — they always carry a "varies by host" qualifier and
+#     must NEVER be asserted as fact in a test (no measured per-embed
+#     benchmark exists yet).
+#
+# The three states this distinguishes:
+#   1. GPU wheel  -> in-process EmbeddedEmbedder (CUDA/Metal/Vulkan) — fastest.
+#   2. CPU wheel  -> in-process EmbeddedEmbedder (CPU llama.cpp) — STILL the
+#      oxidized hot path; "no GPU" does NOT mean "no in-process embedder".
+#   3. NO wheel   -> HTTP fallback (:8082 / primary). The only state the
+#      reassurance below describes.
+OXIDATION_SPEEDUP_X = "~10-85x"
+_OXIDATION_WITH_MS = "~10-50 ms"
+_OXIDATION_WITHOUT_S = "~0.3-2.5 s"
+
+
+def oxidation_fallback_note(*, indent: str = "") -> str:
+    """Canonical reassurance shown whenever the native wheel is absent.
+
+    Reassures that m3 is fully functional as a pure-Python solution and that
+    only Project Oxidation's hot-path optimizations are missing, so speed is
+    not maximized — but it remains very usable. Stated both ways: the typical
+    with-Oxidation latency and the (illustrative) without-Oxidation latency in
+    seconds. ``indent`` is prepended to every line so callers can nest it under
+    their own output.
+    """
+    lines = [
+        "m3 is fully functional as a pure-Python solution — your memories,",
+        "search, chatlog, and sync all work. Only Project Oxidation's hot-path",
+        "optimizations are not employed, so speed is not maximized.",
+        "",
+        "  With Project Oxidation (the native in-process embedder) a typical",
+        f"  embed completes in {_OXIDATION_WITH_MS}. Without it, the same embed runs",
+        f"  on the HTTP fallback path {OXIDATION_SPEEDUP_X} longer — roughly",
+        f"  {_OXIDATION_WITHOUT_S} each (illustrative; varies by host). Slower, but",
+        "  still very usable.",
+    ]
+    return "\n".join(f"{indent}{ln}".rstrip() for ln in lines)
+
+
+def active_embedder_tier() -> dict:
+    """Report which embedder tier is actually live on this host.
+
+    Returns a dict: {"native": bool, "backend": str|None, "version": str|None,
+    "summary": str}. Distinguishes the three states (GPU wheel / CPU wheel /
+    no wheel) by probing whether ``m3_core_rs`` imports and exposes
+    ``EmbeddedEmbedder``. Best-effort and import-safe — never raises; a host
+    without the wheel just reports the pure-Python fallback state.
+
+    Note: this reports whether the NATIVE WHEEL is installed and usable, not
+    whether a GGUF is configured. A wheel with no GGUF set still means the hot
+    path is available; ``memory/doctor.py`` owns the GGUF/tier-1-vs-tier-2
+    runtime probe. This is the install-time "did Oxidation land?" view.
+    """
+    out = {"native": False, "backend": None, "version": None, "summary": ""}
+    try:
+        import m3_core_rs  # type: ignore
+    except Exception:  # noqa: BLE001 — no wheel installed
+        out["summary"] = (
+            "pure-Python (Project Oxidation native wheel not installed — "
+            f"embeds run {OXIDATION_SPEEDUP_X} slower on the HTTP fallback path "
+            "but m3 is fully usable). Run `m3 embedder install-gpu`."
+        )
+        return out
+    if not hasattr(m3_core_rs, "EmbeddedEmbedder"):
+        out["summary"] = (
+            "native wheel present but built WITHOUT the embedded feature — "
+            "embeds use the HTTP fallback. Reinstall with "
+            "`m3 embedder install-gpu`."
+        )
+        return out
+    out["native"] = True
+    out["version"] = getattr(m3_core_rs, "__version__", None) or M3_CORE_RS_VERSION
+    # Best-effort backend label (cpu/cuda/metal/vulkan) if the wheel exposes one.
+    backend = None
+    for attr in ("embed_backend_label", "backend_label", "BACKEND"):
+        val = getattr(m3_core_rs, attr, None)
+        try:
+            backend = val() if callable(val) else val
+        except Exception:  # noqa: BLE001
+            backend = None
+        if backend:
+            break
+    out["backend"] = str(backend) if backend else None
+    inner = f"{out['backend']}, " if out["backend"] else ""
+    out["summary"] = (
+        f"tier-1 in-process — Project Oxidation active "
+        f"({inner}m3_core_rs {out['version']})"
+    )
+    return out
+
+
+def _parse_version(v: str) -> tuple:
+    """Best-effort tuple parse of a dotted version for comparison. Non-numeric
+    components sort after numeric ones (so '3.6.27' > '3.6.27rc1' is avoided —
+    we keep it simple: split on '.', int where possible else fall back to a
+    high-sorting marker so a pre-release isn't treated as newer)."""
+    parts: list = []
+    for tok in str(v).strip().split("."):
+        num = "".join(c for c in tok if c.isdigit())
+        parts.append(int(num) if num and num == tok else (int(num) if num else 0, tok))
+    return tuple(parts)
+
+
+def installed_rust_core_version() -> "str | None":
+    """The version of the installed m3_core_rs, or None if not importable."""
+    try:
+        import m3_core_rs  # type: ignore
+    except Exception:  # noqa: BLE001
+        return None
+    return getattr(m3_core_rs, "__version__", None)
+
+
+def is_rust_core_current() -> bool:
+    """True iff the embedded native wheel is installed AND demonstrably at (or
+    newer than) the target M3_CORE_RS_VERSION. Used to skip a redundant
+    reinstall. CONSERVATIVE: if the real installed version can't be read from the
+    wheel (no __version__), return False so the install proceeds — never skip an
+    upgrade on a guess. (active_embedder_tier falls back to M3_CORE_RS_VERSION
+    for display when __version__ is absent; do NOT trust that for the skip
+    decision — read __version__ directly.)"""
+    try:
+        import m3_core_rs  # type: ignore
+    except Exception:  # noqa: BLE001 — no wheel
+        return False
+    if not hasattr(m3_core_rs, "EmbeddedEmbedder"):
+        return False  # wheel built without the embedded feature — must reinstall
+    cur = getattr(m3_core_rs, "__version__", None)
+    if not cur:
+        return False  # unknown version — don't skip; reinstall to be safe
+    try:
+        return _parse_version(cur) >= _parse_version(M3_CORE_RS_VERSION)
+    except Exception:  # noqa: BLE001 — unparseable → don't skip, reinstall
+        return cur == M3_CORE_RS_VERSION
 
 
 @dataclass(frozen=True)
@@ -162,25 +305,51 @@ def _can_sudo() -> bool:
 
     Uses `sudo -n true` — the -n flag makes sudo fail immediately rather than
     prompting, so this is safe to call non-interactively.
+
+    Windows has no `sudo`; and on a Unix box that doesn't ship sudo the binary
+    is absent (raising FileNotFoundError). Both cases mean "cannot sudo" — we
+    return False rather than letting the missing-binary exception escape into
+    the install path.
     """
-    return subprocess.run(
-        ["sudo", "-n", "true"],
-        capture_output=True,
-    ).returncode == 0
+    if sys.platform == "win32" or not shutil.which("sudo"):
+        return False
+    try:
+        return subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+        ).returncode == 0
+    except OSError:
+        return False
 
 
 def _in_privileged_group() -> bool:
-    """Return True if the user is in the 'sudo' or 'wheel' group."""
+    """Return True if the user is in the 'sudo' or 'wheel' group.
+
+    The `grp` module is Unix-only — it does not exist on Windows, where the
+    sudo/wheel concept is meaningless anyway (privilege there is the
+    Administrators group / UAC). So on Windows this is always False by design.
+    We branch on the platform explicitly rather than catching the ImportError
+    blindly, so a real failure inside the lookup isn't silently swallowed as
+    "not privileged".
+    """
+    if sys.platform == "win32":
+        return False
     try:
-        import grp
-        user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
-        privileged = {"sudo", "wheel"}
-        for g in grp.getgrall():
-            if g.gr_name in privileged and user in g.gr_mem:
-                return True
-    except Exception:
-        pass
-    return False
+        import grp  # Unix-only; guarded by the platform check above.
+    except ImportError:
+        return False
+    user = os.environ.get("USER") or os.environ.get("LOGNAME") or ""
+    if not user:
+        return False
+    try:
+        return any(
+            g.gr_name in {"sudo", "wheel"} and user in g.gr_mem
+            for g in grp.getgrall()
+        )
+    except OSError:
+        # getgrall() can fail on misconfigured NSS / LDAP; treat as "unknown,
+        # assume not privileged" rather than crashing the install path.
+        return False
 
 
 def _pip_install_with_pep668_fallback(*pip_args: str) -> int:
@@ -355,12 +524,11 @@ def _print_manual_build_recommendation(
         f"            PyPI returned exit {pypi_rc}; "
         f"GitHub Release returned exit {release_rc}.\n"
         f"\n"
-        f"            Embeddings still work without it: the tier-2 HTTP\n"
-        f"            embedder (m3-embed-server on port 8082) serves every\n"
-        f"            request. The native wheel just makes embeddings\n"
-        f"            5-10x faster (in-process Rust vs HTTP round-trip).\n"
+        f"{oxidation_fallback_note(indent='            ')}\n"
         f"\n"
-        f"            To install the native wheel by compiling from source:\n"
+        f"            To unlock the native hot path, build your own wheel.\n"
+        f"            Full guide: docs/BUILD_WHEELS.md "
+        f"(or crates/m3-core-py/build_wheel.py in the m3-core-rs repo).\n"
         f"\n"
         f"            1. Install prerequisites:\n"
         f"                 macOS:          xcode-select --install && brew install cmake\n"
@@ -481,7 +649,7 @@ def install_from_github_release(
 
     # Download into a temp DIR, keeping the original filename: pip parses
     # the wheel filename per PEP 427 to identify the package, so the file
-    # must be named e.g. m3_core_rs_macos_metal-3.6.22-cp314-cp314-macosx_11_0_arm64.whl
+    # must be named e.g. m3_core_rs_macos_metal-3.6.27-cp314-cp314-macosx_11_0_arm64.whl
     # — a random NamedTemporaryFile path like /tmp/tmpXXXX.whl is rejected
     # by pip with "Invalid wheel filename (wrong number of parts)".
     tmp_dir = tempfile.mkdtemp(prefix="m3-core-rs-")
@@ -553,8 +721,7 @@ def install_from_source(choice: BackendChoice, *,
             "  If cmake/c++/cargo exists but gives 'Permission denied', the\n"
             "  binary is not executable by this user — ask an admin to fix\n"
             "  permissions or install the package for this user's distro.\n"
-            "  Embeddings still work without this: Tier-2 HTTP fallback serves\n"
-            "  every embed request (no native build needed).",
+            f"{oxidation_fallback_note(indent='  ')}",
             file=sys.stderr,
         )
         return 1
@@ -573,7 +740,8 @@ def install_from_source(choice: BackendChoice, *,
 
 def install_rust_core(os_tok: Optional[str] = None, *,
                       allow_source_fallback: bool = True,
-                      backend: Optional[str] = None) -> int:
+                      backend: Optional[str] = None,
+                      force: bool = False) -> int:
     """Top-level: detect backend, install prebuilt wheel, fall back to source.
 
     Args:
@@ -584,10 +752,24 @@ def install_rust_core(os_tok: Optional[str] = None, *,
         backend: Explicit backend override (cpu/cuda/vulkan/metal). Skips
             auto-detection entirely. Use when detection picks the wrong backend
             (e.g. Vulkan tools present but no Vulkan GPU).
+        force: Reinstall even if the target version is already present. By
+            default a host that already has the embedded wheel at the target
+            version is left untouched (no redundant 100+ MB re-download).
 
     Returns 0 on success, non-zero otherwise. Used by the wizard and the
     `m3 embedder install-gpu` CLI command.
     """
+    # Skip-if-current: if the embedded native wheel is already installed at the
+    # target version, there's nothing to do — avoid re-downloading a large wheel
+    # on every `m3 setup` / `m3 update`. Backend cannot be told apart from the
+    # PyPI version alone, so an explicit --backend override always proceeds (the
+    # user may be switching cpu<->cuda). `force` always proceeds too.
+    if not force and backend is None and is_rust_core_current():
+        cur = active_embedder_tier()
+        print(f"[rust-core] already current: {cur['summary']} — skipping install "
+              "(use --force to reinstall).")
+        return 0
+
     if backend is not None:
         os_tok = os_tok or host_os()
         if (os_tok, backend) not in _VALID:

@@ -15,7 +15,6 @@ from memory.extraction import (
     RuleBasedExtractor,
     canonicalize_relationship,
     extract_entities_impl,
-    get_configured_extractor,
     normalize_entity_id,
 )
 
@@ -98,13 +97,26 @@ async def test_rule_based_extractor():
 
 def test_factory_config(monkeypatch):
     """Test the extractor factory instantiates subclasses based on configuration."""
+    # Resolve the factory AND the classes from the SAME (current) module object.
+    # The top-of-file `from memory.extraction import ...` binds at first import;
+    # if a prior test (or the conftest purge-on-reimport) replaced
+    # memory.extraction, that stale `get_configured_extractor` would build an
+    # instance of the OLD class while a fresh `from memory.extraction import
+    # LLMExtractor` resolves the NEW class — so isinstance() fails even though
+    # the object IS an extractor. Re-import both here so factory and classes are
+    # the same generation.
+    from memory.extraction import (
+        LLMExtractor,
+        RuleBasedExtractor,
+        get_configured_extractor,
+    )
+
     monkeypatch.setenv("M3_EXTRACTION_TYPE", "rule_based")
     ext = get_configured_extractor()
     assert isinstance(ext, RuleBasedExtractor)
 
     monkeypatch.setenv("M3_EXTRACTION_TYPE", "gemini")
     ext = get_configured_extractor()
-    from memory.extraction import LLMExtractor
     assert isinstance(ext, LLMExtractor)
     assert ext.provider == "gemini"
 

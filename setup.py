@@ -39,7 +39,14 @@ if not os.environ.get("M3_SKIP_MYPYC"):
             "bin/memory/util.py",
             "bin/memory/fts.py",
         ])
-    except Exception as e:  # ImportError, compile errors, toolchain failures
+    # Catch BaseException, NOT just Exception. mypyc refuses to run against the
+    # project's intentional `[tool.mypy] strict_optional = false` (mypyc
+    # requires strict optional) and aborts via sys.exit() -> SystemExit, which
+    # is a BaseException and slips past an `except Exception`. That made
+    # `python -m build` fail outright instead of falling back to the pure-Python
+    # wheel. A broken/incompatible optional compiler must NEVER block building
+    # the package, so we fall back on any failure including SystemExit.
+    except BaseException as e:  # ImportError, compile/toolchain errors, SystemExit
         import sys
         print(f"[setup] mypyc skipped ({type(e).__name__}: {e}); "
               "building pure-Python wheel.", file=sys.stderr)

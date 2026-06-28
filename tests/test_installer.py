@@ -143,7 +143,9 @@ def test_install_m3_refuses_overwrite_without_force(tmp_path, monkeypatch):
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
     monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
 
-    with pytest.raises(RuntimeError, match="already exists"):
+    # Refuses without --force, with a clear, actionable message (the improved
+    # UX message names `m3 setup` / `m3 update` / `m3 install-m3 --force`).
+    with pytest.raises(RuntimeError, match="already installed"):
         installer.install_m3(repo_path=repo_path, tag="v1.2.3")
 
 
@@ -256,6 +258,86 @@ def test_doctor_reports_resolved_bridge(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "resolved bridge" in out.lower()
+
+
+def test_resolve_chatlog_db_uses_engine_root(tmp_path, monkeypatch):
+    """Decoupled-roots regression (2026-06-27 macOS): the chatlog DB must
+    resolve to <engine_root>/agent_chatlog.db, NOT the legacy repo-relative
+    path — otherwise doctor/`m3 status` falsely report 'no captures' for a real
+    chatlog DB in the engine root."""
+    from m3_memory import installer
+
+    # Clean env so the earlier env-override branches don't short-circuit.
+    for v in ("CHATLOG_DB_PATH", "M3_DATABASE"):
+        monkeypatch.delenv(v, raising=False)
+    engine = tmp_path / "engine"
+    engine.mkdir()
+    (engine / "agent_chatlog.db").write_bytes(b"")  # the real DB lives here
+    monkeypatch.setenv("M3_ENGINE_ROOT", str(engine))
+
+    # A config that ALSO has a (wrong) repo_path — the engine root must win.
+    resolved = installer._resolve_chatlog_db({"repo_path": str(tmp_path / "repo")})
+    assert resolved == engine / "agent_chatlog.db", resolved
+
+
+def test_doctor_flags_divergent_bridge_vs_config(tmp_path, monkeypatch, capsys):
+    """When the LIVE bridge (M3_BRIDGE_PATH / dev checkout) differs from the
+    config's recorded install, doctor must NOT present the config version as
+    'installed' — it labels it the last fetch and points at the live code."""
+    from m3_memory import installer
+
+    # A live bridge via M3_BRIDGE_PATH that is NOT the config's bridge_path.
+    live = tmp_path / "dev" / "bin" / "memory_bridge.py"
+    live.parent.mkdir(parents=True)
+    live.write_text("# live dev bridge")
+    monkeypatch.setenv("M3_BRIDGE_PATH", str(live))
+    monkeypatch.setattr(installer, "load_config", lambda: {
+        "version": "2026.6.23.2", "tag": "v2026.6.23.2", "installed_at": "old",
+        "bridge_path": "/some/other/repo/bin/memory_bridge.py",
+        "repo_path": "/some/other/repo",
+    })
+
+    installer.doctor()
+    out = capsys.readouterr().out
+    assert "last fetch version:" in out          # NOT presented as 'installed version'
+    assert "2026.6.23.2" in out
+    assert "LIVE bridge differs" in out
+    assert str(live) in out                       # points at the running code
+    assert "installed version:" not in out        # the misleading label is gone
+
+
+def test_doctor_says_installed_when_bridge_matches_config(tmp_path, monkeypatch, capsys):
+    """The happy path: live bridge == config bridge_path -> 'installed version'."""
+    from m3_memory import installer
+
+    monkeypatch.delenv("M3_BRIDGE_PATH", raising=False)
+    bridge = tmp_path / "repo" / "bin" / "memory_bridge.py"
+    bridge.parent.mkdir(parents=True)
+    bridge.write_text("# fetched bridge")
+    monkeypatch.setattr(installer, "load_config", lambda: {
+        "version": "2026.6.27.0", "tag": "v2026.6.27.0", "installed_at": "now",
+        "bridge_path": str(bridge), "repo_path": str(bridge.parent.parent),
+    })
+
+    installer.doctor()
+    out = capsys.readouterr().out
+    assert "installed version:" in out
+    assert "last fetch version:" not in out
+    assert "LIVE bridge differs" not in out
+
+
+def test_resolve_chatlog_db_falls_back_to_repo_when_no_engine_db(tmp_path, monkeypatch):
+    """When no engine-root chatlog DB exists, fall back to the legacy
+    repo-relative path (back-compat for non-decoupled installs)."""
+    from m3_memory import installer
+
+    for v in ("CHATLOG_DB_PATH", "M3_DATABASE"):
+        monkeypatch.delenv(v, raising=False)
+    # Engine root with NO chatlog db.
+    monkeypatch.setenv("M3_ENGINE_ROOT", str(tmp_path / "empty-engine"))
+    repo = tmp_path / "repo"
+    resolved = installer._resolve_chatlog_db({"repo_path": str(repo)})
+    assert resolved == repo / "memory" / "agent_chatlog.db", resolved
 
 
 # ── Auto-install tests (Option C behavior on `mcp-memory` bare invocation) ────
