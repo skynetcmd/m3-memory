@@ -31,6 +31,15 @@ sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
 
 
 def main() -> int:
+    # Quiet the llama.cpp/GGML backend process-wide BEFORE any probe loads the
+    # bge-m3 GGUF. The cascade probe loads the embedder IN-PROCESS and the
+    # embed-server probe loads it in a SUBPROCESS; both inherit this. Without it,
+    # llama.cpp dumps its full per-tensor load trace + Metal teardown to stderr
+    # (hundreds of lines), burying the doctor's readable summary. Level 4 =
+    # error-only; harmless for an embedding model. setdefault() respects an
+    # operator-set value so power users can opt back into the verbose logs.
+    os.environ.setdefault("GGML_LOG_LEVEL", "4")
+
     from m3_sdk import add_database_arg
 
     parser = argparse.ArgumentParser(
