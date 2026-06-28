@@ -7,8 +7,8 @@
 
 ## Network
 - **Subnet:** `private.subnet.x.x` — UniFi-managed with VLANs
-  - `10.21.32.x` — Management / infrastructure
-  - `10.21.40.x` — Servers / VMs
+  - `10.x.x.x` — Management / infrastructure
+  - `10.x.x.x` — Servers / VMs
 - **Router:** UniFi Gateway (UXG) at `10.x.x.x` (SSH: `***UXG_USER_REDACTED***@10.x.x.x`)
 - **Controller:** UniFi Network at `10.x.x.x:11443` (site `hh1srtpv`)
 
