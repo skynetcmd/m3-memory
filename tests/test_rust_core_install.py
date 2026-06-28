@@ -15,6 +15,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from m3_memory import rust_core_install as rci  # noqa: E402
 
+# Real function captured before the autouse fixture can patch it, so the unit
+# tests that exercise is_rust_core_current itself call the genuine impl.
+_REAL_IS_CURRENT = rci.is_rust_core_current
+
+
+@pytest.fixture(autouse=True)
+def _not_current(request, monkeypatch):
+    """Default the skip-if-current guard OFF so install-flow tests exercise the
+    cascade regardless of whether THIS host already has a current wheel. Tests
+    marked `@pytest.mark.real_is_current` opt out to test the real function."""
+    if "real_is_current" in request.keywords:
+        return
+    monkeypatch.setattr(rci, "is_rust_core_current", lambda: False)
+
+
 # ── name mapping (must mirror build_wheel.py) ──────────────────────────────────
 
 @pytest.mark.parametrize("os_tok,backend,expected", [
@@ -383,3 +398,87 @@ def test_find_cargo_via_rustup_toolchain(monkeypatch, tmp_path):
     assert found is not None
     assert "cargo" in found
     assert "toolchains" in found
+
+
+# ── skip-if-current guard ──────────────────────────────────────────────────────
+
+def test_skips_install_when_already_current(monkeypatch):
+    """When the embedded wheel is already at the target version, install_rust_core
+    short-circuits — no PyPI / GitHub / source attempt, no re-download."""
+    calls = []
+    monkeypatch.setattr(rci, "is_rust_core_current", lambda: True)
+    monkeypatch.setattr(rci, "active_embedder_tier",
+                        lambda: {"native": True, "version": rci.M3_CORE_RS_VERSION,
+                                 "summary": "current"})
+    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 0)
+    monkeypatch.setattr(rci, "install_from_github_release", lambda c, **k: calls.append("github") or 0)
+    monkeypatch.setattr(rci, "install_from_source", lambda c, **k: calls.append("source") or 0)
+    monkeypatch.setattr(rci, "detect_backend",
+                        lambda os_tok=None: rci.BackendChoice("linux", "cuda", "t"))
+    rc = rci.install_rust_core()
+    assert rc == 0
+    assert calls == [], "current wheel must not be reinstalled"
+
+
+def test_force_reinstalls_even_when_current(monkeypatch):
+    """--force overrides the skip-if-current guard."""
+    calls = []
+    monkeypatch.setattr(rci, "is_rust_core_current", lambda: True)
+    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 0)
+    monkeypatch.setattr(rci, "install_from_github_release", lambda c, **k: 0)
+    monkeypatch.setattr(rci, "install_from_source", lambda c, **k: 0)
+    monkeypatch.setattr(rci, "detect_backend",
+                        lambda os_tok=None: rci.BackendChoice("linux", "cpu", "t"))
+    rc = rci.install_rust_core(force=True)
+    assert rc == 0
+    assert calls == ["prebuilt"], "force must reinstall"
+
+
+def test_explicit_backend_bypasses_skip(monkeypatch):
+    """An explicit --backend always proceeds (user may be switching cpu<->cuda),
+    even if the current version matches."""
+    calls = []
+    monkeypatch.setattr(rci, "is_rust_core_current", lambda: True)
+    monkeypatch.setattr(rci, "install_prebuilt", lambda c, **k: calls.append("prebuilt") or 0)
+    monkeypatch.setattr(rci, "install_from_github_release", lambda c, **k: 0)
+    monkeypatch.setattr(rci, "install_from_source", lambda c, **k: 0)
+    rc = rci.install_rust_core(backend="cpu", os_tok="linux")
+    assert rc == 0
+    assert calls == ["prebuilt"]
+
+
+@pytest.mark.real_is_current
+def test_is_rust_core_current_false_without_version(monkeypatch):
+    """CONSERVATIVE: a wheel with no __version__ is NOT treated as current — we
+    must not skip an upgrade on a guess."""
+    class _FakeRS:
+        EmbeddedEmbedder = object  # has the feature
+        # no __version__
+    monkeypatch.setitem(sys.modules, "m3_core_rs", _FakeRS())
+    assert rci.is_rust_core_current() is False
+
+
+@pytest.mark.real_is_current
+def test_is_rust_core_current_compares_version(monkeypatch):
+    class _Old:
+        EmbeddedEmbedder = object
+        __version__ = "0.0.1"
+
+    class _New:
+        EmbeddedEmbedder = object
+        __version__ = "999.0.0"
+
+    monkeypatch.setitem(sys.modules, "m3_core_rs", _Old())
+    assert rci.is_rust_core_current() is False  # older than target
+    monkeypatch.setitem(sys.modules, "m3_core_rs", _New())
+    assert rci.is_rust_core_current() is True   # newer than target
+
+
+@pytest.mark.real_is_current
+def test_is_rust_core_current_false_without_embedded_feature(monkeypatch):
+    """A wheel built WITHOUT the embedded feature must reinstall."""
+    class _NoFeature:
+        __version__ = "999.0.0"
+        # no EmbeddedEmbedder
+    monkeypatch.setitem(sys.modules, "m3_core_rs", _NoFeature())
+    assert rci.is_rust_core_current() is False

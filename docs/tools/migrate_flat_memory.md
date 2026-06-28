@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_flat_memory.py
-sha1: 85cee9716707
-mtime_utc: 2026-05-01T09:15:02.504896+00:00
-generated_utc: 2026-05-24T12:09:08.291848+00:00
+sha1: abe2742f539c
+mtime_utc: 2026-06-27T06:53:36.447867+00:00
+generated_utc: 2026-06-27T23:22:27.642974+00:00
 private: false
 ---
 
@@ -32,7 +32,7 @@ Usage:
     python bin/migrate_flat_memory.py
     python bin/migrate_flat_memory.py --sources claude,gemini
     python bin/migrate_flat_memory.py --include-rules
-    python bin/migrate_flat_memory.py --claude-project-slug C--Users-username-m3-memory
+    python bin/migrate_flat_memory.py --claude-project-slug C--Users-<user>-m3-memory
 
 ---
 

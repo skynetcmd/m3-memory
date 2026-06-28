@@ -71,6 +71,20 @@ Your `.zshenv` should define and export the following variables by calling the `
 | `ANTHROPIC_API_KEY`| API key for Anthropic/Claude models. | `_keychain_set ANTHROPIC_API_KEY "your-claude-key"` |
 | `GEMINI_API_KEY`| API key for Google/Gemini models. | `_keychain_set GEMINI_API_KEY "your-gemini-key"` |
 
+### FIPS / Cryptography (`bin/crypto_provider.py`)
+
+Tiered FIPS crypto — see [`FIPS_MODULE_BOUNDARY.md`](FIPS_MODULE_BOUNDARY.md).
+**FIPS mode fails closed**: set these only after wolfSSL is installed
+(`m3 fips install-wolfssl`), or M3 refuses to start.
+
+| Variable | Purpose |
+|---|---|
+| `M3_FIPS_MODE` | `1` = route all crypto through **wolfCrypt** (hardened, fail-closed if absent). Accepts the FREE open-source wolfSSL build. |
+| `M3_FIPS_STRICT` | `1` = additionally REQUIRE the **CMVP-validated** wolfCrypt FIPS module (commercial wolfSSL). Implies `M3_FIPS_MODE`. Refuses the open-source build. |
+| `M3_CRYPTO_BACKEND` | `WOLFSSL` to force the wolfCrypt backend without the FIPS lockouts; `DEFAULT` (Python crypto) otherwise. (FIPS vars override this.) |
+| `M3_WOLFSSL_LIB` | Explicit **absolute path** to the wolfSSL library (highest-precedence, trusted source). |
+| `M3_WOLFSSL_SHA256` | Pin the expected SHA-256 of the wolfSSL library (**self-pin** your trusted build). A mismatch is fatal — detects tampering / in-place swap. `m3 doctor` prints the hash to pin. |
+
 ### MCP Proxy (`bin/mcp_proxy.py`)
 
 The MCP proxy bridges OpenAI-compatible chat clients (Aider, OpenClaw) to the MCP tool catalog. It runs on `localhost:9000` by default.
@@ -117,6 +131,24 @@ When a query triggers expansion (graph hops, session expansion), this guard keep
 |---|---|---|
 | `M3_EXPANSION_DISPLACEMENT_MARGIN` | `2.0` | An expanded row may outrank a primary result only if its score exceeds the primary's by this multiplier. |
 | `M3_EXPANSION_PROTECTED_RANKS` | `3` | The top-N primary results are protected from displacement by expanded rows entirely. |
+
+#### Knowledge Maintenance — Confidence & Trust (opt-in)
+
+First-class memory **confidence** (derived from provenance + corroboration) and
+per-agent **trust**. All default OFF / neutral — nothing about ranking or write
+behavior changes until explicitly enabled. Requires migrations 035 (confidence
+columns) and 036 (trust + corroboration ledger). See
+`docs/plans/KNOWLEDGE_MAINTENANCE_PLAN.md`.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_CONFIDENCE_RANKING` | `0` | `1` blends a memory's stored `confidence` into the retrieval score as an additive term (like `M3_IMPORTANCE_WEIGHT`). Off = ranking byte-identical to today. |
+| `M3_CONFIDENCE_WEIGHT` | `0.10` | Weight of the confidence term when `M3_CONFIDENCE_RANKING=1`. |
+| `M3_CONFIDENCE_MODEL` | `transparent` | Which representation drives ranking: `transparent` (the stored, user-facing aggregate) or `bayesian` (the Beta-posterior mean kept alongside, experimental). The displayed `confidence` is always the transparent value. |
+| `M3_CORROBORATION` | `0` | `1` makes a near-identical re-write (high cosine + same content) corroborate the existing memory — bumping its `corroboration_count`/`confidence` and recording a ledger event — instead of creating an orphan duplicate row. |
+| `CORROBORATION_THRESHOLD` | `0.95` | Cosine floor for treating a same-content write as corroboration. Higher than `CONTRADICTION_THRESHOLD` so only true near-duplicates corroborate. |
+| `M3_TRUST_AUTOTUNE` | `0` | `1` lets daily maintenance nudge agent trust from observed contradiction/corroboration. Off = explicit `agent_set_trust` only. |
+| `M3_CONSOLIDATION_AUTO` | `0` | `1` lets the background job run autonomous episodic→semantic belief consolidation. Off = manual/curator-triggered only. |
 
 ### Ingestion Enrichment
 
@@ -225,7 +257,11 @@ Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-
 |---|---|---|
 | `M3_CORE_RS_DISABLE` | `0` | Kill-switch. Set to `1`/`true`/`yes` to disable the Rust core completely and force the pure-Python path for **every** oxidation-wired operation even when the `m3_core_rs` wheel is installed. |
 | `M3_ROUTE_SHADOW_MODE` | `enforce` (if wheel loaded, otherwise `off`) | Configuration gate for the accelerated Rust route decider in `bin/auto_route.py`. `enforce` (default when Rust core importable) routes queries instantly via pre-retrieval Rust classification and maps branch names via a conceptual shim translation (delivers **30-40x routing speedup**). `log` runs shadow-mode drift comparison logging. `off` disables the Rust path and runs Python post-retrieval routing. |
-| `M3_EMBED_GGUF` | (empty) | Path to a bge-m3 GGUF file. When set (and `m3_core_rs` is built with the `embedded` feature), `_embed` / `_embed_many` produce embeddings **in-process via llama.cpp** instead of POSTing to a llama-server. Unset (default) keeps the HTTP embed path. Guarded: a GGUF whose embedding dimension ≠ `EMBED_DIM` is rejected and HTTP is used. |
+| `M3_GOVERNOR_INITIAL_THRESHOLD` | `85` | Host-load percentage (clamped to 10–99) at which the [Adaptive Background Workload Governor](M3V3_OXIDATION.md) enters `THROTTLED` mode — background maintenance (dedup, PG sync, embed backfill, cognitive loops) runs with a long inter-unit delay so it never competes with foreground work. Load is the max of CPU/RAM/GPU utilization. |
+| `M3_GOVERNOR_LIMIT_THRESHOLD` | `95` | Host-load percentage (clamped to 20–100) at which the governor enters `HALTED` mode — background work stops and interactive work is delayed to prevent a system freeze. Set to `100` to disable the critical/HALTED-on-load tier entirely. If `INITIAL ≥ LIMIT` (and LIMIT ≠ 100) the initial threshold is auto-set to `LIMIT − 5`. The governor pacing ladder is computed natively (`m3_core_rs.Governor`) with an identical pure-Python fallback; both honor these vars. |
+| `M3_EMBED_GGUF` | (empty → **auto-detected**) | Path to a bge-m3 GGUF file. When set (and `m3_core_rs` is built with the `embedded` feature), `_embed` / `_embed_many` produce embeddings **in-process via llama.cpp** (tier-1, ~10–85× faster) instead of POSTing to a llama-server. **When unset, tier-1 now auto-detects a bge-m3 GGUF** in the canonical model dirs (see `M3_EMBED_GGUF_AUTODETECT`) rather than silently skipping to HTTP. Guarded: a GGUF whose embedding dimension ≠ `EMBED_DIM` is rejected and HTTP is used. |
+| `M3_EMBED_GGUF_AUTODETECT` | `1` | When `M3_EMBED_GGUF` is unset, search the canonical model dirs (`~/.lmstudio/models`, `~/Library/Application Support/LM Studio/models`, `~/.cache/lm-studio/models`, `~/.cache/m3/models`, `~/.m3-memory/_assets/embedder`, `~/models`) for a `*bge[-_]m3*.gguf` and use it for tier-1. Set `0` to disable (keeps the pre-auto-detect behavior: no GGUF env ⇒ HTTP). The walk is depth-bounded (~4) and first-match. |
+| `M3_EMBED_GGUF_WALK_BUDGET` | `2.0` | Wall-clock budget (seconds) for the auto-detect filesystem walk. If a pathological models directory can't be searched within this budget, auto-detect gives up and tier-1 falls back to HTTP — cold start is never stalled. |
 | `M3_EMBED_GGUF_MODEL_TAG` | `bge-m3-GGUF-Q4_K_M.gguf` | The `embed_model` tag applied to vectors produced by the in-process path (above). Defaults to the llama.cpp-served bge-m3 tag the embedded backend is parity-verified against (cosine ≈ 0.996 vs stored rows with that tag). This is a distinct content-hash cache namespace from LM Studio's `text-embedding-bge-m3` rows. |
 | `M3_EMBED_FALLBACK_URL` | `http://127.0.0.1:8082` | URL of the CPU HTTP fallback embed server (m3-embed-server). When `M3_EMBED_GGUF` is set but the in-process `EmbeddedEmbedder` fails to construct (GGUF missing, CUDA OOM, wheel built without `--features embedded`) or raises mid-call, `_embed` / `_embed_many` POST to `{this URL}/embedding` (singular path) before falling through to `M3_EMBED_URL`. The fallback must serve bge-m3 (or a model with matching `EMBED_DIM`) to remain vector-compatible with rows tagged `M3_EMBED_GGUF_MODEL_TAG`. Vectors produced via this fallback are tagged with `M3_EMBED_GGUF_MODEL_TAG`, sharing the in-process cache namespace. |
 

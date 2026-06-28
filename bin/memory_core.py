@@ -1734,17 +1734,40 @@ def agent_get_impl(agent_id: str) -> str:
     caps = json.loads(row["capabilities"] or "[]")
     meta = json.loads(row["metadata_json"] or "{}")
 
+    _keys = row.keys()
     lines = [
         f"Agent: {row['agent_id']}",
         f"  Role: {row['role']}",
         f"  Status: {row['status']}",
         f"  Capabilities: {caps}",
         f"  Metadata: {meta}",
+        f"  Trust: {row['trust_score'] if 'trust_score' in _keys else 'N/A'}",
         f"  Last Seen: {row['last_seen']}",
-        f"  Created At: {row['created_at'] if 'created_at' in row.keys() else 'N/A'}",
+        f"  Created At: {row['created_at'] if 'created_at' in _keys else 'N/A'}",
     ]
 
     return "\n".join(lines)
+
+
+def agent_set_trust_impl(agent_id: str, trust_score: float) -> str:
+    """Explicitly set an agent's trust_score (clamped to [0.5, 1.0]).
+
+    Trust weights an agent's assertions in confidence aggregation
+    (knowledge-maintenance Phase 2). 1.0 = neutral. Upserts the agent row if it
+    doesn't exist yet. Requires migration 036 (agents.trust_score).
+    """
+    from memory.trust import set_agent_trust
+    if not agent_id:
+        return "Error: agent_id is required"
+    try:
+        with _db() as db:
+            value = set_agent_trust(db, agent_id, trust_score)
+    except Exception as e:  # noqa: BLE001
+        if "no column named trust_score" in str(e).lower() or "no such column" in str(e).lower():
+            return "Error: trust_score unavailable — run migration 036 (trust_and_corroboration)"
+        raise
+    return f"Set trust for '{agent_id}' to {value:.2f}"
+
 
 def agent_offline_impl(agent_id: str) -> str:
     """Marks an agent as offline."""
@@ -2121,4 +2144,29 @@ def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
 
 # ── Entity search and retrieval (Phase 7) ─────────────────────────────────────
 
+
+# ── Eager-bind bare-name lazy symbols (footgun fix) ──────────────────────────
+# A handful of lazily re-exported symbols are called as BARE NAMES inside
+# function bodies (e.g. `_db()`, `_record_history()` in task_delete_impl). The
+# module-level __getattr__ above binds a lazy symbol into globals() only on
+# ATTRIBUTE access (memory_core._db) — NOT on a bare-name lookup inside a
+# function, which does a plain global lookup. So whichever of these functions
+# runs FIRST in a fresh process, before anything attribute-accessed the symbol,
+# raised NameError (the 2026-06-27 task_delete _record_history incident; an
+# audit found 52 such call sites across 8 distinct symbols).
+#
+# Fix the MECHANISM, not the 52 sites: force-resolve the bare-called symbols
+# into globals() once at import time, via the same __getattr__ path. These
+# modules are already imported during normal operation, so binding them here
+# introduces no new circular-import risk. Best-effort per symbol — if one isn't
+# resolvable in some stripped environment, skip it rather than break import.
+for _eager in (
+    "_db", "_record_history", "_embed", "_content_hash", "_get_embed_client",
+    "_sha256_hex", "memory_link_impl", "memory_search_impl",
+):
+    try:
+        globals()[_eager] = __getattr__(_eager)
+    except Exception:  # noqa: BLE001 — never let eager-binding break module import
+        pass
+del _eager
 

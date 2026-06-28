@@ -15,6 +15,7 @@ unrecoverable without audit.
 
 Public API:
     file_content_sha256(path) -> str
+    file_content_sha256_batch(paths) -> dict[str, str | None]
     detect_m3_doc_id(path, text=None) -> str | None
     resolve_identity_key(path, text=None) -> str
     filetype_for(path) -> str
@@ -113,6 +114,44 @@ def file_content_sha256(path: str | Path) -> str:
                 break
             h.update(buf)
     return h.hexdigest()
+
+
+def file_content_sha256_batch(paths: list[str]) -> dict[str, str | None]:
+    """Hash many files at once, returning ``{path: hex_sha256 | None}``.
+
+    On batches of files (e.g. the staleness re-hash sweep) this routes through
+    the native ``m3_core_rs.hash_files`` — rayon-parallel reads + hashing with
+    the GIL released — which is markedly faster than a serial Python loop on
+    large trees. The digest is byte-identical to ``file_content_sha256``.
+
+    Unreadable files map to ``None`` (parity with the Python staleness path,
+    which logs and skips rather than aborting the batch). Falls back to the
+    per-file Python path when the native extension is unavailable or disabled
+    via ``M3_CORE_RS_DISABLE`` — a missing/old wheel only makes this slower.
+    """
+    if not paths:
+        return {}
+
+    if os.environ.get("M3_CORE_RS_DISABLE", "0") != "1":
+        try:
+            import m3_core_rs
+            if hasattr(m3_core_rs, "hash_files"):
+                out: dict[str, str | None] = {}
+                for rec in m3_core_rs.hash_files(paths):
+                    out[rec["path"]] = rec["sha256"]  # None on read error
+                return out
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("native hash_files unavailable, falling back: %s", e)
+
+    # Pure-Python fallback.
+    result: dict[str, str | None] = {}
+    for p in paths:
+        try:
+            result[p] = file_content_sha256(p)
+        except OSError as e:
+            logger.debug("hash failed for %s: %s", p, e)
+            result[p] = None
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────

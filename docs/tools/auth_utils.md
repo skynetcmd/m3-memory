@@ -1,8 +1,8 @@
 ---
 tool: bin/auth_utils.py
-sha1: c1d988ec48b1
-mtime_utc: 2026-05-31T16:08:17.245368+00:00
-generated_utc: 2026-05-31T18:42:52.557561+00:00
+sha1: 1064acc7ad6e
+mtime_utc: 2026-06-28T00:19:39.885580+00:00
+generated_utc: 2026-06-28T01:23:03.283376+00:00
 private: false
 ---
 
@@ -49,15 +49,15 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 304)
+- `subprocess.run()  → `['cmdkey', f'/list:{service}']`` (line 301)
 - `subprocess.run()  → `['security', 'find-generic-password', '-s', 'AGENT_OS_MASTER_KEY', '-w']`` (line 117)
-- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 290)
-- `subprocess.run()` (line 319)
+- `subprocess.run()  → `['security', 'find-generic-password', '-s', service, '-w']`` (line 287)
+- `subprocess.run()` (line 316)
 
 **sqlite**
 
-- `sqlite3.connect()  → `_vault_db_path()`` (line 397)
-- `sqlite3.connect()  → `vault_path`` (line 336)
+- `sqlite3.connect()  → `_vault_db_path()`` (line 394)
+- `sqlite3.connect()  → `vault_path`` (line 333)
 
 
 ---
@@ -66,8 +66,6 @@ _(no argparse arguments detected)_
 
 - `base64`
 - `cryptography.fernet (Fernet)`
-- `cryptography.hazmat.primitives (hashes)`
-- `cryptography.hazmat.primitives.kdf.pbkdf2 (PBKDF2HMAC)`
 - `keyring`
 - `platform`
 - `unicodedata`

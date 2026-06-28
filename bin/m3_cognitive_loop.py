@@ -176,6 +176,30 @@ def has_enrich_work(core_db: Optional[str]) -> bool:
         logger.debug(f"Enrich work check failed (non-fatal): {e}")
         return True
 
+
+def has_consolidate_work(core_db: Optional[str], source_type: str,
+                         threshold: int, stale_days: int) -> bool:
+    """SQL check: is there an aged 'source_type' group large enough to consolidate
+    into a belief? Mirrors memory_consolidate_impl's group query so the loop only
+    spends an LLM call when there's real work (event-driven, not time-driven)."""
+    try:
+        ctx = M3Context(core_db)
+        clause = ""
+        params: tuple = (source_type, threshold)
+        if stale_days > 0:
+            # Only count rows older than the staleness window.
+            clause = " AND created_at < datetime('now', ?)"
+            params = (source_type, f"-{int(stale_days)} days", threshold)
+        sql = (
+            "SELECT 1 FROM memory_items "
+            "WHERE is_deleted = 0 AND type = ?" + clause + " "
+            "GROUP BY type, agent_id, user_id HAVING COUNT(*) > ? LIMIT 1"
+        )
+        return len(ctx.query_memory(sql, params)) > 0
+    except Exception as e:
+        logger.debug(f"Consolidate work check failed (non-fatal): {e}")
+        return False  # conservative: no LLM work unless we can confirm there is some
+
 async def run_entity_pass(args):
     """Run incremental entity extraction on core and chatlog DBs."""
     if not has_entity_work(args.database, args.chatlog_db):
@@ -256,6 +280,33 @@ async def run_enrich_pass(args):
     except Exception as e:
         logger.error(f"Enrichment pass error: {type(e).__name__}: {e}")
 
+
+async def run_consolidate_pass(args):
+    """Roll up aged 'observation' groups into high-order 'belief' memories
+    (knowledge-maintenance Phase 4) — governor-gated, event-driven. Only fires
+    when a group exceeds the threshold AND M3_CONSOLIDATION_AUTO=1 is set (the
+    job itself enforces the dry-run-unless-opted-in + activity-yield contract).
+    Delegates to consolidate_beliefs._run so the loop and the standalone cron/CLI
+    share ONE implementation."""
+    src = args.consolidate_source_type
+    if not has_consolidate_work(args.database, src,
+                                args.consolidate_threshold, args.consolidate_stale_days):
+        logger.debug("No consolidation work (no aged group over threshold). Skipping.")
+        return
+    logger.info("Starting Belief Consolidation pass...")
+    try:
+        import consolidate_beliefs
+        out = await consolidate_beliefs._run(
+            apply=True,  # the job gates real writes on M3_CONSOLIDATION_AUTO + idle
+            threshold=args.consolidate_threshold,
+            stale_days=args.consolidate_stale_days,
+            source_type=src,
+        )
+        logger.info("Consolidation pass: %s", out.strip().replace("\n", " | "))
+    except Exception as e:
+        logger.error(f"Consolidation pass error: {type(e).__name__}: {e}")
+
+
 async def main_loop(args):
     """Main execution loop with adaptive backoff and signal awareness."""
     logger.info(f"Cognitive Loop heartbeat started. Interval: {args.interval}s")
@@ -295,6 +346,10 @@ async def main_loop(args):
             await run_enrich_pass(args)
             if _STOP_EVENT.is_set(): break
 
+        if not args.skip_consolidate:
+            await run_consolidate_pass(args)
+            if _STOP_EVENT.is_set(): break
+
         elapsed = time.monotonic() - start_time
         wait_time = max(0, args.interval - elapsed)
 
@@ -329,6 +384,17 @@ def main():
     parser.add_argument("--skip-entities", action="store_true", help="Skip entity extraction")
     parser.add_argument("--skip-enrich", action="store_true", help="Skip enrichment pass")
     parser.add_argument("--no-reflect", action="store_true", help="Skip reflection pass")
+    # Belief consolidation pass (knowledge-maintenance Phase 4). Event-driven +
+    # governor-gated inside the loop; the job still requires M3_CONSOLIDATION_AUTO=1
+    # to actually write (else dry-run). Replaces the standalone weekly cron.
+    parser.add_argument("--skip-consolidate", action="store_true",
+                        help="Skip the belief-consolidation pass")
+    parser.add_argument("--consolidate-threshold", type=int, default=50,
+                        help="Min same-type group size before consolidating (default: 50)")
+    parser.add_argument("--consolidate-stale-days", type=int, default=7,
+                        help="Only consolidate items older than N days (default: 7)")
+    parser.add_argument("--consolidate-source-type", default="observation",
+                        help="Episodic source memory type to roll up (default: observation)")
 
     args = parser.parse_args()
 

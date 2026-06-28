@@ -8,6 +8,7 @@ and MOVES configuration files. It does NOT modify system-wide tool settings
 (Claude/Gemini) to ensure safety. manually update tool settings if needed.
 """
 
+import json
 import logging
 import os
 import shutil
@@ -128,9 +129,77 @@ def main():
             except Exception as e:
                 logger.error(f"Failed to copy {dst_name}: {e}")
 
+        # The chatlog config pins an absolute `db_path`; a verbatim copy leaves it
+        # pointing at the OLD location, so the chatlog falls back there even after
+        # the DB itself was migrated (db_path resolution: CHATLOG_DB_PATH env >
+        # M3_DATABASE > config db_path > default). Rewrite it to the new engine
+        # root so the migrated chatlog DB is actually used.
+        if key == "chatlog_config" and os.path.exists(dst):
+            _rewrite_chatlog_db_path(dst, engine_root)
+
     logger.info("\nMigration (Data & Configuration) completed.")
     logger.info(f"New configuration root: {config_root}")
     logger.info(f"New engine root: {engine_root}")
+
+    _print_post_migration_checklist(config_root, engine_root)
+
+
+def _rewrite_chatlog_db_path(config_path, engine_root):
+    """Repoint the chatlog config's pinned `db_path` at the migrated DB.
+
+    Idempotent: only rewrites when the field is present and stale. Preserves the
+    rest of the JSON (and key order) so unrelated settings survive.
+    """
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"Could not read {config_path} to fix db_path: {e}")
+        return
+
+    new_db_path = os.path.join(engine_root, "agent_chatlog.db")
+    old = cfg.get("db_path")
+    if old == new_db_path:
+        return  # already correct
+    cfg["db_path"] = new_db_path
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        logger.info(f"Rewrote chatlog db_path: {old!r} -> {new_db_path!r}")
+    except OSError as e:
+        logger.error(f"Failed to rewrite db_path in {config_path}: {e}")
+
+
+def _print_post_migration_checklist(config_root, engine_root):
+    """Print the explicit manual steps the migration cannot do for the user.
+
+    Omitting these causes silent split-brain: the MCP server reads the new root
+    (from its own env block) while the Stop/PreCompact hook keeps writing chatlog
+    turns to the old root (the hook inherits Claude Code's process env, not the
+    mcpServers[*].env block). Both must be pinned.
+    """
+    sep = "=" * 72
+    logger.info(f"\n{sep}\nPOST-MIGRATION CHECKLIST (do these or you get split-brain):\n{sep}")
+    logger.info(
+        "1. Add these to the `env` block of EVERY m3 MCP server in your client\n"
+        "   settings.json (e.g. ~/.claude/settings.json — memory, custom_pc_tool,\n"
+        "   grok_intel, web_research, debug_agent):\n"
+        f'       "M3_ENGINE_ROOT": "{engine_root}",\n'
+        f'       "M3_CONFIG_ROOT": "{config_root}"\n'
+        "   MCP servers do NOT source ~/.zshenv — without this the server derives\n"
+        "   the OLD root and the chatlog falls back to the legacy path."
+    )
+    logger.info(
+        "2. Inline-pin BOTH chatlog hook `command`s in settings.json (Stop and\n"
+        "   PreCompact) — the hook inherits Claude Code's process env, NOT the\n"
+        "   server env block, so it needs its own pin:\n"
+        f"       M3_ENGINE_ROOT={engine_root} M3_CONFIG_ROOT={config_root} <existing command>"
+    )
+    logger.info(
+        "3. Restart your client (e.g. Claude Code) so the MCP servers re-resolve\n"
+        "   their env, then run `m3 doctor` / `/m3:health` to confirm the new root."
+    )
+    logger.info(sep)
 
 if __name__ == "__main__":
     main()

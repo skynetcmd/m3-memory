@@ -33,6 +33,7 @@ from datetime import date, datetime
 from m3_sdk import resolve_db_path
 
 from . import config
+from . import config as _scfg
 from . import graph as _graph_mod
 
 # `_query_chroma` / `_embed` / `_batch_cosine` (in the .util block below) are
@@ -156,13 +157,28 @@ def _resolve_mc_callbacks() -> None:
     so call-time behavior is bit-for-bit identical to the legacy code.
     """
     global _MC_CALLBACKS_BOUND
-    if _MC_CALLBACKS_BOUND:
+    g = globals()
+    # Don't trust the BOUND flag alone: under the test module purge/restore
+    # dance, this module can be restored with _MC_CALLBACKS_BOUND=True from a
+    # prior bind while the actual gate globals were reset to None (their import
+    # default) — so a "bound" module still has _prefer_observations_gate=None,
+    # and the call site `_prefer_observations_gate()` raises "NoneType is not
+    # callable" (test_vector_kind_strategy under batch ordering). Re-bind if the
+    # flag is unset OR any target is currently non-callable.
+    if _MC_CALLBACKS_BOUND and all(callable(g.get(n)) for n in _MC_CALLBACK_NAMES):
         return
     import memory_core as _mc  # type: ignore
-    g = globals()
+    bound_all = True
     for n in _MC_CALLBACK_NAMES:
-        g[n] = getattr(_mc, n)
-    _MC_CALLBACKS_BOUND = True
+        val = getattr(_mc, n, None)
+        if val is not None:
+            g[n] = val
+        if not callable(g.get(n)):
+            bound_all = False
+    # Only latch the flag when every callback actually resolved to a callable,
+    # so a transient None (e.g. mid-purge) doesn't permanently mark us "bound"
+    # with a None gate.
+    _MC_CALLBACKS_BOUND = bound_all
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -845,6 +861,19 @@ def _recency_bonus_ranks(valid_froms, bias: float) -> list[float]:
 # ----------------------------------------------------------------------------
 
 
+def _mc_callable(mc, name: str, default):
+    """Return mc.<name> only if it is CALLABLE, else the floor-bind default.
+
+    The test-shim resolution wants a monkeypatched callable on memory_core to
+    win — but plain getattr(mc, name, default) also returns the attribute when
+    it's None, which clobbers a valid default and later blows up as
+    "NoneType is not callable". Guard on callability so a None (or otherwise
+    non-callable) attribute leaves the good default in place.
+    """
+    val = getattr(mc, name, None)
+    return val if callable(val) else default
+
+
 async def memory_search_scored_impl(
     query,
     mmr=True,
@@ -912,6 +941,13 @@ async def memory_search_scored_impl(
     _db = globals()["_db"]
     _batch_cosine = globals()["_batch_cosine"]  # noqa: F811 — floor-bind module global
     _query_chroma = globals()["_query_chroma"]  # noqa: F811 — floor-bind module global
+    # `_compile_fts_query` is used in two branches below (the FTS short-circuit
+    # ~L957 and the keyword/FTS cascade ~L1152). A `from memory.fts import
+    # _compile_fts_query` inside only the first branch makes the name a function
+    # LOCAL for the whole body — so the second branch raised UnboundLocalError
+    # when the first branch didn't run. Floor-bind it here, same as the globals
+    # above, so both branches resolve it unconditionally.
+    from memory.fts import _compile_fts_query
 
     # Best-effort: callback resolution + test-shim rebinding. Any failure
     # here just leaves the floor bindings above in place.
@@ -924,12 +960,22 @@ async def memory_search_scored_impl(
     # `memory_core`. Without local rebinding the module-global imports
     # win, defeating the patches. Resolve once per call so the production
     # path pays effectively zero overhead.
+    #
+    # IMPORTANT: only adopt the memory_core value when it is actually CALLABLE.
+    # A bare `getattr(_mc, name, default)` returns the attribute even when it's
+    # None — and a lazily-bound symbol like `_query_chroma` can legitimately be
+    # None (e.g. memory.chroma unavailable, or transiently None during the
+    # test module-purge dance). Clobbering a valid floor-bind with None made the
+    # later `await _query_chroma(...)` raise "NoneType is not callable" under
+    # certain test orderings (test_vector_kind_strategy). Guarding on callable
+    # keeps the monkeypatch override working while never replacing a good
+    # default with None.
     try:
         import memory_core as _mc  # type: ignore
-        _embed = getattr(_mc, "_embed", _embed)
-        _db = getattr(_mc, "_db", _db)
-        _batch_cosine = getattr(_mc, "_batch_cosine", _batch_cosine)
-        _query_chroma = getattr(_mc, "_query_chroma", _query_chroma)
+        _embed = _mc_callable(_mc, "_embed", _embed)
+        _db = _mc_callable(_mc, "_db", _db)
+        _batch_cosine = _mc_callable(_mc, "_batch_cosine", _batch_cosine)
+        _query_chroma = _mc_callable(_mc, "_query_chroma", _query_chroma)
     except ImportError:
         pass  # already have floor bindings
 
@@ -953,7 +999,6 @@ async def memory_search_scored_impl(
             if query_words.issubset(conversational_stops):
                 raise ValueError("Generic conversational query; skipping short-circuit.")
 
-            from memory.fts import _compile_fts_query
             fts_query, ok = _compile_fts_query(query, search_mode)
             if ok:
                 extra_columns = list(extra_columns or [])
@@ -961,6 +1006,7 @@ async def memory_search_scored_impl(
                 _allowed_extra = {
                     "metadata_json", "conversation_id", "valid_from", "valid_to",
                     "user_id", "scope", "agent_id", "created_at", "source",
+                    "confidence", "corroboration_count", "contradiction_count",
                 }
                 safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
                 extra_cols_sql = ""
@@ -999,9 +1045,15 @@ async def memory_search_scored_impl(
     _allowed_extra = {
         "metadata_json", "conversation_id", "valid_from", "valid_to",
         "user_id", "scope", "agent_id", "created_at", "source",
+        "confidence", "corroboration_count", "contradiction_count",
     }
     if recency_bias and "valid_from" not in extra_columns:
         extra_columns = extra_columns + ["valid_from"]
+    # When confidence-ranking is enabled, auto-include the confidence column so
+    # the ranker can blend it (same pattern as recency_bias -> valid_from). Off
+    # by default, so the SELECT and result shape are unchanged for everyone else.
+    if _scfg.CONFIDENCE_RANKING and "confidence" not in extra_columns:
+        extra_columns = extra_columns + ["confidence"]
     safe_extra = [c for c in extra_columns if c in _allowed_extra and c not in _BASE_COLS]
     extra_sql = (", " + ", ".join(f"mi.{c}" for c in safe_extra)) if safe_extra else ""
 
@@ -1282,12 +1334,30 @@ async def memory_search_scored_impl(
             except (json.JSONDecodeError, TypeError):
                 pass
 
+    # Confidence ranking (knowledge-maintenance Phase 5, flag-gated, default off).
+    # Additive term — exactly like role_boosts — so flag-off ranking is byte-
+    # identical. A row's NULL confidence falls back to its importance, so an
+    # un-derived legacy row contributes nothing new versus today. The transparent
+    # stored `confidence` drives ranking; the Beta posterior is for experiments
+    # and not consulted here.
+    confidence_boosts: list[float] = [0.0] * len(rows)
+    if _scfg.CONFIDENCE_RANKING:
+        _cw = _scfg.CONFIDENCE_WEIGHT
+        for i, row in enumerate(rows):
+            try:
+                _c = row["confidence"] if "confidence" in row.keys() else None
+            except (IndexError, KeyError):
+                _c = None
+            if _c is None:
+                _c = float(row["importance"] or 0.0)  # NULL -> importance fallback
+            confidence_boosts[i] = _cw * float(_c)
+
     _MMR_LAMBDA = 0.7
     ranked = None
 
     # ── Candidate Assembly & Ranking (Tier-A Oxidation) ───────────────────
     if not explain and m3_core_rs is not None and mmr and len(rows) > k:
-        relevance = [float(s + b) for s, b in zip(final_scores, role_boosts)]
+        relevance = [float(s + b + c) for s, b, c in zip(final_scores, role_boosts, confidence_boosts)]
         contents = [(r["content"] or "") for r in rows]
         _bytes_per_row = EMBED_DIM * 4
         if all(isinstance(b, (bytes, bytearray)) and len(b) == _bytes_per_row for b in page_blobs):
@@ -1314,7 +1384,7 @@ async def memory_search_scored_impl(
         bm25_w_complement = 1.0 - vector_weight
         for i, row in enumerate(rows):
             item = {k: row[k] for k in row.keys() if k != "embedding"}
-            final_score = final_scores[i] + role_boosts[i]
+            final_score = final_scores[i] + role_boosts[i] + confidence_boosts[i]
             if explain:
                 bm25_norm = 1.0 / (1.0 + abs(row["bm25_score"]))
                 length_penalty = max(0.3, content_lens[i] / short_turn_t) if content_lens[i] < short_turn_t else 1.0

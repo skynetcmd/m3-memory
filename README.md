@@ -7,7 +7,11 @@
 
 # M3 Memory
 
-Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 ready · 100% local (fully offline) or cloud capable
+**M3 treats agent memory as a distributed-systems problem, not a retrieval feature.** Instead of every tool (Claude, Gemini, OpenCode, …) keeping its own throwaway memory, M3 is a **shared, evolving, bitemporal knowledge base** that multiple heterogeneous agents and machines read and write — built to answer *"how do agents maintain a consistent, evolving, temporal knowledge base over months and years?"* rather than just *"how do we retrieve a chunk?"*
+
+That framing is what makes the rest different: memory as persistent infrastructure, **bitemporal history** ("what did we believe last Tuesday, and when was it corrected?"), **automatic contradiction management** (not just append-and-hope), a memory-first MCP **operational API** (not a bare store/fetch), and **local-first without giving up cross-agent interoperability**.
+
+Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable
 
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
@@ -178,6 +182,27 @@ for full instructions, FIPS-mode hardening, and GPU-on-air-gap details.**
 
 By default, m3 stores its configuration, payload, and backups under
 `~/.m3-memory`. Override with `M3_MEMORY_ROOT`.
+
+### 🔒 FIPS 140-3 deployment-ready (what that does and doesn't mean)
+
+M3 **implements no custom cryptography** and uses only FIPS-approved algorithms
+(AES-256-GCM, SHA-256, PBKDF2-HMAC-SHA256, TLS 1.3). Every cryptographic
+operation — the encrypted secrets vault, key derivation, the tamper-evident
+audit hash chain — is routed through a single provider boundary
+(`crypto_provider.py`) so a validated module can serve it.
+
+- **`M3_FIPS_MODE=1`** routes all crypto through **wolfCrypt** (the wolfSSL
+  cryptographic module), runs power-up Known-Answer-Tests, and **fails closed**
+  if wolfCrypt isn't available — never silently falling back to Python crypto.
+  This works with the freely-buildable open-source wolfSSL.
+- **`M3_FIPS_STRICT=1`** additionally **requires the CMVP-validated wolfCrypt
+  FIPS module** (the commercial wolfSSL FIPS build) and refuses anything else.
+
+> **M3 itself is *not* a FIPS-validated cryptographic module** — no application
+> is. "Deployment-ready" means M3 avoids non-approved algorithms, implements no
+> crypto of its own, and uses a validated provider (wolfCrypt) when configured.
+> See **[docs/FIPS_MODULE_BOUNDARY.md](docs/FIPS_MODULE_BOUNDARY.md)** for the
+> module boundary, the three tiers, and known limitations.
 
 ---
 

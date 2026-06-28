@@ -118,11 +118,11 @@ system: |
     `--dry-run`. Always.
   - `env_var`: ALL_CAPS_WITH_UNDERSCORES. Examples: `M3_DATABASE`,
     `LM_API_TOKEN`, `AGENT_OS_MASTER_KEY`.
-  - `ip_address`: strict IPv4 dotted quad. The 10.21.x.x subnet is the
-    user's homelab. Example: `192.0.2.15`.
-  - `mac_address`: six colon-separated hex bytes. Example: `00:00:00:00:00:00`.
-  - `vlan`: `VLAN <num>` or named segments like "vlan-iot", "vlan-main
-    HomeKit", "vlan-servers", "Backbone".
+  - `ip_address`: strict IPv4 dotted quad. A private LAN subnet (e.g.
+    192.0.2.x) is the user's homelab. Example: `192.0.2.5`.
+  - `mac_address`: six colon-separated hex bytes. Example: `00:00:5e:00:53:af`.
+  - `vlan`: `VLAN <num>` or named segments like "IoT", "HomeKit",
+    "Servers", "Backbone".
   - `port`: bare 2-5 digit number after `port|:|listening on`. Common in
     this corpus: 1234, 8081, 11434, 5678, 8006, 21063.
   - `variant`: bench/experiment tag — short alphanumeric like `V0`, `V3`,
@@ -138,7 +138,7 @@ system: |
     ("yesterday", "last week", "next Tuesday").
   - `host`: hostnames with prefixes `pve-`, `TryNode`, or a trailing
     LAN domain suffix. Examples: `pve-node-a`, `pve-node-b`, `TryNodeA2`,
-    `primary-host.lan`.
+    `host.lan`.
   - `container`: "LXC <n>" or "VM <n>". Example: `LXC 503`, `VM 501`.
 
   ## DO NOT EXTRACT — FORCE-DROP THESE

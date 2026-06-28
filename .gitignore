@@ -161,9 +161,6 @@ scan-reports/
 # Claude Code runtime locks
 .claude/scheduled_tasks.lock
 
-# Per-machine Claude Code permissions/paths — machine-specific, never share
-.claude/settings.local.json
-
 # m3_enrich auto-generated per-run reports — contain bench-variant
 # names that are private to development branches. Manually-crafted
 # entries (security-scan-*.md, README.md) stay tracked.
@@ -174,6 +171,15 @@ docs/audits/enrich-run-*.md
 benchmarks/longmemeval/*
 !benchmarks/longmemeval/LME-S_Benchmarking_Report.md
 !benchmarks/longmemeval/LME-S_v1_Benchmarking_Report.md
+
+# Root-level bench strays — private bench dataset/schema notes sometimes get
+# authored at repo root (outside benchmarks/longmemeval/, so the rule above
+# misses them). Guard them at root so a stray `git add` can't leak them.
+/LME-M_*.md
+/LME-S_*.md
+
+# Local working note — MCP plugin-failure diagnosis, kept local (not public origin).
+/2026.05.05_MCP_Plugin_Failure.md
 
 # LoCoMo bench territory — only the public README ships on main; the audit
 # is pending and the harness lives on private/locomo until results land.
@@ -197,3 +203,20 @@ docs/DESIGN_PHILOSOPHIES.md
 .agent_os_salt
 .agents/
 .antigravitycli/
+
+# Per-machine local Claude Code settings — contains user-specific paths/permissions.
+# Never tracked: it is machine-local config, not shared project config.
+.claude/settings.local.json
+
+# Runtime PID/lock files — per-process, per-machine state (e.g. the chatlog
+# embed sweeper writes memory/chatlog_embed_sweeper.pid). Never committed.
+*.pid
+
+# Personal/secret holding pen — machine-local files (tokens, salts, session
+# history, ad-hoc scripts) that m3 does NOT read at runtime, parked here so a
+# stray `git add -A` can never sweep them into a commit. Whole dir is ignored.
+gitignored/
+
+# Internal schema-fork planning doc — documents the private/bench migration
+# lineage; keep local/private, never on public origin.
+docs/plans/SCHEMA_MIGRATION_FORK.md

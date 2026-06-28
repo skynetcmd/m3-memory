@@ -117,6 +117,34 @@ def find_bridge() -> Optional[Path]:
     return None
 
 
+def _safe_copy_sqlite(src: Path, dst: Path) -> None:
+    """Copy a SQLite database WAL-safely via the Online Backup API.
+
+    A plain file copy of a DB the m3 MCP server has open can miss pages still in
+    the `-wal` file or capture a torn write. The backup API produces a
+    transactionally-consistent single-file snapshot (it checkpoints the WAL into
+    the destination). Falls back to a plain copy only if the source isn't a
+    valid SQLite file (e.g. a 0-byte placeholder) so non-DB `.db` files still
+    get preserved rather than dropped.
+    """
+    try:
+        src_conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=10)
+        try:
+            dst_conn = sqlite3.connect(str(dst))
+            try:
+                with dst_conn:
+                    src_conn.backup(dst_conn)
+            finally:
+                dst_conn.close()
+        finally:
+            src_conn.close()
+    except sqlite3.Error:
+        # Not a usable SQLite DB (corrupt / empty / locked-exclusive) — fall
+        # back to a byte copy so we still preserve *something* rather than lose
+        # the file entirely.
+        shutil.copy2(src, dst)
+
+
 def _git_clone(tag: str, dest: Path) -> bool:
     """Shallow-clone REPO_URL at ``tag`` into ``dest``. Returns True on success,
     False if ``git`` is missing. Raises on any other subprocess failure."""
@@ -601,13 +629,81 @@ def _post_install(
         print()
         print("post-install: no action needed (sqlite3 present, no Gemini CLI detected, no prompts).")
         print("              run `mcp-memory doctor` anytime to re-check.")
-        return
+    else:
+        print()
+        print("post-install:")
+        for msg in messages:
+            print(f"  {msg}")
+        print("  run `mcp-memory doctor` to re-check anytime.")
 
+    # Always end with the data-durability reminder — install/upgrade are the
+    # natural moments to nudge the user about backups.
+    _print_backup_reminder()
+
+
+def _detect_cdw_target() -> "Optional[str]":
+    """Return the configured data-warehouse host (no credentials), or None.
+
+    A CDW is "configured" if PG_URL resolves (env var or the encrypted vault)
+    OR a SYNC_TARGET_IP / POSTGRES_SERVER is set. We return only the host so the
+    reminder can name where data is auto-syncing — never the password from
+    PG_URL.
+    """
+    # 1. Explicit warehouse IP/host (sync_all.py uses these).
+    host = os.environ.get("POSTGRES_SERVER") or os.environ.get("SYNC_TARGET_IP")
+    if host:
+        return host.strip()
+
+    # 2. PG_URL — from env, or the encrypted vault. Parse out ONLY the host.
+    pg_url = os.environ.get("PG_URL", "").strip()
+    if not pg_url:
+        try:
+            # Resolve via the SDK's secret vault without spinning up a full
+            # context if it's not importable in this environment.
+            import sys as _sys
+            _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+            from m3_sdk import M3Context  # type: ignore
+            pg_url = (M3Context.for_db().get_secret("PG_URL") or "").strip()
+        except Exception:  # noqa: BLE001 — vault not available / not installed yet
+            pg_url = ""
+    if pg_url:
+        try:
+            from urllib.parse import urlparse
+            return urlparse(pg_url).hostname  # host only — drops user:pass
+        except Exception:  # noqa: BLE001
+            return "your configured PostgreSQL warehouse"
+    return None
+
+
+def _print_backup_reminder() -> None:
+    """Remind the user to back up their databases regularly.
+
+    Branches on whether a CDW (PostgreSQL data warehouse) is configured:
+      - No CDW: a plain "back up your local DBs" reminder.
+      - CDW configured: note that auto-sync to the warehouse exists (and where),
+        but that it is NOT a substitute for backups — the warehouse itself, and
+        the local DBs, should be backed up to the user's risk tolerance.
+    """
+    cdw = _detect_cdw_target()
     print()
-    print("post-install:")
-    for msg in messages:
-        print(f"  {msg}")
-    print("  run `mcp-memory doctor` to re-check anytime.")
+    print("  " + "-" * 68)
+    print("  DATA SAFETY — back up your databases regularly")
+    print("  Your memories, chatlog, and file index live in SQLite DBs under your")
+    print("  engine root (M3_ENGINE_ROOT, default ~/.m3/engine). They are NOT")
+    print("  backed up automatically by install/upgrade.")
+    if cdw:
+        print()
+        print(f"  • You DO have auto-syncing configured to a data warehouse ({cdw}).")
+        print("    That replicates your memories across machines, but it is NOT a")
+        print("    backup: a deletion or corruption syncs too, and the warehouse")
+        print("    itself is a single store. Back up BOTH the warehouse and your")
+        print("    local DBs on a cadence that matches your risk tolerance.")
+    else:
+        print()
+        print("  • Copy ~/.m3/engine/*.db somewhere safe periodically (or set up an")
+        print("    automated backup). Tip: a data warehouse for cross-machine sync")
+        print("    can be configured later (see docs/SYNC.md).")
+    print("  " + "-" * 68)
 
 
 def install_m3(
@@ -660,8 +756,11 @@ def install_m3(
     if repo_path.exists():
         if not force:
             raise RuntimeError(
-                f"{repo_path} already exists. Run `mcp-memory install-m3 --force` to replace it, "
-                f"or `mcp-memory update` to refresh to the current wheel version."
+                "m3 is already installed — nothing to do.\n"
+                "  • To reconfigure (re-wire agents, change options):  m3 setup\n"
+                "  • To upgrade to the current version:                m3 update\n"
+                "  • To re-fetch the system files in place:            m3 install-m3 --force\n"
+                f"  (installed at {repo_path}) Your memories and chatlog are preserved either way."
             )
         memory_dir = repo_path / "memory"
         if memory_dir.is_dir():
@@ -670,15 +769,37 @@ def install_m3(
                 # Keep .db / .json (chatlog config + state) / .jsonl (cursor).
                 # The migrations/ subdir ships with the repo and will be
                 # restored by the new clone, so we don't preserve it.
-                if item.is_file() and item.suffix in (".db", ".json", ".jsonl"):
-                    shutil.copy2(item, preserved_dir / item.name)
+                if not (item.is_file() and item.suffix in (".db", ".json", ".jsonl")):
+                    continue
+                dst = preserved_dir / item.name
+                if item.suffix == ".db":
+                    # A plain file copy of a live SQLite DB can miss in-WAL pages
+                    # or capture a torn write if the server has the DB open.
+                    # Use the SQLite Online Backup API, which produces a
+                    # transactionally-consistent snapshot including the WAL.
+                    _safe_copy_sqlite(item, dst)
+                else:
+                    shutil.copy2(item, dst)
             print(f"  preserving {sum(1 for _ in preserved_dir.iterdir())} user-data file(s) across update")
         print(f"  removing existing {repo_path}")
         shutil.rmtree(repo_path)
 
     print(f"fetching m3-memory {tag} -> {repo_path}")
-    if not _git_clone(tag, repo_path):
-        print("  git not found; falling back to GitHub tarball")
+    # _git_clone returns False only when git is missing; it RAISES on any other
+    # failure (network, bad tag, exit 128). Because we already rmtree'd the old
+    # repo above, an uncaught raise here would leave the user with a vanished
+    # repo and no replacement (the 2026-06-08 incident). So fall back to the
+    # GitHub tarball on EITHER path — missing git OR a failed clone.
+    cloned = False
+    try:
+        cloned = _git_clone(tag, repo_path)
+    except Exception as e:  # noqa: BLE001 — any clone failure -> try the tarball
+        print(f"  git clone failed ({type(e).__name__}: {e}); falling back to GitHub tarball")
+        # A partial clone may have left a dir behind; clear it so the tarball
+        # extracts into a clean path.
+        shutil.rmtree(repo_path, ignore_errors=True)
+    if not cloned:
+        print("  falling back to GitHub tarball")
         _download_tarball(tag, repo_path)
 
     bridge = repo_path / "bin" / "memory_bridge.py"
@@ -745,9 +866,17 @@ def _resolve_chatlog_db(cfg: dict) -> Optional[Path]:
     """Best-effort resolution of the chatlog DB path.
 
     Order: CHATLOG_DB_PATH env, M3_DATABASE env (shared DB case), config's
-    chatlog_db_path, else <repo_path>/memory/agent_chatlog.db.
-    Returns None only when no repo_path is configured AND no env override
-    is set — i.e. the system isn't installed yet.
+    chatlog_db_path, the DECOUPLED ENGINE ROOT (M3_ENGINE_ROOT / ~/.m3/engine —
+    the canonical home for chatlog DBs in the decoupled layout, which is now the
+    default), then the legacy <repo_path>/memory/agent_chatlog.db.
+
+    The engine-root check MUST come before the repo-relative fallback: with
+    decoupled roots, the chatlog DB lives at <engine>/agent_chatlog.db, NOT under
+    the repo. Without this, doctor/`m3 status` read a non-existent repo-relative
+    path and falsely report "no captures" even when a real chatlog DB exists in
+    the engine root (observed 2026-06-27 on a macOS decoupled-roots install: a
+    592MB agent_chatlog.db reported as empty).
+    Returns None only when nothing resolves — i.e. the system isn't installed yet.
     """
     env_chatlog = os.environ.get("CHATLOG_DB_PATH")
     if env_chatlog:
@@ -758,6 +887,16 @@ def _resolve_chatlog_db(cfg: dict) -> Optional[Path]:
     cfg_chatlog = cfg.get("chatlog_db_path")
     if cfg_chatlog:
         return Path(cfg_chatlog).expanduser()
+    # Decoupled engine root — the canonical location for chatlog DBs today.
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        from m3_sdk import get_m3_engine_root
+        eng_db = Path(get_m3_engine_root()) / "agent_chatlog.db"
+        if eng_db.is_file():
+            return eng_db
+    except Exception:  # noqa: BLE001 — fall through to the legacy paths below
+        pass
     repo = cfg.get("repo_path")
     if repo:
         return Path(repo) / "memory" / "agent_chatlog.db"
@@ -882,9 +1021,226 @@ def _chatlog_section(cfg: dict) -> int:
     return 0
 
 
+def _embedder_tier_section() -> None:
+    """Emit the 'which embedder tier is live' line (Project Oxidation status).
+
+    Tells the user whether the native in-process embedder (the oxidized hot
+    path) is active or whether m3 is on the pure-Python HTTP fallback. Purely
+    informational — never changes doctor's exit code. Best-effort: if the
+    rust_core_install probe isn't importable, stay silent rather than error.
+    """
+    try:
+        from m3_memory.rust_core_install import active_embedder_tier
+        tier = active_embedder_tier()
+    except Exception:  # noqa: BLE001 — informational only
+        return
+    print()
+    print("embedder (Project Oxidation):")
+    if tier.get("native"):
+        print(f"  status:                  {tier['summary']}")
+    else:
+        # Wrap the longer fallback summary so it stays readable in a terminal.
+        print("  status:                  pure-Python fallback")
+        for line in tier["summary"].split(" — "):
+            print(f"    {line.strip()}")
+
+
+def _crypto_section() -> None:
+    """Emit the crypto/FIPS status line (backend, FIPS tier, trusted lib path).
+
+    Shows whether crypto runs on the DEFAULT (Python) backend or wolfCrypt, the
+    FIPS tier, and — importantly for security review — WHICH absolute, trusted
+    path the wolfSSL library was loaded from (M3 never loads it by bare name).
+    Best-effort and read-only; never changes doctor's exit code.
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        from crypto_provider import active_crypto_status
+        cs = active_crypto_status()
+    except Exception:  # noqa: BLE001 — informational only
+        return
+    print()
+    print("crypto (FIPS):")
+    tier = "strict" if cs["fips_strict"] else ("mode" if cs["fips_mode"] else "off")
+    print(f"  backend:                 {cs['backend']}  (FIPS: {tier})")
+    if cs["backend"] == "WOLFSSL" and cs.get("lib_path"):
+        print(f"  wolfSSL loaded from:     {cs['lib_path']}"
+              + ("  [integrity-pinned]" if cs["integrity_pinned"] else ""))
+        print(f"  validated FIPS module:   {'yes' if cs['fips_validated'] else 'no (open-source build)'}")
+        sha = cs.get("lib_sha256")
+        if sha:
+            print(f"  loaded lib SHA-256:      {sha}")
+            if not cs["integrity_pinned"]:
+                # Help the operator self-pin THEIR build (M3 doesn't ship wolfSSL).
+                print("    (to detect later tampering, pin your trusted build:")
+                print(f"     export M3_WOLFSSL_SHA256={sha} )")
+    else:
+        print(f"  status:                  {cs['summary']}")
+
+
+def _roots_section() -> None:
+    """Report the decoupled three-root layout and flag the split-brain hazard.
+
+    The engine (DBs) and config roots can be relocated independently of the
+    repo (M3_MEMORY_ROOT / M3_ENGINE_ROOT / M3_CONFIG_ROOT). When only SOME of
+    those env vars are pinned, the MCP server and the chatlog hook can resolve
+    different roots (the documented split-brain — see CLAUDE.md "Homecoming
+    Architecture"). doctor is the natural place to surface where each root
+    actually resolves and to warn when the pinning is partial.
+
+    Best-effort: if the SDK resolvers aren't importable (stripped env), skip
+    the section rather than fail doctor.
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        from m3_sdk import (  # type: ignore
+            get_m3_config_root,
+            get_m3_engine_root,
+            get_m3_root,
+        )
+    except Exception:  # noqa: BLE001 — informational only
+        return
+
+    def _src(env_name: str) -> str:
+        if os.environ.get(env_name):
+            return f"({env_name} env)"
+        if os.environ.get("M3_MEMORY_ROOT"):
+            return "(derived from M3_MEMORY_ROOT)"
+        return "(default ~/.m3)"
+
+    print()
+    print("decoupled roots:")
+    mem = get_m3_root()
+    cfg_root = get_m3_config_root()
+    eng_root = get_m3_engine_root()
+    print(f"  memory root (repo/state): {mem}  {_src('M3_MEMORY_ROOT')}")
+    print(f"  config root:              {cfg_root}  {_src('M3_CONFIG_ROOT')}")
+    print(f"  engine root (DBs):        {eng_root}  {_src('M3_ENGINE_ROOT')}")
+
+    # Engine DBs presence — the thing users actually care about.
+    eng = Path(eng_root)
+    dbs = sorted(p.name for p in eng.glob("*.db")) if eng.is_dir() else []
+    if dbs:
+        print(f"  engine DBs present:       {', '.join(dbs)}")
+    elif eng.is_dir():
+        print("  engine DBs present:       (none yet — no captures/migrations written)")
+    else:
+        print("  engine DBs present:       (engine root does not exist yet)")
+
+    # Split-brain hazard. Two independent risk signals (CLAUDE.md "Split-brain
+    # hazard"): (a) exactly ONE of the engine/config roots is explicitly pinned
+    # while the other only derives — the two can diverge; (b) a root is pinned
+    # in THIS process but the MCP server / hook may not inherit it. We can only
+    # observe this process's env, so we flag the structural asymmetry (a) and
+    # always remind about the both-surfaces requirement when ANY root is pinned.
+    eng_pinned = bool(os.environ.get("M3_ENGINE_ROOT"))
+    cfg_pinned = bool(os.environ.get("M3_CONFIG_ROOT"))
+    if eng_pinned != cfg_pinned:
+        print()
+        only = "M3_ENGINE_ROOT" if eng_pinned else "M3_CONFIG_ROOT"
+        other = "M3_CONFIG_ROOT" if eng_pinned else "M3_ENGINE_ROOT"
+        print(f"  [!] ASYMMETRIC root pinning: {only} is set but {other} is not.")
+        print("      Pin BOTH together so the config and engine roots can't")
+        print("      diverge. (Setting only one leaves the other on its")
+        print("      derived/default path.)")
+    if (eng_pinned or cfg_pinned or os.environ.get("M3_MEMORY_ROOT")):
+        print()
+        print("  [i] Decoupled-roots reminder: the m3 MCP server reads its root")
+        print("      from the server `env` block in the client settings.json,")
+        print("      while the chatlog Stop/PreCompact hook inherits the agent's")
+        print("      PROCESS env. Pin M3_ENGINE_ROOT + M3_CONFIG_ROOT on BOTH")
+        print("      surfaces, or the two halves write to different DBs.")
+        print("      See CLAUDE.md → 'Split-brain hazard'.")
+
+
+def status_summary() -> dict:
+    """Compute a single-glance health verdict + the facts a user cares about.
+
+    Returns {verdict, installed, memories, embedder, chatlog, headline}.
+    verdict ∈ {healthy, degraded, broken}. Best-effort and fast; never raises.
+    Used by `m3 status` (one-liner) and as the lead line of `m3 doctor`.
+    """
+    out: dict = {"verdict": "broken", "installed": False, "memories": None,
+                 "embedder": "?", "chatlog": "?", "headline": ""}
+    # 1. Is the payload installed/resolvable?
+    bridge = find_bridge()
+    out["installed"] = bool(bridge and bridge.is_file())
+
+    cfg = load_config()
+    # 2. Memory count (main DB), best-effort.
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        from m3_sdk import get_m3_engine_root
+        main_db = Path(get_m3_engine_root()) / "agent_memory.db"
+        if main_db.is_file():
+            conn = sqlite3.connect(f"file:{main_db.as_posix()}?mode=ro", uri=True, timeout=1.0)
+            try:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted,0)=0"
+                ).fetchone()
+                out["memories"] = int(row[0]) if row else 0
+            finally:
+                conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3. Embedder tier.
+    try:
+        from m3_memory.rust_core_install import active_embedder_tier
+        out["embedder"] = "native (in-process)" if active_embedder_tier().get("native") \
+            else "pure-Python (HTTP)"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 4. Chatlog activity.
+    db_path = _resolve_chatlog_db(cfg)
+    if db_path is not None:
+        stats = _chatlog_db_stats(db_path)
+        if stats["ok"]:
+            out["chatlog"] = f"active ({stats['rows']} rows)" if stats["rows"] else "wired (0 rows yet)"
+        elif stats["error"] == "file not found":
+            out["chatlog"] = "no captures yet"
+        else:
+            out["chatlog"] = "unreadable"
+
+    # Verdict: broken if not installed; degraded if installed but a subsystem is
+    # off; healthy otherwise.
+    if not out["installed"]:
+        out["verdict"] = "broken"
+        out["headline"] = "NOT installed — run `m3 setup`"
+    else:
+        degraded = out["embedder"].startswith("pure-Python") or out["chatlog"] in ("unreadable",)
+        out["verdict"] = "degraded" if degraded else "healthy"
+        mem = "?" if out["memories"] is None else out["memories"]
+        out["headline"] = (
+            f"{out['verdict'].upper()} · {mem} memories · embedder: {out['embedder']} · "
+            f"chatlog: {out['chatlog']}"
+        )
+    return out
+
+
+def status() -> int:
+    """`m3 status` — one-glance health line. Returns 0 healthy, 1 degraded/broken."""
+    s = status_summary()
+    icon = {"healthy": "[OK]", "degraded": "[~]", "broken": "[X]"}.get(s["verdict"], "[?]")
+    print(f"{icon} m3 {s['headline']}")
+    if s["verdict"] != "healthy":
+        print("     run `m3 doctor` for details.")
+    return 0 if s["verdict"] == "healthy" else 1
+
+
 def doctor() -> int:
     """Print diagnostic info and return 0 on healthy, 1 on missing payload."""
     from m3_memory import __version__
+
+    # Lead with the verdict — the one thing the user actually wants to know.
+    _s = status_summary()
+    _icon = {"healthy": "[OK]", "degraded": "[~]", "broken": "[X]"}.get(_s["verdict"], "[?]")
+    print(f"{_icon} m3 {_s['headline']}")
+    print()
 
     root = os.environ.get("M3_MEMORY_ROOT")
     root_src = "(M3_MEMORY_ROOT env)" if root else "(default)"
@@ -893,11 +1249,33 @@ def doctor() -> int:
     print(f"M3 root directory:         {config_dir()} {root_src}")
     print(f"config file:               {config_file()}")
     cfg = load_config()
+    # The config's version/tag/installed_at describe the LAST `install-m3` fetch
+    # — which is NOT necessarily what's running if the live bridge resolves via
+    # M3_BRIDGE_PATH or the developer-sibling (a different checkout). Detect that
+    # divergence so we don't present a stale version as if it's live.
+    resolved = find_bridge()
+    cfg_bridge = cfg.get("bridge_path") if cfg else None
+    bridge_matches_config = bool(
+        resolved and cfg_bridge
+        and Path(resolved).resolve() == Path(cfg_bridge).expanduser().resolve()
+    )
     if cfg:
-        print(f"  installed version:       {cfg.get('version', '?')}")
-        print(f"  installed tag:           {cfg.get('tag', '?')}")
-        print(f"  installed at:            {cfg.get('installed_at', '?')}")
+        # When the live bridge matches the config, these ARE the installed
+        # version. When it diverges (M3_BRIDGE_PATH / dev checkout), they're just
+        # the record of the last fetch — label them so, and point at the live code.
+        if bridge_matches_config:
+            print(f"  installed version:       {cfg.get('version', '?')}")
+            print(f"  installed tag:           {cfg.get('tag', '?')}")
+            print(f"  installed at:            {cfg.get('installed_at', '?')}")
+        else:
+            print(f"  last fetch version:      {cfg.get('version', '?')}  (NOT the live code — see below)")
+            print(f"  last fetch tag:          {cfg.get('tag', '?')}")
+            print(f"  last fetch at:           {cfg.get('installed_at', '?')}")
         print(f"  repo_path:               {cfg.get('repo_path', '?')}")
+        if not bridge_matches_config and resolved:
+            print("  [i] LIVE bridge differs from the fetch record above:")
+            print(f"      running code:        {resolved}")
+            print(f"      live package version: {__version__}")
     else:
         print("  (no config - system not installed via `mcp-memory install-m3`)")
 
@@ -913,7 +1291,13 @@ def doctor() -> int:
     else:
         print("developer sibling bridge:  (not found)")
 
+    _roots_section()
+
     _chatlog_section(cfg)
+
+    _embedder_tier_section()
+
+    _crypto_section()
 
     print()
     bridge = find_bridge()

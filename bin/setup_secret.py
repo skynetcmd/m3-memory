@@ -2,7 +2,9 @@
 """Interactive CLI for adding API keys to the m3-memory encrypted vault.
 
 Keys are stored in the synchronized_secrets table via auth_utils.set_api_key,
-which Fernet-encrypts the value against AGENT_OS_MASTER_KEY from the OS keyring.
+which encrypts the value with AES-256-GCM (FIPS-approved, via crypto_provider)
+under a key derived from AGENT_OS_MASTER_KEY (from the OS keyring). Legacy
+Fernet ciphertexts are still decryptable and auto-migrate to AES-GCM on read.
 
 Usage:
     python bin/setup_secret.py              # interactive add

@@ -244,6 +244,12 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_status(args: argparse.Namespace) -> int:
+    """`m3 status` — a one-line health verdict (run `m3 doctor` for detail)."""
+    from m3_memory.installer import status
+    return status()
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from m3_memory.installer import doctor
     code = doctor()
@@ -254,6 +260,43 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         return _run_bin_script("memory_doctor.py", args.rest)
 
     return code
+
+
+def _cmd_governor(args: argparse.Namespace) -> int:
+    """Dispatch `m3 governor <status|migrate>` to bin/governor_cli.py."""
+    if not _resolve_bin_script("governor_cli.py"):
+        print("governor command requires the project payload (run `m3 install`).")
+        return 1
+    sub = getattr(args, "governor_cmd", None) or "status"
+    argv = [sub]
+    if sub == "migrate" and getattr(args, "yes", False):
+        argv.append("--yes")
+    return _run_bin_script("governor_cli.py", argv)
+
+
+def _cmd_fips(args: argparse.Namespace) -> int:
+    """Dispatch `m3 fips <install-wolfssl|status>`."""
+    sub = getattr(args, "fips_cmd", None)
+    if sub == "install-wolfssl":
+        if not _resolve_bin_script("install_wolfssl.py"):
+            print("fips install-wolfssl requires the project payload (run `m3 install`).")
+            return 1
+        argv: list = []
+        if getattr(args, "ref", None):
+            argv += ["--ref", args.ref]
+        if getattr(args, "dest", None):
+            argv += ["--dest", args.dest]
+        if getattr(args, "print_sha", False):
+            argv.append("--print-sha")
+        return _run_bin_script("install_wolfssl.py", argv)
+    # Default / `m3 fips status`: show the doctor crypto section.
+    try:
+        from m3_memory.installer import _crypto_section
+        _crypto_section()
+        return 0
+    except Exception as e:  # noqa: BLE001
+        print(f"could not read crypto status: {e}")
+        return 1
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
@@ -872,11 +915,45 @@ Examples:
     )
     p_uninstall.set_defaults(func=_cmd_uninstall)
 
+    p_status = subparsers.add_parser(
+        "status",
+        help="One-line health check (healthy/degraded/broken + memory count).",
+    )
+    p_status.set_defaults(func=_cmd_status)
+
     p_doctor = subparsers.add_parser(
         "doctor",
-        help="Print paths, resolved bridge, and install status.",
+        help="Full diagnostics: paths, resolved bridge, embedder, chatlog, crypto.",
     )
     p_doctor.set_defaults(func=_cmd_doctor)
+
+    p_governor = subparsers.add_parser(
+        "governor",
+        help="Inspect / migrate legacy scheduled tasks to the background governor.",
+    )
+    gov_sub = p_governor.add_subparsers(dest="governor_cmd", metavar="<status|migrate>")
+    gov_sub.add_parser("status", help="Report governor-eligible scheduled tasks still installed.")
+    p_gov_mig = gov_sub.add_parser("migrate", help="Remove governor-eligible scheduled tasks.")
+    p_gov_mig.add_argument("--yes", "-y", action="store_true",
+                           help="Skip the confirmation prompt (headless use).")
+    p_governor.set_defaults(func=_cmd_governor)
+
+    p_fips = subparsers.add_parser(
+        "fips",
+        help="FIPS crypto: build/install open-source wolfSSL, or show crypto status.",
+    )
+    fips_sub = p_fips.add_subparsers(dest="fips_cmd", metavar="<install-wolfssl|status>")
+    p_fips_inst = fips_sub.add_parser(
+        "install-wolfssl",
+        help="Build the OPEN-SOURCE wolfSSL from official source and install to "
+             "~/.m3/lib (license-clean; not the CMVP-validated FIPS module).",
+    )
+    p_fips_inst.add_argument("--ref", default=None, help="wolfSSL git tag/branch.")
+    p_fips_inst.add_argument("--dest", default=None, help="Install dir (default ~/.m3/lib).")
+    p_fips_inst.add_argument("--print-sha", action="store_true",
+                             help="Print the installed library's SHA-256 to self-pin.")
+    fips_sub.add_parser("status", help="Show the active crypto backend / FIPS tier / lib path.")
+    p_fips.set_defaults(func=_cmd_fips)
 
     p_serve = subparsers.add_parser(
         "serve",
@@ -978,7 +1055,18 @@ Examples:
         parser.error(f"unrecognized arguments: {' '.join(extras)}")
 
     if args.command is None:
-        # Bare `mcp-memory` → run the bridge (unchanged default behavior).
+        # Bare `m3` → run the bridge (the MCP stdio server). This is how agents
+        # invoke it, so stdout MUST stay clean (it's the protocol channel).
+        # But a HUMAN running bare `m3` in a terminal usually wanted help, not a
+        # silent server — print a one-line hint to STDERR (never stdout) so it
+        # doesn't corrupt the protocol, only when attached to a TTY.
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            print(
+                "m3: starting the MCP memory server (this is what your agent runs).\n"
+                "    New here? Run `m3 setup` to install + wire your agent,\n"
+                "    or `m3 --help` for all commands.  Ctrl-C to stop.",
+                file=sys.stderr,
+            )
         _run_bridge()
         return
 

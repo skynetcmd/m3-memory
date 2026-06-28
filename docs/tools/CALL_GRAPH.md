@@ -108,6 +108,7 @@ graph LR
   m3_entities --> m3_sdk
   m3_entities --> memory_core
   m3_entities --> slm_intent
+  m3_entities_gliner --> memory_core
   m3_sdk --> audit_trail
   m3_sdk --> auth_utils
   m3_sdk --> chatlog_config
@@ -261,6 +262,7 @@ graph LR
   class m3_enrich_batch_parallel lib
   class m3_enrich_report lib
   class m3_entities lib
+  class m3_entities_gliner lib
   class m3_memory lib
   class m3_sdk lib
   class macbook_status_server lib
@@ -320,7 +322,7 @@ graph LR
   class weekly_auditor sync
 ```
 
-**Stats:** 117 tools, 183 edges, 125 total nodes.
+**Stats:** 118 tools, 184 edges, 126 total nodes.
 
 ## Notes
 

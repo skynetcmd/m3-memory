@@ -11,6 +11,20 @@ import os as _os
 # Setting this sentinel makes _ensure_utf8 return immediately. Must be set
 # BEFORE any test imports cli, so it lives at conftest import time.
 _os.environ.setdefault("_M3_UTF8_REEXEC", "1")
+
+# Disable the native m3_core_rs extension by DEFAULT for the whole test session.
+# Unit tests should not depend on a CUDA/native wheel being installed on the
+# host. On a dev box that HAS the wheel + a discoverable GGUF, any test that
+# exercises an embed would otherwise load the real in-process EmbeddedEmbedder
+# — a multi-second CUDA context + model load that (a) blows the doctor <5s SLO
+# assertions and (b) leaves warm global embed state that poisons run-order-
+# dependent tier-ordering / dedup / cold-cascade tests (they pass in isolation,
+# fail under batch ordering). Tests that specifically exercise the native path
+# opt back in explicitly (e.g. test_sdk_oxidation / test_governor_pacing set
+# M3_CORE_RS_DISABLE=0 / monkeypatch the flag). setdefault so an outer
+# environment that deliberately set it wins. Must run at conftest IMPORT time,
+# before any test imports memory.config (which reads it once at import).
+_os.environ.setdefault("M3_CORE_RS_DISABLE", "1")
 import shutil
 import sqlite3
 import subprocess
@@ -77,12 +91,34 @@ def _restore_memory_modules():
 
     before = _snapshot()
     yield
-    after_names = {
-        name for name in sys.modules
+    after = {
+        name: sys.modules[name] for name in list(sys.modules)
         if name == "memory_core" or name == "memory" or name.startswith("memory.")
     }
-    # Remove modules the test introduced/replaced, then restore the originals.
-    for name in after_names - before.keys():
+    # Detect whether the test REPLACED any memory.* module object (not just
+    # added one). A replacement means some submodule was reimported and may now
+    # be bound, via `from .x import y`, to a DIFFERENT sibling than the one we'd
+    # restore — leaving a divergent mix where e.g. memory.entity's cached
+    # `_embed_canonical_cached` reads a different memory.embed cache than a test
+    # patches. That cross-module identity divergence is what made
+    # test_entity_graph::test_resolution_cosine fail only under batch ordering
+    # (the stub _embed was patched on one memory.embed instance but the
+    # resolution path called another). When a replacement happened, restoring
+    # the old objects can't guarantee internal consistency — so PURGE the whole
+    # memory.* namespace instead and let the next test reimport a clean,
+    # consistently cross-bound set. When nothing was replaced (the common case),
+    # keep the cheap restore.
+    replaced = any(
+        name in before and before[name] is not mod
+        for name, mod in after.items()
+    )
+    if replaced:
+        for name in list(sys.modules):
+            if name == "memory_core" or name == "memory" or name.startswith("memory."):
+                del sys.modules[name]
+        return
+    # No replacement: drop only what the test ADDED, restore the originals.
+    for name in set(after) - set(before):
         del sys.modules[name]
     for name, mod in before.items():
         sys.modules[name] = mod
@@ -111,6 +147,47 @@ def _close_db_pools():
         m3_sdk._cleanup()
     except Exception:  # noqa: BLE001 — teardown hygiene must never fail a test
         pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_embed_global_cache():
+    """Reset memory.embed's in-process embedder cache between tests.
+
+    `memory.embed` memoizes the in-process EmbeddedEmbedder in module-level
+    globals (`_embedded_embedder`, `_embedded_embed_checked`) and only probes
+    once per process (the `_embedded_embed_checked` guard). On a host with the
+    native m3_core_rs wheel installed AND a discoverable GGUF, the FIRST test
+    that exercises an embed warms that cache — and `_restore_memory_modules`
+    above restores the module IDENTITY but NOT its mutated internal globals. So
+    every later test inherits a live tier-1 embedder, which silently satisfies
+    embeds before the HTTP cascade is reached. That made tier-ordering / dedup /
+    cold-cascade tests (test_embed_cascade_order, test_vector_kind_strategy,
+    test_doctor SLOs) pass in isolation but fail under batch ordering on dev
+    boxes with the wheel installed.
+
+    Clearing the cache to its pristine "not yet checked" state after each test
+    means the next test re-probes under ITS OWN env (e.g. M3_CORE_RS_DISABLE /
+    M3_EMBED_GGUF), so tier-1 presence is decided per-test, not leaked.
+    Best-effort: if memory.embed isn't imported / lacks the globals, do nothing.
+    """
+    yield
+    mod = sys.modules.get("memory.embed")
+    if mod is not None:
+        if hasattr(mod, "_embedded_embedder"):
+            mod._embedded_embedder = None
+        if hasattr(mod, "_embedded_embed_checked"):
+            mod._embedded_embed_checked = False
+        # The entity-name embed cache memoizes name->vector across calls. A
+        # sibling test that resolves entities leaves it populated; a later test
+        # that stubs _embed and asserts on embed_calls then sees ZERO calls
+        # because the resolution path served the name from this cache instead
+        # (test_entity_graph::test_resolution_cosine_stores...). Clear it too.
+        cache = getattr(mod, "_ENTITY_NAME_EMBED_CACHE", None)
+        if cache is not None:
+            try:
+                cache.clear()
+            except (AttributeError, TypeError):
+                pass
 
 
 # Minimal memory_items schema sufficient for chatlog writes. Embeddings and

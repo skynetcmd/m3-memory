@@ -60,9 +60,23 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 - [x] Chatlog capture hooks — Claude Code (Stop + PreCompact, zero-gap) and Gemini CLI (SessionEnd)
 - [x] curate-memory + curate-chatlog subagents with UUID-integrity defense (v2026.6.8.0)
 
+### Knowledge maintenance — confidence, trust, reinforcement, beliefs
+
+Memory as a maintained body of knowledge, not a flat index. All additive and
+**off by default** (migrations 035–036). See `docs/CONFIDENCE_AND_TRUST.md`.
+
+- [x] First-class **confidence** on `memory_items` (provenance + corroboration aggregate; NULL ⇒ importance)
+- [x] **Trust-weighted / consensus provenance** — `agents.trust_score`, append-only corroboration ledger, `agent_set_trust` tool, corroboration-on-write (closes the orphan-duplicate gap)
+- [x] **Reinforcement** — confidence decays toward NEUTRAL (uncertainty), re-aggregates from the ledger, access as weak capped evidence
+- [x] **Autonomous episodic→semantic consolidation** — `belief` type, weekly `consolidate_beliefs.py`, reversible (soft-delete + edges)
+- [x] **Confidence in ranking** behind `M3_CONFIDENCE_RANKING` (zero-regression flag-off contract, tested)
+
 ### Compliance + privacy
 
-- [x] FIPS 140-3 strict execution mode (`M3_FIPS_MODE=1`)
+- [x] FIPS 140-3 deployment-ready: tiered crypto (`M3_FIPS_MODE` = hardened
+  wolfCrypt, `M3_FIPS_STRICT` = CMVP-validated module), power-up KATs, secure
+  DLL-hijack-resistant loading, `m3 fips install-wolfssl` helper, algorithm
+  whitelist enforcement (see `FIPS_MODULE_BOUNDARY.md`)
 - [x] GDPR Article 17 (`gdpr_forget`) + Article 20 (`gdpr_export`) as MCP tools
 - [x] Per-conversation isolation enforced at the SQL layer (`WHERE conversation_id = ?` baked in)
 - [x] Audit log entry via `_record_history` for every destructive op

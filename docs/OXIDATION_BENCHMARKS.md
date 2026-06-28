@@ -124,6 +124,53 @@ intertwined with row-dict assembly), so a faithful like-for-like micro-benchmark
 would mean reconstructing that path. It is omitted rather than benched against a
 non-equivalent stub.
 
+## Milestone-4 additions — ingestion hashing & governor (2026-06-27)
+
+These cover the M3-v3 Milestone-4 oxidations (`m3-ingest`, `m3-governor`),
+measured on the freshly built CUDA wheel (3.6.22, cp314). See
+[`M3V3_OXIDATION.md`](M3V3_OXIDATION.md) for what each one means in the system.
+
+### `hash_files` — batch content hashing
+
+The staleness sweep hashes every mtime-changed file. The Python baseline is the
+serial `file_content_sha256` loop; the native path reads + hashes the batch with
+`rayon` (GIL released), digests byte-identical. Parity asserted before timing.
+
+| Input | Python serial | native `hash_files` | Speedup | Verdict |
+|---|---:|---:|---:|---|
+| 500 files × 64 KiB | 43.5 ms | 6.7 ms | **6.45×** | rust faster |
+| 1000 files × 128 KiB | 117.1 ms | 16.8 ms | **6.96×** | rust faster |
+
+This is the **batch** regime — the opposite of the single-`sha256_hex` rows
+above, where `hashlib` (already C) is break-even-to-slower because one small hash
+can't amortize the FFI crossing. The production rule: batch-hash through Rust
+(`file_content_sha256_batch`), single-hash through Python (`file_content_sha256`).
+
+### `Governor.decide` — not benched (correctly)
+
+The governor pacing function is a pure `(load, elapsed) → dict` decision that runs
+once per pacing decision, not per row. It is **not** a hot path and no speedup is
+claimed; it is oxidized for single-source-of-truth, with native-vs-Python dict
+parity verified in `tests/test_governor_pacing.py`.
+
+### Write-queue contention finding (why the in-process queue was reverted)
+
+A multi-process write-contention benchmark (separate processes, same DB) showed
+that **batching commits** — not an in-process queue — is what wins under real
+contention, and that m3's existing `busy_timeout=30000` already removes the
+`database is locked` errors:
+
+| Scenario | per-write commit | 1 writer, batched | Speedup |
+|---|---:|---:|---:|
+| 8 procs × 250 (busy_timeout 50 ms) | 638 ms, 15 lock-retries | 13 ms, 0 | **48×** |
+| 16 procs × 200 (busy_timeout 20 ms) | 1073 ms, 93 lock-retries | 20 ms, 0 | **54×** |
+| 16 procs × 200 (busy_timeout 30 s) | 1302 ms, 0 retries | 24 ms, 0 | 54× |
+
+The in-process `WriteQueueDaemon` prototype could not reach this multi-process
+case and only added latency to the already-fast intra-process case, so it was
+reverted in favor of the existing bulk-write APIs + `busy_timeout`. Full analysis:
+[`../v3/m3_v3_phase_c_rust_oxidation_plan.md`](../v3/m3_v3_phase_c_rust_oxidation_plan.md).
+
 ## Wheel-staleness note (resolved 2026-06-22)
 
 When this suite was first authored, the installed wheel was **stale** — the

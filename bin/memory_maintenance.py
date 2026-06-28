@@ -198,6 +198,76 @@ def memory_feedback_impl(memory_id, feedback="useful"):
             db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (memory_id,))
     return f"Feedback '{fb}' applied to {memory_id}"
 
+def _reinforce_confidence(db):
+    """Reinforcement pass (knowledge-maintenance Phase 3): make confidence a
+    living signal.
+
+      1. Re-aggregate confidence for memories with corroboration-ledger activity
+         (the only ones whose evidence changed) — corroboration raised it,
+         contradiction lowered it. Reuses the Phase-2 ledger aggregation.
+      2. Decay-toward-neutral for memories that have a confidence but NO recent
+         reinforcement (no ledger row, not accessed in the decay window). Unlike
+         importance (which decays toward 0), confidence forgets toward
+         *uncertainty* (NEUTRAL=0.5) — a fact nobody reconfirmed becomes less
+         certain, not worthless. Done as ONE set-based UPDATE (§4): the pure
+         decay_toward_neutral() is a linear interpolation toward NEUTRAL, which
+         SQL expresses directly.
+
+    ABSENCE-TOLERANT: a pre-035/036 DB (no confidence column / no ledger) makes
+    this a no-op. Returns (reaggregated, decayed) counts.
+    """
+    from memory import confidence as _conf
+    from memory import trust as _trust
+
+    reaggregated = 0
+    decayed = 0
+    try:
+        # (1) Re-aggregate the memories with ledger activity.
+        active = db.execute(
+            "SELECT DISTINCT memory_id FROM memory_corroborations"
+        ).fetchall()
+        active_ids = {r[0] for r in active}
+        for mid in active_ids:
+            if _trust.reaggregate_confidence(db, mid) is not None:
+                reaggregated += 1
+    except Exception as e:  # noqa: BLE001 — pre-036 DB has no ledger
+        if not _is_missing_schema(e):
+            raise
+
+    try:
+        # (2) Decay un-reinforced memories toward NEUTRAL in one UPDATE.
+        # new = c + (NEUTRAL - c) * DECAY_RATE, clamped, skipping rows touched by
+        # the ledger (already re-aggregated) and rows accessed in the last 7 days.
+        placeholders = ",".join("?" * len(active_ids)) if active_ids else "''"
+        params = [_conf.NEUTRAL, _conf.DECAY_RATE, *active_ids]
+        res = db.execute(
+            f"""
+            UPDATE memory_items
+               SET confidence = MAX(0.0, MIN(1.0,
+                       confidence + (? - confidence) * ?))
+             WHERE is_deleted = 0
+               AND confidence IS NOT NULL
+               AND id NOT IN ({placeholders})
+               AND (last_accessed_at IS NULL
+                    OR julianday('now') - julianday(last_accessed_at) > 7)
+            """,
+            params,
+        )
+        decayed = res.rowcount
+    except Exception as e:  # noqa: BLE001 — pre-035 DB has no confidence column
+        if not _is_missing_schema(e):
+            raise
+
+    return reaggregated, decayed
+
+
+def _is_missing_schema(exc) -> bool:
+    """True for the pre-035/036 'no such column/table' errors the reinforcement
+    pass tolerates (degrades to a no-op rather than failing maintenance)."""
+    msg = str(exc).lower()
+    return "no such column" in msg or "no such table" in msg or "no column named" in msg
+
+
 def _enforce_retention_policies(db):
     """Enforce per-agent memory limits and TTLs from agent_retention_policies table."""
     try:
@@ -229,7 +299,8 @@ def _enforce_retention_policies(db):
                 purged += 1
     return purged
 
-def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddings=True):
+def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddings=True,
+                            reinforce=True):
     import time
 
     from m3_sdk import _LAST_USER_INTERACTION
@@ -243,6 +314,15 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         if decay:
             res = db.execute("UPDATE memory_items SET importance = MAX(0.0, importance * 0.995) WHERE is_deleted = 0 AND julianday('now') - julianday(created_at) > 7")
             report.append(f"Decayed {res.rowcount} items")
+        if reinforce:
+            # Confidence reinforcement (Phase 3): re-aggregate ledger-active
+            # memories, decay the un-reinforced toward NEUTRAL. No-op on pre-035/
+            # 036 DBs. Distinct from importance decay above (toward 0).
+            r_count, d_count = _reinforce_confidence(db)
+            if r_count or d_count:
+                report.append(
+                    f"Confidence: reaggregated {r_count}, decayed {d_count} toward neutral"
+                )
         if purge_expired:
             expired = db.execute("SELECT id FROM memory_items WHERE expires_at < ?", (now,)).fetchall()
             for row in expired: _transfer_to_archive(row[0], "expired", db)
@@ -543,6 +623,7 @@ async def memory_consolidate_impl(
     max_importance: float = 1.0,
     protected_types=DEFAULT_PROTECTED_TYPES,
     dry_run: bool = False,
+    target_type: str = "summary",
 ):
     """Consolidate old memories of the same type into summaries using the local LLM.
 
@@ -551,6 +632,10 @@ async def memory_consolidate_impl(
       max_importance: skip items with importance above this floor (default 1.0 = no filter)
       protected_types: types never consolidated (defaults to preference/user_fact/task/plan)
       dry_run: preview what would happen without writes or LLM calls
+      target_type: the type of the consolidated output row. Default 'summary'
+        (manual/curator rollups). Autonomous belief consolidation (Phase 4)
+        passes 'belief' so the two provenance paths stay distinguishable; a
+        'belief' row also gets a high first-class confidence.
     """
     now_dt = datetime.now(timezone.utc)
     stale_cutoff = (now_dt - timedelta(days=stale_days)).isoformat() if stale_days > 0 else None
@@ -644,11 +729,25 @@ async def memory_consolidate_impl(
         # Embed the summary so it's searchable
         s_vec, s_model = await _embed(summary_text)
 
+        _label = "belief" if target_type == "belief" else "summary"
+        _title = (f"Belief from {len(rows)} {g_type} memories ({g_agent})"
+                  if target_type == "belief"
+                  else f"Consolidated {g_type} memories for {g_agent}")
         with _db() as db:
             db.execute(
-                "INSERT INTO memory_items (id, type, title, content, agent_id, user_id, created_at, content_hash) VALUES (?, 'summary', ?, ?, ?, ?, ?, ?)",
-                (summary_id, f"Consolidated {g_type} memories for {g_agent}", summary_text, g_agent, g_user, now, _content_hash(summary_text))
+                "INSERT INTO memory_items (id, type, title, content, agent_id, user_id, created_at, content_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (summary_id, target_type, _title, summary_text, g_agent, g_user, now, _content_hash(summary_text))
             )
+            # A belief is a high-order, multi-source abstraction — give it a high
+            # first-class confidence (knowledge-maintenance Phase 4). Guarded so a
+            # pre-035 DB (no confidence column) simply skips it.
+            if target_type == "belief":
+                try:
+                    db.execute("UPDATE memory_items SET confidence = ? WHERE id = ?", (0.85, summary_id))
+                except Exception as ce:  # noqa: BLE001 — pre-035 DB lacks confidence
+                    if "no such column" not in str(ce).lower() and "no column named" not in str(ce).lower():
+                        raise
 
             if s_vec:
                 db.execute(
@@ -661,7 +760,7 @@ async def memory_consolidate_impl(
                 memory_link_impl(summary_id, r["id"], "consolidates", db=db)
                 db.execute("UPDATE memory_items SET is_deleted = 1 WHERE id = ?", (r["id"],))
 
-        results.append(f"Consolidated {len(rows)} {g_type} items into summary {summary_id}")
+        results.append(f"Consolidated {len(rows)} {g_type} items into {_label} {summary_id}")
 
     return "\n".join(results)
 

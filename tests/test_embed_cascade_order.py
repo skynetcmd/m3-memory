@@ -27,15 +27,41 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch, tmp_path):
     """Each test gets a clean env + a tmp DB so the cascade isn't poisoned
-    by a real cache hit from a sibling test."""
+    by a real cache hit from a sibling test.
+
+    These tests verify HTTP tier ORDERING, not native embedding. On a host
+    that has the m3_core_rs native wheel installed AND a real M3_EMBED_GGUF
+    set in the user environment (e.g. a dev box where `m3 setup` persisted
+    one), the in-process EmbeddedEmbedder would satisfy the embed before
+    tier-2 is ever reached — making `test_tier2_attempted_when_no_gguf` and
+    `test_cold_cascade_fails_fast...` fail non-deterministically depending on
+    run order. Pinning M3_CORE_RS_DISABLE=1 forces `config.m3_core_rs = None`
+    on the fresh re-import below, so tier-1 is deterministically out of the
+    picture regardless of the host's wheel/GGUF state. (delenv alone is not
+    enough: it clears the GGUF path but the native wheel + a sibling-leaked
+    env could still resurrect tier-1.)"""
     monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
+    monkeypatch.setenv("M3_CORE_RS_DISABLE", "1")
     monkeypatch.setenv("M3_DATABASE", str(tmp_path / "test.db"))
     monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
     # Force a fresh module load so module-level constants (e.g. _EMBED_GGUF_PATH)
-    # see the cleared env.
+    # and config.m3_core_rs see the env set above.
     for mod in list(sys.modules):
         if mod.startswith("memory."):
             del sys.modules[mod]
+    # Belt-and-suspenders: a sibling test that imported memory.embed earlier in
+    # the session may have INITIALIZED and cached the in-process embedder in the
+    # module globals (_embedded_embedder / _embedded_embed_checked). Deleting the
+    # module from sys.modules above resets those on re-import — but only if the
+    # re-import actually re-runs the module body. To be bulletproof regardless of
+    # import-cache subtleties, force the embedder cache cleared on the freshly
+    # imported module so `_embed` cannot satisfy a request from a stale tier-1
+    # embedder and skip the mocked HTTP tiers (which made vec come back non-None
+    # / a real vector when the test expected the HTTP cascade or None).
+    import importlib
+    embed = importlib.import_module("memory.embed")
+    embed._embedded_embedder = None
+    embed._embedded_embed_checked = False
 
 
 @pytest.mark.asyncio

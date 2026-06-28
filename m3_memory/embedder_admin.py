@@ -135,6 +135,39 @@ def _service_cmd(binary: Path, gguf: Path, sub: str, *extra: str) -> int:
     return subprocess.run([str(binary), sub, *extra], env=env, check=False).returncode
 
 
+def _embed_server_port() -> int:
+    """The configured tier-2 embed-server port (M3_EMBED_SERVER_PORT, def 8082)."""
+    try:
+        return int(os.environ.get("M3_EMBED_SERVER_PORT", "8082"))
+    except ValueError:
+        return 8082
+
+
+def _port_in_use(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
+    """True if something is already accepting TCP connections on host:port.
+
+    A quick connect probe — used to warn the operator that an embed server (or
+    some other process) is already listening before we (re)start one, so a second
+    instance doesn't silently fail to bind."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _warn_if_port_busy(action: str) -> None:
+    """Print a heads-up if the embed-server port is already in use. Non-fatal —
+    the underlying service manager owns the real start/stop; this just makes an
+    already-running instance visible instead of a confusing bind failure."""
+    port = _embed_server_port()
+    if _port_in_use(port):
+        print(f"[i] a process is already listening on port {port} — an m3-embed-server "
+              f"may already be running. `{action}` will hand off to the service "
+              "manager, which is idempotent; use `m3 embedder status` to check.")
+
+
 def _locate_gguf_or_explain() -> Optional[Path]:
     """Locate the bundled GGUF; print actionable guidance if not found."""
     gguf = _find_bundled_gguf()
@@ -208,6 +241,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     size_mb = _gguf_size_bytes(gguf) // (1024 * 1024)
     print(f"[=] using bundled GGUF: {gguf} ({size_mb} MB)")
 
+    _warn_if_port_busy("install")
     print(f"[~] registering m3-embed-server (concurrency={args.concurrency})")
     extra: list[str] = []
     if args.concurrency:
@@ -263,6 +297,7 @@ def _binary_and_gguf_or_fail() -> Optional[tuple[Path, Path]]:
 def cmd_start(args: argparse.Namespace) -> int:
     pair = _binary_and_gguf_or_fail()
     if not pair: return 1
+    _warn_if_port_busy("start")
     return _service_cmd(*pair, "start")
 
 
@@ -301,9 +336,11 @@ def cmd_install_gpu(args: argparse.Namespace) -> int:
 
     allow_source = not getattr(args, "no_source_fallback", False)
     backend = getattr(args, "backend", None) or None
+    force = getattr(args, "force", False)
     rc = rust_core_install.install_rust_core(
         allow_source_fallback=allow_source,
         backend=backend,
+        force=force,
     )
     if rc == 0:
         print("[OK] m3-core-rs installed; restart any running embedder service.")
@@ -342,6 +379,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
              "auto-detection picks the wrong backend — e.g. Vulkan tools are "
              "installed system-wide but no Vulkan GPU is present, so pass "
              "--backend cpu to force the CPU prebuilt wheel.",
+    )
+    p_install_gpu.add_argument(
+        "--force", action="store_true",
+        help="Reinstall even if the target m3-core-rs version is already present "
+             "(default: skip the re-download when already current).",
     )
     p_install_gpu.set_defaults(func=cmd_install_gpu)
 

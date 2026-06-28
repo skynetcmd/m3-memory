@@ -27,3 +27,10 @@
 
 # Every 15 minutes: Drain observation_queue (extract user-facts from chatlog conversations)
 */15 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/m3_enrich.py --drain-queue --drain-batch 200 --profile enrich_local_qwen --log-file [M3_MEMORY_ROOT]/logs/observation_drain.log
+
+# NOTE: belief consolidation (knowledge-maintenance Phase 4) is NOT a cron entry.
+# It runs as a governor-gated, event-driven pass inside the cognitive-loop daemon
+# (run_consolidate_pass in bin/m3_cognitive_loop.py) so it yields to an active
+# user / loaded host like every other expensive pass, and only fires when an aged
+# group actually exceeds the threshold. bin/consolidate_beliefs.py remains for
+# manual/CLI runs. Real writes still require M3_CONSOLIDATION_AUTO=1.

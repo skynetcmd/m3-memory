@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: 50be027acd63
-mtime_utc: 2026-06-07T00:52:26.586430+00:00
-generated_utc: 2026-06-12T20:00:05.336730+00:00
+sha1: d2efee05f1f3
+mtime_utc: 2026-06-27T17:54:10.925483+00:00
+generated_utc: 2026-06-27T23:22:27.583781+00:00
 private: false
 ---
 
@@ -44,6 +44,7 @@ tested in isolation.
 | `--skip-cascade` | Skip the embedding-cascade health probe. | `False` |  | store_true |  |
 | `--skip-embed-server` | Skip the Rust-side m3-embed-server doctor subprocess. | `False` |  | store_true |  |
 | `--skip-oxidation` | Skip the m3_core_rs native-extension status report. | `False` |  | store_true |  |
+| `--skip-governor` | Skip the governor scheduled-task migration check. | `False` |  | store_true |  |
 | `--fix` | Run quick-repair mode to auto-fix common deployment issues. | `False` |  | store_true |  |
 | `--dry-run` | Use with --fix to simulate repair steps without making changes. | `False` |  | store_true |  |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
@@ -73,6 +74,7 @@ _(no subprocess / http / sqlite calls detected)_
 - `doctor (cascade_probe)`
 - `doctor (db_repair)`
 - `doctor (embed_server_probe)`
+- `doctor (governor_probe)`
 - `doctor (oxidation_probe)`
 - `memory.doctor (memory_doctor_fix_impl)`
 
