@@ -158,7 +158,11 @@ def setup_oxidation():
         mcp-memory can't see.
 
     The non-interactive code path (env M3_INSTALL_OXIDATION=1/0) lets
-    install.sh / install.ps1 drive this unattended.
+    install.sh / install.ps1 drive this unattended. The interactive prompt
+    defaults to YES (empty answer or closed stdin opts in); only an explicit
+    "n"/"no" — or M3_INSTALL_OXIDATION=0 — skips. This makes unattended SSH
+    installs get the recommended native hot path instead of silently
+    degrading to pure-Python.
     """
     print("\n" + "="*50)
     print("🦀 PROJECT OXIDATION: HIGH-PERFORMANCE RUST CORE")
@@ -181,13 +185,19 @@ def setup_oxidation():
         choice = "y"
     else:
         try:
-            choice = input(
-                "\nWould you like to install Project Oxidation now? [y/N]: "
+            ans = input(
+                "\nWould you like to install Project Oxidation now? [Y/n]: "
             ).strip().lower()
+            # Default ON: installing the prebuilt wheel is a SAFE attempt — it
+            # never auto-compiles from source here, and m3 stays fully
+            # functional in pure-Python if no wheel matches. An empty answer
+            # (just Enter) opts in. Matches setup_wizard Step 3 (default=True).
+            choice = "n" if ans in ("n", "no") else "y"
         except EOFError:
-            # Piped stdin exhausted (e.g. `printf '\n' | install-m3`).
-            # Default to skip — caller can run `m3 embedder install-gpu` later.
-            choice = "n"
+            # Piped/closed stdin (e.g. unattended SSH install). Default to the
+            # recommended install rather than silently skipping it; the wheel
+            # attempt is non-fatal and falls back to pure-Python on a miss.
+            choice = "y"
 
     if choice in ("y", "yes"):
         if _os_name() == "Windows":
