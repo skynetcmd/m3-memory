@@ -24,7 +24,7 @@ sys.path.insert(0, str(BIN_DIR))
 os.environ.setdefault("GGML_CUDA_DISABLE_GRAPHS", "1")
 os.environ.setdefault(
     "M3_EMBED_GGUF",
-    r"C:\Users\bhaba\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
+    r"C:\Users\username\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
 )
 os.environ.setdefault("M3_EMBED_STREAMS", "1")
 os.environ.setdefault("M3_EMBED_CTX", "8192")

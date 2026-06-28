@@ -21,7 +21,7 @@ import sqlite3
 import struct
 import sys
 
-GGUF = r"C:\Users\bhaba\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf"
+GGUF = r"C:\Users\username\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf"
 EMBED_DIM = 1024
 DB = os.path.join(os.path.dirname(__file__), "..", "memory", "agent_memory.db")
 

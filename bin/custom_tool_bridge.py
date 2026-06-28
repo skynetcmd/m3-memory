@@ -354,7 +354,7 @@ async def grok_ask(query: str):
 async def query_local_model(prompt: str):
     """
     Sends a complex reasoning task to the best available local/network LLM.
-    Tries endpoints in failover order: localhost → MacBook Pro → host-a → GPU VM.
+    Tries endpoints in failover order: localhost → MacBook Pro → primary-host → GPU VM.
     Dynamically selects the largest loaded non-embedding model at each endpoint.
     """
     token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"

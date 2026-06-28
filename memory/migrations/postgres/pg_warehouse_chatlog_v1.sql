@@ -1,5 +1,5 @@
 -- m3-memory warehouse schema migration: chatlog tables
--- Run on your PostgreSQL warehouse (e.g., 10.0.0.51:5432).
+-- Run on your PostgreSQL warehouse (e.g., 192.0.2.151:5432).
 -- Mirrors SQLite tables from agent_chatlog.db so chat logs sync across peers.
 -- agent_memory.db schema is NOT in this file (already exists in warehouse).
 --
