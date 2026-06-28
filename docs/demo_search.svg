@@ -20,7 +20,7 @@
   <text fill="#3fb950" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" font-weight="bold" x="20" y="150">#1  score=0.9420</text>
   <text fill="#bc8cff" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="200" y="150">[fact]</text>
   <text fill="#e6edf3" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="260" y="150">PostgreSQL connection string</text>
-  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="174">"postgres://app:****@10.21.40.51:5432/m3_prod"</text>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="174">"postgres://app:****@192.0.2.151:5432/m3_prod"</text>
   <text fill="#484f58" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="198">vector=0.88  bm25=0.96  mmr=0.99  tags: db, postgres, prod</text>
 
   <!-- Result 2 -->
@@ -34,7 +34,7 @@
   <text fill="#f78166" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" font-weight="bold" x="20" y="334">#3  score=0.7230</text>
   <text fill="#bc8cff" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="200" y="334">[knowledge]</text>
   <text fill="#e6edf3" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="300" y="334">ChromaDB endpoint</text>
-  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="358">"ChromaDB at http://10.21.40.51:8000 for vector store"</text>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="358">"ChromaDB at http://192.0.2.151:8000 for vector store"</text>
   <text fill="#484f58" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="40" y="382">vector=0.79  bm25=0.55  mmr=0.83  tags: chroma, vector</text>
 
   <!-- Footer -->

@@ -72,7 +72,7 @@ x.xxx*
 # Local machine-specific rules (contains IPs, endpoints, credentials — never commit)
 LOCAL_RULES.md
 
-# Discord bot — deployment is outside the repo (runs on N5 Pro LXC 503)
+# Discord bot — deployment is outside the repo (runs on secondary-host LXC 503)
 bin/discord_bot.py
 bin/status_api.py
 
@@ -160,6 +160,9 @@ scan-reports/
 
 # Claude Code runtime locks
 .claude/scheduled_tasks.lock
+
+# Per-machine Claude Code permissions/paths — machine-specific, never share
+.claude/settings.local.json
 
 # m3_enrich auto-generated per-run reports — contain bench-variant
 # names that are private to development branches. Manually-crafted

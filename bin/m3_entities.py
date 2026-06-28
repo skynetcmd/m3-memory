@@ -420,7 +420,7 @@ async def _smoke_profile(profile: Profile, token: str, valid_types, valid_predic
         try:
             out = await extractor(
                 "Test sentence: bin/memory_core.py defines memory_search_scored_impl. "
-                "It runs on SkyPC at 10.21.40.2."
+                "It runs on primary-host at 192.0.2.10."
             )
         except Exception as e:
             sys.exit(f"ERROR: profile smoke failed: {type(e).__name__}: {e}")

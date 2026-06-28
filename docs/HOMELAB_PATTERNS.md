@@ -87,7 +87,7 @@ Rough guidance from real deployments. Adjust to your workload:
 | Box | What works | What to watch out for |
 |---|---|---|
 | **Raspberry Pi 5 / N100 mini-PC** | M3 substrate (Pattern A), ~10K-50K memories, occasional MCP queries from a single agent | Don't run SLM enrichment on the same box; offload to a GPU machine |
-| **N5 Pro / Minisforum / 8-core mini** | M3 substrate + light enrichment via small SLM (gemma-2-2b, qwen-3b) | CPU inference is slow; batch enrichment overnight rather than realtime |
+| **secondary-host / Minisforum / 8-core mini** | M3 substrate + light enrichment via small SLM (gemma-2-2b, qwen-3b) | CPU inference is slow; batch enrichment overnight rather than realtime |
 | **Workstation w/ 12GB+ GPU** | Full Pattern B with qwen3-8b extraction in realtime | Watch VRAM contention if the same GPU is also running your main agent |
 | **Apple Silicon (M-series)** | All patterns; Metal-accelerated inference makes Pattern B cheap | LM Studio + qwen3-8b runs comfortably alongside Claude Code |
 | **Mixed multi-box homelab** | Run M3 store on a small always-on box; run enrichment on the GPU box; sync if you want laptop access | Decide early which box is the "source of truth" — the SQLite WAL file should live there |

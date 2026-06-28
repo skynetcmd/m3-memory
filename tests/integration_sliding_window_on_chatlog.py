@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 os.environ.setdefault("GGML_CUDA_DISABLE_GRAPHS", "1")
 os.environ.setdefault(
     "M3_EMBED_GGUF",
-    r"C:\Users\bhaba\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
+    r"C:\Users\username\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
 )
 os.environ.setdefault("M3_EMBED_STREAMS", "1")
 os.environ.setdefault("M3_EMBED_CTX", "8192")
@@ -44,7 +44,7 @@ os.environ.setdefault("M3_EMBED_N_UBATCH", "8192")
 import m3_core_rs  # noqa: E402
 import memory_core as mc  # noqa: E402
 
-CHATLOG_DB = Path(r"C:\Users\bhaba\m3-memory\memory\agent_chatlog.db")
+CHATLOG_DB = Path(r"C:\Users\username\m3-memory\memory\agent_chatlog.db")
 N_SHORT = 5
 N_MEDIUM = 5
 N_LONG = 5  # rows above MAX_CHARS_PER_CHUNK — will exercise chunking

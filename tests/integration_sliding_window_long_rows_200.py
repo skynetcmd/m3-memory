@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 os.environ.setdefault("GGML_CUDA_DISABLE_GRAPHS", "1")
 os.environ.setdefault(
     "M3_EMBED_GGUF",
-    r"C:\Users\bhaba\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
+    r"C:\Users\username\.lmstudio\models\deepsweet\bge-m3-GGUF-Q4_K_M\bge-m3-GGUF-Q4_K_M.gguf",
 )
 os.environ.setdefault("M3_EMBED_STREAMS", "1")
 os.environ.setdefault("M3_EMBED_CTX", "8192")
@@ -34,10 +34,10 @@ import m3_core_rs  # noqa: E402
 import memory_core as mc  # noqa: E402
 
 DBS = [
-    Path(r"C:\Users\bhaba\m3-memory\memory\agent_chatlog.db"),
-    Path(r"C:\Users\bhaba\m3-memory\memory\agent_memory.db"),
+    Path(r"C:\Users\username\m3-memory\memory\agent_chatlog.db"),
+    Path(r"C:\Users\username\m3-memory\memory\agent_memory.db"),
 ]
-CSV_OUT = Path(r"C:\Users\bhaba\m3-memory\.scratch\integration_chunking_long_200.csv")
+CSV_OUT = Path(r"C:\Users\username\m3-memory\.scratch\integration_chunking_long_200.csv")
 N_TOTAL_PER_DB = 200  # cap; we take min(corpus-long-rows, this) per DB
 PROGRESS_EVERY = 25
 

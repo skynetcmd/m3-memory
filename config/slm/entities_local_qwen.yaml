@@ -119,7 +119,7 @@ system: |
   - `env_var`: ALL_CAPS_WITH_UNDERSCORES. Examples: `M3_DATABASE`,
     `LM_API_TOKEN`, `AGENT_OS_MASTER_KEY`.
   - `ip_address`: strict IPv4 dotted quad. The 10.21.x.x subnet is the
-    user's homelab. Example: `10.21.40.5`.
+    user's homelab. Example: `192.0.2.15`.
   - `mac_address`: six colon-separated hex bytes. Example: `18:e8:29:ef:de:97`.
   - `vlan`: `VLAN <num>` or named segments like "AirNet IOT", "AirNet
     HomeKit", "AirNet Servers", "Backbone".

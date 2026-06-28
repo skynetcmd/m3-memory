@@ -21,7 +21,7 @@
   <!-- Sync indicator -->
   <text fill="#f0883e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="20" y="186">&#8635; Sync: SQLite &#8594; PostgreSQL  (delta: 1 new, 0 updated)</text>
   <text fill="#3fb950" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="20" y="210">&#10003;</text>
-  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="36" y="210">Synced to 10.21.40.51:5432 in 42ms</text>
+  <text fill="#8b949e" font-family="SF Mono,Cascadia Code,Consolas,monospace" font-size="14" x="36" y="210">Synced to 192.0.2.151:5432 in 42ms</text>
 
   <!-- Divider -->
   <line x1="20" y1="240" x2="830" y2="240" stroke="#30363d" stroke-width="1" stroke-dasharray="6,4"/>

@@ -36,7 +36,7 @@ You need:
 Set two env vars (typical values shown):
 
 ```bash
-export POSTGRES_SERVER=10.21.40.51    # or SYNC_TARGET_IP — same thing
+export POSTGRES_SERVER=192.0.2.151    # or SYNC_TARGET_IP — same thing
 export PG_URL='postgresql://user:pass@host:5432/agent_memory'
 ```
 
