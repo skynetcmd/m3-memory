@@ -43,8 +43,8 @@ def test_stale_memory_entry_is_repointed(canonical, tmp_path):
     cfg = tmp_path / "host" / "settings.json"
     _write(cfg, {"mcpServers": {"memory": {
         "command": "/old/python",
-        "args": ["/Users/x/m3-memory-dev/bin/memory_bridge.py"],
-        "env": {"M3_BRIDGE_PATH": "/Users/x/m3-memory-dev/bin/memory_bridge.py"},
+        "args": ["/nonexistent/old-install/bin/memory_bridge.py"],
+        "env": {"M3_BRIDGE_PATH": "/nonexistent/old-install/bin/memory_bridge.py"},
     }}})
 
     msg = I._heal_agent_settings(cfg)
