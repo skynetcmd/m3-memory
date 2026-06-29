@@ -14,6 +14,7 @@ guarantee the patch and the probe see the same `config`.
 """
 from __future__ import annotations
 
+import importlib
 import io
 import sys
 from contextlib import redirect_stdout
@@ -26,10 +27,14 @@ if _BIN not in sys.path:
 
 from doctor import oxidation_probe  # noqa: E402
 
-from memory import config  # noqa: E402
-
 
 def _set_rs(monkeypatch, value, disabled=False):
+    # Patch the CURRENT memory.config object — the same one the probe imports
+    # inside run(). Other tests reload memory.config (replacing it in
+    # sys.modules), so a reference bound at collection time can go stale and
+    # the probe would then read conftest's M3_CORE_RS_DISABLE instead of our
+    # patch, flipping 'not installed' to 'disabled' under batch ordering.
+    config = importlib.import_module("memory.config")
     monkeypatch.setattr(config, "m3_core_rs", value, raising=False)
     monkeypatch.setattr(config, "_OXIDATION_DISABLED", disabled, raising=False)
 
