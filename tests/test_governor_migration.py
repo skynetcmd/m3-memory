@@ -214,6 +214,35 @@ def test_windows_action_scan_skips_canonical_names(monkeypatch):
     assert out["eligible"] == ["AgentOS_HourlySync"]
 
 
+def test_windows_action_match_is_path_anchored_not_bare_substring(monkeypatch):
+    # §3/§6 hardening: detection feeds `schtasks /Delete`, so the action match
+    # must be path-anchored. A task that merely MENTIONS a script filename (not as
+    # an invoked path) must NOT be matched and scheduled for deletion.
+    monkeypatch.setattr(gm, "_os_name", lambda: "Windows")
+    blob = _verbose_list([
+        # bare mention in an argument — NOT an invocation, must be ignored
+        (r"\unrelated-backup-job",
+         r'C:\tools\backup.exe --note "remember to port sync_all.py settings"'),
+    ])
+    monkeypatch.setattr(gm.subprocess, "run", _win_run_factory(blob, set()))
+    out = gm.detect_scheduled_tasks()
+    assert "unrelated-backup-job" not in out["eligible"]
+    assert out["eligible"] == []
+
+
+def test_action_invokes_marker_path_anchored_helper():
+    markers = ("sync_all.py", "m3_enrich.py")
+    # Invoked by path (Windows or POSIX separator) -> match.
+    assert gm._action_invokes_marker(r'"py" "C:\m3\bin\sync_all.py"', markers)
+    assert gm._action_invokes_marker('python /opt/m3/bin/sync_all.py', markers)
+    # Case-insensitive (Windows paths) -> match.
+    assert gm._action_invokes_marker(r'"PY" "C:\M3\BIN\SYNC_ALL.PY"', markers)
+    # Bare mention with no leading separator -> no match.
+    assert not gm._action_invokes_marker('echo sync_all.py is the script', markers)
+    # Different marker not present -> no match.
+    assert not gm._action_invokes_marker(r'"py" "C:\m3\bin\other.py"', markers)
+
+
 def test_windows_action_marker_is_sync_all_not_pg_sync_sh():
     # CROSS-OS TRAP GUARD: the Windows action invokes sync_all.py directly; the
     # Unix wrapper pg_sync.sh never appears in a Windows action. The two marker

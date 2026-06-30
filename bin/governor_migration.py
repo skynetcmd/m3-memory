@@ -139,6 +139,23 @@ def _leaf_task_name(task_name: str) -> str:
     return task_name.strip().rsplit("\\", 1)[-1]
 
 
+def _action_invokes_marker(action: str, markers: tuple[str, ...]) -> bool:
+    """True iff the task action INVOKES one of the m3 entrypoint scripts.
+
+    Path-anchored, not a bare substring. The installer always builds the action
+    as `"<python>" "<root>\\bin\\<script>.py" ...` (see install_schedules.py
+    `_script()` / `/TR`), so a genuine m3 task names the script as a path tail:
+    preceded by a path separator (`\\` or `/`). Requiring that separator is a
+    §3/§6 hardening — it keeps this DESTRUCTIVE detection (matches feed
+    `schtasks /Delete`) precise, so an unrelated task that merely MENTIONS a
+    script filename in an argument or comment is not over-matched and removed.
+    The legacy hand-named tasks we want to catch (e.g. `m3-memory-sync` ->
+    `...\\bin\\sync_all.py`) still match, since they invoke the script by path.
+    """
+    low = action.lower()
+    return any(("\\" + m.lower()) in low or ("/" + m.lower()) in low for m in markers)
+
+
 def detect_windows_legacy_action_tasks() -> set[str]:
     """Names of Windows tasks whose ACTION runs an m3 entrypoint but whose name is
     NOT a canonical AgentOS_* one (legacy / hand-named, e.g. `m3-memory-sync`).
@@ -146,6 +163,8 @@ def detect_windows_legacy_action_tasks() -> set[str]:
     Returned as ACTUAL task names so the caller removes the right task. Matches on
     the "Task To Run" field via _WINDOWS_ACTION_MARKERS (which point at the Python
     entrypoints the action invokes directly, NOT the Unix `pg_sync.sh` wrapper).
+    The match is path-anchored (see `_action_invokes_marker`) so this destructive
+    detection cannot over-match a task that only mentions a script name.
 
     Read-only and never raises: a missing `schtasks` or a parse hiccup yields an
     empty set. Canonical-named tasks are excluded — they are already detected by
@@ -172,10 +191,7 @@ def detect_windows_legacy_action_tasks() -> set[str]:
         elif line.startswith("Task To Run:") and cur_name:
             action = line.split(":", 1)[1]
             leaf = _leaf_task_name(cur_name)
-            # Skip canonical tasks (already counted) and Microsoft/OS tasks that
-            # merely mention a marker substring would be a non-issue — the markers
-            # are m3 script filenames, vanishingly unlikely to appear elsewhere.
-            if leaf not in canonical and any(m in action for m in markers):
+            if leaf not in canonical and _action_invokes_marker(action, markers):
                 # Use the leaf name: schtasks /Delete /TN works with the leaf for
                 # root-level tasks, which is where the installer (and the legacy
                 # hand-named tasks) live.
