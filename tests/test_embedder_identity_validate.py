@@ -99,3 +99,62 @@ def test_warns_once_per_reason():
     first = set(me._IDENTITY_WARNED)
     me._validate_identity([1.0, 0.0, 0.0], config.EMBED_MODEL, "tierX")  # same reason (dim)
     assert me._IDENTITY_WARNED == first  # no new warn key for the same reason
+
+
+# ── _accept_bulk: assign proper vectors, keep failures in the miss set ──────────
+
+def test_accept_bulk_assigns_proper_and_reports_misses():
+    dim = config.EMBED_DIM
+    out: list = [None, None, None]
+    miss_indices = [0, 1, 2]
+    vecs = [_unit(dim), None, _unit(dim)]  # row 1 missing
+    still = me._accept_bulk(out, miss_indices, vecs, config.EMBED_MODEL, "t")
+    assert out[0] == (_unit(dim), config.EMBED_MODEL)
+    assert out[2] == (_unit(dim), config.EMBED_MODEL)
+    assert out[1] is None
+    assert still == [1]  # only the missing local index is reported
+
+
+def test_accept_bulk_rejects_whole_foreign_batch():
+    # A batch whose vectors fail identity (wrong dim) is rejected wholesale:
+    # nothing is stored, every local index is reported as still-missing.
+    out: list = [None, None]
+    bad = [[1.0, 0.0], [1.0, 0.0]]  # dim 2, not EMBED_DIM
+    still = me._accept_bulk(out, [0, 1], bad, config.EMBED_MODEL, "t")
+    assert out == [None, None]
+    assert still == [0, 1]
+
+
+# ── Search read-path identity filter (SQL construction) ────────────────────────
+
+@pytest.mark.asyncio
+async def test_search_sql_includes_identity_filter(monkeypatch):
+    """The semantic/hybrid search SQL must restrict the embeddings join to the
+    proper identity: embed_model IN (compatible) AND dim = EMBED_DIM."""
+    import memory_core
+
+    async def fake_embed(_q):
+        return (_unit(config.EMBED_DIM), config.EMBED_MODEL)
+    monkeypatch.setattr(memory_core, "_embed", fake_embed)
+
+    captured: list[str] = []
+
+    class _Cur:
+        def fetchall(self): return []
+        def fetchone(self): return None
+
+    class _DB:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, params=None):
+            captured.append(sql)
+            return _Cur()
+        def commit(self): pass
+
+    monkeypatch.setattr(memory_core, "_db", lambda: _DB())
+
+    await memory_core.memory_search_scored_impl("anything", search_mode="semantic")
+    assert captured, "expected at least one query"
+    sql = " ".join(captured)
+    assert "me.embed_model IN" in sql, "identity model filter missing from search SQL"
+    assert "me.dim = ?" in sql, "identity dim filter missing from search SQL"
