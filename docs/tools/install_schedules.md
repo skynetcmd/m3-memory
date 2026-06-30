@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: ba2da2b20f98
-mtime_utc: 2026-05-30T20:47:47.636492+00:00
-generated_utc: 2026-05-31T18:42:52.739117+00:00
+sha1: 0b7ca632b73e
+mtime_utc: 2026-06-30T21:32:48.328242+00:00
+generated_utc: 2026-06-30T22:19:18.271724+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 398)
+- `def main()` (line 418)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -42,7 +42,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (ensure_governor_config)`
 
 ---
 
@@ -55,8 +55,9 @@ _(none detected)_
 - `subprocess.run()  → `['launchctl', 'load', dest]`` (line 120)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 119)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 156)
+- `subprocess.run()  → `['powershell', '-NoProfile', '-NonInteractive', '-Command', ps]`` (line 377)
 - `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 334)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 378)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 398)
 - `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 136)
 - `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 170)
 - `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 164)

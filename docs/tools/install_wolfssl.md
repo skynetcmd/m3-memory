@@ -1,8 +1,8 @@
 ---
 tool: bin/install_wolfssl.py
-sha1: 0863a19803db
-mtime_utc: 2026-06-28T01:29:35.789025+00:00
-generated_utc: 2026-06-28T01:32:31.452364+00:00
+sha1: e22712d71071
+mtime_utc: 2026-06-30T22:15:04.786428+00:00
+generated_utc: 2026-06-30T22:15:40.860892+00:00
 private: false
 ---
 
@@ -35,12 +35,21 @@ Prerequisites: git, plus a C toolchain —
     Linux/macOS: autoconf/automake/libtool + make + a C compiler (autotools), OR
                  cmake + a generator (Ninja/Make).
     Windows:     cmake + Visual Studio Build Tools (C++ workload).
+    Optional:    ninja. If `ninja` is on PATH it is auto-detected and used as
+                 the cmake generator, which shows a true percentage progress bar
+                 during the build (Ninja emits per-step "[N/M]" counts) and
+                 compiles a little faster. It is NEVER required or auto-installed
+                 — absent ninja the build uses the platform default generator
+                 (Visual Studio on Windows) and shows a spinner instead. This
+                 keeps air-gapped/sovereign installs working with no extra
+                 dependency: an operator who wants the bar adds ninja to the
+                 same build environment that already provides cmake + a compiler.
 
 ---
 
 ## Entry points
 
-- `def main()` (line 148)
+- `def main()` (line 400)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -73,7 +82,8 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `cmd`` (line 63)
+- `subprocess.Popen()  → `cmd`` (line 158)
+- `subprocess.run()  → `cmd`` (line 80)
 
 
 ---

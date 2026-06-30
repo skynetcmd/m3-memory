@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: d2efee05f1f3
-mtime_utc: 2026-06-27T17:54:10.925483+00:00
-generated_utc: 2026-06-27T23:22:27.583781+00:00
+sha1: b61e551c0236
+mtime_utc: 2026-06-28T12:28:55.205643+00:00
+generated_utc: 2026-06-30T22:19:18.450937+00:00
 private: false
 ---
 

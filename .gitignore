@@ -130,6 +130,14 @@ benchmarks/longmemeval/results.json
 benchmarks/longmemeval/LME-*.json
 benchmarks/longmemeval/refs/
 docs/tools/probe_ingest_cost.md
+# Per-tool inventory docs for PRIVATE bench/harness scripts. The generator
+# (bin/gen_tool_inventory.py) now skips writing these, but ignore them too as
+# defense-in-depth so a generator regression can't re-track a leaked doc.
+# These previously reached public origin/main; keep them off it for good.
+docs/tools/bench_longmemeval.md
+docs/tools/bench_memory.md
+docs/tools/benchmark_memory.md
+docs/tools/build_lme_m_db.md
 
 # Generated configs (machine-specific paths; run bin/generate_configs.py to create)
 .mcp.json

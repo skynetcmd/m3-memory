@@ -1,8 +1,8 @@
 ---
 tool: bin/llm_failover.py
-sha1: b0c8e8bb5433
-mtime_utc: 2026-06-10T00:15:01.405591+00:00
-generated_utc: 2026-06-12T20:00:05.072159+00:00
+sha1: 4bf4912c17f1
+mtime_utc: 2026-06-30T21:32:48.329241+00:00
+generated_utc: 2026-06-30T22:19:18.281987+00:00
 private: false
 ---
 
@@ -33,6 +33,7 @@ _(no argparse arguments detected)_
 ## Environment variables read
 
 - `LLM_ENDPOINTS_CSV`
+- `M3_EMBED_DISCOVERY_NEG_TTL`
 - `M3_LLM_CONNECT_TIMEOUT`
 - `M3_LLM_URL`
 

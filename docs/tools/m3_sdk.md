@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_sdk.py
-sha1: 9328be9670d7
-mtime_utc: 2026-06-27T22:18:37.159143+00:00
-generated_utc: 2026-06-27T23:22:27.470389+00:00
+sha1: 594e09428be7
+mtime_utc: 2026-06-30T21:32:48.330985+00:00
+generated_utc: 2026-06-30T22:19:18.383349+00:00
 private: false
 ---
 
@@ -39,8 +39,9 @@ _(no conventional entry point detected)_
 - `M3_CORE_RS_DISABLE`
 - `M3_DATABASE`
 - `M3_ENGINE_ROOT`
-- `M3_GOVERNOR_INITIAL_THRESHOLD`
-- `M3_GOVERNOR_LIMIT_THRESHOLD`
+- `M3_GOVERNOR_CFG_TTL`
+- `M3_GPU_PROBE_DISABLE`
+- `M3_GPU_PROBE_TTL`
 - `M3_MEMORY_ROOT`
 - `PG_URL`
 - `PYTHONUTF8`
@@ -64,18 +65,21 @@ _(no conventional entry point detected)_
 
 **subprocess**
 
-- `os.execv()  → `sys.executable`` (line 320)
-- `subprocess.run()  → `['tasklist', '/fi', f'PID eq {pid}', '/nh']`` (line 208)
+- `os.execv()  → `sys.executable`` (line 595)
+- `subprocess.run()  → `['ioreg', '-r', '-d', '1', '-w', '0', '-c', 'IOAccelerator']`` (line 121)
+- `subprocess.run()  → `['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits']`` (line 72)
+- `subprocess.run()  → `['powershell', '-NoProfile', '-NonInteractive', '-Command', ps]`` (line 98)
+- `subprocess.run()  → `['tasklist', '/fi', f'PID eq {pid}', '/nh']`` (line 483)
 
 **http**
 
-- `httpx.AsyncClient()` (line 831)
-- `httpx.AsyncClient()` (line 834)
+- `httpx.AsyncClient()` (line 1112)
+- `httpx.AsyncClient()` (line 1115)
 
 **sqlite**
 
-- `sqlite3.connect()  → `path`` (line 437)
-- `sqlite3.connect()  → `self.db_path`` (line 613)
+- `sqlite3.connect()  → `path`` (line 712)
+- `sqlite3.connect()  → `self.db_path`` (line 888)
 
 
 ---
@@ -95,6 +99,7 @@ _(no conventional entry point detected)_
 
 ## File dependencies (repo paths referenced)
 
+- `.governor_config.json`
 - `agent_memory.db`
 
 ---

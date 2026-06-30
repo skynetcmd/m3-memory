@@ -140,6 +140,13 @@ It is equivalent to `python bin/install_wolfssl.py` (auditable, self-contained).
 | macOS | `xcode-select --install` (clang+make+git) **plus** a build system: the smallest is **cmake** — `brew install cmake`, or a standalone [CMake.app](https://cmake.org/download/) if you don't use Homebrew. (Or the autotools trio: `brew install autoconf automake libtool`.) The helper auto-finds Homebrew / CMake.app even when they're off your shell PATH. |
 | Windows | Git, **CMake**, and **Visual Studio Build Tools** (C++ workload) |
 
+*Optional:* if **ninja** is on PATH it is auto-detected and used as the cmake
+generator, giving a true percentage progress bar during the build (and a slightly
+faster compile). It is never required or auto-installed — without it the build
+uses the platform default generator and shows a spinner. This keeps air-gapped
+installs dependency-free: add ninja to the same build environment that already has
+cmake + a compiler if you want the bar.
+
 The result is the **open-source (non-FIPS) build** — works with `M3_FIPS_MODE=1`.
 It is **not** the CMVP-validated FIPS module (`M3_FIPS_STRICT` requires that;
 obtain it via wolfSSL's commercial channel — §3).
