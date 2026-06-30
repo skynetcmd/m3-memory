@@ -92,57 +92,36 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
     # Mock keyring lookup to return a token
     monkeypatch.setattr("auth_utils.safe_keyring_get_password", lambda s, u: "keyring-token")
 
-    # Mock HTTP client responses
+    # Mock at the httpx.AsyncClient.post CLASS level — not via _get_embed_client.
+    # A CI diagnostic proved every tier reaches a *real* httpx.AsyncClient
+    # (httpx.AsyncClient.post fired for both 127.0.0.1:8082 and enclave.test) even
+    # though _get_embed_client was patched, so patching the getter is not enough:
+    # intercept the actual transport so the local tiers fail and tier 4 returns
+    # the dummy embedding, regardless of how the client is resolved.
     posted_payloads = []
     posted_headers = []
     posted_urls = []
 
-    async def mock_post(url, json, headers=None, **kwargs):
-        if "enclave.test" in url:
-            posted_urls.append(url)
+    async def _fake_async_post(self, url, json=None, headers=None, **kwargs):
+        if "enclave.test" in str(url):
+            posted_urls.append(str(url))
             posted_payloads.append(json)
             posted_headers.append(headers)
-            # Return dummy embedding
             resp = MagicMock()
             resp.json.return_value = {"data": [{"embedding": [0.1, 0.2, 0.3, 0.4]}]}
+            resp.raise_for_status = lambda: None
             return resp
         raise RuntimeError("Local HTTP down")
 
-    client_mock = MagicMock()
-    client_mock.post = mock_post
-    get_client_calls = []
-
-    def _fake_get_client():
-        get_client_calls.append(1)
-        return client_mock
-    monkeypatch.setattr(_me, "_get_embed_client", _fake_get_client)
-    # Neutralize the process-wide cached real client so nothing can reuse a
-    # stale loop-bound AsyncClient that bypasses the patched getter.
-    monkeypatch.setattr(_me, "_EMBED_CLIENT", None, raising=False)
-
-    # DIAGNOSTIC: a real httpx client reaching enclave.test means tier 4 used a
-    # binding OTHER than the patched _me._get_embed_client. Trip-wire the real
-    # httpx.AsyncClient.post so CI reports exactly that (instead of a silent DNS
-    # error), and surface whether the cached client global was non-None.
     import httpx as _httpx_mod
-    real_post_calls = []
-    _orig_async_post = _httpx_mod.AsyncClient.post
-
-    async def _spy_post(self, url, *a, **k):
-        real_post_calls.append(str(url))
-        return await _orig_async_post(self, url, *a, **k)
-    monkeypatch.setattr(_httpx_mod.AsyncClient, "post", _spy_post)
+    monkeypatch.setattr(_httpx_mod.AsyncClient, "post", _fake_async_post)
+    # Also neutralize the process-wide cached client so a stale one isn't reused.
+    monkeypatch.setattr(_me, "_EMBED_CLIENT", None, raising=False)
 
     # Let's request an embedding with sensitive data
     vec, model = await _embed("My secret key is sk-proj-12345678901234567890 and email is test@domain.com")
 
-    # Surface the diagnostic state if the mock path was bypassed.
-    assert get_client_calls, (
-        f"cascade reached a client tier but NOT via the patched getter. "
-        f"real httpx.AsyncClient.post calls={real_post_calls!r}; "
-        f"_me._EMBED_CLIENT after={_me._EMBED_CLIENT!r}; "
-        f"_me._get_embed_client is patched={_me._get_embed_client is _fake_get_client}"
-    )
+    # Tier 4 returned the dummy embedding via the class-level transport mock.
     assert vec == [0.1, 0.2, 0.3, 0.4]
     assert len(posted_payloads) == 1
     # Verify PII was redacted!
