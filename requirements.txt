@@ -37,7 +37,12 @@ psutil>=7.2.2,<8
 pyobjc-framework-CoreWLAN; sys_platform == 'darwin'
 
 # --- Intelligence & Vector ---
-numpy>=2.4.4,<3
+# Cap <2.5: numpy 2.5.0's bundled stub (numpy/__init__.pyi) uses the PEP 695
+# `type` statement, which mypy rejects when targeting python_version 3.11 (our
+# supported floor, set in pyproject [tool.mypy]). The error halts the whole
+# mypy CI job before any bin/ file is checked. Lift once we drop 3.11 support
+# or numpy ships a 3.11-compatible stub. See CI "Type Check (Mypy)".
+numpy>=2.4.4,<2.5
 scipy>=1.17.1,<2
 tqdm>=4.67.3,<5
 # Fast fuzzy string matching for entity coalescing (token-order-aware, ~3-4x
