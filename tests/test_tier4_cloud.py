@@ -13,11 +13,43 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "bin"))
 
 import memory.config as config
-from memory.embed import _embed, get_embed_breaker_state, reset_embed_breakers
+
+# Resolve embed entry points from the LIVE module at call time rather than binding
+# them at collection. A sibling test (test_embed_cascade_order) deletes and
+# re-imports memory.* for isolation; a collection-time `from memory.embed import
+# _embed` would then point at the OLD module object while monkeypatch targets
+# ("memory.embed._get_embedded_embedder", ...) resolve via sys.modules to the NEW
+# one — so the patches are silently bypassed and a real tier returns a vector.
+# Going through sys.modules keeps the call and the patch on the same object.
+
+
+def _live_embed_module():
+    import importlib
+    return importlib.import_module("memory.embed")
+
+
+async def _embed(text):
+    return await _live_embed_module()._embed(text)
+
+
+def get_embed_breaker_state():
+    return _live_embed_module().get_embed_breaker_state()
+
+
+def reset_embed_breakers():
+    return _live_embed_module().reset_embed_breakers()
 
 
 @pytest.fixture(autouse=True)
 def clean_breakers(monkeypatch):
+    # Rebind this module's `config` to the LIVE memory.config that memory.embed
+    # actually reads. A sibling test re-imports memory.* for isolation; without
+    # this rebind, `monkeypatch.setattr(config, ...)` below would mutate the
+    # stale collection-time config object while the cascade reads the fresh one,
+    # so e.g. M3_ALLOW_CLOUD_FALLBACK=True wouldn't be seen and tier 4 is skipped.
+    global config
+    import importlib
+    config = importlib.import_module("memory.config")
     reset_embed_breakers()
     # Ultimate cache buster: force content hash to be unique every time to guarantee cache misses
     monkeypatch.setattr("memory.embed._content_hash", lambda t: str(uuid.uuid4()))
