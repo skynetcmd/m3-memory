@@ -69,6 +69,28 @@ def test_non_unit_allowed_when_not_required(monkeypatch):
     assert me._validate_identity(non_unit, config.EMBED_MODEL, "t") is True
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("require_unit", [True, False])
+def test_non_finite_rejected_regardless_of_norm_policy(monkeypatch, bad, require_unit):
+    """A NaN/inf component is never a valid embedding (it poisons every cosine
+    distance). NaN in particular slips past the norm tolerance (NaN compares
+    False to everything), so finite-ness must be enforced independently of the
+    unit-norm policy."""
+    monkeypatch.setattr(config, "EMBED_REQUIRE_UNIT_NORM", require_unit)
+    vec = _unit(config.EMBED_DIM)
+    vec[0] = bad
+    assert me._validate_identity(vec, config.EMBED_MODEL, "t") is False
+    # also caught when the bad vector is a sampled member of a bulk batch
+    batch = [_unit(config.EMBED_DIM) for _ in range(5)]
+    batch[0] = vec
+    assert me._validate_identity(batch, config.EMBED_MODEL, "t") is False
+
+
+def test_zero_vector_rejected_when_unit_required(monkeypatch):
+    monkeypatch.setattr(config, "EMBED_REQUIRE_UNIT_NORM", True)
+    assert me._validate_identity([0.0] * config.EMBED_DIM, config.EMBED_MODEL, "t") is False
+
+
 def test_bulk_list_validated_by_sample():
     vecs = [_unit(config.EMBED_DIM) for _ in range(5)]
     assert me._validate_identity(vecs, config.EMBED_MODEL, "t") is True
