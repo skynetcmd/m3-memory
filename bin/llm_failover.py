@@ -9,6 +9,7 @@ Used by custom_tool_bridge.py and memory_bridge.py.
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 import httpx
@@ -90,21 +91,31 @@ READ_TIMEOUT = 10.0      # for model list fetches only
 _LLM_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
 _SMALL_LLM_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
 _EMBED_ENDPOINT_CACHE: Optional[tuple[str, str]] = None
+# Negative-result cache for embed discovery. Without this, a host with no
+# embedding model loaded would re-run the GET /v1/models probe of EVERY endpoint
+# on EVERY embed call (the positive cache only short-circuits a SUCCESS) — its
+# own per-call request storm. Remember a "no embed endpoint" result for
+# _EMBED_NEG_TTL seconds, then re-probe (so it recovers when a model is loaded).
+_EMBED_NEG_CACHE_TS: float = 0.0
+_EMBED_NEG_TTL: float = float(os.environ.get("M3_EMBED_DISCOVERY_NEG_TTL", "60"))
 
 
 def clear_failover_caches() -> None:
     """Forget all cached endpoints. Call after a persistent failure
     so the next discovery attempt probes the network."""
     global _LLM_ENDPOINT_CACHE, _SMALL_LLM_ENDPOINT_CACHE, _EMBED_ENDPOINT_CACHE
+    global _EMBED_NEG_CACHE_TS
     _LLM_ENDPOINT_CACHE = None
     _SMALL_LLM_ENDPOINT_CACHE = None
     _EMBED_ENDPOINT_CACHE = None
+    _EMBED_NEG_CACHE_TS = 0.0
 
 
 def clear_embed_cache() -> None:
     """Legacy helper for forgetting only the embed cache."""
-    global _EMBED_ENDPOINT_CACHE
+    global _EMBED_ENDPOINT_CACHE, _EMBED_NEG_CACHE_TS
     _EMBED_ENDPOINT_CACHE = None
+    _EMBED_NEG_CACHE_TS = 0.0
 
 
 def parse_model_size(model_id: str) -> float:
@@ -298,8 +309,10 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
     """
     Find an embedding model across endpoints, with fallback to any available model.
 
-    Iterates LLM_ENDPOINTS in failover order. Prefers models matching EMBED_EXCLUSIONS.
-    Falls back to first endpoint with any usable model if no embed model found.
+    Iterates LLM_ENDPOINTS in failover order, returning the first endpoint that
+    advertises an EMBEDDING model (prefers BGE-M3). Returns None if no endpoint
+    serves an embedding model — a chat-only endpoint is NOT a valid fallback
+    (POSTing /embeddings to it 400s), so the caller takes its own embed fallback.
 
     Result is cached process-globally after first successful discovery. Reset
     via clear_embed_cache() on persistent failure.
@@ -311,11 +324,14 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
     Returns:
         Tuple of (base_url, model_id) or None if no models found anywhere
     """
-    global _EMBED_ENDPOINT_CACHE
+    global _EMBED_ENDPOINT_CACHE, _EMBED_NEG_CACHE_TS
     if _EMBED_ENDPOINT_CACHE is not None:
         return _EMBED_ENDPOINT_CACHE
-
-    fallback_result = None
+    # Negative cache: a recent "no embed endpoint" result short-circuits the
+    # all-endpoints /models probe so a host without an embedding model doesn't
+    # re-probe on every single embed call.
+    if _EMBED_NEG_CACHE_TS and (time.time() - _EMBED_NEG_CACHE_TS) < _EMBED_NEG_TTL:
+        return None
 
     for endpoint in LLM_ENDPOINTS:
         try:
@@ -373,10 +389,16 @@ async def get_best_embed(client: httpx.AsyncClient, token: str) -> Optional[tupl
             _EMBED_ENDPOINT_CACHE = (endpoint, embed_models[0])
             return _EMBED_ENDPOINT_CACHE
 
-        # Record fallback if this endpoint has any usable model
-        if other_models and fallback_result is None:
-            fallback_result = (endpoint, other_models[0])
-
-    if fallback_result is not None:
-        _EMBED_ENDPOINT_CACHE = fallback_result
-    return fallback_result
+    # No endpoint advertised an EMBEDDING model. Do NOT fall back to a chat-only
+    # endpoint: POSTing /embeddings to a chat model returns 400 on every call,
+    # and the caller would retry it into a storm. Return None so the caller takes
+    # its real fallback (CPU embed server / cloud / graceful skip) instead of
+    # hammering an endpoint that structurally cannot embed — fail cleanly rather
+    # than returning a known-doomed target. Stamp the negative cache so we don't
+    # re-probe every call for the next _EMBED_NEG_TTL seconds.
+    _EMBED_NEG_CACHE_TS = time.time()
+    logger.warning(
+        "[llm_failover] no embedding model found across endpoints — returning "
+        "None so the caller uses its embed fallback (negative-cached %.0fs).",
+        _EMBED_NEG_TTL)
+    return None

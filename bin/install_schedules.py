@@ -360,6 +360,26 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
         result = subprocess.run(schtasks_cmd, capture_output=True, text=True)
         if result.returncode == 0:
             _safe_print(f"{OK} Created Windows Task: {task['name']}")
+            # Harden: schtasks /Create can't set these, so use PowerShell.
+            # MultipleInstances=IgnoreNew — never start a second copy while one
+            # is running, so a stuck/slow run doesn't STACK every interval and
+            # over-dispatch the local LLM. ExecutionTimeLimit caps a hung run.
+            # Best-effort: a failure here must not fail the install.
+            ps = (
+                f"$t = Get-ScheduledTask -TaskName '{task['name']}' "
+                f"-ErrorAction SilentlyContinue; if ($t) {{ $s = $t.Settings; "
+                f"$s.MultipleInstances = 'IgnoreNew'; "
+                f"$s.ExecutionTimeLimit = 'PT1H'; "
+                f"Set-ScheduledTask -TaskName '{task['name']}' -Settings $s "
+                f"| Out-Null }}"
+            )
+            try:
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                    capture_output=True, text=True, timeout=20,
+                )
+            except Exception:
+                pass  # hardening is best-effort; the task still works without it
         else:
             _safe_print(f"{FAIL} Failed to create task {task['name']}: {result.stderr.strip()}")
             success = False

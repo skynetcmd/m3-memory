@@ -83,7 +83,7 @@ async def test_confidence_ranking_lifts_corroborated_recall(monkeypatch, tmp_pat
     """Targets (high confidence) compete with same-relevance distractors (low
     confidence). Enabling confidence ranking must lift recall@k for the targets
     and never lower it — the pre-registered §5 direction."""
-    from memory.config import EMBED_DIM
+    from memory.config import EMBED_DIM, EMBED_MODEL
 
     db = tmp_path / "t.db"
     _full_db(db)
@@ -105,7 +105,7 @@ async def test_confidence_ranking_lifts_corroborated_recall(monkeypatch, tmp_pat
             )
             conn.execute(
                 "INSERT INTO memory_embeddings (memory_id, embedding, embed_model, dim) VALUES (?,?,?,?)",
-                (f"target-{i}", _pack(qv), "test", EMBED_DIM),
+                (f"target-{i}", _pack(qv), EMBED_MODEL, EMBED_DIM),
             )
         for j in range(N_DISTRACTORS):
             conn.execute(
@@ -116,7 +116,7 @@ async def test_confidence_ranking_lifts_corroborated_recall(monkeypatch, tmp_pat
             )
             conn.execute(
                 "INSERT INTO memory_embeddings (memory_id, embedding, embed_model, dim) VALUES (?,?,?,?)",
-                (f"distractor-{j}", _pack(qv), "test", EMBED_DIM),
+                (f"distractor-{j}", _pack(qv), EMBED_MODEL, EMBED_DIM),
             )
         conn.commit()
 

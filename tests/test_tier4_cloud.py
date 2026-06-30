@@ -13,11 +13,43 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "bin"))
 
 import memory.config as config
-from memory.embed import _embed, get_embed_breaker_state, reset_embed_breakers
+
+# Resolve embed entry points from the LIVE module at call time rather than binding
+# them at collection. A sibling test (test_embed_cascade_order) deletes and
+# re-imports memory.* for isolation; a collection-time `from memory.embed import
+# _embed` would then point at the OLD module object while monkeypatch targets
+# ("memory.embed._get_embedded_embedder", ...) resolve via sys.modules to the NEW
+# one — so the patches are silently bypassed and a real tier returns a vector.
+# Going through sys.modules keeps the call and the patch on the same object.
+
+
+def _live_embed_module():
+    import importlib
+    return importlib.import_module("memory.embed")
+
+
+async def _embed(text):
+    return await _live_embed_module()._embed(text)
+
+
+def get_embed_breaker_state():
+    return _live_embed_module().get_embed_breaker_state()
+
+
+def reset_embed_breakers():
+    return _live_embed_module().reset_embed_breakers()
 
 
 @pytest.fixture(autouse=True)
 def clean_breakers(monkeypatch):
+    # Rebind this module's `config` to the LIVE memory.config that memory.embed
+    # actually reads. A sibling test re-imports memory.* for isolation; without
+    # this rebind, `monkeypatch.setattr(config, ...)` below would mutate the
+    # stale collection-time config object while the cascade reads the fresh one,
+    # so e.g. M3_ALLOW_CLOUD_FALLBACK=True wouldn't be seen and tier 4 is skipped.
+    global config
+    import importlib
+    config = importlib.import_module("memory.config")
     reset_embed_breakers()
     # Ultimate cache buster: force content hash to be unique every time to guarantee cache misses
     monkeypatch.setattr("memory.embed._content_hash", lambda t: str(uuid.uuid4()))
@@ -102,13 +134,19 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
     posted_headers = []
     posted_urls = []
 
+    # Proper-identity stub: EMBED_DIM-long and L2-unit-length, so the embedder-
+    # identity gate accepts the tier-4 vector (a short/un-normalized stub is now
+    # correctly rejected). This test asserts PII redaction + tier-4 routing, not
+    # the vector's content.
+    proper_vec = [1.0] + [0.0] * (config.EMBED_DIM - 1)
+
     async def _fake_async_post(self, url, json=None, headers=None, **kwargs):
         if "enclave.test" in str(url):
             posted_urls.append(str(url))
             posted_payloads.append(json)
             posted_headers.append(headers)
             resp = MagicMock()
-            resp.json.return_value = {"data": [{"embedding": [0.1, 0.2, 0.3, 0.4]}]}
+            resp.json.return_value = {"data": [{"embedding": proper_vec}]}
             resp.raise_for_status = lambda: None
             return resp
         raise RuntimeError("Local HTTP down")
@@ -121,8 +159,8 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
     # Let's request an embedding with sensitive data
     vec, model = await _embed("My secret key is sk-proj-12345678901234567890 and email is test@domain.com")
 
-    # Tier 4 returned the dummy embedding via the class-level transport mock.
-    assert vec == [0.1, 0.2, 0.3, 0.4]
+    # Tier 4 returned the proper-identity embedding via the class-level mock.
+    assert vec == proper_vec
     assert len(posted_payloads) == 1
     # Verify PII was redacted!
     input_text = posted_payloads[0]["input"]
