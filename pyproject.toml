@@ -74,7 +74,9 @@ dependencies = [
     "chromadb-client>=1.5.8,<2",
     "cryptography>=48.0.1,<49",
     "keyring>=25.7.0,<26",
-    "numpy>=2.4.4,<3",
+    # Cap <2.5: numpy 2.5.0's stub uses PEP 695 `type` syntax that mypy rejects
+    # under python_version 3.11 (our floor). See requirements.txt for the full note.
+    "numpy>=2.4.4,<2.5",
     "python-dotenv>=1.2.2,<2",
     "PyYAML>=6.0.3,<7",
     "psutil>=7.2.2,<8",
