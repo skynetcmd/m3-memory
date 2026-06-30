@@ -215,9 +215,22 @@ def run(db_path: str, args) -> dict:
                            WHEN title LIKE 'assistant@%' THEN 'assistant'
                            WHEN title LIKE 'system@%' THEN 'system'
                            WHEN title LIKE 'tool@%' THEN 'tool' ELSE '' END"""
+        # §4/§8: scope the scan to the ACTIONABLE window. Only rows aged past
+        # fresh_days are ever decayed/pruned (fresher noise is kept, see below),
+        # so there's no reason to pull the whole chat_log table into Python every
+        # run — that turns a large backlog into one unbounded monster pass. Filter
+        # by created_at (ISO-8601 sorts lexically) so the scan and the in-Python
+        # cluster build stay bounded to what we might act on. `created_at` is
+        # indexed on the chatlog DB; a missing index just degrades to a scan of
+        # the same rows we'd have read anyway.
+        fresh_cutoff = datetime.fromtimestamp(
+            now_ts - args.fresh_days * 86400.0, timezone.utc
+        ).isoformat()
         rows = conn.execute(f"""SELECT id, {role_sql} AS role, content, importance, created_at
                                 FROM memory_items
-                                WHERE type='chat_log' AND is_deleted=0""").fetchall()
+                                WHERE type='chat_log' AND is_deleted=0
+                                  AND created_at < ?
+                                ORDER BY created_at ASC""", (fresh_cutoff,)).fetchall()
         # PASS 1: build normalized-content cluster sizes (for repeat-status)
         cluster: dict[str, int] = {}
         norms: dict[str, str] = {}
@@ -226,8 +239,14 @@ def run(db_path: str, args) -> dict:
             norms[r["id"]] = n
             if n:
                 cluster[n] = cluster.get(n, 0) + 1
-        # PASS 2: classify + decide by age tier
-        decay_buf, prune_buf = [], []
+        # PASS 2: classify + decide by age tier. §8: bound the WRITE volume per
+        # run via max_actions so a huge backlog drains across cycles instead of
+        # one monster pass (rows are oldest-first, so we always make forward
+        # progress on the most-aged noise). max_actions <= 0 means "no cap".
+        max_actions = int(getattr(args, "max_actions", 0) or 0)
+        S["capped"] = False
+        decay_buf: list[tuple[Any, float]] = []
+        prune_buf: list[tuple[Any]] = []
         for r in rows:
             S["scanned"] += 1
             role = r["role"] or ""
@@ -240,6 +259,12 @@ def run(db_path: str, args) -> dict:
             if age < args.fresh_days:
                 S["kept_noise_recent"] += 1          # noise but recent -> keep
                 continue
+            if max_actions and (len(decay_buf) + len(prune_buf)) >= max_actions:
+                # Hit the per-run action cap. Stop accumulating; the remaining
+                # aged noise is handled next run. Surfaced (not silent) so a
+                # standing backlog is visible.
+                S["capped"] = True
+                break
             # Tightened guard: protected turns (durable signal, or substantial &
             # structured, or a generic turn longer than the trivia cutoff) are
             # never tombstoned — at most suppressed. Hard-noise bypasses this.
@@ -302,6 +327,10 @@ def main() -> int:
     ap.add_argument("--generic-delete-maxlen", type=int, default=300,
                     help="generic turns >= this length are never tombstoned (suppress-only)")
     ap.add_argument("--no-generic", action="store_true")
+    ap.add_argument("--max-actions", type=int, default=0,
+                    help="Max decay+prune writes per run (0 = no cap). Bounds a "
+                         "single pass so a large backlog drains across runs "
+                         "instead of one monster pass; oldest noise goes first.")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()

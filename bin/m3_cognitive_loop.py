@@ -357,10 +357,15 @@ async def run_chatlog_prune_pass(args):
             prune_days=args.chatlog_prune_days,
             status_min_cluster=5, generic_imp_max=0.3, keep_imp_floor=0.4,
             generic_protect_len=300, generic_delete_maxlen=300,
+            # Bound writes per cycle (§8): the loop fires every --interval, so a
+            # large backlog drains over many cycles instead of one monster pass
+            # that blocks the heartbeat. Oldest noise is handled first.
+            max_actions=args.chatlog_prune_max_actions,
             no_generic=False, apply=apply)
         summary = chatlog_prune.run(args.chatlog_db, opts)
-        logger.info("Chatlog-prune pass: suppress=%s soft-delete=%s (apply=%s)",
-                    summary.get("writes_decay"), summary.get("writes_prune"), apply)
+        logger.info("Chatlog-prune pass: suppress=%s soft-delete=%s capped=%s (apply=%s)",
+                    summary.get("writes_decay"), summary.get("writes_prune"),
+                    summary.get("capped"), apply)
     except Exception as e:
         logger.error(f"Chatlog-prune pass error: {type(e).__name__}: {e}")
 
@@ -468,6 +473,10 @@ def main():
                         help="Keep noise newer than N days untouched (default: 14)")
     parser.add_argument("--chatlog-prune-days", type=float, default=45.0,
                         help="Soft-delete aged noise older than N days (default: 45)")
+    parser.add_argument("--chatlog-prune-max-actions", type=int, default=5000,
+                        help="Max decay+prune writes per cycle (default: 5000; 0 = "
+                             "no cap). Caps one pass so a backlog drains across "
+                             "cycles instead of blocking the heartbeat.")
 
     args = parser.parse_args()
 
