@@ -621,11 +621,16 @@ async def _main_async(args: argparse.Namespace) -> int:
     print(f"[m3-entities]   preds: {len(valid_predicates)} ({sorted(valid_predicates)[:6]}...)", flush=True)
 
     # Apply embedder override if requested. CLI flag wins, env var is fallback,
-    # both already merged into args.embed_url/embed_model by argparse.
-    if args.embed_url:
-        mc.set_embed_override(args.embed_url, args.embed_model)
-        print(f"[m3-entities] embedder override: {args.embed_url} "
-              f"(model: {args.embed_model or 'default'})", flush=True)
+    # both already merged into args.embed_url/embed_model by argparse. Use
+    # getattr so a hand-built Namespace (e.g. the cognitive loop's
+    # run_entity_pass) that omits these fields doesn't AttributeError — matches
+    # the defensive read in m3_enrich.py.
+    embed_url = getattr(args, "embed_url", None)
+    embed_model = getattr(args, "embed_model", None)
+    if embed_url:
+        mc.set_embed_override(embed_url, embed_model)
+        print(f"[m3-entities] embedder override: {embed_url} "
+              f"(model: {embed_model or 'default'})", flush=True)
 
     type_allowlist = _build_type_allowlist(args)
 
