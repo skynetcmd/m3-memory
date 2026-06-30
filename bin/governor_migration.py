@@ -77,8 +77,21 @@ def detect_scheduled_tasks() -> dict[str, list[str]]:
     empty lists.
     """
     installed = _list_installed_task_names()
-    eligible = [t for t in GOVERNOR_ELIGIBLE if t in installed]
     not_migratable = [name for name, _ in NOT_MIGRATABLE if name in installed]
+    eligible = [t for t in GOVERNOR_ELIGIBLE if t in installed]
+    # Legacy / hand-named tasks (Windows, detected by action) are neither in
+    # GOVERNOR_ELIGIBLE nor NOT_MIGRATABLE — they carry their real task name. They
+    # ARE governor-eligible (an old sync task IS the thing the governor owns), so
+    # fold them into `eligible` so the CLI removes them by their actual name.
+    # Guard against a hand-named task colliding with a canonical name (already
+    # counted) or a not-migratable name (don't reclassify it for removal).
+    extra = [
+        n for n in sorted(installed)
+        if n not in GOVERNOR_ELIGIBLE
+        and n not in {nm for nm, _ in NOT_MIGRATABLE}
+        and n not in not_migratable
+    ]
+    eligible.extend(extra)
     return {"eligible": eligible, "not_migratable_present": not_migratable}
 
 
@@ -101,6 +114,10 @@ def _list_installed_task_names() -> set[str]:
                     names.add(name)
         except FileNotFoundError:
             pass
+        # Also catch legacy / hand-named tasks (e.g. the pre-bf110222
+        # `m3-memory-sync`) that the canonical-name query above misses. These are
+        # surfaced under their ACTUAL task name so removal targets the right task.
+        names |= detect_windows_legacy_action_tasks()
         return names
 
     # Unix: cron entries carry the invoked command, not the AgentOS_* name.
@@ -109,6 +126,67 @@ def _list_installed_task_names() -> set[str]:
         cron = r.stdout if r.returncode == 0 else ""
     except FileNotFoundError:
         cron = ""
+    return _unix_installed_from_cron(cron)
+
+
+def _canonical_task_names() -> set[str]:
+    """Every task name the current installer emits — canonical AgentOS_* set."""
+    return set(GOVERNOR_ELIGIBLE) | {name for name, _ in NOT_MIGRATABLE}
+
+
+def _leaf_task_name(task_name: str) -> str:
+    """schtasks prints `\\Folder\\Name` (or `\\Name` at root) — return the leaf."""
+    return task_name.strip().rsplit("\\", 1)[-1]
+
+
+def detect_windows_legacy_action_tasks() -> set[str]:
+    """Names of Windows tasks whose ACTION runs an m3 entrypoint but whose name is
+    NOT a canonical AgentOS_* one (legacy / hand-named, e.g. `m3-memory-sync`).
+
+    Returned as ACTUAL task names so the caller removes the right task. Matches on
+    the "Task To Run" field via _WINDOWS_ACTION_MARKERS (which point at the Python
+    entrypoints the action invokes directly, NOT the Unix `pg_sync.sh` wrapper).
+
+    Read-only and never raises: a missing `schtasks` or a parse hiccup yields an
+    empty set. Canonical-named tasks are excluded — they are already detected by
+    the name-based query, and re-listing them here would be redundant.
+    """
+    try:
+        r = subprocess.run(
+            ["schtasks", "/Query", "/FO", "LIST", "/V"],
+            capture_output=True, text=True,
+        )
+    except (FileNotFoundError, OSError):
+        return set()
+    if r.returncode != 0 or not r.stdout:
+        return set()
+
+    canonical = _canonical_task_names()
+    markers = tuple(_WINDOWS_ACTION_MARKERS.values())
+    found: set[str] = set()
+    cur_name: str | None = None
+    for raw in r.stdout.splitlines():
+        line = raw.strip()
+        if line.startswith("TaskName:"):
+            cur_name = line.split(":", 1)[1].strip()
+        elif line.startswith("Task To Run:") and cur_name:
+            action = line.split(":", 1)[1]
+            leaf = _leaf_task_name(cur_name)
+            # Skip canonical tasks (already counted) and Microsoft/OS tasks that
+            # merely mention a marker substring would be a non-issue — the markers
+            # are m3 script filenames, vanishingly unlikely to appear elsewhere.
+            if leaf not in canonical and any(m in action for m in markers):
+                # Use the leaf name: schtasks /Delete /TN works with the leaf for
+                # root-level tasks, which is where the installer (and the legacy
+                # hand-named tasks) live.
+                found.add(leaf)
+            cur_name = None
+    return found
+
+
+def _unix_installed_from_cron(cron: str) -> set[str]:
+    """Unix detection body — split out so the Windows path can return early."""
+    names: set[str] = set()
     for name, marker in _UNIX_CRON_MARKERS.items():
         if marker and marker in cron:
             names.add(name)
@@ -131,6 +209,28 @@ def _list_installed_task_names() -> set[str]:
 # detected by service-file presence instead.
 _UNIX_CRON_MARKERS = {
     "AgentOS_HourlySync": "pg_sync.sh",
+    "AgentOS_ChatlogEmbedSweep": "chatlog_embed_sweeper.py",
+    "AgentOS_ObservationDrain": "m3_enrich.py",
+    "AgentOS_Maintenance": "memory_maintenance.py",
+    "AgentOS_WeeklyAuditor": "weekly_auditor.py",
+    "AgentOS_SecretRotator": "secret_rotator.py",
+}
+
+# Map AgentOS_* names to the token that appears in the WINDOWS task ACTION
+# ("Task To Run"), so we can recognise a legacy/hand-named scheduled task by what
+# it RUNS even when its task name is not the canonical AgentOS_* one. This is the
+# Windows analogue of _UNIX_CRON_MARKERS, but the markers DIFFER by design: the
+# Windows task action invokes the Python entrypoint DIRECTLY (e.g. sync_all.py),
+# whereas the Unix crontab invokes the `pg_sync.sh` wrapper. Reusing
+# _UNIX_CRON_MARKERS here would make HourlySync look for `pg_sync.sh`, which never
+# appears in a Windows action — so a legacy task like the old `m3-memory-sync`
+# (action: ...\\sync_all.py) would be missed. Keep these two maps independent.
+#
+# AgentOS_CognitiveLoop is intentionally absent: it is a not-migratable keepalive
+# the governor already paces, so we do not want a legacy-action match to flag it
+# for removal.
+_WINDOWS_ACTION_MARKERS = {
+    "AgentOS_HourlySync": "sync_all.py",
     "AgentOS_ChatlogEmbedSweep": "chatlog_embed_sweeper.py",
     "AgentOS_ObservationDrain": "m3_enrich.py",
     "AgentOS_Maintenance": "memory_maintenance.py",
