@@ -121,6 +121,7 @@ class MeanPoolTests(unittest.TestCase):
 
     def setUp(self):
         import math
+
         import memory.embed as me
         self.me = me
         self.math = math
