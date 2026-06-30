@@ -126,7 +126,7 @@ def _load_gliner(cfg: _Cfg):
         try:
             import torch
             if not torch.cuda.is_available():
-                print(f"[gliner] WARN: cuda requested but not available; falling back to cpu", flush=True)
+                print("[gliner] WARN: cuda requested but not available; falling back to cpu", flush=True)
                 cfg.device = "cpu"
         except Exception as e:
             print(f"[gliner] WARN: torch import failed ({e}); falling back to cpu", flush=True)
