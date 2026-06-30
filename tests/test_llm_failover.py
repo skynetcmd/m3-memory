@@ -52,6 +52,25 @@ async def test_get_best_embed_success():
         assert result[0] == "http://localhost:1234/v1"
         assert result[1] == "nomic-embed-text-v1.5"
 
+
+@pytest.mark.asyncio
+async def test_get_best_embed_chat_only_returns_none():
+    """A chat-only endpoint is NOT a valid embedding fallback: POSTing
+    /embeddings to it 400s, which previously triggered a retry storm. When no
+    endpoint advertises an embedding model, get_best_embed must return None so
+    the caller takes its own embed fallback."""
+    mock_client = AsyncMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    # Only chat models advertised — no embedding model anywhere.
+    mock_resp.json.return_value = {"data": [{"id": "qwen3-8b"}, {"id": "llama-3-8b"}]}
+    mock_client.get.return_value = mock_resp
+
+    with patch("llm_failover.LLM_ENDPOINTS", ["http://localhost:1234/v1"]):
+        result = await llm_failover.get_best_embed(mock_client, "token")
+        assert result is None, "chat-only endpoint must not be returned as an embed endpoint"
+
+
 @pytest.mark.asyncio
 async def test_get_best_llm_size_sorting():
     """Test that get_best_llm picks the largest available model."""
