@@ -41,15 +41,19 @@ def _vec(primary: float, dim: int):
 
 
 def _seed(conn, mid, content, vec, confidence, *, importance=0.5):
+    from memory.config import EMBED_MODEL
     conn.execute(
         "INSERT INTO memory_items (id, type, title, content, source, change_agent, "
         "created_at, importance, confidence, is_deleted) VALUES (?,?,?,?,?,?,?,?,?,0)",
         (mid, "fact", content[:20], content, "agent", "claude",
          "2026-01-01T00:00:00Z", importance, confidence),
     )
+    # Tag with the configured embedder so the row survives search's proper-identity
+    # filter (embed_model IN compatible AND dim == EMBED_DIM); this test exercises
+    # confidence ranking, not identity, so the rows must be retrievable.
     conn.execute(
         "INSERT INTO memory_embeddings (memory_id, embedding, embed_model, dim) VALUES (?,?,?,?)",
-        (mid, _pack(vec), "test", len(vec)),
+        (mid, _pack(vec), EMBED_MODEL, len(vec)),
     )
 
 
