@@ -52,7 +52,10 @@ def _pacing(sdk, load: float, elapsed: float) -> dict:
 def test_python_fallback_truth_table():
     """The Python path returns the documented dict for each branch."""
     sdk = _load_sdk(disable_rust=True)
-    # Defaults: INITIAL_LIMIT=85, LIMIT_THRESHOLD=95 (env unset).
+    # Pin thresholds to the documented defaults so this ladder test is hermetic
+    # — it must not depend on the absence of a live .governor_config.json (which
+    # may set different thresholds on a real host).
+    sdk._governor_thresholds = lambda now=None: (85, 95)
     out = _pacing(sdk, 95.0, 0.0)
     assert out == {"background": "HALTED", "interactive_delay": 30.0}
     out = _pacing(sdk, 85.0, 0.0)
