@@ -144,3 +144,113 @@ def test_not_migratable_lines_have_reasons():
     lines = gm.not_migratable_lines()
     assert len(lines) == len(gm.NOT_MIGRATABLE)
     assert all("—" in line for line in lines)  # name — reason format
+
+
+# ── Windows legacy-action detection (hardening A) ──────────────────────────────
+# A pre-bf110222 / hand-named task (e.g. `m3-memory-sync`) runs sync_all.py but
+# is NOT named AgentOS_HourlySync, so the name-only query misses it. Detection
+# must catch it by its ACTION and surface it under its REAL name for removal.
+
+def _verbose_list(records: list[tuple[str, str]]) -> str:
+    """Render a fake `schtasks /Query /FO LIST /V` blob from (TaskName, action)."""
+    blocks = []
+    for name, action in records:
+        blocks.append(
+            f"HostName:                             HOSTPC\n"
+            f"TaskName:                             {name}\n"
+            f"Task To Run:                          {action}\n"
+        )
+    return "\n".join(blocks)
+
+
+def _win_run_factory(verbose_blob: str, name_present: set[str]):
+    """Build a fake subprocess.run that answers BOTH query shapes:
+    - /TN <name>            → present iff name in name_present
+    - /FO LIST /V           → returns the verbose blob
+    """
+    class _R:
+        def __init__(self, rc, out):
+            self.returncode = rc
+            self.stdout = out
+            self.stderr = ""
+
+    def fake_run(cmd, **kw):
+        if "/V" in cmd:
+            return _R(0, verbose_blob)
+        name = cmd[-1]  # /TN <name>
+        return _R(0, name) if name in name_present else _R(1, "")
+
+    return fake_run
+
+
+def test_windows_detects_legacy_sync_task_by_action(monkeypatch):
+    monkeypatch.setattr(gm, "_os_name", lambda: "Windows")
+    # No canonical task installed by name; a legacy task runs sync_all.py.
+    blob = _verbose_list([
+        (r"\m3-memory-sync",
+         r'powershell.exe -Command "& ...\.venv\Scripts\python.exe ...\bin\sync_all.py"'),
+        (r"\Microsoft\Windows\SomethingElse", r"C:\Windows\system32\noop.exe"),
+    ])
+    monkeypatch.setattr(gm.subprocess, "run", _win_run_factory(blob, set()))
+    out = gm.detect_scheduled_tasks()
+    # Surfaced under its REAL name so `schtasks /Delete /TN m3-memory-sync` works.
+    assert "m3-memory-sync" in out["eligible"]
+    assert out["not_migratable_present"] == []
+
+
+def test_windows_action_scan_skips_canonical_names(monkeypatch):
+    # A task NAMED AgentOS_HourlySync running sync_all.py must NOT be double-listed
+    # by the action scan — it's already found by the name-based query.
+    monkeypatch.setattr(gm, "_os_name", lambda: "Windows")
+    blob = _verbose_list([
+        (r"\AgentOS_HourlySync", r'"...\pythonw.exe" "...\bin\sync_all.py"'),
+    ])
+    monkeypatch.setattr(
+        gm.subprocess, "run",
+        _win_run_factory(blob, {"AgentOS_HourlySync"}),
+    )
+    out = gm.detect_scheduled_tasks()
+    # Exactly one occurrence — found by name, not duplicated by action.
+    assert out["eligible"] == ["AgentOS_HourlySync"]
+
+
+def test_windows_action_marker_is_sync_all_not_pg_sync_sh():
+    # CROSS-OS TRAP GUARD: the Windows action invokes sync_all.py directly; the
+    # Unix wrapper pg_sync.sh never appears in a Windows action. The two marker
+    # maps MUST stay independent or HourlySync legacy tasks go undetected.
+    assert gm._WINDOWS_ACTION_MARKERS["AgentOS_HourlySync"] == "sync_all.py"
+    assert gm._UNIX_CRON_MARKERS["AgentOS_HourlySync"] == "pg_sync.sh"
+
+
+def test_windows_legacy_detection_never_raises_without_schtasks(monkeypatch):
+    monkeypatch.setattr(gm, "_os_name", lambda: "Windows")
+
+    def boom(*a, **k):
+        raise FileNotFoundError("schtasks")
+
+    monkeypatch.setattr(gm.subprocess, "run", boom)
+    # Whole detect path must swallow it and return empty, not raise.
+    assert gm.detect_windows_legacy_action_tasks() == set()
+    assert gm.detect_scheduled_tasks() == {"eligible": [], "not_migratable_present": []}
+
+
+def test_windows_legacy_does_not_reclassify_not_migratable(monkeypatch):
+    # A hand-named task whose leaf collides with a NOT_MIGRATABLE name must not be
+    # pulled into `eligible` (that would schedule a security task for removal).
+    monkeypatch.setattr(gm, "_os_name", lambda: "Windows")
+    blob = _verbose_list([
+        (r"\AgentOS_SecretRotator", r'"...\pythonw.exe" "...\bin\secret_rotator.py"'),
+    ])
+    monkeypatch.setattr(
+        gm.subprocess, "run",
+        _win_run_factory(blob, {"AgentOS_SecretRotator"}),
+    )
+    out = gm.detect_scheduled_tasks()
+    assert "AgentOS_SecretRotator" in out["not_migratable_present"]
+    assert "AgentOS_SecretRotator" not in out["eligible"]
+
+
+def test_leaf_task_name_strips_path():
+    assert gm._leaf_task_name(r"\m3-memory-sync") == "m3-memory-sync"
+    assert gm._leaf_task_name(r"\Microsoft\Windows\Foo\Bar") == "Bar"
+    assert gm._leaf_task_name("PlainName") == "PlainName"
