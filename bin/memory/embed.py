@@ -256,6 +256,24 @@ def _identity_warn(source_label: str, reason: str) -> None:
                        "rather than storing a non-proper vector.", source_label, reason)
 
 
+def _accept_bulk(out, miss_indices, vecs, model: str, label: str) -> list[int]:
+    """Assign each proper vector into `out` at its original index; return the
+    LOCAL indices (into miss_indices/vecs) whose vector was missing or failed the
+    embedder-identity gate, so the caller can narrow the cascade to just those.
+    Validates the batch once (cheap, sampled) before accepting any vector — a
+    foreign-identity batch is rejected wholesale so no bad vector is stored."""
+    real = [v for v in vecs if v is not None]
+    if real and not _validate_identity(real, model, label):
+        return list(range(len(vecs)))  # whole batch is not proper -> all miss
+    still: list[int] = []
+    for j, (idx, vec) in enumerate(zip(miss_indices, vecs)):
+        if vec is not None:
+            out[idx] = (vec, model)
+        else:
+            still.append(j)
+    return still
+
+
 def _sample_is_unit(vecs) -> bool:
     """Cheap L2-norm check on a SAMPLE (not every vector in a bulk batch)."""
     if vecs and isinstance(vecs[0], (list, tuple)):
@@ -651,10 +669,9 @@ def set_embed_override(url: str | None, model: str | None = None) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Per-call + bulk semaphores, dim-validation flag
+# Per-call + bulk semaphores
 # ──────────────────────────────────────────────────────────────────────────────
 _EMBED_SEM = asyncio.Semaphore(4)
-_EMBED_DIM_VALIDATED = False
 
 EMBED_BULK_CHUNK = int(os.environ.get("EMBED_BULK_CHUNK", "1024"))
 EMBED_BULK_CONCURRENCY = int(os.environ.get("EMBED_BULK_CONCURRENCY", "4"))
@@ -665,7 +682,6 @@ _EMBED_BULK_SEM = asyncio.Semaphore(EMBED_BULK_CONCURRENCY)
 # The cascade itself
 # ──────────────────────────────────────────────────────────────────────────────
 async def _embed(text: str) -> tuple[list[float] | None, str]:
-    global _EMBED_DIM_VALIDATED
     c_hash = _content_hash(text)
     embedded = _get_embedded_embedder()
     cache_model = _EMBED_GGUF_MODEL_TAG if embedded is not None else config.EMBED_MODEL
@@ -689,12 +705,8 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         try:
             _track_cost_lazy("embed_calls", len(text.split()) * 2)
             vec = await asyncio.to_thread(lambda: embedded.embed([text])[0])
-            if not _EMBED_DIM_VALIDATED:
-                if len(vec) != config.EMBED_DIM:
-                    logger.error(
-                        f"Embedded embedding dim {len(vec)} != EMBED_DIM {config.EMBED_DIM}"
-                    )
-                _EMBED_DIM_VALIDATED = True
+            if not _validate_identity(vec, _EMBED_GGUF_MODEL_TAG, "tier1-embedded"):
+                raise EmbeddedBackendError("output failed embedder-identity check")
             if _EMBEDDED_BREAKER is not None:
                 _EMBEDDED_BREAKER.record_success()
             _record_embed_backend(_embedded_label(), 1)
@@ -733,16 +745,14 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
             resp.raise_for_status()
             payload = resp.json()
             emb = payload["data"][0]["embedding"]
-            if not _EMBED_DIM_VALIDATED:
-                if len(emb) != config.EMBED_DIM:
-                    logger.error(
-                        f"CPU fallback embedding dim {len(emb)} != EMBED_DIM {config.EMBED_DIM}"
-                    )
-                _EMBED_DIM_VALIDATED = True
+            # The CPU HTTP service carries the proper-identity fallback tag, NOT
+            # the tier-1 GGUF filename (a historical mis-tag).
+            if not _validate_identity(emb, config.EMBED_FALLBACK_MODEL_TAG, "tier2-cpu-http"):
+                raise EmbedFallbackError("output failed embedder-identity check")
             if _CPU_FALLBACK_BREAKER is not None:
                 _CPU_FALLBACK_BREAKER.record_success()
             _record_embed_backend("cpu-http-fallback", 1)
-            return emb, _EMBED_GGUF_MODEL_TAG
+            return emb, config.EMBED_FALLBACK_MODEL_TAG
         except Exception as e:
             wrapped = EmbedFallbackError(f"{_EMBED_FALLBACK_URL}: {e}")
             wrapped.__cause__ = e
@@ -800,13 +810,9 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     resp.raise_for_status()
                     emb = resp.json()["data"][0]["embedding"]
 
-                    if not _EMBED_DIM_VALIDATED:
-                        if len(emb) != config.EMBED_DIM:
-                            logger.error(
-                                f"Embedding dimension mismatch: got {len(emb)}, "
-                                f"expected EMBED_DIM={config.EMBED_DIM}. Update EMBED_DIM env var."
-                            )
-                        _EMBED_DIM_VALIDATED = True
+                    if not _validate_identity(emb, model, "tier3-primary"):
+                        raise RuntimeError(
+                            f"primary embed output failed identity (model={model!r})")
 
                     if _PRIMARY_BREAKER is not None:
                         _PRIMARY_BREAKER.record_success()
@@ -897,8 +903,8 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                     resp.raise_for_status()
                     emb = resp.json()["data"][0]["embedding"]
 
-                    if len(emb) != config.EMBED_DIM:
-                        logger.error(f"Cloud Enclave embedding dim {len(emb)} != EMBED_DIM {config.EMBED_DIM}")
+                    if not _validate_identity(emb, config.EMBED_MODEL, "tier4-cloud"):
+                        raise RuntimeError("cloud enclave output failed identity check")
 
                     if _CLOUD_BREAKER is not None:
                         _CLOUD_BREAKER.record_success()
@@ -982,12 +988,12 @@ async def _embed_many_cloud_fallback(
         data = resp.json()["data"]
         vecs = _order_embeddings(data, len(cloud_texts))
 
-        if vecs is not None:
+        real = [v for v in vecs if v is not None] if vecs is not None else []
+        if vecs is not None and (not real or _validate_identity(
+                real, config.EMBED_MODEL, "tier4-cloud-bulk")):
             _cloud_served = 0
             for idx, vec in zip(cloud_indices, vecs):
                 if vec is not None:
-                    if len(vec) != config.EMBED_DIM:
-                        logger.error(f"Cloud Enclave embedding dim {len(vec)} != EMBED_DIM {config.EMBED_DIM}")
                     out[idx] = (vec, config.EMBED_MODEL)
                     _cloud_served += 1
 
@@ -1063,10 +1069,15 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         try:
             _track_cost_lazy("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
             vecs = await asyncio.to_thread(lambda: embedded.embed(miss_texts))
-            for idx, vec in zip(miss_indices, vecs):
-                out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
-            _record_embed_backend(_embedded_label(), len(miss_texts))
-            return out  # type: ignore[return-value]
+            # Identity gate (previously this bulk path had NO dim/model check): a
+            # row whose vector isn't proper stays in the miss set and cascades.
+            kept_local = _accept_bulk(out, miss_indices, vecs,
+                                      _EMBED_GGUF_MODEL_TAG, "tier1-embedded-bulk")
+            if not kept_local:
+                _record_embed_backend(_embedded_label(), len(miss_texts))
+                return out  # type: ignore[return-value]
+            miss_indices = [miss_indices[j] for j in kept_local]
+            miss_texts = [miss_texts[j] for j in kept_local]
         except Exception as e:
             # An n_ctx overflow ("N tokens > n_ctx") fails the WHOLE batch even
             # though only one row is too long. Don't cascade the whole batch to
@@ -1113,10 +1124,15 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
                 f"CPU fallback response for {len(miss_texts)} inputs could not be "
                 f"aligned (bad/missing index or count)"
             )
-        for idx, vec in zip(miss_indices, vecs):
-            out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
-        _record_embed_backend("cpu-http-fallback", len(miss_texts))
-        return out  # type: ignore[return-value]
+        # Retag to the proper-identity fallback tag (not the tier-1 GGUF name)
+        # and gate: rows failing identity stay in the miss set and cascade.
+        kept_local = _accept_bulk(out, miss_indices, vecs,
+                                  config.EMBED_FALLBACK_MODEL_TAG, "tier2-cpu-http-bulk")
+        if not kept_local:
+            _record_embed_backend("cpu-http-fallback", len(miss_texts))
+            return out  # type: ignore[return-value]
+        miss_indices = [miss_indices[j] for j in kept_local]
+        miss_texts = [miss_texts[j] for j in kept_local]
     except Exception as e:
         logger.warning(
             f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) bulk failed ({e}) — using primary HTTP"
@@ -1215,21 +1231,20 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
     ]
     chunk_results = await asyncio.gather(*(_post_chunk(c) for c in chunks))
 
-    global _EMBED_DIM_VALIDATED
     flat: list[list[float] | None] = []
     for cr in chunk_results:
         flat.extend(cr)
+    # Identity gate: a primary-HTTP vector that isn't proper is set to None so it
+    # stays a miss and is handed to the cloud fallback (never stored as-is).
+    real = [v for v in flat if v is not None]
+    primary_ok = (not real) or _validate_identity(real, model, "tier3-primary-bulk")
     _primary_served = 0
     for local_i, vec in enumerate(flat):
-        if vec is not None and not _EMBED_DIM_VALIDATED:
-            if len(vec) != config.EMBED_DIM:
-                logger.error(
-                    f"Embedding dimension mismatch: got {len(vec)}, expected {config.EMBED_DIM}"
-                )
-            _EMBED_DIM_VALIDATED = True
-        out[miss_indices[local_i]] = (vec, model)
-        if vec is not None:
+        if vec is not None and primary_ok:
+            out[miss_indices[local_i]] = (vec, model)
             _primary_served += 1
+        else:
+            out[miss_indices[local_i]] = (None, model)
     if _primary_served:
         _record_embed_backend("http-primary", _primary_served)
 
