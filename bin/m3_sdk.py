@@ -47,11 +47,283 @@ import hashlib
 
 _LAST_USER_INTERACTION = 0.0
 
-# User-selectable configurations
-INITIAL_LIMIT = min(99, max(10, int(os.environ.get("M3_GOVERNOR_INITIAL_THRESHOLD", "85"))))
-LIMIT_THRESHOLD = min(100, max(20, int(os.environ.get("M3_GOVERNOR_LIMIT_THRESHOLD", "95"))))
+# ── GPU utilization probe ─────────────────────────────────────────────────────
+# The Python telemetry path historically hardcoded gpu_total=0.0, so the governor
+# was blind to GPU load — a local LLM (LM Studio / Ollama / vLLM) or the embed
+# server could pin the GPU at ~100% and the loop would keep dispatching work,
+# saturating it. Probe real GPU utilization via `nvidia-smi` (no extra dep) and
+# feed it into telemetry so the governor's max(cpu,ram,gpu,llm) load reacts.
+#
+# Cached with a short TTL: spawning nvidia-smi costs ~30-80ms, and the loop reads
+# telemetry often. Disable with M3_GPU_PROBE_DISABLE=1 (e.g. CPU-only hosts).
+_GPU_PROBE_DISABLE = os.environ.get("M3_GPU_PROBE_DISABLE", "").lower() in ("1", "true", "yes")
+_GPU_PROBE_TTL = float(os.environ.get("M3_GPU_PROBE_TTL", "2.0"))
+# `backend` pins the first probe that returned a reading so we don't re-try dead
+# ones every cycle; `misses` trips the whole probe off after every backend has
+# failed enough times (circuit breaker — §6: don't keep paying for a dead call).
+_gpu_probe_cache: dict[str, Any] = {"ts": 0.0, "util": 0.0, "backend": None, "misses": 0}
+_GPU_PROBE_MAX_MISSES = 3
 
-# Enforce sanity constraint: initial < limit
+
+def _gpu_util_nvidia() -> float | None:
+    """CUDA GPUs (any OS) via nvidia-smi. None = backend unavailable."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2.0,
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    utils = [float(x) for x in out.stdout.split() if x.strip().replace(".", "", 1).isdigit()]
+    return max(utils) if utils else None
+
+
+def _gpu_util_windows_counter() -> float | None:
+    """Windows AMD/Intel/NVIDIA via the '\\GPU Engine(*)\\Utilization Percentage'
+    perf counter (covers Vulkan/D3D on any vendor). Sums per-engine usage,
+    capped at 100. None = unavailable / not Windows."""
+    if os.name != "nt":
+        return None
+    import subprocess
+    try:
+        # PowerShell Get-Counter; pick the busiest 3D/compute engine sample.
+        ps = (
+            "$s=(Get-Counter '\\GPU Engine(*)\\Utilization Percentage' "
+            "-ErrorAction Stop).CounterSamples; "
+            "[math]::Round((($s | Measure-Object -Property CookedValue -Maximum).Maximum),1)"
+        )
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, timeout=4.0,
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    s = out.stdout.strip()
+    if out.returncode != 0 or not s:
+        return None
+    try:
+        return min(100.0, float(s))
+    except ValueError:
+        return None
+
+
+def _gpu_util_macos_ioreg() -> float | None:
+    """macOS (Apple Silicon Metal / AMD eGPU) via ioreg IOAccelerator
+    'Device Utilization %' — no sudo. None = unavailable / not macOS."""
+    if sys.platform != "darwin":
+        return None
+    import re as _re
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator"],
+            capture_output=True, text=True, timeout=3.0,
+        )
+    except (FileNotFoundError, OSError):
+        return None
+    if out.returncode != 0 or not out.stdout:
+        return None
+    # Key is reported as "Device Utilization %"=NN (integer percent).
+    vals = [float(m) for m in _re.findall(r'"Device Utilization %"\s*=\s*(\d+)', out.stdout)]
+    return max(vals) if vals else None
+
+
+def _gpu_util_linux_sysfs() -> float | None:
+    """Linux AMD (amdgpu, incl. Vulkan/ROCm) via
+    /sys/class/drm/card*/device/gpu_busy_percent. None = unavailable / no file."""
+    if not sys.platform.startswith("linux"):
+        return None
+    import glob
+    vals = []
+    for path in glob.glob("/sys/class/drm/card*/device/gpu_busy_percent"):
+        try:
+            with open(path) as f:
+                vals.append(float(f.read().strip()))
+        except (OSError, ValueError):
+            continue
+    return max(vals) if vals else None
+
+
+# Ordered by likelihood + cheapness. The first that returns non-None wins and is
+# pinned in the cache. NVIDIA first (most common LLM GPU); then the OS-native
+# counters that cover Metal / AMD / Intel / Vulkan; CPU-only hosts match none.
+_GPU_PROBES = (
+    ("nvidia", _gpu_util_nvidia),
+    ("windows", _gpu_util_windows_counter),
+    ("macos", _gpu_util_macos_ioreg),
+    ("linux-sysfs", _gpu_util_linux_sysfs),
+)
+
+
+def probe_gpu_util(now: float | None = None) -> float:
+    """Best-effort GPU utilization percent (0-100) across CUDA / Apple Metal /
+    AMD+Intel Vulkan / CPU-only, on all three OSes. Returns 0.0 when no GPU
+    backend is available (CPU-only) or the probe is disabled. TTL-cached; pins
+    the working backend; trips off after repeated total misses. Never raises."""
+    if _GPU_PROBE_DISABLE or _gpu_probe_cache["misses"] >= _GPU_PROBE_MAX_MISSES:
+        return 0.0
+    now = now if now is not None else time.time()
+    if now - _gpu_probe_cache["ts"] < _GPU_PROBE_TTL:
+        return _gpu_probe_cache["util"]
+    _gpu_probe_cache["ts"] = now
+
+    # If a backend already worked, try only it (fast path); else scan all.
+    pinned = _gpu_probe_cache["backend"]
+    probes = ([p for p in _GPU_PROBES if p[0] == pinned] or list(_GPU_PROBES)) if pinned else list(_GPU_PROBES)
+    for name, fn in probes:
+        try:
+            val = fn()
+        except Exception:
+            val = None  # transient (timeout/parse) — try the next backend
+        if val is not None:
+            _gpu_probe_cache.update(util=max(0.0, min(100.0, val)), backend=name, misses=0)
+            return _gpu_probe_cache["util"]
+
+    # Nothing answered this round. If a backend was pinned but just failed, it may
+    # be a transient hiccup — keep the last value and count the miss; once we hit
+    # the cap (or never found any GPU), settle to 0.0 and stop probing.
+    _gpu_probe_cache["misses"] += 1
+    if _gpu_probe_cache["backend"] is None or _gpu_probe_cache["misses"] >= _GPU_PROBE_MAX_MISSES:
+        _gpu_probe_cache["util"] = 0.0
+    return _gpu_probe_cache["util"]
+
+# ── Governor thresholds (live-reloadable) ─────────────────────────────────────
+# INITIAL_LIMIT = load% at/above which background work THROTTLES; LIMIT_THRESHOLD
+# = load% at/above which it HALTS. Resolved at runtime each cycle via
+# _governor_thresholds() with precedence: config file > env var > default. The
+# config file (<config_root>/.governor_config.json) is the cross-platform,
+# RESTART-FREE knob: none of the headless launchers (Windows task / macOS
+# launchd / Linux systemd) reliably inherit shell env, but they all resolve the
+# config root the same way, and the file is re-read every _GOV_CFG_TTL seconds so
+# an edit takes effect in the running governor within seconds — no restart.
+#
+# Defaults below are the import-time fallback (kept for any caller reading the
+# module constants directly); the live path is _governor_thresholds().
+_GOV_DEFAULT_INITIAL = 85
+_GOV_DEFAULT_LIMIT = 95
+_GOV_CFG_TTL = float(os.environ.get("M3_GOVERNOR_CFG_TTL", "5.0"))
+# mtime tracks the last-parsed file modification time so we only re-read+parse
+# when the file actually changed; `ts` throttles how often we even stat it.
+_gov_cfg_cache: dict[str, Any] = {"ts": 0.0, "mtime": None, "initial": None, "limit": None}
+
+
+def _governor_config_path() -> str:
+    return os.path.join(get_m3_config_root(), ".governor_config.json")
+
+
+def _governor_thresholds(now: float | None = None) -> tuple[int, int]:
+    """Return (initial_threshold, limit_threshold), clamped & sanity-checked.
+    Precedence per value: config file > env var > default.
+
+    The file is only re-read+parsed when its mtime changes — between the stat
+    checks (throttled to _GOV_CFG_TTL so we don't stat on every single call) an
+    unchanged file costs one os.stat, not an open+JSON-parse. Edits apply within
+    one stat interval, no restart. Never raises."""
+    now = now if now is not None else time.time()
+    if now - _gov_cfg_cache["ts"] >= _GOV_CFG_TTL:
+        _gov_cfg_cache["ts"] = now
+        try:
+            path = _governor_config_path()
+            mtime = os.stat(path).st_mtime  # raises if absent
+        except OSError:
+            mtime = None  # file gone / unreadable -> fall back to env+default
+        if mtime != _gov_cfg_cache["mtime"]:
+            _gov_cfg_cache["mtime"] = mtime
+            cfg: dict = {}
+            if mtime is not None:
+                try:
+                    import json as _json
+                    with open(_governor_config_path(), encoding="utf-8") as f:
+                        cfg = _json.load(f) or {}
+                except Exception as e:
+                    # §3 never silent: a malformed config would otherwise revert
+                    # the governor to env/defaults invisibly — a bad threshold
+                    # edit must be loud so the user knows their tuning isn't live.
+                    logger.warning(
+                        "Governor config %s is unreadable/malformed (%s) — "
+                        "falling back to env vars + defaults until fixed.",
+                        _governor_config_path(), e)
+                    cfg = {}
+            _gov_cfg_cache["initial"] = cfg.get("initial_threshold")
+            _gov_cfg_cache["limit"] = cfg.get("limit_threshold")
+
+    def _resolve(cfg_val, env_name, default):
+        if cfg_val is not None:
+            try:
+                return int(cfg_val)
+            except (TypeError, ValueError):
+                pass
+        try:
+            return int(os.environ.get(env_name, default))
+        except (TypeError, ValueError):
+            return default
+
+    initial = min(99, max(10, _resolve(
+        _gov_cfg_cache["initial"], "M3_GOVERNOR_INITIAL_THRESHOLD", _GOV_DEFAULT_INITIAL)))
+    limit = min(100, max(20, _resolve(
+        _gov_cfg_cache["limit"], "M3_GOVERNOR_LIMIT_THRESHOLD", _GOV_DEFAULT_LIMIT)))
+    # Enforce initial < limit.
+    if initial >= limit and limit != 100:
+        initial = limit - 5
+    return initial, limit
+
+
+_GOV_CFG_TEMPLATE_COMMENT = (
+    "Adaptive Background Workload Governor thresholds. Read live by m3_sdk "
+    "(re-read on mtime change, no restart). load = max(cpu%, ram%, gpu%). "
+    "Background work THROTTLES at >= initial_threshold and HALTS at >= "
+    "limit_threshold, keeping headroom for interactive use. Edit and save; the "
+    "running cognitive loop / MCP server picks it up within seconds. GPU load "
+    "only gates local-LLM work; cloud/SQL passes ignore it."
+)
+
+
+def ensure_governor_config() -> str:
+    """Create <config_root>/.governor_config.json with the CURRENT effective
+    thresholds if it does not already exist. Idempotent and race-safe (atomic
+    create; never overwrites an existing file). Returns the path. Never raises —
+    a write failure just leaves the system on env+defaults. Call at setup and
+    once at daemon startup; NOT from the per-cycle read path."""
+    path = _governor_config_path()
+    if os.path.exists(path):
+        return path
+    try:
+        initial, limit = _governor_thresholds()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        import json as _json
+        payload = {
+            "_comment": _GOV_CFG_TEMPLATE_COMMENT,
+            "initial_threshold": initial,
+            "limit_threshold": limit,
+        }
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(payload, f, indent=2)
+        # os.replace is atomic; if another process raced us, last-writer-wins on
+        # identical default content is harmless.
+        os.replace(tmp, path)
+        logger.info("Seeded governor config at %s (initial=%d limit=%d)", path, initial, limit)
+    except Exception as e:
+        logger.debug("Could not seed governor config (%s); using env+defaults", e)
+    return path
+
+
+# Import-time snapshot (back-compat for any reader of the module constants).
+# Env+default ONLY — the config-file path requires get_m3_config_root(), defined
+# later in this module, so reading it here would NameError at import. The live
+# governor path (_governor_thresholds, called per-cycle) picks up the file.
+def _import_time_threshold(env_name: str, default: int, lo: int, hi: int) -> int:
+    try:
+        return min(hi, max(lo, int(os.environ.get(env_name, default))))
+    except (TypeError, ValueError):
+        return default
+
+
+INITIAL_LIMIT = _import_time_threshold("M3_GOVERNOR_INITIAL_THRESHOLD", _GOV_DEFAULT_INITIAL, 10, 99)
+LIMIT_THRESHOLD = _import_time_threshold("M3_GOVERNOR_LIMIT_THRESHOLD", _GOV_DEFAULT_LIMIT, 20, 100)
 if INITIAL_LIMIT >= LIMIT_THRESHOLD and LIMIT_THRESHOLD != 100:
     INITIAL_LIMIT = LIMIT_THRESHOLD - 5
 
@@ -63,6 +335,9 @@ def get_governor_pacing(telemetry: dict) -> dict:
     """Return pacing delay configurations for background and interactive pipelines."""
     load = max(telemetry.get("cpu_total", 0.0), telemetry.get("ram_total", 0.0), telemetry.get("gpu_total", 0.0))
     elapsed = time.time() - _LAST_USER_INTERACTION
+    # Live thresholds (config file > env > default), re-read each cycle so a
+    # .governor_config.json edit takes effect without restarting the loop.
+    initial_limit, limit_threshold = _governor_thresholds()
 
     # Native fast-path: the Rust governor is the source-of-truth for this ladder
     # (crate m3-governor, exposed as m3_core_rs.Governor). It returns a dict
@@ -73,16 +348,16 @@ def get_governor_pacing(telemetry: dict) -> dict:
         try:
             import m3_core_rs
             if hasattr(m3_core_rs, "Governor"):
-                return m3_core_rs.Governor(INITIAL_LIMIT, LIMIT_THRESHOLD).decide(load, elapsed)
+                return m3_core_rs.Governor(initial_limit, limit_threshold).decide(load, elapsed)
         except Exception:
             pass  # fall through to the pure-Python ladder
 
-    # 1. Critical Mode (Overall load >= LIMIT_THRESHOLD)
-    if LIMIT_THRESHOLD != 100 and load >= LIMIT_THRESHOLD:
+    # 1. Critical Mode (Overall load >= limit_threshold)
+    if limit_threshold != 100 and load >= limit_threshold:
         return {"background": "HALTED", "interactive_delay": 30.0} # 30s-60s delay
 
-    # 2. Throttled Mode (Overall load >= INITIAL_LIMIT but < LIMIT_THRESHOLD)
-    if load >= INITIAL_LIMIT:
+    # 2. Throttled Mode (Overall load >= initial_limit but < limit_threshold)
+    if load >= initial_limit:
         return {"background": "THROTTLED", "background_delay": 10.0, "interactive_delay": 0.0} # 5s-10s delay
 
     # 3. Normal Mode
@@ -646,10 +921,15 @@ class M3Context:
                 import m3_core_rs
                 if hasattr(m3_core_rs, "get_native_telemetry"):
                     telemetry = m3_core_rs.get_native_telemetry()
+                    native_gpu = float(getattr(telemetry, "gpu_total", 0.0))
+                    # If the native path reports no GPU (older wheel without GPU
+                    # support), fall back to the nvidia-smi probe so the governor
+                    # still sees a GPU-pinned local LLM / embed server.
+                    gpu_total = native_gpu if native_gpu > 0.0 else probe_gpu_util()
                     return {
                         "cpu_total": float(getattr(telemetry, "cpu_total", 0.0)),
                         "ram_total": float(getattr(telemetry, "ram_total", 0.0)),
-                        "gpu_total": float(getattr(telemetry, "gpu_total", 0.0)),
+                        "gpu_total": gpu_total,
                         "thermal": str(getattr(telemetry, "thermal", "Nominal")),
                     }
             except Exception:
@@ -678,8 +958,9 @@ class M3Context:
         except Exception:
             ram_total = 0.0
 
-        # GPU Total Usage (Mock/fallback)
-        gpu_total = 0.0
+        # GPU Total Usage — real probe via nvidia-smi (was hardcoded 0.0, which
+        # left the governor blind to a GPU-pinned local LLM / embed server).
+        gpu_total = probe_gpu_util()
 
         # Thermal Load
         try:

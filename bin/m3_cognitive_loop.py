@@ -37,7 +37,7 @@ if str(_BIN) not in sys.path:
 import chatlog_config
 import m3_enrich
 import m3_entities
-from m3_sdk import M3Context, get_governor_pacing, resolve_db_path
+from m3_sdk import M3Context, ensure_governor_config, get_governor_pacing, resolve_db_path
 
 # PID file path for single-instance locking
 PID_FILE = REPO_ROOT / "memory" / "cognitive_loop.pid"
@@ -129,6 +129,66 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger("m3_cognitive_loop")
+
+# When the governor reports THROTTLED (host/GPU load high but below the HALT
+# line), each pass processes only this many items so the loop returns to the
+# top and re-probes load after each LLM call instead of charging through a full
+# batch. Default 1 = send a single item, then re-check load before the next —
+# the most conservative, interactive-first cadence. Tune via
+# M3_GOVERNOR_THROTTLED_LIMIT.
+_THROTTLED_LIMIT = max(1, int(os.environ.get("M3_GOVERNOR_THROTTLED_LIMIT", "1")))
+
+
+def _is_local_llm_url(url: Optional[str]) -> bool:
+    """True if an SLM/LLM endpoint runs on THIS machine (loopback) — i.e. its
+    work competes for the local GPU/CPU. Cloud/frontier endpoints (api.anthropic.
+    com, googleapis, a remote box) return False: GPU load here is irrelevant to
+    them, so GPU pressure must not throttle a cloud-backed pass. A LAN host is
+    treated as remote (not on THIS GPU). Unknown/empty -> assume local (safe:
+    we'd rather over-throttle than saturate the local GPU)."""
+    if not url:
+        return True
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return True
+    # Loopback only. (0.0.0.0 is a bind/listen address, not a destination you'd
+    # POST to, so it's intentionally excluded — keeps this a clean loopback check.)
+    return host in ("127.0.0.1", "localhost", "::1") or host.startswith("127.")
+
+
+def _pace_for_pass(pacing_cpu_ram: dict, pacing_full: dict, uses_local_gpu: bool) -> dict:
+    """Pick the pacing a pass must obey. GPU pressure only gates passes that run
+    on the local GPU (local LLM/SLM); CPU/RAM pressure gates every pass. So a
+    pass that uses the local GPU obeys the stricter of the two ladders; a cloud
+    or pure-SQL pass obeys the CPU/RAM-only ladder."""
+    if uses_local_gpu:
+        # pacing_full already folds in GPU; it's >= the cpu/ram-only verdict.
+        return pacing_full
+    return pacing_cpu_ram
+
+
+_PROFILE_LOCAL_CACHE: dict[str, bool] = {}
+
+
+def _profile_is_local(profile_name: Optional[str]) -> bool:
+    """Resolve whether an SLM profile's endpoint is local (on this GPU). Cached;
+    a missing/unloadable profile is treated as local (safe default)."""
+    key = profile_name or "__default__"
+    if key in _PROFILE_LOCAL_CACHE:
+        return _PROFILE_LOCAL_CACHE[key]
+    is_local = True
+    try:
+        from slm_intent import load_profile
+        prof = load_profile(profile_name) if profile_name else None
+        if prof is not None:
+            is_local = _is_local_llm_url(getattr(prof, "url", None))
+    except Exception:
+        is_local = True
+    _PROFILE_LOCAL_CACHE[key] = is_local
+    return is_local
+
 
 # Global stop signal for graceful shutdown
 _STOP_EVENT = asyncio.Event()
@@ -319,39 +379,95 @@ async def main_loop(args):
         except NotImplementedError:
             pass
 
+    # The configured per-pass batch ceiling. Under load we shrink the EFFECTIVE
+    # limit below this so each pass is small and the loop re-evaluates the
+    # governor (incl. live GPU/LLM load) between tiny batches instead of charging
+    # through a full 50-item batch of LLM calls with no re-check. Restored to the
+    # full value once load clears.
+    _full_limit = args.limit_per_pass
     while not _STOP_EVENT.is_set():
-        # Adaptive Governor Gating
+        # ── Adaptive Governor Gating (per-resource, per-pass) ──────────────────
+        # Each resource gates the work that consumes it: CPU/RAM pressure gates
+        # EVERY background pass; GPU pressure gates only passes that run on the
+        # local GPU (local LLM/SLM). So we compute TWO verdicts — one from
+        # CPU/RAM only, one that also folds in GPU — and apply the right one per
+        # pass. Cloud-backed and pure-SQL passes ignore GPU load entirely.
+        pacing_full = {"background": "CONTINUOUS", "background_delay": 0.1}
+        pacing_cpu_ram = dict(pacing_full)
+        telemetry = {}
+        any_throttled = False
         try:
             ctx = M3Context.for_db(args.database)
             telemetry = ctx.get_system_telemetry()
-            pacing = get_governor_pacing(telemetry)
-            if pacing["background"] == "HALTED":
-                logger.info("Host load or activity critical. Background Cognitive Loop HALTED. Sleeping 5s...")
-                await asyncio.sleep(5.0)
-                continue
+            pacing_full = get_governor_pacing(telemetry)
+            pacing_cpu_ram = get_governor_pacing({**telemetry, "gpu_total": 0.0})
             if telemetry.get("thermal") in ("Serious", "Critical"):
                 logger.info("Thermal load serious. Pausing cognitive loop for 10s...")
                 await asyncio.sleep(10.0)
                 continue
+            # If CPU/RAM alone halts, NOTHING should run — even cloud/SQL contend
+            # for local CPU. Short-circuit the whole cycle.
+            if pacing_cpu_ram["background"] == "HALTED":
+                logger.info("CPU/RAM load critical (cpu=%.0f ram=%.0f). All background "
+                            "work HALTED. Sleeping 5s...",
+                            telemetry.get("cpu_total", 0.0), telemetry.get("ram_total", 0.0))
+                await asyncio.sleep(5.0)
+                continue
         except Exception as e:
             logger.debug(f"Governor check error (non-fatal): {e}")
+
+        # Resolve, per LLM pass, whether it runs on the LOCAL GPU (so GPU load
+        # applies) or is cloud-backed (GPU load irrelevant). The chatlog-prune
+        # pass is pure SQL → never uses the GPU.
+        entity_local = _profile_is_local(args.profile_entities)
+        enrich_local = _profile_is_local(args.profile_enrich)
+        consolidate_local = True  # belief consolidation uses the local LLM
+
+        def _effective_limit(pace: dict) -> int:
+            return _THROTTLED_LIMIT if pace["background"] == "THROTTLED" else _full_limit
+
+        def _run_gate(pace: dict) -> bool:
+            """True if a pass under this pacing should run at all (HALTED skips)."""
+            nonlocal any_throttled
+            if pace["background"] == "HALTED":
+                return False
+            if pace["background"] == "THROTTLED":
+                any_throttled = True
+            return True
 
         start_time = time.monotonic()
 
         if not args.skip_entities:
-            await run_entity_pass(args)
+            pace = _pace_for_pass(pacing_cpu_ram, pacing_full, entity_local)
+            if _run_gate(pace):
+                args.limit_per_pass = _effective_limit(pace)
+                await run_entity_pass(args)
             if _STOP_EVENT.is_set(): break
 
         if not args.skip_enrich:
-            await run_enrich_pass(args)
+            pace = _pace_for_pass(pacing_cpu_ram, pacing_full, enrich_local)
+            if _run_gate(pace):
+                args.limit_per_pass = _effective_limit(pace)
+                await run_enrich_pass(args)
             if _STOP_EVENT.is_set(): break
 
         if not args.skip_consolidate:
-            await run_consolidate_pass(args)
+            pace = _pace_for_pass(pacing_cpu_ram, pacing_full, consolidate_local)
+            if _run_gate(pace):
+                await run_consolidate_pass(args)
             if _STOP_EVENT.is_set(): break
+
+        args.limit_per_pass = _full_limit  # restore for the next cycle's defaults
 
         elapsed = time.monotonic() - start_time
         wait_time = max(0, args.interval - elapsed)
+        # If any pass ran throttled (tiny batch), don't also wait the full
+        # interval (that would crawl the backlog) — but DO insert the throttle
+        # delay so the shrunk batches don't busy-loop and re-saturate the host.
+        if any_throttled:
+            delay = float(pacing_full.get("background_delay",
+                          pacing_cpu_ram.get("background_delay", 10.0)))
+            wait_time = min(wait_time, delay)
 
         if _STOP_EVENT.is_set():
             break
@@ -427,6 +543,10 @@ def main():
     if args.chatlog_db:
         os.environ["CHATLOG_DB_PATH"] = os.path.abspath(args.chatlog_db)
     args.chatlog_db = chatlog_config.chatlog_db_path()
+
+    # Seed .governor_config.json with current defaults if absent, so the live
+    # tuning knob always exists and is discoverable (idempotent; never clobbers).
+    ensure_governor_config()
 
     try:
         asyncio.run(main_loop(args))

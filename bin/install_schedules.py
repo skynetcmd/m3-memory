@@ -430,6 +430,18 @@ def main():
     if args.repair:
         args.add = "all"
 
+    # Seed the governor tuning config (.governor_config.json) at install time so
+    # the live threshold knob always exists and is discoverable. Idempotent —
+    # never clobbers an existing file. Best-effort: a failure must not block task
+    # installation.
+    if args.add:
+        try:
+            sys.path.insert(0, str(script_dir))
+            from m3_sdk import ensure_governor_config
+            ensure_governor_config()
+        except Exception:
+            pass
+
     selector = None if (args.add == "all" or args.remove == "all") else (args.add or args.remove)
 
     if args.add:
