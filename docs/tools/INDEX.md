@@ -1,13 +1,13 @@
 # Tool inventory index
 
-_Generated 2026-06-28T01:57:28.279877+00:00._
+_Generated 2026-06-30T22:19:18.652186+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
 
 | Tool | Summary | Private |
 |---|---|---|
-| [bin/_task_runtime.py](_task_runtime.md) | _task_runtime — shared runtime setup for m3-memory scheduled-task entrypoints. | yes |
+| bin/_task_runtime.py | _task_runtime — shared runtime setup for m3-memory scheduled-task entrypoints. | yes |
 | [bin/agent_protocol.py](agent_protocol.md) | (no docstring) |  |
 | [bin/ai-audit.sh](ai-audit.sh.md) | (no docstring) |  |
 | [bin/ai_mechanic.py](ai_mechanic.md) | (no docstring) |  |
@@ -16,9 +16,9 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/auto_route.py](auto_route.md) | auto_route — multi-signal retrieval branch decider. |  |
 | [bin/backfill_content_hash.py](backfill_content_hash.md) | backfill_content_hash.py — populate memory_embeddings.content_hash on legacy rows. |  |
 | [bin/batch_runner.py](batch_runner.md) | Provider-neutral batch-API runner protocol with Anthropic implementation. |  |
-| [bin/bench_longmemeval.py](bench_longmemeval.md) | LongMemEval benchmark runner for m3-memory. | yes |
-| [bin/bench_memory.py](bench_memory.md) | Memory system benchmark script. | yes |
-| [bin/benchmark_memory.py](benchmark_memory.md) | Retrieval Quality Benchmark for M3 Memory System. | yes |
+| bin/bench_longmemeval.py | LongMemEval benchmark runner for m3-memory. | yes |
+| bin/bench_memory.py | Memory system benchmark script. | yes |
+| bin/benchmark_memory.py | Retrieval Quality Benchmark for M3 Memory System. | yes |
 | [bin/build_kg_variant.py](build_kg_variant.md) | Build a KG-enriched variant from an existing source variant. |  |
 | [bin/chatlog_config.py](chatlog_config.md) | chatlog_config.py — configuration resolver for the chat log subsystem. |  |
 | [bin/chatlog_core.py](chatlog_core.md) | chatlog_core.py — the load-bearing module for the chat log subsystem. |  |
@@ -26,6 +26,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/chatlog_embed_sweeper.py](chatlog_embed_sweeper.md) | chatlog_embed_sweeper.py — lazy embed chat log rows missing embeddings. |  |
 | [bin/chatlog_ingest.py](chatlog_ingest.md) | chatlog_ingest.py — CLI that reads a host-agent transcript file and writes |  |
 | [bin/chatlog_init.py](chatlog_init.md) | chatlog_init.py — interactive setup CLI for the chat log subsystem. |  |
+| [bin/chatlog_prune.py](chatlog_prune.md) | chatlog_prune — aged noise pruning for chatlog turns. |  |
 | [bin/chatlog_redaction.py](chatlog_redaction.md) | Optional secret-scrubbing for chat log entries. |  |
 | [bin/chatlog_status.py](chatlog_status.md) | chatlog_status.py — single-call summary of the chat log subsystem state. |  |
 | [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
@@ -35,6 +36,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/cleanup_logs.sh](cleanup_logs.sh.md) | (no docstring) |  |
 | [bin/cli_kb_browse.py](cli_kb_browse.md) | cli_kb_browse.py — Browse knowledge base entries in rank (importance) order. |  |
 | [bin/cli_knowledge.py](cli_knowledge.md) | (no docstring) |  |
+| [bin/consolidate_beliefs.py](consolidate_beliefs.md) | Autonomous episodic->semantic belief consolidation (knowledge-maintenance P4). |  |
 | [bin/curator_apply.py](curator_apply.md) | Deterministic apply of a curator plan — one entry point, no LLM in the loop. |  |
 | [bin/custom_tool_bridge.py](custom_tool_bridge.md) | (no docstring) |  |
 | [bin/dashboard_server.py](dashboard_server.md) | M3 Cognitive & Observability Portal. |  |
@@ -43,7 +45,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/embed_agent_instructions.py](embed_agent_instructions.md) | One-shot script: embed AGENT_INSTRUCTIONS.md sections as searchable memory items. |  |
 | [bin/embed_backfill.py](embed_backfill.md) | embed_backfill.py — fill in missing embeddings for memory_items rows. |  |
 | [bin/embed_server.py](embed_server.md) | Local embedding server — OpenAI-compatible /v1/embeddings endpoint. |  |
-| [bin/embed_server_gpu.py](embed_server_gpu.md) | AMD GPU Optimized Embedding Proxy — delegates to llama-server.exe. | yes |
+| bin/embed_server_gpu.py | AMD GPU Optimized Embedding Proxy — delegates to llama-server.exe. | yes |
 | [bin/embed_sweep_lib.py](embed_sweep_lib.md) | embed_sweep_lib — shared embed-loop helper for sweeper-style backfill tools. |  |
 | [bin/embedding_utils.py](embedding_utils.md) | Shared embedding and vector-math utilities for MCP bridges. |  |
 | [bin/enrichment_state.py](enrichment_state.md) | Durable per-group enrichment state for m3_enrich. |  |
@@ -70,9 +72,10 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_entities.py](m3_entities.md) | m3_entities — build entity-graph rows from your core/chatlog DBs. |  |
 | [bin/m3_entities_gliner.py](m3_entities_gliner.md) | m3_entities_gliner — fast local entity extraction via GLiNER (zero-shot NER). |  |
 | [bin/m3_sdk.py](m3_sdk.md) | (no docstring) |  |
-| [bin/macbook_status_server.py](macbook_status_server.md) | MacBook network & LM Studio status server for Homepage dashboard. | yes |
+| bin/macbook_status_server.py | MacBook network & LM Studio status server for Homepage dashboard. | yes |
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |
+| [bin/measure_tool_tokens.py](measure_tool_tokens.md) | measure_tool_tokens.py — quantify token cost of MCP tool schemas. |  |
 | [bin/memory_bridge.py](memory_bridge.md) | (no docstring) |  |
 | [bin/memory_core.py](memory_core.md) | Core memory primitives: single + bulk write, search, enrichment, emitters. |  |
 | [bin/memory_doctor.py](memory_doctor.md) | m3-memory doctor — thin CLI dispatcher over the doctor phases. |  |
@@ -81,11 +84,12 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/migrate_entity_vocab.py](migrate_entity_vocab.md) | One-shot migration: rename v1 entity vocabulary to v2-aligned names. |  |
 | [bin/migrate_flat_memory.py](migrate_flat_memory.md) | migrate_flat_memory.py — one-way ETL from flat-file / SQLite agent memory |  |
 | [bin/migrate_memory.py](migrate_memory.md) | Migration runner for the m3-memory SQLite databases. |  |
-| [bin/mission_control.py](mission_control.md) | mission_control.py — Cross-platform pulse dashboard (macOS / Windows / Linux). | yes |
+| bin/mission_control.py | mission_control.py — Cross-platform pulse dashboard (macOS / Windows / Linux). | yes |
 | [bin/news_fetcher.py](news_fetcher.md) | (no docstring) |  |
 | [bin/pg_setup.py](pg_setup.md) | (no docstring) |  |
 | [bin/pg_sync.py](pg_sync.md) | (no docstring) |  |
 | [bin/pg_sync.sh](pg_sync.sh.md) | (no docstring) |  |
+| [bin/promote_pipeline.py](promote_pipeline.md) | LLM-judged promotion pipeline: tightened candidate selection + SLM judge. |  |
 | [bin/re_embed_all.py](re_embed_all.md) | (no docstring) |  |
 | [bin/release_orphan_claims.py](release_orphan_claims.md) | release_orphan_claims — safely release stuck in_progress enrichment_groups rows. |  |
 | [bin/run_observer.py](run_observer.md) | Phase D Mastra-style Observer drainer. |  |

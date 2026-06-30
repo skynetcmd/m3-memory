@@ -1,8 +1,8 @@
 ---
 tool: scan_repo_v7.py
-sha1: 65d6d2725750
-mtime_utc: 2026-06-27T19:42:55.748105+00:00
-generated_utc: 2026-06-27T23:22:28.188771+00:00
+sha1: 555e31c688b6
+mtime_utc: 2026-06-28T12:28:55.232264+00:00
+generated_utc: 2026-06-30T22:19:18.649821+00:00
 private: false
 ---
 
@@ -13,8 +13,9 @@ private: false
 Scan orchestrator for the m3-memory security pipeline on LXC 504.
 
 Runs the standard scanner suite (gitleaks / trufflehog / trivy / semgrep /
-bandit / pip-audit / checkov / osv-scanner / safety / scancode / kubescape
-/ ruff / mypy) against a checkout and uploads each report to DefectDojo.
+bandit / pip-audit / checkov / osv-scanner / safety / scancode / shellcheck /
+hadolint / cargo-audit / cargo-deny / syft / grype / zizmor / ruff / mypy)
+against a checkout and uploads each report to DefectDojo.
 
 DefectDojo credential resolution (first non-empty source wins):
   1. DD_TOKEN env var                                  → API Key (direct)
@@ -42,7 +43,7 @@ with a setup hint covering both input shapes.
 
 ## Entry points
 
-- `def main()` (line 259)
+- `def main()` (line 285)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -76,11 +77,11 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `argv`` (line 209)
+- `subprocess.run()  → `argv`` (line 235)
 
 **http**
 
-- `requests.post()  → `url`` (line 250)
+- `requests.post()  → `url`` (line 276)
 
 
 ---
@@ -107,7 +108,6 @@ _(none detected)_
 - `scancode.json`
 - `trivy.json`
 - `{out}/bandit.json`
-- `{out}/gitleaks.json`
 - `{out}/osv-scanner.json`
 - `{out}/safety.json`
 - `{out}/scancode.json`

@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_ingest.py
-sha1: b699f88c8482
-mtime_utc: 2026-05-30T18:38:21.552828+00:00
-generated_utc: 2026-05-31T18:42:52.627366+00:00
+sha1: 800ab7b2a37b
+mtime_utc: 2026-06-30T21:32:48.327241+00:00
+generated_utc: 2026-06-30T22:19:18.135947+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ message ids / indices have been ingested so re-invoking on the same transcript
 
 ## Entry points
 
-- `async def main()` (line 397)
+- `async def main()` (line 404)
 - `if __name__ == "__main__"` guard
 
 ---

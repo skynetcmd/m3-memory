@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: 3fdfbec40f16
-mtime_utc: 2026-05-31T16:08:17.247946+00:00
-generated_utc: 2026-05-31T18:42:52.761975+00:00
+sha1: b2a7ca7709e5
+mtime_utc: 2026-06-30T21:32:48.329659+00:00
+generated_utc: 2026-06-30T22:19:18.304960+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 311)
+- `def main()` (line 556)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -52,22 +52,38 @@ for m3_enrich and m3_entities.
 | `--skip-entities` | Skip entity extraction | `False` |  | store_true |  |
 | `--skip-enrich` | Skip enrichment pass | `False` |  | store_true |  |
 | `--no-reflect` | Skip reflection pass | `False` |  | store_true |  |
+| `--skip-consolidate` | Skip the belief-consolidation pass | `False` |  | store_true |  |
+| `--consolidate-threshold` | Min same-type group size before consolidating (default: 50) | `50` |  | int |  |
+| `--consolidate-stale-days` | Only consolidate items older than N days (default: 7) | `7` |  | int |  |
+| `--consolidate-source-type` | Episodic source memory type to roll up (default: observation) | `observation` |  | str |  |
+| `--skip-chatlog-prune` | Skip the chatlog noise-prune pass | `False` |  | store_true |  |
+| `--chatlog-prune-threshold` | Min aged prune-eligible chat_log rows before a sweep (default: 2000) | `2000` |  | int |  |
+| `--chatlog-prune-fresh-days` | Keep noise newer than N days untouched (default: 14) | `14.0` |  | float |  |
+| `--chatlog-prune-days` | Soft-delete aged noise older than N days (default: 45) | `45.0` |  | float |  |
+| `--chatlog-prune-max-actions` | Max decay+prune writes per cycle (default: 5000; 0 = no cap). Caps one pass so a backlog drains across cycles instead of blocking the heartbeat. | `5000` |  | int |  |
 
 ---
 
 ## Environment variables read
 
 - `CHATLOG_DB_PATH`
+- `M3_CHATLOG_PRUNE_AUTO`
 - `M3_DATABASE`
+- `M3_EMBED_MODEL`
+- `M3_EMBED_URL`
+- `M3_GOVERNOR_THROTTLED_LIMIT`
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `chatlog_config`
+- `chatlog_prune`
+- `consolidate_beliefs`
 - `m3_enrich`
 - `m3_entities`
-- `m3_sdk (M3Context, get_governor_pacing, resolve_db_path)`
+- `m3_sdk (M3Context, ensure_governor_config, get_governor_pacing, resolve_db_path)`
+- `slm_intent (load_profile)`
 
 ---
 
@@ -75,7 +91,7 @@ for m3_enrich and m3_entities.
 
 **subprocess**
 
-- `subprocess.Popen()  → `argv`` (line 55)
+- `subprocess.Popen()  → `argv`` (line 59)
 
 
 ---
@@ -84,6 +100,7 @@ for m3_enrich and m3_entities.
 
 - `atexit`
 - `ctypes`
+- `types (SimpleNamespace)`
 
 ---
 

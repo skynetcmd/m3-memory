@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_maintenance.py
-sha1: c22a19fff40f
-mtime_utc: 2026-06-11T12:20:45.487110+00:00
-generated_utc: 2026-06-12T20:00:05.345582+00:00
+sha1: 0735f9dfb928
+mtime_utc: 2026-06-28T12:28:55.206642+00:00
+generated_utc: 2026-06-30T22:19:18.459986+00:00
 private: false
 ---
 
@@ -47,7 +47,7 @@ _(none detected)_
 **sqlite**
 
 - `sqlite3.connect()  → `ARCHIVE_DB_PATH`` (line 33)
-- `sqlite3.connect()  → `active_path`` (line 336)
+- `sqlite3.connect()  → `active_path`` (line 416)
 
 
 ---
@@ -55,6 +55,8 @@ _(none detected)_
 ## Notable external imports
 
 - `base64`
+- `memory (confidence)`
+- `memory (trust)`
 
 ---
 

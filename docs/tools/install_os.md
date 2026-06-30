@@ -1,8 +1,8 @@
 ---
 tool: install_os.py
-sha1: d98f5dba3b3d
-mtime_utc: 2026-06-23T02:21:18.043279+00:00
-generated_utc: 2026-06-26T20:00:04.466464+00:00
+sha1: 56d5303a3d93
+mtime_utc: 2026-06-28T12:28:55.227264+00:00
+generated_utc: 2026-06-30T22:19:18.643748+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 235)
+- `def main()` (line 245)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -49,7 +49,7 @@ _(no argparse arguments detected)_
 - `subprocess.run()  → `['node', '--version']`` (line 112)
 - `subprocess.run()  → `['nvm', 'version']`` (line 103)
 - `subprocess.run()  → `['winget', '--version']`` (line 122)
-- `subprocess.run()  → `[python_exe, pg_sync_script]`` (line 299)
+- `subprocess.run()  → `[python_exe, pg_sync_script]`` (line 309)
 - `subprocess.run()  → `cmd`` (line 48)
 - `subprocess.run()` (line 123)
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: 41740d08dc15
-mtime_utc: 2026-06-09T02:42:18.133741+00:00
-generated_utc: 2026-06-12T20:00:05.218347+00:00
+sha1: a2eceaddff02
+mtime_utc: 2026-06-30T07:39:57.952758+00:00
+generated_utc: 2026-06-30T22:19:18.365416+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 ## Entry points
 
-- `def main()` (line 794)
+- `def main()` (line 799)
 - `if __name__ == "__main__"` guard
 
 ---

@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_bridge.py
-sha1: e9d57daadac5
-mtime_utc: 2026-05-30T18:38:21.560004+00:00
-generated_utc: 2026-05-31T18:42:52.866983+00:00
+sha1: 974e5d1d6da2
+mtime_utc: 2026-06-30T21:32:48.333647+00:00
+generated_utc: 2026-06-30T22:19:18.427366+00:00
 private: false
 ---
 
@@ -28,6 +28,7 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
+- `M3_BRIDGE_PATH`
 - `M3_HTTP_HOST`
 - `M3_HTTP_PATH`
 - `M3_HTTP_PORT`
@@ -38,6 +39,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `m3_memory.installer (load_config)`
 - `m3_sdk (active_database)`
 - `mcp_tool_catalog`
 - `memory_core`

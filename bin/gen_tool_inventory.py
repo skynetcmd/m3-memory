@@ -866,6 +866,19 @@ def main() -> None:
             mtime_to_write = mtime
             generated_utc = now_iso
 
+        # Private tools must NOT get a standalone per-tool doc: those files leak
+        # methodology (bench harness flags, call structure) and have repeatedly
+        # ended up tracked + pushed to the PUBLIC origin (see PRIVATE_PATH_PREFIXES
+        # note). The tool still earns an INDEX row (so the catalog acknowledges it
+        # exists, marked Private) but no public .md is written, and any stale one
+        # left from before this guard is removed so a regen self-heals the leak.
+        if private:
+            if out_path.exists():
+                out_path.unlink()
+                print(f"removed private tool doc {out_path.relative_to(BASE_DIR)}")
+            index_entries.append((rel, doc.split("\n", 1)[0] or "(no docstring)", private))
+            continue
+
         rendered = (candidate
                     .replace(gen_placeholder, generated_utc, 1)
                     .replace(mtime_placeholder, mtime_to_write, 1))
@@ -884,7 +897,10 @@ def main() -> None:
     for rel, summary, private in sorted(index_entries):
         name = rel.split("/")[-1].replace(".py", "")
         summary_clean = summary.replace("|", "\\|")[:120]
-        idx_lines.append(f"| [{rel}]({name}.md) | {summary_clean} | {'yes' if private else ''} |")
+        # Private tools have no per-tool doc (skipped above), so don't emit a
+        # link that would 404 — list the path as plain text, still flagged.
+        cell = rel if private else f"[{rel}]({name}.md)"
+        idx_lines.append(f"| {cell} | {summary_clean} | {'yes' if private else ''} |")
     (OUT_DIR / "INDEX.md").write_text("\n".join(idx_lines) + "\n", encoding="utf-8")
     print(f"wrote {(OUT_DIR / 'INDEX.md').relative_to(BASE_DIR)}")
 

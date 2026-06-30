@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 1d2131c3be87
-mtime_utc: 2026-06-27T22:39:32.994220+00:00
-generated_utc: 2026-06-27T23:22:27.577780+00:00
+sha1: 35f5d74159da
+mtime_utc: 2026-06-28T12:28:55.205643+00:00
+generated_utc: 2026-06-30T22:19:18.448609+00:00
 private: false
 ---
 
@@ -99,6 +99,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 - `importlib`
 - `memory.config (FACT_ENRICH_CONCURRENCY)`
+- `memory.trust (set_agent_trust)`
 - `memory.util (_POISON_PATTERNS, _check_content_safety)`
 
 ---
