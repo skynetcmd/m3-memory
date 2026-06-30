@@ -222,7 +222,13 @@ async def run_entity_pass(args):
             force=False,
             dry_run=False,
             skip_preflight=True,
-            yes=True
+            yes=True,
+            # m3_entities._main_async reads args.embed_url/embed_model directly
+            # (not via getattr). The argparse CLI defaults them to the
+            # M3_EMBED_URL/M3_EMBED_MODEL env vars; mirror that here so the
+            # loop honors the same embedder override and doesn't AttributeError.
+            embed_url=os.environ.get("M3_EMBED_URL"),
+            embed_model=os.environ.get("M3_EMBED_MODEL"),
         )
         await m3_entities._main_async(ent_args)
     except Exception as e:
@@ -307,6 +313,63 @@ async def run_consolidate_pass(args):
         logger.error(f"Consolidation pass error: {type(e).__name__}: {e}")
 
 
+def has_chatlog_prune_work(chatlog_db: Optional[str], prune_days: float,
+                           min_rows: int) -> bool:
+    """SQL check: are there enough aged chat_log turns to bother pruning?
+    Event-driven gate (mirrors has_consolidate_work) so the loop only does a
+    sweep when a real backlog of prune-eligible noise has accumulated."""
+    try:
+        ctx = M3Context(chatlog_db)
+        sql = (
+            "SELECT 1 FROM memory_items "
+            "WHERE type='chat_log' AND is_deleted=0 AND importance <= 0.3 "
+            "AND created_at < datetime('now', ?) "
+            "GROUP BY type HAVING COUNT(*) > ? LIMIT 1"
+        )
+        return len(ctx.query_memory(sql, (f"-{int(prune_days)} days", min_rows))) > 0
+    except Exception as e:
+        logger.debug(f"Chatlog-prune work check failed (non-fatal): {e}")
+        return False
+
+
+async def run_chatlog_prune_pass(args):
+    """Aged noise pruning for chatlog turns — governor-gated, event-driven.
+
+    Suppresses 14-45d noise (importance down) and soft-deletes >45d
+    high-confidence noise (durable-signal / substantial-structured turns are
+    protected to suppress-only). Tombstones propagate fleet-wide via
+    is_deleted+updated_at sync and stay recoverable. Real writes require
+    M3_CHATLOG_PRUNE_AUTO=1 (else dry-run) — same opt-in contract as belief
+    consolidation. Delegates to chatlog_prune.run so the loop and the standalone
+    CLI share ONE implementation."""
+    if not has_chatlog_prune_work(args.chatlog_db, args.chatlog_prune_days,
+                                  args.chatlog_prune_threshold):
+        logger.debug("No chatlog-prune work (no aged backlog over threshold). Skipping.")
+        return
+    apply = os.environ.get("M3_CHATLOG_PRUNE_AUTO", "0").lower() in ("1", "true", "yes")
+    logger.info("Starting chatlog noise-prune pass (apply=%s)...", apply)
+    try:
+        from types import SimpleNamespace
+
+        import chatlog_prune
+        opts = SimpleNamespace(
+            fresh_days=args.chatlog_prune_fresh_days,
+            prune_days=args.chatlog_prune_days,
+            status_min_cluster=5, generic_imp_max=0.3, keep_imp_floor=0.4,
+            generic_protect_len=300, generic_delete_maxlen=300,
+            # Bound writes per cycle (§8): the loop fires every --interval, so a
+            # large backlog drains over many cycles instead of one monster pass
+            # that blocks the heartbeat. Oldest noise is handled first.
+            max_actions=args.chatlog_prune_max_actions,
+            no_generic=False, apply=apply)
+        summary = chatlog_prune.run(args.chatlog_db, opts)
+        logger.info("Chatlog-prune pass: suppress=%s soft-delete=%s capped=%s (apply=%s)",
+                    summary.get("writes_decay"), summary.get("writes_prune"),
+                    summary.get("capped"), apply)
+    except Exception as e:
+        logger.error(f"Chatlog-prune pass error: {type(e).__name__}: {e}")
+
+
 async def main_loop(args):
     """Main execution loop with adaptive backoff and signal awareness."""
     logger.info(f"Cognitive Loop heartbeat started. Interval: {args.interval}s")
@@ -348,6 +411,10 @@ async def main_loop(args):
 
         if not args.skip_consolidate:
             await run_consolidate_pass(args)
+            if _STOP_EVENT.is_set(): break
+
+        if not args.skip_chatlog_prune:
+            await run_chatlog_prune_pass(args)
             if _STOP_EVENT.is_set(): break
 
         elapsed = time.monotonic() - start_time
@@ -395,6 +462,21 @@ def main():
                         help="Only consolidate items older than N days (default: 7)")
     parser.add_argument("--consolidate-source-type", default="observation",
                         help="Episodic source memory type to roll up (default: observation)")
+
+    # Chatlog aged noise-prune pass. Governor-gated + event-driven; real
+    # writes require M3_CHATLOG_PRUNE_AUTO=1 (else dry-run). Replaces a fixed cron.
+    parser.add_argument("--skip-chatlog-prune", action="store_true",
+                        help="Skip the chatlog noise-prune pass")
+    parser.add_argument("--chatlog-prune-threshold", type=int, default=2000,
+                        help="Min aged prune-eligible chat_log rows before a sweep (default: 2000)")
+    parser.add_argument("--chatlog-prune-fresh-days", type=float, default=14.0,
+                        help="Keep noise newer than N days untouched (default: 14)")
+    parser.add_argument("--chatlog-prune-days", type=float, default=45.0,
+                        help="Soft-delete aged noise older than N days (default: 45)")
+    parser.add_argument("--chatlog-prune-max-actions", type=int, default=5000,
+                        help="Max decay+prune writes per cycle (default: 5000; 0 = "
+                             "no cap). Caps one pass so a backlog drains across "
+                             "cycles instead of blocking the heartbeat.")
 
     args = parser.parse_args()
 
