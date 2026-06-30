@@ -68,14 +68,21 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
 
     # Mock embedded and CPU fallback to fail
     monkeypatch.setattr("memory.embed._get_embedded_embedder", lambda: None)
-    # Disable the embed circuit breakers (mirrors test_tier4_fallback_skipped).
-    # Without this, the cascade's breaker logic still probes the real local HTTP
-    # tier (127.0.0.1:8082) before honoring the mocked client, so in a backend-
-    # less env (CI) tier 2 raises a live EmbedFallbackError instead of falling
-    # straight through to the mocked cloud client — the test then never reaches
-    # tier 4 and fails. Zeroing the thresholds forces the deterministic path.
-    monkeypatch.setattr(config, "EMBED_BREAKER_CPU_FALLBACK_THRESHOLD", 0)
-    monkeypatch.setattr(config, "EMBED_BREAKER_PRIMARY_THRESHOLD", 0)
+    # NULL the embed circuit-breaker globals so every tier is unconditionally
+    # allowed (the cascade gates each tier on `_X_BREAKER is None or
+    # _X_BREAKER.allow_request()`). This is the real fix for the CI failure:
+    # the breakers are built ONCE at module import from config thresholds, so
+    # patching the config values is too late — the already-constructed breaker
+    # objects are unaffected. If a breaker was left OPEN by an earlier test/embed
+    # call in the session, the tier short-circuits WITHOUT calling
+    # _get_embed_client, the cascade returns None before tier 4, and the mocked
+    # cloud client is never reached. (Diagnosed via a CI assertion: the patched
+    # getter was never called.) Setting the globals to None forces every tier
+    # open so the cascade flows through the mocked client to tier 4.
+    import memory.embed as _me
+    for _bk in ("_EMBEDDED_BREAKER", "_CPU_FALLBACK_BREAKER",
+                "_PRIMARY_BREAKER", "_CLOUD_BREAKER"):
+        monkeypatch.setattr(_me, _bk, None)
 
     # Mock best LLM failover to fail
     async def mock_get_best_embed(*args, **kwargs):
@@ -108,19 +115,20 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
     def _fake_get_client():
         get_client_calls.append(1)
         return client_mock
-    monkeypatch.setattr("memory.embed._get_embed_client", _fake_get_client)
-    # Also neutralize the process-wide cached real client so nothing can reuse a
+    monkeypatch.setattr(_me, "_get_embed_client", _fake_get_client)
+    # Neutralize the process-wide cached real client so nothing can reuse a
     # stale loop-bound AsyncClient that bypasses the patched getter.
-    import memory.embed as _me
     monkeypatch.setattr(_me, "_EMBED_CLIENT", None, raising=False)
 
     # Let's request an embedding with sensitive data
     vec, model = await _embed("My secret key is sk-proj-12345678901234567890 and email is test@domain.com")
 
-    # DIAGNOSTIC: surface whether the patched getter was actually used in CI.
+    # Regression guard: tier 4 must have gone through the mocked client getter.
+    # If this is empty the cascade short-circuited before any HTTP tier (the
+    # original CI failure mode), so a bare `vec is None` check would mask it.
     assert get_client_calls, (
-        "memory.embed._get_embed_client was never called via the patched name — "
-        "tier 4 reached a real client some other way"
+        "embed cascade short-circuited before reaching a client tier — "
+        "a breaker was left open (see breaker-nulling above)"
     )
     assert vec == [0.1, 0.2, 0.3, 0.4]
     assert len(posted_payloads) == 1
