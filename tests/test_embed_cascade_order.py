@@ -23,6 +23,11 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "bin"))
 
+# A proper-identity stub embedding: 1024-dim AND L2-unit-length, so the embedder-
+# identity gate accepts it. (A zero vector has norm 0 and is correctly rejected.)
+# These tests assert tier ORDER, so the exact direction is irrelevant.
+_STUB_EMBEDDING = [1.0] + [0.0] * 1023
+
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch, tmp_path):
@@ -77,7 +82,7 @@ async def test_tier2_attempted_when_no_gguf(monkeypatch):
         def raise_for_status(self):
             pass
         def json(self):
-            return {"data": [{"embedding": [0.0] * 1024, "index": 0}]}
+            return {"data": [{"embedding": _STUB_EMBEDDING, "index": 0}]}
 
     class FakeClient:
         async def post(self, url, **kwargs):
@@ -109,7 +114,7 @@ async def test_tier3_skipped_when_tier2_succeeds(monkeypatch):
         def raise_for_status(self):
             pass
         def json(self):
-            return {"data": [{"embedding": [0.0] * 1024, "index": 0}]}
+            return {"data": [{"embedding": _STUB_EMBEDDING, "index": 0}]}
 
     class FakeClient:
         async def post(self, url, **kwargs):

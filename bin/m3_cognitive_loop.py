@@ -51,10 +51,15 @@ def daemonize_windows(args):
         if arg != "--background":
             argv.append(arg)
 
-    # Spawn and exit parent
+    # Spawn the detached child, then HARD-exit the parent. os._exit(0) — not
+    # sys.exit(0) — because sys.exit raises SystemExit, which an outer try/except
+    # (or the asyncio runner if we got here late) can swallow, leaving the parent
+    # ALIVE alongside the child. Two live loops each dispatch their own
+    # Semaphore(2) of SLM calls = over-dispatch that storms the local LLM.
     subprocess.Popen(argv, creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
     print("Cognitive Loop started in background (Windows pythonw).")
-    sys.exit(0)
+    sys.stdout.flush()
+    os._exit(0)
 
 def daemonize_unix():
     """Double-fork to detach from the terminal."""
