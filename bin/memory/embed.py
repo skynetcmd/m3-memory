@@ -240,6 +240,13 @@ def _validate_identity(vecs, attached_model: str, source_label: str) -> bool:
         if attached_model not in _compatible_model_names():
             _identity_warn(source_label, f"foreign model {attached_model!r}")
             return False
+        # Finite-ness is a hard invariant, independent of the unit-norm policy: a
+        # NaN/inf component is never a valid embedding (it poisons every cosine
+        # distance) and NaN slips past the norm tolerance check (NaN compares
+        # False to everything), so reject non-finite vectors unconditionally.
+        if not _sample_is_finite(vecs):
+            _identity_warn(source_label, "non-finite vector components")
+            return False
         if config.EMBED_REQUIRE_UNIT_NORM and not _sample_is_unit(vecs):
             _identity_warn(source_label, "vectors not unit-normalized")
             return False
@@ -274,20 +281,40 @@ def _accept_bulk(out, miss_indices, vecs, model: str, label: str) -> list[int]:
     return still
 
 
-def _sample_is_unit(vecs) -> bool:
-    """Cheap L2-norm check on a SAMPLE (not every vector in a bulk batch)."""
+def _identity_samples(vecs) -> list:
+    """The first/middle/last vectors of a bulk batch, or [vecs] for a single
+    vector — the sample set shared by the finite-ness and unit-norm checks."""
     if vecs and isinstance(vecs[0], (list, tuple)):
         n = len(vecs)
         idxs = {0, n // 2, n - 1}  # first, middle, last
-        samples = [vecs[i] for i in idxs]
-    else:
-        samples = [vecs]
+        return [vecs[i] for i in idxs]
+    return [vecs]
+
+
+def _sample_is_finite(vecs) -> bool:
+    """All components of the sampled vector(s) are finite (no NaN/inf). Cheap:
+    samples first/middle/last like the norm check. Runs regardless of the
+    unit-norm policy — a non-finite component is never a valid embedding."""
+    for v in _identity_samples(vecs):
+        if not v:
+            return False
+        if not all(math.isfinite(x) for x in v):
+            return False
+    return True
+
+
+def _sample_is_unit(vecs) -> bool:
+    """Cheap L2-norm check on a SAMPLE (not every vector in a bulk batch)."""
+    samples = _identity_samples(vecs)
     tol = config.EMBED_NORM_TOL
     for v in samples:
         if not v:
             return False
         norm = math.sqrt(sum(x * x for x in v))
-        if abs(norm - 1.0) > tol:
+        # A non-finite norm (NaN/inf) must be rejected explicitly: NaN compares
+        # False to everything, so `abs(nan - 1.0) > tol` is False and a NaN
+        # vector would otherwise slip through and poison every cosine distance.
+        if not math.isfinite(norm) or abs(norm - 1.0) > tol:
             return False
     return True
 
