@@ -194,6 +194,86 @@ _embedded_embedder = None
 _embedded_embed_checked = False
 
 
+# ── Embedder identity gate ─────────────────────────────────────────────────────
+# A vector is only acceptable if it came from the configured ("proper") embedder.
+# These resolve config LIVE (so set_embed_override / env changes are honoured) and
+# are model-agnostic. _validate_identity is the single gate every tier calls.
+
+def _proper_embed_dim() -> int:
+    return int(config.EMBED_DIM)
+
+
+def _compatible_model_names() -> frozenset[str]:
+    """The embed_model tags that map to the proper embed space. A tier whose tag
+    is in this set is accepted; anything else is a foreign embedder. Includes the
+    configured name, the tier-1 GGUF tag, the tier-2 fallback tag, the space tag,
+    any runtime model override, and operator-supplied extras."""
+    names = {
+        config.EMBED_MODEL,
+        config.EMBED_SPACE_TAG,
+        config.EMBED_FALLBACK_MODEL_TAG,
+        _EMBED_GGUF_MODEL_TAG,
+        config._EMBED_MODEL_OVERRIDE or config.EMBED_MODEL,
+        *config.EMBED_COMPATIBLE_MODELS,
+    }
+    return frozenset(n for n in names if n)
+
+
+# Log a given identity-rejection reason at most once per source label, so a
+# misconfigured tier is visible without flooding the log (the storm we just fixed).
+_IDENTITY_WARNED: set[str] = set()
+
+
+def _validate_identity(vecs, attached_model: str, source_label: str) -> bool:
+    """True iff `vecs` (a single vector or a list) is acceptable for the store:
+    correct dimension, a compatible model tag, and (if required) unit-length.
+    A failure means this tier did not produce a PROPER vector — the caller must
+    cascade to the next tier (or defer), NEVER store the vector. Never raises."""
+    try:
+        sample = vecs[0] if (vecs and isinstance(vecs[0], (list, tuple))) else vecs
+        if not sample:
+            return False
+        dim = _proper_embed_dim()
+        if len(sample) != dim:
+            _identity_warn(source_label, f"dim {len(sample)} != {dim}")
+            return False
+        if attached_model not in _compatible_model_names():
+            _identity_warn(source_label, f"foreign model {attached_model!r}")
+            return False
+        if config.EMBED_REQUIRE_UNIT_NORM and not _sample_is_unit(vecs):
+            _identity_warn(source_label, "vectors not unit-normalized")
+            return False
+        return True
+    except Exception:
+        return False  # never let the gate itself break the cascade
+
+
+def _identity_warn(source_label: str, reason: str) -> None:
+    key = f"{source_label}:{reason.split(' ')[0]}"
+    if key not in _IDENTITY_WARNED:
+        _IDENTITY_WARNED.add(key)
+        logger.warning("Embed identity rejected from %s: %s — cascading/deferring "
+                       "rather than storing a non-proper vector.", source_label, reason)
+
+
+def _sample_is_unit(vecs) -> bool:
+    """Cheap L2-norm check on a SAMPLE (not every vector in a bulk batch)."""
+    if vecs and isinstance(vecs[0], (list, tuple)):
+        n = len(vecs)
+        idxs = {0, n // 2, n - 1}  # first, middle, last
+        samples = [vecs[i] for i in idxs]
+    else:
+        samples = [vecs]
+    tol = config.EMBED_NORM_TOL
+    for v in samples:
+        if not v:
+            return False
+        norm = math.sqrt(sum(x * x for x in v))
+        if abs(norm - 1.0) > tol:
+            return False
+    return True
+
+
 def discover_bge_m3_gguf(budget_s: float = _EMBED_GGUF_WALK_BUDGET_S) -> str | None:
     """Probe the canonical model directories for a bge-m3 GGUF and return its
     path, or None. Bounded: at most `budget_s` wall-clock and depth ~4 per dir,

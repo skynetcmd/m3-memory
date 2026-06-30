@@ -107,6 +107,34 @@ FILES_DB_PROMPT_ON_FIRST_USE: bool = os.environ.get(
 # the default must name BGE-M3 — an operator can still override via EMBED_MODEL.
 EMBED_MODEL: str = os.environ.get("EMBED_MODEL", "text-embedding-bge-m3")
 EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "1024"))
+
+# ── Proper-embedder identity ───────────────────────────────────────────────────
+# A stored vector is only comparable to the rest of the store if it came from the
+# SAME embedder: same model name, dimension, normalization scheme, and embed
+# space. These knobs define that identity (model-agnostic — driven by config, not
+# a hardcoded model). A tier whose output fails this identity is treated as a
+# failed tier (the cascade tries the next one); if no tier validates, embedding
+# is DEFERRED (the row stays keyword-searchable and is retried next sweep).
+#   require_unit_norm: output vectors must be L2-unit-length (the cosine/vector
+#       store assumes this). Off only for an embedder that emits raw magnitudes.
+#   norm_tol: tolerance for the sampled unit-norm check.
+#   space_tag: an explicit embed-space id; defaults to EMBED_MODEL. Bump it (or
+#       EMBED_MODEL) when the vector space changes so old vectors are excluded.
+#   compatible_models: extra embed_model strings that map to the SAME space
+#       (back-compat for vectors written under a different-but-equivalent tag).
+EMBED_REQUIRE_UNIT_NORM: bool = (
+    os.environ.get("M3_EMBED_REQUIRE_UNIT_NORM", "1").lower() not in ("0", "false", "no"))
+EMBED_NORM_TOL: float = float(os.environ.get("M3_EMBED_NORM_TOL", "0.05"))
+EMBED_SPACE_TAG: str = (os.environ.get("M3_EMBED_SPACE_TAG") or "").strip() or EMBED_MODEL
+# Tier-2 (the local CPU HTTP embed server) historically mis-tagged its vectors
+# with the tier-1 GGUF filename; it should carry the proper identity name.
+EMBED_FALLBACK_MODEL_TAG: str = (
+    (os.environ.get("M3_EMBED_FALLBACK_MODEL_TAG") or "").strip() or EMBED_MODEL)
+# Operator-supplied extra compatible model tags (comma-separated).
+EMBED_COMPATIBLE_MODELS: tuple[str, ...] = tuple(
+    m.strip() for m in (os.environ.get("M3_EMBED_COMPATIBLE_MODELS") or "").split(",")
+    if m.strip())
+
 EMBED_TIMEOUT_READ: float = 30.0
 ORIGIN_DEVICE: str = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
 
