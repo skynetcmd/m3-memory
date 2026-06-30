@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -307,6 +308,28 @@ DENSE_TOKEN_OVERLAP = 500
 DENSE_MIN_SUB_CHARS = 2000
 _DENSE_ERR_RE = re.compile(r"(\d+)\s*tokens\s*>\s*n_ctx")
 
+# Per-call embed-failure sentinels (returned by _post_once, NOT shared state).
+# Distinct objects so a chunk's outcome can't leak into a concurrent chunk's.
+_EMBED_TRANSIENT = object()   # retryable: timeout / 5xx / 413 / 429
+_EMBED_PERMANENT = object()   # non-retryable 4xx: don't retry or bisect
+
+
+def _order_embeddings(data: list[dict], n_inputs: int) -> list[list[float]] | None:
+    """Return embeddings in INPUT order, or None if the response can't be safely
+    aligned. An OpenAI-style embeddings response carries a per-item `index`; we
+    sort by it. But a server that OMITS index (every item defaults to 0) would
+    pass a naive len-check while the vectors are in arbitrary order — storing a
+    semantically-WRONG vector under a memory id with no error. Require `index` to
+    be a complete permutation of range(n_inputs) before trusting order; reject
+    (treat as failure) otherwise."""
+    if len(data) != n_inputs:
+        return None
+    seen = [d.get("index") for d in data]
+    if any(ix is None for ix in seen) or sorted(seen) != list(range(n_inputs)):
+        return None  # missing / duplicate / out-of-range index -> not alignable
+    ordered = sorted(data, key=lambda d: d["index"])
+    return [d["embedding"] for d in ordered]
+
 
 def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
     """Re-split a chunk that overflowed the bge-m3 token ceiling."""
@@ -329,6 +352,66 @@ def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
             return out
         out.append(text[start:end])
         start += stride
+
+
+def _mean_pool(vecs: list[list[float]]) -> list[float] | None:
+    """Average several sub-chunk vectors into one (standard long-doc embedding),
+    then L2-NORMALIZE the result. bge-m3 vectors are unit-length and the store /
+    cosine paths assume that invariant — mean-pooling alone yields a sub-unit
+    vector (norm < 1), so it MUST be renormalized or it is incomparable to every
+    other vector in the store. Returns None if there's nothing to pool."""
+    if not vecs:
+        return None
+    if len(vecs) == 1:
+        return vecs[0]  # already a normalized model output
+    dim = len(vecs[0])
+    acc = [0.0] * dim
+    n = 0
+    for v in vecs:
+        if len(v) != dim:  # defensive: skip a malformed sub-vector
+            continue
+        for k in range(dim):
+            acc[k] += v[k]
+        n += 1
+    if n == 0:
+        return None
+    norm = math.sqrt(sum(x * x for x in acc))
+    if norm == 0.0:
+        return [0.0] * dim  # degenerate (opposing vectors); avoid /0
+    return [x / norm for x in acc]  # mean then L2-normalize (the /n cancels)
+
+
+async def _embedded_bulk_with_subdivide(
+    embedded, texts: list[str]
+) -> list[list[float] | None]:
+    """Embed each text via the in-process (tier-1) embedder, subdividing any row
+    that overflows n_ctx and mean-pooling its sub-chunk vectors. Returns one
+    vector per input (None for a row tier 1 still can't embed). Keeps an
+    oversized row IN-PROCESS instead of cascading the whole batch to HTTP."""
+    def _embed_list(items: list[str]) -> list[list[float]]:
+        return embedded.embed(items)
+
+    results: list[list[float] | None] = []
+    for text in texts:
+        try:
+            vecs = await asyncio.to_thread(_embed_list, [text])
+            results.append(vecs[0])
+            continue
+        except Exception as e:
+            m = _DENSE_ERR_RE.search(str(e))
+            if not m:
+                results.append(None)
+                continue
+            observed = int(m.group(1))
+        # Overflow: split into sub-chunks, embed each, mean-pool.
+        try:
+            subs = _subdivide_dense_chunk(text, observed)
+            sub_vecs = await asyncio.to_thread(_embed_list, subs)
+            results.append(_mean_pool([v for v in sub_vecs if v is not None]))
+        except Exception as e2:
+            logger.warning("Subdivide-embed failed for oversized row: %s", e2)
+            results.append(None)
+    return results
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -817,10 +900,9 @@ async def _embed_many_cloud_fallback(
         )
         resp.raise_for_status()
         data = resp.json()["data"]
-        ordered = sorted(data, key=lambda d: d.get("index", 0))
-        vecs = [d["embedding"] for d in ordered]
+        vecs = _order_embeddings(data, len(cloud_texts))
 
-        if len(vecs) == len(cloud_texts):
+        if vecs is not None:
             _cloud_served = 0
             for idx, vec in zip(cloud_indices, vecs):
                 if vec is not None:
@@ -834,7 +916,9 @@ async def _embed_many_cloud_fallback(
                     _CLOUD_BREAKER.record_success()
                 _record_embed_backend("cloud-enclave", _cloud_served)
         else:
-            logger.error(f"Cloud enclave returned {len(vecs)} vectors for {len(cloud_texts)} inputs")
+            logger.error("Cloud enclave response for %d inputs could not be "
+                         "aligned (bad/missing index or count) — not stored.",
+                         len(cloud_texts))
             if _CLOUD_BREAKER is not None:
                 _CLOUD_BREAKER.record_failure()
     except Exception as e:
@@ -904,7 +988,32 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             _record_embed_backend(_embedded_label(), len(miss_texts))
             return out  # type: ignore[return-value]
         except Exception as e:
-            logger.warning(f"Embedded bulk embed failed ({e}) — falling back to CPU HTTP")
+            # An n_ctx overflow ("N tokens > n_ctx") fails the WHOLE batch even
+            # though only one row is too long. Don't cascade the whole batch to
+            # HTTP for that — subdivide the oversized row(s) in-process (tier 1
+            # handles them), and only the rows tier 1 genuinely can't do fall
+            # through. This keeps a single oversized row from cascading to the
+            # HTTP tiers (and, when those are down, fanning out into a 4xx storm).
+            if _DENSE_ERR_RE.search(str(e)):
+                resolved = await _embedded_bulk_with_subdivide(embedded, miss_texts)
+                still_missing_local = []
+                for j, (idx, vec) in enumerate(zip(miss_indices, resolved)):
+                    if vec is not None:
+                        out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
+                    else:
+                        still_missing_local.append(j)
+                if not still_missing_local:
+                    _record_embed_backend(_embedded_label(), len(miss_texts))
+                    return out  # type: ignore[return-value]
+                # Narrow the cascade to ONLY the rows tier 1 couldn't embed.
+                miss_indices = [miss_indices[j] for j in still_missing_local]
+                miss_texts = [miss_texts[j] for j in still_missing_local]
+                logger.warning(
+                    "Embedded bulk: %d oversized row(s) embedded via subdivide; "
+                    "%d still unresolved — falling back to CPU HTTP for those.",
+                    len(resolved) - len(still_missing_local), len(still_missing_local))
+            else:
+                logger.warning(f"Embedded bulk embed failed ({e}) — falling back to CPU HTTP")
 
     # Tier 2 (bulk): same architecture as single-_embed — always try the
     # always-on 8082 service regardless of tier-1 GGUF configuration.
@@ -918,11 +1027,11 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         )
         resp.raise_for_status()
         data = resp.json()["data"]
-        ordered = sorted(data, key=lambda d: d.get("index", 0))
-        vecs = [d["embedding"] for d in ordered]
-        if len(vecs) != len(miss_texts):
+        vecs = _order_embeddings(data, len(miss_texts))
+        if vecs is None:
             raise RuntimeError(
-                f"CPU fallback returned {len(vecs)} vectors for {len(miss_texts)} inputs"
+                f"CPU fallback response for {len(miss_texts)} inputs could not be "
+                f"aligned (bad/missing index or count)"
             )
         for idx, vec in zip(miss_indices, vecs):
             out[idx] = (vec, _EMBED_GGUF_MODEL_TAG)
@@ -948,9 +1057,15 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             return out  # type: ignore[return-value]
         base_url, model = result
 
-    _last_embed_err: dict[str, str] = {"msg": ""}
+    # _post_once returns a PER-CALL result — never shared mutable state. Each
+    # concurrent chunk decides its own fate; a permanent 4xx in one chunk must
+    # NOT cause a concurrent chunk's transient failure to be dropped as permanent
+    # (that would silently lose embeddable rows). Sentinels:
+    #   list[...]              -> success (the vectors)
+    #   _EMBED_TRANSIENT       -> retryable (timeout / 5xx / 413 / 429)
+    #   (_EMBED_PERMANENT,msg) -> non-retryable 4xx; don't retry or bisect
 
-    async def _post_once(chunk_texts: list[str]) -> list[list[float] | None] | None:
+    async def _post_once(chunk_texts: list[str]):
         try:
             resp = await client.post(
                 f"{base_url}/embeddings",
@@ -960,31 +1075,49 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             )
             resp.raise_for_status()
             data = resp.json()["data"]
-            ordered = sorted(data, key=lambda d: d.get("index", 0))
-            return [d["embedding"] for d in ordered]
+            ordered = _order_embeddings(data, len(chunk_texts))
+            if ordered is None:
+                # Response can't be aligned to inputs — treat as transient (a
+                # smaller batch via bisect may return a clean index), never
+                # store mis-aligned vectors.
+                return _EMBED_TRANSIENT
+            return ordered
         except _httpx.HTTPStatusError as e:
-            _last_embed_err["msg"] = f"HTTP {e.response.status_code}: {e.response.text[:300]}"
-            return None
-        except Exception as e:
-            _last_embed_err["msg"] = f"{type(e).__name__}: {e}"
-            return None
+            code = e.response.status_code
+            msg = f"HTTP {code}: {e.response.text[:300]}"
+            # 4xx = the request is wrong and won't succeed on retry — EXCEPT 413
+            # (payload too large) and 429 (rate limit), where a smaller batch /
+            # a wait genuinely helps. Everything else is permanent.
+            if 400 <= code < 500 and code not in (413, 429):
+                return (_EMBED_PERMANENT, msg)
+            return _EMBED_TRANSIENT
+        except Exception:
+            return _EMBED_TRANSIENT
 
     async def _post_chunk(chunk_texts: list[str]) -> list[list[float] | None]:
         async with _EMBED_BULK_SEM:
             for attempt in range(3):
                 result = await _post_once(chunk_texts)
-                if result is not None:
+                if isinstance(result, list):
                     return result
+                # Permanent (non-retryable 4xx): stop immediately — no backoff
+                # retries, no bisect. Drop this chunk; the next sweep can retry
+                # once the underlying cause (e.g. wrong embed endpoint) is fixed.
+                if isinstance(result, tuple) and result[0] is _EMBED_PERMANENT:
+                    logger.warning(
+                        "Bulk embed: permanent failure (%s) — dropping %d input(s) "
+                        "without retry/bisect.", result[1], len(chunk_texts))
+                    return [None] * len(chunk_texts)
                 if attempt < 2:
                     await asyncio.sleep(2 * (2 ** attempt))
 
         if len(chunk_texts) == 1:
-            reason = _last_embed_err.get("msg") or "unknown"
             logger.warning(
-                f"Bulk embed: dropping single input of len={len(chunk_texts[0])} "
-                f"after 3 attempts — last error: {reason}"
-            )
+                "Bulk embed: dropping single input of len=%d after 3 transient "
+                "attempts.", len(chunk_texts[0]))
             return [None]
+        # Only transient/size failures reach here — bisecting can help (smaller
+        # batch, or isolate one oversized item). Permanent failures returned above.
         mid = len(chunk_texts) // 2
         logger.info(
             f"Bulk embed: bisecting failed chunk of {len(chunk_texts)} into "

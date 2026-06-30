@@ -112,5 +112,57 @@ class SubdivideDenseChunkTests(unittest.TestCase):
         self.assertEqual(int(m2.group(1)), 9735)
 
 
+class MeanPoolTests(unittest.TestCase):
+    """_mean_pool averages an oversized row's sub-chunk vectors into one vector
+    AND L2-normalizes it (standard long-doc embedding) — used by
+    _embedded_bulk_with_subdivide so an over-n_ctx row is handled in-process.
+    The normalize step is load-bearing: bge-m3 vectors are unit-length and the
+    store / cosine paths assume that, so a raw mean (norm < 1) is incomparable."""
+
+    def setUp(self):
+        import math
+        import memory.embed as me
+        self.me = me
+        self.math = math
+
+    def _norm(self, v):
+        return self.math.sqrt(sum(x * x for x in v))
+
+    def _assert_unit(self, v):
+        self.assertAlmostEqual(self._norm(v), 1.0, places=5,
+                               msg=f"pooled vector not unit-length: norm={self._norm(v)}")
+
+    def test_pooled_vector_is_unit_length(self):
+        # Mean of [1,1] and [3,3] points along [1,1]; normalized => [0.707, 0.707].
+        out = self.me._mean_pool([[1.0, 1.0], [3.0, 3.0]])
+        self._assert_unit(out)
+        self.assertAlmostEqual(out[0], out[1], places=6)  # symmetric input
+        self.assertAlmostEqual(out[0], 1.0 / self.math.sqrt(2), places=5)
+
+    def test_direction_preserved(self):
+        # Pooling preserves direction (the mean of the inputs), only rescales.
+        out = self.me._mean_pool([[0.0, 6.0], [2.0, 0.0], [4.0, 3.0]])  # mean [2,3]
+        self._assert_unit(out)
+        # [2,3] normalized
+        self.assertAlmostEqual(out[0] / out[1], 2.0 / 3.0, places=5)
+
+    def test_single_vector_passthrough(self):
+        # A single (already-normalized) model output is returned as-is.
+        self.assertEqual(self.me._mean_pool([[5.0, 6.0]]), [5.0, 6.0])
+
+    def test_empty_returns_none(self):
+        self.assertIsNone(self.me._mean_pool([]))
+
+    def test_skips_malformed_subvector(self):
+        # A sub-vector of the wrong dim is skipped, not crashed on; result still unit.
+        out = self.me._mean_pool([[1.0, 1.0], [9.0], [3.0, 3.0]])
+        self._assert_unit(out)
+        self.assertAlmostEqual(out[0], out[1], places=6)
+
+    def test_opposing_vectors_degenerate_to_zero(self):
+        # Mean of opposing vectors is the zero vector — must not divide by zero.
+        self.assertEqual(self.me._mean_pool([[1.0, 0.0], [-1.0, 0.0]]), [0.0, 0.0])
+
+
 if __name__ == "__main__":
     unittest.main()
