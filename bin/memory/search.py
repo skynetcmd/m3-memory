@@ -1039,6 +1039,14 @@ async def memory_search_scored_impl(
     q_vec, _ = await _embed(query)
     if not q_vec:
         return []
+    # The embeddings join is dim-filtered (me.dim = ? below) and the query is
+    # packed at its own length, so a wrong-dim query simply matches no stored
+    # rows rather than crashing. Log it for visibility (a mismatch means a
+    # misconfigured EMBED_DIM or a non-proper query embedder) but don't hard-fail.
+    if len(q_vec) != config.EMBED_DIM:
+        logger.debug("Query embedding dim %d != EMBED_DIM %d; semantic matches "
+                     "will be empty unless the store also uses dim %d.",
+                     len(q_vec), config.EMBED_DIM, len(q_vec))
 
     extra_columns = list(extra_columns or [])
     _BASE_COLS = ["id", "content", "title", "type", "importance"]
@@ -1131,6 +1139,19 @@ async def memory_search_scored_impl(
         raise ValueError(
             f"vector_kind_strategy must be 'default' or 'max', got {vector_kind_strategy!r}"
         )
+
+    # Identity filter: only compare vectors from the proper embedder. A row whose
+    # embed_model isn't a compatible identity, or whose dim differs, is in a
+    # different (incomparable) vector space — and a wrong-dim blob would break the
+    # cosine pack. Restrict the embeddings join to the proper identity.
+    from memory.embed import _compatible_model_names
+    _compat = sorted(_compatible_model_names())
+    if _compat:
+        where_clauses.append(
+            "me.embed_model IN (%s)" % ",".join("?" for _ in _compat))
+        params.extend(_compat)
+    where_clauses.append("me.dim = ?")
+    params.append(config.EMBED_DIM)
 
     where_sql = " AND ".join(where_clauses)
 
