@@ -90,15 +90,23 @@ async def test_cosine_threshold_resolution_tuning(monkeypatch, tmp_path):
     async def stub_embed(text: str):
         return embed_map.get(text, ([0.0, 1.0], "stub"))
 
-    # _resolve_entity_async embeds via memory.embed._embed_canonical_cached,
-    # which calls the BARE name `_embed` resolved in memory.embed's own globals
-    # (i.e. memory.embed._embed) — NOT memory_core._embed. Patching only the
-    # memory_core re-export left the real path calling the actual embedder, which
-    # returns None in CI (no backend) -> no cosine -> no merge -> the test failed
-    # there while passing locally (warm cache / live embedder). Patch the embed
-    # module directly and clear the name-embedding cache so the stub is always hit.
+    # _resolve_entity_async (tier-3 cosine) gets every name vector — the query
+    # AND each candidate — through `_embed_canonical_cached`. Patch THAT, not the
+    # lower-level `_embed`: the cached helper short-circuits on
+    # _ENTITY_NAME_EMBED_CACHE and on the migration-032 entity_embeddings DB store
+    # (a candidate vector written at _create_entity time), so a real (null-in-CI)
+    # embedder could still leak in via those paths. `entity.py` binds the name at
+    # import (`from .embed import _embed_canonical_cached`), so patch its OWN
+    # namespace (where the resolver looks it up), not just memory.embed's.
+    # Returns list[float] | None (not the (vec, model) tuple `_embed` returns).
+    async def stub_canonical(name: str):
+        vec, _model = await stub_embed(name)
+        return vec
+
     import memory.embed as me_embed
-    monkeypatch.setattr(me_embed, "_embed", stub_embed)
+    monkeypatch.setattr(me, "_embed_canonical_cached", stub_canonical)
+    monkeypatch.setattr(me_embed, "_embed_canonical_cached", stub_canonical)
+    monkeypatch.setattr(me_embed, "_embed", stub_embed)  # belt-and-suspenders
     me_embed._ENTITY_NAME_EMBED_CACHE.clear()
 
     # 1. With a high cosine threshold (e.g. 0.95), they should NOT merge (0.90 < 0.95)
