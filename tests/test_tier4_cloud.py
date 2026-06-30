@@ -103,11 +103,25 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
 
     client_mock = MagicMock()
     client_mock.post = mock_post
-    monkeypatch.setattr("memory.embed._get_embed_client", lambda: client_mock)
+    get_client_calls = []
+
+    def _fake_get_client():
+        get_client_calls.append(1)
+        return client_mock
+    monkeypatch.setattr("memory.embed._get_embed_client", _fake_get_client)
+    # Also neutralize the process-wide cached real client so nothing can reuse a
+    # stale loop-bound AsyncClient that bypasses the patched getter.
+    import memory.embed as _me
+    monkeypatch.setattr(_me, "_EMBED_CLIENT", None, raising=False)
 
     # Let's request an embedding with sensitive data
     vec, model = await _embed("My secret key is sk-proj-12345678901234567890 and email is test@domain.com")
 
+    # DIAGNOSTIC: surface whether the patched getter was actually used in CI.
+    assert get_client_calls, (
+        "memory.embed._get_embed_client was never called via the patched name — "
+        "tier 4 reached a real client some other way"
+    )
     assert vec == [0.1, 0.2, 0.3, 0.4]
     assert len(posted_payloads) == 1
     # Verify PII was redacted!
