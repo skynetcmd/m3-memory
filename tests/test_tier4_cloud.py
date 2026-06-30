@@ -68,6 +68,14 @@ async def test_tier4_fallback_triggered_with_redaction(monkeypatch):
 
     # Mock embedded and CPU fallback to fail
     monkeypatch.setattr("memory.embed._get_embedded_embedder", lambda: None)
+    # Disable the embed circuit breakers (mirrors test_tier4_fallback_skipped).
+    # Without this, the cascade's breaker logic still probes the real local HTTP
+    # tier (127.0.0.1:8082) before honoring the mocked client, so in a backend-
+    # less env (CI) tier 2 raises a live EmbedFallbackError instead of falling
+    # straight through to the mocked cloud client — the test then never reaches
+    # tier 4 and fails. Zeroing the thresholds forces the deterministic path.
+    monkeypatch.setattr(config, "EMBED_BREAKER_CPU_FALLBACK_THRESHOLD", 0)
+    monkeypatch.setattr(config, "EMBED_BREAKER_PRIMARY_THRESHOLD", 0)
 
     # Mock best LLM failover to fail
     async def mock_get_best_embed(*args, **kwargs):
