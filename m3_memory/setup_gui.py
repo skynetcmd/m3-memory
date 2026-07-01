@@ -22,6 +22,7 @@ Design constraints (DESIGN_PHILOSOPHIES):
 """
 from __future__ import annotations
 
+import platform
 import queue
 import subprocess
 import sys
@@ -178,6 +179,31 @@ _TOOLTIPS = {
                    "housekeeping that avoids stale-bytecode surprises after upgrade.",
 }
 
+
+def _apply_platform_tooltips() -> None:
+    """Rewrite the embedder tooltips to name THIS platform's real acceleration
+    back-end and source-build prerequisites. The native embedder is a compiled
+    wheel whose accelerator differs per OS (Metal on Apple Silicon, CUDA/Vulkan
+    on Windows/Linux); saying the true thing for the running machine beats a
+    vague generic (DESIGN_PHILOSOPHIES §3 never-silent, §5 effectiveness).
+    Runs at import; a no-op on platforms without a specific note."""
+    if sys.platform == "darwin":
+        apple_silicon = platform.machine() == "arm64"
+        accel = ("Metal on Apple Silicon (~10–50× faster embeds than the "
+                 "pure-Python path)" if apple_silicon
+                 else "CPU only — Intel Macs have no Metal wheel")
+        _TOOLTIPS["no_native_wheel"] = (
+            "Skip the fast in-process Rust embedder and use the pure-Python "
+            f"path. On this Mac the native wheel runs on {accel}. Leave "
+            "unchecked unless the native wheel won't install.")
+        _TOOLTIPS["allow_native_source_build"] = (
+            "If no prebuilt native wheel matches this macOS + Python, compile "
+            "it from source. Needs the Xcode Command Line Tools "
+            "(xcode-select --install) plus cmake; takes several minutes.")
+
+
+_apply_platform_tooltips()
+
 # Leading status tokens the doctor output uses, mapped to a color-tag name. The
 # emoji forms come from --brief; the bracket forms from installer.doctor / the
 # full output. Checked longest-first so "❌" isn't shadowed, etc.
@@ -316,7 +342,9 @@ def run_gui() -> int:
     # un-closable during the run).
     btns = ttk.Frame(main)
     btns.pack(side="bottom", fill="x", pady=(8, 0))
-    run_btn = ttk.Button(btns, text="Accept and run setup ▶")
+    # default="active": on macOS Aqua this renders the pulsing blue default
+    # button and makes Return trigger it (HIG). Harmless on other platforms.
+    run_btn = ttk.Button(btns, text="Accept and run setup ▶", default="active")
     run_btn.pack(side="right")
     close_btn = ttk.Button(btns, text="Cancel", command=root.destroy)
     close_btn.pack(side="right", padx=(0, 8))
@@ -350,7 +378,10 @@ def run_gui() -> int:
         ttk.Radiobutton(cap_box, text=desc, value=val, variable=cap_var).pack(anchor="w")
 
     # ── Embedder (left) ───────────────────────────────────────────────────────
-    emb_box = ttk.LabelFrame(left, text="Embedder (native wheel ON by default)", padding=8)
+    emb_title = ("Embedder (native Metal wheel ON by default)"
+                 if sys.platform == "darwin" and platform.machine() == "arm64"
+                 else "Embedder (native wheel ON by default)")
+    emb_box = ttk.LabelFrame(left, text=emb_title, padding=8)
     emb_box.pack(fill="x", pady=4)
     state["no_native_wheel"] = tk.BooleanVar(value=False)  # default: keep native wheel
     _check_with_info(emb_box, "Skip native wheel (pure-Python embed path; slower)",
@@ -806,6 +837,20 @@ def run_gui() -> int:
         root.after(120, _pump)
 
     run_btn.configure(command=_on_run)
+
+    # macOS/HIG keyboard affordances: Return/Enter triggers the default action,
+    # Escape cancels. Guarded on running["v"] so a stray Return can't relaunch
+    # setup mid-run (the config window is withdrawn then anyway — belt + braces).
+    def _on_return(_e: "object" = None) -> None:
+        if not running["v"]:
+            _on_run()
+
+    def _on_escape(_e: "object" = None) -> None:
+        _root_close()
+
+    root.bind("<Return>", _on_return)
+    root.bind("<KP_Enter>", _on_return)
+    root.bind("<Escape>", _on_escape)
 
     root.mainloop()
     return exit_code["rc"]

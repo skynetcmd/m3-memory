@@ -8,8 +8,11 @@ must stay correct, and the selector's no-loop guard is the safety-critical part.
 from __future__ import annotations
 
 import argparse
+import sys
 
-from m3_memory.setup_gui import _build_flags, _doctor_line_status
+import pytest
+
+from m3_memory.setup_gui import _TOOLTIPS, _build_flags, _doctor_line_status
 from m3_memory.setup_wizard import _should_use_gui
 
 
@@ -121,3 +124,13 @@ def test_doctor_status_classifier_ignores_plain_lines():
     assert _doctor_line_status("embed-server: not installed") is None
     assert _doctor_line_status("agent MCP configs:") is None
     assert _doctor_line_status("") is None
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS embedder wording")
+def test_macos_embedder_tooltips_name_metal_and_xcode():
+    # On macOS the embedder tooltips must name the REAL back-end/prereqs so the
+    # user isn't guessing (DESIGN_PHILOSOPHIES §3, §5). _apply_platform_tooltips
+    # runs at import, so the module-level dict already reflects this platform.
+    assert "Metal" in _TOOLTIPS["no_native_wheel"]
+    assert "Xcode" in _TOOLTIPS["allow_native_source_build"]
+    assert "cmake" in _TOOLTIPS["allow_native_source_build"]

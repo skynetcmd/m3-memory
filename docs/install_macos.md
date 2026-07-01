@@ -52,6 +52,49 @@ m3 setup                               # one-command wizard
 
 ---
 
+## Graphical setup
+
+Prefer a window to the terminal prompts? `m3 setup --gui` runs the same wizard
+as a graphical window. It's a thin front-end: it collects your choices and runs
+`m3 setup --non-interactive` for you, so there's no separate engine — the
+terminal and graphical paths do exactly the same work.
+
+The config window has recommended defaults already selected (detected agents
+pre-checked, decoupled roots on, native wheel on). Hover the **ⓘ** icons for an
+explanation of each option, then press **Accept and run setup** (or just hit
+**Return** — it's the default button; **Esc** cancels).
+
+macOS specifics the window adapts to automatically:
+
+- **Apple Silicon:** the Embedder section is labeled *native Metal wheel* and its
+  ⓘ tooltip notes the native embedder runs on **Metal (~10–50× faster embeds)**.
+  Intel Macs show the CPU wording instead.
+- **Native source build** (if no prebuilt wheel matches your macOS + Python) needs
+  the **Xcode Command Line Tools** (`xcode-select --install`) plus `cmake` — the
+  tooltip says so up front.
+- There is **no "force-kill" option** as on Windows: macOS can reinstall over a
+  running `mcp-memory` (POSIX replaces the open file in place), so the step isn't
+  needed.
+
+When you accept, the config window hides and a log window shows install progress.
+If you enabled FIPS, a separate window streams the wolfSSL build; a **setup-complete**
+window then summarizes what was configured, and its **Verify with m3 doctor**
+button runs a friendly health check with color-coded status dots (green / amber /
+red). The layout matches the Windows screenshots in
+[install_windows.md](install_windows.md#graphical-setup).
+
+> **If the window doesn't open** ("tkinter is not available" / "no usable
+> display"), your Python lacks a usable Tk. The pipx default (Python 3.14) ships
+> Tk 9.0 and works out of the box; an older system Python may have the buggy
+> Tk 8.5. Fix with `brew install python-tk` (or use a python.org build), or just
+> run the terminal wizard — `m3 setup` — which needs no display.
+
+> The graphical path is optional; it still requires the m3 package to be
+> installed first (the one-line installer or Manual install above) — it's the
+> *configuration* front-end, not a bootstrapper.
+
+---
+
 ## Adding to an MCP client
 
 `m3 setup` wires every agent it detects on PATH. If you skipped the wizard or
