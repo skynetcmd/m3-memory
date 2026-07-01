@@ -234,6 +234,21 @@ Start-Process -WindowStyle Hidden -FilePath "m3-embed-server" `
   `m3 embedder install-gpu` first to install the `m3-embed-server` binary
   (prebuilt PyPI wheel, no Rust toolchain needed), then retry `m3 embedder install`.
 
+- **`m3 setup` / update aborts with `PermissionError [WinError 32] … agent_memory.db`**
+  — a running m3 server (the MCP bridge or `m3-embed-server`) is holding the
+  database open while the updater tries to replace the old repo folder that
+  contains it. Fixes: pass `--force-kill-mcp` (the GUI checks this by default),
+  or stop the server first, then re-run. Using **decoupled roots** (the default
+  in the wizard) keeps the DB outside the repo dir, avoiding this entirely.
+
+- **`m3 setup` reports a huge exit code like `3221225477` (0xC0000005) even
+  though the work succeeded** — this is an *intermittent* native access-violation
+  during process teardown (the GPU/embedder backend unloading), which overwrites
+  the exit code *after* setup has already finished its work. If the log shows the
+  agents wired and (for FIPS) `wolfSSL success`, the install did complete; re-run
+  `m3 doctor` to confirm health. This is a known teardown-crash issue under
+  investigation, separate from any setup step failing.
+
 - **PowerShell vs cmd** — both work; cmd needs the same Scripts dir on PATH.
 - **`sqlite3` not on PATH** — winget puts it under
   `%LOCALAPPDATA%\Programs\SQLite`. Add that to PATH for the CLI to be visible.

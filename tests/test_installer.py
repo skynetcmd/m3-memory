@@ -503,3 +503,63 @@ def test_download_tarball_rejects_non_github_url(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="untrusted URL"):
         installer._download_tarball("v1.2.3", tmp_path / "out")
+
+
+def test_robust_rmtree_deletes_readonly_tree(tmp_path):
+    """A read-only file (git packs its objects read-only) must NOT abort the
+    delete — this is the WinError-5 footgun that made a successful update report
+    as a failure. _robust_rmtree clears the read-only bit and removes the tree."""
+    import stat
+
+    from m3_memory.installer import _robust_rmtree
+
+    pack = tmp_path / "repo" / ".git" / "objects" / "pack"
+    pack.mkdir(parents=True)
+    idx = pack / "pack-abc.idx"
+    idx.write_text("x")
+    os.chmod(idx, stat.S_IREAD)  # read-only, like a real git pack
+
+    _robust_rmtree(tmp_path / "repo")
+    assert not (tmp_path / "repo").exists()
+
+
+def test_robust_rmtree_missing_path_is_noop(tmp_path):
+    from m3_memory.installer import _robust_rmtree
+    _robust_rmtree(tmp_path / "does-not-exist")  # must not raise
+
+
+def test_drain_wal_checkpoints_and_preserves(tmp_path):
+    """The updater must drain the WAL before snapshotting/deleting the old repo
+    (CLAUDE.md §10). _drain_wal folds the -wal back into the .db (shrinking it to
+    0 and dropping an open-file lock), and _safe_copy_sqlite still preserves all
+    rows."""
+    import sqlite3
+
+    from m3_memory.installer import _drain_wal, _safe_copy_sqlite
+
+    db = tmp_path / "t.db"
+    c = sqlite3.connect(str(db))
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("CREATE TABLE x(a)")
+    for i in range(500):
+        c.execute("INSERT INTO x VALUES(?)", (i,))
+    c.commit()
+    wal = tmp_path / "t.db-wal"
+    assert wal.exists() and wal.stat().st_size > 0  # pending pages in WAL
+    c.close()
+
+    _drain_wal(db)
+    assert (not wal.exists()) or wal.stat().st_size == 0  # WAL truncated
+
+    dst = tmp_path / "copy.db"
+    _safe_copy_sqlite(db, dst)
+    n = sqlite3.connect(str(dst)).execute("SELECT COUNT(*) FROM x").fetchone()[0]
+    assert n == 500  # nothing lost
+
+
+def test_drain_wal_safe_on_missing_and_nondb(tmp_path):
+    from m3_memory.installer import _drain_wal
+    _drain_wal(tmp_path / "missing.db")  # must not raise
+    junk = tmp_path / "junk.db"
+    junk.write_text("not a database")
+    _drain_wal(junk)  # must not raise
