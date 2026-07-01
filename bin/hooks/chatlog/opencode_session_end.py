@@ -131,9 +131,13 @@ def _extract_last_json_object(output: str):
 def run_ingest(py: str, ingest: Path, extra_args: list) -> tuple:
     """Run ingest, return (written, skipped, failed, error, returncode)."""
     try:
+        # CREATE_NO_WINDOW: this hook fires in the background at session end; a
+        # bare python.exe child would flash a console window. getattr keeps the
+        # attribute reference valid on non-Windows (0 = default, no-op).
+        _flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
         result = subprocess.run(
             [py, str(ingest)] + extra_args,
-            capture_output=True, text=True, timeout=60)
+            capture_output=True, text=True, timeout=60, creationflags=_flags)
         output = result.stdout.strip()
         result_json = _extract_last_json_object(output)
         if not result_json:
