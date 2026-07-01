@@ -23,6 +23,38 @@ forward-going only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Console windows no longer flash / steal focus on Windows.** Background work —
+  the cognitive loop's per-cycle telemetry and GPU probes (`nvidia-smi`,
+  PowerShell, WMIC), the thermal check, the chatlog hooks, and enrichment report
+  generation — spawned console-subsystem helpers without `CREATE_NO_WINDOW`, so a
+  window flashed and stole focus on every poll. All unattended spawns now run
+  windowless. An AST-based regression guard (`test_no_window_regression_guard.py`)
+  fails CI if a future unattended spawn omits the flag, so this can't come back.
+  Interactive tools (setup wizard, dashboard) still show their window by design.
+- **Status line no longer flashes.** The Windows status-line command spawned
+  `whoami`, `hostname -s`, and `git` per refresh; these are now windowless (and
+  `whoami`/`hostname` are avoided entirely via env / `socket.gethostname()`,
+  which also fixes a crash on Windows where `hostname -s` is unsupported).
+
+### Changed
+
+- **Background GPU bursts are short on interactive machines.** The cognitive
+  loop's heavy local-LLM passes now process one item at a time and re-check the
+  governor between items, so background enrichment no longer monopolizes the GPU
+  for minutes; the embed sweep gained a per-run time budget.
+- **Fairer pass scheduling.** The loop rotates which maintenance pass leads each
+  cycle (round-robin) instead of a fixed priority order, so an always-backlogged
+  pass can't starve the others; when the host is busy it runs a single pass per
+  cycle to stay out of the user's way.
+- **Self-healing background loop (Windows).** The cognitive-loop scheduled task is
+  registered from a Task Scheduler XML definition with a 30-minute self-heal
+  repetition and boot+logon triggers, so a dead loop revives without a reboot;
+  the PowerShell dependency in the installer was removed. New
+  `install_schedules.py --verify` checks the live job matches the spec
+  cross-platform (Windows task / macOS launchd / Linux systemd).
+
 ### Web Diagnostics Portal (planned)
 
 Work-in-progress; not yet released. Tracking under `bin/dashboard_server.py`.

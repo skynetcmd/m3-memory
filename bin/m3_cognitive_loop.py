@@ -174,6 +174,29 @@ def _pace_for_pass(pacing_cpu_ram: dict, pacing_full: dict, uses_local_gpu: bool
     return pacing_cpu_ram
 
 
+def _select_pass_order(passes: list, cycle: int, active: bool) -> list:
+    """Round-robin + idle-aware pass selection for one cycle. Pure function so the
+    fairness policy is unit-testable in isolation from the async loop.
+
+    - ROUND-ROBIN (fairness): rotate the list by `cycle` so a different pass leads
+      each cycle. No pass is permanently first, so an always-backlogged upstream
+      pass (entity extraction) can't perpetually grab the local GPU before the
+      downstream passes get a turn.
+    - IDLE-AWARE INTENSITY (interactive UX): when `active` (governor THROTTLED — a
+      proxy for the user being busy, since this separate process can't read the
+      MCP interaction stamp), return only the rotated LEADER so exactly one pass
+      runs this cycle, minimising GPU contention. When idle, return every pass to
+      drain the backlog.
+
+    `cycle` may grow unbounded; the modulo keeps rotation stable. Empty `passes`
+    returns empty (no crash)."""
+    n = len(passes)
+    if n == 0:
+        return []
+    order = [passes[(i + cycle) % n] for i in range(n)]
+    return order[:1] if active else order
+
+
 _PROFILE_LOCAL_CACHE: dict[str, bool] = {}
 
 
@@ -453,6 +476,11 @@ async def main_loop(args):
     # through a full 50-item batch of LLM calls with no re-check. Restored to the
     # full value once load clears.
     _full_limit = args.limit_per_pass
+    # Round-robin cursor: which pass leads each cycle. Rotating the start avoids
+    # the fixed-priority starvation where entity extraction — always backlogged —
+    # would perpetually run first and grab the local GPU before enrich/consolidate
+    # ever get a turn under contention. Each pass takes the lead 1-in-N cycles.
+    _cycle = 0
     while not _STOP_EVENT.is_set():
         # ── Adaptive Governor Gating (per-resource, per-pass) ──────────────────
         # Each resource gates the work that consumes it: CPU/RAM pressure gates
@@ -505,31 +533,36 @@ async def main_loop(args):
 
         start_time = time.monotonic()
 
-        if not args.skip_entities:
-            pace = _pace_for_pass(pacing_cpu_ram, pacing_full, entity_local)
-            if _run_gate(pace):
-                args.limit_per_pass = _effective_limit(pace)
-                await run_entity_pass(args)
-            if _STOP_EVENT.is_set(): break
+        # The passes as a rotatable list. `gpu` marks passes that run on the
+        # local GPU (so GPU load gates them); chatlog-prune is pure SQL. `sets_limit`
+        # marks the LLM passes whose batch size we shrink under throttle.
+        passes = [
+            {"name": "entities",   "skip": args.skip_entities,      "gpu": entity_local,      "sets_limit": True,  "run": run_entity_pass},
+            {"name": "enrich",     "skip": args.skip_enrich,        "gpu": enrich_local,      "sets_limit": True,  "run": run_enrich_pass},
+            {"name": "consolidate","skip": args.skip_consolidate,   "gpu": consolidate_local, "sets_limit": False, "run": run_consolidate_pass},
+            {"name": "prune",      "skip": args.skip_chatlog_prune, "gpu": None,              "sets_limit": False, "run": run_chatlog_prune_pass},
+        ]
+        # Round-robin order + idle-aware intensity (see _select_pass_order). When
+        # the governor is THROTTLED we treat the host as user-active and run only
+        # the rotated leader this cycle; otherwise every pass runs. Rotation makes
+        # sure the leader differs each cycle so no pass is starved.
+        active = pacing_full.get("background") == "THROTTLED"
+        order = _select_pass_order(passes, _cycle, active)
+        _cycle += 1
 
-        if not args.skip_enrich:
-            pace = _pace_for_pass(pacing_cpu_ram, pacing_full, enrich_local)
+        for p in order:
+            if p["skip"]:
+                continue
+            # prune is pure SQL → gated only by CPU/RAM; everything else uses the
+            # per-pass verdict (GPU folded in only for local-GPU passes).
+            pace = pacing_cpu_ram if p["gpu"] is None else _pace_for_pass(
+                pacing_cpu_ram, pacing_full, p["gpu"])
             if _run_gate(pace):
-                args.limit_per_pass = _effective_limit(pace)
-                await run_enrich_pass(args)
-            if _STOP_EVENT.is_set(): break
-
-        if not args.skip_consolidate:
-            pace = _pace_for_pass(pacing_cpu_ram, pacing_full, consolidate_local)
-            if _run_gate(pace):
-                await run_consolidate_pass(args)
-            if _STOP_EVENT.is_set(): break
-
-        # chatlog-prune is pure SQL: gated only by CPU/RAM, never GPU.
-        if not args.skip_chatlog_prune:
-            if _run_gate(pacing_cpu_ram):
-                await run_chatlog_prune_pass(args)
-            if _STOP_EVENT.is_set(): break
+                if p["sets_limit"]:
+                    args.limit_per_pass = _effective_limit(pace)
+                await p["run"](args)
+            if _STOP_EVENT.is_set():
+                break
 
         args.limit_per_pass = _full_limit  # restore for the next cycle's defaults
 
