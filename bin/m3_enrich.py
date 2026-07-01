@@ -1405,7 +1405,11 @@ async def _main_async(args) -> int:
             first_db = next(iter(db_targets), None)
             if first_db:
                 cmd.extend(["--db", str(first_db[1])])
-            _sp.run(cmd, check=False)
+            # CREATE_NO_WINDOW: enrichment runs unattended (ObservationDrain task);
+            # a bare python.exe child would flash a console window. getattr keeps
+            # the reference valid on non-Windows (0 = default, no-op).
+            _nw_flags = getattr(_sp, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+            _sp.run(cmd, check=False, creationflags=_nw_flags)
         except Exception as e:
             print(f"[m3-enrich] (report generation failed: {type(e).__name__}: {e})", flush=True)
     return 0
