@@ -605,6 +605,107 @@ def remove_windows_tasks(selector: str | None, m3_memory_root: str):
         else:
             _safe_print(f"{WARN} Could not remove {task['name']} (may not exist): {r.stderr.strip()}")
 
+def _verify_windows_task(name: str) -> bool:
+    """Read the registered Windows task's XML and confirm the properties the
+    installer set actually took (self-heal Repetition where expected,
+    MultipleInstances=IgnoreNew). Cross-checks the LIVE task, not the spec, so it
+    catches a task that was created but silently lost a setting. Returns True on
+    match. Never raises — a missing task is a clean False."""
+    r = subprocess.run(
+        ["schtasks", "/Query", "/TN", name, "/XML", "ONE"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0 or not r.stdout.strip():
+        _safe_print(f"{FAIL} {name}: not registered ({(r.stderr or '').strip() or 'no such task'})")
+        return False
+
+    xml = r.stdout
+    ok = True
+    # MultipleInstances=IgnoreNew — guards against the loop stacking copies.
+    if "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" not in xml:
+        _safe_print(f"{WARN} {name}: MultipleInstancesPolicy is not IgnoreNew")
+        ok = False
+    # Self-heal Repetition — only the tasks in _SELF_HEAL_TASKS must have it.
+    expected_rep = _SELF_HEAL_TASKS.get(name)
+    if expected_rep:
+        if f"<Interval>{expected_rep}</Interval>" in xml:
+            _safe_print(f"{OK} {name}: self-heal Repetition {expected_rep} present")
+        else:
+            _safe_print(f"{FAIL} {name}: expected self-heal Repetition {expected_rep} is MISSING")
+            ok = False
+    if ok:
+        _safe_print(f"{OK} {name}: registered and matches spec")
+    return ok
+
+
+def _verify_unix_cognitive_loop() -> bool:
+    """Confirm the launchd agent (macOS) / systemd --user unit (Linux) for the
+    cognitive loop is installed AND loaded. KeepAlive/Restart is the Unix
+    self-heal analogue of the Windows repetition, so being *loaded* is the
+    property that matters. Never raises."""
+    osn = _os_name()
+    if osn == "Darwin":
+        dest = os.path.expanduser("~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist")
+        if not os.path.exists(dest):
+            _safe_print(f"{FAIL} launchd agent not installed: {dest}")
+            return False
+        loaded = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
+        if "com.m3memory.cognitiveloop" in (loaded.stdout or ""):
+            _safe_print(f"{OK} launchd agent installed and loaded: {dest}")
+            # KeepAlive is the self-heal knob — warn loudly if the plist lacks it.
+            try:
+                with open(dest, encoding="utf-8") as f:
+                    plist = f.read()
+                if "KeepAlive" not in plist:
+                    _safe_print(f"{WARN} plist has no <key>KeepAlive</key> — loop won't self-heal on crash")
+            except OSError:
+                pass
+            return True
+        _safe_print(f"{WARN} launchd agent installed but not loaded (run: launchctl load {dest})")
+        return False
+    if osn == "Linux":
+        unit = "m3-cognitive-loop.service"
+        dest = os.path.expanduser(f"~/.config/systemd/user/{unit}")
+        if not os.path.exists(dest):
+            _safe_print(f"{FAIL} systemd --user unit not installed: {dest}")
+            return False
+        active = subprocess.run(
+            ["systemctl", "--user", "is-active", unit], capture_output=True, text=True
+        )
+        state = (active.stdout or "").strip()
+        if state == "active":
+            _safe_print(f"{OK} systemd --user unit installed and active: {unit}")
+            return True
+        _safe_print(f"{WARN} systemd --user unit installed but {state or 'inactive'}")
+        return False
+    _safe_print(f"{WARN} verify: unsupported OS {osn}")
+    return False
+
+
+def verify_schedules(selector: str | None, m3_memory_root: str) -> bool:
+    """Verify the registered scheduled job(s) match what the installer intends.
+    Cross-platform: Windows tasks, macOS launchd, Linux systemd. Returns True if
+    everything verified. Replaces the old ad-hoc PowerShell verify helper."""
+    osn = _os_name()
+    if osn == "Windows":
+        tasks = _filter_tasks(get_schedule_specs(m3_memory_root), selector)
+        if not tasks:
+            _safe_print(f"{FAIL} No schedule matches selector={selector!r}.")
+            return False
+        # Check EVERY task (don't short-circuit) so all failures are reported at
+        # once, not just the first — a verify tool should surface the full picture.
+        results = [_verify_windows_task(t["name"]) for t in tasks]
+        return all(results)
+    # On Unix only the cognitive loop is a managed service; the rest are cron
+    # lines. Verify the loop (the one with the self-heal semantics).
+    if selector is None or selector.lower().replace("-", "").replace("_", "") in (
+        "cognitiveloop", "agentoscognitiveloop"
+    ):
+        return _verify_unix_cognitive_loop()
+    _safe_print(f"{WARN} verify on {osn} currently covers only the cognitive loop.")
+    return True
+
+
 def list_schedules(m3_memory_root):
     """List all configured schedules."""
     specs = get_schedule_specs(m3_memory_root)
@@ -633,11 +734,20 @@ def main():
                        help="Remove one schedule by name, or 'all'.")
     group.add_argument("--repair", action="store_true",
                        help="Re-install every configured schedule in place (alias for --add all).")
+    group.add_argument("--verify", metavar="NAME", nargs="?", const="all",
+                       help="Verify the registered job(s) match the spec (Windows task / "
+                            "macOS launchd / Linux systemd). NAME or 'all' (default). "
+                            "Exit code is non-zero if verification fails.")
     args = parser.parse_args()
 
     if args.list:
         list_schedules(m3_memory_root)
         return
+
+    if args.verify:
+        sel = None if args.verify == "all" else args.verify
+        ok = verify_schedules(sel, m3_memory_root)
+        sys.exit(0 if ok else 1)
 
     os_name = _os_name()
     _safe_print(f"M3 Memory: Detecting platform... {os_name}")
