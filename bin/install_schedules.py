@@ -433,6 +433,14 @@ def _render_trigger_xml(task: dict) -> str:
             "</CalendarTrigger>"
         )
     if sched == "ONSTART":
+        # Original schtasks-era task registered BOTH a boot trigger and a logon
+        # trigger. A BootTrigger fires before interactive logon, but the task
+        # runs as InteractiveToken (see _render_task_xml), so on a boot-before-
+        # logon machine the boot start can be deferred until the user logs in.
+        # Emitting ONLY a BootTrigger therefore risks the loop not starting until
+        # a real logon/reboot — a regression from the original. Keep both so the
+        # loop comes up at whichever event happens first. Both carry the same
+        # self-heal repetition (IgnoreNew makes the duplicate a harmless no-op).
         rep = _SELF_HEAL_TASKS.get(task["name"])
         rep_xml = _xml_repetition(rep) if rep else ""
         return (
@@ -440,6 +448,10 @@ def _render_trigger_xml(task: dict) -> str:
             "<Enabled>true</Enabled>"
             f"{rep_xml}"
             "</BootTrigger>"
+            "<LogonTrigger>"
+            "<Enabled>true</Enabled>"
+            f"{rep_xml}"
+            "</LogonTrigger>"
         )
     raise ValueError(f"Unsupported schedule for XML rendering: {sched!r}")
 
