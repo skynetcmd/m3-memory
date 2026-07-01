@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import socket
 import sqlite3
 import subprocess
@@ -101,6 +102,8 @@ def _git_sha() -> str:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=2,
+            # git is a console app on Windows — flash-free background call.
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
         if out.returncode == 0:
             return out.stdout.strip()

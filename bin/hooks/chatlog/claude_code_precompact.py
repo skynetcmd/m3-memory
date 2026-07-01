@@ -155,9 +155,12 @@ def _extract_last_json_object(output: str):
 def run_ingest(py: str, ingest: Path, extra_args: list) -> tuple:
     """Run ingest, return (written, skipped, failed, error, returncode)."""
     try:
+        # CREATE_NO_WINDOW: this hook fires in the background per compaction; a
+        # bare python.exe child would flash a console window. No-op off Windows.
+        _nw = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
         result = subprocess.run(
             [py, str(ingest)] + extra_args,
-            capture_output=True, text=True, timeout=60)
+            capture_output=True, text=True, timeout=60, **_nw)
         output = result.stdout.strip()
         # ingest emits PRETTY-PRINTED (multi-line) JSON after its log lines, e.g.
         #   {\n  "written": 9,\n  ...\n}

@@ -65,13 +65,23 @@ _gpu_probe_cache: dict[str, Any] = {"ts": 0.0, "util": 0.0, "backend": None, "mi
 _GPU_PROBE_MAX_MISSES = 3
 
 
+def _no_window() -> dict:
+    """subprocess kwargs that suppress a console window on Windows (no-op off
+    Windows). These GPU/telemetry probes run on the per-cycle governor path;
+    without CREATE_NO_WINDOW, nvidia-smi / powershell / tasklist each FLASH a
+    console window and steal focus on every poll. Shared _task_runtime helper is
+    preferred; this local fallback avoids an import cycle in the hot path."""
+    import subprocess as _sp
+    return {"creationflags": _sp.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
 def _gpu_util_nvidia() -> float | None:
     """CUDA GPUs (any OS) via nvidia-smi. None = backend unavailable."""
     import subprocess
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=2.0,
+            capture_output=True, text=True, timeout=2.0, **_no_window(),
         )
     except (FileNotFoundError, OSError):
         return None
@@ -97,7 +107,7 @@ def _gpu_util_windows_counter() -> float | None:
         )
         out = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            capture_output=True, text=True, timeout=4.0,
+            capture_output=True, text=True, timeout=4.0, **_no_window(),
         )
     except (FileNotFoundError, OSError):
         return None
@@ -482,7 +492,7 @@ def _pid_alive(pid: int) -> bool:
         try:
             out = subprocess.run(
                 ["tasklist", "/fi", f"PID eq {pid}", "/nh"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, **_no_window(),
             )
             return str(pid) in (out.stdout or "")
         except (OSError, subprocess.SubprocessError):
