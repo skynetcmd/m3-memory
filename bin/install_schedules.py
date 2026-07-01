@@ -268,8 +268,13 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_ChatlogEmbedSweep",
+            # --batch 256 is efficient per-batch (embedding is cheap); --deadline
+            # 60 bounds one run's wall-clock so a large backlog drains across
+            # several scheduled runs instead of pinning the GPU in one long run
+            # on an interactive machine. --max-per-run still caps total rows.
             "args": [_script("chatlog_embed_sweeper.py"),
                      "--batch", "256", "--max-per-run", "10000",
+                     "--deadline", "60",
                      "--log-file", _log("chatlog_embed_sweep.log")],
             "schedule": "MINUTE",
             "modifier": "30",
@@ -278,8 +283,12 @@ def get_schedule_specs(m3_memory_root):
         },
         {
             "name": "AgentOS_ObservationDrain",
+            # --drain-batch 200 was a heavy local-LLM burst (enrich_local_qwen):
+            # draining 200 queued observations in one run pins the GPU for a long
+            # stretch. Lowered to 8 so each 15-min run is a short burst; the queue
+            # still drains steadily across runs and interactive use isn't starved.
             "args": [_script("m3_enrich.py"),
-                     "--drain-queue", "--drain-batch", "200",
+                     "--drain-queue", "--drain-batch", "8",
                      "--profile", "enrich_local_qwen",
                      "--log-file", _log("observation_drain.log")],
             "schedule": "MINUTE",
