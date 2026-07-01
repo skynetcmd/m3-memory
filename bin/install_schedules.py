@@ -312,6 +312,185 @@ def _filter_tasks(tasks: list, selector: str | None) -> list:
     return matched
 
 
+# ── Windows Task Scheduler XML rendering ──────────────────────────────────────
+# schtasks.exe cannot express MultipleInstances, ExecutionTimeLimit, or trigger
+# Repetition from its CLI flags — the old code shelled out to PowerShell after
+# /Create to patch those in. Task Scheduler's native format IS XML, and
+# `schtasks /Create /XML` accepts a full definition in one call, so we render the
+# spec to XML and drop the PowerShell dependency entirely. (macOS/Linux are
+# unaffected — they use crontab / launchd / systemd.)
+
+# Task Scheduler XML schema namespace (constant for all supported OS versions).
+_TASK_NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+
+
+def _xml_escape(text: str) -> str:
+    """Escape the five XML metacharacters for both element text and attribute
+    values. Deliberately not xml.sax.saxutils (Bandit B406 flags that module for
+    untrusted-XML *parsing*; we only *emit* XML) and not a heavy DOM builder —
+    this is the minimal correct escape for the trusted spec values we render."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&apos;")
+    )
+
+# Only the long-lived ONSTART cognitive loop needs a self-heal repetition: it is
+# a single continuous process, so if it dies it never restarts until the next
+# boot. The MINUTE/HOURLY/DAILY/WEEKLY/MONTHLY tasks already re-fire on their own
+# cadence. 30-minute repetition, no duration => repeat indefinitely. Safe because
+# every task sets MultipleInstances=IgnoreNew (a re-fire while alive is a no-op).
+_SELF_HEAL_TASKS = {"AgentOS_CognitiveLoop": "PT30M"}
+
+
+def _xml_repetition(interval_iso: str) -> str:
+    """A <Repetition> that repeats every interval_iso forever (no Duration)."""
+    return (
+        "<Repetition>"
+        f"<Interval>{interval_iso}</Interval>"
+        "<StopAtDurationEnd>false</StopAtDurationEnd>"
+        "</Repetition>"
+    )
+
+
+def _render_trigger_xml(task: dict) -> str:
+    """Map a spec's schedule/modifier/time to a Task Scheduler <Triggers> body.
+
+    Supported schedules mirror the schtasks /SC values used elsewhere:
+      MINUTE / HOURLY  -> TimeTrigger with a Repetition interval
+      DAILY            -> CalendarTrigger / ScheduleByDay
+      WEEKLY           -> CalendarTrigger / ScheduleByWeek (modifier = day-of-week)
+      MONTHLY          -> CalendarTrigger / ScheduleByMonth (modifier = day-of-month)
+      ONSTART          -> BootTrigger (+ self-heal Repetition for the loop)
+    """
+    sched = task["schedule"]
+    mod = task.get("modifier") or ""
+    hh, mm = (task.get("time") or "00:00").split(":")[:2]
+    # A fixed, past StartBoundary date keeps the XML deterministic (no clock read
+    # at install time); Task Scheduler computes the next fire from it. Time-of-day
+    # is what actually matters for the calendar/time triggers.
+    start = f"2020-01-01T{int(hh):02d}:{int(mm):02d}:00"
+
+    if sched == "MINUTE":
+        n = int(mod or "1")
+        return (
+            "<TimeTrigger>"
+            f"<StartBoundary>{start}</StartBoundary>"
+            "<Enabled>true</Enabled>"
+            f"{_xml_repetition(f'PT{n}M')}"
+            "</TimeTrigger>"
+        )
+    if sched == "HOURLY":
+        n = int(mod or "1")
+        return (
+            "<TimeTrigger>"
+            f"<StartBoundary>{start}</StartBoundary>"
+            "<Enabled>true</Enabled>"
+            f"{_xml_repetition(f'PT{n}H')}"
+            "</TimeTrigger>"
+        )
+    if sched == "DAILY":
+        return (
+            "<CalendarTrigger>"
+            f"<StartBoundary>{start}</StartBoundary>"
+            "<Enabled>true</Enabled>"
+            "<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>"
+            "</CalendarTrigger>"
+        )
+    if sched == "WEEKLY":
+        # schtasks uses 3-letter day tokens (MON/TUE/.../FRI); XML wants element
+        # names (<Monday/> ...). Map, defaulting to Sunday if unrecognised.
+        days = {
+            "MON": "Monday", "TUE": "Tuesday", "WED": "Wednesday",
+            "THU": "Thursday", "FRI": "Friday", "SAT": "Saturday", "SUN": "Sunday",
+        }
+        day_el = days.get(mod.upper()[:3], "Sunday")
+        return (
+            "<CalendarTrigger>"
+            f"<StartBoundary>{start}</StartBoundary>"
+            "<Enabled>true</Enabled>"
+            "<ScheduleByWeek>"
+            f"<DaysOfWeek><{day_el}/></DaysOfWeek>"
+            "<WeeksInterval>1</WeeksInterval>"
+            "</ScheduleByWeek>"
+            "</CalendarTrigger>"
+        )
+    if sched == "MONTHLY":
+        dom = int(mod or "1")
+        return (
+            "<CalendarTrigger>"
+            f"<StartBoundary>{start}</StartBoundary>"
+            "<Enabled>true</Enabled>"
+            "<ScheduleByMonth>"
+            f"<DaysOfMonth><Day>{dom}</Day></DaysOfMonth>"
+            "<Months>"
+            "<January/><February/><March/><April/><May/><June/><July/>"
+            "<August/><September/><October/><November/><December/>"
+            "</Months>"
+            "</ScheduleByMonth>"
+            "</CalendarTrigger>"
+        )
+    if sched == "ONSTART":
+        rep = _SELF_HEAL_TASKS.get(task["name"])
+        rep_xml = _xml_repetition(rep) if rep else ""
+        return (
+            "<BootTrigger>"
+            "<Enabled>true</Enabled>"
+            f"{rep_xml}"
+            "</BootTrigger>"
+        )
+    raise ValueError(f"Unsupported schedule for XML rendering: {sched!r}")
+
+
+def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
+    """Render one spec to a complete Task Scheduler XML document string."""
+    # <Arguments> is one space-joined string; each path is quoted so paths with
+    # spaces survive, mirroring the previous /TR construction.
+    arguments = " ".join(f'"{part}"' for part in task["args"])
+    triggers = _render_trigger_xml(task)
+    esc = _xml_escape
+    return (
+        '<?xml version="1.0" encoding="UTF-16"?>\n'
+        f'<Task version="1.2" xmlns="{_TASK_NS}">'
+        "<RegistrationInfo>"
+        f"<Description>{esc(task['description'])}</Description>"
+        "</RegistrationInfo>"
+        f"<Triggers>{triggers}</Triggers>"
+        "<Principals>"
+        '<Principal id="Author">'
+        f"<UserId>{esc(user_id)}</UserId>"
+        # LeastPrivilege == run as the logged-in user, non-elevated (matches the
+        # prior schtasks default; no elevation is needed by any pass).
+        "<RunLevel>LeastPrivilege</RunLevel>"
+        "<LogonType>InteractiveToken</LogonType>"
+        "</Principal>"
+        "</Principals>"
+        "<Settings>"
+        # IgnoreNew: never stack a second copy while one runs — a slow/stuck run
+        # must not over-dispatch the local LLM, and it makes the self-heal
+        # repetition a no-op when the task is already alive.
+        "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+        "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
+        "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
+        "<AllowStartOnDemand>true</AllowStartOnDemand>"
+        "<Enabled>true</Enabled>"
+        "<StartWhenAvailable>true</StartWhenAvailable>"
+        # ExecutionTimeLimit caps a hung run. The continuous loop must never be
+        # killed mid-flight, so it gets PT0S (no limit); others get PT1H.
+        f"<ExecutionTimeLimit>{'PT0S' if task['schedule'] == 'ONSTART' else 'PT1H'}</ExecutionTimeLimit>"
+        "</Settings>"
+        '<Actions Context="Author">'
+        "<Exec>"
+        f"<Command>{esc(python_exe)}</Command>"
+        f"<Arguments>{esc(arguments)}</Arguments>"
+        "</Exec>"
+        "</Actions>"
+        "</Task>"
+    )
+
+
 def install_windows_tasks(m3_memory_root, selector: str | None = None):
     # pythonw.exe (GUI subsystem) — Task Scheduler draws NO console window for
     # it. python.exe (console subsystem) flashes a window every fire even
@@ -329,64 +508,65 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
         _safe_print(f"{FAIL} No schedule matches selector={selector!r}. Try --list to see all.")
         return
 
+    # The task owner (Principal/UserId). Prefer the domain\user form Task
+    # Scheduler records; fall back to the bare username. Never empty — an empty
+    # UserId makes schtasks reject the XML.
+    user_id = (
+        f"{os.environ['USERDOMAIN']}\\{os.environ['USERNAME']}"
+        if os.environ.get("USERDOMAIN") and os.environ.get("USERNAME")
+        else os.environ.get("USERNAME", "")
+    )
+
     success = True
     for task in tasks:
         subprocess.run(["schtasks", "/Delete", "/TN", task["name"], "/F"], capture_output=True)
-        # Task action is python.exe invoked directly — NO cmd.exe wrapper.
-        # The old cmd.exe wrapper existed only to evaluate the `>>` redirect,
-        # and being a console app it drew a focus-stealing window every fire.
-        # Entrypoints now self-log via _task_runtime, so no redirect is needed.
-        # /TR is a single string: each path is quoted individually so paths
-        # with spaces survive. (The historical ERROR_FILE_NOT_FOUND came from
-        # quoting the *whole* command including `>>`, not from quoting argv.)
-        tr = " ".join(f'"{part}"' for part in [python_exe, *task["args"]])
-        schtasks_cmd = [
-            "schtasks", "/Create", "/TN", task["name"],
-            "/TR", tr,
-            "/SC", task["schedule"],
-            "/F",
-        ]
-        # /ST (start time) and /MO (interval modifier) are NOT valid for
-        # event-based schedules — schtasks rejects them for ONSTART/ONLOGON/
-        # ONIDLE/ONEVENT. Only pass them for time/interval-based schedules.
-        event_based = task["schedule"] in ("ONSTART", "ONLOGON", "ONIDLE", "ONEVENT")
-        if not event_based:
-            schtasks_cmd.extend(["/ST", task["time"]])
-        if task["modifier"] and not event_based:
-            # /D for WEEKLY+MONTHLY day-of-week, /MO for interval-based (MINUTE/HOURLY).
-            flag = "/D" if task["schedule"] in ("WEEKLY", "MONTHLY") else "/MO"
-            schtasks_cmd.extend([flag, task["modifier"]])
+        # Register from a full Task Scheduler XML definition. Unlike the CLI
+        # flags, XML can express MultipleInstances=IgnoreNew, ExecutionTimeLimit,
+        # and trigger Repetition in ONE call — so the PowerShell post-hardening
+        # step (and its dependency) is gone. schtasks /Create /XML requires the
+        # file to be UTF-16; Python's "utf-16" codec writes the BOM it needs.
+        try:
+            xml_doc = _render_task_xml(task, python_exe, user_id)
+        except ValueError as e:
+            # An unsupported schedule is a contract violation, not an edge case
+            # (§3 fail-loud): surface it, skip the task, keep going for the rest.
+            _safe_print(f"{FAIL} Cannot render task {task['name']}: {e}")
+            success = False
+            continue
 
-        result = subprocess.run(schtasks_cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            _safe_print(f"{OK} Created Windows Task: {task['name']}")
-            # Harden: schtasks /Create can't set these, so use PowerShell.
-            # MultipleInstances=IgnoreNew — never start a second copy while one
-            # is running, so a stuck/slow run doesn't STACK every interval and
-            # over-dispatch the local LLM. ExecutionTimeLimit caps a hung run.
-            # Best-effort: a failure here must not fail the install.
-            ps = (
-                f"$t = Get-ScheduledTask -TaskName '{task['name']}' "
-                f"-ErrorAction SilentlyContinue; if ($t) {{ $s = $t.Settings; "
-                f"$s.MultipleInstances = 'IgnoreNew'; "
-                f"$s.ExecutionTimeLimit = 'PT1H'; "
-                f"Set-ScheduledTask -TaskName '{task['name']}' -Settings $s "
-                f"| Out-Null }}"
+        xml_path = None
+        try:
+            fd, xml_path = tempfile.mkstemp(suffix=".xml", prefix=f"m3_{task['name']}_")
+            with os.fdopen(fd, "w", encoding="utf-16") as fh:
+                fh.write(xml_doc)
+            result = subprocess.run(
+                ["schtasks", "/Create", "/TN", task["name"], "/XML", xml_path, "/F"],
+                capture_output=True, text=True,
             )
-            try:
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                    capture_output=True, text=True, timeout=20,
-                )
-            except Exception:
-                pass  # hardening is best-effort; the task still works without it
+        finally:
+            # Always clean up the temp file — no orphaned artifacts (§14).
+            if xml_path and os.path.exists(xml_path):
+                try:
+                    os.unlink(xml_path)
+                except OSError:
+                    pass
+
+        if result.returncode == 0:
+            note = " (+30-min self-heal repetition)" if task["name"] in _SELF_HEAL_TASKS else ""
+            _safe_print(f"{OK} Created Windows Task: {task['name']}{note}")
         else:
-            _safe_print(f"{FAIL} Failed to create task {task['name']}: {result.stderr.strip()}")
+            # Fail loud (§3): print the real schtasks error, don't swallow it.
+            _safe_print(
+                f"{FAIL} Failed to create task {task['name']}: "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
             success = False
 
     if success:
         _safe_print(f"{OK} Finished installing {len(tasks)} Windows scheduled task(s).")
         _safe_print(f"   Logs available in: {log_dir}")
+    else:
+        _safe_print(f"{WARN} One or more Windows tasks failed to install (see above).")
 
 
 def remove_windows_tasks(selector: str | None, m3_memory_root: str):

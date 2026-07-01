@@ -673,8 +673,8 @@ async def test_resolution_cosine_stores_and_reuses_candidate_vectors(monkeypatch
     actually calls) and clears the name-embed cache so the stub is always hit —
     see test_entity_resolution_tuning.py for why memory_core._embed isn't enough.
     """
-    import memory.entity as me
     import memory.embed as me_embed
+    import memory.entity as me
 
     db_path = tmp_path / "test.db"
     _create_entity_graph_schema(db_path)
@@ -750,8 +750,8 @@ async def test_store_once_deferred_buffer_flush(monkeypatch, tmp_path):
     Verifies: nothing is written to entity_embeddings during the deferred phase,
     and the flush writes exactly the buffered rows.
     """
-    import memory.entity as me
     import memory.embed as me_embed
+    import memory.entity as me
 
     db_path = tmp_path / "test.db"
     _create_entity_graph_schema(db_path)

@@ -7,7 +7,6 @@ inherited stderr these interleave with the probe's stdout and scroll the
 readable summary off-screen. The probe sets GGML_LOG_LEVEL=4 (error-only) in the
 subprocess env to suppress them — while respecting an operator-set value.
 """
-import os
 import sys
 from pathlib import Path
 
