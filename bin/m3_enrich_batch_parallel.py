@@ -116,10 +116,20 @@ async def _launch_worker_with_offset(
     print(f"[parallel] worker {worker_idx+1}/{n_workers}: launching", flush=True)
     print(f"[parallel]   cmd: {' '.join(shlex.quote(c) for c in cmd)}", flush=True)
     print(f"[parallel]   log: {log_path}", flush=True)
+    # On Windows OR in CREATE_NO_WINDOW so the worker (a console-subsystem
+    # python.exe) does NOT flash a console window every launch — matching the
+    # windowless convention used by the other spawn sites (_task_runtime,
+    # m3_autoenrich, the cognitive-loop daemonize). Without it, each parallel
+    # worker pops a visible window on an interactive desktop.
+    _flags = 0
+    if os.name == "nt":
+        _flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+            subprocess, "CREATE_NO_WINDOW", 0
+        )
     p = subprocess.Popen(
         cmd, stdout=log_f, stderr=subprocess.STDOUT,
         cwd=str(REPO_ROOT),
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
+        creationflags=_flags,
     )
     print(f"[parallel] worker {worker_idx+1}/{n_workers}: pid={p.pid}", flush=True)
     return p
