@@ -300,8 +300,14 @@ def get_schedule_specs(m3_memory_root):
             "name": "AgentOS_CognitiveLoop",
             # --background re-execs under pythonw.exe (no console at all) on
             # Windows. macOS/Linux use a launchd/systemd service instead.
+            # --interval 60: on an idle host the loop re-ticks fast to drain a
+            # backlog (backlog-aware wait in the loop), so 60s is the ceiling
+            # between passes, not a fixed trickle. --limit-per-pass inherits the
+            # loop's default (2): a short GPU burst per pass, shrunk to 1 under
+            # THROTTLED load. (Previously --interval 300 with the old default-1
+            # ceiling drained ~1 item / 5 min even while idle.)
             "args": [_script("m3_cognitive_loop.py"),
-                     "--interval", "300", "--background",
+                     "--interval", "60", "--background",
                      "--log-file", _log("cognitive_loop.log")],
             "schedule": "ONSTART",
             "modifier": "",
