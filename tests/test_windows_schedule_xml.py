@@ -200,3 +200,84 @@ def test_all_five_xml_metacharacters_escaped():
                          desc="""& < > " '"""))
     desc = root.find(".//t:RegistrationInfo/t:Description", _NS)
     assert desc is not None and desc.text == """& < > " '"""
+
+
+# ── --verify mode (hermetic: mock schtasks /Query output) ─────────────────────
+
+class _FakeProc:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _query_xml(*, ignore_new=True, repetition="PT30M"):
+    """Minimal registered-task XML as schtasks /Query /XML ONE would emit."""
+    rep = f"<Repetition><Interval>{repetition}</Interval></Repetition>" if repetition else ""
+    multi = "IgnoreNew" if ignore_new else "Parallel"
+    return (
+        f'<?xml version="1.0"?><Task xmlns="{isch._TASK_NS}">'
+        f"<Triggers><BootTrigger>{rep}</BootTrigger></Triggers>"
+        f"<Settings><MultipleInstancesPolicy>{multi}</MultipleInstancesPolicy></Settings>"
+        "</Task>"
+    )
+
+
+def test_verify_windows_pass(monkeypatch):
+    # CognitiveLoop is a self-heal task: verify passes when the live XML carries
+    # the PT30M repetition + IgnoreNew.
+    monkeypatch.setattr(isch, "_os_name", lambda: "Windows")
+    monkeypatch.setattr(
+        isch.subprocess, "run",
+        lambda *a, **k: _FakeProc(0, _query_xml(ignore_new=True, repetition="PT30M")),
+    )
+    assert isch._verify_windows_task("AgentOS_CognitiveLoop") is True
+
+
+def test_verify_windows_missing_repetition_fails(monkeypatch):
+    monkeypatch.setattr(isch, "_os_name", lambda: "Windows")
+    monkeypatch.setattr(
+        isch.subprocess, "run",
+        lambda *a, **k: _FakeProc(0, _query_xml(ignore_new=True, repetition="")),
+    )
+    assert isch._verify_windows_task("AgentOS_CognitiveLoop") is False
+
+
+def test_verify_windows_not_registered_fails(monkeypatch):
+    monkeypatch.setattr(isch, "_os_name", lambda: "Windows")
+    monkeypatch.setattr(
+        isch.subprocess, "run",
+        lambda *a, **k: _FakeProc(1, "", "ERROR: The system cannot find the file specified."),
+    )
+    assert isch._verify_windows_task("AgentOS_CognitiveLoop") is False
+
+
+def test_verify_windows_non_selfheal_task_needs_no_repetition(monkeypatch):
+    # A task NOT in _SELF_HEAL_TASKS passes with IgnoreNew and no repetition.
+    monkeypatch.setattr(isch, "_os_name", lambda: "Windows")
+    monkeypatch.setattr(
+        isch.subprocess, "run",
+        lambda *a, **k: _FakeProc(0, _query_xml(ignore_new=True, repetition="")),
+    )
+    assert isch._verify_windows_task("AgentOS_SecretRotator") is True
+
+
+def test_verify_schedules_reports_all_not_short_circuit(monkeypatch, capsys):
+    # verify_schedules must check every task even after one fails.
+    monkeypatch.setattr(isch, "_os_name", lambda: "Windows")
+
+    def fake_run(cmd, *a, **k):
+        # Fail only WeeklyAuditor; everything else is a clean IgnoreNew task.
+        name = cmd[cmd.index("/TN") + 1] if "/TN" in cmd else ""
+        if "WeeklyAuditor" in name:
+            return _FakeProc(1, "", "not found")
+        rep = "PT30M" if name in isch._SELF_HEAL_TASKS else ""
+        return _FakeProc(0, _query_xml(ignore_new=True, repetition=rep))
+
+    monkeypatch.setattr(isch.subprocess, "run", fake_run)
+    root = os.path.dirname(_BIN)
+    ok = isch.verify_schedules(None, root)
+    out = capsys.readouterr().out
+    assert ok is False                          # one failure -> overall False
+    assert "WeeklyAuditor" in out               # the failure is reported
+    assert "CognitiveLoop" in out               # AND later tasks still checked
