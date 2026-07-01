@@ -67,6 +67,10 @@ def main() -> int:
         help="Skip the governor scheduled-task migration check.",
     )
     parser.add_argument(
+        "--skip-schedule", action="store_true",
+        help="Skip the dangling scheduled-task interpreter check.",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Show the full detail (DB-repair steps + each probe's expanded "
              "report + model-load logs). Default is a compact one-line-per-check "
@@ -137,6 +141,13 @@ def main() -> int:
         # supported state, so this never bumps the exit code — it nags and
         # prints the fix command when the governor should own scheduled work.
         governor_probe.run(brief=brief)
+
+    if not args.skip_schedule:
+        from doctor import schedule_probe
+        # Report-only: a task pointing at a deleted interpreter is a recoverable
+        # state (re-register via `m3 setup`), so this never bumps the exit code —
+        # it nags and prints the fix when a registered AgentOS_* task is dangling.
+        schedule_probe.run(brief=brief)
 
     # On a failure in brief mode, point the user at the full detail (§3: an
     # error should tell you how to see more, not dead-end).
