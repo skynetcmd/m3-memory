@@ -36,25 +36,39 @@ _EXPECTED = [
 ]
 
 
-def run() -> int:
-    """Report m3_core_rs presence and per-function availability. Always 0."""
-    print()
-    print("=== oxidation status (m3_core_rs native extension) ===")
+def run(brief: bool = False) -> int:
+    """Report m3_core_rs presence and per-function availability. Always 0.
+
+    brief=True emits a single line for `m3 doctor --brief`."""
+    def _b(line: str) -> None:  # brief-only one-liner
+        if brief:
+            print(line)
+
+    if not brief:
+        print()
+        print("=== oxidation status (m3_core_rs native extension) ===")
 
     try:
         from memory import config
     except Exception as e:  # noqa: BLE001 — probe must never crash the doctor
-        print(f"  could not import memory.config: {type(e).__name__}: {e}")
+        if brief:
+            _b("oxidation: unknown (memory.config not importable)")
+        else:
+            print(f"  could not import memory.config: {type(e).__name__}: {e}")
         return 0
 
     if getattr(config, "_OXIDATION_DISABLED", False):
-        print("  status   : disabled via M3_CORE_RS_DISABLE (pure-Python by choice)")
+        _b("oxidation: disabled (pure-Python by choice)")
+        if not brief:
+            print("  status   : disabled via M3_CORE_RS_DISABLE (pure-Python by choice)")
         return 0
 
     rs = config.m3_core_rs
     if rs is None:
-        print("  status   : not installed — pure-Python fallback (supported, slower)")
-        print("  hint     : `pip install m3-memory[oxidation]` for native speedups")
+        _b("⚠️  oxidation: not installed (pure-Python fallback, slower)")
+        if not brief:
+            print("  status   : not installed — pure-Python fallback (supported, slower)")
+            print("  hint     : `pip install m3-memory[oxidation]` for native speedups")
         return 0
 
     try:
@@ -62,11 +76,14 @@ def run() -> int:
         present = [n for n, _ in _EXPECTED if hasattr(rs, n)]
         missing = [(n, why) for n, why in _EXPECTED if not hasattr(rs, n)]
     except Exception as e:  # noqa: BLE001 — a hostile/broken extension object
-        print(f"  status   : installed but uninspectable: {type(e).__name__}: {e}")
+        _b("⚠️  oxidation: installed but uninspectable")
+        if not brief:
+            print(f"  status   : installed but uninspectable: {type(e).__name__}: {e}")
         return 0
 
-    print(f"  status   : installed (version {version})")
-    print(f"  functions: {len(present)}/{len(_EXPECTED)} expected native paths present")
+    if not brief:
+        print(f"  status   : installed (version {version})")
+        print(f"  functions: {len(present)}/{len(_EXPECTED)} expected native paths present")
 
     # Version staleness — independent of function presence. A wheel can expose
     # every expected function yet still be an OLD build (carrying bugs already
@@ -82,16 +99,24 @@ def run() -> int:
         if version and version != "unknown":
             if _parse_version(version) < _parse_version(M3_CORE_RS_VERSION):
                 version_stale = True
-                print(f"  version  : STALE — installed {version} < expected "
-                      f"{M3_CORE_RS_VERSION}")
-        else:
+                if not brief:
+                    print(f"  version  : STALE — installed {version} < expected "
+                          f"{M3_CORE_RS_VERSION}")
+        elif not brief:
             print("  version  : installed wheel does not report a version "
                   "(cannot confirm currency)")
     except Exception as e:  # noqa: BLE001 — probe must never crash the doctor
         logger.debug("version-staleness check skipped: %s", e)
 
     if not missing and not version_stale:
-        print("  result   : current — all expected native paths active")
+        _b(f"✅ oxidation: current ({len(present)}/{len(_EXPECTED)} native paths)")
+        if not brief:
+            print("  result   : current — all expected native paths active")
+        return 0
+
+    if brief:
+        print(f"⚠️  oxidation: STALE ({len(present)}/{len(_EXPECTED)} paths"
+              f"{', version behind' if version_stale else ''}) — reinstall")
         return 0
 
     # Present-but-stale: the wheel is old relative to the Python code's

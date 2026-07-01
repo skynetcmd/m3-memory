@@ -50,6 +50,12 @@ m3 setup
 > ```
 > Using pipx avoids this entirely — it handles PATH automatically.
 
+> **Prefer a graphical setup?** Run `m3 setup --gui` for a window with the same
+> questions (recommended defaults pre-selected), a live install log, and a
+> color-coded **Verify with m3 doctor** step. See
+> [install_windows.md → Graphical setup](install_windows.md#graphical-setup).
+> It still needs the prerequisites + package above first.
+
 `m3 setup` detects every agent on PATH, asks a handful of questions, and drives the rest end-to-end:
 
 - system payload

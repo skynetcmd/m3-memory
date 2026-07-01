@@ -1487,8 +1487,39 @@ def _os_name_for_summary() -> str:
     return "Linux"
 
 
+def _should_use_gui(args: argparse.Namespace) -> bool:
+    """Decide whether to launch the graphical setup. Rules (in order):
+      - never in --non-interactive (that IS the child the GUI spawns — prevents
+        an infinite GUI->child->GUI loop) or when --terminal is forced;
+      - --gui forces it (but gracefully falls back if no display);
+      - otherwise OFFER it only on an interactive TTY with a usable display;
+        default answer is the terminal wizard, so muscle memory / SSH / headless
+        are never surprised by a window.
+    """
+    if getattr(args, "non_interactive", False) or getattr(args, "terminal", False):
+        return False
+    try:
+        from m3_memory.setup_gui import gui_available
+    except Exception:
+        return False
+    ok, reason = gui_available()
+    if getattr(args, "gui", False):
+        if not ok:
+            _warn(f"--gui requested but unavailable ({reason}); using the terminal wizard.")
+        return ok
+    if not ok:
+        return False  # no display: silently use terminal (don't nag)
+    if not sys.stdin.isatty():
+        return False
+    return _ask_yes_no("  Configure with the graphical setup window?", default=False)
+
+
 def run_setup(args: argparse.Namespace) -> int:
     """Top-level entry point invoked by `m3 setup`."""
+    if _should_use_gui(args):
+        from m3_memory.setup_gui import run_gui
+        return run_gui()
+
     detected = _detect_agents()
     plan = _gather_plan(detected, args)
 
@@ -1579,6 +1610,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--non-interactive", action="store_true",
         help="Run unattended with flag-driven choices (used by install.sh/install.ps1).",
+    )
+    # Configuration-UX selector. Default: ask (TTY + display) else terminal.
+    # The GUI is a thin front-end that re-invokes `m3 setup --non-interactive`,
+    # so it never duplicates the engine. --terminal/--gui skip the prompt and
+    # are scriptable; --gui is a no-op (falls back to terminal) when no display.
+    parser.add_argument(
+        "--gui", action="store_true",
+        help="Use the graphical setup window (falls back to the terminal wizard "
+             "if no display / tkinter is unavailable).",
+    )
+    parser.add_argument(
+        "--terminal", action="store_true",
+        help="Force the terminal wizard, skipping the graphical-setup prompt.",
     )
     parser.add_argument(
         "--agents", default=None,

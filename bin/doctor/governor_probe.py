@@ -21,14 +21,16 @@ import sys
 logger = logging.getLogger("memory.doctor.governor_probe")
 
 
-def run() -> int:
+def run(brief: bool = False) -> int:
     """Report whether governor-eligible scheduled tasks are still installed.
 
     Always returns 0 (report-only). Prints a nag + fix command when legacy
-    schedules are found that the governor should own.
+    schedules are found that the governor should own. brief=True prints a
+    single line for `m3 doctor --brief`.
     """
-    print()
-    print("=== background governor (scheduled-task migration) ===")
+    if not brief:
+        print()
+        print("=== background governor (scheduled-task migration) ===")
 
     # bin/ is on sys.path when run via memory_doctor; be defensive anyway.
     bin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,16 +39,29 @@ def run() -> int:
     try:
         import governor_migration as gm
     except Exception as e:  # noqa: BLE001 — probe must never crash the doctor
-        print(f"  status   : could not load governor_migration: {type(e).__name__}: {e}")
+        if brief:
+            print("governor: unknown (migration module not loadable)")
+        else:
+            print(f"  status   : could not load governor_migration: {type(e).__name__}: {e}")
         return 0
 
     try:
         detected = gm.detect_scheduled_tasks()
     except Exception as e:  # noqa: BLE001
-        print(f"  status   : detection failed: {type(e).__name__}: {e}")
+        if brief:
+            print("governor: unknown (detection failed)")
+        else:
+            print(f"  status   : detection failed: {type(e).__name__}: {e}")
         return 0
 
     eligible = detected.get("eligible", [])
+
+    if brief:
+        if eligible:
+            print(f"⚠️  governor: NAG ({len(eligible)} legacy task(s); run `m3 governor migrate`)")
+        else:
+            print("✅ governor: OK (no legacy scheduled tasks)")
+        return 0
 
     if not eligible:
         print("  status   : OK — no governor-eligible cron/schtasks entries found.")

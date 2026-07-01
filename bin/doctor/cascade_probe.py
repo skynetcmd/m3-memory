@@ -18,29 +18,48 @@ import sys
 logger = logging.getLogger("memory.doctor.cascade_probe")
 
 
-def run() -> int:
+def run(brief: bool = False) -> int:
     """Run the embedding-cascade probe and print a human report.
 
     Returns 0 if summary is 'healthy' or 'degraded'; 1 if 'broken'.
     Returns 0 with a warning if the cascade module itself isn't
     importable — that's a deployment issue separate from cascade health
     and is best left to the operator to address via reinstall.
+
+    brief=True prints a single-line summary (for `m3 doctor --brief`)
+    from the SAME structured dict — no prose-parsing.
     """
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/..")
         from memory.doctor import memory_doctor_impl
     except Exception as e:
-        logger.warning(
-            f"cascade doctor unavailable (memory.doctor not importable): "
-            f"{type(e).__name__}: {e}"
-        )
+        if not brief:
+            logger.warning(
+                f"cascade doctor unavailable (memory.doctor not importable): "
+                f"{type(e).__name__}: {e}"
+            )
+        else:
+            print("embedding-cascade: unavailable (module not importable)")
         return 0
 
     try:
         out = asyncio.run(memory_doctor_impl())
     except Exception as e:
-        logger.error(f"cascade doctor crashed: {type(e).__name__}: {e}")
+        if brief:
+            print("embedding-cascade: ❌ probe crashed")
+        else:
+            logger.error(f"cascade doctor crashed: {type(e).__name__}: {e}")
         return 1
+
+    if brief:
+        summary = out.get("summary", "unknown")
+        t1 = out.get("tier_1", {}).get("status", "?")
+        t2 = out.get("tier_2", {}).get("status", "?")
+        rt = out.get("roundtrip", {})
+        glyph = "✅" if summary == "healthy" else "⚠️" if summary == "degraded" else "❌"
+        lat = f", {rt.get('latency_ms')}ms" if rt.get("latency_ms") is not None else ""
+        print(f"{glyph} embedding-cascade: {summary} (tier1 {t1}, tier2 {t2}{lat})")
+        return 0 if summary != "broken" else 1
 
     print()
     print("=== embedding-cascade health (memory_doctor) ===")

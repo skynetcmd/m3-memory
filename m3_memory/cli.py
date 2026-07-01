@@ -252,12 +252,21 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from m3_memory.installer import doctor
-    code = doctor(fix=getattr(args, "fix", False))
+    # Brief is the DEFAULT; --verbose opts into the full detail.
+    verbose = getattr(args, "verbose", False)
+    brief = not verbose
+    code = doctor(fix=getattr(args, "fix", False), brief=brief)
 
-    # Also run the project-specific doctor if payload is installed
+    # Also run the project-specific doctor if payload is installed. Forward
+    # --verbose so the payload probes match; it may already be in args.rest
+    # (parse_known_args), so only add it if absent.
     if _resolve_bin_script("memory_doctor.py"):
-        print("\n--- Project Payload Diagnostics ---")
-        return _run_bin_script("memory_doctor.py", args.rest)
+        rest = list(getattr(args, "rest", []) or [])
+        if verbose and "--verbose" not in rest:
+            rest.append("--verbose")
+        if verbose:
+            print("\n--- Project Payload Diagnostics ---")
+        return _run_bin_script("memory_doctor.py", rest)
 
     return code
 
@@ -929,6 +938,11 @@ Examples:
         "--fix", action="store_true",
         help="Repoint any agent MCP configs (Claude/Gemini/Antigravity/...) "
              "whose bridge/root paths are dead or moved, to the live install.",
+    )
+    p_doctor.add_argument(
+        "--verbose", action="store_true",
+        help="Show full detail (DB-repair steps, each probe's expanded report, "
+             "model-load logs). Default is a compact high-yield summary.",
     )
     p_doctor.set_defaults(func=_cmd_doctor)
 
