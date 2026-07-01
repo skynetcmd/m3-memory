@@ -21,8 +21,9 @@ Detects your distro, installs prerequisites (`pipx`, `git`, `sqlite3`)
 via your package manager, runs `pipx install m3-memory`, then drives the
 **one-command wizard** (`m3 setup`) which installs the system payload,
 the sovereign CPU embedder (bundled — no LM Studio / Ollama / GPU
-required), per-agent MCP wiring, chatlog hooks, and runs a final
-`m3 doctor`. Refuses to run as root; sudo only for OS package install.
+required), per-agent MCP wiring, chatlog hooks, and runs a final brief
+`m3 doctor` health check (add `--verbose` for full detail). Refuses to run
+as root; sudo only for OS package install.
 
 ### Claude Code users — install as a plugin
 
