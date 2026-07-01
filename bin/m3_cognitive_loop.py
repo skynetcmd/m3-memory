@@ -575,6 +575,22 @@ async def main_loop(args):
             delay = float(pacing_full.get("background_delay",
                           pacing_cpu_ram.get("background_delay", 10.0)))
             wait_time = min(wait_time, delay)
+        else:
+            # IDLE BACKLOG DRAIN (§5/§8): each heavy-LLM pass processes at most
+            # --limit-per-pass items, so a real backlog needs many cycles. When
+            # the host is idle (not throttled) and work remains, re-tick after a
+            # short floor instead of sleeping the full --interval — otherwise an
+            # idle machine trickles one small batch per interval (the "1 item /
+            # 5 min" symptom) while CPU/GPU/RAM sit unused. The batch ceiling
+            # still bounds each burst, so the governor stays responsive; only
+            # the between-pass idle wait is shortened while there's a backlog.
+            more_work = (
+                (not args.skip_entities and has_entity_work(args.database, args.chatlog_db))
+                or (not args.skip_enrich and has_enrich_work(args.database))
+            )
+            if more_work:
+                floor = float(pacing_full.get("background_delay", 0.1))
+                wait_time = min(wait_time, max(floor, 1.0))
 
         if _STOP_EVENT.is_set():
             break
@@ -595,16 +611,19 @@ def main():
                         help="Append logging to this file (scheduled-task / service mode). "
                              "Survives the Windows pythonw re-exec.")
     parser.add_argument("--concurrency", type=int, default=2, help="SLM concurrency (default: 2)")
-    parser.add_argument("--limit-per-pass", type=int, default=1,
+    parser.add_argument("--limit-per-pass", type=int, default=2,
                         help="Max groups/rows per heavy-LLM pass (entity extraction, "
-                             "enrichment, observation drain). Default 1: each pass does "
-                             "one item, then the loop yields and re-checks the governor "
-                             "before the next. This keeps GPU bursts short (sub-second) so "
-                             "background enrichment never monopolizes the GPU on an "
-                             "interactive machine. A single LLM pass of 50 items pinned the "
-                             "GPU for ~17 min because the governor was only re-checked "
-                             "BETWEEN passes, not within a batch. Embedding is a separate "
-                             "scheduled task (ChatlogEmbedSweep) and is unaffected.")
+                             "enrichment, observation drain). Default 2: small enough that "
+                             "one pass is a few-second GPU burst (the governor is only "
+                             "re-checked BETWEEN passes, not within a batch — a 50-item pass "
+                             "once pinned the GPU for ~17 min), large enough that an idle "
+                             "host drains the backlog at a useful rate instead of one item "
+                             "per cycle. Under THROTTLED load this is shrunk to "
+                             "M3_GOVERNOR_THROTTLED_LIMIT (default 1); when idle the loop "
+                             "also re-ticks immediately if a backlog remains (see the "
+                             "backlog-aware wait below) rather than sleeping the full "
+                             "--interval. Embedding is a separate scheduled task "
+                             "(ChatlogEmbedSweep) and is unaffected.")
 
     # Database knobs
     parser.add_argument("--database", default=None, help="Core Memory DB path (Env: M3_DATABASE)")
