@@ -114,3 +114,47 @@ class _Args:
     def __init__(self, **kw):
         self.__dict__.update(kw)
         os.environ.setdefault("M3_DATABASE", kw.get("database", ""))
+
+
+# ── Round-robin + idle-aware pass selection (_select_pass_order) ──────────────
+
+_PASSES = [{"name": n} for n in ("entities", "enrich", "consolidate", "prune")]
+
+
+def _names(order):
+    return [p["name"] for p in order]
+
+
+def test_pass_order_rotates_leader_each_cycle():
+    # Over 4 cycles (idle), every pass leads exactly once — no starvation.
+    leaders = [_names(cl._select_pass_order(_PASSES, c, active=False))[0] for c in range(4)]
+    assert leaders == ["entities", "enrich", "consolidate", "prune"]
+
+
+def test_pass_order_idle_runs_all_passes():
+    order = cl._select_pass_order(_PASSES, cycle=0, active=False)
+    assert _names(order) == ["entities", "enrich", "consolidate", "prune"]
+
+
+def test_pass_order_active_runs_only_leader():
+    # When active (throttled), exactly one pass runs — the rotated leader.
+    assert _names(cl._select_pass_order(_PASSES, cycle=0, active=True)) == ["entities"]
+    assert _names(cl._select_pass_order(_PASSES, cycle=1, active=True)) == ["enrich"]
+    assert _names(cl._select_pass_order(_PASSES, cycle=2, active=True)) == ["consolidate"]
+
+
+def test_pass_order_rotation_is_stable_over_large_cycle():
+    # Cycle counter may grow unbounded; modulo keeps rotation correct.
+    assert _names(cl._select_pass_order(_PASSES, cycle=4, active=False))[0] == "entities"
+    assert _names(cl._select_pass_order(_PASSES, cycle=1000003, active=False))[0] == "prune"
+
+
+def test_pass_order_preserves_relative_sequence():
+    # Rotation is a rotation, not a reshuffle: order after the leader is preserved.
+    assert _names(cl._select_pass_order(_PASSES, cycle=1, active=False)) == \
+        ["enrich", "consolidate", "prune", "entities"]
+
+
+def test_pass_order_empty_is_safe():
+    assert cl._select_pass_order([], cycle=5, active=False) == []
+    assert cl._select_pass_order([], cycle=5, active=True) == []
