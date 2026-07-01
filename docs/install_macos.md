@@ -64,6 +64,8 @@ pre-checked, decoupled roots on, native wheel on). Hover the **ⓘ** icons for a
 explanation of each option, then press **Accept and run setup** (or just hit
 **Return** — it's the default button; **Esc** cancels).
 
+![m3 setup graphical config window on macOS](m3_macos_main_window.png)
+
 macOS specifics the window adapts to automatically:
 
 - **Apple Silicon:** the Embedder section is labeled *native Metal wheel* and its
@@ -82,6 +84,8 @@ window then summarizes what was configured, and its **Verify with m3 doctor**
 button runs a friendly health check with color-coded status dots (green / amber /
 red). The layout matches the Windows screenshots in
 [install_windows.md](install_windows.md#graphical-setup).
+
+![m3 doctor health check with color-coded status dots](m3_macos_doctor.png)
 
 > **If the window doesn't open** ("tkinter is not available" / "no usable
 > display"), your Python lacks a usable Tk. The pipx default (Python 3.14) ships
