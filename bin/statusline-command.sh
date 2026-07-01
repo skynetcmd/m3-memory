@@ -9,6 +9,17 @@ import json, sys, subprocess, os, time, socket
 from datetime import datetime
 from pathlib import Path
 
+# On Windows every console subprocess (git/whoami/hostname) spawned here would
+# flash a console window and STEAL FOCUS on each status-line refresh — even when
+# this script itself runs under pythonw — because each child gets its own
+# console. CREATE_NO_WINDOW suppresses that. No-op off Windows. Route every
+# check_output through _co() so no site can reintroduce the flash.
+_NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+def _co(cmd, **kw):
+    kw.setdefault("text", True)
+    return subprocess.check_output(cmd, **_NO_WINDOW, **kw)
+
 # ── Parse stdin ────────────────────────────────────────────────────────────────
 data = json.load(sys.stdin)
 model      = data.get('model', {}).get('display_name', '?')
@@ -66,12 +77,12 @@ GIT_C = '/tmp/cc_sl_git.json'
 git   = read_cache(GIT_C, 5)
 if git is None:
     try:
-        branch   = subprocess.check_output(['git','branch','--show-current'],
-                       stderr=subprocess.DEVNULL, text=True).strip()
-        staged   = subprocess.check_output(['git','diff','--cached','--name-only'],
-                       stderr=subprocess.DEVNULL, text=True).strip()
-        modified = subprocess.check_output(['git','diff','--name-only'],
-                       stderr=subprocess.DEVNULL, text=True).strip()
+        branch   = _co(['git','branch','--show-current'],
+                       stderr=subprocess.DEVNULL).strip()
+        staged   = _co(['git','diff','--cached','--name-only'],
+                       stderr=subprocess.DEVNULL).strip()
+        modified = _co(['git','diff','--name-only'],
+                       stderr=subprocess.DEVNULL).strip()
         git = {
             'branch':   branch,
             'staged':   len([x for x in staged.split('\n') if x]),
@@ -112,8 +123,12 @@ if mcp_obj is None:
 mcp_count = mcp_obj.get('count', 0)
 
 # ── Build line 1: identity | model | git | vim | time ────────────────────────
-user = os.environ.get('USER', subprocess.check_output(['whoami'], text=True).strip())
-host = subprocess.check_output(['hostname','-s'], text=True).strip()
+# Identity without shelling out where possible: USERNAME/USER env avoids a
+# whoami subprocess entirely; socket.gethostname() avoids `hostname -s` (which
+# isn't even supported by Windows' hostname.exe) — both are cross-platform and
+# flash-free. Fall back to whoami only if no env var is set.
+user = os.environ.get('USER') or os.environ.get('USERNAME') or _co(['whoami']).strip()
+host = socket.gethostname().split('.')[0]
 
 git_part = ''
 if git.get('branch'):
