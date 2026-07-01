@@ -5,6 +5,22 @@ import sys
 
 logger = logging.getLogger("thermal_utils")
 
+# get_thermal_status() runs on a WARM path — the cognitive loop polls telemetry
+# every cycle (and the governor on every load check). On Windows the powershell
+# and wmic probes are console-subsystem processes that FLASH a window and steal
+# focus on each poll unless CREATE_NO_WINDOW is set. Route every spawn through the
+# shared no_window helper (no-op off Windows). Without it, background thermal
+# polling visibly flashes windows during normal operation on every Windows host.
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from _task_runtime import no_window_kwargs
+except Exception:  # pragma: no cover - fallback if _task_runtime unavailable
+    def no_window_kwargs() -> dict:
+        # getattr, not subprocess.CREATE_NO_WINDOW: the attribute only exists on
+        # Windows, so a direct reference fails mypy on the Linux CI runner.
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        return {"creationflags": flags} if flags else {}
+
 def get_thermal_status() -> str:
     """
     Returns the thermal/pressure status of the current system.
@@ -19,7 +35,7 @@ def get_thermal_status() -> str:
         try:
             res = subprocess.run(
                 ["sysctl", "-n", "kern.thermal_pressure"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, **no_window_kwargs(),
             )
             if res.returncode == 0:
                 val = int(res.stdout.strip())
@@ -35,7 +51,7 @@ def get_thermal_status() -> str:
             res = subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
                  "(Get-CimInstance -Namespace root/WMI -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop).CurrentTemperature"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=10, **no_window_kwargs(),
             )
             if res.returncode == 0 and res.stdout.strip():
                 raw_temp = int(res.stdout.strip().splitlines()[0])
@@ -52,7 +68,7 @@ def get_thermal_status() -> str:
             res = subprocess.run(
                 ["wmic", "/namespace:\\\\root\\wmi", "path",
                  "MSAcpi_ThermalZoneTemperature", "get", "CurrentTemperature"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, **no_window_kwargs(),
             )
             if res.returncode == 0 and "CurrentTemperature" in res.stdout:
                 lines = res.stdout.strip().split("\n")
