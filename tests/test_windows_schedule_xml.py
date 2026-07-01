@@ -104,6 +104,14 @@ def test_onstart_schedule_is_boottrigger():
     assert root.find(".//t:Triggers/t:BootTrigger", _NS) is not None
 
 
+def test_onstart_has_both_boot_and_logon_triggers():
+    # The original schtasks-era task had BOTH; emitting only BootTrigger would
+    # regress boot-before-logon start under InteractiveToken. Guard both.
+    root = _render(_spec("AgentOS_Plain", "ONSTART"))
+    assert root.find(".//t:Triggers/t:BootTrigger", _NS) is not None
+    assert root.find(".//t:Triggers/t:LogonTrigger", _NS) is not None
+
+
 def test_unsupported_schedule_raises():
     with pytest.raises(ValueError):
         isch._render_task_xml(_spec("AgentOS_X", "YEARLY"), "py", "u")
@@ -111,21 +119,26 @@ def test_unsupported_schedule_raises():
 
 # ── Self-heal repetition is scoped to the cognitive loop only ─────────────────
 
-def test_cognitive_loop_boottrigger_has_selfheal_repetition():
+def test_cognitive_loop_selfheal_repetition_on_both_triggers():
+    # The loop can come up at boot OR logon (whichever is first); both triggers
+    # must carry the 30-min self-heal repetition so a dead loop revives from
+    # either path.
     root = _render(_spec("AgentOS_CognitiveLoop", "ONSTART"))
-    boot = root.find(".//t:BootTrigger", _NS)
-    interval = boot.find("./t:Repetition/t:Interval", _NS)
-    assert interval is not None and interval.text == "PT30M", (
-        "CognitiveLoop must carry the 30-min self-heal repetition"
-    )
+    for trig in ("BootTrigger", "LogonTrigger"):
+        node = root.find(f".//t:{trig}", _NS)
+        interval = node.find("./t:Repetition/t:Interval", _NS)
+        assert interval is not None and interval.text == "PT30M", (
+            f"CognitiveLoop {trig} must carry the 30-min self-heal repetition"
+        )
 
 
 def test_other_onstart_task_has_no_repetition():
     root = _render(_spec("AgentOS_SomethingElse", "ONSTART"))
-    boot = root.find(".//t:BootTrigger", _NS)
-    assert boot.find("./t:Repetition", _NS) is None, (
-        "only the cognitive loop should self-heal; others must not repeat"
-    )
+    for trig in ("BootTrigger", "LogonTrigger"):
+        node = root.find(f".//t:{trig}", _NS)
+        assert node.find("./t:Repetition", _NS) is None, (
+            f"only the cognitive loop should self-heal; {trig} must not repeat"
+        )
 
 
 def test_selfheal_registry_matches_real_loop_name():
