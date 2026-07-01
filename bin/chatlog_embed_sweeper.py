@@ -15,6 +15,7 @@ import logging
 import os
 import sqlite3
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from glob import glob
@@ -301,6 +302,16 @@ async def main() -> int:
         help="Max rows per run (default from CHATLOG_EMBED_MAX_PER_RUN env or 10000)",
     )
     parser.add_argument(
+        "--deadline",
+        type=float,
+        default=None,
+        help="Soft wall-clock budget (seconds) for one run. The embed loop stops "
+             "starting new batches once this elapses, so a large backlog is drained "
+             "across several scheduled runs instead of monopolizing the GPU in one "
+             "long run. Default from CHATLOG_EMBED_DEADLINE_S env or 60s; 0 disables "
+             "(unbounded, the old behavior). max-per-run still caps total rows.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Query and log but don't embed",
@@ -331,6 +342,18 @@ async def main() -> int:
         args.max_per_run
         or int(os.environ.get("CHATLOG_EMBED_MAX_PER_RUN", "10000"))
     )
+    # Soft time budget per run. None -> env default (60s). 0 -> unbounded (old
+    # behavior). Keeps a big backlog from pinning the GPU in one long run; the
+    # next scheduled sweep picks up where this one left off (cursor-advanced).
+    _deadline = (
+        args.deadline
+        if args.deadline is not None
+        else float(os.environ.get("CHATLOG_EMBED_DEADLINE_S", "60"))
+    )
+    # run_embed_loop expects an ABSOLUTE time.monotonic() deadline, not a
+    # duration — convert here (a raw duration like 60 would read as "already
+    # elapsed" since the monotonic clock is far past 60 at runtime).
+    deadline_s = None if _deadline <= 0 else time.monotonic() + _deadline
 
     # Open DB connection
     db_path = chatlog_config.chatlog_db_path()
@@ -451,7 +474,7 @@ async def main() -> int:
             batch_size=batch_size,
             concurrency=1,                   # sweeper has historically run sequentially
             timeout_s=300.0,                 # generous for a scheduled background job
-            deadline_s=None,                 # max_per_run handles the budget
+            deadline_s=deadline_s,           # soft per-run wall-clock budget (see --deadline)
             max_consecutive_fails=5,
             max_row_bytes=32_768,
             expected_dim=None,               # don't reject by dim — chatlog has heterogenous models
