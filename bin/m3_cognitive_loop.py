@@ -562,7 +562,16 @@ def main():
                         help="Append logging to this file (scheduled-task / service mode). "
                              "Survives the Windows pythonw re-exec.")
     parser.add_argument("--concurrency", type=int, default=2, help="SLM concurrency (default: 2)")
-    parser.add_argument("--limit-per-pass", type=int, default=50, help="Max groups/rows per pass (default: 50)")
+    parser.add_argument("--limit-per-pass", type=int, default=1,
+                        help="Max groups/rows per heavy-LLM pass (entity extraction, "
+                             "enrichment, observation drain). Default 1: each pass does "
+                             "one item, then the loop yields and re-checks the governor "
+                             "before the next. This keeps GPU bursts short (sub-second) so "
+                             "background enrichment never monopolizes the GPU on an "
+                             "interactive machine. A single LLM pass of 50 items pinned the "
+                             "GPU for ~17 min because the governor was only re-checked "
+                             "BETWEEN passes, not within a batch. Embedding is a separate "
+                             "scheduled task (ChatlogEmbedSweep) and is unaffected.")
 
     # Database knobs
     parser.add_argument("--database", default=None, help="Core Memory DB path (Env: M3_DATABASE)")
