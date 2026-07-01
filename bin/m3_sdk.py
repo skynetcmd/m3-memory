@@ -72,7 +72,10 @@ def _no_window() -> dict:
     console window and steal focus on every poll. Shared _task_runtime helper is
     preferred; this local fallback avoids an import cycle in the hot path."""
     import subprocess as _sp
-    return {"creationflags": _sp.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    # getattr, not _sp.CREATE_NO_WINDOW: the attribute only exists on Windows, so
+    # a direct reference fails mypy on the Linux CI runner.
+    flags = getattr(_sp, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    return {"creationflags": flags} if flags else {}
 
 
 def _gpu_util_nvidia() -> float | None:

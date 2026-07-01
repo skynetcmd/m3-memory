@@ -16,7 +16,10 @@ try:
     from _task_runtime import no_window_kwargs
 except Exception:  # pragma: no cover - fallback if _task_runtime unavailable
     def no_window_kwargs() -> dict:
-        return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        # getattr, not subprocess.CREATE_NO_WINDOW: the attribute only exists on
+        # Windows, so a direct reference fails mypy on the Linux CI runner.
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        return {"creationflags": flags} if flags else {}
 
 def get_thermal_status() -> str:
     """
