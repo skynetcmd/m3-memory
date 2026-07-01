@@ -1,12 +1,23 @@
 # Install on Windows
 
+Installing m3 on Windows is **two phases**:
+
+1. **System prerequisites** — install Python, Git, and SQLite. This needs an
+   **elevated** shell (and installs the Python that everything else runs on), so
+   it's a one-time manual step you run yourself.
+2. **User-level setup** — install the m3 package, then configure it with the
+   `m3 setup` wizard (terminal **or** a graphical window). No elevation needed.
+
 There's no one-line bash installer for Windows (PowerShell doesn't have `bash`,
 and the prerequisites differ enough that the Linux script wouldn't apply
-cleanly). Three commands instead:
+cleanly).
 
 ## Quickstart
 
-**Step 1 — Prerequisites** (elevated PowerShell, right-click → Run as administrator, once):
+### Phase 1 — System prerequisites (elevated, once)
+
+Open an **elevated** shell (right-click PowerShell → *Run as administrator*) and
+install the three prerequisites:
 
 ```powershell
 winget install -e --id Python.Python.3.12
@@ -14,11 +25,20 @@ winget install -e --id Git.Git
 winget install -e --id SQLite.SQLite
 ```
 
+> **Which shell for `winget`?** Use **PowerShell or cmd** for this step —
+> `winget` lives in a WindowsApps folder that **Git Bash usually can't see**.
+> If you must run it from Git Bash, call it by full path:
+> ```bash
+> "$LOCALAPPDATA/Microsoft/WindowsApps/winget.exe" install -e --id Python.Python.3.12
+> ```
+> (Phase 2 below works from any shell — PowerShell, cmd, or Git Bash — since
+> `python`/`m3` are ordinary programs.)
+
 > **Microsoft Store Python?** The Store installs a `python3.exe` stub that
 > blocks some installs. Use the winget version above — it puts a real
 > `python.exe` on PATH.
 
-**Step 2 — Install m3** (normal user PowerShell, not elevated):
+### Phase 2 — Install + configure m3 (normal user shell, not elevated)
 
 ```powershell
 # Recommended: pipx isolates m3 and manages PATH automatically
@@ -26,7 +46,7 @@ pip install --user pipx
 pipx ensurepath
 # Open a new terminal so PATH refreshes, then:
 pipx install m3-memory
-m3 setup                              # one-command wizard
+m3 setup                              # one-command wizard (terminal)
 ```
 
 **Prefer plain pip?**
@@ -35,6 +55,11 @@ m3 setup                              # one-command wizard
 pip install --user m3-memory
 m3 setup
 ```
+
+**Prefer a graphical setup?** `m3 setup --gui` opens a window with the same
+questions the terminal wizard asks (recommended defaults pre-selected), then
+runs the install and shows a summary. See [Graphical setup](#graphical-setup)
+below. Use `m3 setup --terminal` to force the text wizard.
 
 > **`m3` not found after `pip install --user`?** See the gotchas section
 > below — pip puts `m3.exe` in a Scripts folder that isn't on PATH by
@@ -46,6 +71,37 @@ m3 setup
 > (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in a
 > domain on demand — just say "load the files tools" and it does. Set
 > `M3_TOOLS_LAZY=0` to disable.
+
+---
+
+## Graphical setup
+
+`m3 setup --gui` runs the same wizard as a window. It's a thin front-end: it
+collects your choices and runs `m3 setup --non-interactive` for you, so there's
+no separate engine — the terminal and graphical paths do exactly the same work.
+
+The config window has recommended defaults already selected (detected agents
+pre-checked, decoupled roots on, native wheel on). Hover the **ⓘ** icons for an
+explanation of each option, then press **Accept and run setup**.
+
+![m3 setup graphical config window](m3_windows_main_window.png)
+
+When you accept, the config window hides and a log window shows the install
+progress. If you enabled FIPS, a separate window streams the wolfSSL build — its
+bottom line tells you what to expect while it compiles:
+
+![wolfSSL build window](m3_windows_wolf_subwindow.png)
+
+A **setup-complete** window then summarizes what was configured:
+
+![Setup complete summary](m3_windows_setup_complete.png)
+
+…and its **Verify with m3 doctor** button runs a friendly health check, showing
+each verdict with a color-coded status dot (green / amber / red).
+
+> The graphical path is optional and Windows-friendly, but it still requires
+> Phase 1 (Python/Git/SQLite) and the m3 package to be installed first — it's
+> the *configuration* front-end, not a bootstrapper.
 
 ---
 
@@ -200,10 +256,21 @@ working local install.
 ## Verifying
 
 ```powershell
-m3 doctor
+m3 doctor            # compact, high-yield summary (the default)
+m3 doctor --verbose  # full detail: DB repair, each probe, model-load logs
 ```
 
-Should show:
-- m3-memory package version + installed payload
-- Chatlog DB path + captured row count + last-capture timestamp
-- Per-agent hook state for Claude (Stop / PreCompact) and Gemini (SessionEnd)
+`m3 doctor` prints a **brief** one-line-per-check summary by default — overall
+health, agent wiring, embedding-cascade status, oxidation, and the background
+governor. If a check fails it tells you to re-run with `--verbose` for the full
+detail (which includes the embedder's model-load logs, useful for diagnosing a
+broken embedder).
+
+The brief output covers:
+- m3-memory health verdict + memory/chatlog counts + embedder mode
+- Per-agent MCP wiring (Claude / Gemini / Antigravity) and the resolved bridge
+- Embedding cascade (tier-1 in-process + tier-2 server) with roundtrip latency
+- Oxidation (native `m3_core_rs`) status and the governor migration check
+
+> The graphical setup's **Verify with m3 doctor** button runs this same brief
+> check and shows it with color-coded status dots (green / amber / red).

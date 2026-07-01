@@ -67,6 +67,12 @@ def main() -> int:
         help="Skip the governor scheduled-task migration check.",
     )
     parser.add_argument(
+        "--verbose", action="store_true",
+        help="Show the full detail (DB-repair steps + each probe's expanded "
+             "report + model-load logs). Default is a compact one-line-per-check "
+             "summary of high-yield verdicts.",
+    )
+    parser.add_argument(
         "--fix", action="store_true",
         help="Run quick-repair mode to auto-fix common deployment issues.",
     )
@@ -98,35 +104,44 @@ def main() -> int:
         return 0
 
     exit_code = 0
+    brief = not args.verbose  # brief is the DEFAULT; --verbose opts into detail
 
-    if not args.skip_repair:
+    # In brief mode the DB-repair phase's [INFO] chatter is noise — the overall
+    # health line (from installer.doctor) already reflects DB health. Skip it
+    # unless the operator explicitly asked to repair.
+    if not args.skip_repair and not brief:
         from doctor import db_repair
         exit_code = max(exit_code, db_repair.run(args.database))
 
     if not args.skip_cascade:
         from doctor import cascade_probe
-        exit_code = max(exit_code, cascade_probe.run())
+        exit_code = max(exit_code, cascade_probe.run(brief=brief))
 
     if not args.skip_embed_server:
         from doctor import embed_server_probe
         # Rust-side probe doesn't bump exit code on its own — operators
         # legitimately run m3 without `m3 embedder install`, and a missing
         # binary is not a Python-side failure.
-        embed_server_probe.run()
+        embed_server_probe.run(brief=brief)
 
     if not args.skip_oxidation:
         from doctor import oxidation_probe
         # Report-only: a pure-Python deployment (no/old wheel) is supported, so
         # this never bumps the exit code — it surfaces a stale wheel that would
         # otherwise degrade silently.
-        oxidation_probe.run()
+        oxidation_probe.run(brief=brief)
 
     if not args.skip_governor:
         from doctor import governor_probe
         # Report-only: leftover cron/schtasks entries are a suboptimal-but-
         # supported state, so this never bumps the exit code — it nags and
         # prints the fix command when the governor should own scheduled work.
-        governor_probe.run()
+        governor_probe.run(brief=brief)
+
+    # On a failure in brief mode, point the user at the full detail (§3: an
+    # error should tell you how to see more, not dead-end).
+    if brief and exit_code != 0:
+        print("\nFor full detail, run:  m3 doctor --verbose")
 
     return exit_code
 

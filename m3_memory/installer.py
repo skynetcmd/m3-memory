@@ -1412,8 +1412,13 @@ def _heal_all_agents(*, force: bool = False) -> int:
     return changed
 
 
-def doctor(fix: bool = False) -> int:
-    """Print diagnostic info and return 0 on healthy, 1 on missing payload."""
+def doctor(fix: bool = False, brief: bool = False) -> int:
+    """Print diagnostic info and return 0 on healthy, 1 on missing payload.
+
+    brief=True prints only the high-yield verdict + agent-wiring lines and the
+    resolved-bridge check, skipping the verbose path/version block — for
+    `m3 doctor --brief` and the GUI's compact health view.
+    """
     from m3_memory import __version__
 
     # Lead with the verdict — the one thing the user actually wants to know.
@@ -1421,6 +1426,22 @@ def doctor(fix: bool = False) -> int:
     _icon = {"healthy": "[OK]", "degraded": "[~]", "broken": "[X]"}.get(_s["verdict"], "[?]")
     print(f"{_icon} m3 {_s['headline']}")
     print()
+
+    # Brief: verdict (above) + agent wiring + bridge check; skip path/version wall.
+    if brief:
+        if fix:
+            n = _heal_all_agents()
+            print(f"agent MCP configs: {n} repointed." if n
+                  else "agent MCP configs: all healthy.")
+        else:
+            _agent_config_section()
+        bridge = find_bridge()
+        if bridge and bridge.is_file():
+            print(f"[OK] resolved bridge: {bridge}")
+            return 0
+        print("[X] no bridge found. Run `mcp-memory install-m3` to fetch the system.")
+        print("\nFor full detail, run:  m3 doctor --verbose")
+        return 1
 
     root = os.environ.get("M3_MEMORY_ROOT")
     root_src = "(M3_MEMORY_ROOT env)" if root else "(default)"
