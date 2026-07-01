@@ -168,10 +168,18 @@ working local install.
 ## Verifying
 
 ```bash
-m3 doctor
+m3 doctor            # compact, high-yield summary (the default)
+m3 doctor --verbose  # full detail: DB repair, each probe, model-load logs
 ```
 
-Should show:
-- Package version + installed payload
-- Chatlog DB path + captured row count + last-capture timestamp
-- Per-agent hook state for Claude (Stop / PreCompact) and Gemini (SessionEnd)
+`m3 doctor` prints a **brief** one-line-per-check summary by default — overall
+health, agent wiring, embedding-cascade status, oxidation, and the background
+governor. If a check fails it tells you to re-run with `--verbose` for the full
+detail (which includes the embedder's model-load logs, useful for diagnosing a
+broken embedder).
+
+The brief output covers:
+- Package version + installed payload + memory/chatlog counts + embedder mode
+- Per-agent MCP wiring (Claude / Gemini / Antigravity) and the resolved bridge
+- Embedding cascade (tier-1 in-process + tier-2 launchd server) with roundtrip latency
+- Oxidation (native `m3_core_rs`) status and the governor migration check
