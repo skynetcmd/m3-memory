@@ -90,8 +90,8 @@ m3 setup
 `m3 setup` is an interactive wizard. It detects every agent on PATH (Claude
 Code, Gemini CLI, OpenCode, OpenClaw), asks a handful of questions, then
 drives the full install end-to-end: system payload, sovereign CPU embedder
-(BGE-M3 on port 8082), per-agent MCP wiring, chatlog hooks, and a `doctor`
-verification. Restart your agent — that's it.
+(BGE-M3 on port 8082), per-agent MCP wiring, chatlog hooks, and a brief
+`doctor` health check. Restart your agent — that's it.
 
 ### 🛡️ Sovereign by default
 
@@ -234,7 +234,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 **Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal. Entity extraction (`entity_search`, `entity_get`) supplements the graph with first-class people / places / things resolution. The entity-graph layer ships a stock entity-type and predicate vocabulary, and it's **user-configurable**: point `M3_ENTITY_VOCAB_YAML` at your own profile to swap or extend the vocab for your domain — no code changes.
 
-**Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `m3 setup` for a one-command wizard that detects agents, wires settings.json + hooks, installs the sovereign CPU embedder, and verifies with `doctor` in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
+**Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `m3 setup` for a one-command wizard that detects agents, wires settings.json + hooks, installs the sovereign CPU embedder, and verifies with a brief `doctor` check in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
 
 **Context-frugal tool catalog** — 100+ MCP tools grouped into 8 domains, loaded lazily. Startup surface is **~3,540 tokens** (~1.8% of a 200K window) vs ~24,918 if every tool registered eagerly. Agent expands a domain when it needs the rest. See [§ 100+ tools, domain-gated](#-100-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small).
 
