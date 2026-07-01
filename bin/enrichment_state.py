@@ -103,7 +103,7 @@ def _git_sha() -> str:
             ["git", "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=2,
             # git is a console app on Windows — flash-free background call.
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            creationflags=(getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0),
         )
         if out.returncode == 0:
             return out.stdout.strip()
