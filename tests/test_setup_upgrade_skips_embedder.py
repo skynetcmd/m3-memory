@@ -7,9 +7,7 @@ _gather_plan now detects active_embedder_tier()["native"] and keeps the embedder
 without prompting. The LLM-endpoint probe is unaffected.
 """
 import argparse
-import importlib.util
 import sys
-import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]

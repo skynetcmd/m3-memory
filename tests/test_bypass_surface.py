@@ -4,7 +4,6 @@ Covers the §11 validation plan items that don't need the full retrieval stack:
 migration up/down + index seek, builder modes + scope gating, scope isolation,
 and gdpr_forget removal via explicit enumeration (NOT cascade-only).
 """
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -79,6 +78,7 @@ def test_fk_cascade_removes_surface_on_item_delete():
 def built_db(monkeypatch):
     """A seeded DB with the builder wired to it via monkeypatched _db()."""
     import contextlib
+
     import memory.entity as E
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
@@ -185,6 +185,7 @@ def test_gdpr_forget_removes_surface_rows_by_user(monkeypatch):
     db.commit()
 
     import contextlib
+
     import memory_maintenance as M
 
     @contextlib.contextmanager
