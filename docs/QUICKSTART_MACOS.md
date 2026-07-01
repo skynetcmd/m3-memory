@@ -36,7 +36,7 @@ pipx ensurepath
 - embedder (everything's bundled — no LM Studio, no Ollama, no internet, no GPU required)
 - per-agent MCP wiring (Claude Code, Gemini CLI, OpenCode, OpenClaw)
 - chatlog Stop + PreCompact hooks
-- final `m3 doctor` verification
+- final brief `m3 doctor` health check (`--verbose` for full detail)
 
 Restart your agent and you're done. The rest of this doc covers the features.
 
