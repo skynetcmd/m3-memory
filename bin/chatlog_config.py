@@ -56,20 +56,11 @@ _M3_ENGINE_ROOT = get_m3_engine_root()
 _M3_ROOT = get_m3_root()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Helper to check new path first, fallback to legacy path if it exists and new does not
-def _resolve_config_file(filename: str) -> str:
-    new_path = os.path.join(_M3_CONFIG_ROOT, filename)
-    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
-    if os.path.exists(legacy_path) and not os.path.exists(new_path):
-        return legacy_path
-    return new_path
-
-def _resolve_engine_file(filename: str) -> str:
-    new_path = os.path.join(_M3_ENGINE_ROOT, filename)
-    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
-    if os.path.exists(legacy_path) and not os.path.exists(new_path):
-        return legacy_path
-    return new_path
+# Path resolution (new-root-with-legacy-fallback) is the single source of truth
+# in m3_core.paths; these module-local names are thin aliases kept for any
+# in-module / external caller that referenced them.
+from m3_core.paths import resolve_config_file as _resolve_config_file  # noqa: E402
+from m3_core.paths import resolve_engine_file as _resolve_engine_file  # noqa: E402
 
 CONFIG_PATH = _resolve_config_file(".chatlog_config.json")
 DEFAULT_DB_PATH = os.environ.get("M3_CHATLOG_DB") or _resolve_engine_file("agent_chatlog.db")

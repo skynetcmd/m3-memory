@@ -64,6 +64,38 @@ def get_m3_engine_root() -> str:
     return os.path.join(os.path.expanduser("~"), ".m3", "engine")
 
 
+def resolve_engine_file(filename: str) -> str:
+    """Resolve a path under the engine root, honoring the legacy fallback.
+
+    Returns ``<engine_root>/<filename>`` unless a legacy copy exists at
+    ``<memory_root>/memory/<filename>`` and the new path does not — in which
+    case the legacy path is returned so pre-Homecoming installs keep working.
+
+    Single source of truth: chatlog_config, memory.config and migrate_memory
+    previously each carried a byte-identical copy of this helper. They now
+    import it from here so the resolution rule lives in exactly one place.
+    """
+    new_path = os.path.join(get_m3_engine_root(), filename)
+    legacy_path = os.path.join(get_m3_root(), "memory", filename)
+    if os.path.exists(legacy_path) and not os.path.exists(new_path):
+        return legacy_path
+    return new_path
+
+
+def resolve_config_file(filename: str) -> str:
+    """Resolve a path under the config root, honoring the legacy fallback.
+
+    Returns ``<config_root>/<filename>`` unless a legacy copy exists at
+    ``<memory_root>/memory/<filename>`` and the new path does not. Companion to
+    :func:`resolve_engine_file`; see that docstring for the de-duplication note.
+    """
+    new_path = os.path.join(get_m3_config_root(), filename)
+    legacy_path = os.path.join(get_m3_root(), "memory", filename)
+    if os.path.exists(legacy_path) and not os.path.exists(new_path):
+        return legacy_path
+    return new_path
+
+
 def _db_is_populated(path: str) -> bool:
     """True iff `path` is a SQLite file that actually carries the memory schema.
 

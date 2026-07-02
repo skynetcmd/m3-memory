@@ -50,19 +50,10 @@ _M3_CONFIG_ROOT = get_m3_config_root()
 _M3_ENGINE_ROOT = get_m3_engine_root()
 _M3_ROOT = get_m3_root()
 
-def _resolve_config_file(filename: str) -> str:
-    new_path = os.path.join(_M3_CONFIG_ROOT, filename)
-    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
-    if os.path.exists(legacy_path) and not os.path.exists(new_path):
-        return legacy_path
-    return new_path
-
-def _resolve_engine_file(filename: str) -> str:
-    new_path = os.path.join(_M3_ENGINE_ROOT, filename)
-    legacy_path = os.path.join(_M3_ROOT, "memory", filename)
-    if os.path.exists(legacy_path) and not os.path.exists(new_path):
-        return legacy_path
-    return new_path
+# Path resolution (new-root-with-legacy-fallback) is the single source of truth
+# in m3_core.paths; these local names are thin aliases.
+from m3_core.paths import resolve_config_file as _resolve_config_file
+from m3_core.paths import resolve_engine_file as _resolve_engine_file
 
 CONFIG_PATH = _resolve_config_file(".migrate_config.json")
 DB_PATH = os.environ.get("M3_DATABASE") or _resolve_engine_file("agent_memory.db")

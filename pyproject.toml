@@ -81,6 +81,11 @@ dependencies = [
     "PyYAML>=6.0.3,<7",
     "psutil>=7.2.2,<8",
     "tqdm>=4.67.3,<5",
+    # SQL-injection AST guard in bin/memory/util.py::_check_content_safety.
+    # Was in requirements.txt but missing here, so `pip install -e .` omitted it
+    # and the guard silently degraded to a no-op (returning "safe" for DROP/
+    # DELETE/ALTER). Runtime dependency, not optional.
+    "sqlglot>=30.6.0,<31",
 ]
 
 [project.optional-dependencies]
