@@ -431,7 +431,7 @@ async def process_conversation(
     token: str,
     counters: dict,
     source_group_id: int | None = None,
-) -> None:
+) -> dict:
     """Build the session block, call Observer (possibly N chunks for long
     conversations), write all observations.
 
@@ -439,10 +439,24 @@ async def process_conversation(
     profile.input_max_chars is split into chunks. Each chunk is sent as
     its own Observer call; observations from all chunks are collected
     and written together. The session_date is shared across all chunks
-    (taken from the first turn's metadata)."""
+    (taken from the first turn's metadata).
+
+    Returns a per-group result dict describing THIS group's outcome so
+    concurrent callers can persist terminal state without reading it back
+    out of the shared `counters` dict across an await boundary (that race
+    misattributes counts and can leave a group unmarked, causing it to be
+    re-fed to the LLM on the next --resume). Shape:
+        {"outcome": "written"|"empty"|"failed"|"skipped",
+         "written": int, "tokens_in": int, "tokens_out": int,
+         "cost_usd": float, "partial_failure_chunks": int,
+         "last_error": str | None}
+    The shared `counters` dict is still updated for aggregate run reporting;
+    existing callers that ignore the return value are unaffected."""
     if not turns:
         counters["empty_groups"] += 1
-        return
+        return {"outcome": "skipped", "written": 0, "tokens_in": 0,
+                "tokens_out": 0, "cost_usd": 0.0, "partial_failure_chunks": 0,
+                "last_error": None}
     # Use the earliest turn's session_date as the canonical observation_date.
     # Falls back to the row's created_at if no metadata.session_date.
     # While scanning, also lift session_id from the source turns so observations
@@ -529,9 +543,16 @@ async def process_conversation(
         # in the caller doesn't double-count.
         if chunk_fail_count > 0:
             counters["failed"] += 1
-        else:
-            counters["empty_groups"] += 1
-        return
+            return {"outcome": "failed", "written": 0,
+                    "tokens_in": group_tokens_in, "tokens_out": group_tokens_out,
+                    "cost_usd": group_cost_usd,
+                    "partial_failure_chunks": chunk_fail_count,
+                    "last_error": counters.get("last_error")}
+        counters["empty_groups"] += 1
+        return {"outcome": "empty", "written": 0,
+                "tokens_in": group_tokens_in, "tokens_out": group_tokens_out,
+                "cost_usd": group_cost_usd, "partial_failure_chunks": 0,
+                "last_error": None}
     counters["processed"] += 1
     # Surface partial-failure count to the caller (m3_enrich) so it can
     # record it on the success row. Multi-chunk groups where some chunks
@@ -555,6 +576,7 @@ async def process_conversation(
     # path is unchanged and adds no per-observation work.
     precise = os.environ.get("M3_OBSERVER_PRECISE_PROVENANCE", "0") == "1"
     idx_to_id = {t[3]: t[0] for t in turns} if precise else {}
+    group_written = 0
     for obs in observations:
         if precise:
             sti = obs.get("source_turn_index")
@@ -574,6 +596,23 @@ async def process_conversation(
         )
         if obs_id:
             counters["written"] += 1
+            group_written += 1
+
+    if group_written == 0:
+        # Every write_observation returned falsy (e.g. dedup/no-op). No
+        # observations landed for this group; report empty rather than a
+        # success with obs_emitted=0 so the caller doesn't mark it done-with-
+        # zero and (worse) so a re-run isn't misled about what happened.
+        return {"outcome": "empty", "written": 0,
+                "tokens_in": group_tokens_in, "tokens_out": group_tokens_out,
+                "cost_usd": group_cost_usd,
+                "partial_failure_chunks": chunk_fail_count,
+                "last_error": None}
+    return {"outcome": "written", "written": group_written,
+            "tokens_in": group_tokens_in, "tokens_out": group_tokens_out,
+            "cost_usd": group_cost_usd,
+            "partial_failure_chunks": chunk_fail_count,
+            "last_error": None}
 
 
 async def drain_variant_mode(args, profile, token: str) -> None:

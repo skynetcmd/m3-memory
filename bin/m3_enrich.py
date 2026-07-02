@@ -326,11 +326,6 @@ async def _run_db(
             async with sem:
                 if abort_reason is not None:
                     return
-                pre_processed = counters["processed"]
-                pre_written = counters["written"]
-                pre_empty = counters["empty_groups"]
-                pre_failed = counters["failed"]
-
                 claim_token: Optional[str] = None
                 gid: Optional[int] = None
                 if track_state and state_conn is not None:
@@ -345,7 +340,7 @@ async def _run_db(
 
                 t0 = time.monotonic()
                 try:
-                    await observer.process_conversation(
+                    result = await observer.process_conversation(
                         cid, uid, turns, target_variant,
                         profile, client, token, counters,
                         source_group_id=gid,
@@ -375,21 +370,32 @@ async def _run_db(
                     raise
 
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
-                written_delta = counters["written"] - pre_written
-                failed_delta = counters["failed"] - pre_failed
-                empty_delta = counters["empty_groups"] - pre_empty
+                # Terminal state is decided from THIS group's own result dict —
+                # never from shared-counter deltas. The counters dict is
+                # mutated by every concurrent task across our awaits, so a
+                # delta read here would be contaminated by other groups and
+                # could compute a spurious "nothing happened", leaving the row
+                # in_progress → re-fed to the LLM on the next --resume. The
+                # result dict is local to this group and immune to that race.
+                res = result or {}
+                outcome = res.get("outcome", "skipped")
+                g_written = res.get("written", 0) or 0
+                g_tin = res.get("tokens_in", 0) or 0
+                g_tout = res.get("tokens_out", 0) or 0
+                g_cost = res.get("cost_usd", 0.0) or 0.0
+                g_pfc = res.get("partial_failure_chunks", 0) or 0
+
                 # Cascade tracker: any clean outcome (real obs OR legitimate
                 # empty) means upstream is healthy — reset the consecutive
                 # rate-limit counter. A pure chunk-failure outcome may be a
                 # 429 in disguise; classify and feed the tracker.
-                if written_delta > 0 or empty_delta > 0:
+                if outcome in ("written", "empty"):
                     cascade.record_success()
                 if track_state and gid is not None and state_conn is not None:
-                    if failed_delta > 0 and written_delta == 0:
-                        # Some chunks failed and nothing was written — count as failed.
-                        # process_conversation stashes the last exception's repr in
-                        # counters["last_error"]; classify and persist that.
-                        raw_err = counters.get("last_error") or "chunk(s) failed"
+                    if outcome == "failed":
+                        # Chunks failed and nothing was written — classify the
+                        # stashed error message and persist as a failure.
+                        raw_err = res.get("last_error") or "chunk(s) failed"
                         # Extract a class-like prefix for error_class — repr starts
                         # with the exception type name, e.g. "ReadTimeout: ReadTimeout('')"
                         ec = "other"
@@ -410,47 +416,33 @@ async def _run_db(
                                 f"resets.",
                                 flush=True,
                             )
-                        # Pull last-group usage even on failure, so that
-                        # partial-chunk costs (chunks that succeeded before
-                        # the failing one) get attributed to this row. Zero
-                        # for clean failures where no chunk succeeded.
-                        f_tin = counters.pop("last_tokens_in", 0) or 0
-                        f_tout = counters.pop("last_tokens_out", 0) or 0
-                        f_cost = counters.pop("last_cost_usd", 0.0) or 0.0
+                        # Attribute partial-chunk costs (chunks that succeeded
+                        # before the failing one) to this row. Zero for clean
+                        # failures where no chunk succeeded.
                         estate.mark_failed(
                             state_conn, gid,
                             error_class=ec, last_error=raw_err,
                             max_attempts=max_attempts, enrichment_ms=elapsed_ms,
-                            tokens_in=f_tin, tokens_out=f_tout, cost_usd=f_cost,
+                            tokens_in=g_tin, tokens_out=g_tout, cost_usd=g_cost,
                         )
-                    elif written_delta > 0:
-                        # run_observer stashes per-call partial-failure count
-                        # in counters["last_partial_failure_chunks"]. Pull and
-                        # zero it so it doesn't leak into the next group.
-                        pfc = counters.pop("last_partial_failure_chunks", 0) or 0
-                        s_tin = counters.pop("last_tokens_in", 0) or 0
-                        s_tout = counters.pop("last_tokens_out", 0) or 0
-                        s_cost = counters.pop("last_cost_usd", 0.0) or 0.0
+                    elif outcome == "written":
                         estate.mark_success(
                             state_conn, gid,
-                            obs_emitted=written_delta, enrichment_ms=elapsed_ms,
-                            tokens_in=s_tin, tokens_out=s_tout, cost_usd=s_cost,
-                            partial_failure_chunks=pfc,
+                            obs_emitted=g_written, enrichment_ms=elapsed_ms,
+                            tokens_in=g_tin, tokens_out=g_tout, cost_usd=g_cost,
+                            partial_failure_chunks=g_pfc,
                         )
-                        if pfc > 0:
+                        if g_pfc > 0:
                             print(f"[m3-enrich] PARTIAL conv={cid[:8]} "
-                                  f"{pfc} chunk(s) failed, {written_delta} obs kept",
+                                  f"{g_pfc} chunk(s) failed, {g_written} obs kept",
                                   flush=True)
-                    elif empty_delta > 0 or counters["processed"] - pre_processed > 0:
-                        e_tin = counters.pop("last_tokens_in", 0) or 0
-                        e_tout = counters.pop("last_tokens_out", 0) or 0
-                        e_cost = counters.pop("last_cost_usd", 0.0) or 0.0
+                    elif outcome == "empty":
                         estate.mark_empty(
                             state_conn, gid, enrichment_ms=elapsed_ms,
-                            tokens_in=e_tin, tokens_out=e_tout, cost_usd=e_cost,
+                            tokens_in=g_tin, tokens_out=g_tout, cost_usd=g_cost,
                         )
-                    # else: process_conversation early-returned (empty turns)
-                    #       — leave row as-is; claim already updated attempts.
+                    # else: outcome == "skipped" (empty turns) — leave row
+                    #       as-is; claim already updated attempts.
 
                 done = counters["processed"] + counters["empty_groups"] + counters["failed"]
                 if done > 0 and done % 50 == 0:

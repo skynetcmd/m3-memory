@@ -177,18 +177,30 @@ def _build_extractor(
         # - "openai": /v1/chat/completions (system as a message, Bearer auth,
         #   choices[].message.content response). Enables OpenAI-compatible
         #   endpoints (OpenAI, Gemini openai-compat, LM Studio /v1/chat).
+        # Model selection: a profile that pins a concrete id sends it; a
+        # profile whose `model` is blank or a sentinel ("default"/"auto"/
+        # "loaded"/"any") sends an empty model so the local server (LM Studio)
+        # routes to whatever model is currently loaded. This avoids the
+        # failure where a profile pins one id but the server has a different
+        # model loaded — the request must follow the loaded model, not fight
+        # it. LM Studio accepts an empty `model` field and serves the loaded
+        # model; the key is always present since some builds 400 on its
+        # absence. (Non-local backends should pin a real id in the profile.)
+        _model = (profile.model or "").strip()
+        if _model.lower() in ("default", "auto", "loaded", "any"):
+            _model = ""
         backend = getattr(profile, "backend", "anthropic") or "anthropic"
         if backend == "openai":
             messages = []
             if profile.system:
                 messages.append({"role": "system", "content": profile.system})
             messages.append({"role": "user", "content": body})
-            payload = {"model": profile.model, "max_tokens": profile.max_tokens, "messages": messages}
+            payload = {"model": _model, "max_tokens": profile.max_tokens, "messages": messages}
             if profile.temperature is not None:
                 payload["temperature"] = profile.temperature
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
         else:  # anthropic (default — preserves prior behaviour)
-            payload = {"model": profile.model, "max_tokens": profile.max_tokens,
+            payload = {"model": _model, "max_tokens": profile.max_tokens,
                        "messages": [{"role": "user", "content": body}]}
             if profile.system:
                 if getattr(profile, "cache_system", False):
