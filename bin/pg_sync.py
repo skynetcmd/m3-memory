@@ -135,6 +135,21 @@ def _get_pg_url() -> str:
 
 # ── Watermarks ───────────────────────────────────────────────────────────────
 
+def _ensure_watermark_table(sl_cur) -> None:
+    """Guarantee the sync_watermarks table exists on the SQLite side.
+
+    It is created by migration 005_perf_and_wal.sql for agent_memory.db, but
+    other target DBs (e.g. agent_chatlog.db) run a different migration set that
+    never creates it. Without this, the watermark INSERT raises 'no such table',
+    the delta cursor is never persisted, and every sync redoes a full reconcile.
+    Idempotent — safe to call once per target before syncing.
+    """
+    sl_cur.execute(
+        "CREATE TABLE IF NOT EXISTS sync_watermarks "
+        "(direction TEXT PRIMARY KEY, last_synced_at TEXT)"
+    )
+
+
 def _get_watermark(sl_cur, direction: str, target_name: str) -> str | None:
     """Read last sync watermark for a direction and target database."""
     # Prefix direction with target_name for separate watermarks per DB
@@ -143,7 +158,10 @@ def _get_watermark(sl_cur, direction: str, target_name: str) -> str | None:
         sl_cur.execute("SELECT last_synced_at FROM sync_watermarks WHERE direction = ?", (prefixed_direction,))
         row = sl_cur.fetchone()
         return row[0] if row else None
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as exc:
+        # The table is ensured before sync, so this is unexpected — surface it
+        # rather than silently forcing a full reconcile every run.
+        logger.warning(f"[{target_name}] watermark read failed ({exc}); treating as first sync")
         return None
 
 
@@ -157,8 +175,10 @@ def _set_watermark(sl_cur, direction: str, ts: str, target_name: str) -> None:
                ON CONFLICT(direction) DO UPDATE SET last_synced_at = excluded.last_synced_at""",
             (prefixed_direction, ts),
         )
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        # Never swallow silently: an unwritten watermark means the next run
+        # re-reconciles the whole table. Ensure the table exists up front.
+        logger.error(f"[{target_name}] watermark write failed for {prefixed_direction}: {exc}")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1138,6 +1158,7 @@ def main():
 
                     try:
                         sl_cur = sl_conn.cursor()
+                        _ensure_watermark_table(sl_cur)
 
                         if target.name == "main":
                             if not _acquire_sync_lock(sl_cur):
@@ -1201,6 +1222,7 @@ def main():
 
             try:
                 sl_cur = sl_conn.cursor()
+                _ensure_watermark_table(sl_cur)
                 with ctx.pg_connection() as pg_conn:
                     pg_conn.autocommit = False
                     with pg_conn.cursor() as pg_cur:
