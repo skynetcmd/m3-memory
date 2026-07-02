@@ -258,3 +258,31 @@ def _recency_bonus_ranks(valid_froms, bias: float) -> list[float]:
     for rank, orig in enumerate(dated_idx):
         out[orig] = bias * (rank / denom)
     return out
+
+
+def _explain_reason(expl: dict) -> str:
+    """Human-readable one-liner summarizing WHY a result matched, synthesized from
+    the numeric _explanation components (pure — no new computation). Names the
+    dominant contributing signals so callers can answer "why did you remember
+    this?" without parsing the raw dict. Used only under search(explain=True)."""
+    parts: list[str] = []
+    vec = float(expl.get("vector") or 0.0)
+    bm25 = float(expl.get("bm25") or 0.0)
+    if vec >= 0.6:
+        parts.append("strong semantic match")
+    elif vec >= 0.35:
+        parts.append("moderate semantic match")
+    if bm25 >= 0.5:
+        parts.append("keyword (BM25) match")
+    if float(expl.get("title_overlap") or 0.0) > 0.0:
+        parts.append("title overlaps the query")
+    if float(expl.get("importance") or 0.0) >= 0.7:
+        parts.append("high importance")
+    if float(expl.get("role_boost") or 0.0) > 0.0:
+        parts.append("speaker/role match")
+    ih = expl.get("intent_hint")
+    if ih and ih not in ("", "general"):
+        parts.append(f"routed as {ih}")
+    if not parts:
+        parts.append("weak/hybrid match (no single dominant signal)")
+    return "; ".join(parts)

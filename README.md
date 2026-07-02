@@ -34,6 +34,36 @@ Works with Claude Code, Gemini CLI, Aider, Google Antigravity, OpenCode, Hermes 
 
 ---
 
+## 🧠 Memory model at a glance
+
+Not a vector store with RAG sugar — a **typed, bitemporal, confidence-scored,
+self-maintaining knowledge base**. Every point below is a first-class column or
+named function, not a roadmap item ([full model →](docs/MEMORY_MODEL.md)):
+
+- **Typed & structured** — every memory has `type`, `source`, `confidence`, `scope`,
+  provenance (`change_agent`), and salience (`importance`, `decay_rate`) — a database
+  of facts, not a transcript.
+- **Bitemporal history** — separate valid-time and transaction-time, so m3 answers
+  *"what did we believe last Tuesday, and when was it corrected?"* — superseded facts
+  are closed, not deleted.
+- **Automatic contradiction handling** — conflicts are detected on write and the stale
+  fact is superseded (with `corroboration_count` / `contradiction_count` + a Bayesian
+  confidence posterior), instead of piling up contradictory history.
+- **Self-maintaining lifecycle** — decay, dedup, consolidation into higher-order
+  `belief` memories, TTL/expiry, retention, and GDPR erasure.
+- **Write-gating** — high-signal memories are promoted through an enrichment queue;
+  a content-safety gate rejects injection at the write boundary. Remember *fewer*
+  things, *better*.
+- **Explainable, goal-aware retrieval** — hybrid (vector + FTS5 BM25 + MMR + rerank),
+  intent-routed by query type, and `memory_suggest` returns the **per-result score
+  breakdown** (vector / bm25 / recency / title-overlap → final) so you can ask *"why
+  did you remember this?"* and get numbers. See
+  [CONFIDENCE_AND_TRUST.md](docs/CONFIDENCE_AND_TRUST.md).
+- **Measured, not asserted** — LongMemEval-S **92% end-to-end QA, 99.2% recall@10**
+  ([report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
+
+---
+
 ## 📦 Install
 
 ```bash

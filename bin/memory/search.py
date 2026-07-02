@@ -126,6 +126,7 @@ from .search_ranking import (  # noqa: F401 — re-exported for callers + memory
     _DATE_MONTHS,
     _apply_recency_bonus,
     _apply_temporal_boost,
+    _explain_reason,
     _hybrid_score_batch,
     _recency_bonus_ranks,
     _trim_by_elbow,
@@ -937,7 +938,7 @@ async def memory_search_scored_impl(
             if explain:
                 bm25_norm = 1.0 / (1.0 + abs(row["bm25_score"]))
                 length_penalty = max(0.3, content_lens[i] / short_turn_t) if content_lens[i] < short_turn_t else 1.0
-                item["_explanation"] = {
+                _expl = {
                     "vector": page_scores[i], "bm25": bm25_norm, "importance": row["importance"],
                     "raw_hybrid": page_scores[i] * vector_weight + bm25_norm * bm25_w_complement,
                     "length_penalty": length_penalty, "title_overlap": title_overlaps[i],
@@ -945,6 +946,11 @@ async def memory_search_scored_impl(
                     "importance_boost": importance_w * importances[i],
                     "vector_weight": vector_weight, "intent_hint": intent_hint, "role_boost": role_boosts[i],
                 }
+                # Human-readable summary synthesized from the numeric components
+                # above (no new computation) so callers can answer "why did you
+                # remember this?" without reading the raw dict. explain-only.
+                _expl["reason"] = _explain_reason(_expl)
+                item["_explanation"] = _expl
             scored.append((final_score, item))
 
         if scored:
@@ -1980,6 +1986,10 @@ async def memory_search_impl(
 
         if explain and "_explanation" in item:
             exp = item["_explanation"]
+            # Lead with the plain-English reason (synthesized from the components
+            # below) so "why did you remember this?" is answerable at a glance.
+            if exp.get("reason"):
+                lines.append(f"   Why: {exp['reason']}")
             if "raw_hybrid" in exp:
                 vw = exp.get("vector_weight", 0.7)
                 lines.append(f"   Breakdown: vector={exp['vector']:.4f} (weight {vw:.2f}) + bm25={exp['bm25']:.4f} (weight {1.0-vw:.2f}) -> raw={exp['raw_hybrid']:.4f}")
