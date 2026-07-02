@@ -375,6 +375,49 @@ async def run_enrich_pass(args):
         logger.error(f"Enrichment pass error: {type(e).__name__}: {e}")
 
 
+def has_embed_work(core_db: Optional[str]) -> bool:
+    """SQL check: are there memory_items rows with no embedding yet?
+
+    These accumulate when memory_write deferred embedding (no fast embedder
+    available at write time — the zero-lag path). embed_backfill's own
+    _count_pending uses the same WHERE-NOT-EXISTS query, so this is an accurate,
+    cheap event-gate."""
+    try:
+        import embed_backfill
+        db_path = core_db or os.environ.get("M3_DATABASE")
+        if not db_path:
+            return False
+        args = embed_backfill._parse_args(["--db", str(db_path), "--limit", "1"])
+        return embed_backfill._count_pending(args.db, args) > 0
+    except Exception as e:
+        logger.debug(f"Embed-backfill work check failed (non-fatal): {e}")
+        return False  # conservative: don't spin the embedder unless we're sure
+
+
+async def run_embed_pass(args):
+    """Drain deferred embeddings via embed_backfill.
+
+    memory_write defers embedding when no fast embedder is available (§3/§8
+    zero-lag write), leaving rows with a persisted verbatim body but no vector.
+    This pass fills those vectors. Bounded by --limit-per-pass so one cycle
+    can't monopolize the GPU; the round-robin scheduler gives other passes a
+    turn (see _select_pass_order)."""
+    if not has_embed_work(args.database):
+        logger.debug("No pending embed-backfill work. Skipping pass.")
+        return
+
+    logger.info("Starting Embed-backfill pass...")
+    try:
+        import embed_backfill
+        bf_args = embed_backfill._parse_args(
+            ["--db", str(args.database), "--limit", str(args.limit_per_pass)]
+        )
+        counters = embed_backfill.Counters()
+        await embed_backfill._run_sweep(bf_args, counters)
+    except Exception as e:
+        logger.error(f"Embed-backfill pass error: {type(e).__name__}: {e}")
+
+
 async def run_consolidate_pass(args):
     """Roll up aged 'observation' groups into high-order 'belief' memories
     (knowledge-maintenance Phase 4) — governor-gated, event-driven. Only fires
@@ -539,6 +582,7 @@ async def main_loop(args):
         passes = [
             {"name": "entities",   "skip": args.skip_entities,      "gpu": entity_local,      "sets_limit": True,  "run": run_entity_pass},
             {"name": "enrich",     "skip": args.skip_enrich,        "gpu": enrich_local,      "sets_limit": True,  "run": run_enrich_pass},
+            {"name": "embed",      "skip": args.skip_embed,         "gpu": True,              "sets_limit": True,  "run": run_embed_pass},
             {"name": "consolidate","skip": args.skip_consolidate,   "gpu": consolidate_local, "sets_limit": False, "run": run_consolidate_pass},
             {"name": "prune",      "skip": args.skip_chatlog_prune, "gpu": None,              "sets_limit": False, "run": run_chatlog_prune_pass},
         ]
@@ -587,6 +631,7 @@ async def main_loop(args):
             more_work = (
                 (not args.skip_entities and has_entity_work(args.database, args.chatlog_db))
                 or (not args.skip_enrich and has_enrich_work(args.database))
+                or (not args.skip_embed and has_embed_work(args.database))
             )
             if more_work:
                 floor = float(pacing_full.get("background_delay", 0.1))
@@ -634,6 +679,8 @@ def main():
     parser.add_argument("--reflector-threshold", type=int, default=5, help="Min observations before Reflector (default: 5)")
     parser.add_argument("--skip-entities", action="store_true", help="Skip entity extraction")
     parser.add_argument("--skip-enrich", action="store_true", help="Skip enrichment pass")
+    parser.add_argument("--skip-embed", action="store_true",
+                        help="Skip embed-backfill pass (draining deferred zero-lag-write vectors)")
     parser.add_argument("--no-reflect", action="store_true", help="Skip reflection pass")
     # Belief consolidation pass (knowledge-maintenance Phase 4). Event-driven +
     # governor-gated inside the loop; the job still requires M3_CONSOLIDATION_AUTO=1

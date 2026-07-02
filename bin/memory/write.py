@@ -72,6 +72,7 @@ from .embed import (
     _get_embedded_embedder,
     _record_embed_backend,
     _subdivide_dense_chunk,
+    fast_embedder_available,
 )
 from .emitters import _maybe_emit_event_rows, _maybe_emit_gist_row, _maybe_emit_window_chunk
 from .enrich import _auto_classify, _ingest_llm_enabled, _maybe_auto_entities, _maybe_auto_title, _try_enrich_or_enqueue
@@ -292,6 +293,25 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                        (_chash, item_id))
 
     vec = None
+    # Zero-lag guard (§3/§8): only embed INLINE when a fast tier is available
+    # (in-process tier-1, or a healthy tier-2 CPU-HTTP breaker). If not, defer:
+    # the verbatim memory_items row is already persisted above and is
+    # FTS-searchable immediately; its vector is filled asynchronously by
+    # bin/embed_backfill.py (which selects rows WHERE NOT EXISTS an embedding —
+    # so a deferred row qualifies by construction, no explicit queue needed).
+    # This turns a degraded/unconfigured embedder from a multi-minute cascade
+    # (tier-2 30s read timeout + tier-3 3-retry + 30s semaphore, per chunk) into
+    # a zero-lag write. Correctly-configured installs hit the fast path and are
+    # unchanged. Contradiction check below is already `if vec`-gated, so it
+    # naturally skips on the deferred path and runs when the vector backfills.
+    _embed_deferred = False
+    if embed and not fast_embedder_available():
+        embed = False
+        _embed_deferred = True
+        logger.info(
+            "memory_write_impl: no fast embedder available; deferring embedding "
+            "for %s to embed_backfill (row persisted, FTS-searchable now)", item_id
+        )
     if embed:
         _et = _augment_embed_text_with_anchors(
             embed_text or content or title, metadata
@@ -478,6 +498,8 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
             logger.debug(f"ingest emitter failed: {e}")
 
     result = f"Created: {item_id}"
+    if _embed_deferred:
+        result += " (embedding deferred — searchable now via FTS, vector backfills async)"
     if superseded_ids:
         result += f" (superseded {len(superseded_ids)} conflicting memories: {', '.join(superseded_ids[:3])})"
     return result

@@ -147,6 +147,32 @@ def get_embed_breaker_state() -> dict:
     }
 
 
+def fast_embedder_available() -> bool:
+    """True iff an embed would be served by a FAST tier without falling into the
+    slow HTTP cascade — i.e. tier-1 in-process embedder is loaded, OR the tier-2
+    CPU-HTTP breaker is currently closed (service believed healthy).
+
+    Purely local + cached: `_get_embedded_embedder()` is memoized after first
+    call (sub-ms), and breaker `.allow_request()` is an in-memory state check —
+    no network I/O. The write path uses this to decide inline-embed vs defer,
+    so a degraded/unconfigured embedder yields a zero-lag write (row persisted,
+    vector backfilled) instead of a multi-minute cascade through dead HTTP tiers.
+
+    Note: this is a best-effort predictor, not a guarantee. Tier-1 can still
+    fail per-call (CUDA/OOM) — that path already falls through the cascade as
+    before; this only gates whether we ATTEMPT inline embedding at all.
+    """
+    if _get_embedded_embedder() is not None:
+        return True
+    # Tier-2 healthy? A closed/half-open breaker means we'd try the CPU HTTP
+    # service (bounded by its read timeout), not skip straight to tier-3.
+    if _CPU_FALLBACK_BREAKER is not None and _CPU_FALLBACK_BREAKER.allow_request():
+        # Only meaningful if a fallback URL is actually configured; otherwise
+        # tier-2 is a no-op and we'd still cascade.
+        return bool(getattr(config, "EMBED_FALLBACK_URL", "") or _EMBED_FALLBACK_URL)
+    return False
+
+
 def reset_embed_breakers() -> dict:
     """Force-close all breakers (test/debug helper). Returns prior state."""
     prior = get_embed_breaker_state()
