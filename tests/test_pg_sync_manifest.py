@@ -427,3 +427,52 @@ def test_infer_manifest_path_agent_bench():
 def test_infer_manifest_path_agent_bench_analysis():
     path = pg_sync._infer_manifest_path("/some/dir/agent_bench_analysis.db")
     assert path.endswith("agent_bench_analysis.yaml"), path
+
+
+# ── Regression: watermark table auto-provisioned on non-main target DBs ───────
+# Bug (2026-06-27..07-01): agent_chatlog.db lacked the sync_watermarks table
+# (migration 005 only runs against agent_memory.db), so every watermark write
+# raised 'no such table', was silently swallowed, and the chatlog target
+# re-reconciled the whole DB every run. _ensure_watermark_table fixes it.
+def test_ensure_watermark_table_creates_missing_table():
+    """A fresh DB without sync_watermarks gets it provisioned idempotently."""
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+
+    # Reproduce the bug precondition: table absent.
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sync_watermarks'"
+    )
+    assert cur.fetchone() is None
+
+    pg_sync._ensure_watermark_table(cur)
+    pg_sync._ensure_watermark_table(cur)  # idempotent — second call must not raise
+
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='sync_watermarks'"
+    )
+    assert cur.fetchone() is not None
+    conn.close()
+
+
+def test_watermark_roundtrips_for_non_main_target():
+    """After ensure, a non-main target persists and reads back its watermark
+    under the target-prefixed direction key."""
+    conn = sqlite3.connect(":memory:")
+    cur = conn.cursor()
+    pg_sync._ensure_watermark_table(cur)
+
+    # Before any write, a non-main target reads None (→ first sync, once).
+    assert pg_sync._get_watermark(cur, "pg_push", "chatlog") is None
+
+    pg_sync._set_watermark(cur, "pg_push", "2026-07-01T00:00:00Z", "chatlog")
+    conn.commit()
+
+    # Reads back → subsequent runs delta instead of full-reconciling.
+    assert pg_sync._get_watermark(cur, "pg_push", "chatlog") == "2026-07-01T00:00:00Z"
+
+    # Stored under the prefixed key, isolated from the 'main' namespace.
+    cur.execute("SELECT direction FROM sync_watermarks")
+    assert cur.fetchone()[0] == "chatlog_pg_push"
+    assert pg_sync._get_watermark(cur, "pg_push", "main") is None
+    conn.close()
