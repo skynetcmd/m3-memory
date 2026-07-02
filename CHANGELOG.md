@@ -74,11 +74,72 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ---
 
+## [2026.7.1.2] — 2026-07-02 — Refactor floor: modular packages, memory legibility, env namespacing
+
+> **⛔ This release is the new SUPPORTED FLOOR.** Versions prior to
+> **2026.7.1.0 are no longer supported** — please upgrade (`m3 update`, or
+> `pip install -U m3-memory`). The migration chain (`memory/migrations/`,
+> now through **v038**) brings any prior-version database up to this floor;
+> `m3 doctor --fix` migrates deprecated environment-variable names into the
+> `M3_` namespace. (Supersedes the earlier "not supported after July 2026"
+> note on 2026.6.27.0 — the floor is this version, effective now.)
+
+### Added
+
+- **Explainable retrieval, surfaced.** `memory_suggest` (search with
+  `explain=True`) now returns a plain-English **"why did you remember this?"**
+  reason alongside the numeric score breakdown (vector / bm25 / recency /
+  title-overlap), so a recall is trustable and a false positive debuggable.
+- **`docs/MEMORY_MODEL.md`** — one high-signal doc mapping m3's typed,
+  bitemporal, confidence-scored, self-maintaining knowledge base to the real
+  schema columns and functions, plus a README "Memory model at a glance".
+- **Pinned / protected memories.** `memory_pin` / `memory_unpin` exempt a
+  memory from decay, expiry, and retention purges ("this is canon") — schema
+  migration `037_pinned`.
+- **Opt-in cross-agent isolation.** Passing `requesting_agent` to the search
+  tools (or `M3_ENFORCE_AGENT_ISOLATION=1`) restricts a search to the caller's
+  own private (`scope='agent'`) memories plus shared scopes — SQL-layer
+  enforcement of the scope model documented in `MULTI_AGENT.md`.
+- **`m3 doctor` migrates deprecated env vars.** Detects old, un-namespaced
+  variable names in on-disk config and `m3 doctor --fix` rewrites them into the
+  `M3_` namespace (dry-run default, `.bak` backup, idempotent).
+
+### Fixed
+
+- **Enrichment no longer re-feeds the same conversations to the LLM.** A
+  shared-counter data race across `await`s let a processed group be marked
+  not-done and re-selected on the next run; terminal state is now derived from a
+  per-group result. Separately, a turn that legitimately extracts to zero
+  entities is now recorded processed (migration `038_entity_extraction_status`)
+  instead of being re-selected every batch (was 22,996 rows re-fed per pass).
+- **Security hardening** (DefectDojo-clean): `defusedxml` for the Windows
+  Task-Scheduler XML parser; SQL identifier interpolation in the dashboard
+  queue-stats panel is allowlisted.
+
+### Changed
+
+- **Modular package structure.** The largest modules were split behind
+  behavior-preserving facades — `m3_sdk` → `m3_core/`, `mcp_tool_catalog` →
+  `catalog/`, plus `memory/search`, `memory/embed`, `m3_enrich`, `installer`,
+  `setup_wizard`, and the dashboard — targeting small single-responsibility
+  files. Public import paths and the MCP tool catalog are unchanged.
+- **Environment variables namespaced.** Collision-prone names (`PG_URL`,
+  `CHROMA_BASE_URL`, `EMBED_MODEL`, the chatlog/DB pool knobs, …) gained `M3_`
+  canonical names with a deprecation shim (old names still work, warn once);
+  configuration resolution is unified in one typed accessor with a documented
+  precedence order.
+- **Every m3 MCP tool call is bounded by a 30s default timeout** (user-selectable
+  per call), and `memory_write` defers embedding when no fast embedder is
+  available so writes stay zero-lag instead of blocking for minutes.
+
+---
+
 ## [2026.6.27.0] — 2026-06-27 — M3-v3 oxidation: governor, native ingest hashing, sqlite-vec
 
 > **⚠️ Recommended for all users.** This release is the new baseline.
-> **Versions prior to 2026.6.27.0 will not be supported after July 2026** —
-> please upgrade (`m3 update`, or `pip install -U m3-memory`).
+> **Superseded:** the supported floor is now **2026.7.1.0** (see above) — this
+> note's original "not supported after July 2026" wording is retained for
+> history but the floor took effect with the 2026.7.1.x release.
 
 Pairs with m3-core-rs **3.6.27** (release tag `v2026.06.27`); the pin in
 `m3_memory/rust_core_install.py` is bumped in lockstep.
