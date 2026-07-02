@@ -13,7 +13,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
+import pytest  # noqa: E402
+
 from dashboard import queue_stats as qs  # noqa: E402
+
+
+def test_identifier_allowlist_blocks_injection():
+    """The COUNT queries f-string-interpolate table/column identifiers (SQLite
+    can't bind them), so they're allowlisted. An identifier not in _PIPELINES —
+    including a SQL-injection attempt — must raise, never reach the query."""
+    # legit identifiers pass through unchanged
+    assert qs._safe_ident("memory_items", qs._ALLOWED_TABLES, "table") == "memory_items"
+    assert qs._safe_ident("created_at", qs._ALLOWED_TS_COLS, "col") == "created_at"
+    # injection / unknown identifiers are rejected
+    for bad in ("memory_items; DROP TABLE x", "x) UNION SELECT ...", "unknown_table", ""):
+        with pytest.raises(ValueError):
+            qs._safe_ident(bad, qs._ALLOWED_TABLES, "table")
 
 
 def _make_db(tmp_path) -> str:

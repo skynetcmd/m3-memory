@@ -53,6 +53,31 @@ _PIPELINES = (
 )
 
 
+# SQLite can't bind identifiers (table/column names), so those must be
+# f-string-interpolated. Today every caller passes a constant from _PIPELINES,
+# but an f-string-into-SQL with no guard is an injection footgun the moment a
+# future caller threads a dynamic value through — so we allowlist against the
+# exact identifiers/fragments _PIPELINES uses (§6 defense-in-depth: never
+# interpolate an unvalidated identifier).
+_ALLOWED_TABLES: frozenset[str] = frozenset(
+    {p["queue_table"] for p in _PIPELINES} | {p["produced_table"] for p in _PIPELINES}
+)
+_ALLOWED_TS_COLS: frozenset[str] = frozenset(
+    {p["queue_ts"] for p in _PIPELINES} | {p["produced_ts"] for p in _PIPELINES}
+)
+_ALLOWED_WHERE: frozenset[str] = frozenset(
+    p["produced_where"] for p in _PIPELINES if p["produced_where"]
+)
+
+
+def _safe_ident(value: str, allowed: frozenset[str], kind: str) -> str:
+    """Return `value` only if it's in the allowlist; else raise. Guards the
+    identifier interpolation in the COUNT queries below."""
+    if value not in allowed:
+        raise ValueError(f"unsafe {kind} identifier {value!r} (not in allowlist)")
+    return value
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)
@@ -60,6 +85,7 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
 
 
 def _count(conn: sqlite3.Connection, table: str) -> int:
+    table = _safe_ident(table, _ALLOWED_TABLES, "table")
     return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
@@ -67,10 +93,16 @@ def _produced_in_window(
     conn: sqlite3.Connection, table: str, ts_col: str, where: str, minutes: int
 ) -> int:
     """Rows produced in the last `minutes`, using SQLite datetime math on the
-    ISO-8601 created_at. SQL does the filtering (no Python-side row scan)."""
+    ISO-8601 created_at. SQL does the filtering (no Python-side row scan).
+    `table`, `ts_col`, and `where` are validated against _PIPELINES-derived
+    allowlists — no unvalidated identifier reaches the query string."""
+    table = _safe_ident(table, _ALLOWED_TABLES, "table")
+    ts_col = _safe_ident(ts_col, _ALLOWED_TS_COLS, "timestamp column")
     clause = f"{ts_col} > datetime('now', ?)"
     if where:
-        clause += f" AND {where}"
+        # `where` fragments come only from _PIPELINES' produced_where constants
+        # (fixed literals like "type = 'fact_enriched'"); validated below.
+        clause += f" AND {_safe_ident(where, _ALLOWED_WHERE, 'where-clause')}"
     sql = f"SELECT COUNT(*) FROM {table} WHERE {clause}"
     return conn.execute(sql, (f"-{int(minutes)} minutes",)).fetchone()[0]
 
