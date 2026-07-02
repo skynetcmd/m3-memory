@@ -13,6 +13,18 @@ That framing is what makes the rest different: memory as persistent infrastructu
 
 Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable
 
+### In one sentence
+
+**M3 is a persistent, local-first memory layer for AI coding agents** — a shared, bitemporal knowledge base that multiple agents read and write over MCP.
+
+|  |  |
+|---|---|
+| **Works with** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · any MCP agent |
+| **M3 is** | a memory layer · an MCP server · a hybrid retrieval engine · a bitemporal knowledge base |
+| **M3 is _not_** | an LLM · a chatbot · a plain vector database · a RAG framework · an IDE |
+| **For you if** | you use a desktop coding agent and want memory that's private, offline-capable, and shared across tools |
+| **Maturity** | production-grade — lightweight by design (SQLite primary), scales out to PostgreSQL for demanding environments; see [`features.json`](docs/features.json) |
+
 > **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
 >
 > 🚀 **[New to M3? Start here with our 5-minute "Human-First" guide.](docs/GETTING_STARTED.md)**
@@ -140,7 +152,7 @@ chat model for generation (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B
 instruct GGUF). M3 auto-selects it; embedding-only features work without
 it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
 
-> **⚡ Auto-Oxidation is ON by Default.** The performance-critical hot paths — FTS5 query sanitize/compile, batch cosine and hybrid ranking, MMR rerank, and redaction scrubbing — are oxidized to an optional in-process Rust core (`m3_core_rs`) that ships as a local wheel (no service, no daemon). It is enabled automatically whenever the wheel is importable, and every path falls back silently to the pure-Python implementation when it is absent. On a per-operation micro-benchmark (FFI-inclusive, output-verified, on real DB vectors) the wins are large where it matters — up to **~846× on packed MMR rerank** and **~97–178× on packed batch-cosine** (the raw-bytes path production actually takes), **11–15× on redaction**, plus smaller but consistent wins on FTS query compilation and token-Jaccard (1.4–10×) — while trivially small C-backed ops (e.g. `sha256`) stay break-even or favor Python and are left on the Python path. Full table, methodology, and caveats: [docs/OXIDATION_BENCHMARKS.md](docs/OXIDATION_BENCHMARKS.md). Opt out at any time by setting `M3_CORE_RS_DISABLE=1` to force the pure-Python path. See [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md) for configuration details.
+> **⚡ Auto-Oxidation is ON by default.** Performance-critical hot paths (MMR rerank, batch cosine, FTS compile, redaction) run on an optional in-process Rust core (`m3_core_rs`, a local wheel — no service), with silent pure-Python fallback when it's absent. Micro-benchmarks show large wins where they matter (up to ~846× on packed MMR rerank, ~97–178× on batch-cosine). Full table + methodology: [docs/OXIDATION_BENCHMARKS.md](docs/OXIDATION_BENCHMARKS.md). Opt out with `M3_CORE_RS_DISABLE=1`.
 
 Restart your agent. Done!
 
@@ -188,51 +200,11 @@ this only gates the MCP wire surface.
 
 ## 🛡️ Air-gapped deployment
 
-M3 is sovereign **by default** — the baseline install needs no external
-services. For fully air-gapped environments, the only extra step is to
-pre-stage the repo (with the LFS-tracked GGUF materialized) on a connected
-machine and transfer it to the target.
+M3 is sovereign **by default** — the baseline install needs no external services. For fully air-gapped environments, the only extra step is to pre-stage the repo (with the LFS-tracked GGUF materialized) and wheels on a connected machine, then sneakernet the folder and `pip install --no-index`. No `curl`, no LM Studio, no third-party model server.
 
-```bash
-# On a connected machine:
-git lfs install                                              # one-time
-git clone https://github.com/skynetcmd/m3-memory.git
-cd m3-memory && git lfs pull                                  # ~438MB
-pip download m3-memory -d _assets/python_wheels               # pre-fetch wheels
+M3 is also **FIPS 140-3 deployment-ready**: it implements no custom crypto, uses only FIPS-approved algorithms, and routes every operation through a single provider boundary so a validated wolfCrypt module can serve it (`M3_FIPS_MODE=1` fails closed if absent). M3 itself is not a CMVP-validated module — no application is.
 
-# On the air-gapped target (after sneakernet-copying the folder):
-pip install --no-index --find-links=_assets/python_wheels m3-memory
-m3 setup --non-interactive --capture-mode both
-```
-
-That's it. No `curl`, no LM Studio, no third-party model server.
-
-**See the [Sovereign & Air-Gapped Deployment Guide](docs/SOVEREIGN_DEPLOYMENT.md)
-for full instructions, FIPS-mode hardening, and GPU-on-air-gap details.**
-
-By default, m3 stores its configuration, payload, and backups under
-`~/.m3-memory`. Override with `M3_MEMORY_ROOT`.
-
-### 🔒 FIPS 140-3 deployment-ready (what that does and doesn't mean)
-
-M3 **implements no custom cryptography** and uses only FIPS-approved algorithms
-(AES-256-GCM, SHA-256, PBKDF2-HMAC-SHA256, TLS 1.3). Every cryptographic
-operation — the encrypted secrets vault, key derivation, the tamper-evident
-audit hash chain — is routed through a single provider boundary
-(`crypto_provider.py`) so a validated module can serve it.
-
-- **`M3_FIPS_MODE=1`** routes all crypto through **wolfCrypt** (the wolfSSL
-  cryptographic module), runs power-up Known-Answer-Tests, and **fails closed**
-  if wolfCrypt isn't available — never silently falling back to Python crypto.
-  This works with the freely-buildable open-source wolfSSL.
-- **`M3_FIPS_STRICT=1`** additionally **requires the CMVP-validated wolfCrypt
-  FIPS module** (the commercial wolfSSL FIPS build) and refuses anything else.
-
-> **M3 itself is *not* a FIPS-validated cryptographic module** — no application
-> is. "Deployment-ready" means M3 avoids non-approved algorithms, implements no
-> crypto of its own, and uses a validated provider (wolfCrypt) when configured.
-> See **[docs/FIPS_MODULE_BOUNDARY.md](docs/FIPS_MODULE_BOUNDARY.md)** for the
-> module boundary, the three tiers, and known limitations.
+**Full guides:** [Sovereign & Air-Gapped Deployment](docs/SOVEREIGN_DEPLOYMENT.md) · [FIPS module boundary & tiers](docs/FIPS_MODULE_BOUNDARY.md). Config/payload/backups live under `~/.m3-memory` (override with `M3_MEMORY_ROOT`).
 
 ---
 
@@ -283,7 +255,8 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | 🤖 **[Agent rules + all tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
 | 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
 | 🗺️ **[Roadmap](docs/ROADMAP.md)** | 📜 **[Changelog](CHANGELOG.md)** |
-| 🛠️ **[Operations playbook](docs/OPERATIONS.md)** (run the memory brain) | |
+| 🛠️ **[Operations playbook](docs/OPERATIONS.md)** (run the memory brain) | 🧩 **[Capability matrix](docs/CAPABILITY_MATRIX.md)** (every tool, grouped) |
+| 🤖 **[AI agent context profile](docs/llm-context.md)** (inject into other LLMs) | 🔢 **[Machine-readable features](docs/features.json)** (`features.json`) |
 
 ---
 

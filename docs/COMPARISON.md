@@ -55,7 +55,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. It's exc
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
 | **LangChain integration** | Not the focus | Excellent |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
-| **Stars (Apr 2026)** | Early — just launched | 20k+ |
+| **Stars (Apr 2026)** | Newer project (fewer stars), production-grade codebase | 20k+ |
 
 ### When to choose M3-Memory over Mem0
 
@@ -133,6 +133,63 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 
 ---
 
+## ⚔️ M3-Memory vs Graphiti
+
+Graphiti (by the Zep team) is a framework for building **temporally-aware knowledge graphs** for agents. Its core abstraction is the graph: entities and relationships as first-class nodes/edges, with bi-temporal edge validity, typically backed by Neo4j (or FalkorDB). It's a strong fit when your problem is fundamentally *relational* — reasoning over how entities connect and how those connections change over time.
+
+M3 is memory-first rather than graph-first: the primary store is a bitemporal SQLite knowledge base with hybrid retrieval, and an entity graph is *one* layer on top (`memory_graph`, entity extraction) rather than the central abstraction. Where Graphiti asks "what's the graph?", M3 asks "what should the agent remember, and is it still true?"
+
+| Feature | M3-Memory | Graphiti |
+|---------|-----------|----------|
+| **Core abstraction** | Bitemporal memory store + hybrid retrieval | Temporal knowledge graph (nodes/edges) |
+| **Backing store** | Single SQLite file (FTS5 + vector) | Graph DB (Neo4j / FalkorDB) |
+| **Search** | FTS5 + vector + MMR | Graph traversal + semantic + BM25 |
+| **Temporal model** | Bitemporal (valid + transaction time) | Bi-temporal edge validity |
+| **MCP support** | Native — 100+ tools | Via a separate MCP server |
+| **Infrastructure** | None to start (SQLite) | Requires a graph database |
+| **Local-first / offline** | 100% — SQLite, fully offline | Depends on graph-DB deployment |
+| **Cost** | Free, Apache 2.0 | Free, OSS |
+
+### When to choose M3-Memory over Graphiti
+- You want zero-infrastructure local memory (one SQLite file, no graph DB to run).
+- Retrieval — "recall what's relevant and still valid" — matters more than graph reasoning.
+- You need MCP-native tools and offline operation out of the box.
+
+### When to choose Graphiti over M3-Memory
+- Your problem is genuinely graph-shaped: multi-hop entity relationship reasoning is the point, not a side feature.
+- You already run (or want) a graph database and want the graph as the primary substrate.
+
+### Can you use both?
+Yes — they operate at different altitudes. You can let M3 own memory/retrieval and offload deep relationship reasoning to a Graphiti graph if a workload needs it.
+
+---
+
+## ⚔️ M3-Memory vs A-MEM
+
+A-MEM is a **research-oriented agentic memory** design: memories are "notes" that the system links into an evolving network (inspired by Zettelkasten), with the LLM generating structured attributes and dynamically updating links as new memories arrive. It's a compelling model for emergent, self-organizing memory and is primarily a research codebase rather than a production deployment target.
+
+M3 is production-and-operations oriented: typed memories, deterministic bitemporal supersession, explicit GDPR/FIPS posture, an operational MCP tool surface, and a benchmarked retrieval stack. Contradiction handling in M3 is a deterministic supersede (soft-delete + `supersedes` edge), not an LLM re-linking pass.
+
+| Feature | M3-Memory | A-MEM |
+|---------|-----------|-------|
+| **Orientation** | Production / operations | Research prototype |
+| **Memory structure** | Typed items + entity graph layer | LLM-generated notes + evolving link network |
+| **Contradiction handling** | Deterministic bitemporal supersede | LLM-driven link/attribute updates |
+| **Retrieval** | FTS5 + vector + MMR (benchmarked) | Embedding-based over the note network |
+| **MCP / agent integration** | Native — 100+ tools, plugin, hooks | Library / research code |
+| **Compliance tooling** | GDPR primitives, FIPS-ready posture | Not a focus |
+| **Local-first / offline** | 100% — SQLite, fully offline | Depends on the LLM/embeddings used |
+
+### When to choose M3-Memory over A-MEM
+- You need something to deploy and operate today — with MCP integration, compliance tooling, and predictable behavior.
+- You want deterministic, auditable contradiction handling rather than emergent LLM re-linking.
+
+### When to choose A-MEM over M3-Memory
+- You're researching self-organizing / emergent memory structures and want the note-network model as the object of study.
+- Deterministic operations and compliance posture are not your priority.
+
+---
+
 ## ⚔️ M3-Memory vs LangChain Memory / LangMem
 
 LangChain Memory (including LangGraph's thread/store memory and the newer LangMem library) is memory that lives inside the LangChain ecosystem. It covers short-term thread memory, long-term JSON stores, and LangMem's episodic/semantic/procedural memory types. It's the natural choice if you're already building LangGraph agents.
@@ -167,6 +224,17 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 
 ---
 
+## 🔭 Not yet independently evaluated
+
+The agentic-memory space moves fast and this page only compares systems we've
+actually examined against primary sources. If you'd like a head-to-head with a
+system not listed here, open an [issue](https://github.com/skynetcmd/m3-memory/issues) —
+we'll evaluate it and add an honest section rather than publish a table built on
+marketing copy. See [Verifying claims](#-verifying-claims-about-m3-or-any-tool-here)
+for how we hold every entry (including M3's own) to source-of-truth.
+
+---
+
 ## 📋 Summary Decision Matrix
 
 | I need... | Best choice |
@@ -183,6 +251,8 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 | Full stateful agent runtime (not just memory) | **Letta** |
 | Git-backed agent state | **Letta** |
 | Enterprise temporal knowledge graph at scale | **Zep** |
+| Graph-first entity/relationship reasoning on a graph DB | **Graphiti** |
+| Researching self-organizing / emergent memory structures | **A-MEM** |
 
 ---
 

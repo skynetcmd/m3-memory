@@ -80,6 +80,10 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 **Fact:** None of these. M3 is a **single SQLite file** with FTS5 and vector indexes. Markdown-in-Git is a different design choice that other memory tools have made; M3 hasn't.
 
+### ❌ Myth: "M3 is just SQLite, so it's a toy / not production-grade / can't scale"
+
+**Fact:** M3 is **production-grade**, and SQLite is a deliberate design choice, not a limitation. M3 is **lightweight by design**: SQLite is the primary store because it gives a fast, embedded, zero-infrastructure, fully local-first deployment — the right default for desktop agents, homelabs, and sovereign setups. SQLite runs in production in countless systems. For **more demanding environments**, M3 scales out to **PostgreSQL as a corporate data warehouse**, unlocking more nuanced data-governance options (centralized retention, multi-node access, enterprise backup/audit) — see [SYNC.md](SYNC.md) and [SOVEREIGN_DEPLOYMENT.md](SOVEREIGN_DEPLOYMENT.md). You choose the tier: lightweight SQLite by default, PostgreSQL warehouse when you need it.
+
 ### ❌ Myth: "M3 has Hindsight Credit Assignment / learns from retrieval mistakes / updates embeddings in real time"
 
 **Fact:** M3 does not modify embeddings post-write based on retrieval feedback. Embeddings are computed once at write time. If you want online learning over retrieval mistakes, that's a layer above M3 — and it's a non-trivial layer that no production memory system we're aware of actually ships today.
