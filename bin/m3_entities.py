@@ -361,6 +361,20 @@ def _load_conv_list(path: Path) -> set[str]:
     return out
 
 
+def _ensure_extraction_status_column(conn) -> None:
+    """Idempotently add entity_extraction_queue.status TEXT. Best-effort — a DB
+    that predates this (or already has it) is a no-op. Mirrors the runtime-DDL
+    pattern used elsewhere (enrich/prep._ensure_migration_025). 'status' is
+    'done' (processed: entities emitted OR legitimately empty) or 'failed'."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(entity_extraction_queue)")}
+        if cols and "status" not in cols:
+            conn.execute("ALTER TABLE entity_extraction_queue ADD COLUMN status TEXT")
+            conn.commit()
+    except Exception:  # noqa: BLE001 — never break the caller
+        pass
+
+
 def _query_eligible_rows(
     db_path: Path,
     type_allowlist: tuple[str, ...],
@@ -382,6 +396,15 @@ def _query_eligible_rows(
     """
     import sqlite3
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    # Is the status marker available? (RO conn can't ALTER; the writers add it.)
+    # Only reference entity_extraction_queue.status if the table+column exist,
+    # so an old DB / fresh DB without the queue degrades to entity-presence only.
+    _has_status = False
+    try:
+        _qcols = {r[1] for r in conn.execute("PRAGMA table_info(entity_extraction_queue)")}
+        _has_status = "status" in _qcols
+    except Exception:  # noqa: BLE001
+        _has_status = False
     placeholders = ",".join("?" * len(type_allowlist))
     excl_placeholders = ",".join("?" * len(ALWAYS_SKIP_TYPES))
     variant_clause = ""
@@ -394,9 +417,23 @@ def _query_eligible_rows(
 
     extracted_clause = ""
     if skip_already_extracted:
+        # "Already extracted" = has an entity row OR was recorded processed
+        # (status='done') in the queue. The second half is essential: a turn
+        # that legitimately extracts to ZERO entities has no memory_item_entities
+        # row, so entity-presence alone would re-select it every run (worst-first
+        # under ORDER BY LENGTH DESC), re-sending it to the LLM forever. The
+        # `status='done'` marker (written by _mark_extracted on empty OR success)
+        # is what makes an empty extraction terminal. Failed rows (status='failed'
+        # or NULL) stay eligible for retry. Tolerant of an old DB lacking the
+        # status column via a table-existence-guarded sub-select.
         extracted_clause = (
             " AND id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)"
         )
+        if _has_status:
+            extracted_clause += (
+                " AND id NOT IN (SELECT memory_id FROM entity_extraction_queue"
+                "                WHERE status = 'done')"
+            )
 
     sql = f"""
         SELECT id,
@@ -480,19 +517,57 @@ async def _run_db(
             import sqlite3 as _sql
             qc = _sql.connect(str(db_path), timeout=30)
             qc.execute("PRAGMA busy_timeout=30000")
+            _ensure_extraction_status_column(qc)
             qc.execute(
                 """INSERT INTO entity_extraction_queue
-                       (memory_id, attempts, last_error, last_attempt_at)
-                   VALUES (?, 1, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                       (memory_id, attempts, last_error, last_attempt_at, status)
+                   VALUES (?, 1, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'failed')
                    ON CONFLICT(memory_id) DO UPDATE SET
                        attempts        = attempts + 1,
                        last_error      = excluded.last_error,
-                       last_attempt_at = excluded.last_attempt_at""",
+                       last_attempt_at = excluded.last_attempt_at,
+                       status          = 'failed'""",
                 (memory_id, f"{type(err).__name__}: {err}"[:500]),
             )
             qc.commit()
         except Exception:
             pass  # never let queue bookkeeping break the run
+        finally:
+            if qc is not None:
+                try:
+                    qc.close()
+                except Exception:
+                    pass
+
+    def _mark_extracted(memory_id: str) -> None:
+        """Record that a turn was PROCESSED (entities emitted OR legitimately
+        empty) so the selection query stops re-feeding it. Without this, a turn
+        that extracts to zero entities leaves no trace (no memory_item_entities
+        row, no failure row) and — because eligibility is "has no entity row" —
+        is re-selected and re-sent to the LLM on EVERY run, burning tokens
+        indefinitely (worst-first, since selection is ORDER BY LENGTH DESC).
+        Marks status='done' in the queue; the selection then skips done rows.
+        Best-effort + concurrency-hardened, same as _enqueue_failure."""
+        qc = None
+        try:
+            import sqlite3 as _sql
+            qc = _sql.connect(str(db_path), timeout=30)
+            qc.execute("PRAGMA busy_timeout=30000")
+            _ensure_extraction_status_column(qc)
+            qc.execute(
+                """INSERT INTO entity_extraction_queue
+                       (memory_id, attempts, last_error, last_attempt_at, status)
+                   VALUES (?, 1, NULL, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'done')
+                   ON CONFLICT(memory_id) DO UPDATE SET
+                       attempts        = attempts + 1,
+                       last_error      = NULL,
+                       last_attempt_at = excluded.last_attempt_at,
+                       status          = 'done'""",
+                (memory_id,),
+            )
+            qc.commit()
+        except Exception:
+            pass  # never let bookkeeping break the run
         finally:
             if qc is not None:
                 try:
@@ -546,6 +621,11 @@ async def _run_db(
                 counters["processed"] += 1
                 if not ents:
                     counters["empty"] += 1
+                    # Record the empty-but-processed outcome so this turn is not
+                    # re-selected and re-sent to the LLM on the next run. Without
+                    # this the turn has zero durable trace (no entity row) and
+                    # loops forever. This is the core of the deferred-bug fix.
+                    _mark_extracted(memory_id)
                     return
                 counters["entities_emitted"] += len(ents)
                 counters["relationships_emitted"] += len(rels)
@@ -560,6 +640,11 @@ async def _run_db(
                         valid_types=valid_types,
                         valid_predicates=valid_predicates,
                     )
+                    # Successful write → mark processed. The entity rows already
+                    # exclude it from re-selection; marking done keeps the queue
+                    # authoritative (a row is 'done' iff processed, not merely
+                    # iff it happened to emit an entity).
+                    _mark_extracted(memory_id)
                 except Exception as e:
                     counters["write_failed"] += 1
                     _enqueue_failure(memory_id, e)
