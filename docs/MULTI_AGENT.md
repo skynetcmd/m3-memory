@@ -30,6 +30,21 @@ Memory is isolated by `scope` so agents can maintain private working notes while
 
 All scopes support the same `memory_search`, `memory_write`, and `memory_update` operations. Scope filtering is applied at query time — an agent searching `scope="org"` sees only org-scoped memories.
 
+### 🔐 Governance / Enforcement
+
+By default, scope filtering is **caller-applied / advisory**: a search that supplies no `scope` or agent filter sees every agent's memories, including other agents' private `scope="agent"` notes. This is intentional — it fits a trusted, single-operator multi-agent setup where the operator (or the orchestrator itself) is allowed full visibility, and it keeps `memory_search` byte-identical to prior behavior for every existing caller.
+
+For setups that want a real access-control boundary, enforcement is **opt-in**:
+
+- Pass `requesting_agent="<id>"` on a `memory_search` call — the search returns only that agent's own `scope="agent"` memories, plus every shared-scope memory (`org`, `user`, `session`). It can never surface another agent's private notes.
+- Or set `M3_ENFORCE_AGENT_ISOLATION=1` to make this the default whenever an `agent_filter` is present, without threading `requesting_agent` through every call site.
+
+This is enforced at the **SQL layer** — a `WHERE (scope != 'agent' OR agent_id = ?)` clause added to the query itself — not as an app-layer post-filter over an already-fetched result set. An explicit `scope=` filter combined with `requesting_agent` only narrows further (e.g. `scope="org"` plus `requesting_agent="implementer"` still returns only org rows); enforcement never widens what an explicit scope filter already restricted.
+
+**Example — planner vs. implementer:** a planner keeps private scratch notes in `scope="agent"` under `agent_id="planner"`. If the implementer searches with `requesting_agent="implementer"`, the planner's private notes are excluded from the result set — but both agents still see the same `scope="org"` requirements, since shared scopes are never gated by `requesting_agent`.
+
+**Audit trail:** isolation is the access-control half of governance; observability is the other half. Every write already records `change_agent`, and the `memory_history` table (see `memory_history_impl`) keeps a full audit trail of which agent mutated which memory row and when — so even in a trusted setup without enforcement turned on, you can always answer "who changed this and when."
+
 ### 📨 Handoffs and inbox
 
 When one agent finishes and the next needs to pick up, use `memory_handoff` to push context directly into the receiving agent's inbox. The receiver calls `memory_inbox` to read pending items and `memory_inbox_ack` to clear them.

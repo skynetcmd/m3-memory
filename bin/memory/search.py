@@ -427,6 +427,7 @@ async def memory_search_scored_impl(
     variant="",
     intent_hint="",
     vector_kind_strategy="default",
+    requesting_agent="",
     _depth=0,
     _capture_dict: dict = None,
 ):
@@ -621,6 +622,20 @@ async def memory_search_scored_impl(
     if scope:
         where_clauses.append("mi.scope = ?")
         params.append(scope)
+    # Cross-agent isolation (SQL-layer enforcement of the scope model). Opt-in:
+    # when the caller passes `requesting_agent`, restrict private (scope='agent')
+    # rows to that agent's own — shared scopes (org/user/session) stay visible.
+    # The M3_ENFORCE_AGENT_ISOLATION flag makes this the DEFAULT even when no
+    # requesting_agent is threaded per-call, IF a fallback identity is resolvable
+    # (see _effective_requesting_agent). An explicit `scope`/`agent_filter` above
+    # is respected and narrows further; this only ADDS a boundary, never widens.
+    # Off by default → behavior byte-identical unless a caller/flag opts in.
+    _req_agent = requesting_agent or (
+        agent_filter.strip("\"'") if (_scfg.ENFORCE_AGENT_ISOLATION and agent_filter) else ""
+    )
+    if _req_agent:
+        where_clauses.append("(mi.scope != 'agent' OR mi.agent_id = ?)")
+        params.append(_req_agent)
     if conversation_id:
         where_clauses.append("mi.conversation_id = ?")
         params.append(conversation_id)
@@ -696,6 +711,7 @@ async def memory_search_scored_impl(
             variant=variant,
             intent_hint=intent_hint,
             vector_kind_strategy=vector_kind_strategy,
+            requesting_agent=requesting_agent,
             _depth=_depth + 1,
             _capture_dict=_capture_dict,
         )
@@ -1240,6 +1256,7 @@ async def memory_search_routed_impl(
     auto_entity_graph_depth: int = 1,                      # entity_graph_depth for entity_anchored branch
     auto_entity_graph_max_neighbors: int = 20,             # entity_graph_max_neighbors for entity_anchored branch
     auto_entity_graph_named_entity_threshold: int = 1,     # min named entities to fire entity_anchored branch
+    requesting_agent: str = "",
     # Capture mechanism (option b): caller passes a dict, function populates it
     _capture_dict: dict = None,
 ) -> list:
@@ -1311,6 +1328,7 @@ async def memory_search_routed_impl(
             search_mode=search_mode, variant=variant, as_of=as_of,
             conversation_id=conversation_id, extra_columns=extra_columns,
             vector_kind_strategy=_overshoot_strategy,
+            requesting_agent=requesting_agent,
             _capture_dict=_capture_dict,
         )
 
@@ -1491,6 +1509,7 @@ async def memory_search_routed_impl(
             adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
             smart_neighbor_sessions=smart_neighbor_sessions,
             intent_hint=intent_hint, vector_kind_strategy="default",
+            requesting_agent=requesting_agent,
             _capture_dict=_capture_dict,
         )
         final_hits = await _resolve_search_callable("_maybe_expand_routed")(
@@ -1520,6 +1539,7 @@ async def memory_search_routed_impl(
             adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
             smart_neighbor_sessions=smart_neighbor_sessions,
             intent_hint=intent_hint, vector_kind_strategy="max",
+            requesting_agent=requesting_agent,
             _capture_dict=_capture_dict,
         )
 
@@ -1548,6 +1568,7 @@ async def memory_search_routed_impl(
                 adaptive_k_max=adaptive_k_max, smart_time_boost=smart_time_boost,
                 smart_neighbor_sessions=smart_neighbor_sessions,
                 intent_hint=intent_hint, vector_kind_strategy="default",
+                requesting_agent=requesting_agent,
             )
 
             # Both return list[tuple[score, dict]]. Dedupe by item id, keep highest score.
@@ -1861,6 +1882,7 @@ async def memory_search_multi_db_impl(
     adaptive_k: bool = False,
     variant: "str | list" = "",
     fan_out_limit: "int | None" = None,
+    requesting_agent: str = "",
 ):
     """Fan out a search across multiple SQLite databases and merge by score.
 
@@ -1909,6 +1931,7 @@ async def memory_search_multi_db_impl(
                     extra_columns=extra_columns,
                     recency_bias=recency_bias, adaptive_k=adaptive_k,
                     variant=variant,
+                    requesting_agent=requesting_agent,
                 )
         if sem is None:
             ranked = await _run()
@@ -1952,6 +1975,7 @@ async def memory_search_impl(
     variant="",
     intent_hint="",
     mmr=True,
+    requesting_agent="",
     _depth=0,
 ):
     _resolve_mc_callbacks()  # bind memory_core callbacks on first call
@@ -1972,6 +1996,7 @@ async def memory_search_impl(
         variant=variant,
         intent_hint=intent_hint,
         extra_columns=["metadata_json", "conversation_id"] if intent_hint else None,
+        requesting_agent=requesting_agent,
     )
     if ranked is None:
         return "Search failed: FTS and semantic both unavailable."

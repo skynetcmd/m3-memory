@@ -222,6 +222,16 @@ CONFIDENCE_WEIGHT: float = float(os.environ.get("M3_CONFIDENCE_WEIGHT", "0.10"))
 # user-facing aggregate) or 'bayesian' (the Beta posterior mean kept alongside,
 # for experiments). The displayed `confidence` is always the transparent value.
 CONFIDENCE_MODEL: str = os.environ.get("M3_CONFIDENCE_MODEL", "transparent").lower()
+
+# M3_ENFORCE_AGENT_ISOLATION: when '1', a search that supplies a requesting agent
+# is restricted to that agent's OWN scope='agent' (private) memories plus all
+# shared scopes (org/user/session) — it can never see ANOTHER agent's private
+# notes. Default '0' so behavior stays byte-identical to today (scope filtering
+# remains caller-applied/advisory unless a caller opts in per-request). This is
+# the SQL-layer enforcement of the scope model documented in MULTI_AGENT.md.
+# Enforcement also activates per-request whenever a `requesting_agent` is passed,
+# independent of this flag (see memory_search_scored_impl).
+ENFORCE_AGENT_ISOLATION: bool = os.environ.get("M3_ENFORCE_AGENT_ISOLATION", "0") == "1"
 # When '1', allow the daily maintenance pass to nudge agent trust from observed
 # contradiction/corroboration. Default '0' — explicit agent_set_trust only.
 TRUST_AUTOTUNE: bool = os.environ.get("M3_TRUST_AUTOTUNE", "0") == "1"
