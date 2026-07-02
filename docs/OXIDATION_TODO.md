@@ -110,8 +110,8 @@ is *not* done.
 
 ## Hygiene / smaller items
 
-- [x] **Benchmark Runners.** Ported `bench_longmemeval.py` and `bench_memory.py`
-  from the private prototype branch to `bin/`. (Completed 2026-05-23).
+- [x] **Benchmark Runners.** Ported `bench_memory.py` to `bin/`; other
+  benchmark harnesses are maintained internally. (Completed 2026-05-23).
 
 - [ ] **Benchmark Datasets.** Restore `repo/data/longmemeval/` datasets for
   1M+ row evaluations. (Still missing from the primary repositories).

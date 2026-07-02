@@ -21,9 +21,6 @@ python bin/memory_doctor.py
 # Scratch DB for testing
 python bin/memory_doctor.py --database memory/scratch.db
 
-# Isolated benchmark DB
-python benchmarks/longmemeval/bench_longmemeval.py --database memory/bench_longmemeval.db
-
 # Separate chatlog file (unchanged behavior — still honored via CHATLOG_DB_PATH)
 CHATLOG_DB_PATH=memory/my_chatlog.db python bin/chatlog_ingest.py --format claude-code --transcript-path foo.jsonl
 ```
@@ -74,7 +71,6 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 | `bin/setup_test_db.py` | Seed a scratch DB with the full schema (for test isolation) | `--force` wipes existing file before seeding |
 | `bin/sync_all.py` | Hourly sync runner (shells out to pg_sync + chroma_sync) | Propagates `--database` to subprocesses via `M3_DATABASE` |
 | `bin/weekly_auditor.py` | PDF weekly audit report | — |
-| `benchmarks/longmemeval/bench_longmemeval.py` | LongMemEval harness | Sets `M3_DATABASE` early so all ingest/search routes to the benchmark DB |
 
 ---
 

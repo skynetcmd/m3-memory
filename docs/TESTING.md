@@ -13,7 +13,7 @@ for the change you just made.
 | Chatlog subsystem (ingest / queue / redact / status) | `python -m pytest tests/test_chatlog_*.py` |
 | `bin/slm_intent.py` or the SLM profiles | `python -m pytest tests/test_slm_intent.py` |
 | MCP proxy dispatch | `python -m unittest bin.test_mcp_proxy_unit` |
-| Retrieval quality on a real dataset | `python benchmarks/longmemeval/bench_longmemeval.py` |
+| Retrieval quality on a real dataset | See published LME-S report — harnesses are maintained internally |
 
 Full test inventory and what each exercises follows.
 
@@ -140,40 +140,10 @@ for details.
 
 ## 3. Benchmark harnesses (`benchmarks/`)
 
-These measure retrieval quality and ingest cost against real datasets. They
-are **not** pass/fail gates — they produce artifacts in
-`.scratch/<run>/` or `benchmarks/locomo/runs/<run>/` that downstream
-analysis utilities consume. Datasets (`data/longmemeval/`, `data/locomo/`)
-are `.gitignore`'d and fetched out-of-band.
-
-### Bench drivers (end-to-end run)
-
-| File | What it measures | Requires |
-|---|---|---|
-| `benchmarks/longmemeval/bench_longmemeval.py` | LongMemEval QA accuracy across temporal, factual, and update-tracking question types. Ingests long-session conversations, retrieves top-K, generates + judges. | `data/longmemeval/longmemeval_s_cleaned.json`; `LLM_ENDPOINTS_CSV` (default `http://localhost:8081/v1`); judge model via `--judge-model` or `EVAL_JUDGE_MODEL` |
-| `benchmarks/locomo/bench_locomo.py` | LOCOMO dialog-QA: multi-hop, temporal, open-domain, single-hop, and adversarial categories. Ingest → retrieve → generate → judge against gold. | `data/locomo/locomo10.json`; `LLM_ENDPOINTS_CSV` (default `http://localhost:1234/v1`); embedding server; judge model |
-
-Both honor `M3_DATABASE` so you can point them at a benchmark-only DB
-without touching production. See the top of each script's docstring for
-full flag listings.
-
-### Sub-utilities (consume prior run artifacts)
-
-These analyze the output of a bench driver — not drivers themselves. Run
-`bench_locomo.py` or `retrieval_audit.py` first, then invoke these against
-the resulting `retrieval_trace.jsonl` or `summary.json`.
-
-| File | What it does | Requires |
-|---|---|---|
-| `benchmarks/locomo/retrieval_audit.py` | Recall@K audit without answer generation / judging. Outputs `retrieval_trace.jsonl` ranking gold evidence dia_ids. | `data/locomo/locomo10.json`; embedding server |
-| `benchmarks/locomo/analyze_handoff.py` | Where do gold hits land in ranking? Precision@K, zero-hit rate, role distribution, session-date coverage. | Prior `retrieval_audit.py` run (reads `retrieval_trace.jsonl`) |
-| `benchmarks/locomo/analyze_prompt.py` | Prompt anatomy: size, whether gold references survive rendering, character offsets, per-category "waste" metrics. | Prior `retrieval_audit.py` run |
-| `benchmarks/locomo/compare_runs.py` | Side-by-side delta between two audit runs: recall@K, mean-first-gold-rank, per-category. | Two prior run directories under `benchmarks/locomo/runs/` |
-| `benchmarks/locomo/reingest.py` | Re-ingest LOCOMO with explicit variant configs (baseline / heuristic_c1c4 / llm_v1 / llm_only). Reuses in-process LLM caches across variants. | `data/locomo/locomo10.json`; embedding server |
-| `benchmarks/locomo/probe_ingest_cost.py` | Profile ingest cost across variants: wall-clock, CPU (Python + LM Studio), LLM calls + tokens, embedding calls + chars, rows written. | `data/locomo/locomo10.json`; LM Studio; psutil |
-| `benchmarks/locomo/probe_issues.py` | Structural audit of dataset + ingest: role distribution, gold-evidence format, zero-hit root causes. | `data/locomo/locomo10.json`; direct SQLite access |
-| `benchmarks/locomo/stamp_variants_from_chainlog.py` | Retrofit the `variant` field into existing `summary.json` files by matching audit timestamps to a chain-runner log. | `.chain.log`; `benchmarks/locomo/runs/` |
-| `benchmarks/locomo/join_variant_reports.py` | Aggregate latest runs across multiple variants into a markdown comparison report: hit rate, recall@K, per-category. | Multiple `benchmarks/locomo/runs/` directories |
+Retrieval-quality benchmarking (LongMemEval, LoCoMo) is maintained
+internally; see the published
+[LME-S report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md)
+for methodology and results.
 
 ---
 
@@ -193,8 +163,7 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 M3_DATABASE=memory/_test.db python bin/test_debug_agent.py
 python -m unittest bin.test_mcp_proxy_unit
 
-# 3. Benchmark smoke (small sample so it finishes in minutes, not hours)
-python benchmarks/longmemeval/bench_longmemeval.py --limit 5 --no-judge
+# 3. Benchmark smoke — internal harness, see published LME-S report
 ```
 
 ---

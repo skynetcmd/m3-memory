@@ -16,7 +16,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/auto_route.py](auto_route.md) | auto_route — multi-signal retrieval branch decider. |  |
 | [bin/backfill_content_hash.py](backfill_content_hash.md) | backfill_content_hash.py — populate memory_embeddings.content_hash on legacy rows. |  |
 | [bin/batch_runner.py](batch_runner.md) | Provider-neutral batch-API runner protocol with Anthropic implementation. |  |
-| bin/bench_longmemeval.py | LongMemEval benchmark runner for m3-memory. | yes |
 | bin/bench_memory.py | Memory system benchmark script. | yes |
 | bin/benchmark_memory.py | Retrieval Quality Benchmark for M3 Memory System. | yes |
 | [bin/build_kg_variant.py](build_kg_variant.md) | Build a KG-enriched variant from an existing source variant. |  |

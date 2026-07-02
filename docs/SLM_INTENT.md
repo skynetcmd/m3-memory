@@ -232,14 +232,13 @@ these directories in order and uses the first `memory.yaml` it finds:
 Missing profiles return `None` with a warning; they never raise. Malformed
 YAML raises `ValueError` at load time — that's a deploy error.
 
-### Example: bench harness with its own profile
+### Example: a caller with its own profile directory
 
 ```bash
-# benchmarks/longmemeval/slm/bench.yaml exists with bench-specific prompt
-export M3_SLM_PROFILES_DIR=benchmarks/longmemeval/slm
+# some/other/dir/slm/custom.yaml exists with a custom prompt
+export M3_SLM_PROFILES_DIR=some/other/dir/slm
 export M3_SLM_CLASSIFIER=1
-python benchmarks/longmemeval/bench_longmemeval.py ...
-# classify_intent(query, profile="bench") loads benchmarks/.../bench.yaml
+# classify_intent(query, profile="custom") loads some/other/dir/slm/custom.yaml
 # classify_intent(query, profile="default") loads config/slm/default.yaml
 # (repo default is still reachable as the second search dir)
 ```
@@ -264,8 +263,8 @@ Five files under `config/slm/`:
 | `memory.yaml` | Pin-to-this for production memory retrieval | Same as default | Future MCP `intent_hint` wiring |
 | `chatlog.yaml` | Chatlog turn sensitivity triage | `sensitive / administrative / routine` | Reserved for future chatlog_core hook |
 | `entity_extract.yaml` | Free-text entity extractor (not label-based) | placeholder `extracted` | `bin/augment_memory.py enrich-titles` via `extract_entities()` |
-| `contextual_keys.yaml` | Atomic-fact extraction for ingest-time embed-key enrichment, local LLM | placeholder `extracted` | `benchmarks/longmemeval/bench_longmemeval.py --contextual-keys` via `extract_text()` |
-| `contextual_keys_haiku.yaml` | Same as above, via Anthropic Haiku cloud (prompt caching enabled) | placeholder `extracted` | `bench_longmemeval.py --contextual-keys --contextual-keys-profile contextual_keys_haiku` |
+| `contextual_keys.yaml` | Atomic-fact extraction for ingest-time embed-key enrichment, local LLM | placeholder `extracted` | ingest-time contextual-key enrichment via `extract_text()` |
+| `contextual_keys_haiku.yaml` | Same as above, via Anthropic Haiku cloud (prompt caching enabled) | placeholder `extracted` | same, using the `contextual_keys_haiku` profile |
 
 Free-text profiles (`entity_extract.yaml`, `contextual_keys.yaml`) use the
 `system` prompt + the endpoint but ignore the `labels` field for output.
@@ -369,24 +368,21 @@ export M3_INTENT_ROUTING=1
 export M3_SLM_PROFILE=openai
 ```
 
-### Scenario D: Bench harness with a co-located profile
+### Scenario D: a caller with a co-located profile
 
-The bench harness ships its own profile next to itself so the harness
-repo-subtree is portable. See the `MAIN_PORT_NOTES.md` breadcrumb on
-`bench-wip` for the reference implementation. In short:
+A caller can ship its own profile next to itself so its subtree stays
+portable — point `M3_SLM_PROFILES_DIR` at its own directory:
 
 ```bash
-# benchmarks/longmemeval/slm/bench.yaml — bench-specific prompt + labels
-export M3_SLM_PROFILES_DIR=benchmarks/longmemeval/slm
+export M3_SLM_PROFILES_DIR=path/to/caller/slm
 export M3_SLM_CLASSIFIER=1
-python benchmarks/longmemeval/bench_longmemeval.py ...
 ```
 
-Inside the harness:
+Inside the caller:
 
 ```python
 from slm_intent import classify_intent
-label = await classify_intent(question, profile="bench")
+label = await classify_intent(question, profile="custom")
 ```
 
 ---

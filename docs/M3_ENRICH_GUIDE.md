@@ -221,12 +221,8 @@ section below for the required env vars (`M3_PREFER_OBSERVATIONS`,
 `M3_TWO_STAGE_OBSERVATIONS`, `M3_ENABLE_ENTITY_GRAPH`) and where to set
 them per deployment shape (MCP / shell / cron).
 
-In the bench harness, the variant flag does the activation for you:
-
-```bash
-python benchmarks/longmemeval/bench_longmemeval.py \
-    --observer-variant m3-observations-20260428
-```
+Internal benchmark harnesses pass an equivalent variant flag to activate
+this automatically; see the published LME-S report for details.
 
 ---
 

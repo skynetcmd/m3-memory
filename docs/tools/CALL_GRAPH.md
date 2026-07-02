@@ -19,8 +19,6 @@ graph LR
   backfill_content_hash --> memory_core
   backfill_content_hash --> sqlite_pragmas
   batch_runner --> unified_ai
-  bench_longmemeval --> auth_utils
-  bench_longmemeval --> memory_core
   benchmark_memory --> auth_utils
   benchmark_memory --> memory_core
   build_kg_variant --> m3_sdk
@@ -147,9 +145,6 @@ graph LR
   migrate_memory --> m3_sdk
   mission_control --> m3_sdk
   pg_setup --> auth_utils
-  probe_ingest_cost --> bench_locomo
-  probe_ingest_cost --> memory_core
-  probe_ingest_cost --> temporal_utils
   re_embed_all --> m3_sdk
   re_embed_all --> memory_core
   run_observer --> agent_protocol
@@ -206,8 +201,6 @@ graph LR
   class auto_route lib
   class backfill_content_hash lib
   class batch_runner lib
-  class bench_locomo lib
-  class bench_longmemeval test
   class bench_memory test
   class benchmark_memory lib
   class build_kg_variant lib
@@ -283,7 +276,6 @@ graph LR
   class news_fetcher lib
   class pg_setup sync
   class pg_sync sync
-  class probe_ingest_cost lib
   class re_embed_all lib
   class release_orphan_claims lib
   class run_observer lib
@@ -322,10 +314,10 @@ graph LR
   class weekly_auditor sync
 ```
 
-**Stats:** 118 tools, 184 edges, 126 total nodes.
+**Stats:** 116 tools, 180 edges, 122 total nodes.
 
 ## Notes
 
 - Solid arrows = Python import; dotted `exec` = subprocess launch.
-- Library modules (imported but not themselves tools): `audit_trail`, `bench_locomo`, `crypto_provider`, `m3_memory`, `sqlite_pragmas`, `tool_domains`, `tool_loader`, `version_drift`.
+- Library modules (imported but not themselves tools): `audit_trail`, `crypto_provider`, `m3_memory`, `sqlite_pragmas`, `tool_domains`, `tool_loader`, `version_drift`.
 - Orphans (no edges to or from other tools in this graph): `ENV_VAR_RECONCILE_REPORT`, `README`, `ai-audit`, `auto_route`, `bench_memory`, `check_tool_catalog_drift`, `chroma_health`, `cleanup_logs`, `deep_sync`, `embed_server`, `embed_server_gpu`, `entity_extraction`, `files_memory`, `generate_configs`, `install_schedules`, `inventory_graph`, `m3_autoenrich`, `m3_chatlog_enrich_backfill`, `m3_enrich_batch_parallel`, `m3_enrich_report`, `macbook_status_server`, `memory_embed`, `memory_search`, `metadata_filler`, `news_fetcher`, `pg_sync`, `release_orphan_claims`, `run_tests`, `scan_repo_v7`, `setup_hooks`, `start_mcp_proxy`, `statusline-command`, `test_knowledge`, `test_unified_router`, `validate_env`. Either stdlib-only or they shell out without naming a sibling `bin/*.py`.
