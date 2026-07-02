@@ -348,10 +348,19 @@ def _canonical_memory_env() -> dict:
     """
     state_root = str(_m3_state_root()).replace("\\", "/")
     cfg = load_config()
-    eng = cfg.get("M3_ENGINE_ROOT") or os.environ.get("M3_ENGINE_ROOT") \
-        or str(_m3_state_root() / "engine")
-    conf = cfg.get("M3_CONFIG_ROOT") or os.environ.get("M3_CONFIG_ROOT") \
-        or str(_m3_state_root() / "config")
+    # Precedence MUST match the canonical resolver in m3_core.paths
+    # (env > derived), or the bridge and this generated env block disagree on
+    # which roots are authoritative. Previously this read the config file FIRST
+    # (cfg.get(...) or env or derived), which let a stale/hand-edited config key
+    # beat an explicit env var — the opposite of the documented rule. In
+    # practice m3 never writes these keys to the config file (the setup wizard
+    # sets them as env vars), so cfg is now only a last-resort override BELOW
+    # env + the canonical derivation.
+    from m3_sdk import get_m3_config_root, get_m3_engine_root
+    eng = os.environ.get("M3_ENGINE_ROOT") or get_m3_engine_root() \
+        or cfg.get("M3_ENGINE_ROOT") or str(_m3_state_root() / "engine")
+    conf = os.environ.get("M3_CONFIG_ROOT") or get_m3_config_root() \
+        or cfg.get("M3_CONFIG_ROOT") or str(_m3_state_root() / "config")
     env = {
         "M3_MEMORY_ROOT": state_root,
         "M3_ENGINE_ROOT": str(eng).replace("\\", "/"),

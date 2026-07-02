@@ -26,24 +26,41 @@ WINDOW_MIN = 15
 def _resolve_db() -> str:
     """Resolve the m3 agent-memory DB path portably (no hardcoded user path).
 
-    Order: m3_sdk.resolve_db_path (canonical) -> M3_DB_PATH env ->
-    M3_HOME/engine/agent_memory.db -> repo-root/engine/agent_memory.db.
-    Mirrors the resolution convention in claude_code_precompact.py so the hook
-    works on any machine/user, not just the author's.
+    Order: m3_sdk.resolve_db_path (canonical, honors M3_DATABASE / M3_ENGINE_ROOT
+    / M3_MEMORY_ROOT exactly as the server does) -> M3_DB_PATH env (legacy) ->
+    canonical engine root (<M3_ENGINE_ROOT|~/.m3/engine>/agent_memory.db) ->
+    repo-root/engine/agent_memory.db (last-resort dev-clone guess).
+
+    The canonical resolver is tried first AND its engine-root default is used
+    for the fallback, so this hook checks the SAME DB the running MCP server
+    writes to. The old fallback resolved the DB from M3_HOME/engine, which
+    diverges from the server's M3_ENGINE_ROOT — the split-brain that produced a
+    false "chatlog NOT writing" alarm against a stale pre-Homecoming copy.
     """
-    # bin/hooks/chatlog/this_file.py -> repo root is parents[3]
+    # bin/hooks/chatlog/this_file.py -> repo root is parents[3]. M3_HOME (if set)
+    # only helps LOCATE the bin/ dir to import m3_sdk; it does NOT decide the DB.
     repo = Path(os.environ.get("M3_HOME") or Path(__file__).resolve().parents[3])
     try:
         sys.path.insert(0, str(repo / "bin"))
-        from m3_sdk import resolve_db_path  # type: ignore
+        from m3_sdk import get_m3_engine_root, resolve_db_path  # type: ignore
         p = resolve_db_path(None)
         if p:
             return os.path.abspath(p)
     except Exception:  # noqa: BLE001 — fall back to path heuristics
-        pass
+        get_m3_engine_root = None  # type: ignore
     env = os.environ.get("M3_DB_PATH")
     if env:
         return os.path.abspath(env)
+    # Prefer the canonical engine root (matches the server) over the repo-relative
+    # guess, which is a frozen pre-Homecoming copy on migrated installs.
+    if get_m3_engine_root is not None:  # type: ignore
+        try:
+            return os.path.abspath(os.path.join(get_m3_engine_root(), "agent_memory.db"))
+        except Exception:  # noqa: BLE001
+            pass
+    engine_root = os.environ.get("M3_ENGINE_ROOT")
+    if engine_root:
+        return os.path.abspath(os.path.join(os.path.expanduser(engine_root), "agent_memory.db"))
     return str(repo / "engine" / "agent_memory.db")
 
 
