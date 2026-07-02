@@ -37,7 +37,17 @@ import posixpath
 import re
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
+
+# defusedxml hardens the parser against XXE / billion-laughs / quadratic-blowup.
+# task_xml comes from `schtasks /query /xml` (external process output), which the
+# security scanner treats as untrusted — so parse it defensively. Drop-in for
+# xml.etree.ElementTree (same fromstring/find API); falls back to stdlib only if
+# defusedxml is somehow unavailable, still safe because Python 3.x's expat has
+# entity-expansion limits, but defusedxml is the belt-and-suspenders default.
+try:
+    import defusedxml.ElementTree as ET  # type: ignore
+except ImportError:  # pragma: no cover — defusedxml is a declared dependency
+    import xml.etree.ElementTree as ET  # noqa: S405 — fallback; expat limits apply
 
 logger = logging.getLogger("memory.doctor.schedule_probe")
 

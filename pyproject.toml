@@ -97,6 +97,11 @@ dependencies = [
     # PDF + HTML parsing used by files-ingestion / report paths.
     "fpdf2>=2.8.7,<3",
     "beautifulsoup4>=4.14.3,<5",
+    # Hardened XML parsing (XXE / entity-expansion defense) for
+    # bin/doctor/schedule_probe.py, which parses `schtasks` XML output. Was only
+    # transitively present (via fpdf2) — pinned directly so the safe path is
+    # guaranteed on a fresh install.
+    "defusedxml>=0.7.1,<1",
     # Windows-only: keyring backend + hook process control. Marker-gated so it
     # installs only where relevant.
     "pywin32>=311; sys_platform == 'win32'",
