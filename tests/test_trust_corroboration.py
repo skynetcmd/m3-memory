@@ -223,7 +223,10 @@ def test_agent_set_trust_tool_clamps_and_surfaces(tmp_path, monkeypatch):
         finally:
             conn.close()
 
+    from memory import orchestration
+
     monkeypatch.setattr(memory_core, "_db", fake_db)
+    monkeypatch.setattr(orchestration, "_db", fake_db)
     assert "0.80" in memory_core.agent_set_trust_impl("claude", 0.8)
     assert "1.00" in memory_core.agent_set_trust_impl("claude", 9.0)   # clamped high
     assert "0.50" in memory_core.agent_set_trust_impl("claude", -1.0)  # clamped low
