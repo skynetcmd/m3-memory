@@ -223,6 +223,7 @@ Search across memory items using semantic similarity or keyword matching. Filter
 | `include_scratchpad` | `boolean` | No | Include ephemeral scratchpad items. | `False` |
 | `user_id` | `string` | No | Filter by data subject. | `` |
 | `scope` | `string` | No | Filter by isolation scope. | `` |
+| `requesting_agent` | `string` | No | Calling agent's id. When set, ENFORCES cross-agent isolation: private (scope='agent') rows from OTHER agents are excluded; the caller still sees its own private rows plus all shared scopes (org/user/session). Empty = no enforcement (sees all, back-compat). | `` |
 | `as_of` | `string` | No | ISO-8601 time-travel cutoff. | `` |
 | `conversation_id` | `string` | No | Restrict to a conversation / team session. | `` |
 | `recency_bias` | `number` | No | Boost newer items (0.0=off, 0.1-0.2=moderate, higher=aggressive). Useful for 'current' or 'latest' queries. | `0.0` |
@@ -250,6 +251,7 @@ Search across multiple SQLite databases (e.g. agent_memory.db AND agent_chatlog.
 | `search_mode` | `string` | No |  | `hybrid` |
 | `user_id` | `string` | No |  | `` |
 | `scope` | `string` | No |  | `` |
+| `requesting_agent` | `string` | No | Calling agent's id. When set, ENFORCES cross-agent isolation: other agents' private (scope='agent') rows are excluded; caller sees its own private + shared scopes. Empty = no enforcement. | `` |
 | `as_of` | `string` | No |  | `` |
 | `conversation_id` | `string` | No |  | `` |
 | `recency_bias` | `number` | No |  | `0.0` |
@@ -278,6 +280,7 @@ Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k
 | `session_cap` | `integer` | No | Per-session turn cap when expand_sessions=true. | `12` |
 | `user_id` | `string` | No |  | `` |
 | `scope` | `string` | No |  | `` |
+| `requesting_agent` | `string` | No | Calling agent's id. When set, ENFORCES cross-agent isolation: other agents' private (scope='agent') rows are excluded; caller sees its own private + shared scopes. Empty = no enforcement. | `` |
 | `type_filter` | `string` | No |  | `` |
 | `agent_filter` | `string` | No |  | `` |
 | `search_mode` | `string` | No |  | `hybrid` |
@@ -332,6 +335,7 @@ Structured hybrid FTS5+vector+MMR search. Returns ranked rows [(score, item)] wi
 | `search_mode` | `string` | No | Retrieval mode. | `hybrid` |
 | `user_id` | `string` | No | Filter by data subject. | `` |
 | `scope` | `string` | No | Filter by isolation scope. | `` |
+| `requesting_agent` | `string` | No | Calling agent's id. When set, ENFORCES cross-agent isolation: private (scope='agent') rows from OTHER agents are excluded; the caller still sees its own private rows plus all shared scopes (org/user/session). Empty = no enforcement (sees all, back-compat). | `` |
 | `as_of` | `string` | No | ISO-8601 time-travel cutoff (bitemporal point-in-time query). | `` |
 | `conversation_id` | `string` | No | Restrict to a conversation / team session. | `` |
 | `recency_bias` | `number` | No | Boost newer items (0.0=off). | `0.0` |
