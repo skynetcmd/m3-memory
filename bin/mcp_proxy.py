@@ -101,7 +101,12 @@ OPENAI_BASE = "https://api.openai.com/v1"
 LMSTUDIO_BASE = os.environ.get("LM_STUDIO_BASE", "http://localhost:1234/v1")
 MAX_TOOL_ROUNDS = 10
 CONNECT_TIMEOUT = 5.0
-READ_TIMEOUT = float(os.environ.get("LM_READ_TIMEOUT", "300"))
+# Canonical LM_READ_TIMEOUT default is 4800.0 (~80 min for 32k tokens at
+# 7.5 tok/s on an M3 Max) — matches m3_core.runtime, custom_tool_bridge, and
+# debug_agent_bridge. Previously this file alone defaulted to 300, so the same
+# env var resolved to two different values depending on entry point (§3: one
+# default per var). Reconciled to the documented canonical value.
+READ_TIMEOUT = float(os.environ.get("LM_READ_TIMEOUT", "4800.0"))
 ALLOW_DESTRUCTIVE = os.environ.get("MCP_PROXY_ALLOW_DESTRUCTIVE", "").lower() in ("1", "true", "yes")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

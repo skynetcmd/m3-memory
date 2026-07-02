@@ -51,11 +51,48 @@ We provide example `zshenv.example` and `zshrc.example` files in the `config/` d
 
 Your `.zshenv` should define and export the following variables by calling the `get_secret` function.
 
+### Roots & precedence (the single source of truth)
+
+All state roots resolve through **one** implementation (`m3_core.paths`, re-exported
+by `m3_sdk`). Every subsystem uses it; there is no second resolver. Precedence,
+per root:
+
+| Root | Precedence (first match wins) | Default |
+|---|---|---|
+| `M3_MEMORY_ROOT` | `M3_MEMORY_ROOT` env | `~/.m3-memory` |
+| `M3_CONFIG_ROOT` | `M3_CONFIG_ROOT` env → `M3_MEMORY_ROOT`/config | `~/.m3/config` |
+| `M3_ENGINE_ROOT` | `M3_ENGINE_ROOT` env → `M3_MEMORY_ROOT`/engine | `~/.m3/engine` |
+
+`M3_MEMORY_ROOT` is the **master override**: set it alone and config/engine derive
+from it (`<root>/config`, `<root>/engine`) unless their own env var is also set.
+None are *required* — every root has a working default.
+
+**DB path** (`M3_DATABASE`) precedence: explicit `database` tool arg → `M3_DATABASE`
+env → active-database contextvar → `<engine_root>/agent_memory.db` (with a
+populated-DB guard that prefers a legacy populated store over an empty stub).
+
+**⚠️ Split-brain hazard.** The MCP **server** reads its roots from the `env` block
+in the client's `settings.json` (it does **not** source your shell). The chatlog
+**hooks** inherit the client *process* env. Pin the roots in **both** places
+(server `env` block AND the hook `command` prefixes) or the two can resolve to
+different DBs. The `session_start_capture_check` hook resolves the DB via the
+canonical resolver first (so it checks the same DB the server writes), then falls
+back to `M3_ENGINE_ROOT`. See `CLAUDE.md` "Homecoming Architecture".
+
+### Universal tool controls (injected on every MCP tool)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_TOOL_TIMEOUT` | `30` | Default per-call timeout (seconds) for every MCP tool. Per-call override: pass `timeout` to any tool. A value `<= 0` disables the timeout (for genuinely long ops). Bounds async impls so a slow/hung call can't block the server indefinitely. |
+
+Every tool also accepts a per-call `database` arg (route one call to a non-default
+SQLite DB) and `timeout` arg — both are stripped before the impl runs.
+
 ### Infrastructure & Connectivity
 
 | Variable | Purpose | Example Keychain Command (macOS) |
 |---|---|---|
-| `M3_MEMORY_ROOT` | **Required.** Absolute path to your workspace directory. | `export M3_MEMORY_ROOT="/path/to/your/m3-memory"` (Set directly) |
+| `M3_MEMORY_ROOT` | Optional master state-root override (see [Roots & precedence](#roots--precedence-the-single-source-of-truth)). Defaults to `~/.m3-memory`. | `export M3_MEMORY_ROOT="/path/to/state"` (Set directly) |
 | `SYNC_TARGET_IP` | IP address of the central PostgreSQL/ChromaDB server. | `_keychain_set agentos_sync_target_ip "YOUR_SERVER_IP"` |
 | `CHROMA_BASE_URL`| Full URL to the ChromaDB API. | `_keychain_set agentos_chroma_url "http://YOUR_SERVER_IP:8000"` |
 | `PG_URL`| **Required.** Full PostgreSQL connection string with credentials. | `_keychain_set agentos_pg_url "postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db"` |
