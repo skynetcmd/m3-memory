@@ -1019,6 +1019,101 @@ def _scan_agent_configs() -> "list[tuple[str, Path, bool]]":
     return out
 
 
+def _client_config_sources() -> "dict[str, list[Path]]":
+    """Map each MCP CLIENT to the config files IT reads. Duplication that causes a
+    double-launch is a server appearing in >1 file THE SAME CLIENT reads — NOT the
+    same server across different clients (Claude/Gemini/Antigravity each legitimately
+    registering `memory` is correct multi-client setup, not a bug).
+
+    Claude Code reads BOTH its global ~/.claude/settings.json AND a project-local
+    .mcp.json (cwd / repo root) — that pair is the axis that double-launched the
+    memory bridge (2026-07-02). Other clients read a single settings.json each."""
+    home = Path.home()
+    claude_sources = [home / ".claude" / "settings.json"]
+    for d in (Path.cwd(), default_repo_path().parent):
+        cand = d / ".mcp.json"
+        if cand not in claude_sources:
+            claude_sources.append(cand)
+    return {
+        "Claude Code": claude_sources,
+        "Gemini CLI":  [home / ".gemini" / "settings.json"],
+        "Antigravity": [home / ".gemini" / "antigravity-cli" / "settings.json"],
+        "OpenCode":    [home / ".opencode" / "settings.json"],
+        "Aider":       [home / ".aider" / "settings.json"],
+    }
+
+
+def _duplicate_mcp_registration() -> "dict[str, dict[str, list[Path]]]":
+    """Return {client: {server_name: [files...]}} for servers declared in MORE THAN
+    ONE file THE SAME CLIENT reads — the real double-launch signature. Same server
+    across different clients is NOT flagged (that's normal multi-client use).
+    Read-only, best-effort (unreadable files skipped)."""
+    out: "dict[str, dict[str, list[Path]]]" = {}
+    for client, sources in _client_config_sources().items():
+        seen: "dict[str, list[Path]]" = {}
+        for path in sources:
+            if not path.is_file():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8")) or {}
+            except (OSError, json.JSONDecodeError):
+                continue
+            for name in (data.get("mcpServers") or {}):
+                seen.setdefault(name, []).append(path)
+        client_dupes = {n: fs for n, fs in seen.items() if len(fs) > 1}
+        if client_dupes:
+            out[client] = client_dupes
+    return out
+
+
+def _live_bridge_counts() -> "dict[str, int]":
+    """Count live m3 bridge processes by script name (memory_bridge, etc.). >1 of
+    any is the process-level signature of double-launch. Returns {} if psutil is
+    unavailable (best-effort — the config check above is the primary signal)."""
+    try:
+        import psutil
+    except Exception:  # noqa: BLE001
+        return {}
+    counts: "dict[str, int]" = {}
+    for proc in psutil.process_iter(["name", "cmdline"]):
+        try:
+            cmd = " ".join(proc.info.get("cmdline") or [])
+        except Exception:  # noqa: BLE001
+            continue
+        for script in ("memory_bridge.py", "grok_bridge.py", "web_research_bridge.py",
+                       "debug_agent_bridge.py", "custom_tool_bridge.py", "mcp_proxy.py"):
+            if script in cmd:
+                counts[script] = counts.get(script, 0) + 1
+    return {s: n for s, n in counts.items() if n > 1}
+
+
+def _duplicate_registration_section() -> None:
+    """Doctor section: flag MCP servers registered in >1 config, or >1 live bridge.
+
+    Duplicate registration is invisible until a call hangs (a memory_write routed
+    to a redundant/mis-configured bridge blocks with no response — the 2h43m hang,
+    2026-07-02). Surfacing it here makes the recurrence loud, not silent."""
+    dupes = _duplicate_mcp_registration()
+    live = _live_bridge_counts()
+    if not dupes and not live:
+        return  # clean — no noise
+    print()
+    if dupes:
+        print("  [!] DUPLICATE MCP registration — a server is declared in MULTIPLE "
+              "config files the SAME client reads, so that client launches it TWICE:")
+        for client, servers in sorted(dupes.items()):
+            for name, files in sorted(servers.items()):
+                print(f"        {client} / {name}: " + " AND ".join(str(f) for f in files))
+        print("      Fix: for that client, keep each server in ONE file only (a "
+              "complete def with its env block). Remove the duplicate. Restart it.")
+    if live:
+        print("  [!] Multiple live bridge processes (double-launch signature):")
+        for script, n in sorted(live.items()):
+            print(f"        {n}x {script}")
+        print("      A duplicate bridge can wedge a tool call indefinitely on the "
+              "old (no-timeout) code. Kill the extras and de-duplicate the config.")
+
+
 def _agent_config_section() -> None:
     """Doctor section: per-host m3 ``memory`` MCP config health (read-only)."""
     scanned = _scan_agent_configs()
@@ -1075,6 +1170,7 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
                   else "agent MCP configs: all healthy.")
         else:
             _agent_config_section()
+        _duplicate_registration_section()
         bridge = find_bridge()
         if bridge and bridge.is_file():
             print(f"[OK] resolved bridge: {bridge}")
@@ -1149,6 +1245,8 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         print(f"  {n} config(s) repointed." if n else "  nothing to repoint — all healthy.")
     else:
         _agent_config_section()
+
+    _duplicate_registration_section()
 
     print()
     bridge = find_bridge()
