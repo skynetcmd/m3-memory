@@ -240,19 +240,37 @@ def _reinforce_confidence(db):
         # the ledger (already re-aggregated) and rows accessed in the last 7 days.
         placeholders = ",".join("?" * len(active_ids)) if active_ids else "''"
         params = [_conf.NEUTRAL, _conf.DECAY_RATE, *active_ids]
-        res = db.execute(
-            f"""
-            UPDATE memory_items
-               SET confidence = MAX(0.0, MIN(1.0,
-                       confidence + (? - confidence) * ?))
-             WHERE is_deleted = 0
-               AND confidence IS NOT NULL
-               AND id NOT IN ({placeholders})
-               AND (last_accessed_at IS NULL
-                    OR julianday('now') - julianday(last_accessed_at) > 7)
-            """,
-            params,
-        )
+        try:
+            res = db.execute(
+                f"""
+                UPDATE memory_items
+                   SET confidence = MAX(0.0, MIN(1.0,
+                           confidence + (? - confidence) * ?))
+                 WHERE is_deleted = 0
+                   AND confidence IS NOT NULL
+                   AND id NOT IN ({placeholders})
+                   AND (last_accessed_at IS NULL
+                        OR julianday('now') - julianday(last_accessed_at) > 7)
+                   AND COALESCE(pinned, 0) = 0
+                """,
+                params,
+            )
+        except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
+            if not _is_missing_schema(e):
+                raise
+            res = db.execute(
+                f"""
+                UPDATE memory_items
+                   SET confidence = MAX(0.0, MIN(1.0,
+                           confidence + (? - confidence) * ?))
+                 WHERE is_deleted = 0
+                   AND confidence IS NOT NULL
+                   AND id NOT IN ({placeholders})
+                   AND (last_accessed_at IS NULL
+                        OR julianday('now') - julianday(last_accessed_at) > 7)
+                """,
+                params,
+            )
         decayed = res.rowcount
     except Exception as e:  # noqa: BLE001 — pre-035 DB has no confidence column
         if not _is_missing_schema(e):
@@ -279,19 +297,39 @@ def _enforce_retention_policies(db):
         agent_id = p["agent_id"]
         # TTL enforcement
         if p["ttl_days"] and p["ttl_days"] > 0:
-            res = db.execute(
-                "UPDATE memory_items SET is_deleted = 1 WHERE agent_id = ? AND is_deleted = 0 "
-                "AND julianday('now') - julianday(created_at) > ?",
-                (agent_id, p["ttl_days"])
-            )
+            try:
+                res = db.execute(
+                    "UPDATE memory_items SET is_deleted = 1 WHERE agent_id = ? AND is_deleted = 0 "
+                    "AND julianday('now') - julianday(created_at) > ? "
+                    "AND COALESCE(pinned, 0) = 0",
+                    (agent_id, p["ttl_days"])
+                )
+            except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
+                if not _is_missing_schema(e):
+                    raise
+                res = db.execute(
+                    "UPDATE memory_items SET is_deleted = 1 WHERE agent_id = ? AND is_deleted = 0 "
+                    "AND julianday('now') - julianday(created_at) > ?",
+                    (agent_id, p["ttl_days"])
+                )
             purged += res.rowcount
         # Max count enforcement (keep newest, soft-delete oldest excess)
         if p["max_memories"] and p["max_memories"] > 0:
-            excess = db.execute(
-                "SELECT id FROM memory_items WHERE agent_id = ? AND is_deleted = 0 "
-                "ORDER BY created_at DESC LIMIT -1 OFFSET ?",
-                (agent_id, p["max_memories"])
-            ).fetchall()
+            try:
+                excess = db.execute(
+                    "SELECT id FROM memory_items WHERE agent_id = ? AND is_deleted = 0 "
+                    "AND COALESCE(pinned, 0) = 0 "
+                    "ORDER BY created_at DESC LIMIT -1 OFFSET ?",
+                    (agent_id, p["max_memories"])
+                ).fetchall()
+            except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
+                if not _is_missing_schema(e):
+                    raise
+                excess = db.execute(
+                    "SELECT id FROM memory_items WHERE agent_id = ? AND is_deleted = 0 "
+                    "ORDER BY created_at DESC LIMIT -1 OFFSET ?",
+                    (agent_id, p["max_memories"])
+                ).fetchall()
             for row in excess:
                 if p["auto_archive"]:
                     _transfer_to_archive(row["id"], "retention_limit", db)
@@ -312,7 +350,19 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
     report = []
     with _db() as db:
         if decay:
-            res = db.execute("UPDATE memory_items SET importance = MAX(0.0, importance * 0.995) WHERE is_deleted = 0 AND julianday('now') - julianday(created_at) > 7")
+            try:
+                res = db.execute(
+                    "UPDATE memory_items SET importance = MAX(0.0, importance * 0.995) "
+                    "WHERE is_deleted = 0 AND julianday('now') - julianday(created_at) > 7 "
+                    "AND COALESCE(pinned, 0) = 0"
+                )
+            except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
+                if not _is_missing_schema(e):
+                    raise
+                res = db.execute(
+                    "UPDATE memory_items SET importance = MAX(0.0, importance * 0.995) "
+                    "WHERE is_deleted = 0 AND julianday('now') - julianday(created_at) > 7"
+                )
             report.append(f"Decayed {res.rowcount} items")
         if reinforce:
             # Confidence reinforcement (Phase 3): re-aggregate ledger-active
@@ -324,9 +374,25 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
                     f"Confidence: reaggregated {r_count}, decayed {d_count} toward neutral"
                 )
         if purge_expired:
-            expired = db.execute("SELECT id FROM memory_items WHERE expires_at < ?", (now,)).fetchall()
+            try:
+                expired = db.execute(
+                    "SELECT id FROM memory_items WHERE expires_at < ? AND COALESCE(pinned, 0) = 0",
+                    (now,),
+                ).fetchall()
+            except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
+                if not _is_missing_schema(e):
+                    raise
+                expired = db.execute("SELECT id FROM memory_items WHERE expires_at < ?", (now,)).fetchall()
             for row in expired: _transfer_to_archive(row[0], "expired", db)
-            res = db.execute("DELETE FROM memory_items WHERE expires_at < ?", (now,))
+            try:
+                res = db.execute(
+                    "DELETE FROM memory_items WHERE expires_at < ? AND COALESCE(pinned, 0) = 0",
+                    (now,),
+                )
+            except Exception as e:  # noqa: BLE001 — pre-pinned-column DB
+                if not _is_missing_schema(e):
+                    raise
+                res = db.execute("DELETE FROM memory_items WHERE expires_at < ?", (now,))
             report.append(f"Purged {res.rowcount} expired")
         if prune_orphan_embeddings:
             res = db.execute("DELETE FROM memory_embeddings WHERE memory_id NOT IN (SELECT id FROM memory_items)")

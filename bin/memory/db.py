@@ -231,6 +231,25 @@ def _backfill_change_agent() -> None:
         logger.warning(f"Backfill failed: {e}")
 
 
+def ensure_pinned_column(conn) -> None:
+    """Idempotently add memory_items.pinned INTEGER DEFAULT 0. Best-effort:
+    a DB that predates this (or already has it) is a no-op. Mirrors the
+    bin/enrich/prep.py::_ensure_migration_025 runtime-DDL fallback — no
+    migration file is required (the migrations dir chain is not fully
+    in-tree; pre-v2026.7.1.0 DBs are no longer supported).
+
+    Pinned memories (pinned=1) are exempt from decay, expiry, and
+    retention purges — see bin/memory_maintenance.py.
+    """
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
+        if "pinned" not in cols:
+            conn.execute("ALTER TABLE memory_items ADD COLUMN pinned INTEGER DEFAULT 0")
+            conn.commit()
+    except Exception:  # noqa: BLE001 — never break the caller
+        pass
+
+
 def _lazy_init(db_path: str | None = None) -> None:
     """Run one-time schema + backfill per DB path. Per-DB to support multi-DB."""
     global _initialized
@@ -243,6 +262,17 @@ def _lazy_init(db_path: str | None = None) -> None:
         try:
             _ensure_sync_tables(key)
             _backfill_change_agent()
+            try:
+                conn = sqlite3.connect(str(key), timeout=10.0)
+                try:
+                    ensure_pinned_column(conn)
+                finally:
+                    conn.close()
+            except Exception:
+                # Best-effort — never let the pinned-column bootstrap break
+                # DB init. ensure_pinned_column() also self-guards, but the
+                # connect() itself could fail on an exotic path.
+                pass
         except Exception:
             # Do not trap init in a permanently-failed state — let next caller retry.
             _initialized_dbs.discard(key)

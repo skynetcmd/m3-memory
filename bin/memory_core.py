@@ -870,6 +870,55 @@ async def memory_update_impl(id, content="", title="", metadata="", importance=-
     return f"Updated: {id}"
 
 
+def _resolve_pin_id(db, ident: str) -> str:
+    """Resolve a 36-char UUID or 8-char prefix to a full id, mirroring
+    memory_get_impl's prefix-lookup contract. Raises ValueError with a
+    caller-facing message on bad length or ambiguous/missing prefix."""
+    ident = (ident or "").strip()
+    if len(ident) == 36:
+        return ident
+    if len(ident) == 8:
+        rows = db.execute(
+            "SELECT id FROM memory_items WHERE SUBSTR(id,1,8) = ?", (ident,)
+        ).fetchall()
+        if not rows:
+            raise ValueError(f"Error: no memory with id {ident}")
+        if len(rows) > 1:
+            ids = ", ".join(r["id"] for r in rows)
+            raise ValueError(f"Error: ambiguous prefix '{ident}': matches {ids}")
+        return rows[0]["id"]
+    raise ValueError("Error: id must be 36-char UUID or 8-char prefix")
+
+
+def _set_pinned(id, val) -> str:
+    from memory.db import ensure_pinned_column
+    with _db() as db:
+        # Ensure column first (idempotent, best-effort) — old DBs get it
+        # lazily on first pin/unpin call even if _lazy_init's bootstrap
+        # somehow missed it.
+        ensure_pinned_column(db)
+        try:
+            full_id = _resolve_pin_id(db, id)
+        except ValueError as e:
+            return str(e)
+        cur = db.execute("UPDATE memory_items SET pinned = ? WHERE id = ?", (val, full_id))
+        if cur.rowcount == 0:
+            return f"Error: no memory with id {id}"
+    return f"{'Pinned' if val else 'Unpinned'}: {full_id}"
+
+
+def memory_pin_impl(id: str) -> str:
+    """Pin a memory: exempt it from decay, expiry, and retention purges.
+    Accepts either a 36-char UUID or an 8-char prefix (see memory_get_impl)."""
+    return _set_pinned(id, 1)
+
+
+def memory_unpin_impl(id: str) -> str:
+    """Unpin a memory, restoring normal decay/expiry/retention handling.
+    Accepts either a 36-char UUID or an 8-char prefix (see memory_get_impl)."""
+    return _set_pinned(id, 0)
+
+
 def memory_delete_impl(id, hard=False):
     """Deletes a MemoryItem (soft or hard). Implements cascade for hard delete (C5)."""
     with _db() as db:

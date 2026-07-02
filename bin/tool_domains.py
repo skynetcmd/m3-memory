@@ -61,6 +61,8 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("memory_import",       "memory"),
     ("memory_verify",       "memory"),
     ("memory_feedback",     "memory"),
+    ("memory_pin",          "memory"),
+    ("memory_unpin",        "memory"),
     ("memory_consolidate",  "memory"),
     ("memory_dedup",        "memory"),
     ("memory_maintenance",  "memory"),

@@ -685,6 +685,52 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_pin",
+        description=(
+            "Pin a memory to exempt it from decay, expiry, and retention "
+            "purges. Pinned memories are never auto-archived, never "
+            "importance/confidence-decayed, and never expiry- or "
+            "TTL-purged by memory_maintenance — use for facts that must "
+            "survive indefinitely regardless of access recency."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Memory item id — 36-char UUID or 8-char prefix. "
+                                   "Ambiguous prefixes return an error listing the matching ids.",
+                },
+            },
+            "required": ["id"],
+        },
+        impl=memory_core.memory_pin_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
+        name="memory_unpin",
+        description="Unpin a memory, restoring normal decay/expiry/retention handling.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Memory item id — 36-char UUID or 8-char prefix. "
+                                   "Ambiguous prefixes return an error listing the matching ids.",
+                },
+            },
+            "required": ["id"],
+        },
+        impl=memory_core.memory_unpin_impl,
+        is_async=False,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="memory_set_retention",
         description="Set or update per-agent memory retention policy. Controls max memory count, TTL expiry, and auto-archival.",
         parameters={

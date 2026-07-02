@@ -1,6 +1,6 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 119 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 121 MCP tools available in the M3 Memory system.
 
 ## Summary Table
 
@@ -10,11 +10,13 @@ This document provides a comprehensive inventory of all 119 MCP tools available 
 | `memory_delete_bulk` | Memory Operations | Deletes a list of MemoryItems (soft or hard) in one transaction per chunk. Use for curation/dedup passes deleting many items; falls back to per-id memory_delete behavior with the same hard-cascade semantics. Returns a structured {succeeded, not_found, mode} dict. |
 | `memory_feedback` | Memory Operations | Provide feedback on a memory item to improve quality. |
 | `memory_get` | Memory Operations | Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefixes return an error. |
+| `memory_pin` | Memory Operations | Pin a memory to exempt it from decay, expiry, and retention purges. Pinned memories are never auto-archived, never importance/confidence-decayed, and never expiry- or TTL-purged by memory_maintenance — use for facts that must survive indefinitely regardless of access recency. |
 | `memory_search` | Memory Operations | Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation. |
 | `memory_search_multi_db` | Memory Operations | Search across multiple SQLite databases (e.g. agent_memory.db AND agent_chatlog.db) in one call. Each DB is searched independently via hybrid FTS5+vector search and the top results are merged by score. Returns the global top-K with each item tagged with its source database. Caveat: FTS5 BM25 scores depend on per-DB corpus stats so cross-DB ranks are approximate; works well for small fan-out (typically 2-5 DBs sharing the same embed_model). |
 | `memory_search_routed` | Memory Operations | Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k+temporal_k_bump; non-temporal queries to (optionally fact-fused) max-kind search at k. Pass fact_variant for two-tier fact-fusion. Optional graph_depth and expand_sessions add post-retrieval neighbor expansion. |
 | `memory_search_scored` | Memory Operations | Structured hybrid FTS5+vector+MMR search. Returns ranked rows [(score, item)] with content + metadata (id, valid_from, conversation_id, user_id) — NOT formatted text. Use when a caller needs parseable rows rather than an LLM-readable block (e.g. a memory-provider backend). Empty query + type_filter = filter-only listing. Same bench-data gate as memory_search. |
 | `memory_suggest` | Memory Operations | Preview which memories would be retrieved for a query, with score breakdowns explaining why each was selected. |
+| `memory_unpin` | Memory Operations | Unpin a memory, restoring normal decay/expiry/retention handling. |
 | `memory_update` | Memory Operations | Updates a MemoryItem by ID. |
 | `memory_verify` | Memory Operations | Verify content integrity by comparing stored hash with computed hash. Returns OK if content hasn't been tampered with. |
 | `memory_write` | Memory Operations | Creates a MemoryItem and optionally embeds it for semantic search. Contradiction detection is automatic — if new content conflicts with an existing memory of the same type/title, the old one is superseded. Use type='auto' to let the LLM decide the best category. |
@@ -189,6 +191,20 @@ Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefi
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
+### `memory_pin`
+
+Pin a memory to exempt it from decay, expiry, and retention purges. Pinned memories are never auto-archived, never importance/confidence-decayed, and never expiry- or TTL-purged by memory_maintenance — use for facts that must survive indefinitely regardless of access recency.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `id` | `string` | Yes | Memory item id — 36-char UUID or 8-char prefix. Ambiguous prefixes return an error listing the matching ids. | `-` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
 ### `memory_search`
 
 Search across memory items using semantic similarity or keyword matching. Filter by user_id and scope for isolation.
@@ -338,6 +354,20 @@ Preview which memories would be retrieved for a query, with score breakdowns exp
 | `k` | `integer` | No | Max results to preview. | `5` |
 | `variant` | `string` | No | Ingest-pipeline filter. Default '__none__' = real user data only. | `__none__` |
 | `include_bench_data` | `boolean` | No | Opt in to bench rows. Default False. | `False` |
+| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
+
+### `memory_unpin`
+
+Unpin a memory, restoring normal decay/expiry/retention handling.
+
+**Source:** mcp_tool_catalog.py
+
+**Parameters:**
+
+| Parameter | Type | Required | Description | Default |
+| --- | --- | --- | --- | --- |
+| `id` | `string` | Yes | Memory item id — 36-char UUID or 8-char prefix. Ambiguous prefixes return an error listing the matching ids. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
