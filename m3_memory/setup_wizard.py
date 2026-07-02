@@ -26,54 +26,17 @@ from pathlib import Path
 from typing import Optional
 
 # ── small UI helpers ──────────────────────────────────────────────────────────
-
-def _color(code: str, msg: str) -> str:
-    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
-        return msg
-    return f"\033[{code}m{msg}\033[0m"
-
-def _say(msg: str) -> None:
-    print(f"{_color('36', '==>')} {msg}", flush=True)
-
-def _ok(msg: str) -> None:
-    print(_color("32", f"[OK] {msg}"), flush=True)
-
-def _warn(msg: str) -> None:
-    print(_color("33", f"[!] {msg}"), flush=True)
-
-def _err(msg: str) -> None:
-    print(_color("31", f"[X] {msg}"), file=sys.stderr, flush=True)
-
-# Transient single-line progress for long, line-by-line sequences (per-package
-# installs, per-section embeds). On a TTY each call REWRITES the same line
-# (carriage-return + clear-to-end-of-line) so a 20-line "installing X / installed
-# X" wall collapses to one self-updating status line. When stdout is NOT a TTY
-# (piped, redirected, non-interactive SSH, CI) it degrades to a normal newline
-# print so logs stay complete and grep-able. Call once more with done=True (or
-# follow with a plain _ok) to commit a final newline so the next output starts
-# on its own line.
-_PROGRESS_ACTIVE = False
-
-def _progress(msg: str, *, done: bool = False) -> None:
-    global _PROGRESS_ACTIVE
-    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
-        # Non-interactive: every step on its own line (full, parseable log).
-        print(f"    {msg}", flush=True)
-        return
-    # Interactive: rewrite the current line. \r returns to col 0; \033[K clears
-    # to end of line so a shorter message doesn't leave stale trailing chars.
-    end = "\n" if done else ""
-    sys.stdout.write(f"\r\033[K    {msg}{end}")
-    sys.stdout.flush()
-    _PROGRESS_ACTIVE = not done
-
-def _progress_done() -> None:
-    """Commit a newline if a transient progress line is still open (TTY only)."""
-    global _PROGRESS_ACTIVE
-    if _PROGRESS_ACTIVE and sys.stdout.isatty():
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-    _PROGRESS_ACTIVE = False
+# Pure output helpers (never monkeypatched, never call a patched fn) live in
+# wizard/ui.py; re-imported here so `setup_wizard._say` etc. keep resolving.
+from .wizard.ui import (  # noqa: F401 — re-exported for setup_wizard.<name> access
+    _color,
+    _err,
+    _ok,
+    _progress,
+    _progress_done,
+    _say,
+    _warn,
+)
 
 
 def _ask_yes_no(question: str, default: bool) -> bool:
@@ -750,127 +713,19 @@ def _persist_embed_gguf(gguf_path: str, *, non_interactive: bool) -> None:
     _persist_embed_gguf_mcp(gguf_path)
 
 
-def _persist_embed_gguf_shell(gguf_path: str, *, non_interactive: bool) -> None:
-    """Persist M3_EMBED_GGUF for new shell sessions (per-platform mechanism)."""
-    if sys.platform == "win32":
-        # Windows: setx writes to HKCU\Environment. Persists across reboot;
-        # new cmd / PowerShell sessions see it. The current process and
-        # other already-open shells are unaffected (by design).
-        if not non_interactive and not _ask_yes_no(
-            "  Persist M3_EMBED_GGUF to your Windows user environment (setx)?",
-            default=True,
-        ):
-            _warn(f"    skipped — set it later: setx M3_EMBED_GGUF \"{gguf_path}\"")
-            return
-        try:
-            result = subprocess.run(
-                ["setx", "M3_EMBED_GGUF", gguf_path],
-                capture_output=True, text=True, timeout=10,
-            )
-        except (subprocess.TimeoutExpired, OSError) as e:
-            _warn(f"    setx failed ({e}); set it later: setx M3_EMBED_GGUF \"{gguf_path}\"")
-            return
-        if result.returncode == 0:
-            _ok("    persisted M3_EMBED_GGUF via setx (new shells will see it)")
-        else:
-            stderr = (result.stderr or result.stdout or "").strip()
-            _warn(f"    setx exited {result.returncode}: {stderr}")
-        return
-
-    # Unix: append `export M3_EMBED_GGUF=...` to the appropriate shell rc.
-    rc_path = _pick_unix_shell_rc()
-
-    if not non_interactive and not _ask_yes_no(
-        f"  Persist M3_EMBED_GGUF to {rc_path}?", default=True
-    ):
-        _warn(f"    skipped — set it later: echo 'export M3_EMBED_GGUF={gguf_path}' >> {rc_path}")
-        return
-
-    try:
-        existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
-    except OSError as e:
-        _warn(f"    could not read {rc_path} ({e}); skipping shell rc persistence")
-        return
-
-    if "M3_EMBED_GGUF" in existing:
-        _ok(f"    M3_EMBED_GGUF already present in {rc_path}")
-        return
-
-    block = (
-        "\n# Added by m3 setup — tier-1 in-process BGE-M3 embedder\n"
-        f'export M3_EMBED_GGUF="{gguf_path}"\n'
-    )
-    try:
-        with rc_path.open("a", encoding="utf-8") as f:
-            f.write(block)
-        _ok(f"    persisted M3_EMBED_GGUF -> {rc_path}")
-    except OSError as e:
-        _warn(f"    failed to write {rc_path} ({e})")
-
-
-def _pick_unix_shell_rc() -> Path:
-    """Pick the shell rc file most likely to be read on this Unix system.
-
-    Order:
-      1. ~/.zshrc if SHELL points at zsh (macOS default since Catalina)
-      2. ~/.bashrc if SHELL points at bash (most Linux distros)
-      3. First existing among (~/.zshrc, ~/.bashrc, ~/.bash_profile, ~/.profile)
-      4. Default to ~/.zshrc (covers fresh macOS Spotlight users)
-    """
-    home = Path.home()
-    shell = os.environ.get("SHELL", "")
-    if "zsh" in shell:
-        return home / ".zshrc"
-    if "bash" in shell:
-        return home / ".bashrc"
-    for candidate in (home / ".zshrc", home / ".bashrc",
-                      home / ".bash_profile", home / ".profile"):
-        if candidate.exists():
-            return candidate
-    return home / ".zshrc"
-
-
-def _persist_embed_gguf_mcp(gguf_path: str) -> None:
-    """Patch the 'memory' MCP server entry's env block on every platform.
-
-    MCP servers are spawned by Claude Code / Gemini CLI as subprocesses; on
-    macOS (launchd) and Windows (GUI process tree) they do not inherit the
-    user's interactive shell env. Setting the env on the MCP server entry
-    itself is the only reliable way the spawned server sees M3_EMBED_GGUF.
-
-    Same code on all 3 platforms — Path.home() resolves to ~/, %USERPROFILE%,
-    or /home/<user> as appropriate.
-    """
-    for label, settings_path in (
-        ("Claude Code", Path.home() / ".claude" / "settings.json"),
-        ("Gemini CLI",  Path.home() / ".gemini" / "settings.json"),
-    ):
-        if not settings_path.is_file():
-            continue
-        try:
-            cfg = json.loads(settings_path.read_text(encoding="utf-8")) or {}
-        except (OSError, json.JSONDecodeError) as e:
-            _warn(f"    {settings_path} is unreadable ({e}); skipping {label} env wiring")
-            continue
-        mcp = cfg.get("mcpServers")
-        if not isinstance(mcp, dict) or "memory" not in mcp:
-            # Memory MCP not yet registered — per-agent wiring step (later
-            # in setup) will create it. We don't pre-create here to avoid
-            # racing the wiring step's idempotency check.
-            continue
-        server = mcp["memory"]
-        env = server.setdefault("env", {})
-        if env.get("M3_EMBED_GGUF") == gguf_path:
-            _ok(f"    M3_EMBED_GGUF already set on {label} memory MCP entry")
-            continue
-        env["M3_EMBED_GGUF"] = gguf_path
-        try:
-            settings_path.write_text(
-                json.dumps(cfg, indent=2) + "\n", encoding="utf-8"
-            )
-            _ok(f"    set M3_EMBED_GGUF on {label} memory MCP entry ({settings_path})")
-        except OSError as e:
-            _warn(f"    failed to write {settings_path} ({e})")
+# Shell-rc / MCP-env persistence backends (never monkeypatched; confirmed via
+# grep) live in wizard/persist.py, re-imported here so setup_wizard.<name>
+# keeps resolving for tests/importers. The top-level _persist_embed_gguf /
+# _persist_env_var wrappers below (which delegate to these) DO get patched by
+# tests indirectly via _ask_yes_no/_run — they stay in this module along with
+# every other patched-fn caller.
+from .wizard.persist import (  # noqa: F401,E402 — re-exported for setup_wizard.<name> access
+    _persist_embed_gguf_mcp,
+    _persist_embed_gguf_shell,
+    _persist_env_var_mcp,
+    _persist_env_var_shell,
+    _pick_unix_shell_rc,
+)
 
 
 def _persist_env_var(name: str, value: str, *, non_interactive: bool) -> None:
@@ -879,82 +734,6 @@ def _persist_env_var(name: str, value: str, *, non_interactive: bool) -> None:
     Best-effort across surfaces; warnings don't abort."""
     _persist_env_var_shell(name, value, non_interactive=non_interactive)
     _persist_env_var_mcp(name, value)
-
-
-def _persist_env_var_shell(name: str, value: str, *, non_interactive: bool) -> None:
-    """Persist <name>=<value> for new shell sessions (per-platform)."""
-    if sys.platform == "win32":
-        if not non_interactive and not _ask_yes_no(
-            f"  Persist {name} to your Windows user environment (setx)?", default=True
-        ):
-            _warn(f'    skipped — set it later: setx {name} "{value}"')
-            return
-        try:
-            result = subprocess.run(
-                ["setx", name, value], capture_output=True, text=True, timeout=10,
-            )
-        except (subprocess.TimeoutExpired, OSError) as e:
-            _warn(f'    setx failed ({e}); set it later: setx {name} "{value}"')
-            return
-        if result.returncode == 0:
-            _ok(f"    persisted {name} via setx (new shells will see it)")
-        else:
-            _warn(f"    setx exited {result.returncode}: {(result.stderr or result.stdout or '').strip()}")
-        return
-
-    rc_path = _pick_unix_shell_rc()
-    if not non_interactive and not _ask_yes_no(
-        f"  Persist {name} to {rc_path}?", default=True
-    ):
-        _warn(f"    skipped — set it later: echo 'export {name}={value}' >> {rc_path}")
-        return
-    try:
-        existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
-    except OSError as e:
-        _warn(f"    could not read {rc_path} ({e}); skipping shell rc persistence")
-        return
-    # Idempotent: if the exact assignment is already present, do nothing; if a
-    # stale value for the same var exists, append the new one (last wins in sh).
-    if f"export {name}={value}" in existing or f'export {name}="{value}"' in existing:
-        _ok(f"    {name}={value} already present in {rc_path}")
-        return
-    block = f'\n# Added by m3 setup — LLM endpoint failover\nexport {name}="{value}"\n'
-    try:
-        with rc_path.open("a", encoding="utf-8") as f:
-            f.write(block)
-        _ok(f"    persisted {name} -> {rc_path}")
-    except OSError as e:
-        _warn(f"    failed to write {rc_path} ({e})")
-
-
-def _persist_env_var_mcp(name: str, value: str) -> None:
-    """Set <name>=<value> on the 'memory' MCP server env block in Claude/Gemini
-    settings, so the spawned MCP server (which doesn't inherit shell env on
-    macOS/Windows) sees it. Mirrors _persist_embed_gguf_mcp."""
-    for label, settings_path in (
-        ("Claude Code", Path.home() / ".claude" / "settings.json"),
-        ("Gemini CLI",  Path.home() / ".gemini" / "settings.json"),
-    ):
-        if not settings_path.is_file():
-            continue
-        try:
-            cfg = json.loads(settings_path.read_text(encoding="utf-8")) or {}
-        except (OSError, json.JSONDecodeError) as e:
-            _warn(f"    {settings_path} is unreadable ({e}); skipping {label} env wiring")
-            continue
-        mcp = cfg.get("mcpServers")
-        if not isinstance(mcp, dict) or "memory" not in mcp:
-            continue
-        env = mcp["memory"].setdefault("env", {})
-        if env.get(name) == value:
-            _ok(f"    {name} already set on {label} memory MCP entry")
-            continue
-        env[name] = value
-        try:
-            settings_path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
-            _ok(f"    set {name} on {label} memory MCP entry ({settings_path})")
-        except OSError as e:
-            _warn(f"    failed to write {settings_path} ({e})")
 
 
 def _discover_bge_m3_gguf() -> str | None:
@@ -1377,114 +1156,9 @@ def _step_doctor() -> bool:
 
 
 # ── orchestrator ──────────────────────────────────────────────────────────────
-
-def _summary(plan: SetupPlan, governor_result: Optional[dict] = None) -> None:
-    """End-of-run summary so the user knows exactly what to do next."""
-    print()
-    _ok("Setup complete.")
-    print()
-    restart_lines = []
-    if plan.targets.claude:
-        restart_lines.append("  • Claude Code              — restart the CLI (or run `/plugin reload`)")
-    if plan.targets.gemini:
-        restart_lines.append("  • Gemini CLI               — restart the CLI")
-    if plan.targets.antigravity:
-        restart_lines.append("  • Antigravity CLI/Desktop  — restart the CLI/Desktop")
-    if plan.targets.opencode:
-        restart_lines.append("  • OpenCode                 — restart the CLI")
-    if plan.targets.openclaw:
-        restart_lines.append("  • OpenClaw                 — start `m3 proxy start`, then set base URL")
-    if restart_lines:
-        print("Next step — restart your agent so it picks up the new MCP server:")
-        for line in restart_lines:
-            print(line)
-    else:
-        print("No agents were wired. Run `m3 setup` again or wire one by hand.")
-    print()
-    if plan.decouple_roots or plan.fips_mode:
-        print("Security & Path Configuration:")
-        print("  To ensure these settings persist across shell sessions and are visible to your agents,")
-        print("  please add the following environment variables to your shell profile (.bashrc, .zshrc, or Windows Env):")
-        if plan.decouple_roots:
-            print(f"    export M3_CONFIG_ROOT=\"{plan.config_root}\"")
-            print(f"    export M3_ENGINE_ROOT=\"{plan.engine_root}\"")
-        if plan.fips_mode:
-            print("    export M3_FIPS_MODE=1")
-            if plan.fips_strict:
-                print("    export M3_FIPS_STRICT=1   # requires the CMVP-validated wolfCrypt")
-            print("    # FIPS needs wolfSSL present (build: m3 fips install-wolfssl).")
-            print("    # Verify + get the SHA-256 to pin: m3 doctor  (crypto section)")
-        print()
-
-    # ── governor migration results ─────────────────────────────────────────
-    if governor_result:
-        removed = governor_result.get("removed", [])
-        failed = governor_result.get("failed", [])
-        cmds = governor_result.get("privileged_cmds", [])
-        not_migratable = governor_result.get("not_migratable", [])
-
-        if removed or failed or not_migratable:
-            print("Background Workload Governor:")
-        if removed:
-            print(f"  Migrated to the governor (removed {len(removed)} legacy scheduled task(s)):")
-            for name in removed:
-                print(f"    • {name}")
-        if not_migratable:
-            print("  Left on their schedule (the governor cannot take these over):")
-            for line in not_migratable:
-                print(line)
-        if failed:
-            print()
-            _warn(f"Could not remove {len(failed)} scheduled task(s) — insufficient privilege.")
-            print("  Run these PRIVILEGED, OS-specific commands to remove them cleanly,")
-            print("  then the governor (already active in-process) fully owns that work:")
-            print()
-            if _os_name_for_summary() == "Windows":
-                print("  → Open an ELEVATED (Administrator) PowerShell or Command Prompt and run:")
-            else:
-                print("  → Run in your shell (prefix with sudo only if it's a system/root crontab):")
-            for c in cmds:
-                print(f"      {c}")
-        if removed or failed or not_migratable:
-            print()
-
-    # ── embedder tier (Project Oxidation status) ────────────────────────────
-    try:
-        from m3_memory.rust_core_install import active_embedder_tier
-        tier = active_embedder_tier()
-        print("Embedder (Project Oxidation):")
-        if tier.get("native"):
-            _ok(f"  {tier['summary']}")
-        else:
-            _warn(f"  {tier['summary']}")
-        print()
-    except Exception:  # noqa: BLE001 — summary is best-effort
-        pass
-
-    # ── clear "you're done" closer ──────────────────────────────────────────
-    print("─" * 60)
-    if plan.targets.any():
-        _ok("M3 is installed and live. Restart your agent (above) and your")
-        print("    memory + chatlog start working immediately — nothing else to do.")
-    else:
-        _ok("M3 is installed. No agents were wired — run `m3 setup` again and")
-        print("    pick at least one agent, or add the MCP server by hand.")
-    print()
-    print("  Try it:   m3 status      # one-line health check")
-    print("            m3 doctor      # full diagnostics")
-    print("            m3 --help      # every command")
-    print("─" * 60)
-    print()
-
-
-def _os_name_for_summary() -> str:
-    """Thin OS branch for summary phrasing (avoids importing governor_migration
-    just for the OS check)."""
-    if os.name == "nt":
-        return "Windows"
-    if sys.platform == "darwin":
-        return "Darwin"
-    return "Linux"
+# Pure rendering, not monkeypatched, calls no patched fn — lives in
+# wizard/summary.py; re-imported here for setup_wizard.<name> access.
+from .wizard.summary import _os_name_for_summary, _summary  # noqa: F401,E402
 
 
 def _should_use_gui(args: argparse.Namespace) -> bool:
