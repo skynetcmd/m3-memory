@@ -9,9 +9,9 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-# Dataset-specific anchor-date parsers register themselves here (see
-# bin/bench_locomo.py and bin/bench_longmemeval.py). Keeps benchmark-format
-# knowledge out of this shared module.
+# Dataset-specific anchor-date parsers register themselves here (from the
+# internal benchmark harnesses). Keeps benchmark-format knowledge out of this
+# shared module.
 _ANCHOR_PARSERS: list[Callable[[str], "datetime | None"]] = []
 
 

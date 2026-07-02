@@ -255,7 +255,6 @@ module = [
     "test_memory_bridge",
     "memory_core",
     "m3_sdk",
-    "bench_locomo",
     "chatlog_core",
     "agent_protocol",
     "chatlog_init",

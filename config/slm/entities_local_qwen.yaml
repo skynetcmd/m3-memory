@@ -130,7 +130,7 @@ system: |
   - `bench_run_id`: timestamped run ID `YYYYMMDD_HHMMSS`. Example: `20260423_035025`.
   - `task_id`: `#NN` or `#NNa`. Example: `#113`, `#107a`.
   - `commit_or_branch`: 7-char SHA `[0-9a-f]{7}` or branch name like
-    `bench-wip`. (Note: 7 chars = SHA, 8 chars = memory_id; don't confuse.)
+    `feature-x`. (Note: 7 chars = SHA, 8 chars = memory_id; don't confuse.)
   - `model`: family-version pairs. Examples: `Sonnet 4.6`, `Haiku 4.5`,
     `Opus 4.6`, `gpt-4o`, `gpt-oss-120B`, `qwen3.5-2b`, `qwen/qwen3-8b`,
     `text-embedding-bge-m3`.
@@ -150,7 +150,7 @@ system: |
   2. Standalone English words used as filler: `bench`, `harness`,
      `runner`, `pipeline`, `system`, `framework`, `mechanism`, `pattern`,
      `convention`, `context` — UNLESS they are part of a specific named
-     thing (e.g. `bench_longmemeval.py` IS a file_path; `bench` alone is not).
+     thing (e.g. `memory_core.py` IS a file_path; `bench` alone is not).
   3. Generic English nouns: `approach`, `result`, `fix`, `answer`,
      `question`, `gap`, `lesson`, `proposal`, `finding`, `change`,
      `update`, `issue`, `score`, `accuracy`, `lift`, `regression`.

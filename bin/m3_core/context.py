@@ -451,7 +451,7 @@ class M3Context:
         Thin convenience accessor; main's StructuredLogger is stateless so
         the returned instance is shareable across calls. The ``name``
         parameter is reserved for a future namespacing pass — currently
-        ignored, kept in the signature to match bench-wip callers.
+        ignored, kept in the signature to match existing callers.
         """
         return StructuredLogger()
 

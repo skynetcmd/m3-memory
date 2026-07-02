@@ -68,8 +68,8 @@ def ensure_utf8() -> None:
 
 
 # Single source of truth for the local LLM base URL + read timeout. Bridges
-# imported this from here in bench-wip; main had been redefining it in each
-# bridge. Still overridable via env so dev machines with LM Studio on a
+# import this from here instead of redefining it in each bridge.
+# Still overridable via env so dev machines with LM Studio on a
 # different port (or a remote Ollama) work without code edits.
 LM_STUDIO_BASE = os.environ.get("LM_STUDIO_BASE", "http://localhost:1234/v1")
 LM_READ_TIMEOUT = float(os.environ.get("LM_READ_TIMEOUT", "4800.0"))

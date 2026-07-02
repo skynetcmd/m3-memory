@@ -15,7 +15,7 @@ BIN_SCRIPTS = {
     "pg_sync", "chroma_sync_cli", "gen_tool_inventory", "migrate_memory",
     "embed_server", "embed_server_gpu", "install_schedules",
     "test_debug_agent", "test_mcp_proxy", "test_memory_bridge",
-    "bench_locomo", "bench_longmemeval", "bench_memory",
+    "bench_memory",
     "cli_knowledge", "cli_kb_browse", "memory_doctor", "migrate_flat_memory",
     "pg_setup", "setup_secret", "embed_agent_instructions",
     "inventory_graph", "metadata_filler",
