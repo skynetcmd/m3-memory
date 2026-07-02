@@ -86,10 +86,46 @@ dependencies = [
     # and the guard silently degraded to a no-op (returning "safe" for DROP/
     # DELETE/ALTER). Runtime dependency, not optional.
     "sqlglot>=30.6.0,<31",
+    # Transitively pulled by httpx/requests, but pinned directly to floor out
+    # PYSEC-2026-141/142 (matches requirements.txt) — a security pin belongs in
+    # the installed metadata, not only the dev requirements file.
+    "urllib3>=2.7.0,<3",
+    # Fuzzy string matching for entity coalescing. Has a difflib fallback, so
+    # it's a perf/quality dep — but small, pure, and used on a common path, so
+    # kept in core (requirements.txt had it; pyproject omitted it).
+    "rapidfuzz>=3.14,<4",
+    # PDF + HTML parsing used by files-ingestion / report paths.
+    "fpdf2>=2.8.7,<3",
+    "beautifulsoup4>=4.14.3,<5",
+    # Windows-only: keyring backend + hook process control. Marker-gated so it
+    # installs only where relevant.
+    "pywin32>=311; sys_platform == 'win32'",
+    # macOS-only: CoreWLAN for thermal/network probes.
+    "pyobjc-framework-CoreWLAN; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2.0,<4"]
+# Web surfaces: the FastAPI dashboard (bin/dashboard_server.py) and the
+# OpenAI-compatible MCP proxy (bin/mcp_proxy.py). Optional by design — the core
+# MCP server + CLI need neither. Were in requirements.txt but missing from
+# pyproject entirely, so `pip install m3-memory` never provided them and the
+# dashboard/proxy failed to import.
+web = [
+    "fastapi>=0.136.1,<1",
+    "uvicorn>=0.46.0,<1",
+]
+# Local embedding-server stack (bin/embed_server*.py, sentence-transformers /
+# FlagEmbedding path). Heavy (pulls torch) and optional — the in-process Rust
+# tier-1 embedder or an external OpenAI-compatible embed endpoint cover the
+# common case. Kept OUT of core so a default install stays light. See
+# requirements.txt for the transformers<5 / torch pin rationale.
+embed-server = [
+    "sentence-transformers>=5.4.1,<6",
+    "transformers>=4.53.0,<5",
+    "torch>=2.11.0,<3",
+    "scipy>=1.17.1,<2",
+]
 # Local zero-shot NER for bin/m3_entities_gliner.py — a fast on-device
 # alternative to the LLM-based entity extractor. Optional by design: core runs
 # fully without it (bin/m3_entities.py needs no extra deps). Pulls torch.
