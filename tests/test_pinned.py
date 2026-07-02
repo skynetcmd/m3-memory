@@ -374,3 +374,59 @@ def test_memory_pin_impl_not_found(tmp_path, monkeypatch):
 
     result = memory_core.memory_pin_impl(str(uuid.uuid4()))
     assert result.startswith("Error:")
+
+
+# ── pinned ≠ supersede-proof (the "pinned but contradicted" boundary) ─────────
+
+def test_pinned_row_can_still_be_superseded(tmp_path, monkeypatch):
+    """Pin protects against lifecycle *aging* (decay/expiry/retention) but NOT
+    against *correction*: a pinned memory can still be explicitly superseded when
+    new contradictory truth arrives. This locks the intended boundary — the pin
+    flag means "don't let this rot," not "never update this."
+
+    Confirmed intent: the module docstring and CHANGELOG scope the pinned
+    exemption to decay/confidence-decay/expiry/retention only; the supersede path
+    (write.py::memory_supersede_impl) carries no `pinned` check by design. This
+    test asserts that design and guards it against silent regression.
+    """
+    import asyncio
+
+    db = tmp_path / "t.db"
+    _full_db(db)
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    from memory.db import ensure_pinned_column
+    ensure_pinned_column(conn)
+    old_id = str(uuid.uuid4())
+    _seed(conn, old_id, importance=0.9, pinned=1)
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("M3_DATABASE", str(db))
+    import memory_core
+
+    result = asyncio.run(
+        memory_core.memory_supersede_impl(
+            old_id, content="corrected fact", embed=False
+        )
+    )
+    assert result.startswith("Superseded"), result
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    old_row = conn.execute(
+        "SELECT pinned, is_deleted FROM memory_items WHERE id=?", (old_id,)
+    ).fetchone()
+    # A `supersedes` edge new -> old was written despite the old row being pinned.
+    edge = conn.execute(
+        "SELECT COUNT(*) FROM memory_relationships "
+        "WHERE to_id=? AND relationship_type='supersedes'",
+        (old_id,),
+    ).fetchone()[0]
+    conn.close()
+
+    # The pinned old row was superseded (closed) — pin did not block correction.
+    assert old_row["is_deleted"] == 1
+    # Still flagged pinned (supersede doesn't touch the flag; it closes the row).
+    assert old_row["pinned"] == 1
+    assert edge == 1

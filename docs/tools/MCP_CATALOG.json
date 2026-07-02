@@ -2507,6 +2507,11 @@
           "type": "boolean"
         },
         {
+          "name": "explain",
+          "required": false,
+          "type": "boolean"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"

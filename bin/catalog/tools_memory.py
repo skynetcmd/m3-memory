@@ -184,6 +184,7 @@ TOOLS: list[ToolSpec] = [
                 "adaptive_k":         {"type": "boolean", "description": "Auto-trim results at the score drop-off point. WARNING: regresses on temporal-reasoning, knowledge-update, and multi-session queries; safe only for sharp-curve queries where most retrievals would be noise. Prefer `auto_route=True` on memory_search_routed for safer multi-signal routing.", "default": False},
                 "variant":            {"type": "string", "description": "Ingest-pipeline filter. '' = real user data only (default, equivalent to IS NULL). Pass a specific variant name (e.g. 'heuristic_c1c4') to scope to that bench ingest.", "default": ""},
                 "include_bench_data": {"type": "boolean", "description": "Opt in to LOCOMO / LongMemEval bench rows. Default False hides any row with a variant tag.", "default": False},
+                "explain":            {"type": "boolean", "description": "Attach a per-result `_explanation` block (vector/bm25/title_overlap/importance/recency/temporal score breakdown) plus a human-readable `reason` string explaining why each row matched. Same breakdown memory_suggest shows, on the primary search path.", "default": False},
             },
             "required": ["query"],
         },

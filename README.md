@@ -283,6 +283,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | 🤖 **[Agent rules + all tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
 | 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
 | 🗺️ **[Roadmap](docs/ROADMAP.md)** | 📜 **[Changelog](CHANGELOG.md)** |
+| 🛠️ **[Operations playbook](docs/OPERATIONS.md)** (run the memory brain) | |
 
 ---
 
