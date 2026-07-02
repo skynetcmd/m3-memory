@@ -356,7 +356,7 @@ Binary per-question SHR (`recall_any@k`) — same convention the adjacent LongMe
 
 The retrieval-vs-QA gap (100% SHR @ k=20 → 92.0% QA) is dominated by answer-model errors on already-retrieved gold evidence, not retrieval misses.
 
-Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md). The earlier oracle-routed results (v1, 89.0%) are preserved at [`LME-S_v1_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_v1_Benchmarking_Report.md).
+Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md). (An earlier oracle-routed configuration scored 89.0%.)
 Discussion threads: [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49) (v3, no-oracle) and [#43](https://github.com/xiaowu0162/LongMemEval/issues/43) (v1).
 LoCoMo audit pending — see [`benchmarks/locomo/README.md`](benchmarks/locomo/README.md).
 

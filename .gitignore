@@ -130,10 +130,9 @@ benchmarks/longmemeval/results.json
 benchmarks/longmemeval/LME-*.json
 benchmarks/longmemeval/refs/
 docs/tools/probe_ingest_cost.md
-# Per-tool inventory docs for PRIVATE bench/harness scripts. The generator
-# (bin/gen_tool_inventory.py) now skips writing these, but ignore them too as
-# defense-in-depth so a generator regression can't re-track a leaked doc.
-# These previously reached public origin/main; keep them off it for good.
+# Per-tool inventory docs for internal benchmark/harness scripts. The generator
+# (bin/gen_tool_inventory.py) skips writing these; ignore them too as
+# defense-in-depth so a generator regression can't re-track them.
 docs/tools/bench_longmemeval.md
 docs/tools/bench_memory.md
 docs/tools/benchmark_memory.md
@@ -189,8 +188,8 @@ benchmarks/longmemeval/*
 # Local working note — MCP plugin-failure diagnosis, kept local (not public origin).
 /2026.05.05_MCP_Plugin_Failure.md
 
-# LoCoMo bench territory — only the public README ships on main; the audit
-# is pending and the harness lives on private/locomo until results land.
+# LoCoMo benchmark — only the public README ships on main; the audit is
+# pending and the harness is kept internal until results land.
 benchmarks/locomo/*
 !benchmarks/locomo/README.md
 

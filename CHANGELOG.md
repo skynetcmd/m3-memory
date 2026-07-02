@@ -134,8 +134,7 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ### Removed
 
-- **`bin/bench_longmemeval.py` — the internal LongMemEval bench runner — is no
-  longer part of the public package.** It was an internal evaluation harness; the
+- **An internal evaluation harness is no longer part of the public package.** The
   generic performance benchmarks (`bench_memory.py`, `benchmark_memory.py`) and the
   published benchmark results remain.
 
@@ -219,9 +218,8 @@ Pairs with m3-core-rs **3.6.27** (release tag `v2026.06.27`); the pin in
   published LME-S QA figure; retrieval session-hit-rate is unchanged at
   **100% @ k=20** (99.2% @ k=10). Full methodology, per-type and per-strategy
   breakdowns, and a routing-error analysis are in
-  [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md);
-  the preserved oracle-routed report is at
-  [`LME-S_v1_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_v1_Benchmarking_Report.md).
+  [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
+  (An earlier oracle-routed configuration scored 89.0%.)
   Discussion: [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49).
 
 ### Added
