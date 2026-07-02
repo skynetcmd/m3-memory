@@ -1112,6 +1112,193 @@ def _dedupe_mcp_registration(*, apply: bool = False) -> "list[str]":
     return actions
 
 
+def _deprecated_env_in_config() -> "dict[Path, dict[str, str]]":
+    """Return {file: {OLD: NEW}} for on-disk config that still uses a deprecated
+    (pre-M3_ namespacing) env var name. Scans the SAME config files
+    ``_client_config_sources()`` reads (settings.json per client, plus Claude's
+    .mcp.json), walking every ``mcpServers.<server>.env`` block, plus a plain
+    ``.env`` (KEY=VALUE) at the cwd if present. Uses ``DEPRECATED_ENV_RENAMES``
+    (bin/m3_core/paths.py) as the sole source of truth for what counts as an old
+    name — never a second hardcoded copy.
+
+    Only files with >=1 old name are included. Tolerant: unreadable/unparseable
+    files are skipped, never raised.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+    from m3_core.paths import DEPRECATED_ENV_RENAMES  # type: ignore
+
+    out: "dict[Path, dict[str, str]]" = {}
+
+    seen_files: "set[Path]" = set()
+    for sources in _client_config_sources().values():
+        for path in sources:
+            seen_files.add(path)
+
+    for path in seen_files:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            continue
+        found: "dict[str, str]" = {}
+        for entry in (data.get("mcpServers") or {}).values():
+            env_block = (entry or {}).get("env") or {}
+            for key in env_block:
+                if key in DEPRECATED_ENV_RENAMES:
+                    found[key] = DEPRECATED_ENV_RENAMES[key]
+        if found:
+            out[path] = found
+
+    dotenv = Path.cwd() / ".env"
+    if dotenv.is_file():
+        try:
+            found = {}
+            for line in dotenv.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+                key = stripped.split("=", 1)[0].strip()
+                if key in DEPRECATED_ENV_RENAMES:
+                    found[key] = DEPRECATED_ENV_RENAMES[key]
+            if found:
+                out[dotenv] = found
+        except OSError:
+            pass
+
+    return out
+
+
+def _migrate_env_names(*, apply: bool = False) -> "list[str]":
+    """Rename deprecated env var KEYS to their M3_ names in on-disk config.
+    Mirrors ``_dedupe_mcp_registration``'s contract exactly.
+
+    apply=False (default): dry-run, returns "would rename ..." lines, no writes.
+    apply=True: rewrites each affected file (a .bak is written FIRST with the
+    original contents), renaming the env KEY in place while preserving its
+    VALUE, then returns "renamed ..." lines. Idempotent — a clean config (or a
+    second run right after) yields [].
+
+    Conflict rule: if BOTH the old and new name are already present in the same
+    env block, the old key is dropped WITHOUT touching the new value (matches
+    getenv_compat's new > old precedence) — the old value is discarded, not
+    merged in, since the new value already wins at read time.
+
+    Never let one bad file abort the rest (try/except per file, error noted).
+    """
+    actions: list[str] = []
+    affected = _deprecated_env_in_config()
+
+    for path, renames in affected.items():
+        try:
+            if path.name == ".env":
+                actions.extend(_migrate_dotenv_file(path, renames, apply=apply))
+            else:
+                actions.extend(_migrate_json_config_file(path, renames, apply=apply))
+        except (OSError, json.JSONDecodeError) as e:
+            actions.append(f"[X] could not migrate env names in {path}: {e}")
+
+    return actions
+
+
+def _migrate_json_config_file(path: Path, renames: "dict[str, str]", *, apply: bool) -> "list[str]":
+    """Rename OLD->NEW env keys inside every mcpServers.<name>.env block of a
+    single JSON config file. Raises on I/O or parse error (caller handles)."""
+    actions: list[str] = []
+    original = path.read_text(encoding="utf-8")
+    data = json.loads(original) or {}
+    changed = False
+    for entry in (data.get("mcpServers") or {}).values():
+        env_block = (entry or {}).get("env")
+        if not isinstance(env_block, dict):
+            continue
+        for old, new in renames.items():
+            if old not in env_block:
+                continue
+            if new in env_block:
+                verb = "dropped" if apply else "would drop"
+                actions.append(f"[+] {verb} superseded {old} ({new} already set) in {path}")
+                if apply:
+                    env_block.pop(old, None)
+                    changed = True
+            else:
+                verb = "renamed" if apply else "would rename"
+                actions.append(f"[+] {verb} {old} -> {new} in {path}")
+                if apply:
+                    env_block[new] = env_block.pop(old)
+                    changed = True
+    if apply and changed:
+        path.with_suffix(path.suffix + ".bak").write_text(original, encoding="utf-8")
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return actions
+
+
+def _migrate_dotenv_file(path: Path, renames: "dict[str, str]", *, apply: bool) -> "list[str]":
+    """Rename OLD->NEW KEY= tokens line-wise in a plain .env file, preserving
+    values and comments. Raises on I/O error (caller handles)."""
+    actions: list[str] = []
+    original = path.read_text(encoding="utf-8")
+    lines = original.splitlines(keepends=True)
+
+    existing_keys: "set[str]" = set()
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            existing_keys.add(stripped.split("=", 1)[0].strip())
+
+    new_lines: "list[str]" = []
+    changed = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            new_lines.append(line)
+            continue
+        key, _, rest = stripped.partition("=")
+        key = key.strip()
+        new = renames.get(key)
+        if new is None:
+            new_lines.append(line)
+            continue
+        if new in existing_keys:
+            verb = "dropped" if apply else "would drop"
+            actions.append(f"[+] {verb} superseded {key} ({new} already set) in {path}")
+            changed = True
+            continue  # old line dropped entirely; new's own line already carries the value
+        verb = "renamed" if apply else "would rename"
+        actions.append(f"[+] {verb} {key} -> {new} in {path}")
+        changed = True
+        ending = "\n" if line.endswith("\n") else ""
+        new_lines.append(f"{new}={rest}".rstrip("\n") + ending)
+
+    if apply and changed:
+        path.with_suffix(path.suffix + ".bak").write_text(original, encoding="utf-8")
+        path.write_text("".join(new_lines), encoding="utf-8")
+    return actions
+
+
+def _deprecated_env_config_section() -> None:
+    """Doctor section: flag on-disk config still using deprecated env var names.
+
+    Mirrors ``_duplicate_registration_section``. Distinct from
+    ``m3_memory.install.sections._deprecated_env_section`` (which reports names
+    actually READ by THIS process via getenv_compat) — this one scans config
+    FILES so it catches names sitting unread in someone else's settings.json.
+    """
+    affected = _deprecated_env_in_config()
+    if not affected:
+        return  # clean — no noise
+    print()
+    print("  [!] deprecated env var NAMES found in on-disk config (still work via "
+          "back-compat, but should migrate to the M3_ namespace):")
+    for path, renames in sorted(affected.items(), key=lambda kv: str(kv[0])):
+        for old, new in sorted(renames.items()):
+            print(f"        {path}: {old}  ->  {new}")
+    print("      → Run `m3 doctor --fix` to rename these into the M3_ namespace")
+    print("        automatically (a .bak is written; the old names still work")
+    print("        until you do).")
+
+
 def _live_bridge_counts() -> "dict[str, int]":
     """Count live m3 bridge processes by script name (memory_bridge, etc.). >1 of
     any is the process-level signature of double-launch. Returns {} if psutil is
@@ -1197,6 +1384,11 @@ def _heal_all_agents(*, force: bool = False) -> int:
         print(f"  {line}")
         if line.lstrip().startswith("[+]"):
             changed += 1
+    # Auto-migrate deprecated env var names to the M3_ namespace.
+    for line in _migrate_env_names(apply=True):
+        print(f"  {line}")
+        if line.lstrip().startswith("[+]"):
+            changed += 1
     return changed
 
 
@@ -1224,6 +1416,7 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         else:
             _agent_config_section()
         _duplicate_registration_section()
+        _deprecated_env_config_section()
         bridge = find_bridge()
         if bridge and bridge.is_file():
             print(f"[OK] resolved bridge: {bridge}")
@@ -1300,6 +1493,8 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         _agent_config_section()
 
     _duplicate_registration_section()
+
+    _deprecated_env_config_section()
 
     print()
     bridge = find_bridge()

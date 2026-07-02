@@ -16,6 +16,34 @@ logger = logging.getLogger("M3_SDK")
 # a ONE-TIME deprecation warning, and records the hit so `m3 doctor` can report
 # which deprecated vars are still in use (fail loud + observable, §3).
 #
+# DEPRECATED_ENV_RENAMES is the STATIC, authoritative old_name -> new_name map
+# for the M3_* namespacing migration. It is the source of truth for the on-disk
+# env-migration helper (`m3 doctor` scans config files for these OLD names and
+# `--fix` rewrites them), which cannot rely on _DEPRECATED_ENV_SEEN (that only
+# records names READ this process — a var sitting unread in a settings.json env
+# block would never appear). Every getenv_compat(new, old) call site MUST have a
+# matching entry here; tests/test_env_rename_map_drift.py enforces that so the map
+# can't silently fall out of sync with the call sites.
+DEPRECATED_ENV_RENAMES: dict[str, str] = {
+    "CHATLOG_DB_PATH":         "M3_CHATLOG_DB_PATH",
+    "CHATLOG_DB_POOL_SIZE":    "M3_CHATLOG_DB_POOL_SIZE",
+    "CHATLOG_DB_POOL_TIMEOUT": "M3_CHATLOG_DB_POOL_TIMEOUT",
+    "CHROMA_BASE_URL":         "M3_CHROMA_BASE_URL",
+    "DB_POOL_SIZE":            "M3_DB_POOL_SIZE",
+    "DB_POOL_TIMEOUT":         "M3_DB_POOL_TIMEOUT",
+    "IMPORTANCE_WEIGHT":       "M3_IMPORTANCE_WEIGHT",
+    "LLM_ENDPOINTS_CSV":       "M3_LLM_ENDPOINTS_CSV",
+    "ORIGIN_DEVICE":           "M3_ORIGIN_DEVICE",
+    "PG_URL":                  "M3_PG_URL",
+    "POSTGRES_SERVER":         "M3_POSTGRES_SERVER",
+    "SEARCH_ROW_CAP":          "M3_SEARCH_ROW_CAP",
+    "SHORT_TURN_THRESHOLD":    "M3_SHORT_TURN_THRESHOLD",
+    "SPEAKER_IN_TITLE":        "M3_SPEAKER_IN_TITLE",
+    "SUPERSEDES_PENALTY":      "M3_SUPERSEDES_PENALTY",
+    "SYNC_TARGET_IP":          "M3_SYNC_TARGET_IP",
+    "TITLE_MATCH_BOOST":       "M3_TITLE_MATCH_BOOST",
+}
+
 # _DEPRECATED_ENV_SEEN maps old_name -> new_name for every deprecated var that
 # was actually read from the environment this process. Doctor reads it via
 # deprecated_env_in_use().
