@@ -18,6 +18,11 @@
           "name": "reset_stalled",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -41,6 +46,11 @@
           "name": "allowed_variants",
           "required": false,
           "type": "array"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -54,6 +64,11 @@
           "name": "text",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -77,6 +92,11 @@
           "name": "allowed_variants",
           "required": false,
           "type": "array"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -90,6 +110,11 @@
           "name": "user_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -103,6 +128,11 @@
           "name": "user_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -131,6 +161,11 @@
           "name": "dry_run",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -149,6 +184,11 @@
           "name": "query",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -162,6 +202,11 @@
           "name": "domain",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -175,6 +220,11 @@
           "name": "notification_id",
           "required": true,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -188,6 +238,11 @@
           "name": "agent_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -211,6 +266,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -234,6 +294,11 @@
           "name": "payload",
           "required": false,
           "type": "object"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -242,7 +307,13 @@
       "summary": "Send a notification to an agent."
     },
     {
-      "args": [],
+      "args": [
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
       "destructive": false,
       "domain": "admin",
       "name": "tools_list_domains",
@@ -254,6 +325,11 @@
           "name": "domain",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -267,6 +343,11 @@
           "name": "agent_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -280,6 +361,11 @@
           "name": "agent_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -298,6 +384,11 @@
           "name": "role",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -311,6 +402,11 @@
           "name": "agent_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -339,6 +435,11 @@
           "name": "metadata",
           "required": false,
           "type": "object"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -356,6 +457,11 @@
         {
           "name": "trust_score",
           "required": true,
+          "type": "number"
+        },
+        {
+          "name": "timeout",
+          "required": false,
           "type": "number"
         }
       ],
@@ -380,6 +486,11 @@
           "name": "group_by",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -403,6 +514,11 @@
           "name": "offset",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -441,6 +557,11 @@
           "name": "target_type",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -469,6 +590,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -527,6 +653,11 @@
           "name": "until",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -560,6 +691,11 @@
           "name": "store_original_hash",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -568,7 +704,13 @@
       "summary": "Flip redaction on/off and update patterns."
     },
     {
-      "args": [],
+      "args": [
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
       "destructive": false,
       "domain": "chatlog",
       "name": "chatlog_status",
@@ -645,6 +787,11 @@
           "name": "latency_ms",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -663,6 +810,11 @@
           "name": "embed",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -681,6 +833,11 @@
           "name": "db_path",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -719,6 +876,11 @@
           "name": "embed",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -737,6 +899,11 @@
           "name": "k",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -765,6 +932,11 @@
           "name": "tags",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -783,6 +955,11 @@
           "name": "threshold",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -791,14 +968,26 @@
       "summary": "Summarize a conversation into key points using the local LLM."
     },
     {
-      "args": [],
+      "args": [
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
       "destructive": false,
       "domain": "diagnostics",
       "name": "embedder_status",
       "summary": "Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_F\u2026"
     },
     {
-      "args": [],
+      "args": [
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
       "destructive": false,
       "domain": "diagnostics",
       "name": "memory_doctor",
@@ -810,6 +999,11 @@
           "name": "dry_run",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -828,6 +1022,11 @@
           "name": "depth",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -861,6 +1060,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -889,6 +1093,11 @@
           "name": "with_neighbors",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -922,6 +1131,11 @@
           "name": "default",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -940,6 +1154,11 @@
           "name": "cascade",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -953,6 +1172,11 @@
           "name": "corpus_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -961,7 +1185,13 @@
       "summary": "Fetch a single corpus's settings + counts."
     },
     {
-      "args": [],
+      "args": [
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
       "destructive": false,
       "domain": "files",
       "name": "files_corpus_list",
@@ -998,6 +1228,11 @@
           "name": "retention_days",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1031,6 +1266,11 @@
           "name": "include_already_detected",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1052,6 +1292,11 @@
         },
         {
           "name": "min_cosine",
+          "required": false,
+          "type": "number"
+        },
+        {
+          "name": "timeout",
           "required": false,
           "type": "number"
         }
@@ -1077,6 +1322,11 @@
           "name": "note",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1100,6 +1350,11 @@
           "name": "corpus",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1133,6 +1388,11 @@
           "name": "confirm",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1156,6 +1416,11 @@
           "name": "min_cosine",
           "required": false,
           "type": "number"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1174,6 +1439,11 @@
           "name": "note",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1187,6 +1457,11 @@
           "name": "cluster_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1200,6 +1475,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1213,6 +1493,11 @@
           "name": "uuid",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1226,6 +1511,11 @@
           "name": "rebuild",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1269,6 +1559,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1327,6 +1622,11 @@
           "name": "original_path",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1350,6 +1650,11 @@
           "name": "expect_sha256",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1378,6 +1683,11 @@
           "name": "include_already_promoted",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1411,6 +1721,11 @@
           "name": "importance",
           "required": false,
           "type": "number"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1434,6 +1749,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1472,6 +1792,11 @@
           "name": "include_history",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1500,6 +1825,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1513,6 +1843,11 @@
           "name": "corpus",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1541,6 +1876,11 @@
           "name": "cooldown_seconds",
           "required": false,
           "type": "number"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1554,6 +1894,11 @@
           "name": "plan",
           "required": true,
           "type": "object"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -1577,6 +1922,11 @@
           "name": "threshold",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1585,7 +1935,13 @@
       "summary": "Consolidate old memories of the same type into summaries using the local LLM."
     },
     {
-      "args": [],
+      "args": [
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
       "destructive": false,
       "domain": "memory",
       "name": "memory_cost_report",
@@ -1607,6 +1963,11 @@
           "name": "pattern",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1635,6 +1996,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1658,6 +2024,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1676,6 +2047,11 @@
           "name": "hard",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -1694,6 +2070,11 @@
           "name": "hard",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -1717,6 +2098,11 @@
           "name": "since",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -1735,6 +2121,11 @@
           "name": "feedback",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1748,6 +2139,11 @@
           "name": "id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1766,6 +2162,11 @@
           "name": "depth",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1804,6 +2205,11 @@
           "name": "task_id",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1822,6 +2228,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1835,6 +2246,11 @@
           "name": "data",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -1858,6 +2274,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1871,6 +2292,11 @@
           "name": "memory_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1894,6 +2320,11 @@
           "name": "relationship_type",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1912,6 +2343,11 @@
           "name": "relationship_type",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -1935,6 +2371,11 @@
           "name": "prune_orphan_embeddings",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -1958,6 +2399,11 @@
           "name": "include_future",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2036,6 +2482,11 @@
           "name": "include_bench_data",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2114,6 +2565,11 @@
           "name": "fan_out_limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -2337,6 +2793,11 @@
           "name": "entity_graph_valid_predicates",
           "required": false,
           "type": "array"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -2405,6 +2866,11 @@
           "name": "include_bench_data",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2433,6 +2899,11 @@
           "name": "auto_archive",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": true,
@@ -2461,6 +2932,11 @@
           "name": "include_bench_data",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2549,6 +3025,11 @@
           "name": "embed_text",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2602,6 +3083,11 @@
           "name": "conversation_id",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2615,6 +3101,11 @@
           "name": "updates",
           "required": true,
           "type": "array"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2628,6 +3119,11 @@
           "name": "id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2736,6 +3232,11 @@
           "name": "embed_text",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2844,6 +3345,11 @@
           "name": "delete_after_read",
           "required": false,
           "type": "boolean"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2862,6 +3368,11 @@
           "name": "owner_agent",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2900,6 +3411,11 @@
           "name": "metadata",
           "required": false,
           "type": "object"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2923,6 +3439,11 @@
           "name": "actor",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2936,6 +3457,11 @@
           "name": "task_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2964,6 +3490,11 @@
           "name": "limit",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -2982,6 +3513,11 @@
           "name": "result_memory_id",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -3000,6 +3536,11 @@
           "name": "max_depth",
           "required": false,
           "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,
@@ -3033,6 +3574,11 @@
           "name": "actor",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
         }
       ],
       "destructive": false,

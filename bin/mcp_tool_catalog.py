@@ -298,10 +298,64 @@ def validate_args(spec: ToolSpec, args: dict) -> tuple[dict, str | None]:
             args = result
     return args, None
 
+# ── Per-call timeout (§6 hardening: strict timeouts everywhere) ───────────────
+# Every MCP tool call is bounded so a slow/hung impl can never block the server
+# or a headless daemon indefinitely (the FILES-search hang, 2026-07-01).
+# Precedence, most-specific first:
+#   1. per-call `timeout` arg (seconds) — user-selectable per invocation
+#   2. M3_TOOL_TIMEOUT env — global default override
+#   3. _DEFAULT_TOOL_TIMEOUT (30s)
+# A value <= 0 disables the timeout (the "unless otherwise specified" escape
+# hatch for genuinely long-running ops, e.g. bench/enrich). Only async impls are
+# bounded — a sync impl runs inline on the event loop and cannot be cancelled by
+# wait_for; sync tools are simple/fast by construction.
+_DEFAULT_TOOL_TIMEOUT = 30.0
+
+
+def _resolve_tool_timeout(args: dict) -> float | None:
+    """Return the timeout in seconds for this call, or None to disable it.
+
+    Pops the reserved `timeout` key from `args` (so it never reaches the impl).
+    Precedence: per-call arg > M3_TOOL_TIMEOUT env > 30s default. <=0 disables.
+    Malformed values fall through to the next source (fail safe, §3)."""
+    raw = args.pop("timeout", None)
+    if raw is None:
+        raw = os.environ.get("M3_TOOL_TIMEOUT")
+    try:
+        val = float(raw) if raw is not None and raw != "" else _DEFAULT_TOOL_TIMEOUT
+    except (TypeError, ValueError):
+        val = _DEFAULT_TOOL_TIMEOUT
+    return None if val <= 0 else val
+
+
+class ToolTimeout(Exception):
+    """Raised when a tool impl exceeds its resolved timeout."""
+
+
+async def _run_impl_bounded(spec: ToolSpec, args: dict, timeout: float | None) -> Any:
+    """Invoke spec.impl, enforcing `timeout` on async impls. Fails loud (§3):
+    a timeout raises ToolTimeout with the tool name and budget, not a silent
+    hang or a bare None."""
+    if spec.is_async:
+        if timeout is None:
+            return await spec.impl(**args)
+        try:
+            return await asyncio.wait_for(spec.impl(**args), timeout=timeout)
+        except (asyncio.TimeoutError, TimeoutError) as e:
+            raise ToolTimeout(
+                f"{spec.name} exceeded {timeout:g}s timeout "
+                f"(raise with a larger `timeout` arg or M3_TOOL_TIMEOUT, "
+                f"or set <=0 to disable)"
+            ) from e
+    return spec.impl(**args)
+
+
 async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:
     try:
+        args = dict(args or {})
+        timeout = _resolve_tool_timeout(args)  # pops reserved `timeout` key
         allowed_keys = set(spec.parameters.get("properties", {}).keys())
-        args = {k: v for k, v in (args or {}).items() if k in allowed_keys}
+        args = {k: v for k, v in args.items() if k in allowed_keys}
         database = _pop_database(args)
         if spec.inject_agent_id and "agent_id" in allowed_keys:
             args["agent_id"] = agent_id
@@ -309,10 +363,7 @@ async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:
         if err:
             return err
         with active_database(database):
-            if spec.is_async:
-                result = await spec.impl(**args)
-            else:
-                result = spec.impl(**args)
+            result = await _run_impl_bounded(spec, args, timeout)
         return result if isinstance(result, str) else str(result)
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
@@ -332,8 +383,10 @@ async def execute_tool_structured(
     including validate_args, then returns {"dry_run": True, "ok": True} WITHOUT
     calling spec.impl (read-only by construction — no side effects).
     """
+    args = dict(args or {})
+    timeout = _resolve_tool_timeout(args)  # pops reserved `timeout` key
     allowed_keys = set(spec.parameters.get("properties", {}).keys())
-    args = {k: v for k, v in (args or {}).items() if k in allowed_keys}
+    args = {k: v for k, v in args.items() if k in allowed_keys}
     database = _pop_database(args)
     if spec.inject_agent_id and "agent_id" in allowed_keys:
         args["agent_id"] = agent_id
@@ -345,9 +398,7 @@ async def execute_tool_structured(
     if dry_run:
         return {"dry_run": True, "ok": True, "tool": spec.name}
     with active_database(database):
-        if spec.is_async:
-            return await spec.impl(**args)
-        return spec.impl(**args)
+        return await _run_impl_bounded(spec, args, timeout)
 
 
 # ── Dispatcher (m3_call / m3_index) ──────────────────────────────────────────
@@ -2976,12 +3027,33 @@ _DATABASE_PARAM_SCHEMA = {
 }
 
 
+# ── Universal `timeout` parameter injection (§6 hardening) ───────────────────
+# Every MCP tool gains an optional `timeout` (seconds) so a caller can bound a
+# single call, or lengthen/disable it for a known-long op. Same injection model
+# as `database`: added at module load, popped by the dispatcher before the impl
+# is called (impl signatures do not change). Precedence and semantics are in
+# _resolve_tool_timeout: per-call arg > M3_TOOL_TIMEOUT env > 30s default; <=0
+# disables. Only async impls are bounded.
+_TIMEOUT_PARAM_SCHEMA = {
+    "type": "number",
+    "description": (
+        "Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT "
+        "env and the 30s default for this call only. Use a larger value for "
+        "long-running ops; <= 0 disables the timeout entirely."
+    ),
+    "default": 30,
+}
+
+
 def _inject_database_arg() -> None:
     for spec in TOOLS:
         props = spec.parameters.setdefault("properties", {})
         # Skip if some future spec already declared `database` explicitly.
         if "database" not in props:
             props["database"] = dict(_DATABASE_PARAM_SCHEMA)
+        # Same for the universal `timeout` knob.
+        if "timeout" not in props:
+            props["timeout"] = dict(_TIMEOUT_PARAM_SCHEMA)
 
 
 _inject_database_arg()

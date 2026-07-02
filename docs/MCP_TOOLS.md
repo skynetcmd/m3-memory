@@ -143,6 +143,7 @@ Deletes a MemoryItem (soft or hard). id MUST be the full UUID — a prefix is re
 | `id` | `string` | Yes | FULL UUID of the memory (not an 8-char prefix — a prefix is rejected for mutation safety). | `-` |
 | `hard` | `boolean` | No | Hard delete (permanent). | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_delete_bulk`
 
@@ -157,6 +158,7 @@ Deletes a list of MemoryItems (soft or hard) in one transaction per chunk. Use f
 | `ids` | `array` | Yes | List of memory item UUIDs to delete. | `-` |
 | `hard` | `boolean` | No | Hard delete (permanent). | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_feedback`
 
@@ -171,6 +173,7 @@ Provide feedback on a memory item to improve quality.
 | `memory_id` | `string` | Yes | Memory item UUID. | `-` |
 | `feedback` | `string` | No | Feedback type. | `useful` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_get`
 
@@ -184,6 +187,7 @@ Retrieves a full MemoryItem; accepts full UUID or 8-char prefix; ambiguous prefi
 | --- | --- | --- | --- | --- |
 | `id` | `string` | Yes | Memory item id — 36-char UUID or 8-char prefix. Ambiguous prefixes return an error listing the matching ids. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_search`
 
@@ -210,6 +214,7 @@ Search across memory items using semantic similarity or keyword matching. Filter
 | `variant` | `string` | No | Ingest-pipeline filter. '' = real user data only (default, equivalent to IS NULL). Pass a specific variant name (e.g. 'heuristic_c1c4') to scope to that bench ingest. | `` |
 | `include_bench_data` | `boolean` | No | Opt in to LOCOMO / LongMemEval bench rows. Default False hides any row with a variant tag. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_search_multi_db`
 
@@ -236,6 +241,7 @@ Search across multiple SQLite databases (e.g. agent_memory.db AND agent_chatlog.
 | `variant` | `string` | No | Variant filter applied uniformly to each DB. Pass a comma-separated list to use multi-variant IN filtering (passed through to memory_search_scored_impl). | `` |
 | `fan_out_limit` | `integer` | No | Cap on concurrent per-DB searches. 0 = unbounded (typical, since fan-out N is small). | `0` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_search_routed`
 
@@ -291,6 +297,7 @@ Temporal-aware routed retrieval. Routes temporal queries to verbatim search at k
 | `entity_graph_valid_types` | `array` | No | Override list of allowed entity_type values for graph traversal. Default empty = use core defaults (person, place, organization, event, concept, object, date). Pass a list to filter traversal to specific types. | `[]` |
 | `entity_graph_valid_predicates` | `array` | No | Override list of allowed predicate values for graph traversal. Default empty = use core defaults (works_at, located_in, before, after, same_as, contradicts, mentions, relates_to). Pass a list to filter traversal to specific predicates. | `[]` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_search_scored`
 
@@ -315,6 +322,7 @@ Structured hybrid FTS5+vector+MMR search. Returns ranked rows [(score, item)] wi
 | `variant` | `string` | No | Ingest-pipeline filter. '' = real user data only. | `` |
 | `include_bench_data` | `boolean` | No | Opt in to LOCOMO / LongMemEval bench rows. Default False hides any variant-tagged row. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_suggest`
 
@@ -331,6 +339,7 @@ Preview which memories would be retrieved for a query, with score breakdowns exp
 | `variant` | `string` | No | Ingest-pipeline filter. Default '__none__' = real user data only. | `__none__` |
 | `include_bench_data` | `boolean` | No | Opt in to bench rows. Default False. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_update`
 
@@ -352,6 +361,7 @@ Updates a MemoryItem by ID.
 | `refresh_reason` | `string` | No | New refresh reason. 'clear' removes; empty = no change. | `` |
 | `conversation_id` | `string` | No | New conversation id. 'clear' removes; empty = no change. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_verify`
 
@@ -365,6 +375,7 @@ Verify content integrity by comparing stored hash with computed hash. Returns OK
 | --- | --- | --- | --- | --- |
 | `id` | `string` | Yes | Memory item UUID. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_write`
 
@@ -397,6 +408,7 @@ Creates a MemoryItem and optionally embeds it for semantic search. Contradiction
 | `variant` | `string` | No | Pipeline identifier for A/B variant tracking. | `` |
 | `embed_text` | `string` | No | Override text used for embedding; falls back to content when empty. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_write_from_file`
 
@@ -429,6 +441,7 @@ Write a memory whose content is read from a file on disk. Use this when the memo
 | `variant` | `string` | No | Pipeline identifier for A/B variant tracking. | `` |
 | `delete_after_read` | `boolean` | No | Delete the source file after successful write. Default true (signals contents are now authoritative in m3-memory). | `True` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -448,6 +461,7 @@ Enrich pending memory items with SLM-distilled facts. Default dry_run=true repor
 | `limit` | `integer` | No | Max items to enrich (0 = no limit). | `0` |
 | `allowed_variants` | `array` | No | Variant names to include in enrichment (if empty, use default). | `[]` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `entity_get`
 
@@ -462,6 +476,7 @@ Load a single entity with its full neighborhood: predecessors, successors, and l
 | `entity_id` | `string` | Yes | The entity ID to fetch. | `-` |
 | `depth` | `integer` | No | Graph depth for neighborhood walk (currently unused; reserved for future multi-hop). | `1` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `entity_search`
 
@@ -478,6 +493,7 @@ Search entities by canonical_name and optionally by entity_type. Returns list of
 | `limit` | `integer` | No | Max results to return. | `10` |
 | `with_neighbors` | `boolean` | No | If true, compute neighbor_count for each entity. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `extract_pending`
 
@@ -493,6 +509,7 @@ Extract pending entities from the queue. Default dry_run=true reports count + ET
 | `limit` | `integer` | No | Max items to extract (0 = no limit). | `0` |
 | `allowed_variants` | `array` | No | Variant names to include in extraction (if empty, use default). | `[]` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_graph`
 
@@ -507,6 +524,7 @@ Returns the local graph neighborhood of a memory item (connected memories up to 
 | `memory_id` | `string` | Yes | Memory item UUID. | `-` |
 | `depth` | `integer` | No | Traversal depth (1-3). | `1` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_history`
 
@@ -521,6 +539,7 @@ Returns the change history (audit trail) for a memory item. Tracks create, updat
 | `memory_id` | `string` | Yes | Memory item UUID. | `-` |
 | `limit` | `integer` | No | Max history records. | `20` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_link`
 
@@ -536,6 +555,7 @@ Creates a directional link between two memory items. Valid types: related, suppo
 | `to_id` | `string` | Yes | Target memory UUID. | `-` |
 | `relationship_type` | `string` | No | Link type. | `related` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -558,6 +578,7 @@ Appends a message to a conversation.
 | `model_id` | `string` | No | Model that generated the message. | `` |
 | `embed` | `boolean` | No | Embed for semantic search. | `True` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `conversation_search`
 
@@ -572,6 +593,7 @@ Search messages across conversations using hybrid semantic/keyword search.
 | `query` | `string` | Yes | Search query. | `-` |
 | `k` | `integer` | No | Max results (1-100). | `8` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `conversation_start`
 
@@ -588,6 +610,7 @@ Starts a new conversation thread.
 | `model_id` | `string` | No | Originating model id. | `` |
 | `tags` | `string` | No | Comma-separated tags. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `conversation_summarize`
 
@@ -602,6 +625,7 @@ Summarize a conversation into key points using the local LLM.
 | `conversation_id` | `string` | Yes | Conversation UUID. | `-` |
 | `threshold` | `integer` | No | Min message count to summarize. | `20` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -620,6 +644,7 @@ Assign a task to an owner. Sets state=in_progress and notifies the new owner.
 | `task_id` | `string` | Yes | Task UUID. | `-` |
 | `owner_agent` | `string` | Yes | Agent to assign to. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `task_create`
 
@@ -638,6 +663,7 @@ Create a new task in 'pending' state. Returns task id.
 | `parent_task_id` | `string` | No | Optional parent task id for sub-tasks. | `` |
 | `metadata` | `object` | No | Free-form metadata. | `{}` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `task_delete`
 
@@ -653,6 +679,7 @@ Delete a task. Soft-delete (default) sets a tombstone that propagates via pg_syn
 | `hard` | `boolean` | No | If true, permanently remove an already-tombstoned row from local SQLite. | `False` |
 | `actor` | `string` | No | Actor performing the delete (audit log). | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `task_get`
 
@@ -666,6 +693,7 @@ Get full record for one task.
 | --- | --- | --- | --- | --- |
 | `task_id` | `string` | Yes | Task UUID. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `task_list`
 
@@ -682,6 +710,7 @@ List tasks with optional filters. Newest updated first.
 | `parent_task_id` | `string` | No | Filter by parent task id. | `` |
 | `limit` | `integer` | No | Max tasks to return. | `50` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `task_set_result`
 
@@ -696,6 +725,7 @@ Set the result memory pointer for a task. Does NOT change state.
 | `task_id` | `string` | Yes | Task UUID. | `-` |
 | `result_memory_id` | `string` | Yes | Result memory UUID. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `task_tree`
 
@@ -710,6 +740,7 @@ Render a recursive subtree of tasks rooted at root_task_id.
 | `root_task_id` | `string` | Yes | Root task UUID. | `-` |
 | `max_depth` | `integer` | No | Max recursion depth. | `3` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `task_update`
 
@@ -727,6 +758,7 @@ Partial update for a task. Validates state transitions. On terminal state, sets 
 | `metadata` | `object` | No | New metadata (empty = no change). | `{}` |
 | `actor` | `string` | No | Actor making the update. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -744,6 +776,7 @@ Get full record for one registered agent.
 | --- | --- | --- | --- | --- |
 | `agent_id` | `string` | Yes | Unique agent identifier. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `agent_heartbeat`
 
@@ -757,6 +790,7 @@ Update last_seen and set status=active. Errors if not registered.
 | --- | --- | --- | --- | --- |
 | `agent_id` | `string` | Yes | Unique agent identifier. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `agent_list`
 
@@ -771,6 +805,7 @@ List registered agents, optionally filtered by status and/or role.
 | `status` | `string` | No | Filter by agent status. | `` |
 | `role` | `string` | No | Filter by agent role. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `agent_offline`
 
@@ -784,6 +819,7 @@ Mark an agent as offline.
 | --- | --- | --- | --- | --- |
 | `agent_id` | `string` | Yes | Unique agent identifier. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `agent_register`
 
@@ -800,6 +836,7 @@ Register an agent (UPSERT). Sets status=active, last_seen=now.
 | `capabilities` | `array` | No | List of capabilities. | `[]` |
 | `metadata` | `object` | No | Free-form metadata. | `{}` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `agent_set_trust`
 
@@ -814,6 +851,7 @@ Set an agent's trust score (0.5-1.0, clamped). Trust weights that agent's assert
 | `agent_id` | `string` | Yes | Unique agent identifier. | `-` |
 | `trust_score` | `number` | Yes | Trust in [0.5, 1.0]; clamped. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `notifications_ack`
 
@@ -827,6 +865,7 @@ Mark one notification as read.
 | --- | --- | --- | --- | --- |
 | `notification_id` | `integer` | Yes | Notification ID. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `notifications_ack_all`
 
@@ -840,6 +879,7 @@ Bulk-ack all unread notifications for an agent. Returns count acked.
 | --- | --- | --- | --- | --- |
 | `agent_id` | `string` | Yes | Agent id. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `notifications_poll`
 
@@ -855,6 +895,7 @@ List notifications addressed to agent_id, newest first.
 | `unread_only` | `boolean` | No | Show only unread notifications. | `True` |
 | `limit` | `integer` | No | Max notifications to return. | `20` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `notify`
 
@@ -870,6 +911,7 @@ Send a notification to an agent. Lightweight wake signal — agents poll notific
 | `kind` | `string` | Yes | Notification kind/type. | `-` |
 | `payload` | `object` | No | Free-form notification data. | `{}` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -892,6 +934,7 @@ Hand off a task from one agent to another. Writes a new handoff-type memory owne
 | `note` | `string` | No | Optional free-text note. | `` |
 | `task_id` | `string` | No | Optional tracked task id. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_inbox`
 
@@ -907,6 +950,7 @@ List handoff messages addressed to agent_id, newest first. Pass unread_only=Fals
 | `unread_only` | `boolean` | No | Show only unread messages. | `True` |
 | `limit` | `integer` | No | Max messages to return. | `20` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_inbox_ack`
 
@@ -920,6 +964,7 @@ Mark a handoff memory as read (sets read_at = now).
 | --- | --- | --- | --- | --- |
 | `memory_id` | `string` | Yes | Handoff memory UUID. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_refresh_queue`
 
@@ -935,6 +980,7 @@ List memories whose refresh_on timestamp has arrived and need review. Read-only 
 | `limit` | `integer` | No | Max rows to return (1-500). | `50` |
 | `include_future` | `boolean` | No | Include memories whose refresh_on is still in the future. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -954,6 +1000,7 @@ Aggregate tokens and cost_usd across chat_log rows. Groups: provider|model_id|ho
 | `until` | `string` | No | ISO-8601 upper bound. | `` |
 | `group_by` | `string` | No | provider\|model_id\|host_agent\|conversation_id\|day | `model_id` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_list_conversations`
 
@@ -969,6 +1016,7 @@ List distinct conversation_ids with turn counts and timespans.
 | `limit` | `integer` | No | Max conversations. | `50` |
 | `offset` | `integer` | No | Pagination offset. | `0` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_promote`
 
@@ -987,6 +1035,7 @@ Promote chat_log rows into the main memory DB under a new type (default 'convers
 | `copy` | `boolean` | No | If false, delete source rows after copy. | `True` |
 | `target_type` | `string` | No | Type assigned in main DB. | `conversation` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_rescrub`
 
@@ -1003,6 +1052,7 @@ Re-apply redaction to existing chat_log rows. Requires redaction.enabled=true.
 | `until` | `string` | No | ISO-8601 upper bound. | `` |
 | `limit` | `integer` | No | Max rows to process. | `10000` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_search`
 
@@ -1025,6 +1075,7 @@ Search chat_log rows. FTS5 keyword when query is non-empty; filter-only when emp
 | `since` | `string` | No | ISO-8601 lower bound on created_at. | `` |
 | `until` | `string` | No | ISO-8601 upper bound on created_at. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_set_redaction`
 
@@ -1042,6 +1093,7 @@ Flip redaction on/off and update patterns. Persists to memory/.chatlog_config.js
 | `custom_regex` | `array` | No | User-supplied regex patterns. | `-` |
 | `store_original_hash` | `boolean` | No | Store SHA-256 of pre-scrub content in metadata. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_status`
 
@@ -1054,6 +1106,7 @@ One-call health summary of the chat log subsystem: mode, DB paths, row counts, q
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_write`
 
@@ -1080,6 +1133,7 @@ Append one chat turn to the chat log DB. Provenance (host_agent, provider, model
 | `cost_usd` | `number` | No | Cost in USD (null → computed from price table). | `-` |
 | `latency_ms` | `integer` | No | End-to-end request latency. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `chatlog_write_bulk`
 
@@ -1094,6 +1148,7 @@ Bulk-append N chat turns. Each item needs the same required fields as chatlog_wr
 | `items` | `array` | Yes | List of chat-turn dicts. | `-` |
 | `embed` | `boolean` | No | Reserved; ignored — sweeper handles. | `False` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -1260,6 +1315,7 @@ Consolidate old memories of the same type into summaries using the local LLM. Re
 | `agent_filter` | `string` | No | Restrict to an agent id. | `` |
 | `threshold` | `integer` | No | Min items to consolidate. | `20` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_dedup`
 
@@ -1275,6 +1331,7 @@ Find (and optionally soft-delete) near-duplicate memory items by cosine similari
 | `dry_run` | `boolean` | No | Preview without applying. | `True` |
 | `limit` | `integer` | No | Cap on returned groups (0 = no cap). count reflects true total regardless. | `0` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_maintenance`
 
@@ -1290,6 +1347,7 @@ Runs maintenance tasks on the memory store.
 | `purge_expired` | `boolean` | No | Delete expired items. | `True` |
 | `prune_orphan_embeddings` | `boolean` | No | Remove orphaned embeddings. | `True` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_set_retention`
 
@@ -1306,6 +1364,7 @@ Set or update per-agent memory retention policy. Controls max memory count, TTL 
 | `ttl_days` | `integer` | No | Time-to-live in days (0 = no limit). | `0` |
 | `auto_archive` | `integer` | No | Auto-archive threshold. | `1` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -1323,6 +1382,7 @@ Export all memories for a data subject (GDPR data portability). Returns JSON wit
 | --- | --- | --- | --- | --- |
 | `user_id` | `string` | Yes | Data subject id. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `gdpr_forget`
 
@@ -1336,6 +1396,7 @@ Right to be forgotten — hard-deletes ALL data for a user_id including memories
 | --- | --- | --- | --- | --- |
 | `user_id` | `string` | Yes | Data subject id to forget. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_export`
 
@@ -1351,6 +1412,7 @@ Export memories as portable JSON. Filter by agent, type, or date.
 | `type_filter` | `string` | No | Restrict to a memory type. | `` |
 | `since` | `string` | No | ISO-8601 start date. | `` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_import`
 
@@ -1364,6 +1426,7 @@ Import memories from a JSON export. UPSERT semantics — safe to re-run.
 | --- | --- | --- | --- | --- |
 | `data` | `string` | Yes | JSON export string. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
@@ -1383,6 +1446,7 @@ Bi-directional sync between local SQLite and ChromaDB.
 | `direction` | `string` | No | Sync direction. | `both` |
 | `reset_stalled` | `boolean` | No | Reset stalled sync records. | `True` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `embedder_status`
 
@@ -1395,6 +1459,7 @@ Check the status of the local sovereign embedder server (default port 8082, over
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `memory_cost_report`
 
@@ -1407,6 +1472,7 @@ Returns current session operation counts and estimated token usage for memory op
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
+| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ---
 
