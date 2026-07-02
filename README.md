@@ -296,7 +296,17 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | **Audited security posture** | Periodic Bandit + pip-audit + secrets-scan reports published under [`docs/audits/`](docs/audits/); CI gates on core-dep CVEs |
 | **Apache 2.0 licensed** | Free. No SaaS tier, no usage limits, no lock-in |
 
-> 🧭 **Maturity, honestly.** The core (storage, retrieval, GDPR, MCP tools, sync) is stable and covered by the test suite. The newer enrichment + reflector pipeline matured rapidly through 2026-Q2 and has live-fire experience behind it but is still iterating. **Production-ready for personal, homelab, and multi-agent developer workflows today.** For regulated workloads, do your own evaluation against your specific use case — and we recommend that against any memory tool, not just M3. See [docs/MYTHS_AND_FACTS.md](docs/MYTHS_AND_FACTS.md) for what we *don't* claim.
+> 🧭 **Maturity.** The core — storage, retrieval, GDPR, MCP tools, sync — is stable and fully covered by the test suite. The enrichment + reflector pipeline shipped through 2026-Q2 with live-fire experience behind it and gets sharper with every release. **M3 runs in production today** — a durable memory substrate for personal, homelab, and multi-agent developer workflows, from a single laptop to a fleet of heterogeneous agents sharing one evolving knowledge base.
+>
+> **Built privacy-focused from the ground up.** For regulated environments, M3 ships with first-class compliance primitives rather than bolting them on:
+>
+> - **GDPR** — `gdpr_forget` (Article 17, right to erasure) and `gdpr_export` (Article 20, data portability) as built-in MCP tools.
+> - **FIPS 140-3 deployment-ready crypto boundary** — AES-256-GCM secrets vault, PBKDF2-HMAC-SHA256 key derivation, and TLS 1.3 with FIPS-approved ciphersuites, all routed through a single provider boundary. The crypto provider is obtained separately, not bundled: point it at the CMVP-validated wolfSSL FIPS module (under `M3_FIPS_STRICT`) for a validated deployment, or use the open-source wolfCrypt build for everything else — the validation belongs to that module, not to M3.
+> - **Bitemporal audit log** — valid-time and transaction-time captured on every write, backed by a tamper-evident hash chain.
+> - **Air-gap operability** — no network listeners, no telemetry, no implicit egress.
+> - **Framework alignment** — mapped to NIST SP 800-53 (FISMA) and CMMC 2.0 / NIST SP 800-171.
+>
+> M3 is an application, not a validated cryptographic module or a certified system — the certificate and the ATO belong to your deployment. Evaluate it against your specific requirements first, as you should any memory tool. See [docs/COMPLIANCE.md](docs/COMPLIANCE.md) and [docs/FIPS_MODULE_BOUNDARY.md](docs/FIPS_MODULE_BOUNDARY.md) for the precise boundary, and [docs/MYTHS_AND_FACTS.md](docs/MYTHS_AND_FACTS.md) for where we draw the line.
 
 ---
 
