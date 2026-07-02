@@ -43,6 +43,19 @@ _DOC_FILES = [
     os.path.join(_ROOT, "docs", "COMPARISON.md"),
     os.path.join(_ROOT, "docs", "MYTHS_AND_FACTS.md"),
     os.path.join(_ROOT, "docs", "tools", "files_memory.md"),
+    # MCP registry manifests — these carry a public description string that must
+    # follow the same "100+ tools" policy. They previously drifted to stale
+    # exact counts (66 and 25) because nothing tested them.
+    os.path.join(_ROOT, "server.json"),
+    os.path.join(_ROOT, "mcp-server.json"),
+]
+
+# Files whose version string must equal the pyproject [project] version, so a
+# release bump can't leave a manifest advertising a stale version (server.json
+# said 2026.4.24.5 and mcp-server.json said 2026.04 while pyproject was newer).
+_VERSIONED_MANIFESTS = [
+    os.path.join(_ROOT, "server.json"),
+    os.path.join(_ROOT, "mcp-server.json"),
 ]
 
 # Domain-/phase-subcount claims that are intentionally NOT the catalog total
@@ -137,4 +150,34 @@ def test_prose_does_not_hardcode_catalog_total():
     assert not offenders, (
         "Hardcoded exact tool-count(s) found in prose — rephrase as "
         f"'100+ tools' or whitelist as a subcount: {offenders}"
+    )
+
+
+def _pyproject_version() -> str:
+    import tomllib
+    with open(os.path.join(_ROOT, "pyproject.toml"), "rb") as fh:
+        return tomllib.load(fh)["project"]["version"]
+
+
+def test_registry_manifests_match_pyproject_version():
+    """server.json / mcp-server.json version strings must equal the pyproject
+    version — a release bump must not leave a manifest advertising a stale one.
+
+    server.json also carries a packages[].version; check every "version" value.
+    """
+    expected = _pyproject_version()
+    mismatches: list[str] = []
+    for path in _VERSIONED_MANIFESTS:
+        data = json.load(open(path, encoding="utf-8"))
+        rel = os.path.relpath(path, _ROOT)
+        if str(data.get("version", expected)) != expected:
+            mismatches.append(f"{rel}: version={data.get('version')!r} != {expected!r}")
+        for pkg in data.get("packages", []):
+            if str(pkg.get("version", expected)) != expected:
+                mismatches.append(
+                    f"{rel}: packages[].version={pkg.get('version')!r} != {expected!r}"
+                )
+    assert not mismatches, (
+        "MCP registry manifest version drift (bump these on release): "
+        + "; ".join(mismatches)
     )

@@ -1,7 +1,7 @@
 {
   "name": "m3-memory",
-  "version": "2026.04",
-  "description": "Local-first agentic memory layer for MCP agents — 25 tools, hybrid search, contradiction detection, cross-device sync, GDPR-ready. 100% local, no cloud APIs.",
+  "version": "2026.7.1.2",
+  "description": "Local-first agentic memory layer for MCP agents — 100+ tools, hybrid search, contradiction detection, cross-device sync, GDPR-ready. 100% local, no cloud APIs.",
   "homepage": "https://github.com/skynetcmd/m3-memory",
   "repository": "https://github.com/skynetcmd/m3-memory",
   "license": "MIT",
@@ -11,13 +11,5 @@
     "args": ["bin/memory_bridge.py"],
     "env": {}
   },
-  "tools": [
-    "memory_write", "memory_search", "memory_suggest", "memory_get",
-    "memory_update", "memory_delete", "memory_verify",
-    "memory_link", "memory_graph", "memory_history",
-    "conversation_start", "conversation_append", "conversation_search", "conversation_summarize",
-    "memory_maintenance", "memory_dedup", "memory_consolidate", "memory_set_retention", "memory_feedback",
-    "gdpr_export", "gdpr_forget", "memory_export", "memory_import",
-    "memory_cost_report", "chroma_sync"
-  ]
+  "//tools": "The full, authoritative tool list is generated from bin/mcp_tool_catalog.py — see docs/tools/MCP_CATALOG.json and docs/MCP_TOOLS.md. A hardcoded array here (previously 25 stale names) drifts silently, so it is intentionally not duplicated."
 }

@@ -1,24 +1,26 @@
 {
+  "//": "Example MCP client config for m3-memory. Copy the 'memory' entry into your client's mcpServers. IMPORTANT: the MCP server does NOT inherit your shell environment — it reads ONLY this env block. Pin the roots here (and inline them on any chatlog-hook command) or the server and hooks can resolve DIFFERENT databases (the 'split-brain' hazard; see docs/ENVIRONMENT_VARIABLES.md). Use the venv interpreter + absolute bridge path (cwd-relative 'python bin/...' is fragile). The m3 installer writes all of this automatically.",
   "mcpServers": {
     "memory": {
-      "command": "python",
-      "args": ["bin/memory_bridge.py"],
-      "cwd": "/path/to/m3-memory"
+      "command": "/path/to/m3-memory/.venv/bin/python",
+      "args": ["/path/to/m3-memory/bin/memory_bridge.py"],
+      "env": {
+        "M3_MEMORY_ROOT": "/path/to/your/m3-state",
+        "M3_ENGINE_ROOT": "/path/to/your/m3-state/engine",
+        "M3_CONFIG_ROOT": "/path/to/your/m3-state/config"
+      }
     },
     "grok_intel": {
-      "command": "python",
-      "args": ["bin/grok_bridge.py"],
-      "cwd": "/path/to/m3-memory"
+      "command": "/path/to/m3-memory/.venv/bin/python",
+      "args": ["/path/to/m3-memory/bin/grok_bridge.py"]
     },
     "web_research": {
-      "command": "python",
-      "args": ["bin/web_research_bridge.py"],
-      "cwd": "/path/to/m3-memory"
+      "command": "/path/to/m3-memory/.venv/bin/python",
+      "args": ["/path/to/m3-memory/bin/web_research_bridge.py"]
     },
     "debug_agent": {
-      "command": "python",
-      "args": ["bin/debug_agent_bridge.py"],
-      "cwd": "/path/to/m3-memory"
+      "command": "/path/to/m3-memory/.venv/bin/python",
+      "args": ["/path/to/m3-memory/bin/debug_agent_bridge.py"]
     }
   }
 }

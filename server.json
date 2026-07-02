@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.skynetcmd/m3-memory",
   "title": "M3 Memory",
-  "description": "Local-first agentic memory — 66 tools, 89% LongMemEval, hybrid search, GDPR, zero cloud.",
-  "version": "2026.4.24.5",
+  "description": "Local-first agentic memory — 100+ tools, 89% LongMemEval, hybrid search, GDPR, zero cloud.",
+  "version": "2026.7.1.2",
   "repository": {
     "url": "https://github.com/skynetcmd/m3-memory",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "m3-memory",
-      "version": "2026.4.24.5",
+      "version": "2026.7.1.2",
       "runtimeHint": "python",
       "transport": {
         "type": "stdio"
