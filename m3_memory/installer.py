@@ -1066,6 +1066,52 @@ def _duplicate_mcp_registration() -> "dict[str, dict[str, list[Path]]]":
     return out
 
 
+def _dedupe_mcp_registration(*, apply: bool = False) -> "list[str]":
+    """Resolve same-client duplicate MCP registrations by keeping ONE copy and
+    removing the redundant ones. For each client + duplicated server, keep the
+    file whose def is most complete (has an ``env`` block; tie-break: the first
+    source = the user settings.json), and drop the server from the other files.
+
+    apply=False (default): dry-run, returns human-readable "would remove ..." lines.
+    apply=True: rewrites the affected files (a .bak is written first) and returns
+    "removed ..." lines. Idempotent — a clean config yields [].
+
+    This is the automated cure `m3 doctor --fix` runs for the double-launch bug.
+    """
+    actions: list[str] = []
+    dupes = _duplicate_mcp_registration()
+    for client, servers in dupes.items():
+        for name, files in servers.items():
+            # Pick the keeper: prefer a file whose entry has an 'env' block.
+            keeper = None
+            for f in files:
+                try:
+                    entry = (json.loads(f.read_text(encoding="utf-8")).get("mcpServers") or {}).get(name) or {}
+                except (OSError, json.JSONDecodeError):
+                    entry = {}
+                if entry.get("env"):
+                    keeper = f
+                    break
+            if keeper is None:
+                keeper = files[0]  # tie-break: first source (user settings.json)
+            for f in files:
+                if f == keeper:
+                    continue
+                verb = "removed" if apply else "would remove"
+                actions.append(f"[+] {verb} duplicate '{name}' from {f} (kept {keeper})")
+                if apply:
+                    try:
+                        data = json.loads(f.read_text(encoding="utf-8")) or {}
+                        f.with_suffix(f.suffix + ".bak").write_text(
+                            f.read_text(encoding="utf-8"), encoding="utf-8"
+                        )
+                        (data.get("mcpServers") or {}).pop(name, None)
+                        f.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                    except (OSError, json.JSONDecodeError) as e:
+                        actions[-1] = f"[X] could not dedup '{name}' in {f}: {e}"
+    return actions
+
+
 def _live_bridge_counts() -> "dict[str, int]":
     """Count live m3 bridge processes by script name (memory_bridge, etc.). >1 of
     any is the process-level signature of double-launch. Returns {} if psutil is
@@ -1104,14 +1150,16 @@ def _duplicate_registration_section() -> None:
         for client, servers in sorted(dupes.items()):
             for name, files in sorted(servers.items()):
                 print(f"        {client} / {name}: " + " AND ".join(str(f) for f in files))
-        print("      Fix: for that client, keep each server in ONE file only (a "
-              "complete def with its env block). Remove the duplicate. Restart it.")
+        print("      → Run `m3 doctor --fix` to remove the duplicate automatically "
+              "(keeps the complete def with its env block, backs up the edited file).")
+        print("        Then restart the MCP client so it relaunches a single bridge.")
     if live:
         print("  [!] Multiple live bridge processes (double-launch signature):")
         for script, n in sorted(live.items()):
             print(f"        {n}x {script}")
-        print("      A duplicate bridge can wedge a tool call indefinitely on the "
-              "old (no-timeout) code. Kill the extras and de-duplicate the config.")
+        print("      → A duplicate bridge can wedge a tool call indefinitely on old "
+              "(no-timeout) code. Run `m3 doctor --fix` to de-duplicate the config,")
+        print("        then restart the MCP client (that clears the extra processes).")
 
 
 def _agent_config_section() -> None:
@@ -1144,6 +1192,11 @@ def _heal_all_agents(*, force: bool = False) -> int:
             print(f"  {msg}")
             if msg.lstrip().startswith("[+]"):
                 changed += 1
+    # Auto-remove same-client duplicate registrations (the double-launch cause).
+    for line in _dedupe_mcp_registration(apply=True):
+        print(f"  {line}")
+        if line.lstrip().startswith("[+]"):
+            changed += 1
     return changed
 
 

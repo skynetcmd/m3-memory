@@ -119,19 +119,27 @@ def generate_configs():
     _write_json(gemini_path, gemini)
     print(f"Generated gemini-settings.json ({python_cmd})")
 
-    # ── .mcp.json (Claude Code project-level MCP registration) ───────────────
-    mcp_data = {"mcpServers": {
-        name: {"command": python_cmd, "args": [repo(f"bin/{script}")]}
-        for name, script in [
-            ("custom_pc_tool", "custom_tool_bridge.py"),
-            ("memory",         "memory_bridge.py"),
-            ("grok_intel",     "grok_bridge.py"),
-            ("web_research",   "web_research_bridge.py"),
-            ("debug_agent",    "debug_agent_bridge.py"),
-        ]
-    }}
+    # ── .mcp.json (project-level) ────────────────────────────────────────────
+    # Deliberately EMPTY of the m3 servers. Claude Code reads BOTH its user
+    # settings.json (claude-settings.json above, which carries the COMPLETE defs
+    # with env blocks) AND a project-local .mcp.json — so declaring the same
+    # servers in both made Claude Code launch each bridge TWICE. A call routed to
+    # the redundant (bare, env-less) bridge could hang indefinitely on code
+    # without a per-tool timeout — the 2h43m memory_write hang, 2026-07-02.
+    # Single registration source = single launch. If you WANT a server scoped to
+    # only this project, add it here (with a full env block) AND remove it from
+    # settings.json — never both.
+    mcp_data = {
+        "//": (
+            "m3 MCP servers are registered once, in your Claude Code user "
+            "settings.json (with env blocks). Do NOT also list them here — "
+            "duplicate registration double-launches the bridge and can hang a "
+            "tool call. See `m3 doctor` (flags duplicates) / `m3 doctor --fix`."
+        ),
+        "mcpServers": {},
+    }
     _write_json(os.path.join(m3_repo_root, ".mcp.json"), mcp_data)
-    print(f"Generated .mcp.json ({python_cmd})")
+    print(f"Generated .mcp.json (empty — servers live in settings.json to avoid double-launch)")
 
     # ── .aider.conf.yml ───────────────────────────────────────────────────────
     aider_path = os.path.join(m3_repo_root, ".aider.conf.yml")
