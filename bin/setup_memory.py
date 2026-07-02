@@ -11,6 +11,8 @@ import sqlite3
 import subprocess
 import sys
 
+from m3_sdk import getenv_compat
+
 BASE   = pathlib.Path(__file__).parent.parent.resolve()
 IS_WIN = sys.platform == "win32"
 VENV   = BASE / ".venv"
@@ -93,7 +95,7 @@ config = {
         "args": [str(BASE / "bin" / "memory_bridge.py")],
         "env": {
             "LM_STUDIO_EMBED_URL": "http://127.0.0.1:1234/v1/embeddings",
-            "CHROMA_BASE_URL": os.environ.get("CHROMA_BASE_URL", "")
+            "CHROMA_BASE_URL": getenv_compat("M3_CHROMA_BASE_URL", "CHROMA_BASE_URL", "")
         }
     },
     "custom_pc_tool": {

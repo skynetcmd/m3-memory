@@ -841,13 +841,15 @@ def _detect_cdw_target() -> "Optional[str]":
     reminder can name where data is auto-syncing — never the password from
     PG_URL.
     """
+    from m3_sdk import getenv_compat
+
     # 1. Explicit warehouse IP/host (sync_all.py uses these).
-    host = os.environ.get("POSTGRES_SERVER") or os.environ.get("SYNC_TARGET_IP")
+    host = getenv_compat("M3_POSTGRES_SERVER", "POSTGRES_SERVER") or getenv_compat("M3_SYNC_TARGET_IP", "SYNC_TARGET_IP")
     if host:
         return host.strip()
 
     # 2. PG_URL — from env, or the encrypted vault. Parse out ONLY the host.
-    pg_url = os.environ.get("PG_URL", "").strip()
+    pg_url = getenv_compat("M3_PG_URL", "PG_URL", "").strip()
     if not pg_url:
         try:
             # Resolve via the SDK's secret vault without spinning up a full
@@ -1074,7 +1076,9 @@ def _resolve_chatlog_db(cfg: dict) -> Optional[Path]:
     592MB agent_chatlog.db reported as empty).
     Returns None only when nothing resolves — i.e. the system isn't installed yet.
     """
-    env_chatlog = os.environ.get("CHATLOG_DB_PATH")
+    from m3_sdk import getenv_compat
+
+    env_chatlog = getenv_compat("M3_CHATLOG_DB_PATH", "CHATLOG_DB_PATH")
     if env_chatlog:
         return Path(env_chatlog).expanduser()
     env_main = os.environ.get("M3_DATABASE")
@@ -1351,6 +1355,34 @@ def _roots_section() -> None:
         print("      See CLAUDE.md → 'Split-brain hazard'.")
 
 
+def _deprecated_env_section() -> None:
+    """Surface deprecated (un-namespaced) env vars that are actually in use.
+
+    m3-specific config vars are migrating under the M3_ namespace; the old
+    generic names (PG_URL, CHROMA_BASE_URL, tuning knobs, ...) still work via a
+    back-compat shim but will be removed. This process's config modules read
+    their env at import time, so by the time doctor runs, getenv_compat has
+    recorded any deprecated name that resolved. Report only what's genuinely in
+    use (no noise on a clean setup), with the new name to migrate to.
+
+    Best-effort: skip silently if the SDK isn't importable.
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        from m3_sdk import deprecated_env_in_use  # type: ignore
+    except Exception:  # noqa: BLE001 — informational only
+        return
+    in_use = deprecated_env_in_use()
+    if not in_use:
+        return  # clean — say nothing rather than add noise
+    print()
+    print("  [!] deprecated env vars in use (still work, but migrate — the old")
+    print("      names will be removed):")
+    for old, new in sorted(in_use.items()):
+        print(f"        {old}  ->  {new}")
+
+
 def status_summary() -> dict:
     """Compute a single-glance health verdict + the facts a user cares about.
 
@@ -1579,6 +1611,8 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         print("developer sibling bridge:  (not found)")
 
     _roots_section()
+
+    _deprecated_env_section()
 
     _chatlog_section(cfg)
 

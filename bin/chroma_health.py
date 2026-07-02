@@ -23,6 +23,8 @@ import argparse
 import json
 import logging
 import os
+
+from m3_sdk import getenv_compat
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -41,7 +43,7 @@ QUEUE_MAX_THRESHOLD = int(os.environ.get("M3_CHROMA_SYNC_QUEUE_MAX", 500000))
 SYNC_STALE_HOURS = 4
 
 # Environment / defaults
-CHROMA_BASE_URL = os.environ.get("CHROMA_BASE_URL", "")
+CHROMA_BASE_URL = getenv_compat("M3_CHROMA_BASE_URL", "CHROMA_BASE_URL", "")
 CHROMA_COLLECTION = "agent_memory"
 CHROMA_V2_PREFIX = "/api/v2/tenants/default_tenant/databases/default_database/collections"
 CHROMA_CONNECT_TIMEOUT = 3.0

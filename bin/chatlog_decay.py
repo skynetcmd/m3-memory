@@ -80,6 +80,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from m3_sdk import getenv_compat
+
 
 # ── DB resolution ──────────────────────────────────────────────────────────
 def resolve_db_path(cli_arg: str | None) -> str:
@@ -91,7 +93,7 @@ def resolve_db_path(cli_arg: str | None) -> str:
     # previously skipped entirely — setting it and running decay silently
     # pointed at M3_DATABASE instead of the chatlog DB.
     env = (os.environ.get("CHATLOG_DB")
-           or os.environ.get("CHATLOG_DB_PATH")
+           or getenv_compat("M3_CHATLOG_DB_PATH", "CHATLOG_DB_PATH")
            or os.environ.get("M3_DATABASE"))
     if env:
         return os.path.abspath(env)

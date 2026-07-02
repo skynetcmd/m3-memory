@@ -21,6 +21,8 @@ import platform
 from pathlib import Path
 from typing import Any
 
+from m3_sdk import getenv_compat
+
 # Oxidation / Rust availability.
 # _OXIDATION_DISABLED must be bound UNCONDITIONALLY — `memory_core.py`
 # re-exports it via `from memory.config import _OXIDATION_DISABLED`, and
@@ -133,7 +135,7 @@ EMBED_COMPATIBLE_MODELS: tuple[str, ...] = tuple(
     if m.strip())
 
 EMBED_TIMEOUT_READ: float = 30.0
-ORIGIN_DEVICE: str = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
+ORIGIN_DEVICE: str = getenv_compat("M3_ORIGIN_DEVICE", "ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
 
 # Per-backend circuit-breaker thresholds for the embed cascade in
 # `bin/memory/embed.py`. Each backend gets its own m3_core_rs.CircuitBreaker;
@@ -180,7 +182,7 @@ CONTRADICTION_THRESHOLD: float = float(os.environ.get("CONTRADICTION_THRESHOLD",
 # 'supersedes' edge (i.e., their newer version exists) get score multiplied
 # by this factor. 0.5 = visible but ranked below newer fact. 0.0 = hide.
 # 1.0 = disable demotion (legacy pre-2026-04-27 behavior).
-SUPERSEDES_PENALTY: float = float(os.environ.get("SUPERSEDES_PENALTY", "0.5"))
+SUPERSEDES_PENALTY: float = float(getenv_compat("M3_SUPERSEDES_PENALTY", "SUPERSEDES_PENALTY", "0.5"))
 
 # CONTRADICTION_TITLE_GATE: 'strict' = require title substring match (legacy);
 # 'loose' = cosine >= threshold + same type + content-differs only (default
@@ -199,12 +201,12 @@ CONTRADICTION_TYPE_EXCLUSIONS: frozenset[str] = frozenset(
 # ──────────────────────────────────────────────────────────────────────────────
 # Retrieval params
 # ──────────────────────────────────────────────────────────────────────────────
-SEARCH_ROW_CAP: int = int(os.environ.get("SEARCH_ROW_CAP", "5000"))
+SEARCH_ROW_CAP: int = int(getenv_compat("M3_SEARCH_ROW_CAP", "SEARCH_ROW_CAP", "5000"))
 LLM_TIMEOUT: float = float(os.environ.get("LLM_TIMEOUT", "45.0"))
-SPEAKER_IN_TITLE: bool = os.environ.get("SPEAKER_IN_TITLE", "1") == "1"
-SHORT_TURN_THRESHOLD: int = int(os.environ.get("SHORT_TURN_THRESHOLD", "20"))
-TITLE_MATCH_BOOST: float = float(os.environ.get("TITLE_MATCH_BOOST", "0.15"))
-IMPORTANCE_WEIGHT: float = float(os.environ.get("IMPORTANCE_WEIGHT", "0.15"))
+SPEAKER_IN_TITLE: bool = getenv_compat("M3_SPEAKER_IN_TITLE", "SPEAKER_IN_TITLE", "1") == "1"
+SHORT_TURN_THRESHOLD: int = int(getenv_compat("M3_SHORT_TURN_THRESHOLD", "SHORT_TURN_THRESHOLD", "20"))
+TITLE_MATCH_BOOST: float = float(getenv_compat("M3_TITLE_MATCH_BOOST", "TITLE_MATCH_BOOST", "0.15"))
+IMPORTANCE_WEIGHT: float = float(getenv_compat("M3_IMPORTANCE_WEIGHT", "IMPORTANCE_WEIGHT", "0.15"))
 
 # ── Confidence & trust (knowledge-maintenance) ───────────────────────────────
 # All default OFF / neutral: nothing about retrieval changes until explicitly
@@ -366,7 +368,7 @@ DEFAULT_RERANK_MODEL: str = os.environ.get(
 # ──────────────────────────────────────────────────────────────────────────────
 DEFAULT_CHANGE_AGENT: str = "unknown"
 
-CHROMA_BASE_URL: str | None = os.environ.get("CHROMA_BASE_URL")
+CHROMA_BASE_URL: str | None = getenv_compat("M3_CHROMA_BASE_URL", "CHROMA_BASE_URL")
 CHROMA_COLLECTION: str = "agent_memory"
 CHROMA_COLLECTIONS: list[str] = ["agent_memory", "home_memory", "user_facts"]
 CHROMA_V2_PREFIX: str = "/api/v2/tenants/default_tenant/databases/default_database/collections"

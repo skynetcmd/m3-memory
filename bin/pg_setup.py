@@ -4,13 +4,14 @@ import sys
 
 import psycopg2
 from auth_utils import get_api_key
+from m3_sdk import getenv_compat
 
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
 logger = logging.getLogger("pg_setup")
 
 def _get_pg_url() -> str:
     """Resolve PostgreSQL connection URL from environment or encrypted vault."""
-    url = os.getenv("PG_URL", "").strip()
+    url = getenv_compat("M3_PG_URL", "PG_URL", "").strip()
     if url:
         return url
     url = get_api_key("PG_URL")

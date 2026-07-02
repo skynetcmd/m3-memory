@@ -19,6 +19,7 @@ import httpx
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
+from m3_sdk import getenv_compat
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
@@ -216,7 +217,7 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         check("title correct",         data.get("title") == "LM Studio cert fix")
         check("importance=0.8",        abs(data.get("importance", 0) - 0.8) < 0.01, f"{data.get('importance')}")
         import platform
-        expected_device = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
+        expected_device = getenv_compat("M3_ORIGIN_DEVICE", "ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
         check("origin_device=macbook", data.get("origin_device") == expected_device)
         check("is_deleted=0",          data.get("is_deleted") == 0)
     else:

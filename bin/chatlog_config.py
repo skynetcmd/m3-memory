@@ -49,7 +49,7 @@ from sqlite_pragmas import apply_pragmas
 
 logger = logging.getLogger("chatlog_config")
 
-from m3_sdk import get_m3_config_root, get_m3_engine_root, get_m3_root
+from m3_sdk import get_m3_config_root, get_m3_engine_root, get_m3_root, getenv_compat
 
 _M3_CONFIG_ROOT = get_m3_config_root()
 _M3_ENGINE_ROOT = get_m3_engine_root()
@@ -180,7 +180,7 @@ def save_config(cfg: ChatlogConfig) -> None:
 
 # ── Resolver ──────────────────────────────────────────────────────────────────
 def _path_from_env() -> Optional[str]:
-    v = os.environ.get("CHATLOG_DB_PATH")
+    v = getenv_compat("M3_CHATLOG_DB_PATH", "CHATLOG_DB_PATH")
     if v is None:
         return None
     v = v.strip()
@@ -337,8 +337,8 @@ _POOL_DB_PATH: Optional[str] = None  # path the pool was opened against; if it c
 
 
 def _build_pool(db_path: str) -> "queue.Queue[sqlite3.Connection]":
-    pool_size = int(os.environ.get("CHATLOG_DB_POOL_SIZE", "4"))
-    pool_timeout = int(os.environ.get("CHATLOG_DB_POOL_TIMEOUT", "10"))
+    pool_size = int(getenv_compat("M3_CHATLOG_DB_POOL_SIZE", "CHATLOG_DB_POOL_SIZE", "4"))
+    pool_timeout = int(getenv_compat("M3_CHATLOG_DB_POOL_TIMEOUT", "CHATLOG_DB_POOL_TIMEOUT", "10"))
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     q: "queue.Queue[sqlite3.Connection]" = queue.Queue(maxsize=pool_size)
     for _ in range(pool_size):
@@ -372,7 +372,7 @@ def chatlog_sqlite_conn():
     which detects the path-equality case and reuses the main pool instead.
     """
     pool = _ensure_pool()
-    timeout = int(os.environ.get("CHATLOG_DB_POOL_TIMEOUT", "10"))
+    timeout = int(getenv_compat("M3_CHATLOG_DB_POOL_TIMEOUT", "CHATLOG_DB_POOL_TIMEOUT", "10"))
     conn = pool.get(timeout=timeout)
     try:
         yield conn

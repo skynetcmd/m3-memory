@@ -14,6 +14,8 @@ from typing import Optional
 
 import httpx
 
+from m3_sdk import getenv_compat
+
 logger = logging.getLogger("llm_failover")
 
 # Failover order. We only probe endpoints the user actually opts into — a probe
@@ -49,7 +51,7 @@ def _flag(name: str, default: bool) -> bool:
     return v in ("1", "true", "yes")
 
 
-_endpoints_csv = os.environ.get("LLM_ENDPOINTS_CSV", "").strip()
+_endpoints_csv = getenv_compat("M3_LLM_ENDPOINTS_CSV", "LLM_ENDPOINTS_CSV", "").strip()
 _custom_url = os.environ.get("M3_LLM_URL", "").strip()
 if _endpoints_csv:
     # Explicit ordered list — full control, overrides everything below.

@@ -17,6 +17,7 @@ from m3_core.gpu import (  # noqa: F401
 from m3_core.paths import (  # noqa: F401
     resolve_venv_python, get_m3_root, get_m3_config_root, get_m3_engine_root,
     resolve_db_path, active_database, add_database_arg,
+    getenv_compat, deprecated_env_in_use,
     _active_db, _db_is_populated, _default_db_path,
 )
 from m3_core.governor import (  # noqa: F401

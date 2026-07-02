@@ -28,7 +28,7 @@ from agent_protocol import _THINK_TAG_RE  # shared compiled regex
 from embedding_utils import (
     parse_model_size as _parse_model_size,
 )
-from m3_sdk import LM_STUDIO_BASE, M3Context
+from m3_sdk import LM_STUDIO_BASE, M3Context, getenv_compat
 from thermal_utils import get_thermal_status
 
 ctx = M3Context.for_db(None)
@@ -58,7 +58,7 @@ LM_STUDIO_EMBED_URL  = f"{LM_STUDIO_BASE}/embeddings"
 LM_MAX_TOKENS        = 32768
 LM_READ_TIMEOUT      = 4800.0   # ~80 min for 32k tokens at 7.5 tok/s on M3 Max
 MAX_CONTEXT_CHARS    = 60_000   # ~15k tokens
-ORIGIN_DEVICE        = os.environ.get("ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
+ORIGIN_DEVICE        = getenv_compat("M3_ORIGIN_DEVICE", "ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 from contextlib import contextmanager

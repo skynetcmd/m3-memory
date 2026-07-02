@@ -25,6 +25,8 @@ import socket
 import subprocess
 import sys
 
+from m3_sdk import getenv_compat
+
 IS_WIN = sys.platform == "win32"
 
 # Subprocess timeout for pg_sync.py. First-run full syncs can take several
@@ -36,7 +38,7 @@ LOG_DIR = BASE / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "sync_all.log"
 PY      = BASE / ".venv" / ("Scripts/python.exe" if IS_WIN else "bin/python")
-TARGET_IP = os.environ.get("POSTGRES_SERVER", os.environ.get("SYNC_TARGET_IP", ""))
+TARGET_IP = getenv_compat("M3_POSTGRES_SERVER", "POSTGRES_SERVER", getenv_compat("M3_SYNC_TARGET_IP", "SYNC_TARGET_IP", ""))
 
 # Logging is configured in main() via setup_task_runtime so scheduled-task
 # runs self-log without a shell `>>` redirect. This minimal fallback keeps

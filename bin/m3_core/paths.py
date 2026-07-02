@@ -9,6 +9,52 @@ from typing import Optional
 
 logger = logging.getLogger("M3_SDK")
 
+# ── Deprecated env-var compatibility shim ─────────────────────────────────────
+# m3-specific config vars are being namespaced under M3_*. Old un-namespaced
+# names (PG_URL, CHROMA_BASE_URL, tuning knobs, ...) are collision-prone with
+# other tools. getenv_compat reads the new name, falls back to the old one with
+# a ONE-TIME deprecation warning, and records the hit so `m3 doctor` can report
+# which deprecated vars are still in use (fail loud + observable, §3).
+#
+# _DEPRECATED_ENV_SEEN maps old_name -> new_name for every deprecated var that
+# was actually read from the environment this process. Doctor reads it via
+# deprecated_env_in_use().
+_DEPRECATED_ENV_SEEN: dict[str, str] = {}
+_DEPRECATED_ENV_WARNED: set[str] = set()
+
+
+def getenv_compat(new_name: str, old_name: str, default: Optional[str] = None) -> Optional[str]:
+    """Resolve an env var during the M3_* namespacing migration.
+
+    Precedence: new_name > old_name > default. If only the old (deprecated)
+    name is set, warn once and record it in _DEPRECATED_ENV_SEEN so `m3 doctor`
+    can surface it. The new name always wins, so users can migrate incrementally.
+    """
+    val = os.environ.get(new_name)
+    if val is not None:
+        return val
+    old_val = os.environ.get(old_name)
+    if old_val is not None:
+        _DEPRECATED_ENV_SEEN[old_name] = new_name
+        if old_name not in _DEPRECATED_ENV_WARNED:
+            _DEPRECATED_ENV_WARNED.add(old_name)
+            logger.warning(
+                "Deprecated env var %s is set; use %s instead. The old name still "
+                "works for now but will be removed. (`m3 doctor` lists all in use.)",
+                old_name, new_name,
+            )
+        return old_val
+    return default
+
+
+def deprecated_env_in_use() -> dict[str, str]:
+    """Return {old_name: new_name} for every deprecated env var read so far this
+    process (via getenv_compat). Used by `m3 doctor` to report migration TODOs.
+    Only reflects names actually READ — a var set but never consulted won't show.
+    """
+    return dict(_DEPRECATED_ENV_SEEN)
+
+
 # ── Active-database ContextVar ────────────────────────────────────────────────
 # Consulted by callers that want "whatever DB the surrounding request/CLI
 # specified, else the default". The MCP tool dispatcher sets this before each

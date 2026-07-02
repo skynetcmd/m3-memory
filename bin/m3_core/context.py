@@ -20,6 +20,7 @@ from m3_core.paths import (
     get_m3_config_root,
     get_m3_engine_root,
     get_m3_root,
+    getenv_compat,
     resolve_db_path,
 )
 from m3_core.runtime import (
@@ -132,8 +133,8 @@ class M3Context:
         with self._pool_lock:
             if self._pool is not None:
                 return
-            pool_size = int(os.environ.get("DB_POOL_SIZE", "5"))
-            pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "30"))
+            pool_size = int(getenv_compat("M3_DB_POOL_SIZE", "DB_POOL_SIZE", "5"))
+            pool_timeout = int(getenv_compat("M3_DB_POOL_TIMEOUT", "DB_POOL_TIMEOUT", "30"))
             pool: "queue.Queue[sqlite3.Connection]" = queue.Queue(maxsize=pool_size)
             for _ in range(pool_size):
                 try:
@@ -484,7 +485,7 @@ class M3Context:
         import psycopg2
         if not self._check_circuit("postgresql"):
             raise RuntimeError("PostgreSQL circuit breaker is open. Failing fast.")
-        url = os.getenv("PG_URL") or self.get_secret("PG_URL")
+        url = getenv_compat("M3_PG_URL", "PG_URL") or self.get_secret("PG_URL")
         if not url:
             raise RuntimeError("PG_URL not found in environment or keychain.")
         last_exc = None

@@ -59,7 +59,7 @@ import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
-from m3_sdk import resolve_venv_python
+from m3_sdk import getenv_compat, resolve_venv_python
 
 
 def ensure_venv():
@@ -123,7 +123,7 @@ def _infer_manifest_path(db_path: str) -> str:
 
 def _get_pg_url() -> str:
     """Resolve PostgreSQL connection URL from environment or encrypted vault."""
-    url = os.getenv("PG_URL", "").strip()
+    url = getenv_compat("M3_PG_URL", "PG_URL", "").strip()
     if url:
         return url
     url = ctx.get_secret("PG_URL")
