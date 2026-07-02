@@ -22,8 +22,11 @@ from pathlib import Path
 
 import pytest
 
-# Ensure bin/ is on sys.path when run directly.
-_BIN = Path(__file__).resolve().parent
+# Ensure bin/ is on sys.path when run standalone. (conftest.py already does this
+# for the normal pytest run; this makes direct `python tests/test_sqlite_pragmas.py`
+# work too. Moved here from bin/ — the repo root is two parents up now, bin/ is a
+# sibling of tests/.)
+_BIN = Path(__file__).resolve().parent.parent / "bin"
 if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
