@@ -10,14 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 **Commit message hygiene (forward-going from 2026-04-29):** commit messages
 on `main` and any branch that pushes to `origin` describe features in
-generic terms. Internal experiment names, private branch names, and
-specific corpus/variant tags stay on the private development branches
-(`private/lme`, `private/lme-runs`, `private/locomo` worktrees) and in
-the run-catalog artifact on those branches. References that already
-appeared in published commit history (README/CHANGELOG/registry
-descriptions are openly discussing benchmark results — that is intentional
-public positioning) are not retroactively rewritten; the policy is
-forward-going only.
+generic terms. Internal experiment names and specific corpus/variant tags
+stay in private development. Published benchmark **results**
+(README/CHANGELOG/registry descriptions) are intentional public positioning;
+the policy is forward-going only.
 
 ---
 
@@ -1200,10 +1196,9 @@ upstream API is throttling instead of burning the retry budget.
 - **`docs/AGENT_INSTRUCTIONS.md`** — new Rule 7 (entity lookups)
   cross-linked from `AGENT_RULES.md`. Tool count reference bumped
   from 66 → 72 to match v2026.5.1.1's MCP inventory.
-- **bench-territory removed from main** — the LongMemEval / LoCoMo
-  harnesses, plans, and run artifacts now live exclusively on the
-  `private/lme` and `private/locomo` worktrees. Public main carries
-  only the LME-S report and the LoCoMo placeholder.
+- **Internal benchmark harnesses and run artifacts are kept out of the
+  public package.** Public main carries only the published benchmark
+  report and the LoCoMo placeholder.
 
 ### Fixed
 
@@ -1213,9 +1208,8 @@ upstream API is throttling instead of burning the retry budget.
   cascade detector instead.
 - **Comparison table scrolling** — section labels stayed pinned but
   became hidden on horizontal scroll on narrow viewports; fixed.
-- **README benchmarks link** — pointed at
-  `benchmarks/longmemeval/README.md` (which lives only on
-  `private/lme`); now points at the real
+- **README benchmarks link** — pointed at an internal-only
+  `benchmarks/longmemeval/README.md`; now points at the published
   `benchmarks/longmemeval/LME-S_Benchmarking_Report.md` that ships
   on main.
 - **Windows install link** — broken anchor in the Windows install
