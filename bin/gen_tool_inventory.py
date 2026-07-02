@@ -76,12 +76,8 @@ PRIVATE_PATH_PREFIXES = (
     "scripts/knob_auto_retro_eval.py",
     "scripts/repatriate_bench_rows.py",
     "scripts/seed_bench_analysis.py",
-    # bench harness runners under bin/ — their inventory entries surface
-    # benchmark methodology that must not land in a public publish. Mark
-    # private so regenerated entries don't carry it. (Pre-existing tracked
-    # docs for these are a separate cleanup — adding the prefix stops FUTURE
-    # regens from re-leaking.)
-    "bin/bench_longmemeval.py",
+    # Internal benchmark/harness scripts — excluded from the generated public
+    # tool inventory.
     "bin/bench_memory.py",
     "bin/benchmark_memory.py",
     "bin/build_lme_m_db.py",

@@ -74,10 +74,10 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ---
 
-## [2026.7.1.2] — 2026-07-02 — Refactor floor: modular packages, memory legibility, env namespacing
+## [2026.7.2.0] — 2026-07-02 — Refactor floor: modular packages, memory legibility, env namespacing
 
 > **⛔ This release is the new SUPPORTED FLOOR.** Versions prior to
-> **2026.7.1.0 are no longer supported** — please upgrade (`m3 update`, or
+> **2026.7.2.0 are no longer supported** — please upgrade (`m3 update`, or
 > `pip install -U m3-memory`). The migration chain (`memory/migrations/`,
 > now through **v038**) brings any prior-version database up to this floor;
 > `m3 doctor --fix` migrates deprecated environment-variable names into the
@@ -132,14 +132,21 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
   per call), and `memory_write` defers embedding when no fast embedder is
   available so writes stay zero-lag instead of blocking for minutes.
 
+### Removed
+
+- **`bin/bench_longmemeval.py` — the internal LongMemEval bench runner — is no
+  longer part of the public package.** It was an internal evaluation harness; the
+  generic performance benchmarks (`bench_memory.py`, `benchmark_memory.py`) and the
+  published benchmark results remain.
+
 ---
 
 ## [2026.6.27.0] — 2026-06-27 — M3-v3 oxidation: governor, native ingest hashing, sqlite-vec
 
 > **⚠️ Recommended for all users.** This release is the new baseline.
-> **Superseded:** the supported floor is now **2026.7.1.0** (see above) — this
+> **Superseded:** the supported floor is now **2026.7.2.0** (see above) — this
 > note's original "not supported after July 2026" wording is retained for
-> history but the floor took effect with the 2026.7.1.x release.
+> history but the floor took effect with the 2026.7.2.x release.
 
 Pairs with m3-core-rs **3.6.27** (release tag `v2026.06.27`); the pin in
 `m3_memory/rust_core_install.py` is bumped in lockstep.
