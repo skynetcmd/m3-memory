@@ -20,9 +20,7 @@ import json
 import logging
 import math
 import os
-import re
 import threading
-from functools import lru_cache as _lru_cache
 from threading import Lock as _ThreadLock
 
 import httpx as _httpx
@@ -31,8 +29,21 @@ from llm_failover import get_best_embed
 from m3_sdk import M3Context, resolve_db_path
 
 from . import config
+from .chunking import (
+    DENSE_MIN_SUB_CHARS,
+    DENSE_TARGET_TOKENS,
+    DENSE_TOKEN_OVERLAP,
+    MAX_CHARS_PER_CHUNK,
+    MIN_OVERLAP_CHARS,
+    STRIDE_CHARS,
+    _chunk_for_sliding_window,
+    _DENSE_ERR_RE,
+    _mean_pool,
+    _order_embeddings,
+    _subdivide_dense_chunk,
+)
 from .db import _db
-from .util import sha256_hex as _sha256_hex
+from .textprep import _augment_embed_text_with_anchors, _content_hash
 
 logger = logging.getLogger("memory.embed")
 
@@ -431,105 +442,17 @@ def _get_embedded_embedder():
 # ──────────────────────────────────────────────────────────────────────────────
 # Sliding-window chunking + dense-content recovery
 # ──────────────────────────────────────────────────────────────────────────────
-MAX_CHARS_PER_CHUNK = int(os.environ.get("M3_EMBED_CHUNK_MAX_CHARS", 28000))
-MIN_OVERLAP_CHARS = int(os.environ.get("M3_EMBED_CHUNK_OVERLAP_CHARS", 8000))
-STRIDE_CHARS = MAX_CHARS_PER_CHUNK - MIN_OVERLAP_CHARS
-
-
-def _chunk_for_sliding_window(text: str) -> list[tuple[str, int]]:
-    """Split text into overlapping windows for embedding."""
-    n = len(text or "")
-    if n <= MAX_CHARS_PER_CHUNK:
-        return [(text or "", 0)]
-    out: list[tuple[str, int]] = []
-    idx = 0
-    start = 0
-    while True:
-        end = start + MAX_CHARS_PER_CHUNK
-        if end >= n:
-            out.append((text[start:n], idx))
-            return out
-        out.append((text[start:end], idx))
-        idx += 1
-        start += STRIDE_CHARS
-
-
-DENSE_TARGET_TOKENS = 7000
-DENSE_TOKEN_OVERLAP = 500
-DENSE_MIN_SUB_CHARS = 2000
-_DENSE_ERR_RE = re.compile(r"(\d+)\s*tokens\s*>\s*n_ctx")
+# MAX_CHARS_PER_CHUNK, MIN_OVERLAP_CHARS, STRIDE_CHARS, DENSE_TARGET_TOKENS,
+# DENSE_TOKEN_OVERLAP, DENSE_MIN_SUB_CHARS, _DENSE_ERR_RE,
+# _chunk_for_sliding_window, _order_embeddings, _subdivide_dense_chunk, and
+# _mean_pool are pure (no module-global state) and now live in .chunking —
+# re-imported above so every existing `memory.embed.X` / `from memory.embed
+# import X` reference keeps resolving.
 
 # Per-call embed-failure sentinels (returned by _post_once, NOT shared state).
 # Distinct objects so a chunk's outcome can't leak into a concurrent chunk's.
 _EMBED_TRANSIENT = object()   # retryable: timeout / 5xx / 413 / 429
 _EMBED_PERMANENT = object()   # non-retryable 4xx: don't retry or bisect
-
-
-def _order_embeddings(data: list[dict], n_inputs: int) -> list[list[float]] | None:
-    """Return embeddings in INPUT order, or None if the response can't be safely
-    aligned. An OpenAI-style embeddings response carries a per-item `index`; we
-    sort by it. But a server that OMITS index (every item defaults to 0) would
-    pass a naive len-check while the vectors are in arbitrary order — storing a
-    semantically-WRONG vector under a memory id with no error. Require `index` to
-    be a complete permutation of range(n_inputs) before trusting order; reject
-    (treat as failure) otherwise."""
-    if len(data) != n_inputs:
-        return None
-    seen = [d.get("index") for d in data]
-    if any(ix is None for ix in seen) or sorted(seen) != list(range(n_inputs)):
-        return None  # missing / duplicate / out-of-range index -> not alignable
-    ordered = sorted(data, key=lambda d: d["index"])
-    return [d["embedding"] for d in ordered]
-
-
-def _subdivide_dense_chunk(text: str, observed_tokens: int) -> list[str]:
-    """Re-split a chunk that overflowed the bge-m3 token ceiling."""
-    if observed_tokens <= 0 or not text:
-        return [text]
-    chars_per_token = len(text) / observed_tokens
-    sub_chars = int(DENSE_TARGET_TOKENS * chars_per_token * 0.90)
-    sub_chars = max(sub_chars, DENSE_MIN_SUB_CHARS)
-    if sub_chars >= len(text):
-        return [text]
-    overlap_chars = int(DENSE_TOKEN_OVERLAP * chars_per_token)
-    stride = max(sub_chars - overlap_chars, sub_chars // 2)
-    out: list[str] = []
-    start = 0
-    n = len(text)
-    while True:
-        end = start + sub_chars
-        if end >= n:
-            out.append(text[start:n])
-            return out
-        out.append(text[start:end])
-        start += stride
-
-
-def _mean_pool(vecs: list[list[float]]) -> list[float] | None:
-    """Average several sub-chunk vectors into one (standard long-doc embedding),
-    then L2-NORMALIZE the result. bge-m3 vectors are unit-length and the store /
-    cosine paths assume that invariant — mean-pooling alone yields a sub-unit
-    vector (norm < 1), so it MUST be renormalized or it is incomparable to every
-    other vector in the store. Returns None if there's nothing to pool."""
-    if not vecs:
-        return None
-    if len(vecs) == 1:
-        return vecs[0]  # already a normalized model output
-    dim = len(vecs[0])
-    acc = [0.0] * dim
-    n = 0
-    for v in vecs:
-        if len(v) != dim:  # defensive: skip a malformed sub-vector
-            continue
-        for k in range(dim):
-            acc[k] += v[k]
-        n += 1
-    if n == 0:
-        return None
-    norm = math.sqrt(sum(x * x for x in acc))
-    if norm == 0.0:
-        return [0.0] * dim  # degenerate (opposing vectors); avoid /0
-    return [x / norm for x in acc]  # mean then L2-normalize (the /n cancels)
 
 
 async def _embedded_bulk_with_subdivide(
@@ -566,50 +489,10 @@ async def _embedded_bulk_with_subdivide(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Anchor augmentation (passage-side only — see EMBED_INPUT_RECIPE.md)
-# ──────────────────────────────────────────────────────────────────────────────
-def _augment_embed_text_with_anchors(embed_text: str, metadata: str | dict | None) -> str:
-    """Prepend `[anchor1, anchor2]` to text from metadata['temporal_anchors']."""
-    if not embed_text:
-        return embed_text
-    if not metadata:
-        return embed_text
-    try:
-        meta = metadata if isinstance(metadata, dict) else json.loads(metadata)
-    except (json.JSONDecodeError, TypeError):
-        return embed_text
-    anchors = meta.get("temporal_anchors")
-    if not isinstance(anchors, (list, tuple)) or not anchors:
-        return embed_text
-    tags: list[str] = []
-    for a in anchors:
-        if not a:
-            continue
-        if isinstance(a, str):
-            tags.append(a[:10])
-        elif isinstance(a, dict):
-            v = a.get("iso") or a.get("date") or a.get("value")
-            if isinstance(v, str):
-                tags.append(v[:10])
-    if not tags:
-        return embed_text
-    return "[" + ", ".join(tags) + "] " + embed_text
-
-
-@_lru_cache(maxsize=512)
-def _content_hash(content: str) -> str:
-    """sha256 of (content or "") UTF-8 bytes, lru-cached at 512 entries.
-
-    Called once per embed (line 322 below) and N times per chatlog write
-    pass; sees frequent repeats during bulk re-embed and chatlog drain.
-    Cache key is the raw content string — modest memory footprint for
-    typical memory bodies (under a few KB each). 512 entries is enough
-    to absorb repeats within a single chatlog drain without unbounded
-    growth.
-    """
-    return _sha256_hex((content or "").encode("utf-8"))
-
-
+# Anchor augmentation + content hashing are pure (no module-global state) and
+# now live in .textprep — _augment_embed_text_with_anchors and _content_hash
+# are re-imported above, so every existing `memory.embed.X` / `from
+# memory.embed import X` reference keeps resolving.
 # ──────────────────────────────────────────────────────────────────────────────
 # HTTP-client singleton
 # ──────────────────────────────────────────────────────────────────────────────
