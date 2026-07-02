@@ -286,6 +286,103 @@ def _is_missing_schema(exc) -> bool:
     return "no such column" in msg or "no such table" in msg or "no column named" in msg
 
 
+def memory_lifecycle_summary_impl(window_days: int = 7, top_n: int = 5) -> dict:
+    """Windowed summary of what the memory system did to itself.
+
+    Aggregates two append-only, timestamp-indexed ledgers over the last
+    ``window_days`` days:
+      * ``memory_history`` (mig 009) — create / update / delete / supersede
+        events (``event`` column, indexed on ``created_at``).
+      * ``memory_corroborations`` (mig 036) — corroboration (``delta>0``) and
+        contradiction (``delta<0``) events.
+
+    Returns a structured dict so an agent can narrate "we updated this belief 3
+    times" and an operator can see lifecycle churn at a glance. Read-only; no
+    writes, no background job. Both queries hit existing indexes.
+
+    Old-DB tolerance: ``memory_corroborations`` only exists post-036. A missing
+    table degrades that section to zero counts (via ``_is_missing_schema``)
+    rather than failing the whole summary — mirroring the reinforcement pass.
+    """
+    window_days = max(1, int(window_days))
+    top_n = max(0, int(top_n))
+    cutoff = f"-{window_days} days"
+    out: dict = {
+        "window_days": window_days,
+        "events": {"create": 0, "update": 0, "delete": 0, "supersede": 0},
+        "corroboration": {"corroborated": 0, "contradicted": 0},
+        "top_contradicted": [],
+        "most_revised": [],
+    }
+    with _db() as db:
+        db.row_factory = sqlite3.Row
+        # Lifecycle events by type in the window.
+        try:
+            for row in db.execute(
+                "SELECT event, COUNT(*) AS n FROM memory_history "
+                "WHERE created_at >= datetime('now', ?) GROUP BY event",
+                (cutoff,),
+            ):
+                if row["event"] in out["events"]:
+                    out["events"][row["event"]] = row["n"]
+        except sqlite3.OperationalError as e:
+            if not _is_missing_schema(e):
+                raise  # a real error, not a pre-009 DB
+
+        # Most-revised memories (update + supersede events per memory_id).
+        if top_n:
+            try:
+                out["most_revised"] = [
+                    {"memory_id": r["memory_id"], "revisions": r["n"], "title": r["title"]}
+                    for r in db.execute(
+                        "SELECT h.memory_id AS memory_id, COUNT(*) AS n, "
+                        "       COALESCE(m.title, '') AS title "
+                        "FROM memory_history h "
+                        "LEFT JOIN memory_items m ON m.id = h.memory_id "
+                        "WHERE h.created_at >= datetime('now', ?) "
+                        "  AND h.event IN ('update', 'supersede') "
+                        "GROUP BY h.memory_id ORDER BY n DESC LIMIT ?",
+                        (cutoff, top_n),
+                    )
+                ]
+            except sqlite3.OperationalError as e:
+                if not _is_missing_schema(e):
+                    raise
+
+        # Corroboration vs contradiction in the window (post-036 table).
+        try:
+            for row in db.execute(
+                "SELECT CASE WHEN delta > 0 THEN 'corroborated' ELSE 'contradicted' END AS kind, "
+                "       COUNT(*) AS n FROM memory_corroborations "
+                "WHERE created_at >= datetime('now', ?) GROUP BY kind",
+                (cutoff,),
+            ):
+                out["corroboration"][row["kind"]] = row["n"]
+        except sqlite3.OperationalError as e:
+            if not _is_missing_schema(e):
+                raise  # pre-036 DB → leave zeros
+
+        # Most-contradicted memories (post-036 table).
+        if top_n:
+            try:
+                out["top_contradicted"] = [
+                    {"memory_id": r["memory_id"], "contradiction_count": r["n"], "title": r["title"]}
+                    for r in db.execute(
+                        "SELECT c.memory_id AS memory_id, COUNT(*) AS n, "
+                        "       COALESCE(m.title, '') AS title "
+                        "FROM memory_corroborations c "
+                        "LEFT JOIN memory_items m ON m.id = c.memory_id "
+                        "WHERE c.created_at >= datetime('now', ?) AND c.delta < 0 "
+                        "GROUP BY c.memory_id ORDER BY n DESC LIMIT ?",
+                        (cutoff, top_n),
+                    )
+                ]
+            except sqlite3.OperationalError as e:
+                if not _is_missing_schema(e):
+                    raise
+    return out
+
+
 def _enforce_retention_policies(db):
     """Enforce per-agent memory limits and TTLs from agent_retention_policies table."""
     try:

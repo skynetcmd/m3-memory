@@ -70,6 +70,33 @@ See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
 
 ---
 
+## [2026.7.2.1] — 2026-07-02 — Retrieval explainability + lifecycle observability
+
+### Added
+- **`memory_lifecycle_summary`** (MCP tool + `bin/m3_lifecycle_summary.py` CLI) —
+  windowed read-only summary of what the memory system did to itself: counts of
+  create/update/delete/supersede events and corroboration vs contradiction
+  events over the last `window_days`, plus most-revised / most-contradicted
+  memories. Aggregates the append-only `memory_history` (009) and
+  `memory_corroborations` (036) ledgers; degrades gracefully on pre-036 DBs
+  (contradiction counts = 0). Answers "we updated this belief N times."
+- **`explain` on `memory_search`.** The primary search tool can now return the
+  `_explanation` score breakdown (vector/bm25/title_overlap/importance/recency/
+  temporal) plus the synthesized human-readable `reason` string — previously
+  reachable only through `memory_suggest`.
+
+### Docs
+- **`docs/OPERATIONS.md`** — operator playbook: verify chat-log capture, promote
+  notes to canonical memories, supersede vs overwrite, pin semantics, prune,
+  bitemporal history, and debugging retrieval ranking.
+
+### Tests
+- `test_pinned_row_can_still_be_superseded` locks the pinned boundary: pin
+  exempts from decay/expiry/retention (aging) but NOT from supersession
+  (correction). Pin means "don't let this rot," not "never update this."
+
+---
+
 ## [2026.7.2.0] — 2026-07-02 — Refactor floor: modular packages, memory legibility, env namespacing
 
 > **⛔ This release is the new SUPPORTED FLOOR.** Versions prior to

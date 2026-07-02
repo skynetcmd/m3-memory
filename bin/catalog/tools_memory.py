@@ -523,6 +523,31 @@ TOOLS: list[ToolSpec] = [
         inject_agent_id=False,
     ),
     ToolSpec(
+        name="memory_lifecycle_summary",
+        description=(
+            "Windowed summary of lifecycle & contradiction activity over the last "
+            "`window_days` days: counts of create/update/delete/supersede events, "
+            "corroboration vs contradiction events, and the most-revised / "
+            "most-contradicted memories. Read-only aggregate over memory_history "
+            "(mig 009) + memory_corroborations (mig 036). Answers 'what did the "
+            "memory system do to itself?' and 'we updated this belief N times'. "
+            "Degrades gracefully on pre-036 DBs (contradiction counts = 0)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "window_days": {"type": "integer", "description": "Look-back window in days.", "default": 7},
+                "top_n":       {"type": "integer", "description": "Max rows in the most-revised / most-contradicted lists (0 = omit them).", "default": 5},
+            },
+            "required": [],
+        },
+        impl=lambda **kw: asyncio.to_thread(memory_maintenance.memory_lifecycle_summary_impl, **kw),
+        is_async=True,
+        validators=(),
+        default_allowed=True,
+        inject_agent_id=False,
+    ),
+    ToolSpec(
         name="memory_consolidate",
         description="Consolidate old memories of the same type into summaries using the local LLM. Reduces clutter while preserving knowledge.",
         parameters={
