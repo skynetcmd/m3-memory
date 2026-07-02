@@ -62,11 +62,17 @@ def _seed(conn, mid, *, importance=0.9, confidence=0.9, created_days_ago=30,
 # ── ensure_pinned_column ─────────────────────────────────────────────────────
 
 def test_ensure_pinned_column_idempotent(tmp_path):
+    # The full schema now carries `pinned` from migration 037, so the runtime
+    # helper is a FALLBACK for a DB that predates 037. Simulate that pre-037 DB
+    # by dropping the column, then verify the helper re-adds it idempotently.
     from memory.db import ensure_pinned_column
     db = tmp_path / "t.db"
     _full_db(db)
     conn = sqlite3.connect(str(db))
     try:
+        conn.execute("DROP INDEX IF EXISTS idx_memory_items_pinned")  # index refs the col
+        conn.execute("ALTER TABLE memory_items DROP COLUMN pinned")  # → pre-037 state
+        conn.commit()
         cols_before = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
         assert "pinned" not in cols_before
 
@@ -185,15 +191,18 @@ def test_pinned_row_not_expiry_purged_unpinned_is(tmp_path):
 # ── old-DB tolerance (pinned column absent) ──────────────────────────────────
 
 def test_decay_and_expiry_tolerate_missing_pinned_column(tmp_path):
-    """No ensure_pinned_column call at all — DB never gets the column.
-    The pinned-aware queries must fall back to the original query and not
-    crash memory_maintenance_impl."""
+    """A pre-037 DB (no `pinned` column, ensure never run). The pinned-aware
+    maintenance queries must fall back to the original query and not crash.
+    Simulate the pre-migration state by dropping the column migration 037 adds."""
     from memory_maintenance import memory_maintenance_impl
 
     db = tmp_path / "t.db"
     _full_db(db)
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
+    conn.execute("DROP INDEX IF EXISTS idx_memory_items_pinned")  # index refs the col
+    conn.execute("ALTER TABLE memory_items DROP COLUMN pinned")  # → pre-037 state
+    conn.commit()
     cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_items)")}
     assert "pinned" not in cols
 
