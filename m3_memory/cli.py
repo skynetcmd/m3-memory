@@ -596,7 +596,8 @@ def _cmd_embedder(args: argparse.Namespace) -> int:
     sub = args.embedder_cmd
     if sub is None:
         print("Error: `m3 embedder` requires a subcommand (install, start, stop, status, "
-              "uninstall, install-gpu). Run `m3 embedder --help`.", file=sys.stderr)
+              "uninstall, install-gpu, shared, unshared). Run `m3 embedder --help`.",
+              file=sys.stderr)
         return 2
     # Each subcommand registered its own func= via embedder_admin.add_arguments.
     return args.func(args)

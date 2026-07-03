@@ -387,6 +387,70 @@ sovereign install on Linux.
 
 ---
 
+## Shared GPU embedder (one CUDA context for all m3 processes)
+
+**The problem.** The in-process Rust embedder (`m3_core_rs.EmbeddedEmbedder`,
+tier-1) runs the GGUF model *inside* the calling process. CUDA contexts do not
+cross process boundaries, so **every** m3 process that embeds in-process opens
+its **own** CUDA context — each a multi-GB host-RAM reservation. On a box where
+the MCP memory server *and* the cognitive loop both embed, you pay for the model
+twice (~4 GB + up to ~12 GB observed). "In-process, shared between processes" is
+a contradiction — the only way to load the GPU model **once** and serve many
+processes is one owner process + thin clients over IPC.
+
+**The fix.** `bin/embed_server_inproc.py` loads the embedder ONCE and serves it
+over localhost HTTP; the other processes disable their own tier-1 and defer to
+it. One CUDA context total (~9-10 GB reclaimed). Localhost HTTP overhead is <2%
+of the ~10-31 ms GPU embed, and requests batch — so throughput is preserved.
+
+### Enable it
+
+```bash
+# 1. Route all m3 processes to the shared server (writes .embed_config.json):
+m3 embedder shared                 # or: --port 8091 for a non-default port
+
+# 2. Make the shared server run (it is the SOLE GPU embedder):
+#    - it is installed as the AgentOS_EmbedServer scheduled task by
+#      `python bin/install_schedules.py --repair` (Windows; elevated shell), OR
+#    - start it directly:
+python bin/embed_server_inproc.py --port 8082
+
+# 3. Restart the MCP server + cognitive loop so they re-read the config.
+```
+
+`m3 embedder shared` writes `<config_root>/.embed_config.json`:
+
+```json
+{ "disable_inproc_embedder": true, "fallback_url": "http://127.0.0.1:8082" }
+```
+
+This is a **config file, not an env var** — because a headless daemon (the
+scheduled-task loop, the MCP server) does not inherit your shell environment
+(DESIGN_PHILOSOPHIES §3). `bin/memory/embed.py` reads it at import: precedence is
+env var > config file > default, so a one-off `M3_EMBED_GGUF` still overrides.
+
+### Revert
+
+```bash
+m3 embedder unshared               # removes .embed_config.json
+# then restart the MCP server + loop → each loads its own in-process embedder
+```
+
+### When to use it
+
+- **Use shared** when multiple m3 processes embed on the same GPU and host RAM is
+  tight — the common desktop/homelab case (one GPU, MCP server + loop + maybe a
+  local chat model competing for VRAM).
+- **Keep per-process (unshared)** when only one process embeds, or when you want
+  zero inter-process dependency (each process is self-contained but heavier).
+
+The shared server binds `127.0.0.1` only (it is not a LAN service), serializes
+GPU calls with a semaphore, caps batch size (413 on overflow, never silent
+truncation), and exits non-zero if the embedder can't load — see the module
+docstring in `bin/embed_server_inproc.py`.
+
+---
+
 ## m3-memory integration
 
 `bin/memory_core.py`'s `_embed()` (single) and `_embed_many()` (batch)

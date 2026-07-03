@@ -349,6 +349,73 @@ def cmd_install_gpu(args: argparse.Namespace) -> int:
 
 # ── argparse wiring ───────────────────────────────────────────────────────────
 
+def _embed_config_path() -> str:
+    """<config_root>/.embed_config.json — read at import by bin/memory/embed.py.
+
+    Resolves the config root the same way m3_core.paths.get_m3_config_root does:
+    M3_CONFIG_ROOT > M3_MEMORY_ROOT/config > ~/.m3/config. Kept dependency-free
+    (no m3_sdk import) so this CLI helper works from a bare package install."""
+    root = os.environ.get("M3_CONFIG_ROOT")
+    if not root:
+        mem_root = os.environ.get("M3_MEMORY_ROOT")
+        root = (os.path.join(os.path.abspath(os.path.expanduser(mem_root)), "config")
+                if mem_root else os.path.join(os.path.expanduser("~"), ".m3", "config"))
+    return os.path.join(root, ".embed_config.json")
+
+
+def cmd_shared(args: argparse.Namespace) -> int:
+    """Route ALL m3 processes to ONE shared GPU embedder (one CUDA context).
+
+    Writes <config_root>/.embed_config.json so every m3 process (MCP server,
+    cognitive loop) disables its OWN in-process embedder and defers to a single
+    shared server (bin/embed_server_inproc.py) over localhost HTTP. This reclaims
+    ~9-10 GB on a box where several processes would otherwise each open their own
+    CUDA context (contexts can't cross process boundaries — the only way to load
+    the GPU model once is one owner + thin clients). Localhost HTTP overhead is
+    <2% of the ~10-31 ms GPU embed.
+
+    After running this, (re)start the shared server and restart the m3 processes:
+      - the AgentOS_EmbedServer scheduled task (install_schedules.py) runs it on
+        boot; or start it manually: `python bin/embed_server_inproc.py --port 8082`.
+      - restart the MCP server + cognitive loop so they re-read the config."""
+    import json
+    port = getattr(args, "port", 8082) or 8082
+    url = f"http://127.0.0.1:{port}"
+    cfg = {
+        "disable_inproc_embedder": True,
+        "fallback_url": url,
+        "_comment": ("Route all m3 processes to the shared GPU embedder "
+                     "(bin/embed_server_inproc.py) so only ONE CUDA context exists. "
+                     "Written by `m3 embedder shared`. Revert with `m3 embedder unshared`."),
+    }
+    path = _embed_config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+    print(f"[OK] wrote {path}")
+    print(f"     -> in-process embedder DISABLED; clients defer to {url}")
+    print("\nNext:")
+    print("  1. Ensure the shared server runs (AgentOS_EmbedServer task, or "
+          "`python bin/embed_server_inproc.py --port %d`)." % port)
+    print("  2. Restart the MCP server + cognitive loop so they re-read the config.")
+    return 0
+
+
+def cmd_unshared(args: argparse.Namespace) -> int:
+    """Revert to per-process in-process embedders (remove .embed_config.json).
+
+    Each m3 process goes back to loading its OWN GPU embedder (more RAM, but no
+    dependency on a shared server). Restart the m3 processes after."""
+    path = _embed_config_path()
+    if os.path.exists(path):
+        os.remove(path)
+        print(f"[OK] removed {path} — processes will use their own in-process embedder again.")
+    else:
+        print(f"[~] {path} not present — already unshared (per-process embedders).")
+    print("     Restart the MCP server + cognitive loop to apply.")
+    return 0
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add `m3 embedder <sub>` subcommands to an argparse subparser."""
     sub = parser.add_subparsers(dest="embedder_cmd", metavar="<subcommand>")
@@ -398,3 +465,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
     p_uninstall = sub.add_parser("uninstall", help="Remove the CPU embedder service registration.")
     p_uninstall.set_defaults(func=cmd_uninstall)
+
+    p_shared = sub.add_parser(
+        "shared",
+        help="Route all m3 processes to ONE shared GPU embedder (one CUDA context, "
+             "~9-10 GB reclaimed). Writes .embed_config.json; then run the shared "
+             "server + restart the MCP server & cognitive loop.",
+    )
+    p_shared.add_argument("--port", type=int, default=8082,
+                          help="Port the shared embedder server listens on (default: 8082).")
+    p_shared.set_defaults(func=cmd_shared)
+
+    p_unshared = sub.add_parser(
+        "unshared",
+        help="Revert to per-process in-process embedders (remove .embed_config.json).",
+    )
+    p_unshared.set_defaults(func=cmd_unshared)
