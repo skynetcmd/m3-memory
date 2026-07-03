@@ -30,20 +30,13 @@ from m3_sdk import M3Context, resolve_db_path
 
 from . import config
 from .chunking import (
-    DENSE_MIN_SUB_CHARS,
-    DENSE_TARGET_TOKENS,
-    DENSE_TOKEN_OVERLAP,
-    MAX_CHARS_PER_CHUNK,
-    MIN_OVERLAP_CHARS,
-    STRIDE_CHARS,
-    _chunk_for_sliding_window,
     _DENSE_ERR_RE,
     _mean_pool,
     _order_embeddings,
     _subdivide_dense_chunk,
 )
 from .db import _db
-from .textprep import _augment_embed_text_with_anchors, _content_hash
+from .textprep import _content_hash
 
 logger = logging.getLogger("memory.embed")
 
@@ -216,6 +209,35 @@ def _track_cost_lazy(operation: str, tokens_est: int = 0) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 # In-process Rust embedder (M3_EMBED_GGUF, or auto-detected when unset)
 # ──────────────────────────────────────────────────────────────────────────────
+# CONFIG FILE (§3): a headless daemon (the scheduled-task cognitive loop, the MCP
+# server) does NOT inherit shell env — so a knob it must read lives in a
+# code-resolved config file at the config root, not an env var. This file lets an
+# operator route ALL m3 processes to a SHARED in-process embedder server (one
+# CUDA context instead of one-per-process, ~9-10 GB reclaimed) without touching
+# every launcher's env. Shape (all optional):
+#   {"disable_inproc_embedder": true,          # turn OFF tier-1 in THIS process
+#    "fallback_url": "http://127.0.0.1:8082"}  # where the shared server listens
+# Precedence per setting: env var > config file > default (env wins so a one-off
+# override still works). Read once at import; warns loudly on a malformed file
+# rather than silently reverting (§3). Mirrors _governor_thresholds.
+def _read_embed_config() -> dict:
+    try:
+        from m3_core.paths import get_m3_config_root
+        path = os.path.join(get_m3_config_root(), ".embed_config.json")
+        if not os.path.exists(path):
+            return {}
+        import json as _json
+        with open(path, encoding="utf-8") as f:
+            return _json.load(f) or {}
+    except Exception as e:  # noqa: BLE001 — never let a bad config break embedding
+        logger.warning(
+            ".embed_config.json is unreadable/malformed (%s) — ignoring it and "
+            "using env vars + defaults.", e)
+        return {}
+
+
+_EMBED_CFG = _read_embed_config()
+
 _EMBED_GGUF_PATH: str | None = (os.environ.get("M3_EMBED_GGUF") or "").strip() or None
 _EMBED_GGUF_MODEL_TAG: str = (
     (os.environ.get("M3_EMBED_GGUF_MODEL_TAG") or "").strip()
@@ -223,9 +245,18 @@ _EMBED_GGUF_MODEL_TAG: str = (
 )
 # When M3_EMBED_GGUF is unset, search the canonical model dirs for a bge-m3 GGUF
 # so tier-1 (the ~10-85x faster in-process embedder) activates automatically.
-# Opt out with M3_EMBED_GGUF_AUTODETECT=0. The walk is depth- and time-bounded so
-# a pathological models directory can never stall cold start.
-_EMBED_GGUF_AUTODETECT: bool = os.environ.get("M3_EMBED_GGUF_AUTODETECT", "1") != "0"
+# Opt out with M3_EMBED_GGUF_AUTODETECT=0 (env) OR "disable_inproc_embedder":true
+# (config file — the headless-safe way). The walk is depth- and time-bounded so a
+# pathological models directory can never stall cold start.
+_EMBED_GGUF_AUTODETECT: bool = (
+    os.environ.get("M3_EMBED_GGUF_AUTODETECT", "1") != "0"
+    and not bool(_EMBED_CFG.get("disable_inproc_embedder"))
+)
+# When the config file disables the in-process embedder, also force-clear any
+# explicit GGUF path so a process pointed at a shared server never opens its OWN
+# CUDA context (the whole point — one context total, not one per process).
+if _EMBED_CFG.get("disable_inproc_embedder"):
+    _EMBED_GGUF_PATH = None
 _EMBED_GGUF_WALK_BUDGET_S: float = float(os.environ.get("M3_EMBED_GGUF_WALK_BUDGET", "2.0"))
 _embedded_embedder = None
 _embedded_embed_checked = False
@@ -552,7 +583,9 @@ def _get_embed_client() -> _httpx.AsyncClient:
 
 
 _EMBED_FALLBACK_URL: str = (
-    os.environ.get("M3_EMBED_FALLBACK_URL") or "http://127.0.0.1:8082"
+    os.environ.get("M3_EMBED_FALLBACK_URL")            # env override wins
+    or _EMBED_CFG.get("fallback_url")                  # config-file (headless-safe)
+    or "http://127.0.0.1:8082"                         # default (the tier-2 port)
 ).rstrip("/")
 
 

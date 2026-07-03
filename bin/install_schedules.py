@@ -313,6 +313,24 @@ def get_schedule_specs(m3_memory_root):
             "modifier": "",
             "time": "00:00",
             "description": "Autonomous heartbeat: entity extraction, observations, and reflection (continuous)"
+        },
+        {
+            "name": "AgentOS_EmbedServer",
+            # Shared in-process GPU embedder server (bin/embed_server_inproc.py):
+            # loads the GGUF embedder ONCE and serves it over localhost HTTP so
+            # every m3 process (MCP server, cognitive loop) uses ONE CUDA context
+            # instead of one-per-process (~9-10 GB reclaimed). Clients defer via
+            # .embed_config.json {"disable_inproc_embedder":true,"fallback_url":...}.
+            # The server auto-detects the bge-m3 GGUF (discover_bge_m3_gguf) so it
+            # needs no env; binds 127.0.0.1 only. ONSTART so it's the sole embedder
+            # from boot, before any client tries to embed.
+            "args": [_script("embed_server_inproc.py"),
+                     "--port", "8082",
+                     "--log-file", _log("embed_server_inproc.log")],
+            "schedule": "ONSTART",
+            "modifier": "",
+            "time": "00:00",
+            "description": "Shared in-process GPU embedder server (one CUDA context, localhost HTTP)"
         }
     ]
 
