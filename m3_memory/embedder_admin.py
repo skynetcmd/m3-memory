@@ -382,8 +382,10 @@ def cmd_shared(args: argparse.Namespace) -> int:
     shared server (bin/embed_server_inproc.py) over localhost HTTP. This reclaims
     ~9-10 GB on a box where several processes would otherwise each open their own
     CUDA context (contexts can't cross process boundaries — the only way to load
-    the GPU model once is one owner + thin clients). Localhost HTTP overhead is
-    <2% of the ~10-31 ms GPU embed.
+    the GPU model once is one owner + thin clients). The win is host RAM, not
+    latency: a single small embed is ~33 ms via the server vs ~28 ms in-process
+    (the localhost round-trip adds a few ms); that per-call cost amortises across
+    a batch, so bulk paths see negligible overhead.
 
     After running this, (re)start the shared server and restart the m3 processes:
       - the AgentOS_EmbedServer scheduled task (install_schedules.py) runs it on

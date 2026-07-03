@@ -400,8 +400,13 @@ processes is one owner process + thin clients over IPC.
 
 **The fix.** `bin/embed_server_inproc.py` loads the embedder ONCE and serves it
 over localhost HTTP; the other processes disable their own tier-1 and defer to
-it. One CUDA context total (~9-10 GB reclaimed). Localhost HTTP overhead is <2%
-of the ~10-31 ms GPU embed, and requests batch — so throughput is preserved.
+it. **One CUDA context total (~9-10 GB reclaimed) — the win is host RAM, not
+latency.** Measured (RTX 5080): a single small embed is ~33 ms P50 via the server
+vs ~28 ms in-process — the localhost round-trip adds a few ms (~10-15% on a
+single small request). That fixed per-call cost amortises across a batch (one
+round-trip for N vectors), so bulk paths (the cognitive loop, file ingestion)
+see negligible overhead. You are trading a few ms on interactive single embeds
+for ~9-10 GB of RAM back.
 
 ### Enable it
 

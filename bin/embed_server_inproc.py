@@ -9,7 +9,14 @@ server and the cognitive loop each loaded a full copy (~4 GB + ~12 GB ≈ 18 GB 
 SkyPC) for one embedder's worth of work. This server loads the embedder ONCE and
 serves it over localhost HTTP; clients disable their own tier-1 (M3_EMBED_GGUF
 unset + M3_EMBED_GGUF_AUTODETECT=0) and defer to it via M3_EMBED_FALLBACK_URL.
-Localhost HTTP overhead is <2% of the ~10-31 ms GPU embed; batching amortises it.
+
+The win is HOST RAM, not latency: one CUDA context instead of one-per-process.
+Measured on SkyPC (RTX 5080): a SINGLE small embed is P50 ~33 ms / P95 ~48 ms
+via this server vs ~28 ms in-process — the localhost HTTP round-trip adds a few
+ms (~10-15% on a single small request), not a rounding error. That per-call cost
+AMORTISES across a batch (one round-trip for N vectors), so bulk paths — the
+cognitive loop, file ingestion — see negligible overhead. Trade a few ms on
+interactive single embeds for ~9-10 GB of host RAM back.
 
 CONTRACT (matches the client tier-2 fallback in bin/memory/embed.py):
     POST /embedding        {"input": [texts...]}  -> {"data": [{"embedding": [...]}, ...]}  (input order)
