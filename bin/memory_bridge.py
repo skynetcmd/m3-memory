@@ -143,6 +143,11 @@ def _build_typed_function(spec):
         async def _wrapper(args):
             args.pop("__class__", None)  # locals() may include this in some Python versions
             database = mcp_tool_catalog._pop_database(args)
+            # `timeout` is a universal injected param (mcp_tool_catalog adds it to
+            # every tool schema). It is dispatch machinery, not an impl argument —
+            # pop it here or it reaches impls with strict signatures and raises
+            # "unexpected keyword argument 'timeout'". Mirrors dispatch.execute_tool.
+            args.pop("timeout", None)
             args, err = mcp_tool_catalog.validate_args(spec, args)
             if err:
                 return err
@@ -156,6 +161,9 @@ def _build_typed_function(spec):
         def _wrapper(args):
             args.pop("__class__", None)
             database = mcp_tool_catalog._pop_database(args)
+            # See async branch: `timeout` is injected dispatch machinery, not an
+            # impl argument — pop it before validation/impl.
+            args.pop("timeout", None)
             args, err = mcp_tool_catalog.validate_args(spec, args)
             if err:
                 return err
