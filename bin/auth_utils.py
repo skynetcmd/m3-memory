@@ -127,12 +127,64 @@ def get_master_key() -> str | None:
     return None
 
 
+class SaltMissingError(RuntimeError):
+    """Raised when the device salt file is gone but the vault already holds
+    encrypted secrets — regenerating a fresh salt here would silently orphan
+    every existing secret (they'd never decrypt again). Fail loud instead of
+    destroying them. (2026-07-03: the Homecoming root relocation lost the salt
+    at the old path and a silent regen orphaned the whole vault — this guard
+    exists so that can't recur.)"""
+
+
+def _vault_has_secrets() -> bool:
+    """True iff the vault DB exists and has at least one synchronized_secrets
+    row. Used to distinguish a genuine fresh install (safe to mint a new salt)
+    from an existing install whose salt went missing (must NOT regenerate).
+    Any error → False (treat as 'no vault yet', i.e. let a fresh salt mint)."""
+    try:
+        vault_path = _vault_db_path()
+        if not os.path.exists(vault_path):
+            return False
+        conn = sqlite3.connect(vault_path, timeout=2)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM synchronized_secrets LIMIT 1"
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — missing table / locked / unreadable → treat as empty
+        return False
+
+
 def _get_device_salt() -> bytes:
     """
     Retrieves a persistent 16-byte salt for PBKDF2 from a local file.
-    Generates one if it doesn't exist. This ensures consistent key derivation
-    on the same device without storing the salt in the DB.
+
+    Resolution: M3_AGENT_OS_SALT_HEX env (32 hex chars, recovery/override) >
+    config-root file > legacy-root file. If none is found, a NEW salt is
+    minted ONLY when the vault has no encrypted secrets yet (a genuine fresh
+    install). If the salt is missing but the vault already holds secrets,
+    raise SaltMissingError rather than silently regenerating — a fresh salt
+    changes the derived key and orphans every existing secret. See
+    SaltMissingError for the incident that motivated this guard.
     """
+    # Recovery / explicit override: lets an operator restore a lost salt
+    # (e.g. from a backup) without putting the file back, or pin the salt in
+    # a container. Must be exactly 16 bytes (32 hex chars).
+    env_hex = os.getenv("M3_AGENT_OS_SALT_HEX", "").strip()
+    if env_hex:
+        try:
+            raw = bytes.fromhex(env_hex)
+            if len(raw) == 16:
+                return raw
+            logger.warning(
+                "M3_AGENT_OS_SALT_HEX must be 32 hex chars (16 bytes); got %d bytes — ignoring.",
+                len(raw),
+            )
+        except ValueError:
+            logger.warning("M3_AGENT_OS_SALT_HEX is not valid hex — ignoring.")
+
     from m3_sdk import get_m3_config_root, get_m3_root
     # Check config root first, fallback to legacy root
     config_root = get_m3_config_root()
@@ -151,7 +203,22 @@ def _get_device_salt() -> bytes:
         except Exception:
             pass
 
-    # Generate new salt
+    # No usable salt file. Minting a new one is SAFE only if nothing was ever
+    # encrypted with the old one. If the vault already has secrets, a fresh
+    # salt would orphan them — fail loud with an actionable message instead.
+    if _vault_has_secrets():
+        raise SaltMissingError(
+            f"Device salt missing at {salt_path} (and no M3_AGENT_OS_SALT_HEX), "
+            f"but the vault {_vault_db_path()} already holds encrypted secrets. "
+            "Minting a new salt would permanently orphan every existing secret "
+            "(they would never decrypt again). Restore the original "
+            ".agent_os_salt from a backup, or set M3_AGENT_OS_SALT_HEX to its "
+            "hex value. If the original salt is truly lost, the vault secrets "
+            "are unrecoverable — clear synchronized_secrets and re-enter the "
+            "keys from source, then a new salt will mint automatically."
+        )
+
+    # Genuine fresh install (empty/absent vault): mint a new salt.
     salt = os.urandom(16)
     # Ensure config directory exists
     os.makedirs(os.path.dirname(salt_path), exist_ok=True)
@@ -368,6 +435,12 @@ def get_api_key(service: str) -> str | None:
                         logger.debug(f"Auto-migration of '{service}' failed: {mig_err}")
 
                 return decrypted
+        except SaltMissingError as exc:
+            # Loud, not swallowed at debug: the salt is gone but secrets exist,
+            # so EVERY vault read is now failing. Surface it once, prominently,
+            # then return None so the caller falls through (env/keyring) rather
+            # than crashing the server on a secret it can't decrypt anyway.
+            logger.error("Vault unreadable: %s", exc)
         except Exception as exc:
             logger.debug(f"Failed to read from encrypted vault: {type(exc).__name__}")
         finally:
