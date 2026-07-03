@@ -27,3 +27,10 @@ python bin/install_schedules.py --repair
 
 ### Q: Where are the logs located?
 **A:** Logs are stored in the `logs/` directory at the project root.
+
+### Q: My chat history is in the main memory DB instead of a separate chatlog DB. How do I split them?
+**A:** This happens after switching from an integrated layout (chatlog sharing
+the main DB) to separate files — repointing the path only routes new turns.
+Move the existing rows with `bin/split_chatlog_from_core.py` (dry-run by default,
+`--commit` to execute). Full steps, including repointing the hooks so it sticks,
+are in [docs/CHATLOG.md → Troubleshooting](CHATLOG.md#8-troubleshooting).

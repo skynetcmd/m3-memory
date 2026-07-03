@@ -17,6 +17,8 @@ If the resolved chatlog path **equals** the main memory DB path, the two are a s
 
 > **Deprecation**: the `CHATLOG_MODE` env var and the `mode` field in `.chatlog_config.json` are ignored (a warning is emitted once per process if `CHATLOG_MODE` is set). To keep everything in a single file, set `M3_DATABASE` and `CHATLOG_DB_PATH` to the same path, or leave `CHATLOG_DB_PATH` unset so it follows `M3_DATABASE`.
 
+> **Splitting an integrated store after the fact**: if you ran integrated (`CHATLOG_DB_PATH` equal to the main DB) and later want separate files, repointing `CHATLOG_DB_PATH` only affects *new* turns — the existing `type='chat_log'` rows stay in the main DB. Move them with `bin/split_chatlog_from_core.py` (copies rows + embeddings + FTS into the chatlog DB, verifies counts, then deletes them from core). It is dry-run by default; pass `--commit` to execute. **Take a filesystem backup of both DBs first** — the script does not. Then repoint `CHATLOG_DB_PATH` at the chatlog DB in every host-agent hook *and* confirm the MCP server resolves the same path (see the split-brain note in `docs/OPERATIONS.md`), or new turns keep landing in core.
+
 ### Data Flow
 
 ```
@@ -588,6 +590,32 @@ If migrations are out of sync, run:
 python bin/migrate_memory.py migrate --target chatlog
 python bin/migrate_memory.py migrate --target main
 ```
+
+### "My chat_log rows are in the main memory DB, not the chatlog DB"
+
+This happens when the store ran integrated (`CHATLOG_DB_PATH` pointed at the main
+memory DB) and you later switched to separate files. Repointing the path only
+routes *new* turns; the accumulated `type='chat_log'` rows stay in the main DB.
+
+Check where they actually are:
+
+```bash
+python bin/chatlog_status.py --json | jq '.db_paths, .chatlog_rows'
+```
+
+If rows sit in the main DB, move them into the chatlog DB:
+
+```bash
+# Back up both DBs first — this script does not.
+python bin/split_chatlog_from_core.py            # dry-run: shows the plan + counts
+python bin/split_chatlog_from_core.py --commit    # copy + verify + delete from core
+```
+
+Paths follow the same resolution as the rest of the subsystem
+(`--source`/`$M3_DATABASE`/engine `agent_memory.db`;
+`--target`/`$CHATLOG_DB_PATH`/engine `agent_chatlog.db`). After the move, run
+`VACUUM` on the main DB to reclaim space, and make sure `CHATLOG_DB_PATH` is
+repointed in **every** host-agent hook so future turns land in the chatlog DB.
 
 ### "I want to turn it all off"
 
