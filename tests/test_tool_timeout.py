@@ -58,6 +58,34 @@ def test_resolve_precedence_and_pop(monkeypatch):
     assert C._resolve_tool_timeout({"timeout": "abc"}) == C._DEFAULT_TOOL_TIMEOUT
 
 
+def test_per_tool_timeout_s_precedence(monkeypatch):
+    monkeypatch.delenv("M3_TOOL_TIMEOUT", raising=False)
+    slow_spec = ToolSpec(
+        name="slow_tool", description="", parameters={"properties": {}},
+        impl=_fast, is_async=True, timeout_s=120,
+    )
+    # spec.timeout_s is used when no per-call arg and no env
+    assert C._resolve_tool_timeout({}, slow_spec) == 120.0
+    # per-call arg still beats the per-tool default
+    assert C._resolve_tool_timeout({"timeout": 5}, slow_spec) == 5.0
+    # env still beats the per-tool default
+    monkeypatch.setenv("M3_TOOL_TIMEOUT", "45")
+    assert C._resolve_tool_timeout({}, slow_spec) == 45.0
+    monkeypatch.delenv("M3_TOOL_TIMEOUT", raising=False)
+    # a spec without timeout_s falls through to the global default
+    plain = ToolSpec(name="plain", description="", parameters={"properties": {}},
+                     impl=_fast, is_async=True)
+    assert C._resolve_tool_timeout({}, plain) == C._DEFAULT_TOOL_TIMEOUT
+
+
+def test_known_slow_tools_have_generous_ceiling():
+    # The injected per-tool map must reach the real specs (regression against a
+    # cold-start search being clipped by the 30s default).
+    for name in ("chatlog_search", "memory_search", "m3_index", "enrich_pending"):
+        spec = C._BY_NAME[name]
+        assert spec.timeout_s is not None and spec.timeout_s > C._DEFAULT_TOOL_TIMEOUT, name
+
+
 def test_execute_tool_times_out_loud():
     r = asyncio.run(C.execute_tool(_spec(_slow), {"timeout": 1}, "agent"))
     assert "ToolTimeout" in r

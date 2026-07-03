@@ -174,8 +174,45 @@ _TIMEOUT_PARAM_SCHEMA = {
 }
 
 
+# Per-tool default timeout ceilings (seconds) for known-slow tools that can
+# legitimately exceed the 30s fast-fail default. These are DEFAULTS: a per-call
+# `timeout` arg still overrides them. Rationale per class:
+#   - *search / entity_search: first call after a cold start pays the bge-m3 GPU
+#     model load (~10-20s) on top of the query.
+#   - *_index / enrich_pending / chroma_sync: GPU/batch/network ops proportional
+#     to corpus size.
+#   - *_bulk / *_dedup / promote: cost scales with the input set.
+# A tool absent from this map keeps the 30s default (fast-fail by construction).
+_SLOW_TOOL_TIMEOUTS: dict[str, float] = {
+    "chatlog_search": 120,
+    "chatlog_write_bulk": 120,
+    "chatlog_promote": 120,
+    "memory_search": 120,
+    "memory_search_scored": 120,
+    "memory_search_routed": 120,
+    "memory_search_multi_db": 180,
+    "entity_search": 120,
+    "conversation_search": 120,
+    "files_search": 120,
+    "files_index": 300,
+    "files_dedup": 180,
+    "m3_index": 300,
+    "enrich_pending": 300,
+    "chroma_sync": 300,
+    "memory_update_bulk": 120,
+    "memory_delete_bulk": 120,
+    "memory_dedup": 180,
+}
+
+
 def _inject_database_arg() -> None:
-    for spec in TOOLS:
+    """Inject universal `database` + `timeout` params into every tool schema and
+    apply per-tool timeout ceilings. Rebuilds TOOLS entries in place because
+    ToolSpec is frozen (schema-dict mutation is fine in place; the timeout_s
+    field needs dataclasses.replace)."""
+    import dataclasses
+
+    for i, spec in enumerate(TOOLS):
         props = spec.parameters.setdefault("properties", {})
         # Skip if some future spec already declared `database` explicitly.
         if "database" not in props:
@@ -183,6 +220,10 @@ def _inject_database_arg() -> None:
         # Same for the universal `timeout` knob.
         if "timeout" not in props:
             props["timeout"] = dict(_TIMEOUT_PARAM_SCHEMA)
+        # Apply a per-tool timeout ceiling unless the spec already set one.
+        override = _SLOW_TOOL_TIMEOUTS.get(spec.name)
+        if override is not None and spec.timeout_s is None:
+            TOOLS[i] = dataclasses.replace(spec, timeout_s=override)
 
 
 _inject_database_arg()

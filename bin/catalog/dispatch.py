@@ -55,7 +55,8 @@ def validate_args(spec: ToolSpec, args: dict) -> tuple[dict, str | None]:
 # Precedence, most-specific first:
 #   1. per-call `timeout` arg (seconds) — user-selectable per invocation
 #   2. M3_TOOL_TIMEOUT env — global default override
-#   3. _DEFAULT_TOOL_TIMEOUT (30s)
+#   3. spec.timeout_s — per-tool default (generous on known-slow GPU/batch tools)
+#   4. _DEFAULT_TOOL_TIMEOUT (30s)
 # A value <= 0 disables the timeout (the "unless otherwise specified" escape
 # hatch for genuinely long-running ops, e.g. bench/enrich). Only async impls are
 # bounded — a sync impl runs inline on the event loop and cannot be cancelled by
@@ -63,15 +64,19 @@ def validate_args(spec: ToolSpec, args: dict) -> tuple[dict, str | None]:
 _DEFAULT_TOOL_TIMEOUT = 30.0
 
 
-def _resolve_tool_timeout(args: dict) -> float | None:
+def _resolve_tool_timeout(args: dict, spec: "ToolSpec | None" = None) -> float | None:
     """Return the timeout in seconds for this call, or None to disable it.
 
     Pops the reserved `timeout` key from `args` (so it never reaches the impl).
-    Precedence: per-call arg > M3_TOOL_TIMEOUT env > 30s default. <=0 disables.
-    Malformed values fall through to the next source (fail safe, §3)."""
+    Precedence: per-call arg > M3_TOOL_TIMEOUT env > spec.timeout_s > 30s default.
+    <=0 disables. Malformed values fall through to the next source (fail safe,
+    §3). The per-tool default (spec.timeout_s) lets known-slow tools raise their
+    own ceiling without weakening the fast-fail 30s for everything else."""
     raw = args.pop("timeout", None)
     if raw is None:
         raw = os.environ.get("M3_TOOL_TIMEOUT")
+    if raw is None and spec is not None and spec.timeout_s is not None:
+        raw = spec.timeout_s
     try:
         val = float(raw) if raw is not None and raw != "" else _DEFAULT_TOOL_TIMEOUT
     except (TypeError, ValueError):
@@ -104,7 +109,7 @@ async def _run_impl_bounded(spec: ToolSpec, args: dict, timeout: float | None) -
 async def execute_tool(spec: ToolSpec, args: dict, agent_id: str) -> str:
     try:
         args = dict(args or {})
-        timeout = _resolve_tool_timeout(args)  # pops reserved `timeout` key
+        timeout = _resolve_tool_timeout(args, spec)  # pops reserved `timeout` key
         allowed_keys = set(spec.parameters.get("properties", {}).keys())
         args = {k: v for k, v in args.items() if k in allowed_keys}
         database = _pop_database(args)
@@ -135,7 +140,7 @@ async def execute_tool_structured(
     calling spec.impl (read-only by construction — no side effects).
     """
     args = dict(args or {})
-    timeout = _resolve_tool_timeout(args)  # pops reserved `timeout` key
+    timeout = _resolve_tool_timeout(args, spec)  # pops reserved `timeout` key
     allowed_keys = set(spec.parameters.get("properties", {}).keys())
     args = {k: v for k, v in args.items() if k in allowed_keys}
     database = _pop_database(args)

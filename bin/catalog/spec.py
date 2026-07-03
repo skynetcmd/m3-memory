@@ -73,3 +73,8 @@ class ToolSpec:
     validators: tuple = ()
     default_allowed: bool = True
     inject_agent_id: bool = False
+    # Per-tool default timeout in seconds. None -> use the global default
+    # (M3_TOOL_TIMEOUT env or 30s). Set generously on known-slow tools
+    # (GPU/batch/network) so they don't hit the fast-fail cap; a per-call
+    # `timeout` arg still overrides this. <= 0 disables the timeout.
+    timeout_s: float | None = None
