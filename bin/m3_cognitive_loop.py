@@ -394,6 +394,45 @@ def has_embed_work(core_db: Optional[str]) -> bool:
         return False  # conservative: don't spin the embedder unless we're sure
 
 
+def _checkpoint_wal(db_path: Optional[str]) -> None:
+    """Explicit WAL checkpoint at the end of a work cycle (§10 WAL discipline).
+
+    The loop is the heavy writer on agent_memory.db; a co-reader (the MCP
+    memory server) runs on the same DB. SQLite's passive wal_autocheckpoint
+    BUSY-FAILS whenever that reader holds a lock (documented in
+    sqlite_pragmas.py), so the WAL grows to its journal_size_limit ceiling
+    (64 MiB) and then wedges every writer AND reader — this is what deadlocked
+    the MCP server (2026-07-03, 32-min memory_search hang). An explicit
+    TRUNCATE checkpoint here is more assertive than PASSIVE and resets the WAL
+    file size. It runs only after a cycle that did write work, off the event
+    loop, and NEVER crashes the loop on failure (fail-safe): a busy checkpoint
+    is retried next cycle, it does not stall the heartbeat.
+    """
+    try:
+        import sqlite3
+
+        from sqlite_pragmas import apply_pragmas, profile_for_db
+        path = db_path or os.environ.get("M3_DATABASE")
+        if not path:
+            return
+        conn = sqlite3.connect(path, timeout=10)
+        try:
+            apply_pragmas(conn, profile_for_db(path))
+            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            # row = (busy, log_pages, checkpointed_pages). busy==1 => a reader
+            # blocked the full truncate; log loudly so a chronic wedge is visible
+            # rather than silently starving (fail-loud, §3).
+            if row and row[0] == 1:
+                logger.warning(
+                    "WAL checkpoint(TRUNCATE) was BUSY (a reader held the lock); "
+                    "WAL not fully reset this cycle (log=%s ckpt=%s). Will retry next cycle.",
+                    row[1] if len(row) > 1 else "?", row[2] if len(row) > 2 else "?")
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 — checkpoint is best-effort; never wedge the loop
+        logger.warning("WAL checkpoint failed (non-fatal): %s", e)
+
+
 async def run_embed_pass(args):
     """Drain deferred embeddings via embed_backfill.
 
@@ -609,6 +648,12 @@ async def main_loop(args):
                 break
 
         args.limit_per_pass = _full_limit  # restore for the next cycle's defaults
+
+        # §10 WAL discipline: the loop is the heavy writer; force a checkpoint at
+        # the cycle boundary so the WAL can't grow to its 64 MiB ceiling and wedge
+        # the co-reading MCP server (the 2026-07-03 32-min-hang root cause). Run
+        # off the event loop (may block briefly on a busy reader) and fail-safe.
+        await asyncio.to_thread(_checkpoint_wal, args.database)
 
         elapsed = time.monotonic() - start_time
         wait_time = max(0, args.interval - elapsed)
