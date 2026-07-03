@@ -29,14 +29,31 @@ from llm_failover import get_best_embed
 from m3_sdk import M3Context, resolve_db_path
 
 from . import config
-from .chunking import (
+
+# These are RE-EXPORTED through the memory_core shim (`from memory.embed import
+# _chunk_for_sliding_window`, the sliding-window constants, etc. — see
+# chunking.py's module docstring). They have no direct caller inside embed.py, so
+# ruff's unused-import autofix will strip them and break the shim — keep noqa.
+from .chunking import (  # noqa: F401
     _DENSE_ERR_RE,
+    DENSE_MIN_SUB_CHARS,
+    DENSE_TARGET_TOKENS,
+    DENSE_TOKEN_OVERLAP,
+    MAX_CHARS_PER_CHUNK,
+    MIN_OVERLAP_CHARS,
+    STRIDE_CHARS,
+    _chunk_for_sliding_window,
     _mean_pool,
     _order_embeddings,
     _subdivide_dense_chunk,
 )
 from .db import _db
-from .textprep import _content_hash
+
+# _augment_embed_text_with_anchors is RE-EXPORTED through this module (the
+# memory_core shim / write.py import it via `from .embed import ...`), so it must
+# stay imported here even though embed.py has no direct caller — ruff's
+# unused-import autofix will try to drop it; keep the noqa.
+from .textprep import _augment_embed_text_with_anchors, _content_hash  # noqa: F401
 
 logger = logging.getLogger("memory.embed")
 
