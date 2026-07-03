@@ -26,6 +26,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -457,6 +458,94 @@ async def run_embed_pass(args):
         logger.error(f"Embed-backfill pass error: {type(e).__name__}: {e}")
 
 
+def has_classify_work(core_db: Optional[str]) -> bool:
+    """SQL event-gate: are there rows persisted as type='auto' awaiting
+    classification? These accumulate from the zero-lag write path — memory_write
+    with auto_classify defers the LLM classify (persist as 'auto', §3/§8 zero-lag)
+    and this sweep resolves the real type later. Cheap COUNT gate; skips the pass
+    when nothing is pending."""
+    try:
+        import sqlite3
+        db_path = core_db or os.environ.get("M3_DATABASE")
+        if not db_path:
+            return False
+        conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM memory_items WHERE type='auto' AND COALESCE(is_deleted,0)=0 LIMIT 1"
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 — conservative gate; don't spin on error
+        logger.debug(f"Classify work check failed (non-fatal): {e}")
+        return False
+
+
+async def run_classify_pass(args):
+    """Classify rows deferred as type='auto' by the zero-lag write path.
+
+    memory_write persists auto_classify rows as type='auto' rather than blocking
+    the write on an LLM call (§3/§8). This sweep selects those rows, asks the
+    local LLM for the real type with a BOUNDED timeout, and UPDATEs the type.
+    Fail-open: on LLM timeout/error a row stays 'auto' and is retried next sweep —
+    never lost, never blocking. Bounded by --limit-per-pass. The per-classify
+    deadline is M3_CLASSIFY_DEADLINE_S (default 10s)."""
+    if not has_classify_work(args.database):
+        logger.debug("No pending classification work. Skipping pass.")
+        return
+
+    import sqlite3
+
+    from memory.enrich import _auto_classify
+
+    deadline_s = float(os.environ.get("M3_CLASSIFY_DEADLINE_S", "10"))
+    db_path = args.database or os.environ.get("M3_DATABASE")
+    if not db_path:
+        return
+
+    logger.info("Starting Classification pass...")
+    # Fetch the batch with a short-lived connection; do the (slow) LLM work
+    # OUTSIDE any open cursor/transaction so we never hold a lock across an LLM
+    # call (§3 cursor/lock discipline, §10 WAL — don't wedge co-readers).
+    conn = sqlite3.connect(db_path, timeout=10)
+    try:
+        rows = conn.execute(
+            "SELECT id, content, title FROM memory_items "
+            "WHERE type='auto' AND COALESCE(is_deleted,0)=0 "
+            "ORDER BY created_at LIMIT ?",
+            (int(args.limit_per_pass),),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    resolved = 0
+    for item_id, content, title in rows:
+        try:
+            new_type = await asyncio.wait_for(
+                _auto_classify(content or "", title or ""), timeout=deadline_s
+            )
+        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001 — fail-open
+            logger.warning(
+                "Classify deferred: row %s left as 'auto' (LLM unavailable/slow: %s). "
+                "Will retry next sweep.", item_id, type(e).__name__)
+            continue
+        # _auto_classify returns 'note' as its own fail-open default; only UPDATE
+        # when we got a REAL classification (not the sentinel and not still 'auto').
+        if new_type and new_type != "auto":
+            uconn = sqlite3.connect(db_path, timeout=10)
+            try:
+                uconn.execute(
+                    "UPDATE memory_items SET type=?, updated_at=? WHERE id=? AND type='auto'",
+                    (new_type, datetime.now(timezone.utc).isoformat(), item_id),
+                )
+                uconn.commit()
+                resolved += 1
+            finally:
+                uconn.close()
+    logger.info("Classification pass: resolved %d/%d row(s).", resolved, len(rows))
+
+
 async def run_consolidate_pass(args):
     """Roll up aged 'observation' groups into high-order 'belief' memories
     (knowledge-maintenance Phase 4) — governor-gated, event-driven. Only fires
@@ -622,6 +711,7 @@ async def main_loop(args):
             {"name": "entities",   "skip": args.skip_entities,      "gpu": entity_local,      "sets_limit": True,  "run": run_entity_pass},
             {"name": "enrich",     "skip": args.skip_enrich,        "gpu": enrich_local,      "sets_limit": True,  "run": run_enrich_pass},
             {"name": "embed",      "skip": args.skip_embed,         "gpu": True,              "sets_limit": True,  "run": run_embed_pass},
+            {"name": "classify",   "skip": args.skip_classify,      "gpu": enrich_local,      "sets_limit": True,  "run": run_classify_pass},
             {"name": "consolidate","skip": args.skip_consolidate,   "gpu": consolidate_local, "sets_limit": False, "run": run_consolidate_pass},
             {"name": "prune",      "skip": args.skip_chatlog_prune, "gpu": None,              "sets_limit": False, "run": run_chatlog_prune_pass},
         ]
@@ -677,6 +767,7 @@ async def main_loop(args):
                 (not args.skip_entities and has_entity_work(args.database, args.chatlog_db))
                 or (not args.skip_enrich and has_enrich_work(args.database))
                 or (not args.skip_embed and has_embed_work(args.database))
+                or (not args.skip_classify and has_classify_work(args.database))
             )
             if more_work:
                 floor = float(pacing_full.get("background_delay", 0.1))
@@ -726,6 +817,8 @@ def main():
     parser.add_argument("--skip-enrich", action="store_true", help="Skip enrichment pass")
     parser.add_argument("--skip-embed", action="store_true",
                         help="Skip embed-backfill pass (draining deferred zero-lag-write vectors)")
+    parser.add_argument("--skip-classify", action="store_true",
+                        help="Skip classification pass (resolving type='auto' rows deferred by zero-lag writes)")
     parser.add_argument("--no-reflect", action="store_true", help="Skip reflection pass")
     # Belief consolidation pass (knowledge-maintenance Phase 4). Event-driven +
     # governor-gated inside the loop; the job still requires M3_CONSOLIDATION_AUTO=1

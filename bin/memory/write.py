@@ -194,8 +194,21 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
             ext = get_configured_extractor()
             entity_extractor = ext.extract
 
+    # Zero-lag classification (mirrors the deferred-embed path below): when
+    # classification is requested we DO NOT call the LLM on the write path —
+    # a slow/unhealthy local LLM would block the write and break the advertised
+    # zero-lag guarantee (2026-07-03: an inline LLM classify on the hot path is
+    # exactly the kind of write-path stall §3/§8 forbid). Instead we persist the
+    # row as type='auto' (a valid, storable type) and let the cognitive loop's
+    # classification sweep pick it up (SELECT WHERE type='auto') and set the
+    # real type later, with a bounded LLM timeout, off the write path. On classify
+    # failure the row simply stays 'auto' and is retried next sweep — never lost,
+    # never blocking. Set M3_INLINE_CLASSIFY=1 to force the old inline behavior.
     if auto_classify and (not type or type == "auto"):
-        type = await _auto_classify(content, title)
+        if os.environ.get("M3_INLINE_CLASSIFY", "0").strip().lower() in ("1", "true", "yes", "on"):
+            type = await _auto_classify(content, title)
+        else:
+            type = "auto"  # deferred; classification sweep resolves it
 
     # Leak gate: reject `window:*` summary rows when the variant is NULL.
     # See bulk-write impl for the same gate + history (task #189, memory
@@ -819,10 +832,16 @@ async def memory_write_bulk_impl(
                 datetime.now(timezone.utc) + timedelta(hours=24)
             ).isoformat()
 
-        # Resolve auto_classify before adding to prepared
+        # Resolve auto_classify before adding to prepared. Zero-lag: defer to the
+        # classification sweep (persist as 'auto'), same as the singleton path —
+        # a bulk write must not block on N LLM classify calls. M3_INLINE_CLASSIFY=1
+        # forces the old inline behavior.
         item_type = it.get("type", "note")
         if it.get("auto_classify") and (not item_type or item_type == "auto"):
-            item_type = await _auto_classify(content, title)
+            if os.environ.get("M3_INLINE_CLASSIFY", "0").strip().lower() in ("1", "true", "yes", "on"):
+                item_type = await _auto_classify(content, title)
+            else:
+                item_type = "auto"
 
         # Resolve effective variant once so the leak gate below can check it.
         eff_variant = (it.get("variant") or variant) or None
