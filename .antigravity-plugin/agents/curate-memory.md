@@ -1,7 +1,7 @@
 ---
 name: curate-memory
 description: Curate the m3-memory store — clean, dedupe, supersede stale entries, consolidate overlapping notes. Triggered by "curate memory", "tidy memory", "dedupe memory", "consolidate memory", or after long sessions where many writes accumulated.
-tools: Bash, Read, Grep, mcp__memory__memory_search, mcp__memory__memory_dedup, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__memory__memory_link, mcp__memory__memory_link_bulk, mcp__memory__memory_update_bulk, mcp__memory__memory_write, mcp__memory__gdpr_forget, mcp__memory__curate_memory_apply, mcp__plugin_m3_m3__memory_search, mcp__plugin_m3_m3__memory_dedup, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__memory_link, mcp__plugin_m3_m3__memory_link_bulk, mcp__plugin_m3_m3__memory_update_bulk, mcp__plugin_m3_m3__memory_write, mcp__plugin_m3_m3__gdpr_forget, mcp__plugin_m3_m3__curate_memory_apply
+tools: Bash, Read, Grep, mcp__memory__memory_search, mcp__memory__memory_dedup, mcp__memory__memory_delete, mcp__memory__memory_delete_bulk, mcp__memory__memory_update, mcp__memory__memory_supersede, mcp__memory__memory_link, mcp__memory__memory_link_bulk, mcp__memory__memory_update_bulk, mcp__memory__memory_write, mcp__memory__memory_pin, mcp__memory__memory_unpin, mcp__memory__gdpr_forget, mcp__memory__curate_memory_apply, mcp__plugin_m3_m3__memory_search, mcp__plugin_m3_m3__memory_dedup, mcp__plugin_m3_m3__memory_delete, mcp__plugin_m3_m3__memory_delete_bulk, mcp__plugin_m3_m3__memory_update, mcp__plugin_m3_m3__memory_supersede, mcp__plugin_m3_m3__memory_link, mcp__plugin_m3_m3__memory_link_bulk, mcp__plugin_m3_m3__memory_update_bulk, mcp__plugin_m3_m3__memory_write, mcp__plugin_m3_m3__memory_pin, mcp__plugin_m3_m3__memory_unpin, mcp__plugin_m3_m3__gdpr_forget, mcp__plugin_m3_m3__curate_memory_apply
 model: sonnet
 ---
 
@@ -36,7 +36,15 @@ These rules cost almost nothing to follow (you already have the tool outputs in 
 
 ## Tool usage
 
+**FIRST, load the memory domain.** The m3 MCP server lazy-loads tools: at spawn start only a small essential set (`memory_search`, `memory_write`, `memory_get`) is actually callable, even though this agent DECLARES the full curation toolset. The mutating tools you need (`memory_dedup`, `memory_update`, `memory_link`, `memory_delete`, `memory_pin`, `memory_unpin`, `memory_supersede`, `curate_memory_apply`) live in the `memory` domain and are NOT materialized until you load it. Before proposing or applying anything, call:
+
+    tools_load_domain(domain="memory")
+
+If `tools_load_domain` itself isn't visible, reach any tool by name through the always-present dispatcher instead — `m3_call(tool="memory_unpin", args={"id": "..."})` — which resolves the full catalog without a domain load. Only if BOTH are unreachable do you fall back per the direct-sqlite policy below. Do NOT conclude "the tool doesn't exist" from a bare tool-list check — check via `tools_load_domain` / `m3_call` first.
+
 You have BOTH `mcp__memory__*` and `mcp__plugin_m3_m3__*` registered. Prefer the `mcp__plugin_m3_m3__*` form (current plugin namespace); fall back to `mcp__memory__*` if the plugin form errors. Both call the same backend.
+
+For pin/unpin and supersede: `memory_pin(id=...)` / `memory_unpin(id=...)` toggle the pinned (aging-exempt) flag; `memory_supersede(old_id=..., content=..., ...)` records an intentional replacement (closes the old, creates a successor). A superseded (is_deleted=1) memory should NOT stay pinned — unpin it as part of curation. Pinning is separate from writing: `memory_write` never pins; pin as a second step.
 
 For deletes:
 - **>5 ids**: use `memory_delete_bulk(ids=[...], hard=False)` — one transaction per 500-id chunk, returns `{succeeded, not_found, mode}`. ~1 MCP round-trip per chunk vs. 1 per id with the single-version. A 178-id delete drops from ~10 minutes to seconds. Preferred for DELETE arrays in apply prompts.
