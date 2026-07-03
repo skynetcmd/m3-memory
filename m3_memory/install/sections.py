@@ -250,6 +250,60 @@ def _embedder_tier_section() -> None:
         print("  status:                  pure-Python fallback")
         for line in tier["summary"].split(" — "):
             print(f"    {line.strip()}")
+    _shared_embedder_status()
+
+
+def _shared_embedder_status() -> None:
+    """Report whether m3 is in SHARED-embedder mode (.embed_config.json disables
+    the per-process in-process embedder and defers to one shared server), and if
+    so, HEALTH-CHECK that server. A shared config pointing at a DEAD endpoint is a
+    silent-failure trap (§3): every embed would slow-cascade or fail — so warn
+    loudly. Read-only; never changes doctor's exit code. Best-effort."""
+    try:
+        import json
+        import os
+        root = os.environ.get("M3_CONFIG_ROOT")
+        if not root:
+            mem = os.environ.get("M3_MEMORY_ROOT")
+            root = (os.path.join(os.path.abspath(os.path.expanduser(mem)), "config")
+                    if mem else os.path.join(os.path.expanduser("~"), ".m3", "config"))
+        path = os.path.join(root, ".embed_config.json")
+        if not os.path.exists(path):
+            print("  mode:                    per-process (each m3 process loads its "
+                  "own embedder)")
+            print("    tip: `m3 embedder shared` routes all processes to ONE shared "
+                  "GPU embedder (~9-10 GB reclaimed).")
+            return
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+    except Exception as e:  # noqa: BLE001 — informational only
+        print(f"  mode:                    UNKNOWN (.embed_config.json unreadable: {e})")
+        return
+
+    if not cfg.get("disable_inproc_embedder"):
+        print("  mode:                    per-process (.embed_config.json present but "
+              "in-process embedder not disabled)")
+        return
+
+    url = (cfg.get("fallback_url") or "http://127.0.0.1:8082").rstrip("/")
+    print(f"  mode:                    SHARED — deferring to {url}")
+    # Health-check the shared server. A dead endpoint here is the trap to surface.
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"{url}/health", timeout=3) as r:
+            body = json.loads(r.read())
+        if body.get("status") == "ok":
+            print(f"  shared server:           OK (model={body.get('model')}, "
+                  f"dim={body.get('dim')})")
+        else:
+            print(f"  shared server:           [WARN] responded status={body.get('status')!r} "
+                  "(not ready) — embeds will slow-cascade until it's serving.")
+    except Exception as e:  # noqa: BLE001
+        print(f"  shared server:           [WARN] UNREACHABLE at {url} ({type(e).__name__}) "
+              "— m3 is configured to defer to it but it's DOWN.")
+        print("    Fix: start it (AgentOS_EmbedServer task or "
+              "`python bin/embed_server_inproc.py`), or run `m3 embedder unshared` "
+              "to revert to per-process embedders.")
 
 
 def _crypto_section() -> None:

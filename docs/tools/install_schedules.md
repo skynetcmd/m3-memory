@@ -1,8 +1,8 @@
 ---
 tool: bin/install_schedules.py
-sha1: 0b7ca632b73e
-mtime_utc: 2026-06-30T21:32:48.328242+00:00
-generated_utc: 2026-06-30T22:19:18.271724+00:00
+sha1: 21bbf5924475
+mtime_utc: 2026-07-02T01:21:24.693175+00:00
+generated_utc: 2026-07-03T20:00:03.438071+00:00
 private: false
 ---
 
@@ -18,7 +18,7 @@ Uses project virtual environment paths and ensures log directories exist.
 
 ## Entry points
 
-- `def main()` (line 418)
+- `def main()` (line 726)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -31,12 +31,14 @@ Uses project virtual environment paths and ensures log directories exist.
 | `--add` | Install one schedule by name (e.g. chatlog-embed-sweep) or 'all'. | — | Prints "Nothing to do" message and exits. | str | Installs Windows Task(s) or crontab entries matching NAME; 'all' installs all 5. |
 | `--remove` | Remove one schedule by name, or 'all'. | — | Prints "Nothing to do" message and exits. | str | Removes Windows Task(s) matching NAME; 'all' removes all; Unix users edit crontab. |
 | `--repair` | Re-install every configured schedule in place (alias for --add all). | `False` |  | store_true |  |
+| `--verify` | Verify the registered job(s) match the spec (Windows task / macOS launchd / Linux systemd). NAME or 'all' (default). Exit code is non-zero if verification fails. | — |  | str |  |
 
 ---
 
 ## Environment variables read
 
-_(none detected)_
+- `USERDOMAIN`
+- `USERNAME`
 
 ---
 
@@ -52,17 +54,19 @@ _(none detected)_
 
 - `subprocess.run()  → `['crontab', '-l']`` (line 59)
 - `subprocess.run()  → `['crontab', tmp_path]`` (line 78)
+- `subprocess.run()  → `['launchctl', 'list']`` (line 658)
 - `subprocess.run()  → `['launchctl', 'load', dest]`` (line 120)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 119)
 - `subprocess.run()  → `['launchctl', 'unload', dest]`` (line 156)
-- `subprocess.run()  → `['powershell', '-NoProfile', '-NonInteractive', '-Command', ps]`` (line 377)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 334)
-- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 398)
+- `subprocess.run()  → `['schtasks', '/Create', '/TN', task['name'], '/XML', xml_path, '/F']`` (line 569)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 549)
+- `subprocess.run()  → `['schtasks', '/Delete', '/TN', task['name'], '/F']`` (line 605)
+- `subprocess.run()  → `['schtasks', '/Query', '/TN', name, '/XML', 'ONE']`` (line 620)
 - `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 136)
 - `subprocess.run()  → `['systemctl', '--user', 'daemon-reload']`` (line 170)
 - `subprocess.run()  → `['systemctl', '--user', 'disable', '--now', 'm3-cognitive-loop.service']`` (line 164)
 - `subprocess.run()  → `['systemctl', '--user', 'enable', '--now', 'm3-cognitive-loop.service']`` (line 137)
-- `subprocess.run()  → `schtasks_cmd`` (line 360)
+- `subprocess.run()  → `['systemctl', '--user', 'is-active', unit]`` (line 678)
 
 
 ---

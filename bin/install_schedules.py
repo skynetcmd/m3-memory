@@ -506,8 +506,11 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
         "<Principals>"
         '<Principal id="Author">'
         f"<UserId>{esc(user_id)}</UserId>"
-        # LeastPrivilege == run as the logged-in user, non-elevated (matches the
-        # prior schtasks default; no elevation is needed by any pass).
+        # LeastPrivilege == the task RUNS as the logged-in user, non-elevated
+        # (matches the prior schtasks default; no pass needs elevation to run).
+        # NOTE: this is about EXECUTION, not REGISTRATION — registering an ONSTART
+        # (boot-trigger) task still requires an elevated shell; the caller handles
+        # the "Access is denied" case with a re-run-elevated hint.
         "<RunLevel>LeastPrivilege</RunLevel>"
         "<LogonType>InteractiveToken</LogonType>"
         "</Principal>"
@@ -563,6 +566,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
     )
 
     success = True
+    denied_any = False
     for task in tasks:
         subprocess.run(["schtasks", "/Delete", "/TN", task["name"], "/F"], capture_output=True)
         # Register from a full Task Scheduler XML definition. Unlike the CLI
@@ -601,10 +605,10 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
             _safe_print(f"{OK} Created Windows Task: {task['name']}{note}")
         else:
             # Fail loud (§3): print the real schtasks error, don't swallow it.
-            _safe_print(
-                f"{FAIL} Failed to create task {task['name']}: "
-                f"{(result.stderr or result.stdout).strip()}"
-            )
+            err = (result.stderr or result.stdout).strip()
+            _safe_print(f"{FAIL} Failed to create task {task['name']}: {err}")
+            if "access is denied" in err.lower():
+                denied_any = True
             success = False
 
     if success:
@@ -612,6 +616,19 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
         _safe_print(f"   Logs available in: {log_dir}")
     else:
         _safe_print(f"{WARN} One or more Windows tasks failed to install (see above).")
+        if denied_any:
+            # "Access is denied" on /Create means the shell isn't elevated. The
+            # ONSTART tasks (CognitiveLoop, EmbedServer, SecretRotator) register
+            # a boot trigger, which Task Scheduler gates behind admin — the
+            # MINUTE/DAILY tasks register fine unelevated, so a partial failure
+            # here is almost always this. Tell the user exactly how to fix it.
+            _safe_print(
+                f"{WARN} 'Access is denied' = this shell is not elevated. Boot-start "
+                "(ONSTART) tasks need an Administrator shell to register. Re-run from "
+                "an elevated terminal:")
+            _safe_print("   python bin/install_schedules.py --repair")
+            _safe_print("   (the already-created non-boot tasks are fine; --repair is "
+                        "idempotent and just adds the missing ones.)")
 
 
 def remove_windows_tasks(selector: str | None, m3_memory_root: str):

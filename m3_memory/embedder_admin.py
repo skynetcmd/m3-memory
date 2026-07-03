@@ -349,6 +349,17 @@ def cmd_install_gpu(args: argparse.Namespace) -> int:
 
 # ── argparse wiring ───────────────────────────────────────────────────────────
 
+def _print_stop_proc_hint(script_name: str) -> None:
+    """Print the platform-appropriate one-liner to find + stop a python process
+    running `script_name`, so a user isn't left guessing how to 'restart the loop'."""
+    if sys.platform == "win32":
+        print("         Find + stop it (PowerShell):")
+        print("           Get-CimInstance Win32_Process | ? { $_.CommandLine -like "
+              f"'*{script_name}*' }} | ForEach {{ Stop-Process -Id $_.ProcessId -Force }}")
+    else:
+        print(f"           pkill -f {script_name}   # find + stop it")
+
+
 def _embed_config_path() -> str:
     """<config_root>/.embed_config.json — read at import by bin/memory/embed.py.
 
@@ -394,10 +405,28 @@ def cmd_shared(args: argparse.Namespace) -> int:
         json.dump(cfg, f, indent=2)
     print(f"[OK] wrote {path}")
     print(f"     -> in-process embedder DISABLED; clients defer to {url}")
-    print("\nNext:")
-    print("  1. Ensure the shared server runs (AgentOS_EmbedServer task, or "
-          "`python bin/embed_server_inproc.py --port %d`)." % port)
-    print("  2. Restart the MCP server + cognitive loop so they re-read the config.")
+    print("\nThe config is read at process START, so already-running m3 processes")
+    print("keep their OWN embedder until restarted. Do these THREE steps:\n")
+    print(f"  1. Start the shared server (the SOLE GPU embedder, on {url}):")
+    if sys.platform == "win32":
+        print("       Installed as the AgentOS_EmbedServer scheduled task by:")
+        print("           python bin/install_schedules.py --repair")
+        print("       ^ run from an ELEVATED (Administrator) shell — the ONSTART")
+        print("         task registration fails with 'Access is denied' otherwise.")
+        print("       Or start it directly for this session:")
+        print(f"           python bin/embed_server_inproc.py --port {port}")
+    else:
+        print(f"           python bin/embed_server_inproc.py --port {port}")
+        print("       (or wire a launchd/systemd unit so it starts on boot).")
+    print("\n  2. Restart the m3 processes so they DROP their own embedder:")
+    print("       - Cognitive loop: stop the running m3_cognitive_loop.py, then")
+    print("         let its scheduled task / your launcher relaunch it.")
+    _print_stop_proc_hint("m3_cognitive_loop.py")
+    print("       - MCP memory server: restart it. In Claude Code, killing it DROPS")
+    print("         the client connection — run `/mcp` to reconnect afterward (a")
+    print("         plain reconnect alone does NOT reload code; the process must restart).")
+    print("\n  3. Verify:  m3 doctor   (reports shared mode + server health), or")
+    print(f"              curl {url}/health   ->  {{\"status\":\"ok\"}}")
     return 0
 
 

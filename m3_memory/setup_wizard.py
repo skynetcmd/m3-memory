@@ -182,6 +182,10 @@ class SetupPlan:
     # OFF: a no-matching-wheel host gets the graceful pure-Python fallback +
     # build-your-own guidance, never a surprise compile.
     allow_native_source_build: bool = False
+    # Route all m3 processes to ONE shared GPU embedder server (one CUDA context)
+    # instead of each loading its own. Writes .embed_config.json. Default OFF —
+    # only worth it when multiple m3 processes embed on the same GPU + RAM is tight.
+    use_shared_embedder: bool = False
     endpoint: Optional[str] = None
     cognitive_loop: bool = False
     # B15: GGUF path discovered + accepted in preflight. Used by the embedder
@@ -345,6 +349,23 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
                 "    If no prebuilt wheel matches, build it from source? "
                 "(needs Rust+cmake+C++; slow)",
                 default=False,
+            )
+            # Shared-embedder mode: one CUDA context for all m3 processes. Only
+            # worth it when several m3 processes embed on the same GPU + RAM is
+            # tight (the common one-GPU desktop/homelab case). Default OFF.
+            print()
+            print("    Shared GPU embedder: run ONE embedder server that all m3")
+            print("    processes (MCP server + cognitive loop) share, instead of each")
+            print("    loading its own copy on the GPU. Reclaims ~9-10 GB of host RAM")
+            print("    when several processes embed on the same GPU. You can also")
+            print("    toggle this later with `m3 embedder shared` / `unshared`.")
+            plan.use_shared_embedder = (
+                False if args.no_shared_embedder else
+                (True if args.shared_embedder else
+                 _ask_yes_no(
+                     "    Use the shared GPU embedder (one CUDA context)?",
+                     default=False,
+                 ))
             )
 
     print()
@@ -928,6 +949,25 @@ def _step_gpu_embedder(plan: "SetupPlan") -> bool:
         return True  # non-fatal
 
 
+def _step_shared_embedder(plan: "SetupPlan") -> bool:
+    """Enable shared-embedder mode: write .embed_config.json so all m3 processes
+    defer to one shared GPU embedder server (one CUDA context). Non-fatal."""
+    print()
+    print("[~] Enabling shared GPU embedder (one CUDA context for all processes)")
+    try:
+        import types
+
+        from m3_memory import embedder_admin
+        # cmd_shared writes .embed_config.json + prints the 3-step follow-up
+        # (start the server, restart the m3 processes, verify). Reuse it so the
+        # wizard and the CLI stay in lockstep.
+        embedder_admin.cmd_shared(types.SimpleNamespace(port=8082))
+    except Exception as e:  # noqa: BLE001 — non-fatal; user can run `m3 embedder shared` later
+        print(f"    [!] could not enable shared mode ({e}); run `m3 embedder shared` later.")
+        return True
+    return True
+
+
 def _step_install_wolfssl(plan: "SetupPlan") -> bool:
     """Build + install the open-source wolfSSL so FIPS mode actually works.
 
@@ -1272,6 +1312,8 @@ def run_setup(args: argparse.Namespace) -> int:
     _step_cpu_sovereign_embedder()
     if plan.install_gpu_embedder:
         _step_gpu_embedder(plan)
+    if plan.use_shared_embedder:
+        _step_shared_embedder(plan)
     _step_wire_agents(plan)
     governor_result = _step_governor_migration(plan)
     _step_doctor()
@@ -1339,6 +1381,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
              "from source (needs Rust + cmake + a C++ compiler; multi-minute "
              "compile). Default: skip the source build and fall back to "
              "pure-Python.",
+    )
+    parser.add_argument(
+        "--shared-embedder", action="store_true",
+        help="Enable shared-embedder mode: all m3 processes defer to ONE shared "
+             "GPU embedder server (one CUDA context, ~9-10 GB reclaimed). Writes "
+             ".embed_config.json. Toggle later with `m3 embedder shared/unshared`.",
+    )
+    parser.add_argument(
+        "--no-shared-embedder", action="store_true",
+        help="Force per-process embedders (do NOT enable shared mode). Overrides "
+             "--shared-embedder; the non-interactive default.",
     )
     parser.add_argument(
         "--endpoint", default=None,
