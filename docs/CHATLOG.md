@@ -17,7 +17,9 @@ If the resolved chatlog path **equals** the main memory DB path, the two are a s
 
 > **Deprecation**: the `CHATLOG_MODE` env var and the `mode` field in `.chatlog_config.json` are ignored (a warning is emitted once per process if `CHATLOG_MODE` is set). To keep everything in a single file, set `M3_DATABASE` and `CHATLOG_DB_PATH` to the same path, or leave `CHATLOG_DB_PATH` unset so it follows `M3_DATABASE`.
 
-> **Splitting an integrated store after the fact**: if you ran integrated (`CHATLOG_DB_PATH` equal to the main DB) and later want separate files, repointing `CHATLOG_DB_PATH` only affects *new* turns — the existing `type='chat_log'` rows stay in the main DB. Move them with `bin/split_chatlog_from_core.py` (copies rows + embeddings + FTS into the chatlog DB, verifies counts, then deletes them from core). It is dry-run by default; pass `--commit` to execute. **Take a filesystem backup of both DBs first** — the script does not. Then repoint `CHATLOG_DB_PATH` at the chatlog DB in every host-agent hook *and* confirm the MCP server resolves the same path (see the split-brain note in `docs/OPERATIONS.md`), or new turns keep landing in core.
+> **Splitting an integrated store after the fact**: if you ran integrated (`CHATLOG_DB_PATH` equal to the main DB) and later want separate files, repointing `CHATLOG_DB_PATH` only affects *new* turns — the existing `type='chat_log'` rows stay in the main DB. Move them with `bin/split_chatlog_from_core.py` (copies rows + existing embeddings + FTS into the chatlog DB, verifies counts, then deletes them from core). It is dry-run by default; pass `--commit` to execute. **Take a filesystem backup of both DBs first** — the script does not. Then repoint `CHATLOG_DB_PATH` at the chatlog DB in every host-agent hook *and* confirm the MCP server resolves the same path (see the split-brain note in `docs/OPERATIONS.md`), or new turns keep landing in core.
+>
+> The move only carries embeddings that *already existed* in the source; any source rows that were never embedded arrive in the chatlog DB with no vector. **Backfill them afterward** so semantic/hybrid search covers the full history — see "Backfilling missing embeddings" in §8, or wait for the next scheduled embed sweep.
 
 ### Data Flow
 
@@ -563,17 +565,38 @@ python bin/chatlog_status.py --json | jq '.queue_depth, .spill_files'
 
 ### "Search returns nothing"
 
-When the chatlog DB is a different file from the main DB, search is FTS5-only (no vector embeddings). Check:
+FTS5 keyword search works as soon as rows land; vector/hybrid search needs the
+rows to be embedded (the embed sweeper runs on a schedule and fills the backlog
+lazily). Check:
 
 1. Unified status: `python bin/chatlog_status.py --json | jq '.unified, .db_paths'`
 2. Row count: `python bin/chatlog_status.py | grep chatlog_rows`
 3. Embed backlog: `chatlog_status.py | grep without_embed`
 
-If backlog is high, wait for the next embed sweep or manually run:
+If the backlog is high, wait for the next scheduled sweep or run one now (see
+"Backfilling missing embeddings" below).
+
+### Backfilling missing embeddings
+
+Rows are searchable by FTS5 immediately but only join vector/hybrid search once
+embedded. A backlog builds up when: the sweeper schedule isn't installed, rows
+were bulk-imported with `embed=False`, or you just moved rows in with
+`split_chatlog_from_core.py` (which carries only embeddings that already
+existed). Count the gap, then run the sweeper against the chatlog DB:
 
 ```bash
-python bin/chatlog_embed_sweeper.py --force
+# How many rows still need an embedding:
+python bin/chatlog_status.py | grep without_embed
+
+# Drain the whole backlog in one pass (unbounded time budget) and flush spill:
+python bin/chatlog_embed_sweeper.py --deadline 0 --drain-spill
 ```
+
+The sweeper only touches rows missing from `memory_embeddings`, so re-running it
+is safe and idempotent. Useful flags: `--deadline <s>` caps one run's wall-clock
+(default 60s; `0` = unbounded), `--max-per-run <n>` caps rows per run (default
+10000), `--dry-run` reports without embedding. It resolves the chatlog DB the
+same way as the rest of the subsystem, or takes an explicit `--database <path>`.
 
 ### "Promote failed"
 

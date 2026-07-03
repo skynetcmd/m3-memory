@@ -32,5 +32,16 @@ python bin/install_schedules.py --repair
 **A:** This happens after switching from an integrated layout (chatlog sharing
 the main DB) to separate files — repointing the path only routes new turns.
 Move the existing rows with `bin/split_chatlog_from_core.py` (dry-run by default,
-`--commit` to execute). Full steps, including repointing the hooks so it sticks,
-are in [docs/CHATLOG.md → Troubleshooting](CHATLOG.md#8-troubleshooting).
+`--commit` to execute), then backfill embeddings (next question) since the move
+only carries embeddings that already existed. Full steps, including repointing
+the hooks so it sticks, are in
+[docs/CHATLOG.md → Troubleshooting](CHATLOG.md#8-troubleshooting).
+
+### Q: Chatlog search misses recent (or just-moved) turns. How do I backfill embeddings?
+**A:** FTS5 keyword search works immediately, but vector/hybrid search needs the
+rows embedded — a backlog builds up when the embed sweeper schedule isn't
+installed, rows were bulk-imported, or you just moved rows between DBs. Check the
+gap with `python bin/chatlog_status.py | grep without_embed`, then drain it:
+`python bin/chatlog_embed_sweeper.py --deadline 0 --drain-spill`. The sweep is
+idempotent (only embeds rows that lack one). Details in
+[docs/CHATLOG.md → Backfilling missing embeddings](CHATLOG.md#backfilling-missing-embeddings).
