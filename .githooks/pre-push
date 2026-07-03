@@ -64,22 +64,43 @@ changed_files() {
 }
 CHANGED="$(changed_files)"
 
-# --- 1/2 tool-catalog drift gate (conditional) ------------------------------
+# --- 1/3 tool-catalog drift gate (conditional) ------------------------------
 # Paths whose change can make the generated catalog/inventory or the hardcoded
 # "N tools" counts go stale. Mirrors check_tool_catalog_drift.py's universe.
 if printf '%s\n' "$CHANGED" | grep -qE \
   '^bin/mcp_tool_catalog\.py$|^bin/mcp_proxy\.py$|^bin/gen_tool_manifest\.py$|^bin/gen_mcp_inventory\.py$|^docs/tools/MCP_CATALOG\.json$|^docs/MCP_TOOLS\.md$|^README\.md$|^docs/COMPARISON\.md$|^docs/MYTHS_AND_FACTS\.md$|^docs/tools/files_memory\.md$|^tests/test_tool_count_drift\.py$|^tests/test_mcp_catalog_manifest_fresh\.py$'
 then
-  echo "[pre-push] 1/2 tool-catalog drift gate (catalog/docs touched — checking)"
+  echo "[pre-push] 1/3 tool-catalog drift gate (catalog/docs touched — checking)"
   "$PY" bin/check_tool_catalog_drift.py || {
     echo "[pre-push] BLOCKED: tool-catalog drift. Regenerate + commit, then re-push." >&2
     exit 1
   }
 else
-  echo "[pre-push] 1/2 tool-catalog drift gate — skipped (no catalog/doc paths in push)"
+  echo "[pre-push] 1/3 tool-catalog drift gate — skipped (no catalog/doc paths in push)"
 fi
 
-# --- 2/2 bench-data + compromising-content leakage scan (always) ------------
+# --- 2/3 shim re-export integrity gate (conditional) ------------------------
+# The memory_core modularization is a FACADE: bin/memory/*.py re-export symbols
+# from each other, and downstream does `from memory.embed import <sym>`. A
+# re-exported symbol has no direct caller in its own module, so `ruff --fix`'s
+# unused-import autofix silently STRIPS it — breaking the import chain at RUNTIME,
+# not at lint time (memory_write broke this way in 4d46b97). Run the shim guard
+# whenever a memory shim file changes so a stripped re-export can't reach the
+# remote.
+if printf '%s\n' "$CHANGED" | grep -qE '^bin/memory/[a-z_]+\.py$|^bin/memory_core\.py$'
+then
+  echo "[pre-push] 2/3 shim re-export integrity gate (memory shim touched — checking)"
+  "$PY" -m pytest tests/test_shim_reexports.py -q >/dev/null 2>&1 || {
+    echo "[pre-push] BLOCKED: a memory shim re-export is missing (likely stripped" >&2
+    echo "  by 'ruff --fix'). Run: pytest tests/test_shim_reexports.py -q" >&2
+    echo "  Restore the dropped 'from .<sibling> import ...' + mark it # noqa: F401." >&2
+    exit 1
+  }
+else
+  echo "[pre-push] 2/3 shim re-export integrity gate — skipped (no memory shim in push)"
+fi
+
+# --- 3/3 bench-data + compromising-content leakage scan (always) ------------
 # Patterns mirror the m3 bench-privacy guard (LME-M ids, dataset paths, local
 # absolute paths, credentials) PLUS "don't leak anything compromising":
 #   - generic RFC1918 IP SHAPES (10.x / 192.168.x) — catches any internal IP
@@ -92,7 +113,7 @@ fi
 # legitimately CONTAIN the marker patterns: this hook (its own regex), the
 # process docs, and the leakage-test fixtures — else the scanner matches its
 # own definition (a false positive blocking the very commit that adds the gate).
-echo "[pre-push] 2/2 bench-data + compromising-content leakage scan"
+echo "[pre-push] 3/3 bench-data + compromising-content leakage scan"
 LEAK=""
 for r in "${RANGES[@]}"; do
   # Only scan addition lines (^+) — deletions can't leak to the remote.
