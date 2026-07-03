@@ -107,6 +107,15 @@ def shared_cols(src: str, tgt: str, table: str) -> list[str]:
     return [c for c in cols(src) if c in tgt_set]
 
 
+def _table_has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """True iff `table` exists in `conn` and declares `column`. Used to guard
+    dependent-metadata cleanup against leaner schemas that lack the entity stack."""
+    try:
+        return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})"))
+    except sqlite3.Error:
+        return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--source", help="CORE memory DB (default: $M3_DATABASE or engine agent_memory.db)")
@@ -183,9 +192,20 @@ def main() -> int:
                   f"Source left INTACT. ***", file=sys.stderr)
             return 1
 
+        # Delete dependent metadata for the moved rows BEFORE the items
+        # themselves, so we don't leave dangling references in the source
+        # (memory_item_entities / entity_extraction_queue carry memory_id FKs
+        # that a bare items+embeddings delete would orphan). Guarded by
+        # table_exists: a leaner source schema may not have the entity stack.
+        chatlog_ids_sql = "SELECT id FROM memory_items WHERE type='chat_log'"
+        for tbl, col in (("memory_item_entities", "memory_id"),
+                         ("entity_extraction_queue", "memory_id"),
+                         ("entity_relationships", "source_memory_id")):
+            if _table_has_column(core, tbl, col):
+                core.execute(f"DELETE FROM {tbl} WHERE {col} IN ({chatlog_ids_sql})")
         core.execute(
             "DELETE FROM memory_embeddings WHERE memory_id IN "
-            "(SELECT id FROM memory_items WHERE type='chat_log')")
+            f"({chatlog_ids_sql})")
         core.execute("DELETE FROM memory_items WHERE type='chat_log'")
         core.commit()
         remain = core.execute(
