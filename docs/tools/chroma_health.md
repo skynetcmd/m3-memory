@@ -1,8 +1,8 @@
 ---
 tool: bin/chroma_health.py
-sha1: 4a1ef5615cc5
-mtime_utc: 2026-05-01T09:15:53.154019+00:00
-generated_utc: 2026-05-01T13:05:26.763950+00:00
+sha1: e1b450c1d8c5
+mtime_utc: 2026-07-02T21:51:11.637830+00:00
+generated_utc: 2026-07-03T20:00:03.159721+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ Can be wired into:
 
 ## Entry points
 
-- `def main()` (line 349)
+- `def main()` (line 351)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -49,7 +49,6 @@ Can be wired into:
 
 ## Environment variables read
 
-- `CHROMA_BASE_URL`
 - `M3_CHROMA_SYNC_QUEUE_MAX`
 - `M3_CHROMA_SYNC_QUEUE_WARN`
 - `M3_DATABASE`
@@ -58,7 +57,7 @@ Can be wired into:
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (getenv_compat)`
 
 ---
 
@@ -66,11 +65,11 @@ _(none detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 179)
+- `httpx.AsyncClient()` (line 181)
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 62)
+- `sqlite3.connect()  → `db_path`` (line 64)
 
 
 ---

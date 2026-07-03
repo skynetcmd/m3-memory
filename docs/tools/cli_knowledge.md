@@ -1,8 +1,8 @@
 ---
 tool: bin/cli_knowledge.py
-sha1: a90253ea9ab4
-mtime_utc: 2026-04-23T20:33:55.940828+00:00
-generated_utc: 2026-05-24T12:09:07.712428+00:00
+sha1: 65f8229b715f
+mtime_utc: 2026-07-02T01:21:24.643804+00:00
+generated_utc: 2026-07-03T20:00:03.184597+00:00
 private: false
 ---
 

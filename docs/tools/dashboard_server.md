@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: 052561351b81
-mtime_utc: 2026-06-09T02:42:18.250087+00:00
-generated_utc: 2026-06-12T20:00:04.921426+00:00
+sha1: 4f3afb2ee8ac
+mtime_utc: 2026-07-02T21:51:11.638834+00:00
+generated_utc: 2026-07-03T20:00:03.253887+00:00
 private: false
 ---
 
@@ -91,22 +91,24 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `cmd`` (line 2923)
+- `subprocess.Popen()  → `cmd`` (line 1318)
 
 **sqlite**
 
-- `sqlite3.connect()  → `chatlog_db`` (line 1956)
-- `sqlite3.connect()  → `files_db`` (line 1965)
-- `sqlite3.connect()  → `main_db`` (line 1929)
-- `sqlite3.connect()  → `main_db`` (line 1951)
-- `sqlite3.connect()  → `selected_db_path`` (line 2092)
-- `sqlite3.connect()  → `selected_db_path`` (line 2265)
+- `sqlite3.connect()  → `chatlog_db`` (line 287)
+- `sqlite3.connect()  → `files_db`` (line 296)
+- `sqlite3.connect()  → `main_db`` (line 260)
+- `sqlite3.connect()  → `main_db`` (line 282)
+- `sqlite3.connect()  → `selected_db_path`` (line 487)
+- `sqlite3.connect()  → `selected_db_path`` (line 660)
 
 
 ---
 
 ## Notable external imports
 
+- `dashboard.queue_stats (collect_pipeline_stats, collect_governor)`
+- `dashboard.templates (HEADER_HTML, STYLE_CSS, INDEX_HTML, BROWSE_HTML, AUDIT_HTML)`
 - `difflib`
 - `fastapi (FastAPI, Form, HTTPException, Request)`
 - `fastapi.responses (HTMLResponse, JSONResponse, StreamingResponse)`

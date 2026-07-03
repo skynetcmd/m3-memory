@@ -1,8 +1,8 @@
 ---
 tool: bin/deep_sync.py
-sha1: a4db0b124814
-mtime_utc: 2026-04-23T20:33:55.943412+00:00
-generated_utc: 2026-05-24T12:09:07.771199+00:00
+sha1: 2bd09b17ebaa
+mtime_utc: 2026-07-02T01:21:24.647284+00:00
+generated_utc: 2026-07-03T20:00:03.275638+00:00
 private: false
 ---
 

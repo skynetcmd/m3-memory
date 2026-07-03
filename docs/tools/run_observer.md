@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: 5c51f6bd0a04
-mtime_utc: 2026-06-09T13:47:00.544516+00:00
-generated_utc: 2026-06-12T20:00:05.464436+00:00
+sha1: 35285974a4d6
+mtime_utc: 2026-07-02T21:51:11.656462+00:00
+generated_utc: 2026-07-03T20:00:03.849906+00:00
 private: false
 ---
 
@@ -39,7 +39,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 789)
+- `def main()` (line 828)
 - `if __name__ == "__main__"` guard
 
 ---

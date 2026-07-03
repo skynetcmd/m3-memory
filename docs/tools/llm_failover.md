@@ -1,8 +1,8 @@
 ---
 tool: bin/llm_failover.py
-sha1: 4bf4912c17f1
-mtime_utc: 2026-06-30T21:32:48.329241+00:00
-generated_utc: 2026-06-30T22:19:18.281987+00:00
+sha1: bc7562747833
+mtime_utc: 2026-07-02T21:51:11.644462+00:00
+generated_utc: 2026-07-03T20:00:03.458711+00:00
 private: false
 ---
 
@@ -32,7 +32,6 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `LLM_ENDPOINTS_CSV`
 - `M3_EMBED_DISCOVERY_NEG_TTL`
 - `M3_LLM_CONNECT_TIMEOUT`
 - `M3_LLM_URL`
@@ -41,7 +40,7 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (getenv_compat)`
 
 ---
 

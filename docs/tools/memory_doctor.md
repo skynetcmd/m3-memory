@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: b61e551c0236
-mtime_utc: 2026-06-28T12:28:55.205643+00:00
-generated_utc: 2026-06-30T22:19:18.450937+00:00
+sha1: b238f6a7abc6
+mtime_utc: 2026-07-02T01:21:24.711174+00:00
+generated_utc: 2026-07-03T20:00:03.697874+00:00
 private: false
 ---
 
@@ -45,6 +45,8 @@ tested in isolation.
 | `--skip-embed-server` | Skip the Rust-side m3-embed-server doctor subprocess. | `False` |  | store_true |  |
 | `--skip-oxidation` | Skip the m3_core_rs native-extension status report. | `False` |  | store_true |  |
 | `--skip-governor` | Skip the governor scheduled-task migration check. | `False` |  | store_true |  |
+| `--skip-schedule` | Skip the dangling scheduled-task interpreter check. | `False` |  | store_true |  |
+| `--verbose` | Show the full detail (DB-repair steps + each probe's expanded report + model-load logs). Default is a compact one-line-per-check summary of high-yield verdicts. | `False` |  | store_true |  |
 | `--fix` | Run quick-repair mode to auto-fix common deployment issues. | `False` |  | store_true |  |
 | `--dry-run` | Use with --fix to simulate repair steps without making changes. | `False` |  | store_true |  |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
@@ -76,6 +78,7 @@ _(no subprocess / http / sqlite calls detected)_
 - `doctor (embed_server_probe)`
 - `doctor (governor_probe)`
 - `doctor (oxidation_probe)`
+- `doctor (schedule_probe)`
 - `memory.doctor (memory_doctor_fix_impl)`
 
 ---

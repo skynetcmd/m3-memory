@@ -1,8 +1,8 @@
 ---
 tool: bin/test_memory_bridge.py
-sha1: 0818ecc6bcd7
-mtime_utc: 2026-05-30T16:01:38.273980+00:00
-generated_utc: 2026-05-31T18:42:53.037781+00:00
+sha1: 68fb79a5c131
+mtime_utc: 2026-07-02T21:51:11.656462+00:00
+generated_utc: 2026-07-03T20:00:04.046297+00:00
 private: false
 ---
 
@@ -22,8 +22,8 @@ embedding model is not loaded in LM Studio.
 
 ## Entry points
 
-- `async def run()` (line 134)
-- `async def main()` (line 1346)
+- `async def run()` (line 135)
+- `async def main()` (line 1347)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -38,7 +38,6 @@ _(no argparse arguments detected)_
 
 - `COMPUTERNAME`
 - `HOSTNAME`
-- `ORIGIN_DEVICE`
 - `SEARCH_ROW_CAP`
 
 ---
@@ -46,6 +45,7 @@ _(no argparse arguments detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
+- `m3_sdk (getenv_compat)`
 - `m3_sdk (resolve_db_path)`
 - `memory_bridge (VALID_MEMORY_TYPES, _content_hash, _ensure_sync_tables, _pack, agent_get, agent_heartbeat, agent_list, agent_offline, agent_register, chroma_sync, conversation_append, conversation_messages, conversation_search, conversation_start, conversation_summarize, gdpr_export, gdpr_forget, memory_consolidate, memory_cost_report, memory_delete, memory_export, memory_get, memory_graph, memory_handoff, memory_history, memory_import, memory_inbox, memory_inbox_ack, memory_link, memory_maintenance, memory_search, memory_set_retention, memory_suggest, memory_update, memory_verify, memory_write, notifications_ack, notifications_ack_all, notifications_poll, notify, sync_status, task_assign, task_create, task_get, task_list, task_set_result, task_tree, task_update)`
 - `memory_core`
@@ -56,42 +56,42 @@ _(no argparse arguments detected)_
 
 **http**
 
-- `httpx.AsyncClient()` (line 64)
+- `httpx.AsyncClient()` (line 65)
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 107)
-- `sqlite3.connect()  → `DB_PATH`` (line 1089)
-- `sqlite3.connect()  → `DB_PATH`` (line 1133)
-- `sqlite3.connect()  → `DB_PATH`` (line 1169)
-- `sqlite3.connect()  → `DB_PATH`` (line 1232)
-- `sqlite3.connect()  → `DB_PATH`` (line 1250)
-- `sqlite3.connect()  → `DB_PATH`` (line 1259)
-- `sqlite3.connect()  → `DB_PATH`` (line 1320)
-- `sqlite3.connect()  → `DB_PATH`` (line 204)
-- `sqlite3.connect()  → `DB_PATH`` (line 246)
-- `sqlite3.connect()  → `DB_PATH`` (line 253)
-- `sqlite3.connect()  → `DB_PATH`` (line 426)
-- `sqlite3.connect()  → `DB_PATH`` (line 437)
-- `sqlite3.connect()  → `DB_PATH`` (line 485)
-- `sqlite3.connect()  → `DB_PATH`` (line 505)
-- `sqlite3.connect()  → `DB_PATH`` (line 518)
-- `sqlite3.connect()  → `DB_PATH`` (line 527)
-- `sqlite3.connect()  → `DB_PATH`` (line 557)
-- `sqlite3.connect()  → `DB_PATH`` (line 573)
-- `sqlite3.connect()  → `DB_PATH`` (line 586)
-- `sqlite3.connect()  → `DB_PATH`` (line 606)
-- `sqlite3.connect()  → `DB_PATH`` (line 623)
-- `sqlite3.connect()  → `DB_PATH`` (line 743)
-- `sqlite3.connect()  → `DB_PATH`` (line 786)
-- `sqlite3.connect()  → `DB_PATH`` (line 795)
-- `sqlite3.connect()  → `DB_PATH`` (line 816)
-- `sqlite3.connect()  → `DB_PATH`` (line 836)
-- `sqlite3.connect()  → `DB_PATH`` (line 888)
-- `sqlite3.connect()  → `DB_PATH`` (line 921)
-- `sqlite3.connect()  → `DB_PATH`` (line 959)
-- `sqlite3.connect()  → `DB_PATH`` (line 96)
-- `sqlite3.connect()  → `DB_PATH`` (line 986)
+- `sqlite3.connect()  → `DB_PATH`` (line 108)
+- `sqlite3.connect()  → `DB_PATH`` (line 1090)
+- `sqlite3.connect()  → `DB_PATH`` (line 1134)
+- `sqlite3.connect()  → `DB_PATH`` (line 1170)
+- `sqlite3.connect()  → `DB_PATH`` (line 1233)
+- `sqlite3.connect()  → `DB_PATH`` (line 1251)
+- `sqlite3.connect()  → `DB_PATH`` (line 1260)
+- `sqlite3.connect()  → `DB_PATH`` (line 1321)
+- `sqlite3.connect()  → `DB_PATH`` (line 205)
+- `sqlite3.connect()  → `DB_PATH`` (line 247)
+- `sqlite3.connect()  → `DB_PATH`` (line 254)
+- `sqlite3.connect()  → `DB_PATH`` (line 427)
+- `sqlite3.connect()  → `DB_PATH`` (line 438)
+- `sqlite3.connect()  → `DB_PATH`` (line 486)
+- `sqlite3.connect()  → `DB_PATH`` (line 506)
+- `sqlite3.connect()  → `DB_PATH`` (line 519)
+- `sqlite3.connect()  → `DB_PATH`` (line 528)
+- `sqlite3.connect()  → `DB_PATH`` (line 558)
+- `sqlite3.connect()  → `DB_PATH`` (line 574)
+- `sqlite3.connect()  → `DB_PATH`` (line 587)
+- `sqlite3.connect()  → `DB_PATH`` (line 607)
+- `sqlite3.connect()  → `DB_PATH`` (line 624)
+- `sqlite3.connect()  → `DB_PATH`` (line 744)
+- `sqlite3.connect()  → `DB_PATH`` (line 787)
+- `sqlite3.connect()  → `DB_PATH`` (line 796)
+- `sqlite3.connect()  → `DB_PATH`` (line 817)
+- `sqlite3.connect()  → `DB_PATH`` (line 837)
+- `sqlite3.connect()  → `DB_PATH`` (line 889)
+- `sqlite3.connect()  → `DB_PATH`` (line 922)
+- `sqlite3.connect()  → `DB_PATH`` (line 960)
+- `sqlite3.connect()  → `DB_PATH`` (line 97)
+- `sqlite3.connect()  → `DB_PATH`` (line 987)
 
 
 ---

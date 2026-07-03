@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: b2a7ca7709e5
-mtime_utc: 2026-06-30T21:32:48.329659+00:00
-generated_utc: 2026-06-30T22:19:18.304960+00:00
+sha1: a58a527bedba
+mtime_utc: 2026-07-03T15:14:29.121741+00:00
+generated_utc: 2026-07-03T20:00:03.508085+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 556)
+- `def main()` (line 786)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -43,7 +43,7 @@ for m3_enrich and m3_entities.
 | `--background` | Run in background (fire and forget) | `False` |  | store_true |  |
 | `--log-file` | Append logging to this file (scheduled-task / service mode). Survives the Windows pythonw re-exec. | None |  | str |  |
 | `--concurrency` | SLM concurrency (default: 2) | `2` |  | int |  |
-| `--limit-per-pass` | Max groups/rows per pass (default: 50) | `50` |  | int |  |
+| `--limit-per-pass` | Max groups/rows per heavy-LLM pass (entity extraction, enrichment, observation drain). Default 2: small enough that one pass is a few-second GPU burst (the governor is only re-checked BETWEEN passes, not within a batch — a 50-item pass once pinned the GPU for ~17 min), large enough that an idle host drains the backlog at a useful rate instead of one item per cycle. Under THROTTLED load this is shrunk to M3_GOVERNOR_THROTTLED_LIMIT (default 1); when idle the loop also re-ticks immediately if a backlog remains (see the backlog-aware wait below) rather than sleeping the full --interval. Embedding is a separate scheduled task (ChatlogEmbedSweep) and is unaffected. | `2` |  | int |  |
 | `--database` | Core Memory DB path (Env: M3_DATABASE) | None |  | str |  |
 | `--chatlog-db` | Chatlog DB path (Env: CHATLOG_DB_PATH) | None |  | str |  |
 | `--profile-entities` | Profile for entities | `entities_local_qwen` |  | str |  |
@@ -51,6 +51,8 @@ for m3_enrich and m3_entities.
 | `--reflector-threshold` | Min observations before Reflector (default: 5) | `5` |  | int |  |
 | `--skip-entities` | Skip entity extraction | `False` |  | store_true |  |
 | `--skip-enrich` | Skip enrichment pass | `False` |  | store_true |  |
+| `--skip-embed` | Skip embed-backfill pass (draining deferred zero-lag-write vectors) | `False` |  | store_true |  |
+| `--skip-classify` | Skip classification pass (resolving type='auto' rows deferred by zero-lag writes) | `False` |  | store_true |  |
 | `--no-reflect` | Skip reflection pass | `False` |  | store_true |  |
 | `--skip-consolidate` | Skip the belief-consolidation pass | `False` |  | store_true |  |
 | `--consolidate-threshold` | Min same-type group size before consolidating (default: 50) | `50` |  | int |  |
@@ -68,6 +70,7 @@ for m3_enrich and m3_entities.
 
 - `CHATLOG_DB_PATH`
 - `M3_CHATLOG_PRUNE_AUTO`
+- `M3_CLASSIFY_DEADLINE_S`
 - `M3_DATABASE`
 - `M3_EMBED_MODEL`
 - `M3_EMBED_URL`
@@ -80,10 +83,12 @@ for m3_enrich and m3_entities.
 - `chatlog_config`
 - `chatlog_prune`
 - `consolidate_beliefs`
+- `embed_backfill`
 - `m3_enrich`
 - `m3_entities`
 - `m3_sdk (M3Context, ensure_governor_config, get_governor_pacing, resolve_db_path)`
 - `slm_intent (load_profile)`
+- `sqlite_pragmas (apply_pragmas, profile_for_db)`
 
 ---
 
@@ -91,7 +96,14 @@ for m3_enrich and m3_entities.
 
 **subprocess**
 
-- `subprocess.Popen()  → `argv`` (line 59)
+- `subprocess.Popen()  → `argv`` (line 60)
+
+**sqlite**
+
+- `sqlite3.connect()  → `db_path`` (line 472)
+- `sqlite3.connect()  → `db_path`` (line 511)
+- `sqlite3.connect()  → `db_path`` (line 536)
+- `sqlite3.connect()  → `path`` (line 419)
 
 
 ---
@@ -100,6 +112,7 @@ for m3_enrich and m3_entities.
 
 - `atexit`
 - `ctypes`
+- `memory.enrich (_auto_classify)`
 - `types (SimpleNamespace)`
 
 ---

@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_embed_sweeper.py
-sha1: 30848967df87
-mtime_utc: 2026-05-23T12:31:13.374493+00:00
-generated_utc: 2026-05-23T17:51:49.036586+00:00
+sha1: 1d5b6b5edef0
+mtime_utc: 2026-07-02T01:21:24.639162+00:00
+generated_utc: 2026-07-03T20:00:03.074278+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ and drains any spill-to-disk files from the async write queue.
 
 ## Entry points
 
-- `async def main()` (line 286)
+- `async def main()` (line 287)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -31,6 +31,7 @@ and drains any spill-to-disk files from the async write queue.
 |---|---|---|---|---|---|
 | `--batch` | Batch size (default from config.embed_sweeper.batch_size) | None | Uses config batch size | int | Embeds N rows per batch iteration |
 | `--max-per-run` | Max rows per run (default from CHATLOG_EMBED_MAX_PER_RUN env or 10000) | None | Embeds up to 10000 rows per run | int | Processes up to N rows total per invocation |
+| `--deadline` | Soft wall-clock budget (seconds) for one run. The embed loop stops starting new batches once this elapses, so a large backlog is drained across several scheduled runs instead of monopolizing the GPU in one long run. Default from CHATLOG_EMBED_DEADLINE_S env or 60s; 0 disables (unbounded, the old behavior). max-per-run still caps total rows. | None |  | float |  |
 | `--dry-run` | Query and log but don't embed | `False` | Queries unembed rows, embeds in batches, updates DB | store_true | Queries and logs row counts without embedding |
 | `--drain-spill` | Process spill files before embedding | `False` | Skips spill drain (unless spill dir exists) | store_true | Always processes spill files before embedding |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db | str | Routes this run against PATH for all DB reads/writes |
@@ -39,6 +40,7 @@ and drains any spill-to-disk files from the async write queue.
 
 ## Environment variables read
 
+- `CHATLOG_EMBED_DEADLINE_S`
 - `CHATLOG_EMBED_MAX_PER_RUN`
 - `M3_DATABASE`
 
@@ -62,8 +64,8 @@ and drains any spill-to-disk files from the async write queue.
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 118)
-- `sqlite3.connect()  → `db_path`` (line 342)
+- `sqlite3.connect()  → `db_path`` (line 119)
+- `sqlite3.connect()  → `db_path`` (line 365)
 
 
 ---

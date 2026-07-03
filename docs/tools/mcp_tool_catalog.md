@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: 3b7bd6204bef
-mtime_utc: 2026-06-30T11:36:02.422636+00:00
-generated_utc: 2026-06-30T22:19:18.421152+00:00
+sha1: cd2dda692a35
+mtime_utc: 2026-07-03T02:12:39.375742+00:00
+generated_utc: 2026-07-03T20:00:03.649040+00:00
 private: false
 ---
 
@@ -29,6 +29,28 @@ tool descriptions so it survives doc-inventory regeneration. Also note:
 memory_supersede is non-destructive and creates a NEW successor each call — it
 is an update primitive, not a delete; do not chain it to "clean up" clutter.
 
+── Module structure (catalog/ subpackage split) ──────────────────────────────
+This module is the AGGREGATOR + INJECTION point. The actual ToolSpec support
+code and the 108 ToolSpec entries live in the bin/catalog/ subpackage:
+  - catalog.lazy        — LazyImpl / LazyModuleProxy
+  - catalog.spec         — ToolSpec dataclass + validation constants
+  - catalog.validators   — per-tool argument validators
+  - catalog.dispatch      — execute_tool(_structured), timeout machinery,
+                            the m3_call/m3_index dispatcher, and the inline
+                            impl wrappers (_conversation_search_impl,
+                            _memory_verify_impl)
+  - catalog.tools_<domain> — one module per domain (admin, memory, chatlog,
+                            conversations, agent, tasks, entity, diagnostics,
+                            files), each exporting a flat `TOOLS` list.
+This module re-imports everything the support modules define (so
+`mcp_tool_catalog.ToolSpec`, `.execute_tool`, `.m3_call_impl`,
+`.LazyModuleProxy`, all validators, etc. still resolve for external
+importers), concatenates the 9 domain TOOLS lists into ONE flat `TOOLS` list,
+then runs the `database` + `timeout` parameter injection over the aggregated
+list (order does not matter for injection — every spec is mutated the same
+way — but injection must run AFTER aggregation since it walks the full list),
+and finally rebuilds `_BY_NAME`.
+
 ---
 
 ## Entry points
@@ -45,14 +67,13 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `MCP_PROXY_ALLOW_DESTRUCTIVE`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (active_database)`
-- `tool_domains`
 - `tool_loader`
 
 ---
@@ -65,7 +86,19 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `importlib`
+- `catalog.dispatch (get_tool, default_allowlist, _pop_database, validate_args, _DEFAULT_TOOL_TIMEOUT, _resolve_tool_timeout, ToolTimeout, _run_impl_bounded, execute_tool, execute_tool_structured, _DESTRUCTIVE_ALLOWED, _DISPATCH_EXCLUDE, _spec_by_name, _did_you_mean, _dispatch_one, m3_call_impl, _tool_arg_rows, m3_index_impl, _conversation_search_impl, _memory_verify_impl)`
+- `catalog.lazy (LazyImpl, LazyModuleProxy)`
+- `catalog.spec (ToolSpec, MAX_CONTENT_SIZE, MAX_QUERY_LENGTH, MAX_K, VALID_MEMORY_TYPES, VALID_ENTITY_TYPES, VALID_ENTITY_PREDICATES, _UUID_RE, _is_full_uuid)`
+- `catalog.tools_admin`
+- `catalog.tools_agent`
+- `catalog.tools_chatlog`
+- `catalog.tools_conversations`
+- `catalog.tools_diagnostics`
+- `catalog.tools_entity`
+- `catalog.tools_files`
+- `catalog.tools_memory`
+- `catalog.tools_tasks`
+- `catalog.validators (_memory_write_validator, _memory_delete_validator, _memory_supersede_validator, _memory_search_validator, _variant_gate, _memory_search_gated_validator, _memory_suggest_validator, _memory_search_scored_validator, _memory_update_validator, _memory_set_retention_validator, _gdpr_user_id_validator)`
 
 ---
 

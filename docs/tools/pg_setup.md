@@ -1,8 +1,8 @@
 ---
 tool: bin/pg_setup.py
-sha1: b200c2a3ebdb
-mtime_utc: 2026-04-23T20:33:55.966657+00:00
-generated_utc: 2026-05-24T12:09:08.352188+00:00
+sha1: 847e15667148
+mtime_utc: 2026-07-02T21:51:11.655462+00:00
+generated_utc: 2026-07-03T20:00:03.789109+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 99)
+- `def main()` (line 100)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -29,13 +29,14 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `PG_URL`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
 - `auth_utils (get_api_key)`
+- `m3_sdk (getenv_compat)`
 
 ---
 

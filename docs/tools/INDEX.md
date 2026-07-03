@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-06-30T22:19:18.652186+00:00._
+_Generated 2026-07-03T20:00:04.201985+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -49,6 +49,8 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/embedding_utils.py](embedding_utils.md) | Shared embedding and vector-math utilities for MCP bridges. |  |
 | [bin/enrichment_state.py](enrichment_state.md) | Durable per-group enrichment state for m3_enrich. |  |
 | [bin/fetch_sovereign_assets.py](fetch_sovereign_assets.md) | fetch_sovereign_assets.py — Hydrate the _assets/embedder directory for sovereign setup. |  |
+| [bin/gen_capability_matrix.py](gen_capability_matrix.md) | gen_capability_matrix.py — generate docs/CAPABILITY_MATRIX.md from the MCP catalog. |  |
+| [bin/gen_features_json.py](gen_features_json.md) | gen_features_json.py — generate docs/features.json (machine-readable capabilities). |  |
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
 | [bin/gen_tool_manifest.py](gen_tool_manifest.md) | Generate a machine-readable tool-catalog manifest at docs/tools/MCP_CATALOG.json. |  |
 | [bin/generate_configs.py](generate_configs.md) | (no docstring) |  |
@@ -70,7 +72,8 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/m3_enrich_report.py](m3_enrich_report.md) | Summarize an m3_enrich run from enrichment_groups + enrichment_runs. |  |
 | [bin/m3_entities.py](m3_entities.md) | m3_entities — build entity-graph rows from your core/chatlog DBs. |  |
 | [bin/m3_entities_gliner.py](m3_entities_gliner.md) | m3_entities_gliner — fast local entity extraction via GLiNER (zero-shot NER). |  |
-| [bin/m3_sdk.py](m3_sdk.md) | (no docstring) |  |
+| [bin/m3_lifecycle_summary.py](m3_lifecycle_summary.md) | CLI wrapper for the memory lifecycle/contradiction observability summary. |  |
+| [bin/m3_sdk.py](m3_sdk.md) | m3_sdk — facade. Real implementations live in bin/m3_core/*. |  |
 | bin/macbook_status_server.py | MacBook network & LM Studio status server for Homepage dashboard. | yes |
 | [bin/mcp_proxy.py](mcp_proxy.md) | MCP Tool Execution Proxy  v2.0 |  |
 | [bin/mcp_tool_catalog.py](mcp_tool_catalog.md) | mcp_tool_catalog.py — single source of truth for the m3-memory MCP tool catalog. |  |
@@ -99,6 +102,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/setup_secret.py](setup_secret.md) | Interactive CLI for adding API keys to the m3-memory encrypted vault. |  |
 | [bin/setup_test_db.py](setup_test_db.md) | Seed a fresh SQLite DB with the full m3-memory schema for test isolation. |  |
 | [bin/slm_intent.py](slm_intent.md) | Small-Language-Model intent classifier with named-profile configs. |  |
+| [bin/split_chatlog_from_core.py](split_chatlog_from_core.md) | split_chatlog_from_core — move chat_log rows out of the CORE memory DB into |  |
 | [bin/start_mcp_proxy.sh](start_mcp_proxy.sh.md) | start_mcp_proxy.sh — Launch the MCP Tool Execution Proxy on localhost:9000 |  |
 | [bin/statusline-command.sh](statusline-command.sh.md) | (no docstring) |  |
 | [bin/sync_all.py](sync_all.md) | sync_all.py — Hourly sync runner (SQLite <-> PostgreSQL + ChromaDB). |  |
@@ -111,7 +115,6 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/test_mcp_proxy.py](test_mcp_proxy.md) | test_mcp_proxy.py — End-to-end proxy test suite |  |
 | [bin/test_mcp_proxy_unit.py](test_mcp_proxy_unit.md) | test_mcp_proxy_unit.py - In-process unit tests for mcp_proxy. |  |
 | [bin/test_memory_bridge.py](test_memory_bridge.md) | End-to-end test suite for memory_bridge.py. |  |
-| [bin/test_sqlite_pragmas.py](test_sqlite_pragmas.md) | test_sqlite_pragmas.py — regression tests for bin/sqlite_pragmas.py. |  |
 | [bin/test_unified_router.py](test_unified_router.md) | (no docstring) |  |
 | [bin/thermal_utils.py](thermal_utils.md) | (no docstring) |  |
 | [bin/unified_ai.py](unified_ai.md) | Unified chat client across Gemini, Claude, and LM Studio. |  |

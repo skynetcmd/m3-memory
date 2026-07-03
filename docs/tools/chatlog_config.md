@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_config.py
-sha1: f05eb4df5087
-mtime_utc: 2026-06-23T11:26:28.008564+00:00
-generated_utc: 2026-06-26T20:00:03.468398+00:00
+sha1: 142ba97a38df
+mtime_utc: 2026-07-02T21:51:11.636513+00:00
+generated_utc: 2026-07-03T20:00:03.041428+00:00
 private: false
 ---
 
@@ -61,8 +61,6 @@ _(no argparse arguments detected)_
 ## Environment variables read
 
 - `CHATLOG_DB_PATH`
-- `CHATLOG_DB_POOL_SIZE`
-- `CHATLOG_DB_POOL_TIMEOUT`
 - `M3_CHATLOG_DB`
 - `M3_DATABASE`
 
@@ -71,7 +69,7 @@ _(no argparse arguments detected)_
 ## Calls INTO this repo (intra-repo imports)
 
 - `m3_sdk (_active_db)`
-- `m3_sdk (get_m3_config_root, get_m3_engine_root, get_m3_root)`
+- `m3_sdk (get_m3_config_root, get_m3_engine_root, get_m3_root, getenv_compat)`
 - `sqlite_pragmas (apply_pragmas)`
 
 ---
@@ -80,14 +78,15 @@ _(no argparse arguments detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 354)
+- `sqlite3.connect()  → `db_path`` (line 345)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `m3_core.paths (resolve_config_file)`
+- `m3_core.paths (resolve_engine_file)`
 
 ---
 

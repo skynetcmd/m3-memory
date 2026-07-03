@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: 9f709139faf6
-mtime_utc: 2026-05-14T05:26:04.409065+00:00
-generated_utc: 2026-05-14T05:37:12.655262+00:00
+sha1: cc8a31586ba3
+mtime_utc: 2026-07-02T21:51:11.646462+00:00
+generated_utc: 2026-07-03T20:00:03.522212+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 1414)
+- `def main()` (line 916)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -134,24 +134,25 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 1117)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 286)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 999)
-- `sqlite3.connect()  → `str(db_path)`` (line 144)
-- `sqlite3.connect()  → `str(db_path)`` (line 725)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 497)
+- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 615)
+- `sqlite3.connect()  → `str(db_path)`` (line 231)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `enrich (ALWAYS_SKIP_TYPES)`
+- `enrich.eligibility (_query_eligible_groups, _load_conv_list)`
+- `enrich.prep (_today, _resolve_db, _load_profile_with_path, _ensure_migration_025, _backup_db)`
+- `enrich.rate_limit (_estimate_cost_wall, _classify_observer_error, _is_rate_limit_failure, _RateLimitCascade)`
+- `enrich.report (_print_plan_body, _print_dry_run, _print_run_summary)`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
-- `025_observation_queue.up.sql`
 - `agent_chatlog.db`
 - `agent_memory.db`
 

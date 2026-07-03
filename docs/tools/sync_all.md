@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: 100843323ce4
-mtime_utc: 2026-06-09T02:42:18.251082+00:00
-generated_utc: 2026-06-12T20:00:05.545519+00:00
+sha1: 6fda205f658f
+mtime_utc: 2026-07-02T21:51:11.656462+00:00
+generated_utc: 2026-07-03T20:00:03.939562+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ DB list:
 
 ## Entry points
 
-- `def main()` (line 198)
+- `def main()` (line 200)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -50,8 +50,6 @@ DB list:
 - `M3_DATABASE`
 - `M3_PG_SYNC_TIMEOUT`
 - `M3_SYNC_DBS`
-- `POSTGRES_SERVER`
-- `SYNC_TARGET_IP`
 
 ---
 
@@ -60,6 +58,7 @@ DB list:
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `_task_runtime (no_window_kwargs)`
 - `m3_sdk (add_database_arg)`
+- `m3_sdk (getenv_compat)`
 - `m3_sdk (resolve_db_path)`
 
 ---
@@ -68,8 +67,8 @@ DB list:
 
 **subprocess**
 
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 174)
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 129)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'chroma_sync_cli.py'), 'both']`` (line 176)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 131)
 
 
 ---

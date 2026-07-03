@@ -1,8 +1,8 @@
 ---
 tool: bin/debug_agent_bridge.py
-sha1: 34b3a171752d
-mtime_utc: 2026-05-30T16:01:33.795980+00:00
-generated_utc: 2026-05-31T18:42:52.694923+00:00
+sha1: e4f383f7cdbb
+mtime_utc: 2026-07-02T21:51:11.639839+00:00
+generated_utc: 2026-07-03T20:00:03.267401+00:00
 private: false
 ---
 
@@ -41,7 +41,6 @@ _(no argparse arguments detected)_
 - `AI_WORKSPACE_DIR`
 - `COMPUTERNAME`
 - `HOSTNAME`
-- `ORIGIN_DEVICE`
 
 ---
 
@@ -49,7 +48,7 @@ _(no argparse arguments detected)_
 
 - `agent_protocol (_THINK_TAG_RE)`
 - `embedding_utils (parse_model_size)`
-- `m3_sdk (LM_STUDIO_BASE, M3Context)`
+- `m3_sdk (LM_STUDIO_BASE, M3Context, getenv_compat)`
 - `thermal_utils (get_thermal_status)`
 
 ---

@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_sdk.py
-sha1: 594e09428be7
-mtime_utc: 2026-06-30T21:32:48.330985+00:00
-generated_utc: 2026-06-30T22:19:18.383349+00:00
+sha1: cdd76b5cc3ea
+mtime_utc: 2026-07-02T21:51:11.647462+00:00
+generated_utc: 2026-07-03T20:00:03.615677+00:00
 private: false
 ---
 
@@ -10,7 +10,8 @@ private: false
 
 ## Purpose
 
-_(no module docstring — update the source file.)_
+m3_sdk — facade. Real implementations live in bin/m3_core/*.
+Kept as the stable import surface for ~60 callers. Do not add logic here.
 
 ---
 
@@ -22,85 +23,49 @@ _(no conventional entry point detected)_
 
 ## CLI flags / arguments
 
-| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
-|---|---|---|---|---|---|
-| `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | m3_sdk itself has no CLI; this row documents the add_database_arg(parser) helper shape. | str | Every CLI that calls add_database_arg(parser) gains this flag with identical semantics. |
+_(no argparse arguments detected)_
 
 ---
 
 ## Environment variables read
 
-- `DB_POOL_SIZE`
-- `DB_POOL_TIMEOUT`
-- `LM_READ_TIMEOUT`
-- `LM_STUDIO_BASE`
-- `M3_CONFIG_ROOT`
-- `M3_CONTEXT_CACHE_SIZE`
-- `M3_CORE_RS_DISABLE`
-- `M3_DATABASE`
-- `M3_ENGINE_ROOT`
-- `M3_GOVERNOR_CFG_TTL`
-- `M3_GPU_PROBE_DISABLE`
-- `M3_GPU_PROBE_TTL`
-- `M3_MEMORY_ROOT`
-- `PG_URL`
-- `PYTHONUTF8`
-- `_M3_UTF8_REEXEC`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `audit_trail (log_event)`
-- `auth_utils (get_api_key)`
-- `auth_utils (get_salt_path)`
-- `chatlog_config`
-- `crypto_provider (provider)`
-- `sqlite_pragmas (apply_pragmas, profile_for_db)`
-- `thermal_utils (get_thermal_status)`
+_(none detected)_
 
 ---
 
 ## Calls OUT (external side-channels)
 
-**subprocess**
-
-- `os.execv()  → `sys.executable`` (line 595)
-- `subprocess.run()  → `['ioreg', '-r', '-d', '1', '-w', '0', '-c', 'IOAccelerator']`` (line 121)
-- `subprocess.run()  → `['nvidia-smi', '--query-gpu=utilization.gpu', '--format=csv,noheader,nounits']`` (line 72)
-- `subprocess.run()  → `['powershell', '-NoProfile', '-NonInteractive', '-Command', ps]`` (line 98)
-- `subprocess.run()  → `['tasklist', '/fi', f'PID eq {pid}', '/nh']`` (line 483)
-
-**http**
-
-- `httpx.AsyncClient()` (line 1112)
-- `httpx.AsyncClient()` (line 1115)
-
-**sqlite**
-
-- `sqlite3.connect()  → `path`` (line 712)
-- `sqlite3.connect()  → `self.db_path`` (line 888)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
-- `atexit`
-- `contextvars`
-- `dotenv (load_dotenv)`
-- `httpx`
-- `m3_core_rs`
-- `m3_core_rs (format_log)`
-- `psutil`
-- `psycopg2`
+- `m3_core.context`
+- `m3_core.context (M3Context, _cleanup, _close_context_pool, _CIRCUITS, _CB_THRESHOLD, _CB_COOLDOWN, _HTTP_CLIENT, _HTTP_CLIENT_LOOP_ID, _HTTP_CLIENT_LOCK, _CONTEXT_CACHE_SIZE, _CONTEXTS, _CONTEXTS_LOCK)`
+- `m3_core.governor`
+- `m3_core.governor (INITIAL_LIMIT, LIMIT_THRESHOLD, register_user_interaction, get_governor_pacing, pre_execute_interactive_check, ensure_governor_config, _governor_thresholds, _governor_config_path)`
+- `m3_core.gpu`
+- `m3_core.gpu (probe_gpu_util, _GPU_PROBE_DISABLE, _GPU_PROBE_TTL, _gpu_probe_cache, _GPU_PROBE_MAX_MISSES, _GPU_PROBES, _no_window)`
+- `m3_core.locking`
+- `m3_core.locking (migration_lock, _MIGRATION_LOCK_MAX_AGE_S, _lock_owner_stamp, _pid_alive, _reclaim_stale_lock)`
+- `m3_core.paths`
+- `m3_core.paths (resolve_venv_python, get_m3_root, get_m3_config_root, get_m3_engine_root, resolve_db_path, active_database, add_database_arg, getenv_compat, deprecated_env_in_use, _active_db, _db_is_populated, _default_db_path)`
+- `m3_core.runtime`
+- `m3_core.runtime (format_log, logger, M3_CORE_RS_DISABLE, ensure_utf8, LM_STUDIO_BASE, LM_READ_TIMEOUT, StructuredLogger)`
+- `types`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
-- `.governor_config.json`
-- `agent_memory.db`
+_(none detected)_
 
 ---
 

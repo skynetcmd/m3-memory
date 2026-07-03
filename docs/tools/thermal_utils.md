@@ -1,8 +1,8 @@
 ---
 tool: bin/thermal_utils.py
-sha1: 895498afe5b1
-mtime_utc: 2026-05-30T18:58:16.628149+00:00
-generated_utc: 2026-05-31T18:42:53.046163+00:00
+sha1: a5394ce425a9
+mtime_utc: 2026-07-02T01:21:24.724041+00:00
+generated_utc: 2026-07-03T20:00:04.079760+00:00
 private: false
 ---
 
@@ -34,7 +34,7 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `_task_runtime (no_window_kwargs)`
 
 ---
 
@@ -42,9 +42,9 @@ _(none detected)_
 
 **subprocess**
 
-- `subprocess.run()  → `['sysctl', '-n', 'kern.thermal_pressure']`` (line 20)
-- `subprocess.run()` (line 35)
-- `subprocess.run()` (line 52)
+- `subprocess.run()  → `['sysctl', '-n', 'kern.thermal_pressure']`` (line 36)
+- `subprocess.run()` (line 51)
+- `subprocess.run()` (line 68)
 
 
 ---

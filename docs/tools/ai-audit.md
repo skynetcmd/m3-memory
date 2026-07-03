@@ -1,8 +1,8 @@
 ---
 tool: bin/ai-audit.sh
-sha1: 659882eaf6ae
-mtime_utc: 2026-04-06T00:25:00.977104+00:00
-generated_utc: 2026-05-24T12:09:07.388939+00:00
+sha1: b74f049e93d8
+mtime_utc: 2026-07-02T01:21:24.634473+00:00
+generated_utc: 2026-07-03T20:00:02.928108+00:00
 private: false
 ---
 

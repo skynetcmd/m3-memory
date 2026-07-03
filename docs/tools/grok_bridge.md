@@ -1,8 +1,8 @@
 ---
 tool: bin/grok_bridge.py
-sha1: 24a0b7109e1e
-mtime_utc: 2026-04-23T20:33:55.949006+00:00
-generated_utc: 2026-05-24T12:09:07.895870+00:00
+sha1: 979721cb01bb
+mtime_utc: 2026-07-02T01:21:24.687532+00:00
+generated_utc: 2026-07-03T20:00:03.414774+00:00
 private: false
 ---
 
