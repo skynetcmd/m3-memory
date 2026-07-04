@@ -16,6 +16,7 @@ import os
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import chatlog_config
@@ -140,25 +141,71 @@ def _recent_write_count(config: chatlog_config.ChatlogConfig,
     landing). Reporting the wiring flag as "capture status" produced a permanent
     false alarm for the CLAUDE.md session-start check. Returns -1 on query error
     (distinct from a real 0 = nothing written).
+
+    On a NON-UNIFIED install, chat_log rows are written to the chatlog DB
+    (config.db_path), NOT the main DB. Query config.db_path, which equals the
+    main DB when unified — so this is correct in both topologies. Querying
+    resolve_db_path(None) here was a bug: it counts the main DB, which holds
+    zero chat_log rows on a split install, giving a permanent false
+    capture-down alarm (confirmed 2026-07-04: 161 rows/15min in the chatlog DB
+    while the main DB showed 0). If, on a split install, no rows are found in
+    the chatlog DB, fall back to the main DB to cover installs that promote
+    turns into main instead.
+
+    Read-only by construction (§6): opens each DB via a ``mode=ro`` URI so the
+    probe can never mutate the store and never flips journal_mode on a DB it is
+    only counting (which is why apply_pragmas — a WAL-setting write pragma — is
+    deliberately NOT used here). The COUNT is index-served: EXPLAIN QUERY PLAN
+    confirms ``SEARCH ... USING INDEX idx_mi_created (created_at>?)`` on both the
+    chatlog and main DBs, so it is a bounded index range-scan, not a table scan,
+    even on a multi-hundred-MB chatlog DB (§8, verified 2026-07-04).
     """
     from m3_sdk import resolve_db_path
 
-    db = os.path.abspath(resolve_db_path(None))
-    if not os.path.exists(db):
-        return -1
-    try:
-        conn = sqlite3.connect(db, timeout=5)
+    chatlog_db = os.path.abspath(config.db_path)
+    main_db = os.path.abspath(resolve_db_path(None))
+    # Chatlog DB first (where the writer lands turns on a split install); the
+    # main DB is a fallback for promote-into-main topologies. On a unified
+    # install both paths are identical and the second probe is skipped.
+    candidates = [chatlog_db] if chatlog_db == main_db else [chatlog_db, main_db]
+
+    # `queried_ok` = a candidate DB that we not only opened but successfully ran
+    # the COUNT against. It must NOT be set on open alone: a DB can open yet the
+    # query error (e.g. `no such table: memory_items` on a partially-initialised
+    # or wrong-schema file). If such an error counted as "saw a readable DB", the
+    # fn would return 0 (a real "capture down" alarm) instead of -1 (unknown) —
+    # reintroducing the false-signal class this whole fix removes. So the flag is
+    # set only after fetchone() returns without raising.
+    queried_ok = False
+    for db in candidates:
+        if not os.path.exists(db):
+            continue
+        conn = None
         try:
+            # mode=ro: read-only handle — cannot create/alter the DB or its WAL.
+            # Path.as_uri() builds an OS-correct file:// URI (Windows drive
+            # letters and POSIX paths alike), keeping this cross-platform (§1).
+            uri = f"{Path(db).as_uri()}?mode=ro"
+            conn = sqlite3.connect(uri, uri=True, timeout=5)
             row = conn.execute(
                 "SELECT COUNT(*) FROM memory_items WHERE type='chat_log' "
                 "AND created_at > datetime('now', ?)",
                 (f"-{int(window_min)} minutes",),
             ).fetchone()
-            return int(row[0]) if row else 0
+            queried_ok = True  # only reached if the query itself did not raise
+            n = int(row[0]) if row else 0
+            if n > 0:
+                return n
+        except sqlite3.Error:
+            continue
         finally:
-            conn.close()
-    except sqlite3.Error:
-        return -1
+            if conn is not None:
+                conn.close()
+
+    # Successfully queried a DB but found no recent rows -> a real 0 (warns).
+    # Never got a clean query off any candidate (all missing / open-errored /
+    # query-errored) -> -1 unknown (distinct warning, no false "down").
+    return 0 if queried_ok else -1
 
 
 def _compute_warnings(
@@ -265,12 +312,16 @@ def chatlog_status_impl() -> str:
             "recent_rows": recent_writes,
             "window_min": recent_window_min,
         },
+        # NOT a capture-health signal. Each entry's `wired`/`enabled` only
+        # records whether a per-turn shell hook was configured in settings.json
+        # at init time; the Stop-hook / MCP write path captures turns even when
+        # every entry here is False (that is the norm on this deployment). Read
+        # `capture.healthy` for whether turns are landing — NOT these flags.
+        # Kept a flat {agent_name: {...}} map (no sentinel keys) so consumers can
+        # iterate it as pure agent data; the caveat lives here in code, not in
+        # the return shape (§3/§12: returns stay structured for machine callers).
         "hooks": {
             name: {
-                # `wired`: a per-turn shell hook is configured in settings for this
-                # agent. This is NOT a capture signal — the Stop-hook / MCP write
-                # path captures even when wired is False. Kept (was misnamed
-                # `enabled`) for back-compat: `enabled` is aliased to `wired`.
                 "wired": spec.enabled,
                 "enabled": spec.enabled,
                 "last_write_ms_ago": state.get("hooks", {}).get(name, {}).get("last_write_ms_ago"),

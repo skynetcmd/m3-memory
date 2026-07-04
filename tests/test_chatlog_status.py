@@ -226,3 +226,182 @@ def test_status_with_data_in_db(status_test_env):
     # Should count at least chatlog_rows
     if "chatlog_rows" in row_counts:
         assert row_counts["chatlog_rows"] >= 10
+
+
+def _create_recent_schema(db_path):
+    """Schema with a created_at column so recent-write queries work.
+
+    The status fixture pre-creates the chatlog DB's tables without a created_at
+    column, so drop-and-recreate to be idempotent regardless of prior state.
+    """
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS memory_items")
+    cur.execute("DROP TABLE IF EXISTS memory_embeddings")
+    cur.execute(
+        "CREATE TABLE memory_items (id TEXT PRIMARY KEY, type TEXT, created_at TEXT)"
+    )
+    cur.execute("CREATE TABLE memory_embeddings (id TEXT, memory_id TEXT)")
+    conn.commit()
+    conn.close()
+
+
+def test_capture_healthy_when_rows_land_in_chatlog_db_not_main(status_test_env):
+    """Non-unified regression: recent chat_log rows in the CHATLOG db (not main)
+    must report capture.healthy=True.
+
+    Before the fix, _recent_write_count queried resolve_db_path(None) (the main
+    DB), which holds 0 chat_log rows on a split install — producing a permanent
+    false "capture may be down" alarm even while capture was thriving.
+    """
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    main_db = status_test_env["main_db_path"]
+
+    # Both DBs get a created_at-aware schema; the writer lands turns in chatlog.
+    _create_recent_schema(str(chatlog_db))
+    _create_recent_schema(str(main_db))
+
+    conn = sqlite3.connect(str(chatlog_db))
+    cur = conn.cursor()
+    for i in range(5):
+        cur.execute(
+            "INSERT INTO memory_items (id, type, created_at) "
+            "VALUES (?, 'chat_log', datetime('now'))",
+            (f"recent-{i}",),
+        )
+    conn.commit()
+    conn.close()
+
+    parsed = json.loads(chatlog_status.chatlog_status_impl())
+
+    assert parsed["unified"] is False
+    assert parsed["capture"]["healthy"] is True
+    assert parsed["capture"]["recent_rows"] == 5
+    assert not any("capture may be down" in w for w in parsed["warnings"])
+
+
+def test_capture_recent_count_prefers_chatlog_over_main(status_test_env):
+    """The recent-write probe reads the chatlog DB, not the main DB, on a split
+    install: rows only in main must NOT be double-counted, and rows in chatlog
+    are the source of truth."""
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    main_db = status_test_env["main_db_path"]
+    _create_recent_schema(str(chatlog_db))
+    _create_recent_schema(str(main_db))
+
+    # 3 recent in chatlog, 99 recent in main. Probe should report 3 (chatlog
+    # wins), never 102 and never 99.
+    for db, n in ((chatlog_db, 3), (main_db, 99)):
+        conn = sqlite3.connect(str(db))
+        cur = conn.cursor()
+        for i in range(n):
+            cur.execute(
+                "INSERT INTO memory_items (id, type, created_at) "
+                "VALUES (?, 'chat_log', datetime('now'))",
+                (f"{db.name}-{i}",),
+            )
+        conn.commit()
+        conn.close()
+
+    parsed = json.loads(chatlog_status.chatlog_status_impl())
+    assert parsed["capture"]["recent_rows"] == 3
+    assert parsed["capture"]["healthy"] is True
+
+
+def test_recent_write_count_query_error_returns_unknown_not_zero(status_test_env):
+    """Regression (footgun): a DB that OPENS but whose COUNT query ERRORS
+    (e.g. missing memory_items table) must return -1 (unknown), never 0.
+
+    Returning 0 would emit a real "capture may be down" warning for a merely
+    wrong-schema file — reintroducing the false-signal class the whole fix
+    removes. The saw/queried flag must be set only after the query succeeds.
+    """
+    import chatlog_config
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    main_db = status_test_env["main_db_path"]
+
+    # Both candidate DBs exist and open fine, but neither has memory_items.
+    for db in (chatlog_db, main_db):
+        conn = sqlite3.connect(str(db))
+        conn.execute("DROP TABLE IF EXISTS memory_items")
+        conn.execute("CREATE TABLE unrelated (x TEXT)")
+        conn.commit()
+        conn.close()
+
+    cfg = chatlog_config.resolve_config()
+    assert chatlog_status._recent_write_count(cfg) == -1
+
+
+def test_recent_write_count_readable_but_empty_returns_zero(status_test_env):
+    """A DB that opens AND queries cleanly but has no recent rows returns 0 —
+    the genuine "capture down" signal, which must still fire (complement to the
+    query-error case above)."""
+    import chatlog_config
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    main_db = status_test_env["main_db_path"]
+    _create_recent_schema(str(chatlog_db))
+    _create_recent_schema(str(main_db))
+
+    # One old row, outside the 15-min window, in the chatlog DB.
+    conn = sqlite3.connect(str(chatlog_db))
+    conn.execute(
+        "INSERT INTO memory_items (id, type, created_at) "
+        "VALUES ('old', 'chat_log', '2020-01-01T00:00:00Z')"
+    )
+    conn.commit()
+    conn.close()
+
+    cfg = chatlog_config.resolve_config()
+    assert chatlog_status._recent_write_count(cfg) == 0
+
+
+def test_recent_write_count_missing_dbs_returns_unknown(
+    status_test_env, tmp_path, monkeypatch
+):
+    """No candidate DB exists on disk -> -1 unknown (never a false 0)."""
+    import chatlog_config
+    import chatlog_status
+
+    # Point both paths at nonexistent files. Use monkeypatch (auto-reverted)
+    # rather than raw os.environ so this test stays hermetic (§3) and cannot
+    # leak env state into later tests regardless of run order.
+    monkeypatch.setenv("CHATLOG_DB_PATH", str(tmp_path / "nope_chatlog.db"))
+    monkeypatch.setenv("M3_DATABASE", str(tmp_path / "nope_main.db"))
+    chatlog_config.invalidate_cache()
+
+    cfg = chatlog_config.resolve_config()
+    assert chatlog_status._recent_write_count(cfg) == -1
+
+
+def test_recent_write_probe_opens_read_only(status_test_env):
+    """The probe must open DBs read-only (§6): it must never be able to mutate
+    the store it is only counting."""
+    from pathlib import Path
+
+    import chatlog_config
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    _create_recent_schema(str(chatlog_db))
+
+    # A read-only handle built the same way the probe builds it must reject writes.
+    uri = f"{Path(str(chatlog_db)).as_uri()}?mode=ro"
+    ro = sqlite3.connect(uri, uri=True, timeout=5)
+    with pytest.raises(sqlite3.OperationalError):
+        ro.execute("CREATE TABLE _should_fail (x)")
+    ro.close()
+
+    # And the probe itself completes cleanly, returning a valid int, without
+    # ever needing write access to the DB.
+    cfg = chatlog_config.resolve_config()
+    result = chatlog_status._recent_write_count(cfg)
+    assert isinstance(result, int)
+    assert result >= -1
