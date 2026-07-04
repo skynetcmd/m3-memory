@@ -6,7 +6,7 @@
 
 ## Capability groups
 
-- [🧠 Memory](#memory) — Write, retrieve, version, and reconcile long-term agent memory. (35 tools)
+- [🧠 Memory](#memory) — Write, retrieve, version, and reconcile long-term agent memory. (36 tools)
 - [💬 Chat Log](#chat-log) — Capture verbatim conversation turns before compaction; audit and replay. (10 tools)
 - [📁 Files Memory](#files-memory) — Index, search, and recall project files as memory. (26 tools)
 - [🕸️ Entity Graph](#entity-graph) — Extract and query entities and their relationships across sessions. (3 tools)
@@ -14,7 +14,7 @@
 - [👥 Agents](#agents) — Register agents, hand off tasks, and route multi-agent work. (6 tools)
 - [✅ Tasks](#tasks) — Track and coordinate agent tasks and their state. (8 tools)
 - [🩺 Diagnostics](#diagnostics) — Health, cost, and integrity checks for the memory store. (3 tools)
-- [⚙️ Admin & Sync](#admin--sync) — Maintenance, cross-store sync, import/export, and lifecycle ops. (16 tools)
+- [⚙️ Admin & Sync](#admin--sync) — Maintenance, cross-store sync, import/export, and lifecycle ops. (15 tools)
 
 ## 🧠 Memory
 
@@ -39,6 +39,7 @@ _Write, retrieve, version, and reconcile long-term agent memory._
 | `memory_import` | Import memories from a JSON export. | ⚠️ yes |
 | `memory_inbox` | List handoff messages addressed to agent_id, newest first. | read-only |
 | `memory_inbox_ack` | Mark a handoff memory as read (sets read_at = now). | read-only |
+| `memory_lifecycle_summary` | Windowed summary of lifecycle & contradiction activity over the last `window_days` days: counts of… | read-only |
 | `memory_link` | Creates a directional link between two memory items. | read-only |
 | `memory_link_bulk` | Create many memory_relationships rows in one transaction per chunk. | read-only |
 | `memory_maintenance` | Runs maintenance tasks on the memory store. | ⚠️ yes |
@@ -182,7 +183,6 @@ _Maintenance, cross-store sync, import/export, and lifecycle ops._
 | `m3_call` | Invoke ANY m3 catalog tool by name without loading its domain — the low-token path to the full tool… | read-only |
 | `m3_help_capabilities` | Discover m3-memory tool capabilities, parameters, and availability. | read-only |
 | `m3_index` | List m3 catalog tools (optionally one domain) as structured rows: name, domain, one-line summary, d… | read-only |
-| `memory_lifecycle_summary` | Windowed summary of lifecycle & contradiction activity over the last `window_days` days: counts of… | read-only |
 | `notifications_ack` | Mark one notification as read. | read-only |
 | `notifications_ack_all` | Bulk-ack all unread notifications for an agent. | read-only |
 | `notifications_poll` | List notifications addressed to agent_id, newest first. | read-only |

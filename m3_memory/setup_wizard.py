@@ -359,14 +359,17 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
             print("    loading its own copy on the GPU. Reclaims ~9-10 GB of host RAM")
             print("    when several processes embed on the same GPU. You can also")
             print("    toggle this later with `m3 embedder shared` / `unshared`.")
-            plan.use_shared_embedder = (
-                False if args.no_shared_embedder else
-                (True if args.shared_embedder else
-                 _ask_yes_no(
-                     "    Use the shared GPU embedder (one CUDA context)?",
-                     default=False,
-                 ))
-            )
+            # getattr with defaults: callers that build `args` without these
+            # flags (tests, programmatic entry points) must not AttributeError.
+            if getattr(args, "no_shared_embedder", False):
+                plan.use_shared_embedder = False
+            elif getattr(args, "shared_embedder", False):
+                plan.use_shared_embedder = True
+            else:
+                plan.use_shared_embedder = _ask_yes_no(
+                    "    Use the shared GPU embedder (one CUDA context)?",
+                    default=False,
+                )
 
     print()
     print("  Where to store data (recommended: separate folders):")

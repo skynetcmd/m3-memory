@@ -107,14 +107,14 @@
   "tools": {
     "total": 111,
     "by_domain": {
-      "admin": 16,
+      "admin": 15,
       "agent": 6,
       "chatlog": 10,
       "conversations": 4,
       "diagnostics": 3,
       "entity": 3,
       "files": 26,
-      "memory": 35,
+      "memory": 36,
       "tasks": 8
     },
     "catalog": "docs/tools/MCP_CATALOG.json",

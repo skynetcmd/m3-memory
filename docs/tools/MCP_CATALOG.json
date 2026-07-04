@@ -217,29 +217,6 @@
     {
       "args": [
         {
-          "name": "window_days",
-          "required": false,
-          "type": "integer"
-        },
-        {
-          "name": "top_n",
-          "required": false,
-          "type": "integer"
-        },
-        {
-          "name": "timeout",
-          "required": false,
-          "type": "number"
-        }
-      ],
-      "destructive": false,
-      "domain": "admin",
-      "name": "memory_lifecycle_summary",
-      "summary": "Windowed summary of lifecycle & contradiction activity over the last `window_days` days: counts of\u2026"
-    },
-    {
-      "args": [
-        {
           "name": "notification_id",
           "required": true,
           "type": "integer"
@@ -2326,6 +2303,29 @@
       "domain": "memory",
       "name": "memory_inbox_ack",
       "summary": "Mark a handoff memory as read (sets read_at = now)."
+    },
+    {
+      "args": [
+        {
+          "name": "window_days",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "top_n",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "type": "number"
+        }
+      ],
+      "destructive": false,
+      "domain": "memory",
+      "name": "memory_lifecycle_summary",
+      "summary": "Windowed summary of lifecycle & contradiction activity over the last `window_days` days: counts of\u2026"
     },
     {
       "args": [

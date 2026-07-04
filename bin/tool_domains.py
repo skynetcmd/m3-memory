@@ -69,6 +69,7 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("memory_refresh",      "memory"),
     ("memory_set_retention","memory"),
     ("memory_cost",         "memory"),
+    ("memory_lifecycle_summary", "memory"),
     # Aggregation queries (entity-count first-class) — memory-scoped
     # because they query the curated entity tables.
     ("memory_count_entities", "memory"),
