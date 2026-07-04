@@ -370,12 +370,23 @@ def _xml_escape(text: str) -> str:
         .replace("'", "&apos;")
     )
 
-# Only the long-lived ONSTART cognitive loop needs a self-heal repetition: it is
-# a single continuous process, so if it dies it never restarts until the next
-# boot. The MINUTE/HOURLY/DAILY/WEEKLY/MONTHLY tasks already re-fire on their own
-# cadence. 30-minute repetition, no duration => repeat indefinitely. Safe because
-# every task sets MultipleInstances=IgnoreNew (a re-fire while alive is a no-op).
-_SELF_HEAL_TASKS = {"AgentOS_CognitiveLoop": "PT30M"}
+# The long-lived ONSTART processes need a self-heal repetition: each is a single
+# continuous process, so if it dies it never restarts until the next boot. The
+# MINUTE/HOURLY/DAILY/WEEKLY/MONTHLY tasks already re-fire on their own cadence.
+# The repetition re-fires the trigger indefinitely (no duration); MultipleInstances
+# =IgnoreNew makes a re-fire while the process is still alive a harmless no-op, so
+# the net effect is "restart it if and only if it has died."
+#   - AgentOS_CognitiveLoop: PT30M — a stalled heartbeat is tolerable for ~30 min.
+#   - AgentOS_EmbedServer:    PT5M  — this is the SOLE embedder for the whole fleet
+#     (clients disable their own tier-1 via .embed_config.json), so its death is a
+#     fleet-wide embedding outage. A tighter 5-min heal bounds that outage: without
+#     it, one crash silently kills write-embedding AND semantic/vector retrieval
+#     across every m3 process until the next reboot (observed 2026-07-03: the
+#     server was never started and there was no local fallback → global outage).
+_SELF_HEAL_TASKS = {
+    "AgentOS_CognitiveLoop": "PT30M",
+    "AgentOS_EmbedServer": "PT5M",
+}
 
 
 def _xml_repetition(interval_iso: str) -> str:

@@ -133,11 +133,27 @@ def test_cognitive_loop_selfheal_repetition_on_both_triggers():
 
 
 def test_other_onstart_task_has_no_repetition():
+    # A task NOT in _SELF_HEAL_TASKS gets no repetition (only the registered
+    # long-lived singletons self-heal).
     root = _render(_spec("AgentOS_SomethingElse", "ONSTART"))
     for trig in ("BootTrigger", "LogonTrigger"):
         node = root.find(f".//t:{trig}", _NS)
         assert node.find("./t:Repetition", _NS) is None, (
-            f"only the cognitive loop should self-heal; {trig} must not repeat"
+            f"a task outside _SELF_HEAL_TASKS must not repeat; {trig} must not repeat"
+        )
+
+
+def test_embed_server_has_5min_self_heal_repetition():
+    # The shared embed server is the SOLE embedder for the fleet; its death is a
+    # fleet-wide outage, so it must carry a tight (PT5M) self-heal repetition on
+    # BOTH the boot and logon triggers.
+    root = _render(_spec("AgentOS_EmbedServer", "ONSTART"))
+    for trig in ("BootTrigger", "LogonTrigger"):
+        node = root.find(f".//t:{trig}", _NS)
+        assert node is not None, f"EmbedServer must emit a {trig}"
+        interval = node.find("./t:Repetition/t:Interval", _NS)
+        assert interval is not None and interval.text == "PT5M", (
+            f"EmbedServer {trig} must carry the 5-min self-heal repetition"
         )
 
 
