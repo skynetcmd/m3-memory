@@ -168,6 +168,15 @@ def _fix_start_server() -> bool:
 
 
 def _fix_register_task() -> bool:
+    # The scheduled-task fallback is WINDOWS-ONLY (schtasks). On Unix the only
+    # cross-boot keep-alive is the Rust m3-embed-server OS service; there is no
+    # launchd/systemd unit for the Python server, so don't pretend to register
+    # one (§1 3-OS, §3 never-silent) — point at the Rust install instead.
+    if sys.platform != "win32":
+        print("  [fix] no scheduled-task fallback on this OS — install the Rust")
+        print("        sovereign embedder to get a systemd/launchd keep-alive:")
+        print("            m3 embedder install-gpu && m3 embedder install")
+        return False
     script = os.path.join(_payload_bin(), "install_schedules.py")
     if not os.path.exists(script):
         print("  [fix] install_schedules.py not found; cannot register the keep-alive task.")

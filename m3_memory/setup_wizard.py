@@ -1000,10 +1000,26 @@ def _register_embed_server_task() -> None:
             print("    Keep-alive: the Rust m3-embed-server OS service (installed "
                   "above) keeps :8082 up — no scheduled task needed.")
             return
-    except Exception:  # noqa: BLE001 — detection failure: fall through to the task fallback
+    except Exception:  # noqa: BLE001 — detection failure: fall through to the fallback
         pass
+
+    # Rust binary absent. The scheduled-task fallback (bin/install_schedules.py,
+    # schtasks) is WINDOWS-ONLY — there is no crontab/systemd/launchd unit for the
+    # Python embed_server_inproc.py. So on Unix the only cross-boot keep-alive is
+    # the Rust OS service; be honest and point there rather than shell out to a
+    # Windows-only path that would silently do nothing (§1 3-OS, §3 never-silent).
+    if sys.platform != "win32":
+        print("    Rust m3-embed-server not present, and the Python embed-server has")
+        print("    no launchd/systemd unit yet — so shared mode has no cross-boot")
+        print("    keep-alive on this OS. To get one, install the sovereign embedder:")
+        print("        m3 embedder install-gpu   # fetches the m3-embed-server binary")
+        print("        m3 embedder install       # registers it as a systemd/launchd service")
+        print("    Until then, shared mode works only while a server is started manually:")
+        print("        python bin/embed_server_inproc.py --port 8082")
+        return
+
     print("    Rust m3-embed-server not present — registering the Python embed-"
-          "server keep-alive task as a fallback.")
+          "server keep-alive task as a fallback (Windows).")
     # Locate the payload's bin/install_schedules.py. In the dev checkout bin/ is
     # a sibling of the m3_memory package (parent.parent/bin, the same idiom the
     # GGUF-discovery step uses); a pipx install fetches the payload to the same

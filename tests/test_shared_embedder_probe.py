@@ -103,6 +103,28 @@ def test_keepalive_none_when_neither(monkeypatch):
     assert kind == "none" and ok is False
 
 
+def test_unix_no_keepalive_points_at_rust_not_windows_task(monkeypatch, cfg_root, capsys):
+    # On Unix with no Rust binary, the probe must NOT claim a scheduled-task
+    # fallback (schtasks is Windows-only). The --fix path points at the Rust
+    # systemd/launchd service instead of pretending to register a task (§1 3-OS).
+    monkeypatch.setattr(P.sys, "platform", "linux")
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="ok", rust=False, task=None)
+    rc = P.run(brief=False, fix=True)
+    out = capsys.readouterr().out
+    assert rc == 1  # still unhealthy — no keep-alive could be established
+    assert "m3 embedder install" in out
+    # must not falsely claim a Windows task was/should be registered on Linux
+    assert "schtasks" not in out.lower()
+
+
+def test_fix_register_task_refuses_on_unix(monkeypatch, capsys):
+    monkeypatch.setattr(P.sys, "platform", "darwin")
+    assert P._fix_register_task() is False
+    out = capsys.readouterr().out
+    assert "m3 embedder install" in out
+
+
 def test_brief_healthy_and_unhealthy(monkeypatch, cfg_root, capsys):
     _write_shared_config(cfg_root)
     _patch(monkeypatch, health="ok", rust=True)
