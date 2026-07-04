@@ -141,7 +141,13 @@ def main() -> int:
     with open(OUTPUT, "w", encoding="utf-8") as f:
         json.dump(features, f, indent=2)
         f.write("\n")
-    print(f"wrote {os.path.relpath(OUTPUT, BASE_DIR)} "
+    # relpath raises ValueError across Windows drives (OUTPUT on C: tmp vs repo
+    # on D:, the freshness test's setup) — keep this cosmetic log non-fatal.
+    try:
+        _shown = os.path.relpath(OUTPUT, BASE_DIR)
+    except ValueError:
+        _shown = OUTPUT
+    print(f"wrote {_shown} "
           f"({len(tools)} tools, {len(by_domain)} domains)")
     return 0
 

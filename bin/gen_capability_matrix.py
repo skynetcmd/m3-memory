@@ -99,7 +99,14 @@ def main() -> int:
     content = "\n".join(lines) + "\n"
     with open(OUTPUT, "w", encoding="utf-8") as f:
         f.write(content)
-    print(f"wrote {os.path.relpath(OUTPUT, BASE_DIR)} "
+    # relpath raises ValueError across Windows drives (e.g. OUTPUT on a C: tmp
+    # dir while the repo is on D:, which is exactly the freshness test's setup).
+    # This is a cosmetic log line — never let it abort generation.
+    try:
+        _shown = os.path.relpath(OUTPUT, BASE_DIR)
+    except ValueError:
+        _shown = OUTPUT
+    print(f"wrote {_shown} "
           f"({len(tools)} tools, {len([d for d in domains if d in by_domain])} groups)")
     return 0
 
