@@ -29,6 +29,35 @@ Or directly from the repo without going through the marketplace:
 After install, restart your Claude Code session (or run `/plugin reload`)
 so the new MCP server, hooks, and commands take effect.
 
+## Updating m3
+
+To upgrade an installed plugin to the latest published version, run these
+**in order**:
+
+```
+/plugin marketplace update skynetcmd      # refresh the marketplace metadata from GitHub
+/plugin install m3@skynetcmd              # re-install → upgrades to the newest version
+/reload-plugins                           # restart the m3 MCP server + reload hooks/commands
+```
+
+`/reload-plugins` restarts the MCP server in-place, so a full Claude Code
+restart is not required.
+
+> **⚠️ Re-installing can silently disable the plugin.** On some Claude Code
+> versions, `/plugin install` of an already-installed plugin flips it to
+> **disabled** — after which m3 vanishes from `/mcp` and no `mcp__…m3…` tools
+> load, even though the reload "succeeded". If that happens:
+> 1. Check `~/.claude/settings.json` → `enabledPlugins` → `"m3@skynetcmd"`.
+> 2. If it is `false`, set it to `true`.
+> 3. Run `/reload-plugins` again.
+>
+> `m3 doctor` detects this exact state (stale/disabled plugin) and prints these
+> steps — run it if m3's tools ever go missing after an update.
+
+**Verify the update landed:** `m3 doctor` reports the served plugin version, or
+check that the m3 tools are back with `/mcp`. A successful update loads the new
+version from `~/.claude/plugins/cache/skynetcmd/m3/<version>/`.
+
 ---
 
 ## What it does on first run

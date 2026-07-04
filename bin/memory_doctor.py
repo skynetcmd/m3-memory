@@ -75,6 +75,10 @@ def main() -> int:
         help="Skip the shared-embedder-mode check (config + server + keep-alive task).",
     )
     parser.add_argument(
+        "--skip-plugin", action="store_true",
+        help="Skip the Claude Code plugin version/enabled check.",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Show the full detail (DB-repair steps + each probe's expanded "
              "report + model-load logs). Default is a compact one-line-per-check "
@@ -169,6 +173,13 @@ def main() -> int:
         # state (silent fleet-wide embedding outage), not a supported variant.
         # `m3 doctor --fix` repairs it (see the --fix branch above).
         exit_code = max(exit_code, shared_embedder_probe.run(brief=brief, fix=False))
+
+    if not args.skip_plugin:
+        from doctor import plugin_version_probe
+        # Report-only: a stale or disabled Claude Code plugin is user-recoverable
+        # (the fix is client-side /plugin + /reload-plugins commands doctor can't
+        # invoke), so it nags with the exact commands but never bumps the exit code.
+        plugin_version_probe.run(brief=brief)
 
     # On a failure in brief mode, point the user at the full detail (§3: an
     # error should tell you how to see more, not dead-end).
