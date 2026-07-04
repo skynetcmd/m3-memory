@@ -543,25 +543,47 @@ async def memory_search_scored_impl(
                     extra_cols_sql = ", " + ", ".join(f"mi.{c}" for c in safe_extra)
 
                 with _db() as conn:
-                    row = conn.execute(
+                    # Fetch the top-N bm25-ranked FTS matches, not LIMIT 1.
+                    # The old LIMIT 1 + substring gate was lossy: FTS routinely
+                    # matches many rows, but only the single best-bm25 row was
+                    # examined. If THAT row contained the exact query substring,
+                    # the function returned it ALONE and discarded every other
+                    # match (e.g. query "core tenets" matched 6 rows but returned
+                    # 1); if it did NOT, the short-circuit fell through to the
+                    # embedding path, which returns [] when the embed backend is
+                    # down — so a purely lexical, FTS-satisfiable query silently
+                    # yielded nothing. Now: keep ALL top-N rows whose content or
+                    # title contains the exact query substring, bm25-ranked.
+                    fts_rows = conn.execute(
                         f"""
-                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql}
+                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql},
+                               bm25(memory_items_fts) AS _bm25
                         FROM memory_items_fts fts
                         JOIN memory_items mi ON fts.rowid = mi.rowid
                         WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0
-                        LIMIT 1
+                        ORDER BY _bm25 ASC
+                        LIMIT ?
                         """,
-                        (fts_query,)
-                    ).fetchone()
-                    if row:
+                        (fts_query, max(k * 4, 20)),
+                    ).fetchall()
+                    query_lower = query.lower()
+                    exact_hits = []
+                    for row in fts_rows:
                         hit = dict(row)
-                        content_lower = hit["content"].lower()
-                        query_lower = query.lower()
-                        # Verify the match is a direct specific hit (e.g. key or exact phrase match)
-                        if query_lower in content_lower or query_lower in hit["title"].lower():
-                            logger.info("FTS Short-Circuit early exit triggered for query: %r", query)
-                            # Return 1.0 exact score match, bypassing embedding generation!
-                            return [(1.0, hit)]
+                        hit.pop("_bm25", None)  # internal ranking col, not part of the item shape
+                        content_lower = (hit["content"] or "").lower()
+                        title_lower = (hit["title"] or "").lower()
+                        # Direct specific hit: exact query phrase in content or title.
+                        if query_lower in content_lower or query_lower in title_lower:
+                            exact_hits.append((1.0, hit))
+                    if exact_hits:
+                        logger.info(
+                            "FTS Short-Circuit early exit for query %r: %d exact match(es)",
+                            query, len(exact_hits),
+                        )
+                        # bm25 order preserved (rows came back ORDER BY _bm25 ASC);
+                        # all share score 1.0 as exact-substring hits. Cap at k.
+                        return exact_hits[:k]
         except Exception as exc:
             logger.debug("FTS Short-circuit check failed (non-fatal): %s", exc)
 
