@@ -1104,28 +1104,88 @@ def _wire_gemini() -> bool:
     return True
 
 
-def _wire_opencode() -> bool:
-    """Append an `m3` MCP entry to the user's opencode.json. Idempotent."""
+def _opencode_entry_is_stale(entry: object) -> bool:
+    """True if an existing OpenCode ``memory`` entry points at a dead path.
+
+    OpenCode's schema is ``{"command": [interp, script, ...], ...}`` — a LIST,
+    unlike the mcpServers schema — so any list element that looks like an absolute
+    path to a missing file (a moved-install split-brain) means repoint. A bare
+    console-script command like ``["m3"]`` has no path elements and is never stale.
+    """
+    if not isinstance(entry, dict):
+        return True
+    cmd = entry.get("command")
+    parts = cmd if isinstance(cmd, list) else [cmd]
+    for p in parts:
+        if isinstance(p, str) and (("/" in p) or ("\\" in p) or p.endswith(".py")):
+            if not Path(os.path.expandvars(os.path.expanduser(p))).exists():
+                return True
+    return False
+
+
+def _opencode_config_paths() -> list[Path]:
+    """Candidate opencode.json locations. On Windows OpenCode may live under
+    %APPDATA% OR ~/.config (the XDG-style path some installs use), so heal both."""
+    paths = [Path.home() / ".config" / "opencode" / "opencode.json"]
     if sys.platform == "win32":
-        cfg_path = Path(os.environ.get("APPDATA", "")) / "opencode" / "opencode.json"
-    else:
-        cfg_path = Path.home() / ".config" / "opencode" / "opencode.json"
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    existing: dict = {}
-    if cfg_path.is_file():
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            paths.insert(0, Path(appdata) / "opencode" / "opencode.json")
+    return paths
+
+
+def _wire_opencode() -> bool:
+    """Register/repoint the `memory` MCP entry in opencode.json.
+
+    Self-healing (mirrors _register_gemini_mcp): a present-but-STALE entry (dead
+    interpreter/bridge path from a moved install) is REPOINTED to the canonical
+    ``command: ["m3"]`` — the bare CLI form is relocation-proof, so a repointed
+    entry never goes stale again. The old skip-if-present behavior silently left
+    a dead entry in place across upgrades."""
+    canonical = {"type": "local", "command": ["m3"], "enabled": True}
+    healed_any = False
+    for cfg_path in _opencode_config_paths():
+        if not cfg_path.is_file():
+            continue
         try:
             existing = json.loads(cfg_path.read_text(encoding="utf-8")) or {}
         except json.JSONDecodeError:
             _warn(f"{cfg_path} is unreadable; skipping OpenCode wiring")
-            return False
-    mcp = existing.setdefault("mcp", {})
-    if "memory" in mcp:
-        _say(f"  · OpenCode already wired ({cfg_path})")
-        return True
-    mcp["memory"] = {"type": "local", "command": ["m3"], "enabled": True}
-    existing.setdefault("$schema", "https://opencode.ai/config.json")
-    cfg_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-    _say(f"  · wrote OpenCode config to {cfg_path}")
+            continue
+        mcp = existing.setdefault("mcp", {})
+        cur = mcp.get("memory")
+        if cur == canonical:
+            _say(f"  · OpenCode already wired ({cfg_path})")
+            healed_any = True
+            continue
+        if cur is not None and not _opencode_entry_is_stale(cur):
+            _say(f"  · OpenCode already wired ({cfg_path})")
+            healed_any = True
+            continue
+        # Missing or stale -> (re)write the canonical entry, backing up a rewrite.
+        if cur is not None:
+            bak = cfg_path.with_suffix(cfg_path.suffix + ".m3bak")
+            try:
+                bak.write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
+            except OSError:
+                pass
+        mcp["memory"] = canonical
+        existing.setdefault("$schema", "https://opencode.ai/config.json")
+        cfg_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+        verb = "repointed" if cur is not None else "wrote"
+        _say(f"  · {verb} OpenCode memory MCP in {cfg_path}")
+        healed_any = True
+
+    if not healed_any:
+        # No existing config anywhere -> create the canonical one at the primary path.
+        cfg_path = _opencode_config_paths()[0]
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg_path.write_text(
+            json.dumps({"$schema": "https://opencode.ai/config.json",
+                        "mcp": {"memory": canonical}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        _say(f"  · wrote OpenCode config to {cfg_path}")
     return True
 
 

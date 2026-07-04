@@ -149,3 +149,57 @@ def test_doctor_fix_flag_runs(canonical, tmp_path, monkeypatch, capsys):
     assert "repointed" in out
     after = json.loads(g.read_text())["mcpServers"]["memory"]
     assert after["args"] == [str(canonical["bridge"]).replace("\\", "/")]
+
+
+# ── OpenCode self-heal (mcp.memory schema, list command) ──────────────────────
+# OpenCode uses a DIFFERENT config shape than the mcpServers hosts:
+# {"mcp": {"memory": {"command": [interp, script], ...}}}. Its wiring historically
+# SKIPPED an already-present entry, so a dead-path entry survived a moved install.
+# _wire_opencode now self-heals it. These test the OpenCode-specific logic.
+from m3_memory import setup_wizard as W  # noqa: E402
+
+
+def test_opencode_stale_detector_flags_dead_list_command(tmp_path):
+    dead = str(tmp_path / "gone" / "python.exe")  # absolute path, does not exist
+    entry = {"type": "local", "command": [dead, "bin/memory_bridge.py"]}
+    assert W._opencode_entry_is_stale(entry) is True
+
+
+def test_opencode_stale_detector_ignores_bare_cli(tmp_path):
+    # command: ["m3"] is a bare console script — no path elements — never stale.
+    assert W._opencode_entry_is_stale({"type": "local", "command": ["m3"]}) is False
+
+
+def test_opencode_stale_detector_non_dict_is_stale():
+    assert W._opencode_entry_is_stale(None) is True
+    assert W._opencode_entry_is_stale("weird") is True
+
+
+def test_wire_opencode_repoints_a_dead_entry(tmp_path, monkeypatch):
+    cfg = tmp_path / ".config" / "opencode" / "opencode.json"
+    cfg.parent.mkdir(parents=True)
+    dead = str(tmp_path / "old-repo" / ".venv" / "python.exe")
+    _write(cfg, {"mcp": {"memory": {"type": "local",
+                                    "command": [dead, "bin/memory_bridge.py"]}}})
+    monkeypatch.setattr(W, "_opencode_config_paths", lambda: [cfg])
+    monkeypatch.setattr(W, "_say", lambda m: None)
+    monkeypatch.setattr(W, "_warn", lambda m: None)
+
+    assert W._wire_opencode() is True
+    after = json.loads(cfg.read_text())["mcp"]["memory"]
+    assert after["command"] == ["m3"]              # repointed to the relocation-proof CLI
+    assert cfg.with_suffix(".json.m3bak").is_file()  # backed up first
+
+
+def test_wire_opencode_leaves_a_healthy_entry(tmp_path, monkeypatch):
+    cfg = tmp_path / ".config" / "opencode" / "opencode.json"
+    cfg.parent.mkdir(parents=True)
+    _write(cfg, {"mcp": {"memory": {"type": "local", "command": ["m3"], "enabled": True}}})
+    before = cfg.read_text()
+    monkeypatch.setattr(W, "_opencode_config_paths", lambda: [cfg])
+    monkeypatch.setattr(W, "_say", lambda m: None)
+    monkeypatch.setattr(W, "_warn", lambda m: None)
+
+    W._wire_opencode()
+    assert cfg.read_text() == before  # no rewrite of a healthy entry
+    assert not cfg.with_suffix(".json.m3bak").exists()
