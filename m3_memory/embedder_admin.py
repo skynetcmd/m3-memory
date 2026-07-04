@@ -57,11 +57,10 @@ def _find_bundled_gguf() -> Optional[Path]:
 
     # 2. Resolve via the install-m3 payload root.
     try:
-        from m3_memory.installer import find_bridge
-        bridge = find_bridge()
-        if bridge:
-            # bridge points at <payload>/bin/memory_bridge.py; up two = payload root.
-            candidate = bridge.parent.parent / "_assets" / "models" / BGE_M3_FILENAME
+        from m3_memory.installer import assets_dir
+        assets = assets_dir()
+        if assets:
+            candidate = assets / "models" / BGE_M3_FILENAME
             if candidate.is_file():
                 return candidate
     except Exception:

@@ -111,7 +111,9 @@ def _resolve_chatlog_db(cfg: dict) -> Optional[Path]:
     from m3_memory import installer as _inst
     dev = _inst._developer_bridge()
     if dev:
-        return dev.parent.parent / "memory" / "agent_chatlog.db"
+        candidate = dev.parent.parent / "memory" / "agent_chatlog.db"
+        if candidate.exists():
+            return candidate
     return None
 
 

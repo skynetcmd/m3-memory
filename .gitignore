@@ -227,3 +227,7 @@ gitignored/
 # Internal schema-fork planning doc — documents the private/bench migration
 # lineage; keep local/private, never on public origin.
 docs/plans/SCHEMA_MIGRATION_FORK.md
+
+# Build artifact: install_os.py is staged into the package by setup.py
+# (_stage_root_file) at build time from the repo-root install_os.py. Never commit.
+m3_memory/install_os.py

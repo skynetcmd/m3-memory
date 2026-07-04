@@ -107,33 +107,61 @@ def _developer_bridge() -> Optional[Path]:
     return None
 
 
-def find_bridge() -> Optional[Path]:
-    """Locate ``memory_bridge.py`` using the four-step resolution order.
-
-    Returns the absolute path if found, or None to signal "not installed."
-    Callers should present an actionable message when None is returned.
+def _payload_dir(component: str, env_var: str, must_contain: "Optional[str]" = None) -> "Optional[Path]":
+    """Resolve a payload component dir (bin/docs/_assets/examples) with a
+    per-component env-var override. Precedence:
+      1. $<env_var> if set and exists (and, if must_contain given, contains it)
+      2. Path(__file__).parent / component  (the wheel-shipped packaged copy)
+      3. a dev-checkout sibling: walk up from __file__ for a <component>/ dir
+         (mirrors _developer_bridge for the pip-install-e . case)
+      4. None
     """
-    # 1. Env var override.
-    env = os.environ.get("M3_BRIDGE_PATH")
+    def _ok(base: "Path") -> bool:
+        return base.is_dir() and (must_contain is None or (base / must_contain).exists())
+
+    env = os.environ.get(env_var)
     if env:
-        p = Path(env).expanduser().resolve()
-        if p.is_file():
-            return p
-
-    # 2. Config file written by install_m3.
-    cfg = load_config()
-    bridge = cfg.get("bridge_path")
-    if bridge:
-        p = Path(bridge).expanduser().resolve()
-        if p.is_file():
-            return p
-
-    # 3. Developer sibling case.
-    dev = _developer_bridge()
-    if dev:
-        return dev
-
+        p = Path(env).expanduser()
+        if _ok(p):
+            return p.resolve()
+    packaged = Path(__file__).resolve().parent / component
+    if _ok(packaged):
+        return packaged
+    # dev-checkout sibling: walk up looking for <repo>/<component>
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        cand = parent / component
+        if _ok(cand):
+            return cand
     return None
+
+
+def bin_dir() -> "Optional[Path]":
+    """The bin/ directory (payload scripts + memory_bridge.py). $M3_PATH_BIN overrides."""
+    return _payload_dir("bin", "M3_PATH_BIN", must_contain="memory_bridge.py")
+
+
+def docs_dir() -> "Optional[Path]":
+    """The docs/ directory. $M3_PATH_DOC overrides."""
+    return _payload_dir("docs", "M3_PATH_DOC")
+
+
+def assets_dir() -> "Optional[Path]":
+    """The _assets/ directory. $M3_PATH_ASSETS overrides."""
+    return _payload_dir("_assets", "M3_PATH_ASSETS")
+
+
+def examples_dir() -> "Optional[Path]":
+    """The examples/ directory. $M3_PATH_EXAMPLES overrides."""
+    return _payload_dir("examples", "M3_PATH_EXAMPLES")
+
+
+def find_bridge() -> Optional[Path]:
+    """Resolve bin/memory_bridge.py via bin_dir() (which honors $M3_PATH_BIN,
+    then the wheel-packaged location, then a dev-checkout sibling). Returns None
+    if no payload bin/ can be found (caller errors to `m3 install-m3`)."""
+    d = bin_dir()
+    return (d / "memory_bridge.py") if d else None
 
 
 def _git_clone(tag: str, dest: Path) -> bool:
@@ -247,9 +275,16 @@ def _canonical_memory_env() -> dict:
         "M3_ENGINE_ROOT": str(eng).replace("\\", "/"),
         "M3_CONFIG_ROOT": str(conf).replace("\\", "/"),
     }
-    bridge = _canonical_bridge_path()
-    if bridge:
-        env["M3_BRIDGE_PATH"] = str(bridge).replace("\\", "/")
+    # Pin the payload bin/ DIRECTORY via M3_PATH_BIN (replaces the removed
+    # M3_BRIDGE_PATH file-var). Only written when the resolved bin/ is NOT the
+    # packaged default — a packaged install needs no pin (the server resolves
+    # bin/ from its own package location), so we keep the env block clean in the
+    # common case and only pin a non-standard (dev / staged) location.
+    _bd = bin_dir()
+    if _bd is not None:
+        _packaged_default = Path(__file__).resolve().parent / "bin"
+        if _bd.resolve() != _packaged_default.resolve():
+            env["M3_PATH_BIN"] = str(_bd).replace("\\", "/")
     embed = os.environ.get("M3_EMBED_GGUF")
     if not embed:
         cand = Path.home() / ".lmstudio" / "models" / "deepsweet" \
@@ -600,7 +635,12 @@ def _run_main_migrations(bridge: Path) -> Optional[str]:
 
 def _run_os_install(bridge: Path) -> Optional[str]:
     """Execute the OS-specific installer (install_os.py) in the payload root."""
-    install_script = bridge.parent.parent / "install_os.py"
+    # Resolve install_os.py via bin_dir() if available, else fall back to bridge-relative path.
+    bin_d = bin_dir()
+    if bin_d:
+        install_script = bin_d.parent / "install_os.py"
+    else:
+        install_script = bridge.parent.parent / "install_os.py"
     if not install_script.is_file():
         return None
 
@@ -826,31 +866,41 @@ def install_m3(
         # read-only-bit clearing + short backoff.
         _robust_rmtree(repo_path)
 
-    print(f"fetching m3-memory {tag} -> {repo_path}")
-    # _git_clone returns False only when git is missing; it RAISES on any other
-    # failure (network, bad tag, exit 128). Because we already rmtree'd the old
-    # repo above, an uncaught raise here would leave the user with a vanished
-    # repo and no replacement (the 2026-06-08 incident). So fall back to the
-    # GitHub tarball on EITHER path — missing git OR a failed clone.
-    cloned = False
-    try:
-        cloned = _git_clone(tag, repo_path)
-    except Exception as e:  # noqa: BLE001 — any clone failure -> try the tarball
-        print(f"  git clone failed ({type(e).__name__}: {e}); falling back to GitHub tarball")
-        # A partial clone may have left a dir behind; clear it so the tarball
-        # extracts into a clean path.
-        shutil.rmtree(repo_path, ignore_errors=True)
-    if not cloned:
-        print("  falling back to GitHub tarball")
-        _download_tarball(tag, repo_path)
-
-    bridge = repo_path / "bin" / "memory_bridge.py"
-    if not bridge.is_file():
-        raise RuntimeError(
-            f"fetched repo but {bridge} not found. This usually means the "
-            f"tag {tag!r} doesn't exist on GitHub yet. Check "
-            f"https://github.com/skynetcmd/m3-memory/releases."
-        )
+    # Guard: if the bin payload is packaged in the wheel and not forced,
+    # skip the network fetch. The post-install setup still runs.
+    if bin_dir() is not None and not force:
+        print("[install-m3] payload already present (packaged in the wheel); skipping fetch.")
+        bridge = bin_dir() / "memory_bridge.py"
+        if not bridge.is_file():
+            raise RuntimeError(
+                f"payload bin_dir exists but {bridge} not found. This is unexpected; "
+                f"check your installation."
+            )
+    else:
+        print(f"fetching m3-memory {tag} -> {repo_path}")
+        # _git_clone returns False only when git is missing; it RAISES on any other
+        # failure (network, bad tag, exit 128). Because we already rmtree'd the old
+        # repo above, an uncaught raise here would leave the user with a vanished
+        # repo and no replacement (the 2026-06-08 incident). So fall back to the
+        # GitHub tarball on EITHER path — missing git OR a failed clone.
+        cloned = False
+        try:
+            cloned = _git_clone(tag, repo_path)
+        except Exception as e:  # noqa: BLE001 — any clone failure -> try the tarball
+            print(f"  git clone failed ({type(e).__name__}: {e}); falling back to GitHub tarball")
+            # A partial clone may have left a dir behind; clear it so the tarball
+            # extracts into a clean path.
+            shutil.rmtree(repo_path, ignore_errors=True)
+        if not cloned:
+            print("  falling back to GitHub tarball")
+            _download_tarball(tag, repo_path)
+        bridge = repo_path / "bin" / "memory_bridge.py"
+        if not bridge.is_file():
+            raise RuntimeError(
+                f"fetched repo but {bridge} not found. This usually means the "
+                f"tag {tag!r} doesn't exist on GitHub yet. Check "
+                f"https://github.com/skynetcmd/m3-memory/releases."
+            )
 
     # Restore preserved user data on top of the fresh tree.
     if preserved_dir is not None:

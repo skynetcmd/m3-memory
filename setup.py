@@ -24,6 +24,66 @@ if sys.platform == "win32":
 
 from setuptools import setup
 
+
+# ── Ship the runnable payload INSIDE the wheel under m3_memory/ ────────────────
+# A `pipx install m3-memory` user with no repo clone (possibly air-gapped) must
+# get the full toolset without the `install-m3` GitHub fetch. bin/, docs/, etc.
+# live at REPO ROOT (not under m3_memory/), and setuptools has no pyproject
+# `force-include`, so we map each root tree in as a sub-package sourced from its
+# root location: package_dir tells setuptools where a package's files LIVE, and
+# package_data (with "*" + "**/*") pulls in every file, not just .py. Every
+# subdir becomes its own package entry (setuptools maps one dir per package).
+# installer.py resolves these from Path(m3_memory.__file__).parent / <component>
+# (or their per-component $M3_PATH_* override).
+def _payload_mapping():
+    # (import-name-prefix, root-dir) — each root tree grafts under m3_memory/.
+    # memory/migrations + memory/chatlog_migrations carry the schema .sql that
+    # `m3 setup` applies; they live at REPO ROOT (not bin/), so ship them too.
+    trees = [
+        ("m3_memory.bin", "bin"),
+        ("m3_memory.docs", "docs"),
+        ("m3_memory._assets", "_assets"),
+        ("m3_memory.examples", "examples"),
+        ("m3_memory.memory.migrations", os.path.join("memory", "migrations")),
+        ("m3_memory.memory.chatlog_migrations", os.path.join("memory", "chatlog_migrations")),
+    ]
+    package_dir = {}
+    packages = []
+    package_data = {}
+    for pkg_root, disk_root in trees:
+        if not os.path.isdir(disk_root):
+            continue
+        for dirpath, dirnames, _files in os.walk(disk_root):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            rel = os.path.relpath(dirpath, disk_root)
+            pkg = pkg_root if rel == "." else pkg_root + "." + rel.replace(os.sep, ".")
+            package_dir[pkg] = dirpath.replace(os.sep, "/")
+            packages.append(pkg)
+            package_data[pkg] = ["*"]  # every file in this dir, any extension
+    return package_dir, packages, package_data
+
+
+_pkg_dir, _payload_pkgs, _pkg_data = _payload_mapping()
+
+# install_os.py is a single ROOT-LEVEL file (the OS-level installer). It must
+# land at m3_memory/install_os.py so _run_os_install (installer.py) finds it via
+# bin_dir().parent. A tree-walk can't map a lone file, so stage it into a build
+# dir under m3_memory/ and ship it as package_data of the top-level package.
+# _run_os_install no-ops gracefully if it's absent, so a build without it still
+# works — but ship it for completeness / air-gapped OS-install support.
+def _stage_root_file(src, pkg="m3_memory"):
+    import shutil
+    if not os.path.isfile(src):
+        return
+    dst = os.path.join(pkg, os.path.basename(src))
+    # Only copy if missing or stale (build is repeatable / idempotent).
+    if not os.path.isfile(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
+        shutil.copy2(src, dst)
+    _pkg_data.setdefault(pkg, []).append(os.path.basename(src))
+
+
+_stage_root_file("install_os.py")
+
 # mypyc compilation of the hot-path modules is a pure OPTIMIZATION — the package
 # is fully functional as a pure-Python wheel without it. Skip it gracefully when:
 #   - M3_SKIP_MYPYC is set (opt-out for constrained / cross / CI build envs), or
@@ -52,6 +112,35 @@ if not os.environ.get("M3_SKIP_MYPYC"):
               "building pure-Python wheel.", file=sys.stderr)
         ext_modules = []
 
+# Discover the real python packages (m3_memory + subpackages) the same way
+# pyproject's [tool.setuptools.packages.find] would, then ADD the payload trees.
+# Passing `packages`/`package_dir`/`package_data` here supersedes the pyproject
+# `find`, so we must reproduce its include/exclude (m3_memory*, minus
+# integrations which ship as data).
+from setuptools import find_packages
+
+_code_pkgs = find_packages(
+    where=".", include=["m3_memory*"], exclude=["m3_memory.integrations*"]
+)
+
+# package_data for the CODE package: the mcp examples + the vendored Hermes
+# provider (which ships as data, not an importable package). Previously in
+# pyproject's [tool.setuptools.package-data]; moved here since setup.py now owns
+# packages/package_dir/package_data (all three must come from one source).
+_code_data = {
+    "m3_memory": [
+        "mcp.json.example",
+        "mcp-server.json",
+        "integrations/hermes/*.py",
+        "integrations/hermes/*.yaml",
+        "integrations/hermes/*.md",
+    ],
+}
+_pkg_data.update(_code_data)
+
 setup(
     ext_modules=ext_modules,
+    packages=_code_pkgs + _payload_pkgs,
+    package_dir=_pkg_dir,
+    package_data=_pkg_data,
 )

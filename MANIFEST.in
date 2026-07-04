@@ -8,5 +8,22 @@ include NOTICE
 # m3_memory in pyproject.toml.) The setup wizard's _find_m3_hermes_plugin_src()
 # resolves it under m3_memory/integrations/hermes/.
 graft m3_memory/integrations/hermes
+
+# Ship the runnable PAYLOAD in the wheel so a `pipx install m3-memory` user with
+# no repo clone (and possibly air-gapped) gets the full toolset — no `install-m3`
+# GitHub fetch required. These root-level trees are mapped INTO the package via
+# [tool.setuptools.force-include] in pyproject.toml so they land under
+# m3_memory/ in the installed package; installer.py resolves them from there
+# (or from their per-component $M3_PATH_* override). Keeping them at repo root
+# (not physically moving them under m3_memory/) avoids churning the whole
+# bin/... reference surface.
+graft bin
+graft docs
+graft _assets
+graft examples
+include install_os.py
+recursive-include memory/migrations *.sql
+
 global-exclude __pycache__/*
 global-exclude *.py[cod]
+global-exclude *.pdb

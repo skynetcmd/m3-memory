@@ -174,29 +174,14 @@ Repository = "https://github.com/skynetcmd/m3-memory"
 Changelog = "https://github.com/skynetcmd/m3-memory/blob/main/docs/CHANGELOG.md"
 Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/AGENT_INSTRUCTIONS.md"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["m3_memory*"]
-# The Hermes plugin under m3_memory/integrations/hermes/ is VENDORED DATA, not an
-# importable package — its __init__.py imports hermes-agent modules that exist
-# only after it's copied into a hermes-agent checkout. Exclude it from package
-# discovery so setuptools never treats it as code; it ships as package-data
-# below instead.
-exclude = ["m3_memory.integrations*"]
-
-[tool.setuptools.package-data]
-m3_memory = [
-    "bin/*.py",
-    "memory/migrations/*.sql",
-    "mcp.json.example",
-    "mcp-server.json",
-    # Hermes Agent memory-provider plugin, vendored under the package so it ships
-    # in the wheel for `pip install` users. Treated as data (see exclude above).
-    # The setup wizard's _find_m3_hermes_plugin_src() resolves this packaged copy.
-    "integrations/hermes/*.py",
-    "integrations/hermes/*.yaml",
-    "integrations/hermes/*.md",
-]
+# NOTE: package discovery, package_dir and package_data are defined in setup.py,
+# NOT here. The root-level payload trees (bin/, docs/, _assets/, examples/) must
+# be MAPPED into the m3_memory package (setuptools has no pyproject force-include),
+# which requires programmatic package_dir/package_data — so setup.py is the single
+# source for all three. Declaring [tool.setuptools.packages.find] here as well
+# would override setup.py's `packages=` and silently drop the payload from the
+# wheel. Keep them out of pyproject. (Hermes vendored data + mcp examples are also
+# handled in setup.py's mapping / MANIFEST graft.)
 
 [tool.ruff]
 target-version = "py311"

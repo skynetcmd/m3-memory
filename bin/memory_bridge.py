@@ -290,13 +290,16 @@ if __name__ == "__main__":
     except Exception as _e:
         logger.debug(f"version-drift check skipped: {type(_e).__name__}: {_e}")
     # B: canonical-path guard. If this bridge is being run from a path that
-    # disagrees with the recorded install (config bridge_path / M3_BRIDGE_PATH),
+    # disagrees with the resolved install (M3_PATH_BIN dir / config bridge_path),
     # the launching agent config is stale (the split-brain signature). Warn but
     # never abort — the bridge still works from wherever it was started.
     try:
         from pathlib import Path as _Path
         _self = _Path(__file__).resolve()
-        _want = _os.environ.get("M3_BRIDGE_PATH")
+        # M3_PATH_BIN is the bin/ DIRECTORY (replaces the removed M3_BRIDGE_PATH
+        # file-var); the expected bridge is <M3_PATH_BIN>/memory_bridge.py.
+        _pb = _os.environ.get("M3_PATH_BIN")
+        _want = (str(_Path(_pb) / "memory_bridge.py") if _pb else None)
         if not _want:
             try:
                 from m3_memory.installer import load_config as _lc

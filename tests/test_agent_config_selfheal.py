@@ -27,7 +27,11 @@ def canonical(tmp_path, monkeypatch):
     monkeypatch.setenv("M3_MEMORY_ROOT", str(state))
     monkeypatch.setenv("M3_ENGINE_ROOT", str(state / "engine"))
     monkeypatch.setenv("M3_CONFIG_ROOT", str(state / "config"))
-    monkeypatch.setenv("M3_BRIDGE_PATH", str(bridge))
+    # M3_PATH_BIN (a bin/ DIRECTORY) replaces the removed M3_BRIDGE_PATH file-var.
+    # bin_dir() honors it (must_contain=memory_bridge.py), so find_bridge()
+    # resolves to the fake bridge instead of the real dev-checkout bin.
+    monkeypatch.setenv("M3_PATH_BIN", str(bridge.parent))
+    monkeypatch.delenv("M3_BRIDGE_PATH", raising=False)
     monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
     monkeypatch.setattr(I, "config_dir", lambda: state)
     return {"bridge": bridge, "state": state}
@@ -52,7 +56,10 @@ def test_stale_memory_entry_is_repointed(canonical, tmp_path):
 
     after = json.loads(cfg.read_text())["mcpServers"]["memory"]
     assert after["args"] == [str(canonical["bridge"]).replace("\\", "/")]
-    assert after["env"]["M3_BRIDGE_PATH"] == str(canonical["bridge"]).replace("\\", "/")
+    # M3_BRIDGE_PATH is removed project-wide; the canonical env now pins the
+    # bin/ DIRECTORY via M3_PATH_BIN (non-packaged install -> pin is written).
+    assert after["env"]["M3_PATH_BIN"] == str(canonical["bridge"].parent).replace("\\", "/")
+    assert "M3_BRIDGE_PATH" not in after["env"]
 
 
 def test_healthy_entry_is_left_untouched(canonical, tmp_path):

@@ -336,19 +336,24 @@ def test_gather_plan_interactive_defaults(monkeypatch):
 
 
 def test_wire_opencode_writes_json(monkeypatch, tmp_path):
-    """_wire_opencode creates the opencode.json config file with correct settings."""
+    """_wire_opencode creates opencode.json (canonical ``command:["m3"]``) when
+    no existing config is found at ANY candidate path.
+
+    The self-heal now scans BOTH %APPDATA%/opencode and ~/.config/opencode, so we
+    must pin _opencode_config_paths to a hermetic tmp path — otherwise the real
+    user's ~/.config/opencode/opencode.json short-circuits the write."""
     import json
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    monkeypatch.setattr(sys, "platform", "win32")
+    cfg_file = tmp_path / "opencode" / "opencode.json"
+    # No file exists at this path yet -> _wire_opencode creates it at paths[0].
+    monkeypatch.setattr(setup_wizard, "_opencode_config_paths", lambda: [cfg_file])
 
     success = setup_wizard._wire_opencode()
     assert success is True
 
-    cfg_file = tmp_path / "opencode" / "opencode.json"
     assert cfg_file.is_file()
-
     content = json.loads(cfg_file.read_text(encoding="utf-8"))
     assert content["mcp"]["memory"]["command"] == ["m3"]
+    assert content["mcp"]["memory"]["enabled"] is True
 
 
 def test_wire_hermes_plugin_copy(monkeypatch, tmp_path):
@@ -459,6 +464,12 @@ def test_step_install_m3_passes_force(monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(setup_wizard, "_run", fake_run)
+    # New skip-guard: _step_install_m3 returns early (no fetch subprocess) when
+    # find_bridge() already resolves. Force the fetch path by making it None so
+    # the --force install-m3 command is actually issued. find_bridge is imported
+    # inside the function from m3_memory.installer, so patch it at the source.
+    from m3_memory import installer
+    monkeypatch.setattr(installer, "find_bridge", lambda: None)
 
     plan = setup_wizard.SetupPlan()
     plan.capture_mode = "both"

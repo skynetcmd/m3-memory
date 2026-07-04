@@ -46,13 +46,16 @@ def test_find_bridge_returns_none_when_nothing_configured(tmp_path):
 
 
 def test_find_bridge_honors_env_var(tmp_path):
-    """$M3_BRIDGE_PATH, when pointing at a real file, is returned first."""
+    """$M3_PATH_BIN, a bin/ DIRECTORY containing memory_bridge.py, is honored
+    first; find_bridge returns <dir>/memory_bridge.py."""
     from m3_memory import installer
 
-    fake_bridge = tmp_path / "fake_bridge.py"
+    bin_d = tmp_path / "custom-bin"
+    bin_d.mkdir()
+    fake_bridge = bin_d / "memory_bridge.py"
     fake_bridge.write_text("# fake")
 
-    with patch.dict(os.environ, {"M3_BRIDGE_PATH": str(fake_bridge)}):
+    with patch.dict(os.environ, {"M3_PATH_BIN": str(bin_d)}):
         assert installer.find_bridge() == fake_bridge.resolve()
 
 
@@ -66,8 +69,11 @@ def test_find_bridge_env_var_nonexistent_falls_through(tmp_path):
         assert result is None or result.is_file()
 
 
-def test_find_bridge_honors_config_file(tmp_path, monkeypatch):
-    """When ~/.m3-memory/config.json has a valid bridge_path, use it."""
+def test_find_bridge_ignores_config_file(tmp_path, monkeypatch):
+    """The config-file ``bridge_path`` step was REMOVED from find_bridge: it now
+    resolves ONLY via bin_dir() (env $M3_PATH_BIN > packaged > dev-sibling). A
+    valid bridge_path in config.json must NOT be honored — with no payload bin/
+    reachable, find_bridge returns None even though config points at a real file."""
     from m3_memory import installer
 
     fake_bridge = tmp_path / "configured_bridge.py"
@@ -76,9 +82,12 @@ def test_find_bridge_honors_config_file(tmp_path, monkeypatch):
     # Redirect config_dir to tmp_path to avoid touching real home.
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
     monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    # Neutralize the payload bin resolution so the ONLY possible source of a
+    # bridge would be the (removed) config-file step.
+    monkeypatch.setattr(installer, "bin_dir", lambda: None)
 
     installer.save_config({"bridge_path": str(fake_bridge)})
-    assert installer.find_bridge() == fake_bridge.resolve()
+    assert installer.find_bridge() is None
 
 
 def test_config_roundtrip(tmp_path, monkeypatch):
@@ -118,6 +127,10 @@ def test_install_m3_via_git_mock(tmp_path, monkeypatch):
     repo_path = tmp_path / "repo"
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
     monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    # The packaging change SKIPS the fetch when a payload bin/ is already present
+    # (the wheel case). To exercise the git-clone fetch path we must force the
+    # "no packaged/dev payload" branch: bin_dir() -> None.
+    monkeypatch.setattr(installer, "bin_dir", lambda: None)
 
     # Mock git clone by creating the expected directory structure at the
     # destination when subprocess.run is called.
@@ -160,6 +173,8 @@ def test_install_m3_falls_back_to_tarball_when_git_missing(tmp_path, monkeypatch
     repo_path = tmp_path / "repo"
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
     monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    # Force the fetch path (skip the packaged-payload short-circuit).
+    monkeypatch.setattr(installer, "bin_dir", lambda: None)
 
     def fake_run(*a, **kw):
         raise FileNotFoundError("git not installed")
@@ -186,6 +201,9 @@ def test_install_m3_fails_if_bridge_missing_in_fetched_repo(tmp_path, monkeypatc
     repo_path = tmp_path / "repo"
     monkeypatch.setattr(installer, "config_dir", lambda: tmp_path / ".m3-memory")
     monkeypatch.setattr(installer, "config_file", lambda: tmp_path / ".m3-memory" / "config.json")
+    # Force the fetch path (skip the packaged-payload short-circuit) so the
+    # "fetched repo lacks the bridge" error is the one under test.
+    monkeypatch.setattr(installer, "bin_dir", lambda: None)
 
     def fake_run(cmd, **kwargs):
         # Simulate a successful clone that happens to NOT contain the bridge.
@@ -233,8 +251,11 @@ def test_doctor_reports_missing_when_not_installed(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(installer, "config_file", lambda: cfg_dir / "config.json")
 
     # Also neutralize the developer-sibling walk so we're testing the "pure
-    # pip user" branch.
+    # pip user" branch. find_bridge now resolves via bin_dir() (env > packaged
+    # > dev-sibling), so we must neutralize bin_dir too — otherwise the dev
+    # checkout's real bin/ makes doctor report 'installed'.
     monkeypatch.setattr(installer, "_developer_bridge", lambda: None)
+    monkeypatch.setattr(installer, "bin_dir", lambda: None)
 
     rc = installer.doctor()
     out = capsys.readouterr().out
@@ -318,6 +339,11 @@ def test_doctor_says_installed_when_bridge_matches_config(tmp_path, monkeypatch,
     bridge = tmp_path / "repo" / "bin" / "memory_bridge.py"
     bridge.parent.mkdir(parents=True)
     bridge.write_text("# fetched bridge")
+    # find_bridge now resolves via bin_dir(); point it at the fake bin/ so the
+    # LIVE bridge matches config bridge_path (the happy path under test). Without
+    # this, find_bridge would resolve the real dev-checkout bridge and doctor
+    # would (correctly) report divergence instead of 'installed'.
+    monkeypatch.setattr(installer, "bin_dir", lambda: bridge.parent)
     monkeypatch.setattr(installer, "load_config", lambda: {
         "version": "2026.6.27.0", "tag": "v2026.6.27.0", "installed_at": "now",
         "bridge_path": str(bridge), "repo_path": str(bridge.parent.parent),

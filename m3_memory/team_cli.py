@@ -92,10 +92,10 @@ def _example_dir() -> Path:
     if local_example.exists():
         return local_example
 
-    from m3_memory.installer import find_bridge
-    bridge = find_bridge()
-    if bridge:
-        return bridge.parent.parent / "examples" / "multi-agent-team"
+    from m3_memory.installer import examples_dir
+    examples = examples_dir()
+    if examples:
+        return examples / "multi-agent-team"
 
     return local_example
 

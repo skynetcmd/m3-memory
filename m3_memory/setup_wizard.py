@@ -801,7 +801,16 @@ def _step_install_m3(plan: SetupPlan) -> bool:
     preserves user data (chatlog DB, .json/.jsonl state) across --force, so
     this is non-destructive for upgrades and a no-op for fresh installs.
     """
+    from m3_memory.installer import find_bridge
+
     _say("Step 1/5: fetching m3-memory system payload (install-m3)")
+
+    # If find_bridge() already resolves (packaged payload or dev checkout),
+    # skip the fetch. The payload is already present.
+    if find_bridge() is not None:
+        _say("  payload already present (packaged or via sibling); skipping fetch")
+        _ok("payload available")
+        return True
 
     # Subprocess-time package-shadow guard. The wizard's own preflight checks
     # `import m3_memory` in THIS process, but the install-m3 CHILD can resolve
@@ -1525,11 +1534,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Enable shared-embedder mode: all m3 processes defer to ONE shared "
              "GPU embedder server (one CUDA context, ~9-10 GB reclaimed). Writes "
              ".embed_config.json. Toggle later with `m3 embedder shared/unshared`.",
-    )
-    parser.add_argument(
-        "--no-shared-embedder", action="store_true",
-        help="Force per-process embedders (do NOT enable shared mode). Overrides "
-             "--shared-embedder; the non-interactive default.",
     )
     parser.add_argument(
         "--endpoint", default=None,
