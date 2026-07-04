@@ -155,8 +155,14 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     """Creates a directional link between two memory items. Valid types:
     related, supports, contradicts, extends, supersedes, references,
     consolidates, message, handoff.
+
+    `db` is accepted for signature back-compat but ignored: `_db()` resolves the
+    active context's pooled connection internally and takes no argument — passing
+    one raised `TypeError: _db() takes 0 positional arguments` on every call
+    (regression from the memory_core modularization that changed `_db`'s
+    signature without updating this caller).
     """
-    with _db(db) as db_conn:
+    with _db() as db_conn:
         db_conn.execute(
             "INSERT OR REPLACE INTO memory_relationships (from_id, to_id, relationship_type) VALUES (?, ?, ?)",
             (from_id, to_id, relationship_type)
