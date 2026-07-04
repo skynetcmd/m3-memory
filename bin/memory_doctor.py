@@ -79,6 +79,10 @@ def main() -> int:
         help="Skip the Claude Code plugin version/enabled check.",
     )
     parser.add_argument(
+        "--skip-agent-paths", action="store_true",
+        help="Skip the cross-agent dead-path check (Gemini/OpenCode/Hermes/...).",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Show the full detail (DB-repair steps + each probe's expanded "
              "report + model-load logs). Default is a compact one-line-per-check "
@@ -180,6 +184,13 @@ def main() -> int:
         # (the fix is client-side /plugin + /reload-plugins commands doctor can't
         # invoke), so it nags with the exact commands but never bumps the exit code.
         plugin_version_probe.run(brief=brief)
+
+    if not args.skip_agent_paths:
+        from doctor import agent_paths_probe
+        # DOES bump the exit code: a dead-path agent config means m3 silently does
+        # not load in that host (Gemini/OpenCode/Hermes/... after a relocation).
+        # `m3 setup` self-heals it (installer owns the canonical write path).
+        exit_code = max(exit_code, agent_paths_probe.run(brief=brief))
 
     # On a failure in brief mode, point the user at the full detail (§3: an
     # error should tell you how to see more, not dead-end).
