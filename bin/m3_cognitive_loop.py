@@ -446,6 +446,19 @@ async def run_embed_pass(args):
         logger.debug("No pending embed-backfill work. Skipping pass.")
         return
 
+    # Active embed-server recovery (§8): there IS pending embed work, which often
+    # means writes deferred because the fast embedder was down. If the shared
+    # tier-2 server (:8082) has since come back, force the client breakers closed
+    # NOW rather than waiting for organic traffic to re-open them — otherwise this
+    # backfill sweep would cascade through dead tiers and re-defer. No-op (and no
+    # network cost beyond one /health GET) when the server is still down.
+    try:
+        from memory.embed import recover_if_fallback_healthy
+        if recover_if_fallback_healthy():
+            logger.info("Embed-backfill: tier-2 server healthy — breakers reset before sweep.")
+    except Exception as e:
+        logger.debug(f"Active embed recovery check failed (non-fatal): {e}")
+
     logger.info("Starting Embed-backfill pass...")
     try:
         import embed_backfill

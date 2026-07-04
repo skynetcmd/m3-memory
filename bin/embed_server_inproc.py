@@ -85,6 +85,35 @@ class EmbeddingRequest(BaseModel):
     input: Union[str, list[str]] = Field(...)
 
 
+def _already_serving(host: str, port: int, timeout: float = 1.5) -> bool:
+    """True if a healthy embed server is already listening on host:port.
+
+    Probes GET /health and accepts only a JSON body with status in
+    {"ok","loading"} — i.e. it is THIS server, already up (or mid-load), not
+    some unrelated service that happens to hold the port. Any connection error,
+    timeout, non-200, or unrecognised body returns False so the caller starts
+    normally. Stdlib-only (urllib) to keep the pre-flight dependency-free.
+
+    Used as a pre-flight guard so a re-fired self-heal task never loads a second
+    GPU embedder when one is already serving (§8: one CUDA context, not two).
+    """
+    import json as _json
+    import urllib.request
+
+    # 127.0.0.1 for a wildcard/loopback bind host so the probe targets a real IP.
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    url = f"http://{probe_host}:{port}/health"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — fixed loopback URL
+            if resp.status != 200:
+                return False
+            body = _json.loads(resp.read().decode("utf-8", "replace"))
+        return isinstance(body, dict) and body.get("status") in ("ok", "loading")
+    except Exception:
+        # Nothing there, refused, timed out, or a foreign service — start normally.
+        return False
+
+
 def _load_embedder() -> None:
     """Load the in-process GPU embedder ONCE. Fail loud (§3): a load failure
     exits non-zero — a shared embedder that can't embed must not pretend to."""
@@ -218,6 +247,23 @@ def main() -> int:
 
     if args.log_file:
         logging.getLogger().addHandler(logging.FileHandler(args.log_file, encoding="utf-8"))
+
+    # Pre-flight liveness guard (do NOT stack a second embedder). The self-heal
+    # scheduled task re-fires every minute; MultipleInstancesPolicy=IgnoreNew
+    # covers a re-fire of the SAME task, but a manually-started server (or any
+    # process not owned by the task) would otherwise let this instance load a
+    # SECOND GPU embedder — a second multi-GB CUDA context, the exact waste this
+    # shared-server design exists to avoid — and only THEN fail to bind the port.
+    # So probe /health first: if the port is already serving, exit 0 cleanly
+    # BEFORE touching the GPU. Any probe error (nothing there / half-up) falls
+    # through and we start normally.
+    if _already_serving(args.host, args.port):
+        logger.info(
+            "an embed server is already serving %s:%d — exiting without loading "
+            "a second GPU embedder (§8: one CUDA context, not two).",
+            args.host, args.port,
+        )
+        return 0
 
     _load_embedder()  # fail-loud: exits non-zero if the embedder can't load
     logger.info("listening on http://%s:%d (loopback=%s)",

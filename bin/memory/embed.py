@@ -203,6 +203,48 @@ def reset_embed_breakers() -> dict:
     return prior
 
 
+def recover_if_fallback_healthy(timeout: float = 1.5) -> bool:
+    """Active recovery: if the tier-2 embed server (:8082) answers /health, force
+    the client back to healthy IMMEDIATELY — close the breakers and clear the
+    endpoint-discovery negative cache — instead of waiting for organic traffic to
+    align three independent recovery timers.
+
+    WHY (2026-07-03): the CPU-fallback breaker (30s), primary breaker (60s), and
+    llm_failover endpoint neg-cache (60s) each only reset when a real embed call
+    lands in its half-open window AND succeeds. On a LOW-TRAFFIC server (the MCP
+    process embeds only on a query), recovery latency after the server returns is
+    "time until a query happens to land after all windows expire" — unbounded in
+    the worst case. This gives a health-check loop a way to trip recovery the
+    instant the server is confirmed back, regardless of query traffic.
+
+    Returns True if the fallback was healthy and breakers were reset; False if the
+    server isn't answering (nothing changed). Stdlib-only probe; never raises.
+    """
+    import json as _json
+    import urllib.request
+
+    url = f"{_EMBED_FALLBACK_URL}/health"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — loopback URL from trusted config
+            if resp.status != 200:
+                return False
+            body = _json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception:
+        return False
+    if not (isinstance(body, dict) and body.get("status") in ("ok", "loading")):
+        return False
+    # Server is back — close breakers and clear the discovery neg-cache so the
+    # very next embed call routes to it without a wasted cascade tick.
+    reset_embed_breakers()
+    try:
+        import llm_failover
+        llm_failover.clear_embed_cache()  # drop endpoint neg-cache so discovery re-probes now
+    except Exception:
+        pass
+    logger.info("tier-2 embed server healthy again — breakers reset, recovery forced")
+    return True
+
+
 def _ctx() -> M3Context:
     """Resolve the active M3Context lazily (mirrors memory_core._current_ctx)."""
     return M3Context.for_db(resolve_db_path(None))

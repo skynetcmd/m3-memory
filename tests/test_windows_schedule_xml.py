@@ -143,17 +143,19 @@ def test_other_onstart_task_has_no_repetition():
         )
 
 
-def test_embed_server_has_5min_self_heal_repetition():
+def test_embed_server_has_1min_self_heal_repetition():
     # The shared embed server is the SOLE embedder for the fleet; its death is a
-    # fleet-wide outage, so it must carry a tight (PT5M) self-heal repetition on
-    # BOTH the boot and logon triggers.
+    # fleet-wide outage, so it must carry a tight (PT1M) self-heal repetition on
+    # BOTH the boot and logon triggers. Safe at 1 min because IgnoreNew + the
+    # server's own /health pre-flight guarantee a re-fire never stacks a second
+    # GPU embedder.
     root = _render(_spec("AgentOS_EmbedServer", "ONSTART"))
     for trig in ("BootTrigger", "LogonTrigger"):
         node = root.find(f".//t:{trig}", _NS)
         assert node is not None, f"EmbedServer must emit a {trig}"
         interval = node.find("./t:Repetition/t:Interval", _NS)
-        assert interval is not None and interval.text == "PT5M", (
-            f"EmbedServer {trig} must carry the 5-min self-heal repetition"
+        assert interval is not None and interval.text == "PT1M", (
+            f"EmbedServer {trig} must carry the 1-min self-heal repetition"
         )
 
 

@@ -377,15 +377,19 @@ def _xml_escape(text: str) -> str:
 # =IgnoreNew makes a re-fire while the process is still alive a harmless no-op, so
 # the net effect is "restart it if and only if it has died."
 #   - AgentOS_CognitiveLoop: PT30M — a stalled heartbeat is tolerable for ~30 min.
-#   - AgentOS_EmbedServer:    PT5M  — this is the SOLE embedder for the whole fleet
+#   - AgentOS_EmbedServer:    PT1M  — this is the SOLE embedder for the whole fleet
 #     (clients disable their own tier-1 via .embed_config.json), so its death is a
-#     fleet-wide embedding outage. A tighter 5-min heal bounds that outage: without
-#     it, one crash silently kills write-embedding AND semantic/vector retrieval
-#     across every m3 process until the next reboot (observed 2026-07-03: the
-#     server was never started and there was no local fallback → global outage).
+#     fleet-wide embedding outage. A tight 1-min heal bounds that outage to ~1 min.
+#     Safe at this cadence because (a) MultipleInstances=IgnoreNew makes a re-fire
+#     of the task a no-op while the server is alive, and (b) the server itself does
+#     a /health pre-flight (embed_server_inproc._already_serving) and exits WITHOUT
+#     loading a second GPU embedder if :8082 is already serving — so a re-fire can
+#     never stack a second CUDA context even if launched out-of-band. Without the
+#     heal, one crash silently kills write-embedding AND semantic/vector retrieval
+#     across every m3 process until the next reboot (observed 2026-07-03).
 _SELF_HEAL_TASKS = {
     "AgentOS_CognitiveLoop": "PT30M",
-    "AgentOS_EmbedServer": "PT5M",
+    "AgentOS_EmbedServer": "PT1M",
 }
 
 
