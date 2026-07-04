@@ -88,3 +88,88 @@ def test_health_structured():
     c = _client()
     h = c.get("/health").json()
     assert h["status"] == "ok" and h["dim"] == 4 and h["model"] == "test-bge"
+
+
+# ── Pre-flight no-stack guard (_already_serving) ──────────────────────────────
+# The self-heal task re-fires every minute; the server must refuse to load a
+# SECOND GPU embedder if one is already serving :8082. _already_serving is the
+# guard that makes the 1-min cadence safe. These tests mock urllib so no real
+# socket/GPU is touched (CI-safe).
+import json as _json  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+
+@contextmanager
+def _fake_urlopen(monkeypatch, *, status=200, body=None, raises=None):
+    """Patch urllib.request.urlopen for the duration of the block."""
+    import urllib.request
+
+    class _Resp:
+        def __init__(self):
+            self.status = status
+        def read(self):
+            return _json.dumps(body if body is not None else {}).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake(url, timeout=None):
+        if raises is not None:
+            raise raises
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    yield
+
+
+def test_already_serving_true_when_health_ok(monkeypatch):
+    with _fake_urlopen(monkeypatch, status=200,
+                       body={"status": "ok", "model": "bge", "dim": 1024}):
+        assert S._already_serving("127.0.0.1", 8082) is True
+
+
+def test_already_serving_true_when_loading(monkeypatch):
+    # A server mid-GPU-load reports status=loading; that still owns the port, so
+    # a second instance must NOT start.
+    with _fake_urlopen(monkeypatch, status=200, body={"status": "loading"}):
+        assert S._already_serving("127.0.0.1", 8082) is True
+
+
+def test_already_serving_false_when_connection_refused(monkeypatch):
+    # Nothing listening -> start normally.
+    with _fake_urlopen(monkeypatch, raises=OSError("connection refused")):
+        assert S._already_serving("127.0.0.1", 8082) is False
+
+
+def test_already_serving_false_for_foreign_service(monkeypatch):
+    # Some unrelated service holds the port but doesn't speak our /health shape:
+    # we must NOT treat it as our server (would suppress a legitimate start).
+    with _fake_urlopen(monkeypatch, status=200, body={"hello": "world"}):
+        assert S._already_serving("127.0.0.1", 8082) is False
+
+
+def test_already_serving_false_on_non_200(monkeypatch):
+    with _fake_urlopen(monkeypatch, status=503, body={"status": "ok"}):
+        assert S._already_serving("127.0.0.1", 8082) is False
+
+
+def test_already_serving_probes_loopback_for_wildcard_bind(monkeypatch):
+    # When bound to 0.0.0.0 the probe must target a concrete IP (127.0.0.1),
+    # not the un-connectable wildcard address.
+    seen = {}
+    import urllib.request
+
+    class _Resp:
+        status = 200
+        def read(self): return b'{"status":"ok"}'
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake(url, timeout=None):
+        seen["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    S._already_serving("0.0.0.0", 8082)
+    assert "127.0.0.1" in seen["url"] and "0.0.0.0" not in seen["url"]
