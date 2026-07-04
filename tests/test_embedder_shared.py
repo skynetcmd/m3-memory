@@ -6,7 +6,6 @@ its own in-process embedder and defers to one shared server (one CUDA context,
 mechanism (a scheduled-task daemon doesn't inherit shell env — §3).
 """
 import json
-import os
 import sys
 import types
 from pathlib import Path
@@ -67,6 +66,7 @@ def test_shared_config_is_read_by_embed_cascade(monkeypatch, tmp_path):
     # import embed.py fresh with bin/ on path so it reads the just-written config
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
     import importlib
+
     from memory import embed as E
     importlib.reload(E)
     assert E._EMBED_GGUF_AUTODETECT is False

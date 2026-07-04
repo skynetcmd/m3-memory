@@ -12,8 +12,6 @@ branches (sync + async).
 """
 import asyncio
 
-import pytest
-
 
 def _strict_sync_impl(query):
     # No **kwargs — reproduces the strict signature that used to crash.

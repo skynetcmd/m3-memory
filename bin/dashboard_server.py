@@ -71,7 +71,11 @@ HOST = "127.0.0.1"
 # --- Common HTML Parts (Styling, Header, Nav) ---
 # HTML/CSS templates extracted to bin/dashboard/templates.py (behavior-preserving).
 from dashboard.templates import (  # noqa: E402
-    HEADER_HTML, STYLE_CSS, INDEX_HTML, BROWSE_HTML, AUDIT_HTML,
+    AUDIT_HTML,
+    BROWSE_HTML,
+    HEADER_HTML,
+    INDEX_HTML,
+    STYLE_CSS,
 )
 
 
@@ -415,8 +419,8 @@ async def get_pipeline(request: Request):
     this route only renders. Polled by HTMX every few seconds."""
     selected_db = request.cookies.get("selected_db", "main")
     set_active_db_env(selected_db)
+    from dashboard.queue_stats import collect_governor, collect_pipeline_stats
     from m3_sdk import resolve_db_path
-    from dashboard.queue_stats import collect_pipeline_stats, collect_governor
 
     db = resolve_db_path(None)
     try:

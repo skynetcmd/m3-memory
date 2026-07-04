@@ -34,13 +34,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
-import shutil
 import sys
 import time
-from collections import defaultdict
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -58,30 +54,29 @@ import enrichment_state as estate  # noqa: E402
 import run_observer as observer  # noqa: E402
 import run_reflector as reflector  # noqa: E402
 from auth_utils import get_api_key  # noqa: E402
-from m3_sdk import get_m3_root
-from slm_intent import (  # noqa: E402
-    Profile,
-    _parse_profile,
-    load_profile,
-)
-from slm_intent import (
-    invalidate_cache as invalidate_profile_cache,
-)
-from sqlite_pragmas import apply_pragmas  # noqa: E402
+from enrich.eligibility import _load_conv_list, _query_eligible_groups  # noqa: E402
 
 # Import moved functions from enrich subpackage
 from enrich.prep import (
-    _today, _resolve_db, _load_profile_with_path,
-    _ensure_migration_025, _backup_db,
-)  # noqa: E402
-from enrich.eligibility import _query_eligible_groups, _load_conv_list  # noqa: E402
-from enrich.report import (
-    _print_plan_body, _print_dry_run, _print_run_summary,
+    _backup_db,
+    _ensure_migration_025,
+    _load_profile_with_path,
+    _resolve_db,
+    _today,
 )  # noqa: E402
 from enrich.rate_limit import (
-    _estimate_cost_wall, _classify_observer_error,
-    _is_rate_limit_failure, _RateLimitCascade,
+    _classify_observer_error,
+    _estimate_cost_wall,
+    _RateLimitCascade,
 )  # noqa: E402
+from enrich.report import (
+    _print_dry_run,
+    _print_run_summary,
+)  # noqa: E402
+from slm_intent import (  # noqa: E402
+    Profile,
+)
+from sqlite_pragmas import apply_pragmas  # noqa: E402
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")
@@ -97,7 +92,9 @@ DEFAULT_CORE_TYPES = (
     "knowledge", "fact", "preference",
     "message", "conversation",
 )
-from enrich import ALWAYS_SKIP_TYPES  # single source of truth (package leaf); re-exported as m3_enrich.ALWAYS_SKIP_TYPES
+from enrich import (
+    ALWAYS_SKIP_TYPES,  # single source of truth (package leaf); re-exported as m3_enrich.ALWAYS_SKIP_TYPES
+)
 
 
 async def _smoke_profile(profile: Profile) -> None:

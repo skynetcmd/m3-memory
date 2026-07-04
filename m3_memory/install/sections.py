@@ -287,10 +287,19 @@ def _shared_embedder_status() -> None:
 
     url = (cfg.get("fallback_url") or "http://127.0.0.1:8082").rstrip("/")
     print(f"  mode:                    SHARED — deferring to {url}")
+    # Reject anything but http(s): the URL comes from a config file, and a
+    # malformed/hostile value (file://, custom scheme) must not turn this health
+    # check into a local-file read (bandit B310). Only http/https reach urlopen.
+    from urllib.parse import urlparse
+    if urlparse(url).scheme not in ("http", "https"):
+        print(f"  shared server:           [WARN] fallback_url {url!r} is not http(s) "
+              "— refusing to probe. Fix .embed_config.json.")
+        return
     # Health-check the shared server. A dead endpoint here is the trap to surface.
     try:
         import urllib.request
-        with urllib.request.urlopen(f"{url}/health", timeout=3) as r:
+        # scheme validated to http(s) above, so B310's file:// concern can't apply
+        with urllib.request.urlopen(f"{url}/health", timeout=3) as r:  # nosec B310
             body = json.loads(r.read())
         if body.get("status") == "ok":
             print(f"  shared server:           OK (model={body.get('model')}, "

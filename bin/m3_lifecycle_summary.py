@@ -48,8 +48,8 @@ def _format_human(summary: dict) -> str:
 
 
 def main() -> int:
-    from m3_sdk import add_database_arg
     import memory_maintenance
+    from m3_sdk import add_database_arg
 
     parser = argparse.ArgumentParser(
         description="m3-memory lifecycle & contradiction summary (read-only).",

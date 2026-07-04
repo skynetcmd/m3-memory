@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from m3_sdk import get_m3_root
 from slm_intent import (
     Profile,
     _parse_profile,
@@ -16,7 +17,6 @@ from slm_intent import (
 from slm_intent import (
     invalidate_cache as invalidate_profile_cache,
 )
-from m3_sdk import get_m3_root
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_PROFILE = os.environ.get("M3_ENRICH_PROFILE", "enrich_local_qwen")

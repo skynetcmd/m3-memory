@@ -13,7 +13,6 @@ import time
 from typing import Optional
 
 import httpx
-
 from m3_sdk import getenv_compat
 
 logger = logging.getLogger("llm_failover")

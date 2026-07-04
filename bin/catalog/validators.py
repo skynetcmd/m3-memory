@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .spec import MAX_CONTENT_SIZE, MAX_QUERY_LENGTH, MAX_K, VALID_MEMORY_TYPES, _is_full_uuid
+from .spec import MAX_CONTENT_SIZE, MAX_K, MAX_QUERY_LENGTH, VALID_MEMORY_TYPES, _is_full_uuid
 
 
 def _memory_write_validator(args: dict) -> Any:

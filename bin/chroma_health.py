@@ -23,14 +23,13 @@ import argparse
 import json
 import logging
 import os
-
-from m3_sdk import getenv_compat
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+from m3_sdk import getenv_compat
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 

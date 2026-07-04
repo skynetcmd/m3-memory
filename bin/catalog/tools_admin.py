@@ -6,19 +6,16 @@ assignment per tool_domains.domain_of_tool().
 """
 from __future__ import annotations
 
-import asyncio
-
+from .dispatch import m3_call_impl, m3_index_impl
 from .lazy import LazyImpl, LazyModuleProxy
 from .spec import ToolSpec
 from .validators import _gdpr_user_id_validator
-from .dispatch import m3_index_impl, m3_call_impl
 
 memory_core = LazyModuleProxy("memory_core")
 memory_maintenance = LazyModuleProxy("memory_maintenance")
 memory_sync = LazyModuleProxy("memory_sync")
 
 import tool_loader as _tool_loader  # provides lazy domain-expansion impls
-
 
 TOOLS: list[ToolSpec] = [
     # ── Meta-tools: lazy domain loading ──────────────────────────────────────

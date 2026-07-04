@@ -13,8 +13,6 @@ import importlib.util
 import os
 from pathlib import Path
 
-import pytest
-
 _HOOK = (
     Path(__file__).resolve().parents[1]
     / "bin" / "hooks" / "chatlog" / "session_start_capture_check.py"

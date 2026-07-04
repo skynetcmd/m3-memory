@@ -563,24 +563,38 @@ VALID_CHANGE_AGENTS = {"claude", "gemini", "aider", "openclaw", "deepseek", "gro
 # single source of truth. Re-exported here so external callers importing from
 # memory_core keep working. Do NOT redefine the patterns here — fix the regex
 # bug in util.py once and both call sites benefit (CodeQL alert #29 history).
-from memory.util import _POISON_PATTERNS, _check_content_safety  # noqa: F401
-
 # Multi-agent orchestration (agent registry + notifications + tasks) moved to
 # bin/memory/orchestration.py. Re-exported here so external callers
 # (mcp_tool_catalog, files_memory/watch) that reach these as memory_core
 # attributes keep working. orchestration.py does not import memory_core
 # (would cycle) — it lazily imports `_refresh_hint` from here instead.
 from memory.orchestration import (  # noqa: F401,E402
-    TASK_STATE_TRANSITIONS, VALID_TASK_STATES, TERMINAL_TASK_STATES,
+    TASK_STATE_TRANSITIONS,
+    TERMINAL_TASK_STATES,
     VALID_AGENT_STATUSES,
-    _validate_task_transition, _agent_exists,
-    agent_register_impl, agent_heartbeat_impl, agent_list_impl, agent_get_impl,
-    agent_set_trust_impl, agent_offline_impl,
-    notify_impl, notifications_poll_impl, notifications_ack_impl,
+    VALID_TASK_STATES,
+    _agent_exists,
+    _validate_task_transition,
+    agent_get_impl,
+    agent_heartbeat_impl,
+    agent_list_impl,
+    agent_offline_impl,
+    agent_register_impl,
+    agent_set_trust_impl,
     notifications_ack_all_impl,
-    task_create_impl, task_assign_impl, task_update_impl, task_set_result_impl,
-    task_get_impl, task_delete_impl, task_list_impl, task_tree_impl,
+    notifications_ack_impl,
+    notifications_poll_impl,
+    notify_impl,
+    task_assign_impl,
+    task_create_impl,
+    task_delete_impl,
+    task_get_impl,
+    task_list_impl,
+    task_set_result_impl,
+    task_tree_impl,
+    task_update_impl,
 )
+from memory.util import _POISON_PATTERNS, _check_content_safety  # noqa: F401
 
 # DEFAULT_CHANGE_AGENT, CHROMA_*, FEDERATION_LOW_SCORE_THRESHOLD moved to
 # bin/memory/config.py in Phase 1. Re-exported via the shim at the top.

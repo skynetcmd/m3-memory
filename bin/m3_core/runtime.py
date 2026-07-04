@@ -1,11 +1,21 @@
 import logging
 import os
 import sys
+from os import PathLike
+from typing import IO, Optional, Union
 
 try:
     from dotenv import load_dotenv
 except ImportError:
-    def load_dotenv(*args, **kwargs): pass
+    def load_dotenv(
+        dotenv_path: Optional[Union[str, "PathLike[str]"]] = None,
+        stream: Optional[IO[str]] = None,
+        verbose: bool = False,
+        override: bool = False,
+        interpolate: bool = True,
+        encoding: Optional[str] = "utf-8",
+    ) -> bool:
+        return False
 
 M3_CORE_RS_DISABLE = os.environ.get("M3_CORE_RS_DISABLE", "0") == "1"
 

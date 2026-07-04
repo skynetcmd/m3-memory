@@ -8,19 +8,19 @@ from __future__ import annotations
 
 import asyncio
 
-from .lazy import LazyImpl, LazyModuleProxy
-from .spec import ToolSpec, VALID_MEMORY_TYPES
+from .dispatch import _memory_verify_impl
+from .lazy import LazyModuleProxy
+from .spec import VALID_MEMORY_TYPES, ToolSpec
 from .validators import (
-    _memory_write_validator,
-    _memory_supersede_validator,
+    _memory_delete_validator,
     _memory_search_gated_validator,
     _memory_search_scored_validator,
-    _memory_suggest_validator,
-    _memory_update_validator,
-    _memory_delete_validator,
     _memory_set_retention_validator,
+    _memory_suggest_validator,
+    _memory_supersede_validator,
+    _memory_update_validator,
+    _memory_write_validator,
 )
-from .dispatch import _memory_verify_impl
 
 memory_core = LazyModuleProxy("memory_core")
 memory_maintenance = LazyModuleProxy("memory_maintenance")

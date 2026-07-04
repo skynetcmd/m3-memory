@@ -31,23 +31,23 @@ from pathlib import Path
 from typing import Optional
 
 from m3_memory._platform import os_name as _os_name
-from m3_memory.install.fs import (
-    _robust_rmtree,
+from m3_memory.install.fs import (  # noqa: F401  (re-exported facade surface — see cli.py / test_installer.py importers)
     _drain_wal,
+    _robust_rmtree,
     _safe_copy_sqlite,
     _safe_tar_member,
 )
-from m3_memory.install.sections import (
-    _read_json,
-    _claude_hook_state,
-    _gemini_hook_state,
+from m3_memory.install.sections import (  # noqa: F401  (re-exported facade surface)
     _chatlog_db_stats,
-    _resolve_chatlog_db,
     _chatlog_section,
-    _embedder_tier_section,
+    _claude_hook_state,
     _crypto_section,
-    _roots_section,
     _deprecated_env_section,
+    _embedder_tier_section,
+    _gemini_hook_state,
+    _read_json,
+    _resolve_chatlog_db,
+    _roots_section,
     _sqlite3_cli_hint,
 )
 

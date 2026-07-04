@@ -3,40 +3,6 @@ Kept as the stable import surface for ~60 callers. Do not add logic here."""
 import sys as _sys
 import types as _types
 
-import m3_core.governor as _governor  # owns the mutable _LAST_USER_INTERACTION scalar
-
-from m3_core.runtime import (  # noqa: F401
-    format_log, logger, M3_CORE_RS_DISABLE, ensure_utf8,
-    LM_STUDIO_BASE, LM_READ_TIMEOUT, StructuredLogger,
-)
-from m3_core.gpu import (  # noqa: F401
-    probe_gpu_util,
-    _GPU_PROBE_DISABLE, _GPU_PROBE_TTL, _gpu_probe_cache, _GPU_PROBE_MAX_MISSES,
-    _GPU_PROBES, _no_window,
-)
-from m3_core.paths import (  # noqa: F401
-    resolve_venv_python, get_m3_root, get_m3_config_root, get_m3_engine_root,
-    resolve_db_path, active_database, add_database_arg,
-    getenv_compat, deprecated_env_in_use,
-    _active_db, _db_is_populated, _default_db_path,
-)
-from m3_core.governor import (  # noqa: F401
-    INITIAL_LIMIT, LIMIT_THRESHOLD, register_user_interaction,
-    get_governor_pacing, pre_execute_interactive_check, ensure_governor_config,
-    _governor_thresholds, _governor_config_path,
-)
-from m3_core.locking import (  # noqa: F401
-    migration_lock,
-    _MIGRATION_LOCK_MAX_AGE_S, _lock_owner_stamp, _pid_alive, _reclaim_stale_lock,
-)
-from m3_core.context import (  # noqa: F401
-    M3Context, _cleanup, _close_context_pool,
-    _CIRCUITS, _CB_THRESHOLD, _CB_COOLDOWN,
-    _HTTP_CLIENT, _HTTP_CLIENT_LOOP_ID, _HTTP_CLIENT_LOCK,
-    _CONTEXT_CACHE_SIZE, _CONTEXTS, _CONTEXTS_LOCK,
-)
-
-
 # In the pre-split monolith, callers and tests reached module globals as
 # m3_sdk.NAME for both reads AND writes, and the functions that used those globals
 # read them from the very same module namespace. After the split the
@@ -56,10 +22,74 @@ from m3_core.context import (  # noqa: F401
 # attribute semantics. Keeping the proxy narrow avoids clobbering importlib.reload
 # and internal attributes.
 import m3_core.context as _context  # noqa: E402,F401
+import m3_core.governor as _governor  # owns the mutable _LAST_USER_INTERACTION scalar
 import m3_core.gpu as _gpu  # noqa: E402
 import m3_core.locking as _locking  # noqa: E402
 import m3_core.paths as _paths  # noqa: E402
 import m3_core.runtime as _runtime  # noqa: E402
+from m3_core.context import (  # noqa: F401
+    _CB_COOLDOWN,
+    _CB_THRESHOLD,
+    _CIRCUITS,
+    _CONTEXT_CACHE_SIZE,
+    _CONTEXTS,
+    _CONTEXTS_LOCK,
+    _HTTP_CLIENT,
+    _HTTP_CLIENT_LOCK,
+    _HTTP_CLIENT_LOOP_ID,
+    M3Context,
+    _cleanup,
+    _close_context_pool,
+)
+from m3_core.governor import (  # noqa: F401
+    INITIAL_LIMIT,
+    LIMIT_THRESHOLD,
+    _governor_config_path,
+    _governor_thresholds,
+    ensure_governor_config,
+    get_governor_pacing,
+    pre_execute_interactive_check,
+    register_user_interaction,
+)
+from m3_core.gpu import (  # noqa: F401
+    _GPU_PROBE_DISABLE,
+    _GPU_PROBE_MAX_MISSES,
+    _GPU_PROBE_TTL,
+    _GPU_PROBES,
+    _gpu_probe_cache,
+    _no_window,
+    probe_gpu_util,
+)
+from m3_core.locking import (  # noqa: F401
+    _MIGRATION_LOCK_MAX_AGE_S,
+    _lock_owner_stamp,
+    _pid_alive,
+    _reclaim_stale_lock,
+    migration_lock,
+)
+from m3_core.paths import (  # noqa: F401
+    _active_db,
+    _db_is_populated,
+    _default_db_path,
+    active_database,
+    add_database_arg,
+    deprecated_env_in_use,
+    get_m3_config_root,
+    get_m3_engine_root,
+    get_m3_root,
+    getenv_compat,
+    resolve_db_path,
+    resolve_venv_python,
+)
+from m3_core.runtime import (  # noqa: F401
+    LM_READ_TIMEOUT,
+    LM_STUDIO_BASE,
+    M3_CORE_RS_DISABLE,
+    StructuredLogger,
+    ensure_utf8,
+    format_log,
+    logger,
+)
 
 # name -> submodules whose namespace must observe a rebind of that name. The
 # first entry is the canonical read source used by the facade's own __getattr__.

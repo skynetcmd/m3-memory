@@ -185,7 +185,7 @@ def collect_governor(db_path: str) -> dict:
     """Governor telemetry + current pacing verdict. Best-effort: returns a
     zeroed/degraded dict if the SDK isn't importable."""
     try:
-        from m3_sdk import M3Context, get_governor_pacing, _governor_thresholds
+        from m3_sdk import M3Context, _governor_thresholds, get_governor_pacing
     except Exception:  # noqa: BLE001
         return {"available": False}
     try:

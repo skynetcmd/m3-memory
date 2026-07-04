@@ -5,10 +5,10 @@ import os
 import queue
 import random
 import sqlite3
-import sys
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Optional
 
@@ -60,7 +60,7 @@ def _close_context_pool(ctx: "M3Context") -> None:
         except Exception as e:
             logger.error(f"Error closing SQLite connection: {e}")
 
-_CIRCUITS = {}
+_CIRCUITS: dict[str, Any] = {}
 _CB_THRESHOLD = 3
 _CB_COOLDOWN = 60
 _HTTP_CLIENT: Optional[httpx.AsyncClient] = None
@@ -327,7 +327,7 @@ class M3Context:
                 if hasattr(m3_core_rs, "NativeCircuitBreaker"):
                     state = _CIRCUITS.get(service)
                     if not state or not hasattr(state, "check"):
-                        cooldown = int(custom_cooldown or _CB_COOLDOWN)
+                        cooldown: float = int(custom_cooldown or _CB_COOLDOWN)
                         state = m3_core_rs.NativeCircuitBreaker(3, cooldown)
                         _CIRCUITS[service] = state
                     if hasattr(state, "record_failure"):
@@ -401,7 +401,7 @@ class M3Context:
                 await asyncio.sleep(wait)
 
     @contextmanager
-    def get_sqlite_conn(self) -> sqlite3.Connection:
+    def get_sqlite_conn(self) -> Iterator[sqlite3.Connection]:
         # Capture self._pool inside the with so put-back lands in the correct
         # pool even if another thread somehow swaps the attribute. (It won't
         # today, but cheap insurance for a multi-pool world.)
@@ -415,7 +415,7 @@ class M3Context:
             pool.put(conn)
 
     @contextmanager
-    def get_chatlog_conn(self) -> sqlite3.Connection:
+    def get_chatlog_conn(self) -> Iterator[sqlite3.Connection]:
         """Yield a SQLite connection for chat log writes/reads.
 
         Resolution: the chatlog DB path comes from chatlog_config (which now

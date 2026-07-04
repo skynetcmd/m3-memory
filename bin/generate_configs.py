@@ -139,7 +139,7 @@ def generate_configs():
         "mcpServers": {},
     }
     _write_json(os.path.join(m3_repo_root, ".mcp.json"), mcp_data)
-    print(f"Generated .mcp.json (empty — servers live in settings.json to avoid double-launch)")
+    print("Generated .mcp.json (empty — servers live in settings.json to avoid double-launch)")
 
     # ── .aider.conf.yml ───────────────────────────────────────────────────────
     aider_path = os.path.join(m3_repo_root, ".aider.conf.yml")

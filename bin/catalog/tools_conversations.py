@@ -6,10 +6,10 @@ assignment per tool_domains.domain_of_tool().
 """
 from __future__ import annotations
 
+from .dispatch import _conversation_search_impl
 from .lazy import LazyModuleProxy
 from .spec import ToolSpec
 from .validators import _memory_search_validator
-from .dispatch import _conversation_search_impl
 
 memory_core = LazyModuleProxy("memory_core")
 

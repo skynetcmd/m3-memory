@@ -43,57 +43,59 @@ and finally rebuilds `_BY_NAME`.
 
 from __future__ import annotations
 
-import os
+from catalog.dispatch import (  # noqa: F401
+    _DEFAULT_TOOL_TIMEOUT,
+    _DESTRUCTIVE_ALLOWED,
+    _DISPATCH_EXCLUDE,
+    ToolTimeout,
+    _conversation_search_impl,
+    _did_you_mean,
+    _dispatch_one,
+    _memory_verify_impl,
+    _pop_database,
+    _resolve_tool_timeout,
+    _run_impl_bounded,
+    _spec_by_name,
+    _tool_arg_rows,
+    default_allowlist,
+    execute_tool,
+    execute_tool_structured,
+    get_tool,
+    m3_call_impl,
+    m3_index_impl,
+    validate_args,
+)
 
 # ── Support code re-exported from catalog/ for the external-import surface ───
 # (mcp_proxy, memory_bridge, tool_loader, gen_tool_*.py, tests all do
-# `import mcp_tool_catalog` then attribute-access these names.)
-from catalog.lazy import LazyImpl, LazyModuleProxy
-from catalog.spec import (
-    ToolSpec,
-    MAX_CONTENT_SIZE,
-    MAX_QUERY_LENGTH,
-    MAX_K,
-    VALID_MEMORY_TYPES,
-    VALID_ENTITY_TYPES,
-    VALID_ENTITY_PREDICATES,
+# `import mcp_tool_catalog` then attribute-access these names.) These have no
+# direct caller INSIDE this module — it is a re-export facade — so ruff's F401
+# unused-import autofix would strip them and break every external importer.
+# `# noqa: F401` pins them; do NOT remove it.
+from catalog.lazy import LazyImpl, LazyModuleProxy  # noqa: F401
+from catalog.spec import (  # noqa: F401
     _UUID_RE,
+    MAX_CONTENT_SIZE,
+    MAX_K,
+    MAX_QUERY_LENGTH,
+    VALID_ENTITY_PREDICATES,
+    VALID_ENTITY_TYPES,
+    VALID_MEMORY_TYPES,
+    ToolSpec,
     _is_full_uuid,
 )
-from catalog.validators import (
-    _memory_write_validator,
-    _memory_delete_validator,
-    _memory_supersede_validator,
-    _memory_search_validator,
-    _variant_gate,
-    _memory_search_gated_validator,
-    _memory_suggest_validator,
-    _memory_search_scored_validator,
-    _memory_update_validator,
-    _memory_set_retention_validator,
+from catalog.validators import (  # noqa: F401
     _gdpr_user_id_validator,
-)
-from catalog.dispatch import (
-    get_tool,
-    default_allowlist,
-    _pop_database,
-    validate_args,
-    _DEFAULT_TOOL_TIMEOUT,
-    _resolve_tool_timeout,
-    ToolTimeout,
-    _run_impl_bounded,
-    execute_tool,
-    execute_tool_structured,
-    _DESTRUCTIVE_ALLOWED,
-    _DISPATCH_EXCLUDE,
-    _spec_by_name,
-    _did_you_mean,
-    _dispatch_one,
-    m3_call_impl,
-    _tool_arg_rows,
-    m3_index_impl,
-    _conversation_search_impl,
-    _memory_verify_impl,
+    _memory_delete_validator,
+    _memory_search_gated_validator,
+    _memory_search_scored_validator,
+    _memory_search_validator,
+    _memory_set_retention_validator,
+    _memory_suggest_validator,
+    _memory_supersede_validator,
+    _memory_update_validator,
+    _memory_write_validator,
+    _variant_gate,
 )
 
 # Re-export the shared LazyModuleProxy handles some external code may expect
@@ -106,20 +108,18 @@ memory_maintenance = LazyModuleProxy("memory_maintenance")
 memory_sync = LazyModuleProxy("memory_sync")
 _files_tools = LazyModuleProxy("files_memory.tools")
 
-from m3_sdk import active_database
-
-import tool_loader as _tool_loader  # provides lazy domain-expansion impls
-
 # ── Domain-partitioned tool modules ───────────────────────────────────────────
 import catalog.tools_admin as tools_admin
-import catalog.tools_memory as tools_memory
+import catalog.tools_agent as tools_agent
 import catalog.tools_chatlog as tools_chatlog
 import catalog.tools_conversations as tools_conversations
-import catalog.tools_agent as tools_agent
-import catalog.tools_tasks as tools_tasks
-import catalog.tools_entity as tools_entity
 import catalog.tools_diagnostics as tools_diagnostics
+import catalog.tools_entity as tools_entity
 import catalog.tools_files as tools_files
+import catalog.tools_memory as tools_memory
+import catalog.tools_tasks as tools_tasks
+import tool_loader as _tool_loader  # noqa: F401  (side-effect import: registers lazy domain-expansion impls)
+from m3_sdk import active_database  # noqa: F401  (re-exported on the import surface)
 
 # ── TOOLS catalog (aggregated from the 9 domain modules) ─────────────────────
 # Order is NOT semantically significant: gen_tool_manifest sorts by

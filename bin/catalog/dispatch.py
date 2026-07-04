@@ -15,8 +15,10 @@ import json
 import os
 from typing import Any
 
-from .spec import ToolSpec, memory_core
 from m3_sdk import active_database
+
+from .spec import ToolSpec, memory_core
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def get_tool(name: str) -> ToolSpec | None:

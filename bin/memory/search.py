@@ -101,7 +101,7 @@ from .fts import (
     _DATE_RE_LONG,  # noqa: F401 — memory_core lazy-registry shim resolves this from memory.search
     _EVENT_PROPER_NOUN,  # noqa: F401 — re-exported for search_routing / shim parity
     _TEMPORAL_QUERY_RE,  # noqa: F401 — re-exported for search_routing / shim parity
-    _TEMPORAL_ROUTER_RE,
+    _TEMPORAL_ROUTER_RE,  # noqa: F401 — re-exported for search_routing / shim parity
     _query_title_token_set,
     _title_overlap_from_qset,
 )
@@ -141,7 +141,6 @@ from .search_routing import (  # noqa: F401 — re-exported for callers + memory
     _pull_predecessor_turns,
     is_temporal_query,
 )
-
 
 # Cross-module callback names that stay in memory_core. The retrieval impls
 # below reference them as bare names; we bind them into this module's globals

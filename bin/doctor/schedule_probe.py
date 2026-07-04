@@ -47,7 +47,7 @@ import sys
 try:
     import defusedxml.ElementTree as ET  # type: ignore
 except ImportError:  # pragma: no cover — defusedxml is a declared dependency
-    import xml.etree.ElementTree as ET  # noqa: S405 — fallback; expat limits apply
+    import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405
 
 logger = logging.getLogger("memory.doctor.schedule_probe")
 
@@ -108,7 +108,9 @@ def _query_task_xml(name: str) -> str | None:
 def _parse_exec_paths(task_xml: str) -> tuple[str | None, str | None]:
     """(interpreter, script) from a task's <Exec>. <Command> may be quoted;
     the first <Arguments> token is the script (quotes stripped)."""
-    root = ET.fromstring(task_xml)
+    # ET is defusedxml at runtime (see import above); the value is schtasks
+    # /query output (trusted local OS), not untrusted network XML.
+    root = ET.fromstring(task_xml)  # nosec B314
     exec_el = root.find(f".//{_TASK_NS}Actions/{_TASK_NS}Exec")
     if exec_el is None:
         return None, None

@@ -57,9 +57,9 @@ def test_fast_embedder_available_true_with_healthy_tier2(monkeypatch):
 async def test_write_defers_and_is_fast_without_embedder(monkeypatch, tmp_path):
     """A write with no fast embedder returns quickly, marks deferral, and leaves
     NO embedding row (so embed_backfill will pick it up by construction)."""
+    import memory_core as mc
     import migrate_memory
     from m3_sdk import active_database
-    import memory_core as mc
 
     db = str(tmp_path / "zerolag.db")
     monkeypatch.setenv("M3_DATABASE", db)
