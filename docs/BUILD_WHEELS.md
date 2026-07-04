@@ -25,18 +25,32 @@ don't publish for.
 So building a wheel is a **speed optimization**, never a correctness
 requirement. If the build is inconvenient, skip it — m3 keeps working.
 
+### What ships in every wheel
+
+Each `m3-core-rs-<os>-<backend>` wheel bundles **two** native artifacts, both
+built for that wheel's backend:
+
+1. the **in-process embedder** — the `m3_core_rs` Python extension
+   (`EmbeddedEmbedder`), used when a process embeds directly; and
+2. the **shared-embedder server binary** — `m3-embed-server[.exe]`, the
+   OpenAI-compatible HTTP server on port 8082 that is m3's **shared-embedder
+   baseline**: all m3 processes defer to ONE server (one model in host RAM
+   instead of one copy per process), kept alive as an OS service.
+
+Both are the oxidized (native) path; the shared server is the default topology,
+the in-process embedder the per-process fallback.
+
 ### The three states
 
-| State | In-process embedder? | Backend | Speed |
+| State | In-process embedder? | Shared `:8082` server | Speed |
 |---|---|---|---|
-| GPU wheel installed | ✅ `EmbeddedEmbedder` | CUDA / Metal / Vulkan | maximized |
-| **CPU wheel installed (no GPU)** | ✅ `EmbeddedEmbedder` | **CPU llama.cpp, in-process** | still the oxidized hot path |
-| No wheel (pure-Python) | ❌ | HTTP fallback (`:8082` / primary) | usable, not maximized |
+| GPU wheel installed | ✅ `EmbeddedEmbedder` | ✅ `m3-embed-server` (CUDA/Metal/Vulkan) | maximized |
+| **CPU wheel installed (no GPU)** | ✅ `EmbeddedEmbedder` | ✅ `m3-embed-server` (**CPU llama.cpp**) | still the oxidized hot path |
+| No wheel (pure-Python) | ❌ | ❌ (Python `embed_server_inproc.py` only if started) | usable, not maximized |
 
-Note the middle row: **a machine with no GPU still gets the in-process
-embedder** from the CPU wheel — "no GPU" does **not** mean "no Project
-Oxidation". You only lose the in-process path entirely when **no wheel at all**
-is installed.
+Note the middle row: **a machine with no GPU still gets both native artifacts**
+from the CPU wheel — "no GPU" does **not** mean "no Project Oxidation". You only
+lose the native path entirely when **no wheel at all** is installed.
 
 ## Prerequisites
 
@@ -99,6 +113,17 @@ pip install --force-reinstall --no-deps crates/m3-core-py/dist/m3_core_rs_*.whl
 `build_wheel.py` is also the script that names and produces the wheels we
 publish, so a hand-built wheel is byte-for-byte the same kind m3 would have
 installed for you.
+
+**The wheel bundles the shared-embedder binary.** `build_wheel.py` builds
+`m3-embed-server` with the same backend feature as the wheel and stages it into
+the package so it ships *inside* the wheel (at `m3_core_rs/m3-embed-server[.exe]`,
+where `embedder_admin._server_binary()` finds it). This is a baseline artifact,
+not optional — the build **fails loud** rather than publishing a binary-less
+wheel. (Prior wheels silently omitted it because `maturin build` packages only
+the Python extension, not Cargo `[[bin]]` targets; the server crate lives in a
+separate workspace member.) So a from-source build needs the same native
+toolchain (cmake + C/C++ compiler, plus the GPU SDK for a GPU backend) that the
+`embedded*` features already require.
 
 The version m3-memory expects is pinned in
 [`m3_memory/rust_core_install.py`](../m3_memory/rust_core_install.py)
