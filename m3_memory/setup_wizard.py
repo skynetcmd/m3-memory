@@ -182,10 +182,14 @@ class SetupPlan:
     # OFF: a no-matching-wheel host gets the graceful pure-Python fallback +
     # build-your-own guidance, never a surprise compile.
     allow_native_source_build: bool = False
-    # Route all m3 processes to ONE shared GPU embedder server (one CUDA context)
-    # instead of each loading its own. Writes .embed_config.json. Default OFF —
-    # only worth it when multiple m3 processes embed on the same GPU + RAM is tight.
-    use_shared_embedder: bool = False
+    # Route all m3 processes to ONE shared embedder server instead of each loading
+    # its own. Writes .embed_config.json + registers the self-healing embed-server
+    # task. Default ON — this is the SHIPPED configuration, not an opt-in: one
+    # shared embedder (GPU-accelerated where available, CPU-only otherwise — the
+    # wheel picks the backend) is always preferable to N per-process embedders
+    # (N CUDA contexts / N model copies in host RAM). Not surfaced as a selectable
+    # option; --no-shared-embedder remains only as an escape hatch for debugging.
+    use_shared_embedder: bool = True
     endpoint: Optional[str] = None
     cognitive_loop: bool = False
     # B15: GGUF path discovered + accepted in preflight. Used by the embedder
@@ -253,6 +257,10 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         plan.install_wolfssl = bool(getattr(args, "install_wolfssl", False))
         # Default ON; --no-governor-migration sets args.no_governor_migration=True.
         plan.migrate_to_governor = not bool(getattr(args, "no_governor_migration", False))
+        # Shared-embedder mode is the shipped default (one shared embedder for the
+        # whole fleet, GPU or CPU); --no-shared-embedder is a debug escape hatch.
+        # Applies on a CPU-only host too, so it is NOT gated on install_gpu_embedder.
+        plan.use_shared_embedder = not bool(getattr(args, "no_shared_embedder", False))
         return plan
 
     # ── interactive prompts ───────────────────────────────────────────────────
@@ -350,26 +358,19 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
                 "(needs Rust+cmake+C++; slow)",
                 default=False,
             )
-            # Shared-embedder mode: one CUDA context for all m3 processes. Only
-            # worth it when several m3 processes embed on the same GPU + RAM is
-            # tight (the common one-GPU desktop/homelab case). Default OFF.
-            print()
-            print("    Shared GPU embedder: run ONE embedder server that all m3")
-            print("    processes (MCP server + cognitive loop) share, instead of each")
-            print("    loading its own copy on the GPU. Reclaims ~9-10 GB of host RAM")
-            print("    when several processes embed on the same GPU. You can also")
-            print("    toggle this later with `m3 embedder shared` / `unshared`.")
-            # getattr with defaults: callers that build `args` without these
-            # flags (tests, programmatic entry points) must not AttributeError.
-            if getattr(args, "no_shared_embedder", False):
-                plan.use_shared_embedder = False
-            elif getattr(args, "shared_embedder", False):
-                plan.use_shared_embedder = True
-            else:
-                plan.use_shared_embedder = _ask_yes_no(
-                    "    Use the shared GPU embedder (one CUDA context)?",
-                    default=False,
-                )
+        # Shared-embedder mode is the SHIPPED DEFAULT, not a user choice: ONE
+        # shared embedder server (GPU-accelerated where available, CPU-only
+        # otherwise) that all m3 processes defer to, plus a self-healing task
+        # that keeps it up. We deliberately do NOT prompt — a single shared
+        # embedder is always preferable to N per-process copies, and leaving it
+        # off is the failure mode that silently kills embedding fleet-wide.
+        # --no-shared-embedder stays as a debug-only escape hatch (not surfaced).
+        # Set outside the install_gpu_embedder branch: shared mode applies to a
+        # CPU-only host too, where there is no GPU embedder to install.
+        if getattr(args, "no_shared_embedder", False):
+            plan.use_shared_embedder = False
+        else:
+            plan.use_shared_embedder = True
 
     print()
     print("  Where to store data (recommended: separate folders):")
@@ -953,22 +954,80 @@ def _step_gpu_embedder(plan: "SetupPlan") -> bool:
 
 
 def _step_shared_embedder(plan: "SetupPlan") -> bool:
-    """Enable shared-embedder mode: write .embed_config.json so all m3 processes
-    defer to one shared GPU embedder server (one CUDA context). Non-fatal."""
+    """Enable shared-embedder mode (the shipped default): write .embed_config.json
+    so every m3 process defers to ONE shared embedder server (GPU-accelerated
+    where available, CPU-only otherwise), AND register the self-healing
+    embed-server task so that server is always up. Non-fatal at each step."""
     print()
-    print("[~] Enabling shared GPU embedder (one CUDA context for all processes)")
+    print("[~] Enabling shared embedder (one shared server for all m3 processes)")
     try:
         import types
 
         from m3_memory import embedder_admin
-        # cmd_shared writes .embed_config.json + prints the 3-step follow-up
-        # (start the server, restart the m3 processes, verify). Reuse it so the
-        # wizard and the CLI stay in lockstep.
+        # cmd_shared writes .embed_config.json + prints the follow-up steps.
+        # Reuse it so the wizard and the CLI stay in lockstep.
         embedder_admin.cmd_shared(types.SimpleNamespace(port=8082))
     except Exception as e:  # noqa: BLE001 — non-fatal; user can run `m3 embedder shared` later
-        print(f"    [!] could not enable shared mode ({e}); run `m3 embedder shared` later.")
+        print(f"    [!] could not write shared-mode config ({e}); run `m3 embedder shared` later.")
         return True
+
+    # Register the self-healing embed-server task so the shared server is always
+    # running (config alone points clients at a server nobody started — the exact
+    # silent fleet-wide outage this mode must avoid). install_schedules is CLI-
+    # only and prints its own elevation hint on Windows "Access is denied", so we
+    # shell out and surface, but never fail setup, if it needs an admin shell.
+    _register_embed_server_task()
     return True
+
+
+def _register_embed_server_task() -> None:
+    """Ensure the shared :8082 server has a keep-alive, PREFERRING the Rust
+    m3-embed-server OS service over the Python scheduled-task fallback.
+
+    _step_cpu_sovereign_embedder (runs earlier) installs the Rust m3-embed-server
+    as a systemd/launchd/Windows Service — cross-platform, OS-native restart.
+    THAT is the preferred keep-alive. Only when the Rust binary is absent (a host
+    without the oxidation wheel) do we register the Python-server scheduled task
+    as a fallback. The two are mutually exclusive by design — both bind :8082, so
+    we must NEVER wire both.
+
+    Non-fatal at every step: on Windows the ONSTART task registration needs an
+    elevated shell; install_schedules prints the exact re-run-elevated command,
+    which we pass through."""
+    try:
+        from m3_memory import embedder_admin
+        if embedder_admin._server_binary() is not None:
+            print("    Keep-alive: the Rust m3-embed-server OS service (installed "
+                  "above) keeps :8082 up — no scheduled task needed.")
+            return
+    except Exception:  # noqa: BLE001 — detection failure: fall through to the task fallback
+        pass
+    print("    Rust m3-embed-server not present — registering the Python embed-"
+          "server keep-alive task as a fallback.")
+    # Locate the payload's bin/install_schedules.py. In the dev checkout bin/ is
+    # a sibling of the m3_memory package (parent.parent/bin, the same idiom the
+    # GGUF-discovery step uses); a pipx install fetches the payload to the same
+    # relative spot. Guard on existence and degrade to a manual hint otherwise.
+    script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
+    if not os.path.exists(script):
+        print("    [!] embed-server task not registered (install_schedules.py not found);")
+        print("        run `python bin/install_schedules.py --add embed-server` from the payload.")
+        return
+    print("    Registering the self-healing embed-server task (keeps :8082 up)...")
+    try:
+        # Inherit stdout/stderr so the user sees the OK line or the elevation hint.
+        rc = subprocess.run(
+            [sys.executable, script, "--add", "embed-server"],
+            check=False,
+        ).returncode
+        if rc != 0:
+            # install_schedules already printed the elevation / failure detail.
+            print("    [!] embed-server task not fully registered (see above). Shared mode")
+            print("        still works once the server runs; re-run elevated to auto-start it:")
+            print("            python bin/install_schedules.py --repair   # from an admin shell")
+    except Exception as e:  # noqa: BLE001 — never fail setup on the task step
+        print(f"    [!] could not register the embed-server task ({e}); do it later with")
+        print("        `python bin/install_schedules.py --add embed-server`.")
 
 
 def _step_install_wolfssl(plan: "SetupPlan") -> bool:
@@ -1436,5 +1495,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Do NOT replace governor-eligible cron/schtasks entries with the "
              "Adaptive Background Workload Governor. By default the wizard offers "
              "to remove legacy scheduled tasks the governor can take over.",
+    )
+    parser.add_argument(
+        "--no-shared-embedder", action="store_true",
+        help="Debug escape hatch: do NOT enable shared-embedder mode. Shared mode "
+             "(one shared embedder server for all m3 processes, GPU or CPU, kept up "
+             "by a self-healing task) is the shipped default; disabling it means "
+             "each process loads its own embedder. Not recommended.",
     )
     parser.set_defaults(func=run_setup)

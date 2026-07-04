@@ -71,6 +71,10 @@ def main() -> int:
         help="Skip the dangling scheduled-task interpreter check.",
     )
     parser.add_argument(
+        "--skip-shared-embedder", action="store_true",
+        help="Skip the shared-embedder-mode check (config + server + keep-alive task).",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Show the full detail (DB-repair steps + each probe's expanded "
              "report + model-load logs). Default is a compact one-line-per-check "
@@ -103,7 +107,16 @@ def main() -> int:
             print(f"         Detail: {act['detail']}")
         print("-" * 50)
 
-        if res["summary"] == "failed":
+        # Shared-embedder repair lives in its own probe (it writes config, starts
+        # the server, and registers the keep-alive task — actions outside the DB-
+        # focused memory_doctor_fix_impl). Run it with fix=True so `m3 doctor --fix`
+        # heals shared mode too. Dry-run only reports (no side effects).
+        shared_rc = 0
+        if not args.skip_shared_embedder:
+            from doctor import shared_embedder_probe
+            shared_rc = shared_embedder_probe.run(brief=False, fix=not args.dry_run)
+
+        if res["summary"] == "failed" or shared_rc != 0:
             return 1
         return 0
 
@@ -148,6 +161,14 @@ def main() -> int:
         # state (re-register via `m3 setup`), so this never bumps the exit code —
         # it nags and prints the fix when a registered AgentOS_* task is dangling.
         schedule_probe.run(brief=brief)
+
+    if not args.skip_shared_embedder:
+        from doctor import shared_embedder_probe
+        # DOES bump the exit code: shared mode is the shipped default, so a missing
+        # config / dead server / unregistered keep-alive task is a real degraded
+        # state (silent fleet-wide embedding outage), not a supported variant.
+        # `m3 doctor --fix` repairs it (see the --fix branch above).
+        exit_code = max(exit_code, shared_embedder_probe.run(brief=brief, fix=False))
 
     # On a failure in brief mode, point the user at the full detail (§3: an
     # error should tell you how to see more, not dead-end).

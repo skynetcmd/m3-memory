@@ -269,10 +269,15 @@ def _shared_embedder_status() -> None:
                     if mem else os.path.join(os.path.expanduser("~"), ".m3", "config"))
         path = os.path.join(root, ".embed_config.json")
         if not os.path.exists(path):
-            print("  mode:                    per-process (each m3 process loads its "
-                  "own embedder)")
-            print("    tip: `m3 embedder shared` routes all processes to ONE shared "
-                  "GPU embedder (~9-10 GB reclaimed).")
+            # Shared mode is the shipped DEFAULT, so its absence is an anomaly to
+            # flag, not a neutral state. A per-process fleet means N embedder
+            # copies in host RAM and no single self-healed server.
+            print("  mode:                    [WARN] per-process — shared mode NOT "
+                  "enabled (this is the shipped default)")
+            print("    fix: re-run `m3 setup` (enables it automatically), or "
+                  "`m3 embedder shared` to enable it now.")
+            print("    then register the keep-alive task: "
+                  "`python bin/install_schedules.py --add embed-server` (admin shell).")
             return
         with open(path, encoding="utf-8") as f:
             cfg = json.load(f) or {}
