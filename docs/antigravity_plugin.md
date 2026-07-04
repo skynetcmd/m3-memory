@@ -10,6 +10,24 @@ agy plugin install https://github.com/skynetcmd/m3-memory
 
 After install, restart your Antigravity CLI/Desktop session (or reload the environment) so the new MCP server, hooks, and Skills take effect.
 
+## Updating m3
+
+Re-install over the existing plugin to upgrade to the latest published version, then restart Antigravity:
+
+```bash
+agy plugin install https://github.com/skynetcmd/m3-memory   # re-install → upgrades in place
+# restart the Antigravity CLI/Desktop session so the new MCP server + Skills load
+```
+
+> **⚠️ Re-installing can leave the plugin disabled.** As with other agent hosts, re-installing an already-installed plugin can flip it to **disabled** — after which m3's tools and `/m3:*` Skills stop loading. Antigravity exposes a direct fix (no manual config edit needed):
+> ```bash
+> agy plugin list                 # check whether m3 shows as disabled
+> agy plugin enable m3            # re-enable it
+> # then restart the Antigravity session
+> ```
+
+**Verify the update:** run `agy plugin list` to confirm m3 is present and enabled, and `m3 doctor` for overall m3 health. (`m3 doctor`'s plugin-version check currently covers the Claude Code plugin specifically; for Antigravity, `agy plugin list` is the authoritative check.)
+
 ---
 
 ## What it does on first run
