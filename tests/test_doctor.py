@@ -173,7 +173,9 @@ async def test_doctor_cold_cascade_slo(monkeypatch):
     # instead of getting a fast ECONNREFUSED.
     monkeypatch.setenv("M3_EMBED_FALLBACK_URL", "http://198.51.100.1:8082")
 
-    # Force fresh module so M3_EMBED_FALLBACK_URL is picked up
+    # Force fresh module so M3_EMBED_FALLBACK_URL is picked up. The autouse
+    # _isolate_env fixture snapshots + restores memory.* around every test in
+    # this file, so this eviction does not leak to later tests.
     for mod in list(sys.modules):
         if mod.startswith("memory."):
             del sys.modules[mod]
