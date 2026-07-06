@@ -122,10 +122,28 @@ def _probe_tier2() -> dict[str, Any]:
         conn.close()
         res["health"] = body
         res["latency_ms"] = int((time.perf_counter() - t0) * 1000)
-        if resp.status != 200 or body != "OK":
+        # Accept two /health contracts:
+        #   - legacy Rust m3-embed-server: plaintext body "OK"
+        #   - shared in-process embedder (embed_server_inproc.py): JSON
+        #     {"status": "ok"|"loading", "model": ..., "dim": ...}
+        # The system migrated to the shared server, which never replies "OK";
+        # match shared_embedder_probe.py's JSON contract instead of rejecting it.
+        healthy = resp.status == 200
+        if healthy and body != "OK":
+            import json as _json
+            try:
+                hj = _json.loads(body)
+            except Exception:
+                healthy = False
+            else:
+                healthy = hj.get("status") in ("ok", "loading")
+                # shared server reports model on /health, not /metrics
+                res["model"] = hj.get("model")
+        if not healthy:
             res["status"] = f"unhealthy-{resp.status}"
             return res
-        # /metrics: model + queue stats
+        # /metrics: model + queue stats (legacy Rust server only; the shared
+        # in-process server has no /metrics — 404 here is expected, not a fault)
         conn = http.client.HTTPConnection(host, port, timeout=PROBE_TIMEOUT_S)
         conn.request("GET", "/metrics")
         mresp = conn.getresponse()
@@ -134,7 +152,7 @@ def _probe_tier2() -> dict[str, Any]:
             try:
                 metrics = _json.loads(mresp.read().decode())
                 res["metrics"] = metrics
-                res["model"] = metrics.get("model")
+                res["model"] = metrics.get("model") or res["model"]
             except Exception:
                 pass
         conn.close()

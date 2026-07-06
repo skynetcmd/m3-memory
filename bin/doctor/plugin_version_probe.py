@@ -70,9 +70,9 @@ def _latest_cached_version() -> str | None:
     return max(versions, key=_ver_key) if versions else None
 
 
-def _ver_key(v: str) -> tuple:
+def _ver_key(v: str) -> tuple[tuple[int, int | str], ...]:
     """Sort key for dotted numeric versions (2026.7.4.0, 3.7.4, ...)."""
-    parts = []
+    parts: list[tuple[int, int | str]] = []
     for p in str(v).split("."):
         try:
             parts.append((0, int(p)))

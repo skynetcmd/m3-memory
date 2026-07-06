@@ -21,6 +21,15 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **`m3 doctor` no longer reports the embedding cascade as broken when the
+  shared in-process embedder is healthy.** The tier-2 health probe required the
+  legacy plaintext `OK` body and rejected the shared server's JSON health
+  response (`{"status":"ok",…}`) as `unhealthy-200`, flipping the whole cascade
+  to `broken` even though embedding worked. The probe now accepts both the
+  legacy plaintext and the JSON contract (matching the shared-embedder probe),
+  reads the model name from the JSON body, and treats the shared server's
+  absent `/metrics` endpoint as expected rather than a fault.
+
 - **Console windows no longer flash / steal focus on Windows.** Background work —
   the cognitive loop's per-cycle telemetry and GPU probes (`nvidia-smi`,
   PowerShell, WMIC), the thermal check, the chatlog hooks, and enrichment report

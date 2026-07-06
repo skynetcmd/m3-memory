@@ -93,12 +93,28 @@ _stage_root_file("install_os.py")
 ext_modules = []
 if not os.environ.get("M3_SKIP_MYPYC"):
     try:
+        # Compile these stateless, high-frequency modules — but ONLY from the
+        # STAGED in-package location. The payload now ships under m3_memory/bin/
+        # (package_dir maps root bin/ -> m3_memory/bin/), so the compiled module
+        # name must be `m3_memory.bin.memory.*` to match where the SOURCE ships.
+        # Compiling the repo-root `bin/memory/util.py` would name the extension
+        # `bin.memory.util` — a stray top-level `bin` package that mismatches the
+        # shipped source (a silent orphaned/polluting .pyd). So stage the two
+        # modules into m3_memory/bin/memory/ first and mypycify the staged paths.
+        # If staging fails, fall through to the pure-Python wheel (mypyc is a pure
+        # optimization; §1 — the package is fully functional without it).
+        import shutil as _sh
+
         from mypyc.build import mypycify
-        # Only compile these stateless, high-frequency modules.
-        ext_modules = mypycify([
-            "bin/memory/util.py",
-            "bin/memory/fts.py",
-        ])
+        _staged = []
+        for _rel in ("memory/util.py", "memory/fts.py"):
+            _src = os.path.join("bin", _rel)
+            _dst = os.path.join("m3_memory", "bin", _rel)
+            os.makedirs(os.path.dirname(_dst), exist_ok=True)
+            if not os.path.isfile(_dst) or os.path.getmtime(_src) > os.path.getmtime(_dst):
+                _sh.copy2(_src, _dst)
+            _staged.append(_dst.replace(os.sep, "/"))
+        ext_modules = mypycify(_staged)
     # Catch BaseException, NOT just Exception. mypyc refuses to run against the
     # project's intentional `[tool.mypy] strict_optional = false` (mypyc
     # requires strict optional) and aborts via sys.exit() -> SystemExit, which

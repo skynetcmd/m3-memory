@@ -72,7 +72,6 @@ from .embed import (
     _get_embedded_embedder,
     _record_embed_backend,
     _subdivide_dense_chunk,
-    fast_embedder_available,
 )
 from .emitters import _maybe_emit_event_rows, _maybe_emit_gist_row, _maybe_emit_window_chunk
 from .enrich import _auto_classify, _ingest_llm_enabled, _maybe_auto_entities, _maybe_auto_title, _try_enrich_or_enqueue
@@ -156,13 +155,15 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     related, supports, contradicts, extends, supersedes, references,
     consolidates, message, handoff.
 
-    `db` is accepted for signature back-compat but ignored: `_db()` resolves the
-    active context's pooled connection internally and takes no argument — passing
-    one raised `TypeError: _db() takes 0 positional arguments` on every call
-    (regression from the memory_core modularization that changed `_db`'s
-    signature without updating this caller).
+    When `db` is provided, the link is written on that existing connection so a
+    caller already inside an open transaction (e.g. the consolidation pass) shares
+    it instead of opening a second connection to the same file — a second connect
+    against an uncommitted writer deadlocks as `database is locked`. The `_db`
+    wrapper forwards the connection to a monkeypatched override in tests; in
+    production `db` is None and `_db()` resolves the active context's pooled
+    connection with no argument.
     """
-    with _db() as db_conn:
+    with (_db(db) if db is not None else _db()) as db_conn:
         db_conn.execute(
             "INSERT OR REPLACE INTO memory_relationships (from_id, to_id, relationship_type) VALUES (?, ?, ?)",
             (from_id, to_id, relationship_type)
@@ -324,7 +325,11 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     # unchanged. Contradiction check below is already `if vec`-gated, so it
     # naturally skips on the deferred path and runs when the vector backfills.
     _embed_deferred = False
-    if embed and not fast_embedder_available():
+    # Call via the module (not the value-bound import) so tests monkeypatching
+    # memory.embed.fast_embedder_available take effect, matching the dynamic-lookup
+    # pattern this module uses for _db. Value-binding it defeats the patch and the
+    # deferral branch never fires under test.
+    if embed and not _embed_mod.fast_embedder_available():
         embed = False
         _embed_deferred = True
         logger.info(

@@ -68,8 +68,16 @@ async def test_write_defers_and_is_fast_without_embedder(monkeypatch, tmp_path):
     except Exception:
         pass
 
-    # Force "no fast embedder".
-    monkeypatch.setattr(embed_mod, "fast_embedder_available", lambda: False)
+    # Force "no fast embedder". The write path calls
+    # `_embed_mod.fast_embedder_available()`, where _embed_mod is whatever object
+    # memory.write bound via `from . import embed`. Under the full suite another
+    # test evicts+reimports memory.*, so the module the write path holds can be a
+    # DIFFERENT object than this file's `embed_mod` — patching only embed_mod then
+    # misses (isolated test passed, full-suite run attempted a real embed and did
+    # not defer). Patch the exact object the code under test dereferences.
+    import memory.write as _write_mod
+    for _target in {embed_mod, _write_mod._embed_mod}:
+        monkeypatch.setattr(_target, "fast_embedder_available", lambda: False)
 
     with active_database(db):
         t = time.time()

@@ -231,3 +231,6 @@ docs/plans/SCHEMA_MIGRATION_FORK.md
 # Build artifact: install_os.py is staged into the package by setup.py
 # (_stage_root_file) at build time from the repo-root install_os.py. Never commit.
 m3_memory/install_os.py
+
+# mypyc build staging (setup.py copies these for in-package compilation)
+m3_memory/bin/
