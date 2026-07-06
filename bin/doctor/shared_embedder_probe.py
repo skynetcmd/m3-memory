@@ -59,6 +59,97 @@ def _read_config() -> dict | None:
         return {}
 
 
+def _known_agent_settings() -> "list[tuple[str, str]]":
+    """(label, path) for every client settings file that may carry an m3 MCP
+    server env block. Dependency-free mirror of installer._known_agent_settings
+    so this probe runs from a bare payload."""
+    home = os.path.expanduser("~")
+    j = os.path.join
+    return [
+        ("Claude Code", j(home, ".claude", "settings.json")),
+        ("Gemini CLI",  j(home, ".gemini", "settings.json")),
+        ("Antigravity", j(home, ".gemini", "antigravity-cli", "settings.json")),
+        ("OpenCode",    j(home, ".opencode", "settings.json")),
+        ("Aider",       j(home, ".aider", "settings.json")),
+    ]
+
+
+def _detect_inproc_env_leak() -> "list[str]":
+    """Locations where M3_EMBED_GGUF is set — each forces a per-process CUDA
+    embedder (the hang footgun) when shared mode is on. Returns human-readable
+    location strings (empty when clean). Checks the process env AND every client
+    settings file's m3 MCP-server env block."""
+    hits: list[str] = []
+    if (os.environ.get("M3_EMBED_GGUF") or "").strip():
+        hits.append("process env (M3_EMBED_GGUF) — persists via User env / shell rc")
+    for label, path in _known_agent_settings():
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except Exception:  # noqa: BLE001 — a bad settings file is another probe's concern
+            continue
+        for name, entry in (data.get("mcpServers") or {}).items():
+            env_block = (entry or {}).get("env")
+            if not isinstance(env_block, dict) or "M3_EMBED_GGUF" not in env_block:
+                continue
+            args_blob = " ".join((entry or {}).get("args") or [])
+            if name == "memory" or "memory_bridge" in args_blob or "m3" in name.lower():
+                hits.append(f"{label}: mcpServers.{name}.env ({path})")
+    return hits
+
+
+def _fix_scrub_env_leak() -> tuple[bool, bool]:
+    """Scrub M3_EMBED_GGUF from m3 MCP-server env blocks in every client settings
+    file (backing each up first). Returns (settings_scrubbed, process_env_remains).
+    A persistent User/shell env var CANNOT be auto-removed from another process's
+    environment — we report it so the user removes it (with the exact command)."""
+    settings_scrubbed = False
+    for _label, path in _known_agent_settings():
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                original = f.read()
+            data = json.loads(original) or {}
+        except Exception:  # noqa: BLE001
+            continue
+        changed = False
+        for name, entry in (data.get("mcpServers") or {}).items():
+            env_block = (entry or {}).get("env")
+            if not isinstance(env_block, dict) or "M3_EMBED_GGUF" not in env_block:
+                continue
+            args_blob = " ".join((entry or {}).get("args") or [])
+            if name == "memory" or "memory_bridge" in args_blob or "m3" in name.lower():
+                env_block.pop("M3_EMBED_GGUF", None)
+                changed = True
+        if changed:
+            try:
+                with open(path + ".bak", "w", encoding="utf-8") as f:
+                    f.write(original)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                    f.write("\n")
+                print(f"  [fix] scrubbed M3_EMBED_GGUF from {path} (backup: {path}.bak)")
+                settings_scrubbed = True
+            except Exception as e:  # noqa: BLE001
+                print(f"  [fix] could not rewrite {path}: {e}")
+    process_env_remains = bool((os.environ.get("M3_EMBED_GGUF") or "").strip())
+    if process_env_remains:
+        print("  [fix] M3_EMBED_GGUF is ALSO set in the process/User env — that cannot")
+        print("        be removed from here. Remove it so new shells + MCP servers stop")
+        print("        inheriting it:")
+        if sys.platform == "win32":
+            print("          PowerShell:  [Environment]::SetEnvironmentVariable("
+                  "'M3_EMBED_GGUF', $null, 'User')")
+        else:
+            print("          remove the `export M3_EMBED_GGUF=...` line from your shell rc "
+                  "(~/.zshrc / ~/.bashrc / ~/.profile)")
+        print("        then start a NEW shell and restart the MCP client.")
+    return settings_scrubbed, process_env_remains
+
+
 def _server_health(url: str, timeout: float = 3.0) -> tuple[str, dict]:
     """Return (state, body). state in {'ok','loading','bad-scheme','down'}."""
     if urlparse(url).scheme not in ("http", "https"):
@@ -220,6 +311,13 @@ def run(brief: bool = False, fix: bool = False) -> int:
     if not ka_ok:
         problems.append("keepalive-missing")
 
+    # 4. Inproc env leak: M3_EMBED_GGUF anywhere forces a per-process CUDA embedder
+    #    — the unbounded-init hang. Flag it whenever shared mode is the intent
+    #    (config missing or shared-on), so the exact footgun is never silent.
+    leak_locations = _detect_inproc_env_leak()
+    if leak_locations:
+        problems.append("inproc-env-leak")
+
     if fix and problems:
         print()
         print("=== shared-embedder: applying fixes ===")
@@ -247,6 +345,13 @@ def run(brief: bool = False, fix: bool = False) -> int:
                     problems = [p for p in problems if p != "keepalive-missing"]
             elif _fix_register_task():
                 problems = [p for p in problems if p != "keepalive-missing"]
+        if "inproc-env-leak" in problems:
+            scrubbed, env_remains = _fix_scrub_env_leak()
+            # Clear the problem only when nothing leaks anymore. A persistent
+            # process/User env var still needs the manual step printed above, so
+            # keep the flag (loud, not silent) until it's actually gone.
+            if not _detect_inproc_env_leak():
+                problems = [p for p in problems if p != "inproc-env-leak"]
 
     healthy = not problems
 
@@ -291,6 +396,18 @@ def run(brief: bool = False, fix: bool = False) -> int:
         print("             fix (preferred): `m3 embedder install` (Rust OS service), OR")
         print("             fallback: `python bin/install_schedules.py --add embed-server`")
         print("                       (Windows: from an ADMIN shell — ONSTART needs it).")
+
+    if "inproc-env-leak" in problems:
+        print("  inproc   : [FAIL] M3_EMBED_GGUF is set — forces a per-process GPU")
+        print("             context (CUDA/Metal/Vulkan) or heavy CPU load per process")
+        print("             (the read/write HANG risk). Locations:")
+        for loc in leak_locations:
+            print(f"               - {loc}")
+        print("             fix: `m3 doctor --fix` scrubs the settings blocks (backs")
+        print("                  them up). A persistent User/shell env var must be")
+        print("                  removed by hand — the fix prints the exact command.")
+    else:
+        print("  inproc   : OK — no M3_EMBED_GGUF leak (clients defer to the server).")
 
     if healthy:
         print("  status   : OK — shared mode fully configured and serving.")

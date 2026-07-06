@@ -285,14 +285,22 @@ def _canonical_memory_env() -> dict:
         _packaged_default = Path(__file__).resolve().parent / "bin"
         if _bd.resolve() != _packaged_default.resolve():
             env["M3_PATH_BIN"] = str(_bd).replace("\\", "/")
+    # Deliberately NO M3_EMBED_GGUF in the MCP server env. An env var forces the
+    # bridge to load its OWN in-process CUDA embedder (a second context; the exact
+    # hang that motivated this). Discover the GGUF and seed it into the SHARED
+    # config instead (§3 headless knob -> config file), so the single :8082 server
+    # owns the one CUDA context and the bridge defers to it.
     embed = os.environ.get("M3_EMBED_GGUF")
     if not embed:
         cand = Path.home() / ".lmstudio" / "models" / "deepsweet" \
             / "bge-m3-GGUF-Q4_K_M" / "bge-m3-GGUF-Q4_K_M.gguf"
         if cand.is_file():
             embed = str(cand)
-    if embed:
-        env["M3_EMBED_GGUF"] = str(embed).replace("\\", "/")
+    try:
+        from m3_memory.embedder_admin import seed_shared_config
+        seed_shared_config(conf, gguf_path=(str(embed) if embed else None))
+    except Exception:  # noqa: BLE001 — env generation must not fail on config seed
+        pass
     return env
 
 
@@ -1284,6 +1292,71 @@ def _migrate_json_config_file(path: Path, renames: "dict[str, str]", *, apply: b
     return actions
 
 
+# The m3 MCP server names whose env blocks must never carry M3_EMBED_GGUF (it
+# forces a per-process CUDA embedder — the hang footgun). Only the memory server
+# reads it, but scrub any m3-owned block defensively.
+_M3_MCP_SERVER_NAMES = ("memory",)
+
+
+def _scrub_embed_gguf_from_settings(path: Path, *, apply: bool) -> "list[str]":
+    """Remove M3_EMBED_GGUF from m3 MCP-server env blocks in one settings file.
+
+    An env-var GGUF makes the bridge open its OWN CUDA context, which can hang
+    the read/write path indefinitely (§3/§6). Shared mode (.embed_config.json)
+    is the correct home for the model path. This auto-heals installs already in
+    the bad state, on every upgrade and via `m3 doctor --fix`. Idempotent: a
+    clean file yields no actions. Backs up to <file>.bak before writing.
+    Raises on I/O or parse error (caller handles)."""
+    actions: list[str] = []
+    if not path.exists():
+        return actions
+    original = path.read_text(encoding="utf-8")
+    data = json.loads(original) or {}
+    changed = False
+    servers = data.get("mcpServers") or {}
+    for name, entry in servers.items():
+        env_block = (entry or {}).get("env")
+        if not isinstance(env_block, dict) or "M3_EMBED_GGUF" not in env_block:
+            continue
+        # Scrub the m3 memory server (the one that reads it) — and any block that
+        # points at a bridge/embed script, to be safe on renamed servers.
+        args_blob = " ".join((entry or {}).get("args") or [])
+        is_m3 = name in _M3_MCP_SERVER_NAMES or "memory_bridge" in args_blob or "m3" in name.lower()
+        if not is_m3:
+            continue
+        verb = "scrubbed" if apply else "would scrub"
+        actions.append(f"[+] {verb} M3_EMBED_GGUF from mcpServers.{name}.env in {path}")
+        if apply:
+            env_block.pop("M3_EMBED_GGUF", None)
+            changed = True
+    if apply and changed:
+        path.with_suffix(path.suffix + ".bak").write_text(original, encoding="utf-8")
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return actions
+
+
+def _heal_embed_gguf_env_leak(*, apply: bool) -> "list[str]":
+    """Scrub M3_EMBED_GGUF from every known agent settings file AND seed the
+    shared config, so an upgrade auto-heals the per-process-CUDA hang footgun.
+    Best-effort per file (a bad file is warned, not fatal). Returns actions."""
+    actions: list[str] = []
+    for _label, path in _known_agent_settings():
+        try:
+            actions.extend(_scrub_embed_gguf_from_settings(path, apply=apply))
+        except Exception as e:  # noqa: BLE001 — one bad file must not abort the sweep
+            actions.append(f"[!] could not scrub {path}: {type(e).__name__}: {e}")
+    # Seed the shared config so clients have somewhere to defer to after the scrub.
+    if apply:
+        try:
+            from m3_memory.embedder_admin import seed_shared_config
+            _p, wrote = seed_shared_config()
+            if wrote:
+                actions.append(f"[+] seeded shared embedder config: {_p}")
+        except Exception as e:  # noqa: BLE001
+            actions.append(f"[!] could not seed shared config: {type(e).__name__}: {e}")
+    return actions
+
+
 def _migrate_dotenv_file(path: Path, renames: "dict[str, str]", *, apply: bool) -> "list[str]":
     """Rename OLD->NEW KEY= tokens line-wise in a plain .env file, preserving
     values and comments. Raises on I/O error (caller handles)."""
@@ -1436,6 +1509,12 @@ def _heal_all_agents(*, force: bool = False) -> int:
             changed += 1
     # Auto-migrate deprecated env var names to the M3_ namespace.
     for line in _migrate_env_names(apply=True):
+        print(f"  {line}")
+        if line.lstrip().startswith("[+]"):
+            changed += 1
+    # Auto-heal the per-process-CUDA hang footgun: scrub M3_EMBED_GGUF from m3
+    # MCP-server env blocks and seed the shared config so clients defer to :8082.
+    for line in _heal_embed_gguf_env_leak(apply=True):
         print(f"  {line}")
         if line.lstrip().startswith("[+]"):
             changed += 1

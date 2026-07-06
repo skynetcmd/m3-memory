@@ -28,7 +28,11 @@ def generate_configs():
             "python3" if shutil.which("python3") else "python"
         )
 
-    # M3_EMBED_GGUF: use env override, else auto-detect the standard LMStudio path.
+    # Embedder GGUF: discover a bge-m3 model, but do NOT push it into the MCP
+    # server env. An env var forces every MCP-server process to open its OWN CUDA
+    # context (a per-process hang risk; see §3 "headless knob -> config file, not
+    # env var"). Instead seed it into the SHARED config so the single :8082 server
+    # owns the one CUDA context and all clients defer to it.
     embed_gguf = os.environ.get("M3_EMBED_GGUF", "")
     if not embed_gguf:
         candidate = os.path.expanduser(
@@ -36,6 +40,13 @@ def generate_configs():
         )
         if os.path.exists(candidate):
             embed_gguf = candidate
+    try:
+        from m3_memory.embedder_admin import seed_shared_config
+        _cfg_path, _wrote = seed_shared_config(gguf_path=embed_gguf or None)
+        if _wrote:
+            print(f"[generate_configs] seeded shared embedder config: {_cfg_path}")
+    except Exception as _e:  # noqa: BLE001 — config gen must not hard-fail on this
+        print(f"[generate_configs] WARN: could not seed shared embedder config: {_e}")
 
     def repo(path):
         return os.path.join(m3_repo_root, path).replace("\\", "/")
@@ -62,9 +73,9 @@ def generate_configs():
         "statusMessage": "Checking m3 chatlog capture...",
     }]}]
 
-    memory_env = {}
-    if embed_gguf:
-        memory_env["M3_EMBED_GGUF"] = embed_gguf.replace("\\", "/")
+    # No M3_EMBED_GGUF here — it lives in the shared config (seeded above) so the
+    # memory server defers to the single :8082 embedder instead of loading its own.
+    memory_env: dict[str, str] = {}
 
     mcp_servers = {
         "custom_pc_tool": mcp_server("custom_tool_bridge.py"),

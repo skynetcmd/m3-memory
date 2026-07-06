@@ -281,44 +281,79 @@ def _track_cost_lazy(operation: str, tokens_est: int = 0) -> None:
 # Precedence per setting: env var > config file > default (env wins so a one-off
 # override still works). Read once at import; warns loudly on a malformed file
 # rather than silently reverting (§3). Mirrors _governor_thresholds.
-def _read_embed_config() -> dict:
+def _read_embed_config() -> tuple[dict, bool]:
+    """Return (config_dict, present). `present` is True only when a readable
+    .embed_config.json exists at the config root — the safe-default logic below
+    needs to distinguish "config says use inproc" from "no config at all", which
+    a bare {} could not express."""
     try:
         from m3_core.paths import get_m3_config_root
         path = os.path.join(get_m3_config_root(), ".embed_config.json")
         if not os.path.exists(path):
-            return {}
+            return {}, False
         import json as _json
         with open(path, encoding="utf-8") as f:
-            return _json.load(f) or {}
+            return (_json.load(f) or {}), True
     except Exception as e:  # noqa: BLE001 — never let a bad config break embedding
         logger.warning(
             ".embed_config.json is unreadable/malformed (%s) — ignoring it and "
             "using env vars + defaults.", e)
-        return {}
+        return {}, False
 
 
-_EMBED_CFG = _read_embed_config()
+_EMBED_CFG, _EMBED_CFG_PRESENT = _read_embed_config()
 
 _EMBED_GGUF_PATH: str | None = (os.environ.get("M3_EMBED_GGUF") or "").strip() or None
 _EMBED_GGUF_MODEL_TAG: str = (
     (os.environ.get("M3_EMBED_GGUF_MODEL_TAG") or "").strip()
     or "bge-m3-GGUF-Q4_K_M.gguf"
 )
+# Explicit opt-IN to a per-process in-process embedder (a second CUDA context).
+# Shared mode is the safe default; this is the escape hatch for someone who
+# genuinely wants tier-1 in THIS process and accepts the extra CUDA context.
+_EMBED_INPROC_OPT_IN: bool = os.environ.get("M3_EMBED_INPROC", "0") == "1"
+
+# SAFE-BY-DEFAULT (§3, §6): route to the SHARED server unless inproc is clearly
+# intended. Inproc is permitted ONLY when:
+#   (a) a config file is present and does NOT disable it, OR
+#   (b) the operator explicitly opted in via M3_EMBED_INPROC=1.
+# When NO config file is found (e.g. a stale/misresolved config root) we must NOT
+# silently spin up our own CUDA context — a missing config means "defer to shared",
+# never "load my own embedder". This closes the hang: a misresolved config root
+# with M3_EMBED_GGUF set used to load an unbounded per-process CUDA embedder.
+_inproc_disabled_by_cfg = bool(_EMBED_CFG.get("disable_inproc_embedder"))
+if _EMBED_CFG_PRESENT:
+    _INPROC_ALLOWED = not _inproc_disabled_by_cfg
+else:
+    _INPROC_ALLOWED = _EMBED_INPROC_OPT_IN
+    if (_EMBED_GGUF_PATH is not None) and not _EMBED_INPROC_OPT_IN:
+        # A GGUF path is set but no config file resolved — the exact footgun.
+        # Default to shared and say so loudly (never silent, §3).
+        logger.warning(
+            "M3_EMBED_GGUF is set but no .embed_config.json was found at the "
+            "config root — defaulting to the SHARED embedder (inproc OFF) to avoid "
+            "a per-process GPU context (CUDA/Metal/Vulkan) or a heavy CPU load. Set "
+            "M3_EMBED_INPROC=1 to force inproc, or seed .embed_config.json "
+            "(run `m3 doctor --fix`).")
+
 # When M3_EMBED_GGUF is unset, search the canonical model dirs for a bge-m3 GGUF
-# so tier-1 (the ~10-85x faster in-process embedder) activates automatically.
-# Opt out with M3_EMBED_GGUF_AUTODETECT=0 (env) OR "disable_inproc_embedder":true
-# (config file — the headless-safe way). The walk is depth- and time-bounded so a
-# pathological models directory can never stall cold start.
+# so tier-1 (the ~10-85x faster in-process embedder) activates automatically —
+# but ONLY when inproc is allowed (safe-default above). The walk is depth- and
+# time-bounded so a pathological models directory can never stall cold start.
 _EMBED_GGUF_AUTODETECT: bool = (
     os.environ.get("M3_EMBED_GGUF_AUTODETECT", "1") != "0"
-    and not bool(_EMBED_CFG.get("disable_inproc_embedder"))
+    and _INPROC_ALLOWED
 )
-# When the config file disables the in-process embedder, also force-clear any
-# explicit GGUF path so a process pointed at a shared server never opens its OWN
-# CUDA context (the whole point — one context total, not one per process).
-if _EMBED_CFG.get("disable_inproc_embedder"):
+# When inproc is not allowed, force-clear any explicit GGUF path so a process
+# pointed at a shared server never opens its OWN CUDA context (the whole point —
+# one context total, not one per process).
+if not _INPROC_ALLOWED:
     _EMBED_GGUF_PATH = None
 _EMBED_GGUF_WALK_BUDGET_S: float = float(os.environ.get("M3_EMBED_GGUF_WALK_BUDGET", "2.0"))
+# Hard deadline on the in-process CUDA embedder INIT (§6: strict timeouts
+# everywhere). A stuck EmbeddedEmbedder(path) load (bad driver, GPU contention,
+# OOM) must degrade to HTTP tier-2, never hang the caller forever. 0 disables.
+_EMBED_INIT_TIMEOUT_S: float = float(os.environ.get("M3_EMBED_INIT_TIMEOUT_S", "20"))
 _embedded_embedder = None
 _embedded_embed_checked = False
 
@@ -512,8 +547,44 @@ def _get_embedded_embedder():
         )
         return None
     try:
-        emb = config.m3_core_rs.EmbeddedEmbedder(_EMBED_GGUF_PATH)
-        dim = emb.embedding_dim()
+        # §6 strict timeout — cross-platform (§1: 3 OSes × Metal/CUDA/Vulkan/CPU).
+        # The native model load (any backend) can hang on a bad driver, GPU
+        # contention, or OOM. Bound it with a DAEMON THREAD we never join, so a
+        # wedged load is truly abandoned and the caller returns on time. A
+        # ThreadPoolExecutor is WRONG here: its context-manager __exit__ calls
+        # shutdown(wait=True) which block-joins the hung worker — the "timeout"
+        # then never bounds the total wait. A raw daemon thread (not signal.alarm,
+        # which is SIGALRM-only = Unix-main-thread-only) works on every platform and
+        # off the main thread. The wedged native thread can't be force-killed, but
+        # it no longer holds the request path; its result is discarded.
+        import threading as _threading
+
+        _box: dict = {}
+
+        def _load() -> None:
+            try:
+                em = config.m3_core_rs.EmbeddedEmbedder(_EMBED_GGUF_PATH)
+                _box["result"] = (em, em.embedding_dim())
+            except Exception as _le:  # noqa: BLE001 — surfaced via _box for the caller
+                _box["error"] = _le
+
+        if _EMBED_INIT_TIMEOUT_S and _EMBED_INIT_TIMEOUT_S > 0:
+            _t = _threading.Thread(target=_load, name="m3-embed-init", daemon=True)
+            _t.start()
+            _t.join(_EMBED_INIT_TIMEOUT_S)
+            if _t.is_alive():
+                logger.error(
+                    "in-process embedder init exceeded %.0fs (GGUF=%s) — "
+                    "abandoning it and using HTTP tier-2. Set "
+                    "M3_EMBED_INIT_TIMEOUT_S to change the deadline.",
+                    _EMBED_INIT_TIMEOUT_S, _EMBED_GGUF_PATH)
+                return None
+            if "error" in _box:
+                raise _box["error"]
+            emb, dim = _box["result"]
+        else:
+            emb = config.m3_core_rs.EmbeddedEmbedder(_EMBED_GGUF_PATH)
+            dim = emb.embedding_dim()
         if dim != config.EMBED_DIM:
             logger.error(
                 "M3_EMBED_GGUF dimension %d != EMBED_DIM %d — embedded "
