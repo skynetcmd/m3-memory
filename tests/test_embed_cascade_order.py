@@ -51,9 +51,18 @@ def _isolate_env(monkeypatch, tmp_path):
     monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
     # Force a fresh module load so module-level constants (e.g. _EMBED_GGUF_PATH)
     # and config.m3_core_rs see the env set above.
-    for mod in list(sys.modules):
-        if mod.startswith("memory."):
-            del sys.modules[mod]
+    #
+    # CRITICAL: snapshot and RESTORE the evicted modules on teardown. Evicting
+    # memory.* without restoring corrupts LATER tests — a downstream test that
+    # re-imports memory.embed gets a NEW object, while modules still loaded from
+    # before (memory.write caches `from . import embed as _embed_mod`) keep the
+    # OLD one. A test then patching memory.embed can't reach the object the code
+    # under test dereferences. This is precisely how test_zero_lag_write flaked
+    # under `pytest tests/` (cascade_order sorts before zero_lag). test_doctor's
+    # sibling fixture already does this save/restore; this one silently didn't.
+    saved = {m: sys.modules[m] for m in list(sys.modules) if m.startswith("memory.")}
+    for mod in saved:
+        del sys.modules[mod]
     # Belt-and-suspenders: a sibling test that imported memory.embed earlier in
     # the session may have INITIALIZED and cached the in-process embedder in the
     # module globals (_embedded_embedder / _embedded_embed_checked). Deleting the
@@ -67,6 +76,14 @@ def _isolate_env(monkeypatch, tmp_path):
     embed = importlib.import_module("memory.embed")
     embed._embedded_embedder = None
     embed._embedded_embed_checked = False
+
+    yield
+
+    # Restore: drop the fresh re-imports this test created, then put the
+    # originals back so later tests see a consistent memory.* module graph.
+    for mod in [m for m in sys.modules if m.startswith("memory.")]:
+        del sys.modules[mod]
+    sys.modules.update(saved)
 
 
 @pytest.mark.asyncio
