@@ -225,7 +225,9 @@ def recover_if_fallback_healthy(timeout: float = 1.5) -> bool:
 
     url = f"{_EMBED_FALLBACK_URL}/health"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — loopback URL from trusted config
+        # nosec B310 — url is built from _EMBED_FALLBACK_URL (http(s):// endpoint
+        # from trusted runtime config, default 127.0.0.1:8082); no file:/custom scheme.
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — loopback URL from trusted config  # nosec B310
             if resp.status != 200:
                 return False
             body = _json.loads(resp.read().decode("utf-8", "replace"))

@@ -101,10 +101,15 @@ def _already_serving(host: str, port: int, timeout: float = 1.5) -> bool:
     import urllib.request
 
     # 127.0.0.1 for a wildcard/loopback bind host so the probe targets a real IP.
-    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    # nosec B104 — "0.0.0.0" here is a comparison literal used to REWRITE a wildcard
+    # bind to loopback for the health probe; it is not a bind address. The actual
+    # server bind defaults to 127.0.0.1 (see arg parser below, §6 hardening).
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host  # nosec B104
     url = f"http://{probe_host}:{port}/health"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — fixed loopback URL
+        # nosec B310 — url is a fixed http:// loopback (probe_host is 127.0.0.1 or
+        # the operator-set bind host); no user/file/custom scheme reaches urlopen.
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — fixed loopback URL  # nosec B310
             if resp.status != 200:
                 return False
             body = _json.loads(resp.read().decode("utf-8", "replace"))

@@ -25,6 +25,7 @@ import os
 import subprocess
 import sys
 import urllib.request
+from typing import Any
 from urllib.parse import urlparse
 
 _PORT = 8082
@@ -133,10 +134,12 @@ def _keepalive() -> tuple[str, bool]:
 def _fix_write_config() -> bool:
     try:
         sys.path.insert(0, os.path.join(_payload_bin(), "..", "m3_memory"))
-        from types import SimpleNamespace
+        import argparse
 
         from m3_memory import embedder_admin
-        embedder_admin.cmd_shared(SimpleNamespace(port=_PORT))
+        # cmd_shared reads only args.port; pass a real Namespace to satisfy its
+        # argparse.Namespace signature (SimpleNamespace is not a subtype).
+        embedder_admin.cmd_shared(argparse.Namespace(port=_PORT))
         return True
     except Exception as e:  # noqa: BLE001
         print(f"  [fix] could not write .embed_config.json: {e}")
@@ -151,7 +154,7 @@ def _fix_start_server() -> bool:
     # The server's own _already_serving pre-flight makes a redundant start a no-op,
     # so starting is always safe. Detached so it outlives the doctor process.
     try:
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if sys.platform == "win32":
             kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
         else:
