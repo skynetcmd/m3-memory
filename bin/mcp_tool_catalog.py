@@ -71,7 +71,7 @@ from catalog.dispatch import (  # noqa: F401
 # `import mcp_tool_catalog` then attribute-access these names.) These have no
 # direct caller INSIDE this module — it is a re-export facade — so ruff's F401
 # unused-import autofix would strip them and break every external importer.
-# `# noqa: F401` pins them; do NOT remove it.
+# the noqa-F401 directive pins them; do NOT remove it.
 from catalog.lazy import LazyImpl, LazyModuleProxy  # noqa: F401
 from catalog.spec import (  # noqa: F401
     _UUID_RE,

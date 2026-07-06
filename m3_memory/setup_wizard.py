@@ -560,28 +560,29 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     # offer to wire it in.
     discovered = _discover_bge_m3_gguf()
     if discovered:
-        env_set = bool(os.environ.get("M3_EMBED_GGUF"))
-        if env_set:
-            _ok(f"  M3_EMBED_GGUF already set: {os.environ['M3_EMBED_GGUF']}")
-        else:
-            _say(f"  discovered BGE-M3 GGUF: {discovered}")
-            _say("  setting it via M3_EMBED_GGUF gives ~10-85x faster embeds "
-                 "on the hot path (tier-1 in-proc vs tier-2 HTTP)")
-            if args.non_interactive or _ask_yes_no(
-                "  Use this GGUF for tier-1 in-proc embedder?", default=True
-            ):
-                # Set for THIS process so cpu_embedder install picks it up,
-                # and stash on the plan so per-agent wiring records it.
-                os.environ["M3_EMBED_GGUF"] = discovered
+        _say(f"  discovered BGE-M3 GGUF: {discovered}")
+        _say("  wiring it into the SHARED embedder config so the single :8082 "
+             "server loads it (one CUDA context, ~10-85x faster than HTTP tiers)")
+        if args.non_interactive or _ask_yes_no(
+            "  Use this GGUF for the shared embedder?", default=True
+        ):
+            # Seed the shared config (NOT an env var). An env var would force
+            # every MCP-server process to open its OWN CUDA context — a hang risk
+            # (§3 headless knob -> config file). The shared :8082 server owns the
+            # one context; clients defer to it. Idempotent.
+            try:
+                from m3_memory.embedder_admin import seed_shared_config
+                _cfg_path, _wrote = seed_shared_config(gguf_path=discovered)
                 plan.embed_gguf = discovered
-                _ok(f"  M3_EMBED_GGUF set for this session: {discovered}")
-                # Persist so every new shell and every MCP server spawn picks
-                # it up automatically. Without this, tier-1 falls back to
-                # tier-2 the next time anything reads the env.
-                _persist_embed_gguf(discovered, non_interactive=args.non_interactive)
+                _ok(f"  shared embedder config {'seeded' if _wrote else 'already set'}: {_cfg_path}")
+                _say("  (start/keep the :8082 server via `m3 embedder install`; "
+                     "clients defer to it automatically)")
+            except Exception as _e:  # noqa: BLE001 — best-effort, don't abort setup
+                _warn(f"  could not seed shared embedder config: {_e}")
     else:
         _say("  no BGE-M3 GGUF auto-discovered; tier-2 (:8082) will serve all embeds")
-        _say("  (set M3_EMBED_GGUF later to enable tier-1; see EMBEDDER_ARCHITECTURE.md)")
+        _say("  (drop a bge-m3 GGUF in the LM Studio models dir + run "
+             "`m3 doctor --fix` later to wire tier-1; see EMBEDDER_ARCHITECTURE.md)")
 
     # ── Probe 5: LLM endpoint detection + failover wiring ───────────────
     # Enrichment features (auto-classify, summarize) discover a chat model via
@@ -970,12 +971,11 @@ def _step_shared_embedder(plan: "SetupPlan") -> bool:
     print()
     print("[~] Enabling shared embedder (one shared server for all m3 processes)")
     try:
-        import types
-
-        from m3_memory import embedder_admin
-        # cmd_shared writes .embed_config.json + prints the follow-up steps.
-        # Reuse it so the wizard and the CLI stay in lockstep.
-        embedder_admin.cmd_shared(types.SimpleNamespace(port=8082))
+        from m3_memory.embedder_admin import seed_shared_config
+        # seed_shared_config writes .embed_config.json idempotently — the single
+        # source of truth shared with the installer/doctor, so all stay in lockstep.
+        _path, _wrote = seed_shared_config(port=8082)
+        print(f"    [OK] shared-mode config {'written' if _wrote else 'already set'}: {_path}")
     except Exception as e:  # noqa: BLE001 — non-fatal; user can run `m3 embedder shared` later
         print(f"    [!] could not write shared-mode config ({e}); run `m3 embedder shared` later.")
         return True

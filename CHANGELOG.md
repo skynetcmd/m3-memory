@@ -21,6 +21,30 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **The in-process embedder can no longer hang the read/write path — shared mode
+  is the safe, hang-proof default across all platforms.** A misresolved config
+  root combined with `M3_EMBED_GGUF` in the MCP-server env could make the memory
+  bridge load its own GPU embedder (a per-process CUDA/Metal/Vulkan context or a
+  heavy CPU load), whose init could block indefinitely — the tool timeout guarded
+  a layer that was never reached. Fixed at every layer (defense in depth):
+  - **Bounded init.** The native embedder load now runs under a hard deadline
+    (`M3_EMBED_INIT_TIMEOUT_S`, default 20s) via a daemon thread that is abandoned
+    on timeout, degrading to the HTTP tier instead of hanging. Cross-platform (no
+    `signal.alarm`), works off the main thread and on macOS/Metal, Windows/Linux ×
+    {CPU, Vulkan, CUDA}.
+  - **Safe-by-default.** When no `.embed_config.json` is found, m3 now defers to
+    the shared server instead of silently spinning up a per-process embedder;
+    opt in explicitly with `M3_EMBED_INPROC=1`. Warns loudly, never silent.
+  - **Installer/updater/wizard stop writing the footgun.** They no longer put
+    `M3_EMBED_GGUF` in the MCP-server env; the GGUF path is seeded into the shared
+    `.embed_config.json` (the headless-safe config file). On upgrade, existing
+    settings files are auto-scrubbed of the leak (backed up first) and the shared
+    config is seeded.
+  - **Doctor detects and repairs it.** `m3 doctor` reports an `inproc-env-leak`
+    (in the process env or any client settings block); `m3 doctor --fix` scrubs
+    the settings blocks and prints the exact command to remove a persistent
+    User/shell env var.
+
 - **`m3 doctor` no longer reports the embedding cascade as broken when the
   shared in-process embedder is healthy.** The tier-2 health probe required the
   legacy plaintext `OK` body and rejected the shared server's JSON health

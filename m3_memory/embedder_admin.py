@@ -373,6 +373,62 @@ def _embed_config_path() -> str:
     return os.path.join(root, ".embed_config.json")
 
 
+def seed_shared_config(
+    config_root: str | None = None,
+    *,
+    gguf_path: str | None = None,
+    port: int = 8082,
+    overwrite: bool = False,
+) -> tuple[str, bool]:
+    """Idempotently seed <config_root>/.embed_config.json for SHARED mode.
+
+    The single source of truth for what the shared-embedder config looks like, so
+    the installer, updater, setup wizard, `m3 embedder shared`, and `m3 doctor
+    --fix` all write an identical, correct file (§4 DRY; §3 idempotent seed).
+
+    - Sets ``disable_inproc_embedder: true`` so every client defers to the shared
+      server instead of opening its own CUDA context.
+    - Records ``fallback_url`` (where the shared server listens) and, when known,
+      ``gguf_path`` (which model the SERVER should load — clients never load it).
+    - overwrite=False (default) preserves an existing file's keys, only filling in
+      what's missing, so a hand-tuned config is never clobbered.
+
+    Returns (path, wrote) — wrote is False when an already-correct file was left
+    as-is. Pure/deterministic apart from the file write; safe to call repeatedly.
+    """
+    import json
+    if config_root is None:
+        path = _embed_config_path()
+    else:
+        path = os.path.join(config_root, ".embed_config.json")
+    url = f"http://127.0.0.1:{port or 8082}"
+
+    existing: dict = {}
+    if os.path.exists(path) and not overwrite:
+        try:
+            with open(path, encoding="utf-8") as f:
+                existing = json.load(f) or {}
+        except Exception:  # noqa: BLE001 — a corrupt file is replaced, not trusted
+            existing = {}
+
+    desired = dict(existing)
+    desired["disable_inproc_embedder"] = True
+    desired.setdefault("fallback_url", url)
+    if gguf_path:
+        desired.setdefault("gguf_path", gguf_path.replace("\\", "/"))
+    desired["_comment"] = (
+        "Route all m3 processes to the shared GPU embedder "
+        "(bin/embed_server_inproc.py) so only ONE CUDA context exists. "
+        "Seeded by the installer/doctor; edit via `m3 embedder shared|unshared`.")
+
+    if desired == existing:
+        return path, False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(desired, f, indent=2)
+    return path, True
+
+
 def cmd_shared(args: argparse.Namespace) -> int:
     """Route ALL m3 processes to ONE shared GPU embedder (one CUDA context).
 
