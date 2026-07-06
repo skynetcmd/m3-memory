@@ -68,8 +68,19 @@ async def test_write_defers_and_is_fast_without_embedder(monkeypatch, tmp_path):
     except Exception:
         pass
 
-    # Force "no fast embedder".
+    # Force "no fast embedder". Patch fast_embedder_available directly AND
+    # neutralize the state it reads (no tier-1 embedder; tier-2 breaker open) so
+    # the deferral fires even if module-resolution under the full suite reaches
+    # the real function instead of this override — the isolated test passed but
+    # the full-suite run resolved the un-patched original and attempted to embed.
     monkeypatch.setattr(embed_mod, "fast_embedder_available", lambda: False)
+    monkeypatch.setattr(embed_mod, "_get_embedded_embedder", lambda: None)
+
+    class _OpenBreaker:
+        def allow_request(self):
+            return False
+
+    monkeypatch.setattr(embed_mod, "_CPU_FALLBACK_BREAKER", _OpenBreaker())
 
     with active_database(db):
         t = time.time()
