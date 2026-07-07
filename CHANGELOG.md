@@ -21,6 +21,20 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **`m3 doctor` no longer shows a scary warning for a perfectly healthy
+  shared-embedder setup.** On the shipped-default shared-embedder topology,
+  per-process tier-1 is intentionally off (the shared server owns the single GPU
+  context), but the cascade probe reported `⚠️ embedding-cascade: degraded (tier1
+  init-failed, tier2 online)` — reading as broken when nothing was wrong, and
+  mislabeling a deliberate skip as an init failure. The tier-1 probe now reports
+  `shared-mode` when `.embed_config.json` disables the in-process embedder, and
+  the cascade verdict is **healthy** when shared mode is on and the shared server
+  is online, with a clear line: *shared tier-2 embedder online (tier-1
+  appropriately offline)*. Genuine failures (non-shared box with tiers down) are
+  unchanged — still `degraded`/`broken`. Also made the doctor classification
+  tests hermetic (isolate `M3_CONFIG_ROOT`) so they no longer depend on the
+  host's real embedder config.
+
 - **The in-process embedder can no longer hang the read/write path — shared mode
   is the safe, hang-proof default across all platforms.** A misresolved config
   root combined with `M3_EMBED_GGUF` in the MCP-server env could make the memory

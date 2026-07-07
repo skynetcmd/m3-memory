@@ -58,13 +58,24 @@ def run(brief: bool = False) -> int:
         rt = out.get("roundtrip", {})
         glyph = "✅" if summary == "healthy" else "⚠️" if summary == "degraded" else "❌"
         lat = f", {rt.get('latency_ms')}ms" if rt.get("latency_ms") is not None else ""
-        print(f"{glyph} embedding-cascade: {summary} (tier1 {t1}, tier2 {t2}{lat})")
+        if out.get("tier_1", {}).get("shared_mode"):
+            # Reassuring, accurate phrasing for the shipped default: the shared
+            # server is the fast path; per-process tier-1 is off by design.
+            print(f"{glyph} embedding-cascade: {summary} — shared tier-2 embedder "
+                  f"online (tier-1 appropriately offline{lat})")
+        else:
+            print(f"{glyph} embedding-cascade: {summary} (tier1 {t1}, tier2 {t2}{lat})")
         return 0 if summary != "broken" else 1
 
     print()
     print("=== embedding-cascade health (memory_doctor) ===")
     print(f"  summary  : {out.get('summary')}")
-    print(f"  tier_1   : {out.get('tier_1', {}).get('status')}")
+    _t1 = out.get("tier_1", {})
+    if _t1.get("shared_mode"):
+        print("  tier_1   : shared-mode (intentionally off — the shared tier-2 "
+              "server owns the single GPU context)")
+    else:
+        print(f"  tier_1   : {_t1.get('status')}")
     print(
         f"  tier_2   : {out.get('tier_2', {}).get('status')}"
         f"  ({out.get('tier_2', {}).get('url')})"
