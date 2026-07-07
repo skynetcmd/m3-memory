@@ -3,7 +3,7 @@
   "name": "io.github.skynetcmd/m3-memory",
   "title": "M3 Memory",
   "description": "Local-first agentic memory — 100+ tools, 89% LongMemEval, hybrid search, GDPR, zero cloud.",
-  "version": "2026.7.7.0",
+  "version": "2026.7.7.1",
   "repository": {
     "url": "https://github.com/skynetcmd/m3-memory",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "m3-memory",
-      "version": "2026.7.7.0",
+      "version": "2026.7.7.1",
       "runtimeHint": "python",
       "transport": {
         "type": "stdio"

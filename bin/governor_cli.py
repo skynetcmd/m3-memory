@@ -63,6 +63,15 @@ def cmd_migrate(*, yes: bool) -> int:
     for name in eligible:
         print(f"  - {name}")
 
+    # Tell the user UP FRONT that deletion needs elevation on Windows, before they
+    # confirm — otherwise they say yes, hit "Access is denied", and only then learn
+    # they needed an Administrator shell. Stating it here saves the round trip.
+    if sys.platform == "win32":
+        print("\nNOTE: removing scheduled tasks requires an ELEVATED (Administrator)")
+        print("shell. If this session is not elevated, the deletes below will fail")
+        print("with 'Access is denied' and the exact commands to run as admin will")
+        print("be printed.")
+
     if not yes:
         try:
             ans = input("\nRemove these and let the governor own them? [Y/n] ").strip().lower()
@@ -76,7 +85,9 @@ def cmd_migrate(*, yes: bool) -> int:
     for name in removed:
         print(f"  [OK] removed {name}")
     for name in failed:
-        print(f"  [WARN] could not remove {name} (insufficient privilege?)")
+        _hint = "needs an elevated shell" if sys.platform == "win32" else \
+            "needs sudo / the task owner"
+        print(f"  [WARN] could not remove {name} ({_hint})")
 
     if failed:
         print("\nRun these PRIVILEGED, OS-specific commands to remove the rest")

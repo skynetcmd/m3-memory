@@ -21,6 +21,14 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **The governor NAG now says up front that removal needs an elevated shell on
+  Windows.** Previously `m3 doctor` said only "run `m3 governor migrate`", and
+  `m3 governor migrate` revealed the privilege requirement *after* failing with
+  "Access is denied" — a runaround. The doctor NAG line (brief and verbose) and
+  the migrate pre-flight now state the Administrator-shell requirement before any
+  delete is attempted, on Windows; the per-failure message is a definite "needs
+  an elevated shell", not a tentative "(insufficient privilege?)".
+
 - **`m3 doctor` no longer shows a scary warning for a perfectly healthy
   shared-embedder setup.** On the shipped-default shared-embedder topology,
   per-process tier-1 is intentionally off (the shared server owns the single GPU
