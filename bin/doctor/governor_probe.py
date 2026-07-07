@@ -58,7 +58,14 @@ def run(brief: bool = False) -> int:
 
     if brief:
         if eligible:
-            print(f"⚠️  governor: NAG ({len(eligible)} legacy task(s); run `m3 governor migrate`)")
+            # State the elevation requirement up front on Windows — deleting
+            # scheduled tasks needs an Administrator shell, and without this hint
+            # the user runs `m3 governor migrate`, hits "Access is denied", and
+            # only THEN learns they needed elevation (the runaround we want to
+            # spare them). §3: fail-loud/never-silent applies to the remedy too.
+            _elev = " from an ELEVATED shell" if sys.platform == "win32" else ""
+            print(f"⚠️  governor: NAG ({len(eligible)} legacy task(s); run "
+                  f"`m3 governor migrate`{_elev})")
         else:
             print("✅ governor: OK (no legacy scheduled tasks)")
         return 0
@@ -80,7 +87,12 @@ def run(brief: bool = False) -> int:
     print("             embedding / maintenance can fire mid-session and contend for")
     print("             CPU/GPU/WAL — exactly what the governor exists to prevent.")
     print()
-    print("  fix      : run the migration (removes them with your current privileges):")
+    if sys.platform == "win32":
+        print("  fix      : run the migration FROM AN ELEVATED (Administrator) shell —")
+        print("             deleting scheduled tasks needs admin rights; a normal shell")
+        print("             fails with 'Access is denied':")
+    else:
+        print("  fix      : run the migration (may need sudo / the task owner to remove):")
     print("               m3 governor migrate")
     print("             or via the setup wizard:")
     print("               m3 setup")

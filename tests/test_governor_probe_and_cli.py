@@ -42,6 +42,58 @@ def test_probe_nags_with_fix_command(monkeypatch, capsys):
     assert 'schtasks /Delete /TN "AgentOS_HourlySync" /F' in out  # privileged cmd
 
 
+def test_probe_brief_nag_mentions_elevation_on_windows(monkeypatch, capsys):
+    """The brief NAG line (what most users see in `m3 doctor`) must state up front
+    that migration needs an elevated shell on Windows — without it, the user hits
+    'Access is denied' only after running migrate."""
+    monkeypatch.setattr(
+        gm, "detect_scheduled_tasks",
+        lambda: {"eligible": ["AgentOS_HourlySync"], "not_migratable_present": []},
+    )
+    monkeypatch.setattr(governor_probe.sys, "platform", "win32")
+    governor_probe.run(brief=True)
+    out = capsys.readouterr().out
+    assert "NAG" in out
+    assert "ELEVATED" in out
+
+
+def test_probe_brief_nag_no_elevation_note_on_unix(monkeypatch, capsys):
+    """On non-Windows the brief line stays clean (no Windows-only elevation text)."""
+    monkeypatch.setattr(
+        gm, "detect_scheduled_tasks",
+        lambda: {"eligible": ["AgentOS_HourlySync"], "not_migratable_present": []},
+    )
+    monkeypatch.setattr(governor_probe.sys, "platform", "linux")
+    governor_probe.run(brief=True)
+    out = capsys.readouterr().out
+    assert "NAG" in out
+    assert "ELEVATED shell" not in out
+
+
+def test_migrate_warns_about_elevation_before_prompt_on_windows(monkeypatch, capsys):
+    """`m3 governor migrate` must warn about the elevation requirement BEFORE the
+    deletes are attempted (headless mode skips the prompt but still prints it)."""
+    monkeypatch.setattr(
+        gm, "detect_scheduled_tasks",
+        lambda: {"eligible": ["AgentOS_Maintenance"], "not_migratable_present": []},
+    )
+    # simulate a non-elevated Windows session: every remove fails
+    monkeypatch.setattr(
+        gm, "try_remove_scheduled_tasks",
+        lambda names: ([], list(names)),
+    )
+    monkeypatch.setattr(
+        gm, "privileged_removal_commands",
+        lambda names: [f'schtasks /Delete /TN "{n}" /F' for n in names],
+    )
+    monkeypatch.setattr(governor_cli.sys, "platform", "win32")
+    rc = governor_cli.cmd_migrate(yes=True)
+    out = capsys.readouterr().out
+    assert "ELEVATED" in out            # up-front notice
+    assert "needs an elevated shell" in out  # per-failure hint (not a vague guess)
+    assert rc == 1                       # pure permission failure
+
+
 def test_cli_status_returns_zero(monkeypatch, capsys):
     monkeypatch.setattr(
         gm, "detect_scheduled_tasks",
