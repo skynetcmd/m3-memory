@@ -136,3 +136,102 @@ def test_brief_healthy_and_unhealthy(monkeypatch, cfg_root, capsys):
     _patch(monkeypatch, health="ok", rust=True)
     assert P.run(brief=True, fix=False) == 1
     assert "⚠️" in capsys.readouterr().out
+
+
+# ── M3_EMBED_GGUF leak: localization + loop-termination + verbose command ──────
+#
+# These pin the three UX fixes: the probe must (1) localize a shell-rc leak to
+# file:line, (2) NOT re-emit "run --fix" for a manual-only leak (the dead-end
+# loop), and (3) print the exact removal command under --verbose, not only --fix.
+# All hermetic: rc scan is pointed at tmp_path, the Windows registry read is
+# stubbed, so no real HOME / registry is touched (CI-safe, §2 hermetic).
+
+
+@pytest.fixture
+def no_env_leak(monkeypatch, tmp_path):
+    """Baseline clean environment: no process var, no Windows User-env var, and
+    the shell-rc scan pointed at an empty tmp dir so a CI runner's real ~/.zshrc
+    can never leak into the assertion."""
+    monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
+    monkeypatch.setattr(P, "_windows_user_env_has", lambda var: False)
+    monkeypatch.setattr(P, "_shell_rc_candidates", lambda: [])
+    return tmp_path
+
+
+def test_shell_rc_leak_localizes_to_file_line(monkeypatch, tmp_path):
+    rc = tmp_path / ".zshrc"
+    rc.write_text(
+        "# a comment\n"
+        'export PATH="$PATH:/x"\n'
+        'export M3_EMBED_GGUF="/models/bge-m3.gguf"\n'
+    )
+    monkeypatch.setattr(P, "_shell_rc_candidates", lambda: [str(rc)])
+    hits = P._find_env_in_shell_rc("M3_EMBED_GGUF")
+    assert hits == [f"{rc}:3"]  # exact file:line, not just "shell rc"
+
+
+def test_commented_export_is_not_a_leak(monkeypatch, tmp_path):
+    rc = tmp_path / ".zshrc"
+    rc.write_text('# export M3_EMBED_GGUF="/old.gguf"\n')
+    monkeypatch.setattr(P, "_shell_rc_candidates", lambda: [str(rc)])
+    assert P._find_env_in_shell_rc("M3_EMBED_GGUF") == []
+
+
+def test_detect_leak_reports_rc_file_line(monkeypatch, no_env_leak):
+    rc = no_env_leak / ".zshrc"
+    rc.write_text('export M3_EMBED_GGUF="/models/bge-m3.gguf"\n')
+    monkeypatch.setenv("M3_EMBED_GGUF", "/models/bge-m3.gguf")  # process sees it too
+    monkeypatch.setattr(P, "_shell_rc_candidates", lambda: [str(rc)])
+    locs = P._detect_inproc_env_leak()
+    assert any(str(rc) in loc and ":1" in loc for loc in locs)
+
+
+def test_manual_only_brief_does_not_loop_to_fix(monkeypatch, cfg_root, capsys, no_env_leak):
+    # Shared config + live server + keep-alive: the ONLY problem is a process-env
+    # leak that --fix can't remove. Brief output must guide to the manual step,
+    # NOT re-print "run `m3 doctor --fix`" (the dead-end loop).
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="ok", rust=True)
+    monkeypatch.setenv("M3_EMBED_GGUF", "/models/bge-m3.gguf")
+    rc = P.run(brief=True, fix=False)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "remove it by hand" in out.lower()
+    assert "run `m3 doctor --fix`" not in out  # the loop is broken
+
+
+def test_manual_only_verbose_prints_removal_command(monkeypatch, cfg_root, capsys, no_env_leak):
+    # --verbose (fix=False) must print the actual removal command, not merely
+    # claim "the fix prints the exact command".
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="ok", rust=True)
+    monkeypatch.setattr(P.sys, "platform", "darwin")
+    rc_file = no_env_leak / ".zshrc"
+    rc_file.write_text('export M3_EMBED_GGUF="/models/bge-m3.gguf"\n')
+    monkeypatch.setenv("M3_EMBED_GGUF", "/models/bge-m3.gguf")
+    monkeypatch.setattr(P, "_shell_rc_candidates", lambda: [str(rc_file)])
+    rc = P.run(brief=False, fix=False)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert str(rc_file) in out  # the exact file is named
+    assert "new shell" in out.lower() and "restart the mcp client" in out.lower()
+
+
+def test_manual_only_verbose_prints_windows_command(monkeypatch, cfg_root, capsys, no_env_leak):
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="ok", rust=True)
+    monkeypatch.setattr(P.sys, "platform", "win32")
+    monkeypatch.setattr(P, "_windows_user_env_has", lambda var: True)
+    rc = P.run(brief=False, fix=False)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "SetEnvironmentVariable('M3_EMBED_GGUF', $null, 'User')" in out
+
+
+def test_no_leak_verbose_stays_clean(monkeypatch, cfg_root, capsys, no_env_leak):
+    _write_shared_config(cfg_root)
+    _patch(monkeypatch, health="ok", rust=True)
+    rc = P.run(brief=False, fix=False)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "no M3_EMBED_GGUF leak" in out

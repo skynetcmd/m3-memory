@@ -21,6 +21,19 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **`m3 doctor` now pinpoints an `M3_EMBED_GGUF` leak and stops sending you in a
+  circle.** When the shared-embedder probe found `M3_EMBED_GGUF` set in the
+  environment (the per-process-GPU hang footgun), it localized only to the
+  category "shell rc" and — for the one thing `--fix` provably cannot remove (a
+  persistent User/shell-rc var) — the summary still said "run `m3 doctor --fix`",
+  so a user ran `--fix` and was told to run `--fix` again: a dead-end loop. Now
+  the probe (1) greps the shell rc files / reads the Windows User-env registry
+  and reports the exact **`file:line`**, (2) prints the precise copy-pasteable
+  removal command under **`--verbose`** (not only under `--fix`, which had merely
+  *claimed* it), and (3) when the only remaining issue is a manual-only env leak,
+  guides to the manual step and does **not** re-emit "run `--fix`". Settings.json
+  env blocks are still auto-scrubbed by `--fix` as before.
+
 - **Version-tag pushes now publish to PyPI automatically.** `publish.yml` fired
   only on a published GitHub *Release*, so releases pushed as tags (without a
   GitHub Release) silently skipped PyPI — PyPI drifted several versions behind
