@@ -3,16 +3,23 @@ name: Publish to PyPI
 # checkov:skip=CKV_GHA_7: dry_run is a constrained choice input used to route
 # between TestPyPI and PyPI; no value flows into build/publish commands beyond
 # an equality check.
-# checkov:skip=CKV2_GHA_1: publish.yml is release-triggered (`on: release`) or
-# manually invoked (`workflow_dispatch`). There is no PR/push trigger whose
-# permissions we could further constrain at the top level. The two publish
-# jobs each declare `permissions: id-token: write` and nothing else (trusted
-# publishing to PyPI/TestPyPI); the build job runs with the default
-# `contents: read` set at the workflow level.
+# checkov:skip=CKV2_GHA_1: publish.yml is triggered by a published release, a
+# version-tag push (`push: tags: v*`), or a manual `workflow_dispatch`. The
+# tag-push trigger is scoped to `v*` tags only (not arbitrary branch pushes).
+# The two publish jobs each declare `permissions: id-token: write` and nothing
+# else (trusted publishing to PyPI/TestPyPI); the build job runs with the
+# default `contents: read` set at the workflow level.
 
 on:
   release:
     types: [published]
+  # Also publish when a version tag is pushed, so `git push origin vX.Y.Z`
+  # ships to PyPI without a separate GitHub Release step. (Historically only
+  # `release: published` fired this, so tag-only pushes silently skipped PyPI —
+  # PyPI drifted several releases behind the tags.)
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -61,7 +68,7 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+    if: github.event_name == 'release' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
     environment:
       name: pypi
       url: https://pypi.org/project/m3-memory/
