@@ -21,6 +21,13 @@ the policy is forward-going only.
 
 ### Fixed
 
+- **Version-tag pushes now publish to PyPI automatically.** `publish.yml` fired
+  only on a published GitHub *Release*, so releases pushed as tags (without a
+  GitHub Release) silently skipped PyPI — PyPI drifted several versions behind
+  the tags. The workflow now also triggers on `push: tags: v*` (scoped to version
+  tags), routing to the real-PyPI publish job. Fresh `pip install m3-memory` will
+  no longer lag the tagged releases.
+
 - **The governor NAG now says up front that removal needs an elevated shell on
   Windows.** Previously `m3 doctor` said only "run `m3 governor migrate`", and
   `m3 governor migrate` revealed the privilege requirement *after* failing with
