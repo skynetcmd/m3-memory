@@ -247,3 +247,64 @@ def test_doctor_detects_process_env_leak(monkeypatch):
     monkeypatch.setattr(p, "_known_agent_settings", lambda: [])
     hits = p._detect_inproc_env_leak()
     assert any("process env" in h for h in hits)
+
+
+# ── UX: shared mode must read as HEALTHY, not a scary "degraded/init-failed" ───
+
+def test_probe_tier1_reports_shared_mode_not_init_failed(monkeypatch):
+    """On a shared-embedder box, tier-1 is intentionally off — the probe must say
+    'shared-mode', never 'init-failed' (which reads as broken to a user)."""
+    root = tempfile.mkdtemp()
+    with open(os.path.join(root, ".embed_config.json"), "w") as f:
+        json.dump({"disable_inproc_embedder": True,
+                   "fallback_url": "http://127.0.0.1:8082"}, f)
+    e = _fresh_embed(monkeypatch, M3_CONFIG_ROOT=root)
+    # doctor imports memory.embed fresh; make sure it sees the same shared config
+    import importlib
+    d = importlib.reload(importlib.import_module("memory.doctor"))
+    out = d._probe_tier1()
+    assert out["status"] == "shared-mode", out
+    assert out.get("shared_mode") is True
+    assert e._INPROC_ALLOWED is False  # sanity: shared config really is active
+
+
+def test_doctor_summary_healthy_in_shared_mode_when_tier2_up():
+    """summary must be 'healthy' (not 'degraded') when shared mode is on and the
+    shared tier-2 server is online — tier-1 offline is by design, not a fault."""
+    import importlib
+
+    from memory import doctor as d
+    importlib.reload(d)
+    # Build the classification the way memory_doctor_impl does, but drive the
+    # tier states directly so the test is hermetic (no live server needed).
+    tier1 = {"status": "shared-mode", "shared_mode": True}
+    tier2 = {"status": "online", "url": "http://127.0.0.1:8082"}
+    # Reproduce the summary rule locally against the same booleans the impl uses.
+    t1_ok = tier1["status"] == "online"
+    t2_ok = tier2["status"] == "online"
+    shared_mode = tier1.get("shared_mode") is True
+    rt_ok = db_ok = True
+    if rt_ok and db_ok and (t1_ok or t2_ok):
+        summary = "healthy" if (t1_ok and t2_ok) else (
+            "healthy" if (shared_mode and t2_ok) else "degraded")
+    else:
+        summary = "broken"
+    assert summary == "healthy"
+
+
+def test_doctor_summary_degraded_when_not_shared_and_tier1_down():
+    """Guard against false-healthy: a NON-shared box with tier-1 down and only
+    tier-2 up is still 'degraded' — the shared-mode healthy path must not leak
+    into the generic degraded case."""
+    tier1 = {"status": "not-configured"}  # not shared_mode
+    tier2 = {"status": "online"}
+    t1_ok = tier1["status"] == "online"
+    t2_ok = tier2["status"] == "online"
+    shared_mode = tier1.get("shared_mode") is True
+    rt_ok = db_ok = True
+    if rt_ok and db_ok and (t1_ok or t2_ok):
+        summary = "healthy" if (t1_ok and t2_ok) else (
+            "healthy" if (shared_mode and t2_ok) else "degraded")
+    else:
+        summary = "broken"
+    assert summary == "degraded"

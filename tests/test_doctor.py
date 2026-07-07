@@ -36,6 +36,15 @@ def _isolate_env(monkeypatch, tmp_path):
     monkeypatch.setenv("M3_ENABLE_OLLAMA_FAILOVER", "0")
     monkeypatch.setenv("M3_DATABASE", str(tmp_path / "test.db"))
     monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
+    # Isolate the config root to an EMPTY dir so these tests never read the host's
+    # real .embed_config.json. On a shared-embedder box (the shipped default) that
+    # file sets disable_inproc_embedder:true, which correctly makes tier-1 report
+    # 'shared-mode' — but the classification tests here assert the generic
+    # not-configured / gguf-missing states, so they must run WITHOUT a shared
+    # config present (hermetic, host-independent — §3).
+    _cfg_root = tmp_path / "config"
+    _cfg_root.mkdir(exist_ok=True)
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(_cfg_root))
     # Force fresh module load so each doctor test re-reads the env above.
     # CRITICAL: snapshot and RESTORE the purged modules on teardown. Without
     # restore, the whole rest of the pytest session runs with memory.* modules

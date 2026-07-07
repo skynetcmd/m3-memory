@@ -47,6 +47,28 @@ def _probe_tier1() -> dict[str, Any]:
         "embedder_initialized": False,
         "error": None,
     }
+    # SHARED MODE FIRST: when the operator has routed all processes to the shared
+    # embedder server (.embed_config.json disable_inproc_embedder:true — the
+    # shipped default), tier-1-per-process is INTENTIONALLY off. Report that as a
+    # deliberate, healthy state ("shared-mode"), NOT "init-failed" — a per-process
+    # embedder that was never meant to load did not "fail". This is the difference
+    # between "the design is working" and "something is broken", and the whole
+    # cascade verdict hinges on it (see the summary logic in memory_doctor_impl).
+    try:
+        from memory import embed as _emb_cfg
+        if not _emb_cfg._INPROC_ALLOWED and _emb_cfg._EMBED_CFG.get("disable_inproc_embedder"):
+            res["status"] = "shared-mode"
+            res["shared_mode"] = True
+            res["gguf_source"] = "shared-server"
+            # Record whether the extension is importable, for diagnostics only.
+            try:
+                import m3_core_rs  # noqa: F401
+                res["m3_core_rs_importable"] = True
+            except Exception:  # noqa: BLE001
+                pass
+            return res
+    except Exception:  # noqa: BLE001 — fall through to normal probing if unreadable
+        pass
     gguf = os.environ.get("M3_EMBED_GGUF") or ""
     res["gguf_source"] = "env" if gguf else None
     # When the env var is unset, tier-1 now auto-detects a bge-m3 GGUF in the
@@ -255,6 +277,10 @@ async def memory_doctor_impl() -> dict[str, Any]:
     t2_ok = tier2["status"] == "online"
     db_ok = db["status"] == "online"
     rt_ok = roundtrip["status"] == "ok"
+    # Shared mode: tier-1-per-process is intentionally off and the shared server
+    # (tier-2) IS the fast path. This is the shipped-default healthy topology, not
+    # a degradation — so tier-1 being offline must not drag the verdict down.
+    shared_mode = tier1.get("shared_mode") is True
 
     if not t1_ok and tier1["status"] == "not-configured":
         if not tier1["gguf_path"]:
@@ -288,10 +314,24 @@ async def memory_doctor_impl() -> dict[str, Any]:
 
     # Summary
     if rt_ok and db_ok and (t1_ok or t2_ok):
-        summary = "healthy" if (t1_ok and t2_ok) else "degraded"
+        if t1_ok and t2_ok:
+            summary = "healthy"
+        elif shared_mode and t2_ok:
+            # Shared mode with the shared server online IS the healthy default —
+            # tier-1 is appropriately offline (one CUDA/Metal/Vulkan context lives
+            # in the shared server, not one per process). Not a degradation.
+            summary = "healthy"
+        else:
+            summary = "degraded"
     else:
         summary = "broken"
 
+    if summary == "healthy" and shared_mode and not t1_ok:
+        recommendations.append(
+            "Shared-embedder mode: the shared tier-2 server is the fast path and "
+            "tier-1-per-process is intentionally off (one GPU context total, not "
+            "one per process). This is the recommended default — nothing to change."
+        )
     if summary == "degraded" and not t1_ok and t2_ok:
         recommendations.append(
             "System functional via tier-2 (HTTP) only. Consider configuring "
