@@ -63,11 +63,18 @@ def test_shared_config_is_read_by_embed_cascade(monkeypatch, tmp_path):
     monkeypatch.delenv("M3_EMBED_GGUF", raising=False)
     monkeypatch.delenv("M3_EMBED_GGUF_AUTODETECT", raising=False)
     EA.cmd_shared(types.SimpleNamespace(port=8082))
-    # import embed.py fresh with bin/ on path so it reads the just-written config
+    # Import embed.py FRESH so its module-level config (read at import time) reflects
+    # the file we just wrote. Purge-then-import instead of importlib.reload(): a
+    # sibling test's fixture (test_doctor.py::_isolate_env) evicts all `memory.*`
+    # from sys.modules on teardown, and under py3.14 reload() of an absent module
+    # raises `ImportError: module memory.embed not in sys.modules`. Dropping the
+    # cached entry and re-importing is state-independent — it works whether or not
+    # `memory.embed` was previously loaded, so this test no longer depends on run
+    # order (§3 hermetic tests).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
     import importlib
 
-    from memory import embed as E
-    importlib.reload(E)
+    sys.modules.pop("memory.embed", None)
+    E = importlib.import_module("memory.embed")
     assert E._EMBED_GGUF_AUTODETECT is False
     assert E._EMBED_FALLBACK_URL == "http://127.0.0.1:8082"
