@@ -110,10 +110,21 @@ def test_inproc_init_times_out_instead_of_hanging(monkeypatch):
                      M3_EMBED_GGUF="C:/fake/model.gguf",
                      M3_EMBED_INIT_TIMEOUT_S="1")
 
+    # The wedge must stay blocked while the caller's 1s deadline elapses (that's
+    # what proves the abandon path). But `embed.py` runs the init on a daemon
+    # thread it CANNOT force-kill, so a bare `Event().wait()` here leaks a live
+    # thread into the rest of the session — on Windows that later races with
+    # test_fips_integrity.py's crypto_provider reload and segfaults the run (#85).
+    # Make the wedge INTERRUPTIBLE: it waits on an event we set in teardown so the
+    # thread actually exits, with a finite backstop cap so it can never truly hang
+    # even if teardown is skipped. The cap (30s) is far beyond the <5s assertion
+    # window, so the wedge is still blocking when the caller times out.
+    _release = threading.Event()
+
     class _HangingEmbedder:
         def __init__(self, *_a):
-            # simulate a wedged CUDA load
-            threading.Event().wait()  # blocks forever
+            # simulate a wedged CUDA load — released only in teardown
+            _release.wait(timeout=30.0)
 
         def embedding_dim(self):  # pragma: no cover — never reached
             return 1024
@@ -128,11 +139,19 @@ def test_inproc_init_times_out_instead_of_hanging(monkeypatch):
     e._EMBED_GGUF_PATH = "C:/fake/model.gguf"
     e._EMBED_INIT_TIMEOUT_S = 1.0
 
-    t0 = _time.time()
-    result = e._get_embedded_embedder()
-    dt = _time.time() - t0
-    assert result is None, "hanging init must yield None (HTTP fallback)"
-    assert dt < 5.0, f"init should abandon within the deadline, took {dt:.1f}s"
+    try:
+        t0 = _time.time()
+        result = e._get_embedded_embedder()
+        dt = _time.time() - t0
+        assert result is None, "hanging init must yield None (HTTP fallback)"
+        assert dt < 5.0, f"init should abandon within the deadline, took {dt:.1f}s"
+    finally:
+        # Release the wedge and reap the abandoned m3-embed-init daemon thread so
+        # it does not survive into later tests (the #85 segfault trigger).
+        _release.set()
+        for _th in threading.enumerate():
+            if _th.name == "m3-embed-init" and _th is not threading.current_thread():
+                _th.join(timeout=5.0)
 
 
 def test_inproc_init_succeeds_fast_when_healthy(monkeypatch):
