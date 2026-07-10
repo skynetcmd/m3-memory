@@ -125,6 +125,62 @@ def _restore_memory_modules():
 
 
 @pytest.fixture(autouse=True)
+def _guard_thread_leaks():
+    """Fail fast when a test leaks a live worker thread into the session.
+
+    A test that spawns a background thread which never exits (e.g. a simulated
+    wedged native init, `threading.Event().wait()` with no release) leaves that
+    thread alive for the rest of the run. Beyond hiding a real bug, a lingering
+    NATIVE-touching thread can race a later test that reloads a C-extension
+    module and crash the whole run (that is exactly what happened with the
+    m3-embed-init thread and the crypto_provider reload, #85).
+
+    Guard: snapshot the live threads before the test; after it, any NEW thread
+    still alive after a short grace is a leak. Threads whose name matches a
+    known worker prefix (they should be joined/stopped by their test) FAIL the
+    test; anything else is surfaced as a warning so genuinely long-lived helpers
+    don't turn into false reds. Give stragglers a brief join first — a thread
+    mid-shutdown at yield time is not a leak.
+    """
+    import threading
+    import warnings
+
+    # Worker-thread name prefixes that a well-behaved test must not leave running.
+    _LEAK_FAIL_PREFIXES = ("m3-embed-init",)
+
+    before = {t.ident for t in threading.enumerate()}
+    yield
+    current = threading.current_thread()
+
+    def _new_live():
+        return [
+            t for t in threading.enumerate()
+            if t.ident not in before and t is not current and t.is_alive()
+        ]
+
+    # A leaked thread may be a few ms from exiting; give it a short window.
+    for t in _new_live():
+        t.join(timeout=2.0)
+    leaked = _new_live()
+    if not leaked:
+        return
+    fail = [t for t in leaked if t.name.startswith(_LEAK_FAIL_PREFIXES)]
+    if fail:
+        names = ", ".join(sorted(t.name for t in fail))
+        raise AssertionError(
+            f"test leaked live worker thread(s): {names}. Join/stop them in "
+            "teardown (an unreleased native-init thread can crash a later "
+            "module reload — see #85)."
+        )
+    # Non-worker stragglers: surface but don't fail (may be a legit helper).
+    warnings.warn(
+        "test left non-main thread(s) alive: "
+        + ", ".join(sorted(t.name for t in leaked)),
+        stacklevel=2,
+    )
+
+
+@pytest.fixture(autouse=True)
 def _close_db_pools():
     """Close every cached M3Context SQLite pool after each test.
 
