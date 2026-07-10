@@ -51,17 +51,32 @@ def _run_fips_subprocess(body: str, env: dict) -> dict:
 
         def _bin_mock():
             # Load MockLibWolf from bin/test_fips_integrity.py by path (the tests/
-            # file of the same name shadows it on sys.path).
+            # file of the same name shadows it on sys.path). That bin module
+            # transitively imports auth_utils -> crypto_provider at module scope;
+            # under M3_FIPS_MODE=1 with no wolfSSL that import fails closed BEFORE
+            # we can install the mock. So load it with FIPS mode temporarily off
+            # (we only need the MockLibWolf class), then restore the env.
             import importlib.util as _ilu
-            p = os.path.join({_BIN!r}, "test_fips_integrity.py")
-            spec = _ilu.spec_from_file_location("_bin_fips_mock", p)
-            m = _ilu.module_from_spec(spec); spec.loader.exec_module(m)
-            return m.MockLibWolf
+            saved = {{k: os.environ.pop(k, None)
+                      for k in ("M3_FIPS_MODE", "M3_FIPS_STRICT", "M3_CRYPTO_BACKEND")}}
+            try:
+                p = os.path.join({_BIN!r}, "test_fips_integrity.py")
+                spec = _ilu.spec_from_file_location("_bin_fips_mock", p)
+                m = _ilu.module_from_spec(spec); spec.loader.exec_module(m)
+                return m.MockLibWolf
+            finally:
+                for k, v in saved.items():
+                    if v is not None:
+                        os.environ[k] = v
+                # crypto_provider was imported (DEFAULT backend) while FIPS was
+                # off; drop it so _install_mock re-imports it fresh under FIPS +
+                # the mock CDLL.
+                sys.modules.pop("crypto_provider", None)
 
         def _install_mock(*, break_sha=False, non_fips=False):
-            # Patch ctypes.CDLL to return a MockLibWolf for wolfssl, pin a real
-            # placeholder file so the secure loader resolves it, then return the
-            # freshly-imported crypto_provider. Mirrors the in-process helper.
+            # Order matters: build the mock + pin the fake lib + patch ctypes.CDLL
+            # BEFORE importing crypto_provider, so its module-level FIPS init sees
+            # the mock. Returns the freshly-imported crypto_provider module.
             MockLibWolf = _bin_mock()
             mock = MockLibWolf()
             if break_sha:
@@ -82,6 +97,7 @@ def _run_fips_subprocess(body: str, env: dict) -> dict:
                 f.write(b"mock-wolfssl-placeholder")
             os.environ["M3_WOLFSSL_LIB"] = fake
             ctypes.CDLL = _mock_cdll
+            sys.modules.pop("crypto_provider", None)  # ensure a fresh FIPS init
             import crypto_provider
             return crypto_provider
     """)
