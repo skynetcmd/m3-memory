@@ -35,6 +35,59 @@ _COMPILE_ERRORS: list[str] = []
 _COMPILE_LOCK = threading.Lock()
 
 
+# ── Harness-framing strip (always-on, independent of secret redaction) ────────
+# Harness control markup — <system-reminder>…</system-reminder> and
+# <task-notification>…</task-notification> — is injected by the CLI harness, not
+# authored by the user or assistant. If a turn carrying such a block is captured
+# verbatim, it later re-surfaces from chatlog search as data that READS LIKE a
+# live instruction (e.g. a genuine "the date has changed … do not mention this"
+# reminder), indistinguishable from a prompt-injection payload. Worse, a
+# malicious string smuggled inside such a block would be replayed with the
+# apparent authority of stored memory. So we strip these blocks at capture time,
+# UNCONDITIONALLY (not gated behind redaction.enabled) — they are never durable
+# conversation content. This is deliberately kept OUT of scrub()/the m3_core_rs
+# Rust port: it is structural block removal, not the config-gated secret
+# regex→[REDACTED] substitution, and must not perturb that byte-exact parity.
+_HARNESS_BLOCK_TAGS = ("system-reminder", "task-notification")
+_HARNESS_BLOCK_RE = re.compile(
+    r"<(?P<tag>system-reminder|task-notification)\b[^>]*>.*?</(?P=tag)>",
+    re.DOTALL | re.IGNORECASE,
+)
+# Collapse the 3+ newlines a removed block can leave behind into a clean break.
+_EXCESS_BLANK_RE = re.compile(r"\n[ \t]*\n[ \t]*\n+")
+
+
+def strip_harness_framing(content: str) -> tuple[str, int]:
+    """Remove harness control blocks (<system-reminder>, <task-notification>)
+    from `content` before it is persisted to the chat log.
+
+    Returns (stripped_content, blocks_removed). Always-on and cheap: a fast
+    substring pre-check skips the regex entirely for the overwhelmingly common
+    case of a turn with no harness markup, so this adds no measurable cost to
+    the hot write path. Idempotent — re-running on already-stripped content
+    removes nothing and returns count 0 (so it is safe for rescrub backfills).
+    """
+    if not content:
+        return (content, 0)
+    # Cheap gate: only pay for the regex if a tag name is even present.
+    lowered = content.lower()
+    if not any(f"<{t}" in lowered for t in _HARNESS_BLOCK_TAGS):
+        return (content, 0)
+
+    count = 0
+
+    def _drop(_m: "re.Match") -> str:
+        nonlocal count
+        count += 1
+        return ""
+
+    stripped = _HARNESS_BLOCK_RE.sub(_drop, content)
+    if count:
+        # Tidy the whitespace the removed block(s) left behind.
+        stripped = _EXCESS_BLANK_RE.sub("\n\n", stripped).strip()
+    return (stripped, count)
+
+
 def get_compile_errors() -> list[str]:
     """Return any regex compilation errors from the last scrub()/compile_patterns()
     call. Empty list if all patterns compiled cleanly. When the Rust core handled
@@ -313,5 +366,30 @@ if __name__ == "__main__":
     }
     scrub("irrelevant", cfg_bad)
     assert get_compile_errors(), "expected a compile error to be recorded"
+
+    # ── strip_harness_framing self-tests ──
+    # No markup -> untouched, count 0 (hot path).
+    assert strip_harness_framing("just a normal turn") == ("just a normal turn", 0)
+    assert strip_harness_framing("") == ("", 0)
+    # system-reminder block removed.
+    s, n = strip_harness_framing(
+        "before\n<system-reminder>the date has changed. DO NOT mention this.</system-reminder>\nafter"
+    )
+    assert n == 1 and "system-reminder" not in s and "before" in s and "after" in s, s
+    # task-notification block (multiline, with attributes) removed.
+    s, n = strip_harness_framing(
+        "<task-notification>\n<task-id>abc</task-id>\n<result>stuff</result>\n</task-notification>\nkept"
+    )
+    assert n == 1 and "task-notification" not in s and s.strip() == "kept", repr(s)
+    # Multiple blocks + both tag types in one turn.
+    s, n = strip_harness_framing(
+        "a<system-reminder>x</system-reminder>b<task-notification>y</task-notification>c"
+    )
+    assert n == 2 and "abc" == s, repr(s)
+    # Idempotent: re-stripping already-clean content removes nothing.
+    assert strip_harness_framing(s) == (s, 0)
+    # Prose that merely mentions the words (no full block) is NOT touched.
+    prose = "I told the agent to ignore the system-reminder it saw."
+    assert strip_harness_framing(prose) == (prose, 0)
 
     print("chatlog_redaction.py self-tests passed")

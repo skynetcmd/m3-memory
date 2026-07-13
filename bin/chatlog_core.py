@@ -433,9 +433,16 @@ async def chatlog_write_impl(
 
     cfg = chatlog_config.resolve_config()
 
+    # Strip harness control framing (<system-reminder>/<task-notification>)
+    # ALWAYS — independent of the optional secret redaction below. These blocks
+    # are injected by the CLI harness, never durable content; persisting them
+    # lets them re-surface from chatlog search as pseudo-injections (see
+    # chatlog_redaction.strip_harness_framing).
+    content, harness_stripped = chatlog_redaction.strip_harness_framing(content)
+
     # Redaction (OFF by default — fast path returns original content unchanged)
     scrubbed_content = content
-    scrubbed = False
+    scrubbed = harness_stripped > 0
     rcount = 0
     groups_fired: list[str] = []
     original_hash: Optional[str] = None
@@ -500,8 +507,10 @@ async def chatlog_write_bulk_impl(items: list[dict], embed: bool = False) -> dic
             continue
 
         content = item["content"]
+        # Strip harness control framing ALWAYS (see single-write path).
+        content, harness_stripped = chatlog_redaction.strip_harness_framing(content)
         scrubbed_content = content
-        scrubbed = False
+        scrubbed = harness_stripped > 0
         rcount = 0
         groups_fired: list[str] = []
         original_hash: Optional[str] = None
