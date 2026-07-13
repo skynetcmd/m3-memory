@@ -381,6 +381,98 @@ def test_recent_write_count_missing_dbs_returns_unknown(
     assert chatlog_status._recent_write_count(cfg) == -1
 
 
+def test_lull_does_not_trigger_capture_down_alarm(status_test_env):
+    """Session-start / between-turns regression: 0 rows in the 15-min window but
+    a RECENT last_write_at must NOT emit the 'capture may be down' scream — it is
+    an ordinary lull (the Stop hook just hasn't fired this window yet). This is
+    the false alarm that tripped the CLAUDE.md session-start check every fresh
+    session (observed 2026-07-12)."""
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    main_db = status_test_env["main_db_path"]
+    _create_recent_schema(str(chatlog_db))
+    _create_recent_schema(str(main_db))
+
+    # An OLD row (outside the 15-min window) so total_rows > 0 and recent == 0...
+    conn = sqlite3.connect(str(chatlog_db))
+    conn.execute(
+        "INSERT INTO memory_items (id, type, created_at) "
+        "VALUES ('old', 'chat_log', '2020-01-01T00:00:00Z')"
+    )
+    conn.commit()
+    conn.close()
+
+    # ...but the state file says the last write was 3 minutes ago (a lull).
+    from datetime import datetime, timedelta, timezone
+    recent = (datetime.now(timezone.utc) - timedelta(minutes=3)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    with open(str(status_test_env["state_file"]), "w") as f:
+        json.dump({"last_write_at": recent}, f)
+
+    parsed = json.loads(chatlog_status.chatlog_status_impl())
+    assert not any("capture may be down" in w for w in parsed["warnings"]), (
+        f"lull wrongly raised capture-down alarm: {parsed['warnings']}"
+    )
+    # It should still note the idle window benignly, so the state is visible.
+    assert any("capture idle, not down" in w for w in parsed["warnings"])
+
+
+def test_stale_last_write_still_triggers_capture_down_alarm(status_test_env):
+    """Complement to the lull test: when the last write is OLDER than the grace
+    window, a 0-in-15min count is a genuine outage and the real 'capture may be
+    down' alarm MUST still fire. The lull grace must not mask a true failure."""
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    main_db = status_test_env["main_db_path"]
+    _create_recent_schema(str(chatlog_db))
+    _create_recent_schema(str(main_db))
+
+    conn = sqlite3.connect(str(chatlog_db))
+    conn.execute(
+        "INSERT INTO memory_items (id, type, created_at) "
+        "VALUES ('old', 'chat_log', '2020-01-01T00:00:00Z')"
+    )
+    conn.commit()
+    conn.close()
+
+    # last_write_at well beyond the 6h grace window.
+    with open(str(status_test_env["state_file"]), "w") as f:
+        json.dump({"last_write_at": "2020-01-01T00:00:00Z"}, f)
+
+    parsed = json.loads(chatlog_status.chatlog_status_impl())
+    assert any("capture may be down" in w for w in parsed["warnings"]), (
+        f"stale last-write failed to raise capture-down alarm: {parsed['warnings']}"
+    )
+
+
+def test_missing_last_write_triggers_capture_down_alarm(status_test_env):
+    """No last_write_at at all (unknown age) with 0 recent rows is treated as a
+    real outage, not a lull — the grace only applies to a KNOWN-recent write."""
+    import chatlog_status
+
+    chatlog_db = status_test_env["db_path"]
+    main_db = status_test_env["main_db_path"]
+    _create_recent_schema(str(chatlog_db))
+    _create_recent_schema(str(main_db))
+
+    conn = sqlite3.connect(str(chatlog_db))
+    conn.execute(
+        "INSERT INTO memory_items (id, type, created_at) "
+        "VALUES ('old', 'chat_log', '2020-01-01T00:00:00Z')"
+    )
+    conn.commit()
+    conn.close()
+
+    # No state file written -> last_write_at is None -> unknown age.
+    parsed = json.loads(chatlog_status.chatlog_status_impl())
+    assert any("capture may be down" in w for w in parsed["warnings"]), (
+        f"unknown last-write failed to raise capture-down alarm: {parsed['warnings']}"
+    )
+
+
 def test_recent_write_probe_opens_read_only(status_test_env):
     """The probe must open DBs read-only (§6): it must never be able to mutate
     the store it is only counting."""
