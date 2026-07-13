@@ -208,6 +208,33 @@ def _recent_write_count(config: chatlog_config.ChatlogConfig,
     return 0 if queried_ok else -1
 
 
+# A 0-in-15min window is only a genuine "capture down" signal if the LAST write
+# was also long ago. On a just-started session (or an ordinary between-turns
+# lull), the Stop/PreCompact hook has simply not fired yet, so the 15-min count
+# is legitimately 0 while the store is perfectly healthy — the last write is just
+# minutes-to-hours old. Screaming "capture may be down" in that case is a false
+# alarm that trips the CLAUDE.md session-start check every single fresh session
+# (observed 2026-07-12: alarm fired while this very session's turns were landing).
+# Grace: if the last write is within this many minutes, downgrade the scream to a
+# benign note. Beyond it (or last-write unknown), the real alarm still fires.
+_LULL_GRACE_MIN = 360  # 6h — comfortably longer than any between-turns gap
+
+
+def _minutes_since(iso_ts: str | None) -> float | None:
+    """Minutes between `iso_ts` (an ISO-8601 UTC stamp) and now, or None if the
+    stamp is missing/unparseable. Tolerant of a trailing 'Z' and of fractional
+    seconds, matching how last_write_at is stored."""
+    if not iso_ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+    except (ValueError, TypeError):
+        return None
+
+
 def _compute_warnings(
     state: dict[str, Any],
     config: chatlog_config.ChatlogConfig,
@@ -224,10 +251,22 @@ def _compute_warnings(
     # 0 recent writes and should not scream).
     total_rows = row_counts.get("main_chat_log_rows", 0) or row_counts.get("chatlog_rows", 0)
     if recent_writes == 0 and total_rows > 0:
-        warnings.append(
-            f"NO chatlog writes in last {recent_window_min}min "
-            "(capture may be down — verify before trusting memory)"
-        )
+        # Disambiguate session-start/between-turns lull from a real outage using
+        # the age of the LAST write (see _LULL_GRACE_MIN). A recent last-write
+        # means the hook just hasn't fired this window yet — benign; anything
+        # older (or unknown) keeps the real "capture may be down" alarm.
+        mins_since_last = _minutes_since(state.get("last_write_at"))
+        if mins_since_last is not None and mins_since_last <= _LULL_GRACE_MIN:
+            warnings.append(
+                f"no chatlog writes in last {recent_window_min}min "
+                f"(last write {int(mins_since_last)}min ago — "
+                "capture idle, not down)"
+            )
+        else:
+            warnings.append(
+                f"NO chatlog writes in last {recent_window_min}min "
+                "(capture may be down — verify before trusting memory)"
+            )
     elif recent_writes < 0:
         warnings.append("could not query recent chatlog writes (capture status unknown)")
 
