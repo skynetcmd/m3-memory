@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 from collections.abc import Callable
 
 from m3_sdk import resolve_db_path
@@ -237,10 +238,19 @@ def _resolve_mc_callbacks() -> None:
 # callers that don't use rerank.
 _RERANKER_MODEL = None  # CrossEncoder | None — lazy-init
 _RERANKER_MODEL_NAME = ""
+# Guards the lazy load below. _apply_rerank now runs via asyncio.to_thread (off
+# the event loop), so two concurrent rerank=True searches can call _get_reranker
+# from different pool threads simultaneously — without this lock they would race
+# the first-time CrossEncoder load (double GPU/CPU load) or observe a half-set
+# (_RERANKER_MODEL assigned, _RERANKER_MODEL_NAME not yet). The fast path (cache
+# hit) still needs no lock: the two globals are only ever transitioned together
+# under the lock, so a reader seeing a non-None model with a matching name sees
+# a fully-published pair.
+_RERANKER_LOCK = threading.Lock()
 
 
 def _get_reranker(model_name: str):
-    """Lazy-load + cache cross-encoder reranker.
+    """Lazy-load + cache cross-encoder reranker (thread-safe).
 
     Reuses the cached instance if model_name matches the previously-loaded one;
     otherwise loads the new model (and discards the prior). GPU is used if
@@ -251,24 +261,36 @@ def _get_reranker(model_name: str):
     the user has a broken install).
     """
     global _RERANKER_MODEL, _RERANKER_MODEL_NAME
+    # Fast path: lock-free cache hit (see _RERANKER_LOCK note on why this is safe).
     if _RERANKER_MODEL is not None and _RERANKER_MODEL_NAME == model_name:
         return _RERANKER_MODEL
-    try:
-        from sentence_transformers import CrossEncoder
-    except ImportError as e:
-        raise RuntimeError(
-            f"rerank=True requires sentence-transformers (declared in "
-            f"requirements.txt). Install/repair via: "
-            f"pip install -r requirements.txt. Original error: {e}"
-        ) from e
-    try:
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    except ImportError:
-        device = "cpu"
-    _RERANKER_MODEL = CrossEncoder(model_name, device=device)
-    _RERANKER_MODEL_NAME = model_name
-    return _RERANKER_MODEL
+    with _RERANKER_LOCK:
+        # Re-check under the lock: another thread may have loaded it while we
+        # waited (double-checked locking).
+        if _RERANKER_MODEL is not None and _RERANKER_MODEL_NAME == model_name:
+            return _RERANKER_MODEL
+        try:
+            from sentence_transformers import CrossEncoder
+        except ImportError as e:
+            raise RuntimeError(
+                f"rerank=True requires sentence-transformers (declared in "
+                f"requirements.txt). Install/repair via: "
+                f"pip install -r requirements.txt. Original error: {e}"
+            ) from e
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            device = "cpu"
+        model = CrossEncoder(model_name, device=device)
+        # Publish name FIRST then model? No — publish model then name would let a
+        # lock-free reader see a new model under the old name. Assign the model,
+        # then the name; the fast-path reader checks name==model_name AFTER
+        # reading model is not None, and both writes happen under the lock, so a
+        # reader either sees the old pair or the fully-updated new pair.
+        _RERANKER_MODEL = model
+        _RERANKER_MODEL_NAME = model_name
+        return _RERANKER_MODEL
 
 
 def _apply_rerank(
@@ -587,51 +609,19 @@ async def memory_search_scored_impl(
         except Exception as exc:
             logger.debug("FTS Short-circuit check failed (non-fatal): %s", exc)
 
-    # Degrade-safe query embed. The full _embed cascade can stack per-tier
-    # timeouts into minutes on a degraded box, and because the stdio MCP server
-    # is a single event loop that stall freezes EVERY concurrent tool call (the
-    # "MCP server locked up" symptom). memory_write sidesteps this by DEFERRING
-    # its embed; search cannot (no query vector, no semantic search), so it
-    # bounds the embed two ways and degrades to FTS-only on failure:
-    #   1. Fast-tier gate — skip the embed entirely if no fast tier is believed
-    #      up (same predictor the write path uses for inline-vs-defer).
-    #   2. Wall-clock deadline (EMBED_SEARCH_DEADLINE_S, default 8s) — cap a
-    #      slow-but-not-failed tier that never trips its breaker.
-    # `_embed` is the local floor-bind (monkeypatch-aware) resolved above; we
-    # replicate embed.embed_for_search's guards here rather than call it so the
-    # test-shim rebinding of `_embed` still takes effect.
-    #
-    # The fast-tier gate is a PREDICTOR OF THE REAL CASCADE'S COST — it only
-    # makes sense to apply when `_embed` IS the real cascade. When a caller or
-    # test has injected a different `_embed` (the floor-bind adopted a
-    # memory_core override at ~L504), the gate is meaningless: honor the
-    # injected embed and just bound it with the deadline. This keeps the
-    # degrade-safe behavior in production (where `_embed` is the module cascade)
-    # without forcing every caller/test that supplies a fast `_embed` to also
-    # patch the gate.
+    # Degrade-safe query embed via the single source of truth
+    # embed.embed_for_search (fast-tier gate + EMBED_SEARCH_DEADLINE_S wall-clock
+    # cap → degrades to FTS-only instead of wedging the single-loop MCP server).
+    # `_embed` is the local floor-bind (monkeypatch-aware) resolved above; pass
+    # it as embed_fn so the test-shim rebinding still takes effect. The fast-tier
+    # gate only makes sense when `_embed` IS the real module cascade — when a
+    # caller/test injected a different `_embed` (floor-bind adopted a memory_core
+    # override at ~L504) the predictor is meaningless, so gate=False there.
     from memory import embed as _embed_mod
     _embed_is_real = _embed is getattr(_embed_mod, "_embed", None)
-    q_vec = None
-    _try_embed = (not _embed_is_real) or _embed_mod.fast_embedder_available()
-    if _try_embed:
-        _deadline = _scfg.EMBED_SEARCH_DEADLINE_S
-        try:
-            if _deadline and _deadline > 0:
-                q_vec, _ = await asyncio.wait_for(_embed(query), timeout=_deadline)
-            else:
-                q_vec, _ = await _embed(query)
-        except asyncio.TimeoutError:
-            logger.warning(
-                "search embed exceeded %.1fs deadline — degrading to FTS-only "
-                "results (embed server / primary endpoint may be slow)",
-                _deadline,
-            )
-            q_vec = None
-    else:
-        logger.info(
-            "search embed skipped: no fast embedder tier available — "
-            "degrading to FTS-only results"
-        )
+    q_vec, _ = await _embed_mod.embed_for_search(
+        query, embed_fn=_embed, gate=_embed_is_real
+    )
     if not q_vec:
         # No query vector (embedder degraded, skipped, or timed out) — return
         # empty rather than hang. This preserves the pre-existing contract: the

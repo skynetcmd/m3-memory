@@ -1515,3 +1515,54 @@ def test_elbow_quality_gating_floor(monkeypatch):
 
     out_high = mc._trim_by_elbow(hits_high, sensitivity=1.5)
     assert len(out_high) < len(hits_high), "Should trim candidates when top similarity is high and drop occurs"
+
+
+# ── Reranker lazy-load thread-safety (regression) ─────────────────────────────
+# _apply_rerank now runs via asyncio.to_thread (off the event loop), so two
+# concurrent rerank=True searches can call _get_reranker from different pool
+# threads at once. Without the _RERANKER_LOCK, they race the first-time model
+# load. This verifies concurrent _get_reranker calls load the model exactly once
+# and all return the same instance.
+
+def test_get_reranker_concurrent_loads_once(monkeypatch):
+    import threading as _threading
+
+    import memory.search as S
+
+    # Reset the module cache so the load actually happens under the test.
+    monkeypatch.setattr(S, "_RERANKER_MODEL", None)
+    monkeypatch.setattr(S, "_RERANKER_MODEL_NAME", "")
+
+    load_count = {"n": 0}
+    barrier = _threading.Barrier(8)
+
+    class _FakeCE:
+        def __init__(self, model_name, device="cpu"):
+            load_count["n"] += 1  # count real constructions
+
+    # Patch the CrossEncoder import target. _get_reranker does
+    # `from sentence_transformers import CrossEncoder`, so patch there.
+    import sys as _sys
+    import types as _types
+    fake_mod = _types.ModuleType("sentence_transformers")
+    fake_mod.CrossEncoder = _FakeCE
+    monkeypatch.setitem(_sys.modules, "sentence_transformers", fake_mod)
+
+    results = []
+    res_lock = _threading.Lock()
+
+    def _worker():
+        barrier.wait()  # maximize contention: all threads hit the load together
+        r = S._get_reranker("some/model")
+        with res_lock:
+            results.append(r)
+
+    threads = [_threading.Thread(target=_worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert load_count["n"] == 1, f"model must load exactly once, loaded {load_count['n']}x (race)"
+    assert len(results) == 8
+    assert all(r is results[0] for r in results), "all callers must get the same cached instance"
