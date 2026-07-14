@@ -23,6 +23,45 @@ the policy is forward-going only.
      the usual ### Added / ### Changed / ### Fixed sub-sections here. -->
 ### None pending at this time
 
+---
+
+## [2026.7.14.1] — 2026-07-14 — Docs refresh: reorganized README, self-hosted star history
+
+Documentation and repository-hygiene release. No changes to the installable
+package's runtime behavior or tool surface.
+
+### Added
+
+- **Self-hosted star-history chart.** `bin/gen_star_history.py` fetches the
+  repo's stargazer timestamps and renders a theme-aware SVG
+  (`docs/star-history.svg`); `.github/workflows/star-history.yml` regenerates it
+  weekly and commits only when the count changes. Replaces the anonymous
+  star-history.com embed, which GitHub's 2026-06-30 stargazer-API restriction
+  broke (the built-in `GITHUB_TOKEN` returns 403; a `M3_STARGAZER` PAT secret is
+  used instead).
+- **"More Documentation" index** in the README surfacing previously unlinked
+  guides (Roadmap, Sync, Multi-Agent, Comparison, FAQ, Security,
+  Troubleshooting, CLI/API reference, and more).
+
+### Changed
+
+- **README reorganized** around a table of contents, "at a glance" tables, a
+  consolidated documentation index, and per-integration install sections
+  (Claude Code, Antigravity, Hermes, LangChain/LangGraph). Refreshed hero banner.
+- Provider badges (Hermes, OpenClaw, OpenCode) now render as committed SVGs
+  under `docs/badges/` instead of inline `data:` URIs, which GitHub sanitized
+  (OpenClaw's exceeded the Camo URL-length limit and 404'd).
+
+### Fixed
+
+- Corrected factual drift in the README: **9** tool domains (not 8; `diagnostics`
+  was omitted), the essential startup set (~18 tools, not 10), the eager tool
+  count (**109**, not 107), and the test count (~1,283 tests across 154 files,
+  replacing the stale "563").
+- License metadata in `mcp-server.json` corrected from `MIT` to **`Apache-2.0`**
+  to match `LICENSE` and `pyproject.toml`; README icon-credit attribution
+  aligned with `NOTICE` (LobeHub `lobe-icons`, MIT).
+
 ## [2026.7.14.0] — 2026-07-14 — Drop-in LangChain / LangGraph memory
 
 ### Added
