@@ -1027,13 +1027,16 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         _EMBED_SEM.release()
 
 
-async def embed_for_search(text: str) -> tuple[list[float] | None, str]:
+async def embed_for_search(
+    text: str, *, embed_fn=None, gate: bool = True
+) -> tuple[list[float] | None, str]:
     """Bounded, degrade-safe query embed for the INTERACTIVE search path.
 
-    Wraps the full `_embed` cascade with two guards so a degraded/unreachable
-    embedder can never wedge the single-event-loop MCP server:
+    The single source of truth for the search-path embed guards (memory_search
+    calls this). Wraps the `_embed` cascade with two guards so a degraded/
+    unreachable embedder can never wedge the single-event-loop MCP server:
 
-      1. Fast-tier gate. If no fast tier is believed available
+      1. Fast-tier gate. If `gate` and no fast tier is believed available
          (`fast_embedder_available()` — tier-1 loaded, or tier-2 breaker
          closed), skip the embed entirely and return (None, EMBED_MODEL). The
          caller degrades to FTS-only results. Same predictor memory_write uses
@@ -1045,11 +1048,22 @@ async def embed_for_search(text: str) -> tuple[list[float] | None, str]:
          return (None, ...) — a query with no vector degrades to FTS, it does
          not hang.
 
+    `embed_fn`: the coroutine to run (defaults to this module's `_embed`).
+    search.py passes its monkeypatch-aware floor-bound `_embed` here so the
+    caller's test-shim rebinding still takes effect — the guards live in ONE
+    place instead of being replicated at the call site.
+
+    `gate`: the fast-tier gate is a predictor OF THE REAL CASCADE'S cost; it is
+    only meaningful when `embed_fn` IS the real cascade. Callers that inject a
+    different embed_fn (a test shim, or a known-fast callable) pass gate=False
+    to skip the predictor and just apply the deadline.
+
     Returns (vector|None, model_tag). A None vector is the "degrade to lexical"
     signal, identical in shape to a genuine embed miss, so callers need no new
     branch. Set M3_EMBED_SEARCH_DEADLINE_S=0 to disable the ceiling.
     """
-    if not fast_embedder_available():
+    _fn = embed_fn if embed_fn is not None else _embed
+    if gate and not fast_embedder_available():
         logger.info(
             "search embed skipped: no fast embedder tier available — "
             "degrading to FTS-only results (query vector not computed)"
@@ -1058,10 +1072,10 @@ async def embed_for_search(text: str) -> tuple[list[float] | None, str]:
 
     deadline = config.EMBED_SEARCH_DEADLINE_S
     if not deadline or deadline <= 0:
-        return await _embed(text)
+        return await _fn(text)
 
     try:
-        return await asyncio.wait_for(_embed(text), timeout=deadline)
+        return await asyncio.wait_for(_fn(text), timeout=deadline)
     except asyncio.TimeoutError:
         logger.warning(
             "search embed exceeded %.1fs deadline — degrading to FTS-only "

@@ -204,8 +204,18 @@ def _resolve_admission() -> _AdmissionGate:
 
 
 def _is_interactive(texts: list[str], request: "Request | None") -> bool:
-    """Classify a request: small batch => interactive, unless an explicit
-    `X-M3-Embed-Priority: bulk|interactive` header overrides."""
+    """Classify a request into the interactive fast-lane or the bulk lane.
+
+    CONTRACT: the `X-M3-Embed-Priority: interactive|bulk` header is AUTHORITATIVE
+    — it always wins. First-party clients set it explicitly (memory/embed.py
+    tags single-query posts `interactive` and bulk posts `bulk`), so the size
+    heuristic below is only a fallback for callers that send NO header.
+
+    Fallback: batch size. A latency-sensitive caller sending a multi-text batch
+    (> _INTERACTIVE_MAX_TEXTS) WITHOUT the header is treated as bulk and may
+    queue behind other bulk work — such callers should send the header rather
+    than rely on size. The default threshold (8) comfortably covers the only
+    header-less interactive shape today (a single query embed, len 1)."""
     if request is not None:
         pri = (request.headers.get("x-m3-embed-priority") or "").strip().lower()
         if pri == "interactive":
@@ -329,16 +339,22 @@ def _coerce_texts(inp: Union[str, list[str]]) -> list[str]:
 async def _embed(texts: list[str], *, interactive: bool = False) -> list[list[float]]:
     """Admission-gated GPU embed. Runs the blocking call off the event loop.
 
-    Concurrency is bounded by the two-lane admission gate (interactive requests
-    get reserved capacity; bulk is capped but may borrow when idle). The
-    underlying `_embedder.embed` is safe to call concurrently — the Rust
-    dispatcher fans the calls across its stream pool (see _AdmissionGate WHY).
+    Concurrency is bounded by the two-lane admission gate: interactive requests
+    get reserved capacity, and bulk is strictly capped at total-reserved with NO
+    borrow (the reserved slots are never available to bulk, so an interactive
+    request always has room — see _AdmissionGate). The underlying
+    `_embedder.embed` is safe to call concurrently — the Rust dispatcher fans the
+    calls across its stream pool.
     """
+    if _embedder is None:
+        # Request arrived before _load_embedder() finished (racing startup).
+        # Fail cleanly rather than AttributeError-ing inside the worker thread.
+        raise RuntimeError("embedder not loaded yet")
     gate = _GATE
     if gate is None:
         # Pre-load / test fallback: preserve the original strict-serial behaviour.
         async with _GPU_SEM:
-            return await asyncio.to_thread(_embedder.embed, texts)  # type: ignore[union-attr]
+            return await asyncio.to_thread(_embedder.embed, texts)
     await gate.acquire(interactive=interactive)
     try:
         return await asyncio.to_thread(_embedder.embed, texts)  # type: ignore[union-attr]
