@@ -19,6 +19,44 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.14.0] — 2026-07-14 — Drop-in LangChain / LangGraph memory
+
+### Added
+
+- **m3 is now a drop-in memory backend for LangChain / LangGraph.** Install the
+  optional extra (`pip install "m3-memory[langchain]"`) and reach four standard
+  surfaces from `m3_memory.langchain`:
+  - **`Memory` / `MemoryClient`** — a Mem0-compatible surface. Migrating from
+    Mem0 is a one-line import swap (`from m3_memory.langchain import Memory`);
+    `.add()` / `.search()` / `.get_all()` / `.delete()` keep their signatures and
+    return shape. m3 shadows Mem0's API but never imports it (no dependency).
+  - **`M3Store`** — a LangGraph `BaseStore`, so `create_react_agent(store=M3Store())`
+    gives any agent persistent, local-first, cross-session memory. Also backs
+    **LangMem** unchanged (it drives the same `asearch`/`aput`/`adelete`/`aget`).
+  - **`M3ChatMessageHistory`** + `with_m3_history()` — short-term chat history
+    (`BaseChatMessageHistory`); turns persist locally and feed async fact
+    extraction.
+  - **`M3Retriever`** — a `BaseRetriever` for RAG, surfacing m3's bitemporal +
+    confidence signal in each `Document.metadata`.
+- LangChain users gain what Mem0/LangMem don't: contradiction handling
+  (`.supersede`), time-travel queries (`as_of=`), commanded forgetting
+  (`.forget`), and hybrid + graph retrieval — all local-first, no server, no API
+  key. See [`docs/integrations/LANGCHAIN.md`](docs/integrations/LANGCHAIN.md) and
+  the runnable examples in `examples/langchain-agent/`.
+- The integration is additive: no hard LangChain dependency in core, and no new
+  MCP tools (the whole surface is in-process adapter code).
+
+### Changed
+
+- `chatlog_write` now accepts `langchain` as a host agent, and the host-agent
+  allowlist is **config-extensible** — a new host can be registered via chatlog
+  config with no code change.
+
+### Fixed
+
+- Tightened tenancy filtering (`user_id` / `scope`) on the FTS and graph-expansion
+  paths of scored/routed search.
+
 ## [2026.7.13.0] — 2026-07-13 — MCP lockup elimination: embed fast-lane + off-loop hot paths
 
 ### Fixed

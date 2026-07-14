@@ -74,7 +74,7 @@ INGEST_CURSOR = _resolve_engine_file(".chatlog_ingest_cursor.json")
 # which homecoming never populates, so the chatlog DB could never be bootstrapped.
 CHATLOG_MIGRATIONS_DIR = os.path.join(BASE_DIR, "memory", "chatlog_migrations")
 
-VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider"))
+VALID_HOST_AGENTS: frozenset[str] = frozenset(("claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider", "langchain"))
 VALID_PROVIDERS: frozenset[str] = frozenset((
     "anthropic", "google", "openai", "local", "xai",
     "deepseek", "mistral", "meta", "other",
@@ -124,6 +124,7 @@ class ChatlogConfig:
         "antigravity-cli": HookSpec(),
         "opencode":    HookSpec(),
         "aider":       HookSpec(),
+        "langchain":   HookSpec(),
     })
     embed_default: bool = False
     embed_sweeper: EmbedSweeperSpec = field(default_factory=EmbedSweeperSpec)
@@ -223,7 +224,12 @@ def _build_from_dict(d: dict) -> ChatlogConfig:
     base.db_path = d.get("db_path", base.db_path) or base.db_path
 
     hooks_in = d.get("host_agents") or {}
-    for host in list(base.host_agents.keys()):
+    # Iterate the UNION of built-in hosts and any the config introduces, so a
+    # user can register a NEW host_agent (e.g. "langchain") purely via config —
+    # the validator's allowlist is built-ins ∪ config keys (see
+    # chatlog_core._valid_host_agents). Previously this looped only the built-in
+    # keys, silently dropping any new host a user added.
+    for host in list(dict.fromkeys(list(base.host_agents.keys()) + list(hooks_in.keys()))):
         spec_in = hooks_in.get(host) or {}
         if isinstance(spec_in, dict):
             base.host_agents[host] = HookSpec(

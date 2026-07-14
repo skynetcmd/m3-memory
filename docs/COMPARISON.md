@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Comparison Guide
 
-> Last updated: June 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
+> Last updated: July 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
 Several tools address agentic memory. This document explains where M3 Memory fits relative to each, and when a different tool is the better choice.
 
@@ -33,27 +33,35 @@ If "the LLM should decide what's worth remembering" matches your worldview, Mem0
 
 ---
 
+> **Legend:** 🏆 = the system has this capability and does it well · 👑 = best-in-class here — either a rare stand-out few offer (e.g. FIPS-ready crypto, bundled in-process embedder) or a shared capability M3 does better (e.g. deterministic contradiction supersession, native MCP, drop-in LangChain). Where a competitor also has a feature it earns 🏆; M3's 👑 marks where it leads. (Temporal/bitemporal is a genuine tie with graph-native systems like Zep/Graphiti — both earn 🏆; M3's edge there is doing it local-first with no graph DB to run.) Applies to every table below.
+
+---
+
 ## ⚔️ M3-Memory vs Mem0
 
-Mem0 is a popular agentic memory library with broad ecosystem adoption. It's excellent for cloud-hosted, multi-session personalization in LangChain/LangGraph/CrewAI apps. M3-Memory targets a different audience: developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
+Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memory offers a **superset of Mem0's capabilities** and ships a drop-in Mem0-compatible surface (`from m3_memory.langchain import Memory` — a one-line import swap), so LangChain/LangGraph users get everything Mem0 does plus contradiction supersession, bitemporal history, commanded forgetting, and hybrid+graph retrieval — locally, with no server or API key. M3 also serves developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
 
 | Feature | M3-Memory | Mem0 |
 |---------|-----------|------|
-| **Primary deployment** | Local SQLite — works fully offline | Cloud API (self-host is possible but not the happy path) |
-| **MCP support** | Native — 100+ tools, zero config in Claude Code / Gemini CLI | No native MCP; requires a custom wrapper |
+| **Primary deployment** | 👑 Local SQLite — works fully offline, zero data egress | Cloud API (self-host is possible but not the happy path) |
+| **MCP support** | 👑 Native — 100+ tools, zero config in Claude Code / Gemini CLI | No native MCP; requires a custom wrapper |
 | **Search algorithm** | FTS5 (BM25) + vector cosine + MMR diversity re-ranking | Vector search + knowledge graph traversal |
-| **Contradiction detection** | Automatic on write — old memory soft-deleted, `supersedes` relationship recorded | Basic deduplication; no strong conflict resolution |
-| **Bitemporal history** | `valid_from` / `valid_to` on every memory — query state as of any past date | No |
-| **GDPR tooling** | `gdpr_forget` (Art. 17 hard delete) + `gdpr_export` (Art. 20 portable JSON) as MCP tools | Manual; no dedicated GDPR tooling |
-| **Embeddings** | Local LLM only (Ollama, LM Studio, vLLM) — zero data egress | Cloud embedding APIs by default |
+| **Contradiction handling** | 👑 Automatic heuristic detection on write (cosine + title) **plus** a deterministic explicit `memory_supersede` — old memory soft-deleted, `supersedes` edge recorded, history preserved | Basic deduplication; no strong conflict resolution |
+| **Bitemporal history** | 👑 `valid_from` / `valid_to` on every memory — query state as of any past date | No |
+| **GDPR tooling** | 👑 `gdpr_forget` (Art. 17 hard delete) + `gdpr_export` (Art. 20 portable JSON) as MCP tools | Manual; no dedicated GDPR tooling |
+| **Embeddings** | 👑 **Bundled in-process embedder** — BGE-M3 ships with M3 (GGUF, installed by `m3 setup`); no separate model server, no Ollama/LM Studio/vLLM required. Optional GPU or external endpoint if you want them | Cloud embedding APIs by default |
+| **Setup** | 👑 One-command auto-configuring wizard (`m3 setup`) — detects agents, wires config + hooks, installs the embedder, runs a `doctor` verify | Manual SDK wiring / cloud dashboard config |
 | **API keys required** | None | Yes (cloud version) |
-| **Offline operation** | Full — SQLite + local embeddings | No (cloud version) |
+| **Offline operation** | Full — SQLite + bundled embedder, no external services | No (cloud version) |
+| **FIPS 140-3** | 👑 **Deployment-ready** crypto boundary (AES-256-GCM vault, PBKDF2-HMAC-SHA256, TLS 1.3 FIPS ciphersuites); point it at the CMVP-validated wolfSSL FIPS module for a validated deployment. Note: the validation belongs to that module — M3 is not itself a CMVP-validated cryptographic module (no application is) | No |
 | **Cross-device sync** | SQLite ↔ PostgreSQL ↔ ChromaDB, bi-directional delta sync | Managed by Mem0 cloud |
+| **Storage topology** | 🏆 Chat-log and curated memory run as **one unified store, two independent stores, or two stores searched together** (`memory_search_multi_db`) — your choice by config, no rework | Single managed store |
 | **Knowledge graph** | Yes — 9 relationship types, 3-hop traversal | Yes — strong point |
 | **Multi-agent concurrent writes** | Atomic via SQLite WAL — multiple agents writing simultaneously without races | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |
 | **Cognition placement** | Composable — disable, replace, or use built-in SLM extraction | LLM-driven extraction is welded into the memory layer |
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
-| **LangChain integration** | Not the focus | Excellent |
+| **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`) and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |
+| **Feature coverage** | **Superset of Mem0** — everything Mem0 does (`.add()`/`.search()`) plus contradiction supersession, bitemporal `as_of`, commanded forgetting, hybrid+graph retrieval | Baseline |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
 | **Stars (Apr 2026)** | Newer project (fewer stars), production-grade codebase | 20k+ |
 
@@ -68,10 +76,10 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. It's exc
 
 ### When to choose Mem0 over M3-Memory
 
-- You're building LangChain / LangGraph / CrewAI applications
-- You need managed multi-tenant cloud memory with a hosted dashboard
-- You want a well-established solution with broad ecosystem adoption
-- Multi-session personalization at scale is your primary use case
+- You need managed multi-tenant **cloud** memory with a hosted dashboard and don't want to run anything yourself
+- You specifically want Mem0's SaaS platform (billing, org management, hosted UI)
+
+> **Building on LangChain / LangGraph?** You no longer have to choose Mem0 for that reason. M3 is a **drop-in Mem0 replacement** (one-line import swap), is **compatible with LangMem** (pass `store=M3Store()`), and exposes M3's full **100+ MCP tool** surface to LangChain agents — while adding contradiction handling, temporal queries, and forgetting that Mem0 doesn't offer. See [`docs/integrations/LANGCHAIN.md`](integrations/LANGCHAIN.md).
 
 ---
 
@@ -85,13 +93,14 @@ M3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for
 |---------|-----------|-------|
 | **Type** | Dedicated memory layer | Full agent runtime + memory |
 | **Adoption** | Drop-in — one line in mcp.json | Full runtime adoption required |
-| **MCP support** | Native — 100+ tools, zero config | Custom SDKs / REST API |
+| **MCP support** | 👑 Native — 100+ tools, zero config | Custom SDKs / REST API |
 | **Memory model** | Semantic store + configurable knowledge graph (off-switchable; swappable entity-vocab via `M3_ENTITY_VOCAB_YAML`) | Tiered blocks (core / recall / archival) |
 | **Search** | FTS5 + vector + MMR | Tiered recall with embeddings |
-| **Contradiction handling** | Automatic on write — bitemporal supersede | Agent-driven — the agent must decide to update its own memory |
-| **GDPR tooling** | Built-in `gdpr_forget` + `gdpr_export` | Not built-in |
-| **Bitemporal history** | Yes — query state as of any past date | No |
-| **Deployment** | 100% local (SQLite) by default | Self-hosted or Letta Cloud |
+| **Contradiction handling** | 👑 Automatic heuristic detection + deterministic explicit supersede (bitemporal, auditable) | 🏆 Agent-driven — the agent must decide to update its own memory |
+| **GDPR tooling** | 👑 Built-in `gdpr_forget` + `gdpr_export` | Not built-in |
+| **Bitemporal history** | 👑 Yes — query state as of any past date | No |
+| **Deployment** | 👑 100% local (SQLite) by default, bundled embedder — no external services | 🏆 Self-hosted or Letta Cloud |
+| **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Works with existing agents** | Yes — any MCP agent unchanged | No — must rebuild on Letta runtime |
 | **Long-lived self-improving agents** | Supported | Core strength |
 | **Git-backed agent state** | No | Yes (Letta Code) |
@@ -125,10 +134,11 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 | Feature | M3-Memory | Zep |
 |---------|-----------|-----|
 | **Search** | FTS5 + vector + MMR | Vector + temporal knowledge graph |
-| **Temporal model** | Bitemporal (valid time + transaction time) | Strong temporal KG |
-| **GDPR tooling** | Built-in MCP tools | Partial |
-| **MCP support** | Native | No |
-| **Deployment** | Local SQLite to start | Self-hosted or Zep Cloud |
+| **Temporal model** | 🏆 Bitemporal (valid time + transaction time), item-grain | 🏆 Bitemporal at fact/edge grain in a temporal KG |
+| **GDPR tooling** | 👑 Built-in MCP tools | 🏆 Partial |
+| **MCP support** | 👑 Native — 100+ tools | No |
+| **Deployment** | 👑 Local SQLite + bundled embedder — no external services | 🏆 Self-hosted or Zep Cloud |
+| **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Cost** | Free, OSS | OSS + SaaS |
 
 ---
@@ -144,10 +154,11 @@ M3 is memory-first rather than graph-first: the primary store is a bitemporal SQ
 | **Core abstraction** | Bitemporal memory store + hybrid retrieval | Temporal knowledge graph (nodes/edges) |
 | **Backing store** | Single SQLite file (FTS5 + vector) | Graph DB (Neo4j / FalkorDB) |
 | **Search** | FTS5 + vector + MMR | Graph traversal + semantic + BM25 |
-| **Temporal model** | Bitemporal (valid + transaction time) | Bi-temporal edge validity |
-| **MCP support** | Native — 100+ tools | Via a separate MCP server |
-| **Infrastructure** | None to start (SQLite) | Requires a graph database |
-| **Local-first / offline** | 100% — SQLite, fully offline | Depends on graph-DB deployment |
+| **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain | 🏆 Bi-temporal edge validity (fact/edge grain) |
+| **MCP support** | 👑 Native — 100+ tools | 🏆 Via a separate MCP server |
+| **Infrastructure** | 👑 None to start (SQLite + bundled embedder) | Requires a graph database |
+| **Local-first / offline** | 👑 100% — SQLite, fully offline, no external services | Depends on graph-DB deployment |
+| **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Cost** | Free, Apache 2.0 | Free, OSS |
 
 ### When to choose M3-Memory over Graphiti
@@ -168,17 +179,17 @@ Yes — they operate at different altitudes. You can let M3 own memory/retrieval
 
 A-MEM is a **research-oriented agentic memory** design: memories are "notes" that the system links into an evolving network (inspired by Zettelkasten), with the LLM generating structured attributes and dynamically updating links as new memories arrive. It's a compelling model for emergent, self-organizing memory and is primarily a research codebase rather than a production deployment target.
 
-M3 is production-and-operations oriented: typed memories, deterministic bitemporal supersession, explicit GDPR/FIPS posture, an operational MCP tool surface, and a benchmarked retrieval stack. Contradiction handling in M3 is a deterministic supersede (soft-delete + `supersedes` edge), not an LLM re-linking pass.
+M3 is production-and-operations oriented: typed memories, bitemporal supersession, explicit GDPR/FIPS posture, an operational MCP tool surface, and a benchmarked retrieval stack. The *supersede operation* itself is deterministic and auditable (soft-delete + `supersedes` edge, not an LLM re-linking pass); automatic *detection* of which prior memory to supersede is a cosine+title heuristic (or you target it explicitly with `memory_supersede`).
 
 | Feature | M3-Memory | A-MEM |
 |---------|-----------|-------|
 | **Orientation** | Production / operations | Research prototype |
 | **Memory structure** | Typed items + entity graph layer | LLM-generated notes + evolving link network |
-| **Contradiction handling** | Deterministic bitemporal supersede | LLM-driven link/attribute updates |
+| **Contradiction handling** | 👑 Deterministic *explicit* supersede + heuristic auto-detect — bitemporal, auditable | 🏆 LLM-driven link/attribute updates |
 | **Retrieval** | FTS5 + vector + MMR (benchmarked) | Embedding-based over the note network |
-| **MCP / agent integration** | Native — 100+ tools, plugin, hooks | Library / research code |
-| **Compliance tooling** | GDPR primitives, FIPS-ready posture | Not a focus |
-| **Local-first / offline** | 100% — SQLite, fully offline | Depends on the LLM/embeddings used |
+| **MCP / agent integration** | 👑 Native — 100+ tools, plugin, hooks | Library / research code |
+| **Compliance tooling** | 👑 GDPR primitives + FIPS 140-3 deployment-ready posture (validation belongs to the wolfSSL CMVP module, not M3 itself) | Not a focus |
+| **Local-first / offline** | 👑 100% — SQLite + bundled embedder, fully offline | Depends on the LLM/embeddings used |
 
 ### When to choose M3-Memory over A-MEM
 - You need something to deploy and operate today — with MCP integration, compliance tooling, and predictable behavior.
@@ -194,18 +205,24 @@ M3 is production-and-operations oriented: typed memories, deterministic bitempor
 
 LangChain Memory (including LangGraph's thread/store memory and the newer LangMem library) is memory that lives inside the LangChain ecosystem. It covers short-term thread memory, long-term JSON stores, and LangMem's episodic/semantic/procedural memory types. It's the natural choice if you're already building LangGraph agents.
 
-M3-Memory is framework-agnostic and MCP-native — it works with any agent via a single config line.
+M3-Memory is framework-agnostic and MCP-native — it works with any agent via a single config line. It is also **compatible with LangMem**: `M3Store` implements LangGraph's `BaseStore`, so LangMem's tools and background manager run on M3 unchanged (`store=M3Store()`) — persisted locally with contradiction, temporal, and graph features underneath.
+
+**For LangChain users, M3 is a superset.** You keep everything LangChain Memory / LangMem gives you — thread memory, the `BaseStore`, LangMem's episodic/semantic/procedural tools — and gain what they don't: automatic contradiction supersession, bitemporal `as_of` queries, commanded forgetting (GDPR), hybrid FTS5+vector+MMR retrieval, a bundled in-process embedder, and M3's full 100+ MCP tool surface exposed to your agent — all local-first, no external store to provision. Nothing is given up; capabilities are added.
 
 | Feature | M3-Memory | LangChain Memory / LangMem |
 |---------|-----------|---------------------------|
-| **Ecosystem** | Any MCP agent | LangChain / LangGraph only |
-| **MCP support** | Native — 100+ tools | No |
+| **Ecosystem** | Any MCP agent **and** LangChain/LangGraph (backs LangMem via `M3Store`) | LangChain / LangGraph only |
+| **Drop-in surfaces** | 👑 All four standard slots: mem0-compatible `Memory`, LangGraph `M3Store` (`BaseStore`), `M3ChatMessageHistory` (short-term), `M3Retriever` (RAG) | Native (its own classes) |
+| **MCP support** | 👑 Native — 100+ tools, also exposed to LangChain agents | No |
 | **Memory types** | 21 types + auto-classification | Thread, store, episodic, semantic, procedural |
-| **Contradiction handling** | Automatic — bitemporal superseding | Manual / LLM-driven via procedural memory |
-| **GDPR tooling** | Built-in `gdpr_forget` + `gdpr_export` | Custom implementation required |
+| **Storage topology** | 🏆 Short-term chat-log and long-term memory can be **unified, kept separate, or searched together** by config — retrieve conversation turns and curated facts independently or in one merged query | Thread memory + store are distinct layers, not user-configurable as one |
+| **Contradiction handling** | 👑 Automatic heuristic detect + deterministic explicit supersede (bitemporal) | 🏆 Manual / LLM-driven via procedural memory |
+| **GDPR tooling** | 👑 Built-in `gdpr_forget` + `gdpr_export` | Custom implementation required |
 | **Search** | FTS5 + vector + MMR | Depends on configured backend store |
-| **Local-first** | 100% — SQLite, fully offline | Good — depends on backend store choice |
-| **Installation** | `pip install m3-memory` + 1-line config | Part of LangChain / LangGraph install |
+| **Local-first** | 👑 100% — SQLite + bundled embedder, fully offline | 🏆 Good — depends on backend store choice |
+| **Embeddings** | 👑 Bundled in-process (BGE-M3) — no separate model server | Configured externally (needs an embedder) |
+| **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
+| **Installation** | 👑 `pip install m3-memory` + one-command auto-configuring wizard (`m3 setup`) | Part of LangChain / LangGraph install |
 | **Overhead** | Very light | Medium (tied to LangGraph runtime) |
 | **Cost** | Free, Apache 2.0 | Free, MIT |
 
@@ -216,11 +233,12 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 - You want automatic contradiction detection without writing custom procedural memory logic
 - GDPR compliance tooling is a requirement
 
-### When to choose LangChain Memory
+### When to choose LangChain Memory / LangMem
 
-- You're building exclusively on LangGraph and want framework-native memory with no extra dependencies
-- LangMem's episodic/semantic/procedural taxonomy fits your use case well
-- You prefer everything in one unified LangChain install
+- You want to keep using LangMem's tools and taxonomy directly — in which case **back them with M3** (`store=M3Store()`) to gain local-first storage, contradiction handling, and temporal queries without changing your LangMem code
+- You prefer everything in one unified LangChain install and don't need M3's extra capabilities
+
+> **Note:** choosing LangMem and choosing M3 are not mutually exclusive — M3 implements the `BaseStore` LangMem runs on. See [`docs/integrations/LANGCHAIN.md`](integrations/LANGCHAIN.md).
 
 ---
 
@@ -244,14 +262,17 @@ for how we hold every entry (including M3's own) to source-of-truth.
 | Automatic contradiction detection | **M3-Memory** |
 | GDPR forget + export as MCP tools | **M3-Memory** |
 | Drop-in memory for an existing MCP agent | **M3-Memory** |
-| LangChain / CrewAI integration | **Mem0** |
-| Managed cloud, multi-tenant, hosted dashboard | **Mem0** |
-| Already building on LangGraph, want framework-native memory | **LangChain Memory / LangMem** |
+| LangChain / LangGraph memory (drop-in Mem0 replacement, or back LangMem) | **M3-Memory** |
+| Full 100+ MCP tool set available inside a LangChain agent | **M3-Memory** |
+| Managed cloud, multi-tenant, hosted dashboard (SaaS) | **Mem0** |
+| CrewAI integration | **Mem0** |
 | Long-lived autonomous agents that self-edit memory | **Letta** |
 | Full stateful agent runtime (not just memory) | **Letta** |
 | Git-backed agent state | **Letta** |
-| Enterprise temporal knowledge graph at scale | **Zep** |
+| Dedicated graph-database backend (Neo4j / FalkorDB) at massive scale | **Zep** |
 | Graph-first entity/relationship reasoning on a graph DB | **Graphiti** |
+| Bitemporal memory + temporal queries, local-first, no graph DB to run | **M3-Memory** |
+| Short-term + long-term memory unified, separate, or searched together by config | **M3-Memory** |
 | Researching self-organizing / emergent memory structures | **A-MEM** |
 
 ---
@@ -266,7 +287,7 @@ M3 Memory targets a specific intersection that other tools don't fully cover:
 - **Compliant** — GDPR forget and export are built-in MCP tools
 - **Drop-in** — one config line to add memory to an existing agent; no runtime migration
 
-If you need LangChain pipeline memory, a full agent runtime, or enterprise-scale temporal graphs, the tools above are better suited. If you need persistent, private memory for MCP agents, M3 is built for that.
+If you need a full agent runtime (Letta), a dedicated graph-database backend at massive scale (Zep/Graphiti), or a managed cloud SaaS (Mem0 Pro), those tools are better suited. For LangChain / LangGraph, M3 is a drop-in Mem0 replacement and backs LangMem — no need to look elsewhere. And for persistent, private, local-first memory for any MCP agent, M3 is built for exactly that.
 
 ---
 

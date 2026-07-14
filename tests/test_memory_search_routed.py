@@ -256,7 +256,7 @@ async def test_expand_sessions_calls_session_helper(monkeypatch):
 
     captured = {"called": False, "cap": None}
 
-    def stub_session_neighbors(seed_ids, session_cap=12):
+    def stub_session_neighbors(seed_ids, session_cap=12, **_kw):
         captured["called"] = True
         captured["cap"] = session_cap
         return {"sess_x": {"id": "sess_x", "title": "session-mate"}}
@@ -843,7 +843,7 @@ async def test_expanded_via_tags_set_on_session_and_graph_hits(monkeypatch):
     async def stub_scored(*args, **kwargs):
         return [(0.9, {"id": "primary-a", "content": "primary hit", "title": "p"})]
 
-    def stub_session_neighbors(seed_ids, session_cap=12):
+    def stub_session_neighbors(seed_ids, session_cap=12, **_kw):
         return {"session-b": {"id": "session-b", "content": "session hit", "title": "s"}}
 
     def stub_graph_neighbors(seed_ids, depth):

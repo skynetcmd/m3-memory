@@ -1,0 +1,5 @@
+# Install the integration surface via the extra (pulls langchain-core + langgraph):
+#   pip install "m3-memory[langchain]"
+# or, from a checkout:   pip install -e ".[langchain]"
+langmem>=0.0.20            # only for langmem_on_m3.py
+# mem0ai is NOT required — m3 shadows mem0's API; nothing imports mem0.

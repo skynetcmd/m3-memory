@@ -11,7 +11,7 @@
 
 That framing is what makes the rest different: memory as persistent infrastructure, **bitemporal history** ("what did we believe last Tuesday, and when was it corrected?"), **automatic contradiction management** (not just append-and-hope), a memory-first MCP **operational API** (not a bare store/fetch), and **local-first without giving up cross-agent interoperability**.
 
-Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable
+Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · **drop-in LangChain / LangGraph memory** (Mem0-compatible, backs LangMem) · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable
 
 ### In one sentence
 
@@ -19,7 +19,7 @@ Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=
 
 |  |  |
 |---|---|
-| **Works with** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · any MCP agent |
+| **Works with** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · **LangChain / LangGraph** · any MCP agent |
 | **M3 is** | a memory layer · an MCP server · a hybrid retrieval engine · a bitemporal knowledge base |
 | **M3 is _not_** | an LLM · a chatbot · a plain vector database · a RAG framework · an IDE |
 | **For you if** | you use a desktop coding agent and want memory that's private, offline-capable, and shared across tools |
@@ -34,7 +34,7 @@ Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=
   <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
   <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-101_tools-orange?style=flat-square"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-100+_tools-orange?style=flat-square"></a>
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
@@ -253,6 +253,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[Compare M3 to alternatives](docs/COMPARISON.md)** ([sovereign substrates table](docs/M3_Comparison_Table.md)) |
 | 🔧 **[Implementation details](docs/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](docs/ENVIRONMENT_VARIABLES.md)** |
 | 🤖 **[Agent rules + all tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
+| 🦜 **[LangChain / LangGraph integration](docs/integrations/LANGCHAIN.md)** (drop-in Mem0 replacement, backs LangMem) | 🧩 **[Hermes Agent integration](docs/HERMES.md)** |
 | 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
 | 🗺️ **[Roadmap](docs/ROADMAP.md)** | 📜 **[Changelog](CHANGELOG.md)** |
 | 🛠️ **[Operations playbook](docs/OPERATIONS.md)** (run the memory brain) | 🧩 **[Capability matrix](docs/CAPABILITY_MATRIX.md)** (every tool, grouped) |
@@ -267,6 +268,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 | | |
 |---|---|
 | 🤖 **You use coding agents** | Claude Code, Gemini CLI, Aider, OpenCode, or any MCP-compatible agent. Non-MCP clients work too via the built-in HTTP proxy. |
+| 🦜 **You build on LangChain / LangGraph** | **A superset for LangChain users** — keep everything Mem0 / LangMem give you and gain contradiction supersession, bitemporal `as_of` queries, GDPR forgetting, hybrid retrieval, a bundled embedder, and M3's full 100+ MCP tool set. Drop-in **Mem0 replacement** (one-line import swap), **LangMem-compatible** (`store=M3Store()`). See [docs/integrations/LANGCHAIN.md](docs/integrations/LANGCHAIN.md). |
 | 👥 **You run multiple agents** | Coordinating Claude + Gemini + a background worker on a shared local store, with handoffs and per-agent scoping. |
 | 🛡️ **You need compliance primitives** | `gdpr_forget` / `gdpr_export` as MCP tools, bitemporal valid-time / transaction-time, audit trail, no telemetry. |
 | 💾 **You want pure local-first** | Single-file SQLite. Works offline. No external database, no cloud calls, no API costs by default. |
@@ -276,7 +278,7 @@ M3 Memory gives agents a structured, persistent memory layer that handles this.
 
 | | Try instead |
 |---|---|
-| You're building LangChain / LangGraph / CrewAI pipelines and want framework-native memory | [Mem0](https://mem0.ai), [LangChain Memory / LangMem](https://python.langchain.com/docs/modules/memory/) |
+| You're building **CrewAI** pipelines and want framework-native memory | [Mem0](https://mem0.ai) |
 | You want a hosted agent runtime with managed scaling, dashboards, and SLAs | [Letta](https://letta.ai), [Mem0 Pro](https://mem0.ai) |
 | You want a fully managed, hosted retrieval service and don't need local-first / sovereignty | [agentmemory](https://github.com/agentmemory), [Hindsight](https://github.com/vectorize-io/hindsight) |
 | You only need in-session chat context that's discarded after the conversation | Your agent's built-in conversation buffer; M3 is overkill |

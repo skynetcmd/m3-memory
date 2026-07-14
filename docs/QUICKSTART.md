@@ -110,10 +110,10 @@ the operational subsystem command. Add `--dry-run` to validate without
 executing, and `--yes` to confirm a destructive tool. Run `m3 <domain> --help`
 to list a domain's tools.
 
-> **Tool catalog stays small in your context.** m3 ships 87 MCP tools but
+> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
 > conversations, admin). Only ~6 essentials load at MCP startup
-> (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in
+> (~2,400 tokens vs ~16,100 if all of them loaded eagerly). The agent pulls in
 > a domain on demand — just say "load the files tools" and it does. Set
 > `M3_TOOLS_LAZY=0` to disable.
 
