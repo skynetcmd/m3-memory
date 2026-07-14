@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import logging
 import os
@@ -71,11 +72,22 @@ def sync_status():
         return f"Sync status unavailable: {e}"
 
 # ── Typed function builder for FastMCP schema introspection ──────────────────
-def _build_typed_function(spec):
+def _build_typed_function(spec, *, for_mcp: bool = False):
     """Build a typed function from spec.parameters so FastMCP can introspect it.
 
     Returns a function with explicit typed parameters that FastMCP can use to
     generate proper JSONSchema. Both async and sync are supported.
+
+    `for_mcp`: when True (the FastMCP-registration path), a SYNC impl is wrapped
+    as an `async def` that runs the blocking impl via asyncio.to_thread — so its
+    synchronous SQLite work does not block the single stdio-server event loop
+    (one slow query would otherwise freeze ALL concurrent MCP calls). The
+    generated parameter signature is identical either way, so FastMCP's schema
+    introspection is unaffected. When False (module-level exposure used by tests
+    and direct callers, e.g. `task_create(...)`), a sync impl stays a plain sync
+    function returning a value, NOT a coroutine — offloading there would break
+    every synchronous caller. asyncio.to_thread propagates the active_database
+    ContextVar into the worker thread (verified), so DB routing is preserved.
     """
     props = spec.parameters.get("properties", {})
     required = set(spec.parameters.get("required", []))
@@ -129,8 +141,13 @@ def _build_typed_function(spec):
 
     sig = ", ".join(parts)
 
-    # Build the function source. The _wrapper closure will call the validator and impl.
-    if spec.is_async:
+    # A sync impl is offloaded to a thread ONLY on the MCP path (for_mcp=True):
+    # its _impl is `async def` and awaits the sync work via to_thread. Off the
+    # MCP path it stays a plain sync def (tests/direct callers expect a value).
+    _offload_sync = (not spec.is_async) and for_mcp
+
+    # Build the function source. The _wrapper closure runs validation + impl.
+    if spec.is_async or _offload_sync:
         src = f"async def _impl({sig}):\n    return await _wrapper(locals())"
     else:
         src = f"def _impl({sig}):\n    return _wrapper(locals())"
@@ -154,6 +171,30 @@ def _build_typed_function(spec):
             try:
                 with active_database(database):
                     result = await spec.impl(**args)
+                return result if isinstance(result, str) else str(result)
+            except Exception as e:
+                return f"Error: {type(e).__name__}: {e}"
+    elif _offload_sync:
+        # MCP path for a SYNC impl: run the whole blocking body (validation +
+        # the impl's synchronous SQLite work) in a worker thread so it never
+        # blocks the event loop. `active_database` is entered INSIDE the thread
+        # target because a ContextVar set on the loop thread is not visible in
+        # the executor thread's own frame; to_thread copies the context, but we
+        # (re)enter the CM in-thread to be explicit and correct.
+        async def _wrapper(args):
+            args.pop("__class__", None)
+            database = mcp_tool_catalog._pop_database(args)
+            args.pop("timeout", None)
+            args, err = mcp_tool_catalog.validate_args(spec, args)
+            if err:
+                return err
+
+            def _run_sync():
+                with active_database(database):
+                    return spec.impl(**args)
+
+            try:
+                result = await asyncio.to_thread(_run_sync)
                 return result if isinstance(result, str) else str(result)
             except Exception as e:
                 return f"Error: {type(e).__name__}: {e}"
@@ -200,7 +241,9 @@ def _register_one(spec):
     a no-op."""
     if spec.name in _REGISTERED:
         return False
-    fn = _build_typed_function(spec)
+    # for_mcp=True: sync impls get an async to_thread wrapper so their blocking
+    # SQLite work runs off the event loop (see _build_typed_function).
+    fn = _build_typed_function(spec, for_mcp=True)
     mcp.tool(name=spec.name, description=spec.description)(fn)
     _REGISTERED.add(spec.name)
     return True

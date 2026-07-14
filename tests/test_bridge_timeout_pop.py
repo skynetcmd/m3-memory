@@ -61,3 +61,63 @@ def test_async_wrapper_strips_injected_timeout():
     out = asyncio.run(fn(query="hi", timeout=30))
     assert out == "async:hi"
     assert "unexpected keyword" not in out
+
+
+# ── Sync-impl offload to a worker thread (event-loop-blocking fix) ────────────
+# On the MCP registration path (for_mcp=True), a SYNC impl must run via
+# asyncio.to_thread so its blocking SQLite work does not freeze the single
+# stdio-server event loop. Off the MCP path (for_mcp=False, the module-level
+# exposure used by tests/direct callers), it must stay a plain sync function
+# returning a value — NOT a coroutine.
+import inspect
+import threading
+
+
+def test_sync_impl_stays_sync_off_mcp_path():
+    """for_mcp=False (default): sync impl -> plain sync fn returning a value.
+    Direct callers like task_create('title', ...) depend on this."""
+    import memory_bridge
+
+    fn = memory_bridge._build_typed_function(_spec(_strict_sync_impl, is_async=False))
+    assert not inspect.iscoroutinefunction(fn)
+    assert fn(query="hi") == "sync:hi"
+
+
+def test_sync_impl_offloaded_on_mcp_path():
+    """for_mcp=True: sync impl -> async fn that runs the impl in a WORKER thread
+    (off the event loop), preserving the string result."""
+    import memory_bridge
+
+    seen = {}
+
+    def _thread_probe_impl(query):
+        seen["thread"] = threading.current_thread().name
+        return f"sync:{query}"
+
+    fn = memory_bridge._build_typed_function(
+        _spec(_thread_probe_impl, is_async=False), for_mcp=True
+    )
+    assert inspect.iscoroutinefunction(fn), "MCP-path sync impl must become async"
+
+    async def _drive():
+        loop_thread = threading.current_thread().name
+        out = await fn(query="hi", timeout=30)
+        return loop_thread, out
+
+    loop_thread, out = asyncio.run(_drive())
+    assert out == "sync:hi"
+    assert seen["thread"] != loop_thread, "impl must run OFF the event-loop thread"
+
+
+def test_async_impl_unaffected_by_for_mcp():
+    """An async impl is already off-loop-friendly; for_mcp doesn't change it —
+    it stays an async fn either way."""
+    import memory_bridge
+
+    f_plain = memory_bridge._build_typed_function(_spec(_strict_async_impl, is_async=True))
+    f_mcp = memory_bridge._build_typed_function(
+        _spec(_strict_async_impl, is_async=True), for_mcp=True
+    )
+    assert inspect.iscoroutinefunction(f_plain)
+    assert inspect.iscoroutinefunction(f_mcp)
+    assert asyncio.run(f_mcp(query="hi", timeout=1)) == "async:hi"

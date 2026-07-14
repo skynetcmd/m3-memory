@@ -587,8 +587,58 @@ async def memory_search_scored_impl(
         except Exception as exc:
             logger.debug("FTS Short-circuit check failed (non-fatal): %s", exc)
 
-    q_vec, _ = await _embed(query)
+    # Degrade-safe query embed. The full _embed cascade can stack per-tier
+    # timeouts into minutes on a degraded box, and because the stdio MCP server
+    # is a single event loop that stall freezes EVERY concurrent tool call (the
+    # "MCP server locked up" symptom). memory_write sidesteps this by DEFERRING
+    # its embed; search cannot (no query vector, no semantic search), so it
+    # bounds the embed two ways and degrades to FTS-only on failure:
+    #   1. Fast-tier gate — skip the embed entirely if no fast tier is believed
+    #      up (same predictor the write path uses for inline-vs-defer).
+    #   2. Wall-clock deadline (EMBED_SEARCH_DEADLINE_S, default 8s) — cap a
+    #      slow-but-not-failed tier that never trips its breaker.
+    # `_embed` is the local floor-bind (monkeypatch-aware) resolved above; we
+    # replicate embed.embed_for_search's guards here rather than call it so the
+    # test-shim rebinding of `_embed` still takes effect.
+    #
+    # The fast-tier gate is a PREDICTOR OF THE REAL CASCADE'S COST — it only
+    # makes sense to apply when `_embed` IS the real cascade. When a caller or
+    # test has injected a different `_embed` (the floor-bind adopted a
+    # memory_core override at ~L504), the gate is meaningless: honor the
+    # injected embed and just bound it with the deadline. This keeps the
+    # degrade-safe behavior in production (where `_embed` is the module cascade)
+    # without forcing every caller/test that supplies a fast `_embed` to also
+    # patch the gate.
+    from memory import embed as _embed_mod
+    _embed_is_real = _embed is getattr(_embed_mod, "_embed", None)
+    q_vec = None
+    _try_embed = (not _embed_is_real) or _embed_mod.fast_embedder_available()
+    if _try_embed:
+        _deadline = _scfg.EMBED_SEARCH_DEADLINE_S
+        try:
+            if _deadline and _deadline > 0:
+                q_vec, _ = await asyncio.wait_for(_embed(query), timeout=_deadline)
+            else:
+                q_vec, _ = await _embed(query)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "search embed exceeded %.1fs deadline — degrading to FTS-only "
+                "results (embed server / primary endpoint may be slow)",
+                _deadline,
+            )
+            q_vec = None
+    else:
+        logger.info(
+            "search embed skipped: no fast embedder tier available — "
+            "degrading to FTS-only results"
+        )
     if not q_vec:
+        # No query vector (embedder degraded, skipped, or timed out) — return
+        # empty rather than hang. This preserves the pre-existing contract: the
+        # FTS short-circuit above already handles exact-substring queries, and
+        # higher-level callers (memory_search_routed_impl) run their own keyword/
+        # FTS cascade. The win here is that we reach this return in <=8s instead
+        # of after a multi-minute cascade that wedged the whole MCP server.
         return []
     # The embeddings join is dim-filtered (me.dim = ? below) and the query is
     # packed at its own length, so a wrong-dim query simply matches no stored
@@ -746,55 +796,67 @@ async def memory_search_scored_impl(
     sql_row_limit = 5000 if vector_kind_strategy == "max" else 2000
     has_vec = False
 
-    try:
-        with _db() as db:
-            has_vec = _detect_sqlite_vec(db)
-            if search_mode == "semantic":
-                if has_vec:
-                    import struct
-                    q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
-                    sql = f"""
-                        WITH limited AS (
-                            SELECT mi.id FROM memory_items mi
-                            WHERE {where_sql}
-                            LIMIT 50
-                        )
-                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score,
-                               (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
-                        FROM memory_items mi
-                        JOIN memory_embeddings me ON mi.id = me.memory_id
-                        WHERE mi.id IN (SELECT id FROM limited)
-                        ORDER BY vec_score DESC
-                    """
+    # The main candidate-fetch is a synchronous SQLite read (dynamic SQL across
+    # semantic/hybrid × has_vec branches, plus _detect_sqlite_vec). It runs off
+    # the event loop via asyncio.to_thread so a slow query can't freeze the
+    # single stdio-server loop. The blocking work is pulled into a nested SYNC
+    # helper that returns a small verdict; the two "recurse to semantic" exits
+    # and the OperationalError-recurse stay in ASYNC land here (you cannot await
+    # inside a to_thread target). _RECURSE / _EMPTY are sentinels for those.
+    _RECURSE = object()
+    _EMPTY = object()
+
+    def _fetch_candidates():
+        """Sync DB read. Returns (rows, has_vec) on success, or a sentinel
+        (_RECURSE -> caller re-runs semantic; _EMPTY -> caller returns [])."""
+        try:
+            with _db() as db:
+                _has_vec = _detect_sqlite_vec(db)
+                if search_mode == "semantic":
+                    if _has_vec:
+                        import struct
+                        q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
+                        sql = f"""
+                            WITH limited AS (
+                                SELECT mi.id FROM memory_items mi
+                                WHERE {where_sql}
+                                LIMIT 50
+                            )
+                            SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score,
+                                   (1.0 - vec_distance_cosine(me.embedding, ?)) as vec_score{extra_sql}
+                            FROM memory_items mi
+                            JOIN memory_embeddings me ON mi.id = me.memory_id
+                            WHERE mi.id IN (SELECT id FROM limited)
+                            ORDER BY vec_score DESC
+                        """
+                        if os.environ.get("M3_DEBUG"):
+                            print(f"DEBUG SQL (semantic sqlite-vec):\n{sql}")
+                        _rows = db.execute(sql, (q_blob, *params)).fetchall()
+                    else:
+                        sql = f"""
+                            WITH limited AS (
+                                SELECT mi.id FROM memory_items mi
+                                WHERE {where_sql}
+                                LIMIT 50
+                            )
+                            SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score{extra_sql}
+                            FROM memory_items mi
+                            JOIN memory_embeddings me ON mi.id = me.memory_id
+                            WHERE mi.id IN (SELECT id FROM limited)
+                            ORDER BY mi.created_at DESC
+                        """
+                        if os.environ.get("M3_DEBUG"):
+                            print(f"DEBUG SQL (semantic standard):\n{sql}")
+                        _rows = db.execute(sql, params).fetchall()
                     if os.environ.get("M3_DEBUG"):
-                        print(f"DEBUG SQL (semantic sqlite-vec):\n{sql}")
-                    rows = db.execute(sql, (q_blob, *params)).fetchall()
-                else:
-                    sql = f"""
-                        WITH limited AS (
-                            SELECT mi.id FROM memory_items mi
-                            WHERE {where_sql}
-                            LIMIT 50
-                        )
-                        SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding, 0.0 as bm25_score{extra_sql}
-                        FROM memory_items mi
-                        JOIN memory_embeddings me ON mi.id = me.memory_id
-                        WHERE mi.id IN (SELECT id FROM limited)
-                        ORDER BY mi.created_at DESC
-                    """
-                    if os.environ.get("M3_DEBUG"):
-                        print(f"DEBUG SQL (semantic standard):\n{sql}")
-                    rows = db.execute(sql, params).fetchall()
-                if os.environ.get("M3_DEBUG"):
-                    print(f"DEBUG SQL HITS (semantic): {len(rows)}")
-            else:
+                        print(f"DEBUG SQL HITS (semantic): {len(_rows)}")
+                    return _rows, _has_vec
+
                 fts_query, ok = _compile_fts_query(query, search_mode)
                 if not ok:
-                    if search_mode != "fts5":
-                        return await _recurse_semantic()
-                    return []
+                    return (_RECURSE if search_mode != "fts5" else _EMPTY), _has_vec
 
-                if has_vec:
+                if _has_vec:
                     import struct
                     q_blob = struct.pack(f"{len(q_vec)}f", *q_vec)
                     sql = f"""
@@ -810,7 +872,7 @@ async def memory_search_scored_impl(
                     """
                     if os.environ.get("M3_DEBUG"):
                         print(f"DEBUG SQL (hybrid sqlite-vec):\n{sql}")
-                    rows = db.execute(sql, (q_blob, *params, fts_query)).fetchall()
+                    _rows = db.execute(sql, (q_blob, *params, fts_query)).fetchall()
                 else:
                     sql = f"""
                         SELECT mi.id, mi.content, mi.title, mi.type, mi.importance, me.embedding,
@@ -824,17 +886,22 @@ async def memory_search_scored_impl(
                     """
                     if os.environ.get("M3_DEBUG"):
                         print(f"DEBUG SQL (hybrid standard):\n{sql}")
-                    rows = db.execute(sql, (*params, fts_query)).fetchall()
+                    _rows = db.execute(sql, (*params, fts_query)).fetchall()
 
                 if os.environ.get("M3_DEBUG"):
-                    print(f"DEBUG SQL HITS (hybrid): {len(rows)}")
-                if not rows and search_mode != "fts5":
-                    return await _recurse_semantic()
-    except sqlite3.OperationalError as e:
-        if os.environ.get("M3_DEBUG"):
-            print(f"DEBUG SQL ERROR: {e}")
-        if search_mode != "fts5":
-            return await _recurse_semantic()
+                    print(f"DEBUG SQL HITS (hybrid): {len(_rows)}")
+                if not _rows and search_mode != "fts5":
+                    return _RECURSE, _has_vec
+                return _rows, _has_vec
+        except sqlite3.OperationalError as e:
+            if os.environ.get("M3_DEBUG"):
+                print(f"DEBUG SQL ERROR: {e}")
+            return (_RECURSE if search_mode != "fts5" else _EMPTY), False
+
+    rows, has_vec = await asyncio.to_thread(_fetch_candidates)
+    if rows is _RECURSE:
+        return await _recurse_semantic()
+    if rows is _EMPTY:
         return []
 
     scored: list[tuple[float, dict]] = []
@@ -1641,7 +1708,13 @@ async def memory_search_routed_impl(
         _model = rerank_model or DEFAULT_RERANK_MODEL
         _pool = rerank_pool_k if rerank_pool_k > 0 else (3 * k)
         _final_n = len(final_hits)
-        final_hits = _apply_rerank(
+        # _apply_rerank runs CrossEncoder torch inference (and a first-call model
+        # load) — seconds of CPU/GPU-bound work. Offload it so it does not block
+        # the single stdio-server event loop (one rerank would otherwise freeze
+        # every concurrent MCP call). No shared mutable state crosses the thread:
+        # inputs are a local list + scalars, output is a new list.
+        final_hits = await asyncio.to_thread(
+            _apply_rerank,
             final_hits,
             query,
             pool_k=_pool,

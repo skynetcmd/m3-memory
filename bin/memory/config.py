@@ -135,6 +135,19 @@ EMBED_COMPATIBLE_MODELS: tuple[str, ...] = tuple(
     if m.strip())
 
 EMBED_TIMEOUT_READ: float = 30.0
+# Hard wall-clock ceiling for embedding a QUERY on the interactive search path
+# (bin/memory/search.py). The full _embed cascade can stack per-tier timeouts
+# (30s read × ×2 × ×4 + retries + a 30s semaphore wait) into multiple minutes
+# on a degraded box — and because the stdio MCP server is a single event loop,
+# that stall freezes EVERY concurrent tool call (the "MCP server locked up"
+# symptom). memory_write already sidesteps this by DEFERRING its embed when no
+# fast tier is available; search cannot defer (no query vector, no semantic
+# search), so instead it bounds the embed with this deadline and degrades to
+# FTS-only results on timeout. Interactive-only: bulk/backfill paths keep the
+# full EMBED_TIMEOUT_READ budget. 0 disables the ceiling (pre-fix behavior).
+EMBED_SEARCH_DEADLINE_S: float = float(
+    os.environ.get("M3_EMBED_SEARCH_DEADLINE_S", "8.0")
+)
 ORIGIN_DEVICE: str = getenv_compat("M3_ORIGIN_DEVICE", "ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
 
 # Per-backend circuit-breaker thresholds for the embed cascade in
