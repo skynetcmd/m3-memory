@@ -327,3 +327,159 @@ def test_doctor_summary_degraded_when_not_shared_and_tier1_down():
     else:
         summary = "broken"
     assert summary == "degraded"
+
+
+# ── embed_for_search: bounded, degrade-safe query embed (lockup fix) ──────────
+# The stdio MCP server is a single event loop; an unbounded query embed on the
+# search path can stack the full cascade into minutes and freeze every
+# concurrent tool call (the "MCP server locked up" symptom). embed_for_search
+# gates on fast_embedder_available() and caps the embed with a wall-clock
+# deadline, degrading to (None, ...) — the caller's FTS-only fallback — instead
+# of hanging. These tests are hermetic: no live embedder, no real timers beyond
+# a sub-second sleep.
+
+import asyncio
+
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_embed_for_search_skips_when_no_fast_tier(monkeypatch):
+    """No fast tier available -> skip the embed entirely, return (None, model).
+    The underlying _embed must NOT be called (that's the whole point: we never
+    enter the slow cascade)."""
+    import memory.embed as emb
+
+    called = {"n": 0}
+
+    async def _boom(text):  # would be the slow cascade in production
+        called["n"] += 1
+        return [0.1] * 1024, "should-not-run"
+
+    monkeypatch.setattr(emb, "fast_embedder_available", lambda: False)
+    monkeypatch.setattr(emb, "_embed", _boom)
+
+    vec, model = await emb.embed_for_search("anything")
+    assert vec is None
+    assert called["n"] == 0, "embed_for_search must not invoke _embed when no fast tier"
+
+
+@pytest.mark.asyncio
+async def test_embed_for_search_runs_when_fast_tier_present(monkeypatch):
+    """Fast tier available + fast _embed -> the vector is returned unchanged."""
+    import memory.embed as emb
+
+    async def _fast(text):
+        return [0.5] * 1024, "mock"
+
+    monkeypatch.setattr(emb, "fast_embedder_available", lambda: True)
+    monkeypatch.setattr(emb, "_embed", _fast)
+
+    vec, model = await emb.embed_for_search("q")
+    assert vec == [0.5] * 1024
+    assert model == "mock"
+
+
+@pytest.mark.asyncio
+async def test_embed_for_search_deadline_degrades_not_hangs(monkeypatch):
+    """A fast tier that is believed-up but actually SLOW (never trips its
+    breaker) must not hang the caller: the deadline fires and we degrade to
+    (None, ...). Uses a tiny deadline + a sleep longer than it."""
+    import memory.config as cfg
+    import memory.embed as emb
+
+    async def _slow(text):
+        await asyncio.sleep(0.5)  # longer than the deadline below
+        return [0.9] * 1024, "too-slow"
+
+    monkeypatch.setattr(emb, "fast_embedder_available", lambda: True)
+    monkeypatch.setattr(emb, "_embed", _slow)
+    monkeypatch.setattr(cfg, "EMBED_SEARCH_DEADLINE_S", 0.05)
+
+    loop = asyncio.get_event_loop()
+    t0 = loop.time()
+    vec, model = await emb.embed_for_search("q")
+    elapsed = loop.time() - t0
+
+    assert vec is None, "slow embed past deadline must degrade to None, not return a vector"
+    assert elapsed < 0.4, f"deadline should bound the wait well under the 0.5s embed; took {elapsed:.2f}s"
+
+
+@pytest.mark.asyncio
+async def test_embed_for_search_deadline_zero_disables_ceiling(monkeypatch):
+    """EMBED_SEARCH_DEADLINE_S=0 disables the wall-clock ceiling (pre-fix
+    behavior) — the embed runs to completion even if slow."""
+    import memory.config as cfg
+    import memory.embed as emb
+
+    async def _slow_but_ok(text):
+        await asyncio.sleep(0.05)
+        return [0.3] * 1024, "ok"
+
+    monkeypatch.setattr(emb, "fast_embedder_available", lambda: True)
+    monkeypatch.setattr(emb, "_embed", _slow_but_ok)
+    monkeypatch.setattr(cfg, "EMBED_SEARCH_DEADLINE_S", 0.0)
+
+    vec, model = await emb.embed_for_search("q")
+    assert vec == [0.3] * 1024
+
+
+@pytest.mark.asyncio
+async def test_search_scored_degrades_when_no_fast_tier(monkeypatch):
+    """PRODUCTION-SHAPE gate test: with the REAL `_embed` in place (not
+    monkeypatched) and no fast embedder tier, memory_search_scored_impl must NOT
+    enter the embed cascade — it degrades to an empty semantic result instead of
+    hanging. Proves the inline search-path gate (search.py), distinct from the
+    embed_for_search helper, fires on the real code path.
+
+    The gate only applies when `_embed` IS the module cascade (identity check);
+    here we deliberately leave `_embed` un-patched so `_embed_is_real` is True
+    and the gate governs. fast_embedder_available()=False is the "embedder down"
+    condition the fix targets."""
+    import sqlite3
+
+    import memory_core
+
+    from memory import embed as _emb
+    from memory import search
+
+    monkeypatch.setenv("M3_SKIP_MIGRATIONS", "1")
+    # Embedder believed DOWN — the whole point of the degrade path.
+    monkeypatch.setattr(_emb, "fast_embedder_available", lambda: False)
+
+    # We deliberately leave `_embed` UN-patched so search's identity check makes
+    # _embed_is_real True and the fast-tier gate governs. Correctness is asserted
+    # via the empty result below: the stubbed DB would return a vector row if the
+    # embed path were reached, so [] can only mean the embed was skipped.
+
+    # A DB whose vector query would return a row IF reached — so an empty result
+    # can only mean the embed was skipped, not that the store was empty.
+    class _Cur:
+        def fetchall(self):
+            return [{"id": "x", "content": "c", "title": "t", "type": "concept",
+                     "importance": 0.5, "embedding": b"\x00" * 12,
+                     "vec_score": 0.9, "bm25_score": 0.0}]
+        def fetchone(self):
+            return None
+
+    class _Conn(sqlite3.Connection):
+        def execute(self, sql, *a):
+            return _Cur()
+
+    conn = sqlite3.connect(":memory:", factory=_Conn)
+
+    class _Ctx:
+        def __enter__(self): return conn
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(search, "_db", lambda: _Ctx())
+    monkeypatch.setattr(memory_core, "_db", lambda: _Ctx())
+    monkeypatch.setattr(search, "_detect_sqlite_vec", lambda db: False)
+    monkeypatch.setattr(search, "_prefer_observations_gate", lambda: False)
+    monkeypatch.setattr(search, "_two_stage_observations_gate", lambda: False)
+
+    # A non-exact query so the FTS short-circuit does not early-return.
+    results = await search.memory_search_scored_impl(
+        "some semantic query that is not an exact substring", search_mode="semantic", k=5
+    )
+    assert results == [], "no fast tier -> semantic search must degrade to empty, not hang or return vec rows"

@@ -841,6 +841,12 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
             resp = await client.post(
                 f"{_EMBED_FALLBACK_URL}/embedding",
                 json={"input": [text]},
+                # Single-query embed is INTERACTIVE — mark it so the shared
+                # embed server's admission gate routes it to the reserved
+                # fast-lane instead of queuing it behind bulk ingestion (the
+                # "MCP server locked up" wedge). The server also infers this
+                # from the batch size of 1, but the header makes it explicit.
+                headers={"X-M3-Embed-Priority": "interactive"},
                 timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ),
             )
             resp.raise_for_status()
@@ -1019,6 +1025,51 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         return None, model
     finally:
         _EMBED_SEM.release()
+
+
+async def embed_for_search(text: str) -> tuple[list[float] | None, str]:
+    """Bounded, degrade-safe query embed for the INTERACTIVE search path.
+
+    Wraps the full `_embed` cascade with two guards so a degraded/unreachable
+    embedder can never wedge the single-event-loop MCP server:
+
+      1. Fast-tier gate. If no fast tier is believed available
+         (`fast_embedder_available()` — tier-1 loaded, or tier-2 breaker
+         closed), skip the embed entirely and return (None, EMBED_MODEL). The
+         caller degrades to FTS-only results. Same predictor memory_write uses
+         to decide inline-vs-defer; here it decides embed-vs-skip.
+      2. Wall-clock deadline. Even when a tier is believed healthy, bound the
+         embed with `EMBED_SEARCH_DEADLINE_S` (default 8s). A tier that is
+         slow-but-not-failed never trips its breaker and would otherwise re-pay
+         its full read timeout every call; the deadline caps that. On timeout we
+         return (None, ...) — a query with no vector degrades to FTS, it does
+         not hang.
+
+    Returns (vector|None, model_tag). A None vector is the "degrade to lexical"
+    signal, identical in shape to a genuine embed miss, so callers need no new
+    branch. Set M3_EMBED_SEARCH_DEADLINE_S=0 to disable the ceiling.
+    """
+    if not fast_embedder_available():
+        logger.info(
+            "search embed skipped: no fast embedder tier available — "
+            "degrading to FTS-only results (query vector not computed)"
+        )
+        return None, config.EMBED_MODEL
+
+    deadline = config.EMBED_SEARCH_DEADLINE_S
+    if not deadline or deadline <= 0:
+        return await _embed(text)
+
+    try:
+        return await asyncio.wait_for(_embed(text), timeout=deadline)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "search embed exceeded %.1fs deadline — degrading to FTS-only "
+            "results. A tier is slow but not tripping its breaker; check the "
+            "embed server (:8082) / primary endpoint health.",
+            deadline,
+        )
+        return None, config.EMBED_MODEL
 
 
 async def _embed_many_cloud_fallback(
@@ -1215,6 +1266,10 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         resp = await client.post(
             f"{_EMBED_FALLBACK_URL}/embedding",
             json={"input": miss_texts},
+            # Bulk ingestion — mark explicitly so a SMALL final chunk (<= the
+            # server's interactive threshold) isn't misrouted into the reserved
+            # interactive fast-lane. The lane is for latency-sensitive queries.
+            headers={"X-M3-Embed-Priority": "bulk"},
             timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 4),
         )
         resp.raise_for_status()

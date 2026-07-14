@@ -65,10 +65,155 @@ logger = logging.getLogger("embed_server_inproc")
 # via M3_EMBED_SERVER_MAX_BATCH. The client's own EMBED_BULK_CHUNK is 1024, so
 # this is a safety ceiling, not the expected batch size.
 _MAX_BATCH = int(os.environ.get("M3_EMBED_SERVER_MAX_BATCH", "2048"))
-# Serialise GPU calls: the embedder is one CUDA context; concurrent Python
-# callers must not interleave into it. Semaphore(1) = strict serialisation
-# (correct + simplest); raise only if the backend is proven concurrency-safe.
-_GPU_SEM = asyncio.Semaphore(int(os.environ.get("M3_EMBED_SERVER_CONCURRENCY", "1")))
+
+# ── Two-lane admission gate (interactive fast-lane) ───────────────────────────
+# WHY: the Rust `m3_core_rs.EmbeddedEmbedder` is NOT one serial CUDA context —
+# it wraps `m3_dispatcher::Dispatcher<EmbeddedBackend>` with a POOL of
+# `M3_EMBED_STREAMS` (default 8) independent contexts, its own slot semaphore,
+# and a circuit breaker. `embed()` releases the GIL and its decode region is
+# pure Rust, so it is SAFE to call concurrently — the dispatcher fans calls out
+# across its stream pool without interleaving into a single context. (The old
+# `Semaphore(1)` here predated the multi-stream dispatcher and throttled an
+# 8-wide backend down to strictly serial — that serialisation, not any GPU
+# limit, is what made an interactive query queue behind a bulk ingestion batch
+# and wedge the single-event-loop MCP server.)
+#
+# POLICY: strict reservation (chosen 2026-07-14, user bhaba). Bulk is capped at
+# `bulk_max = total - reserved` and NEVER exceeds it — even when the reserved
+# slots are idle. `reserved` (default 1) slots are held for interactive
+# single-query embeds so a search ALWAYS finds a free slot and never waits
+# behind a bulk batch (batches are non-preemptible, so a work-conserving borrow
+# would let bulk fill every slot and reintroduce the ~1-batch wait — the wedge
+# this fix exists to kill). Interactive itself is NOT capped: when bulk is idle
+# it may use up to `total`. The cost of strict reserve is that peak bulk
+# concurrency is `total-1` instead of `total` during idle periods — accepted in
+# exchange for a constant, load-independent interactive latency.
+#
+# `total` DEFAULTS TO THE BACKEND STREAM POOL (M3_EMBED_STREAMS, typically 8) —
+# resolved from the loaded embedder in _resolve_admission(), so the server uses
+# the full concurrency the Rust dispatcher offers rather than an arbitrary cap.
+# Override with M3_EMBED_SERVER_CONCURRENCY (still clamped to the backend pool).
+#
+# Classification is by batch size (interactive posts 1 text, bulk posts up to
+# EMBED_BULK_CHUNK=1024) with an explicit `X-M3-Embed-Priority` header override.
+_INTERACTIVE_MAX_TEXTS = int(os.environ.get("M3_EMBED_INTERACTIVE_MAX_TEXTS", "8"))
+# Slots reserved for interactive (never usable by bulk). >=1 guarantees a search
+# always has a free slot.
+_INTERACTIVE_RESERVED = int(os.environ.get("M3_EMBED_SERVER_INTERACTIVE_RESERVED", "1"))
+# Total admission ceiling. 0 (the default sentinel) => use the backend stream
+# pool as resolved in _resolve_admission(). A positive value overrides but is
+# still clamped to the backend pool so we never over-subscribe the dispatcher.
+_ADMISSION_TOTAL_DEFAULT = int(os.environ.get("M3_EMBED_SERVER_CONCURRENCY", "0"))
+
+
+class _AdmissionGate:
+    """Strict-reservation admission (no borrow).
+
+    `total` concurrent GPU calls are allowed (clamped to the backend stream
+    pool). At most `bulk_max = total - reserved` of them may be BULK requests,
+    and bulk NEVER exceeds that — even when the reserved slots are idle. The
+    `reserved` slots (>=1) are held for interactive single-query embeds so an
+    interactive request ALWAYS finds a free slot and never waits behind a bulk
+    batch. Interactive itself is not per-lane capped: when bulk is idle it may
+    use up to `total`. In-flight batches are never preempted (bounded by
+    _MAX_BATCH), but strict reservation means an interactive request never has
+    to wait for one — there is always a slot bulk cannot occupy.
+    """
+
+    def __init__(self, total: int, reserved: int = 1):
+        self.total = max(1, total)
+        # Reserve at least 1 (guarantee an interactive slot) but leave bulk >=1.
+        self.reserved = max(1, min(reserved, self.total - 1)) if self.total > 1 else 0
+        self.bulk_max = self.total - self.reserved
+        # Counts guarded by _cv.
+        self._bulk_inflight = 0
+        self._interactive_inflight = 0
+        self._cv = asyncio.Condition()
+
+    def _bulk_may_run_locked(self) -> bool:
+        """Bulk admission (call under _cv): strictly capped at bulk_max. No
+        borrow — the reserved slots are never available to bulk, so an
+        interactive request always has room."""
+        return self._bulk_inflight < self.bulk_max
+
+    def _interactive_may_run_locked(self) -> bool:
+        """Interactive admission (call under _cv): bounded only by the overall
+        total. Because bulk can hold at most bulk_max = total - reserved, there
+        are always >= reserved slots interactive can take immediately."""
+        return (self._bulk_inflight + self._interactive_inflight) < self.total
+
+    async def acquire(self, *, interactive: bool):
+        async with self._cv:
+            if interactive:
+                while not self._interactive_may_run_locked():
+                    await self._cv.wait()
+                self._interactive_inflight += 1
+            else:
+                while not self._bulk_may_run_locked():
+                    await self._cv.wait()
+                self._bulk_inflight += 1
+            self._cv.notify_all()
+
+    async def release(self, *, interactive: bool):
+        async with self._cv:
+            if interactive:
+                self._interactive_inflight -= 1
+            else:
+                self._bulk_inflight -= 1
+            self._cv.notify_all()
+
+
+# Resolved in _load_embedder() once the backend stream count is known; a plain
+# Semaphore(1) fallback keeps import-time / test-time behaviour safe until then.
+_GATE: _AdmissionGate | None = None
+_GPU_SEM = asyncio.Semaphore(1)  # legacy fallback; superseded by _GATE at load
+
+
+def _resolve_admission() -> _AdmissionGate:
+    """Build the admission gate against the loaded backend's stream pool.
+
+    `total` defaults to the backend's stream count (`_embedder.streams()` — the
+    Rust dispatcher slot count == context-pool size, typically 8), so the server
+    uses the full concurrency the dispatcher offers. A positive
+    M3_EMBED_SERVER_CONCURRENCY (_ADMISSION_TOTAL_DEFAULT) overrides but is
+    clamped to the pool so we never over-subscribe it. Strict reservation holds
+    `_INTERACTIVE_RESERVED` (default 1) slot(s) for interactive so a search
+    always has room; bulk_max = total - reserved.
+    """
+    streams = 0
+    try:
+        if _embedder is not None and hasattr(_embedder, "streams"):
+            streams = int(_embedder.streams())
+    except Exception:  # noqa: BLE001 — introspection is best-effort
+        streams = 0
+    # Backend pool (fall back to a sane 4 if the backend can't report it).
+    pool = streams if streams > 0 else 4
+    # total: full pool by default (_ADMISSION_TOTAL_DEFAULT==0 sentinel), else the
+    # configured value, always clamped to the pool.
+    total = pool if _ADMISSION_TOTAL_DEFAULT <= 0 else min(_ADMISSION_TOTAL_DEFAULT, pool)
+    total = max(1, total)
+    gate = _AdmissionGate(total=total, reserved=_INTERACTIVE_RESERVED)
+    logger.info(
+        "admission gate: total=%d (backend streams=%d, configured=%s), "
+        "bulk_max=%d, interactive_reserved=%d (strict, no borrow)",
+        gate.total, streams,
+        _ADMISSION_TOTAL_DEFAULT if _ADMISSION_TOTAL_DEFAULT > 0 else "auto",
+        gate.bulk_max, gate.reserved,
+    )
+    return gate
+
+
+def _is_interactive(texts: list[str], request: "Request | None") -> bool:
+    """Classify a request: small batch => interactive, unless an explicit
+    `X-M3-Embed-Priority: bulk|interactive` header overrides."""
+    if request is not None:
+        pri = (request.headers.get("x-m3-embed-priority") or "").strip().lower()
+        if pri == "interactive":
+            return True
+        if pri == "bulk":
+            return False
+    return len(texts) <= _INTERACTIVE_MAX_TEXTS
+
 
 app = FastAPI(title="M3 Shared In-Process GPU Embedder")
 
@@ -160,6 +305,9 @@ def _load_embedder() -> None:
             "shared GPU embedder loaded (%s, dim=%d) in %.1fs — serving.",
             gguf, dim, time.perf_counter() - t0,
         )
+        # Build the admission gate now that the backend stream pool is known.
+        global _GATE
+        _GATE = _resolve_admission()
     except SystemExit:
         raise
     except Exception as e:  # noqa: BLE001 — any load failure is fatal for a shared embedder
@@ -178,10 +326,24 @@ def _coerce_texts(inp: Union[str, list[str]]) -> list[str]:
     return texts
 
 
-async def _embed(texts: list[str]) -> list[list[float]]:
-    """Serialised GPU embed. Runs the blocking call off the event loop."""
-    async with _GPU_SEM:
+async def _embed(texts: list[str], *, interactive: bool = False) -> list[list[float]]:
+    """Admission-gated GPU embed. Runs the blocking call off the event loop.
+
+    Concurrency is bounded by the two-lane admission gate (interactive requests
+    get reserved capacity; bulk is capped but may borrow when idle). The
+    underlying `_embedder.embed` is safe to call concurrently — the Rust
+    dispatcher fans the calls across its stream pool (see _AdmissionGate WHY).
+    """
+    gate = _GATE
+    if gate is None:
+        # Pre-load / test fallback: preserve the original strict-serial behaviour.
+        async with _GPU_SEM:
+            return await asyncio.to_thread(_embedder.embed, texts)  # type: ignore[union-attr]
+    await gate.acquire(interactive=interactive)
+    try:
         return await asyncio.to_thread(_embedder.embed, texts)  # type: ignore[union-attr]
+    finally:
+        await gate.release(interactive=interactive)
 
 
 @app.post("/embedding")
@@ -194,7 +356,7 @@ async def embedding(req: EmbeddingRequest, request: Request):
         return JSONResponse(status_code=413, content={"error": str(e)})
     if not texts:
         return {"data": []}
-    vecs = await _embed(texts)
+    vecs = await _embed(texts, interactive=_is_interactive(texts, request))
 
     if "application/octet-stream" in (request.headers.get("accept") or ""):
         import numpy as np
@@ -211,7 +373,7 @@ async def embedding(req: EmbeddingRequest, request: Request):
 
 
 @app.post("/v1/embeddings")
-async def v1_embeddings(req: EmbeddingRequest):
+async def v1_embeddings(req: EmbeddingRequest, request: Request):
     """OpenAI-compatible shape (tier-3 / LM-Studio-style callers)."""
     try:
         texts = _coerce_texts(req.input)
@@ -219,7 +381,7 @@ async def v1_embeddings(req: EmbeddingRequest):
         return JSONResponse(status_code=413, content={"error": str(e)})
     if not texts:
         return {"object": "list", "data": [], "model": _model_tag, "usage": {}}
-    vecs = await _embed(texts)
+    vecs = await _embed(texts, interactive=_is_interactive(texts, request))
     return {
         "object": "list",
         "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vecs)],
@@ -273,9 +435,55 @@ def main() -> int:
     _load_embedder()  # fail-loud: exits non-zero if the embedder can't load
     logger.info("listening on http://%s:%d (loopback=%s)",
                 args.host, args.port, args.host in ("127.0.0.1", "localhost", "::1"))
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    _run_server(args.host, args.port)
     return 0
 
 
+def _run_server(host: str, port: int) -> None:
+    """Run uvicorn in a way that survives a NO-CONSOLE launch (pythonw.exe).
+
+    The scheduled task (AgentOS_EmbedServer) launches this via `pythonw.exe`,
+    which has no console and no valid std handles. Under that launcher the
+    plain `uvicorn.run(app, ...)` server loop terminated the moment it went
+    live — uvicorn's default `run()` installs signal handlers and manages
+    stdin/stdout for its shutdown/reload machinery, and with pythonw those
+    handles are invalid, so `Server.serve()` returned immediately and the
+    process exited right after logging "listening" (bind succeeded, then no
+    one kept the loop alive).
+
+    Fix: build the Server explicitly and drive it with asyncio.run(), with
+    `install_signal_handlers=False` (the process is managed by the task /
+    parent, not by Ctrl-C) so the loop lifecycle no longer depends on console
+    or signal state that pythonw doesn't provide.
+    """
+    config = uvicorn.Config(
+        app, host=host, port=port, log_level="warning", use_colors=False,
+    )
+    server = uvicorn.Server(config)
+    # Do NOT let uvicorn install SIGINT/SIGTERM handlers: under pythonw there is
+    # no console to deliver them, and the attempt is part of why the default
+    # run() exits early. The task/parent stops us by terminating the process.
+    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+    asyncio.run(server.serve())
+
+
+def _ensure_std_streams() -> None:
+    """Give the process real stdout/stderr when launched via pythonw.exe.
+
+    Under `pythonw` (no console) sys.stdout / sys.stderr are None. A stray write
+    from any dependency (llama.cpp C stdio, a logging fallback, a warning) then
+    raises and can take the process down. Bind the missing streams to devnull so
+    such writes are harmless. Idempotent; safe under normal python.exe (no-op).
+    """
+    import io
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name, None) is None:
+            try:
+                setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
+            except Exception:  # noqa: BLE001 — best-effort; never block startup
+                setattr(sys, name, io.StringIO())
+
+
 if __name__ == "__main__":
+    _ensure_std_streams()
     sys.exit(main())
