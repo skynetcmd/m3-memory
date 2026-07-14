@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.7.13.0"
+version = "2026.7.14.0"
 description = "Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
@@ -142,6 +142,17 @@ entity-ner = ["gliner>=0.2.26"]
 # cosine path is the fallback). The PyPI wheel ships the platform-native
 # extension binary, so no separate compilation/bundling step is needed.
 vector = ["sqlite-vec>=0.1.6"]
+# LangChain / LangGraph integration (m3_memory/integrations/langchain/). Optional
+# by design: core m3 gains NO hard LangChain dependency — the adapter imports
+# langchain-core / langgraph lazily, so `pip install m3-memory` stays light and
+# the integration only activates for users who opt in with `[langchain]`. The
+# mem0-compat surface shadows mem0's API SHAPE but never imports mem0 (no dep on
+# it). Pinned to a tested range so the version-pinned parity tests (§5) track a
+# fixed target rather than a moving API.
+langchain = [
+    "langchain-core>=0.3.0,<1",
+    "langgraph>=0.2.0,<1",
+]
 # "Project Oxidation" Rust compute core is installed manually until
 # m3-core-rs publishes wheels to PyPI:
 #   pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"

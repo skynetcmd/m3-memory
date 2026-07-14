@@ -65,10 +65,10 @@ below. Use `m3 setup --terminal` to force the text wizard.
 > below — pip puts `m3.exe` in a Scripts folder that isn't on PATH by
 > default. `pipx` handles this automatically.
 
-> **Tool catalog stays small in your context.** m3 ships 87 MCP tools but
+> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
 > groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
 > conversations, admin). Only ~6 essentials load at MCP startup
-> (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in a
+> (~2,400 tokens vs ~16,100 if all of them loaded eagerly). The agent pulls in a
 > domain on demand — just say "load the files tools" and it does. Set
 > `M3_TOOLS_LAZY=0` to disable.
 

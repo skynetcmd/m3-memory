@@ -16,7 +16,7 @@ In this mode, you configure Hermes Agent to use **M3 as its primary memory provi
 * **How it works:** Hermes loads the M3 memory provider plugin, redirecting all default read/write operations to the M3 SQLite memory catalog (`~/.m3-memory/memory/agent_memory.db`).
 
 ### Option B: Parallel Co-existence (SOTA Rich Memory Toolbelt)
-In this mode, you keep Hermes' default memory provider active, but load M3's **103 MCP tools** directly into Hermes' runtime toolbelt.
+In this mode, you keep Hermes' default memory provider active, but load M3's **100+ MCP tools** directly into Hermes' runtime toolbelt.
 * **Why do this?** This allows Hermes to continue using its lightweight built-in memory for simple context holding while granting it access to M3's specialized tools (like `memory_link`, `task_create`, `files_ingest`, and `chatlog_search`) for complex research and file-indexing tasks.
 
 ---

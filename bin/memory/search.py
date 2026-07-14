@@ -564,6 +564,21 @@ async def memory_search_scored_impl(
                 if safe_extra:
                     extra_cols_sql = ", " + ", ".join(f"mi.{c}" for c in safe_extra)
 
+                # TENANCY (SECURITY, 2026-07-14): the short-circuit MUST apply the
+                # SAME user_id/scope isolation the main branch does at ~L681, or it
+                # leaks cross-tenant. Without these predicates a specific query
+                # (>3 chars, non-stopword) returns ANOTHER user's rows because the
+                # early-return path never reaches the filtered branch. Parameterized
+                # + empty-string-passes-through so callers that omit tenancy (the
+                # legacy shared "agent" path) behave byte-identically.
+                _tenancy_sql = ""
+                _tenancy_params: list = []
+                if user_id:
+                    _tenancy_sql += " AND mi.user_id = ?"
+                    _tenancy_params.append(user_id)
+                if scope:
+                    _tenancy_sql += " AND mi.scope = ?"
+                    _tenancy_params.append(scope)
                 with _db() as conn:
                     # Fetch the top-N bm25-ranked FTS matches, not LIMIT 1.
                     # The old LIMIT 1 + substring gate was lossy: FTS routinely
@@ -582,11 +597,11 @@ async def memory_search_scored_impl(
                                bm25(memory_items_fts) AS _bm25
                         FROM memory_items_fts fts
                         JOIN memory_items mi ON fts.rowid = mi.rowid
-                        WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0
+                        WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{_tenancy_sql}
                         ORDER BY _bm25 ASC
                         LIMIT ?
                         """,
-                        (fts_query, max(k * 4, 20)),
+                        (fts_query, *_tenancy_params, max(k * 4, 20)),
                     ).fetchall()
                     query_lower = query.lower()
                     exact_hits = []
@@ -1600,6 +1615,7 @@ async def memory_search_routed_impl(
             entity_graph_valid_types=_egt,
             entity_graph_valid_predicates=_egp,
             entity_stoplist=entity_stoplist,
+            user_id=user_id, scope=scope,  # tenancy for neighbor hydration (SECURITY)
             _capture_dict=_capture_dict,
         )
     else:
@@ -1632,6 +1648,7 @@ async def memory_search_routed_impl(
                 entity_graph_valid_types=_egt,
                 entity_graph_valid_predicates=_egp,
                 entity_stoplist=entity_stoplist,
+                user_id=user_id, scope=scope,  # tenancy for neighbor hydration (SECURITY)
                 _capture_dict=_capture_dict,
             )
         else:
@@ -1668,6 +1685,7 @@ async def memory_search_routed_impl(
                 entity_graph_valid_types=_egt,
                 entity_graph_valid_predicates=_egp,
                 entity_stoplist=entity_stoplist,
+                user_id=user_id, scope=scope,  # tenancy for neighbor hydration (SECURITY)
                 _capture_dict=_capture_dict,
             )
 
@@ -1828,6 +1846,8 @@ async def _maybe_expand_routed(
     entity_graph_valid_types: list = None,
     entity_graph_valid_predicates: list = None,
     entity_stoplist: list = None,
+    user_id: str = "",
+    scope: str = "",
     _capture_dict: dict = None,
 ) -> list:
     """Apply optional graph, session, and entity-graph expansion to a routed retrieval result.
@@ -1835,7 +1855,21 @@ async def _maybe_expand_routed(
     All three expansions take the primary top-k hits' ids (or the query, for entity_graph)
     as seeds, fetch new rows, score them against the query, and max-fuse with the primary
     list. If all are off (the default), returns primary unchanged.
-    """
+
+    TENANCY (SECURITY, 2026-07-14): graph/entity-graph neighbor ids come from
+    `memory_relationships`/entity edges that can CROSS users — so the hydration
+    queries below MUST re-apply the caller's `user_id`/`scope`, or an edge from
+    user A's memory to user B's would pull B's row into A's results. The primary
+    hits are already tenant-filtered; we pass the same tenancy down and gate every
+    hydrated neighbor on it (defense at the materialization choke point)."""
+    _tenancy_sql = ""
+    _tenancy_params: list = []
+    if user_id:
+        _tenancy_sql += " AND user_id = ?"
+        _tenancy_params.append(user_id)
+    if scope:
+        _tenancy_sql += " AND scope = ?"
+        _tenancy_params.append(scope)
     _resolve_mc_callbacks()  # bind memory_core callbacks on first call
 
     # Test-shim resolution: tests patch `memory_core._db` to feed a fake
@@ -1866,15 +1900,18 @@ async def _maybe_expand_routed(
                 rows = db.execute(
                     f"SELECT id, type, title, content, metadata_json, conversation_id, "
                     f"valid_from, user_id FROM memory_items "
-                    f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted, 0) = 0",
-                    list(neighbor_ids),
+                    f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted, 0) = 0"
+                    f"{_tenancy_sql}",  # tenancy re-applied (edges may cross users)
+                    list(neighbor_ids) + _tenancy_params,
                 ).fetchall()
                 for r in rows:
                     extra_rows[r["id"]] = dict(r)
                     extra_row_source[r["id"]] = "graph"
 
     if expand_sessions and seed_ids:
-        session_rows = _resolve_graph_helper("_session_neighbor_ids")(seed_ids, session_cap=int(session_cap))
+        session_rows = _resolve_graph_helper("_session_neighbor_ids")(
+            seed_ids, session_cap=int(session_cap),
+            user_id=user_id, scope=scope)
         for rid, item in session_rows.items():
             if rid not in extra_rows:
                 extra_rows[rid] = item
@@ -1900,8 +1937,9 @@ async def _maybe_expand_routed(
                     eg_rows = db.execute(
                         f"SELECT id, type, title, content, metadata_json, conversation_id, "
                         f"valid_from, user_id FROM memory_items "
-                        f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted, 0) = 0",
-                        list(new_ids),
+                        f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted, 0) = 0"
+                        f"{_tenancy_sql}",  # tenancy re-applied (entity edges cross users)
+                        list(new_ids) + _tenancy_params,
                     ).fetchall()
                     for r in eg_rows:
                         if r["id"] not in extra_rows:

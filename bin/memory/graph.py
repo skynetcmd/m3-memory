@@ -114,15 +114,30 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
     return seen
 
 
-def _session_neighbor_ids(seed_ids: list, session_cap: int = 12) -> dict:
+def _session_neighbor_ids(seed_ids: list, session_cap: int = 12,
+                          user_id: str = "", scope: str = "") -> dict:
     """For each conversation_id present in `seed_ids`' rows, return up to
     session_cap turns from that conversation (excluding seeds themselves).
 
     Returns dict[memory_id -> row_dict]. Used by memory_search_routed_impl
     when expand_sessions=True. The session_cap is applied per session.
+
+    TENANCY (SECURITY, 2026-07-14): `conversation_id` is per-conversation
+    isolation and normally same-user, but a shared/forged conversation_id would
+    otherwise leak turns across users. When the caller threads `user_id`/`scope`
+    (the routed search does), re-apply them so session expansion can only surface
+    the searcher's own turns.
     """
     if not seed_ids:
         return {}
+    _tenancy_sql = ""
+    _tenancy_params: list = []
+    if user_id:
+        _tenancy_sql += " AND user_id = ?"
+        _tenancy_params.append(user_id)
+    if scope:
+        _tenancy_sql += " AND scope = ?"
+        _tenancy_params.append(scope)
     out: dict = {}
     with _db() as db:
         placeholders = ",".join(["?"] * len(seed_ids))
@@ -141,9 +156,10 @@ def _session_neighbor_ids(seed_ids: list, session_cap: int = 12) -> dict:
             rows = db.execute(
                 "SELECT id, type, title, content, metadata_json, conversation_id, "
                 "valid_from, user_id FROM memory_items "
-                "WHERE conversation_id = ? AND COALESCE(is_deleted, 0) = 0 "
+                "WHERE conversation_id = ? AND COALESCE(is_deleted, 0) = 0"
+                f"{_tenancy_sql} "
                 "ORDER BY valid_from LIMIT ?",
-                (cid, cap),
+                (cid, *_tenancy_params, cap),
             ).fetchall()
             for r in rows:
                 if r["id"] in seed_set or r["id"] in out:

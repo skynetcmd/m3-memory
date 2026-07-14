@@ -38,7 +38,7 @@ from memory_core import _sanitize_fts
 logger = logging.getLogger("chatlog_core")
 
 VALID_ROLES = frozenset({"user", "assistant", "system", "tool"})
-VALID_HOST_AGENTS = frozenset({"claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider"})
+VALID_HOST_AGENTS = frozenset({"claude-code", "gemini-cli", "antigravity-cli", "opencode", "aider", "langchain"})
 VALID_PROVIDERS = frozenset({
     "anthropic", "google", "openai", "local", "xai",
     "deepseek", "mistral", "meta", "other",
@@ -119,6 +119,23 @@ def _redaction_dict(spec) -> dict:
 # Validation
 # ---------------------------------------------------------------------------
 
+def _valid_host_agents() -> frozenset[str]:
+    """Allowed host_agent values: the built-in floor (VALID_HOST_AGENTS) UNION
+    any host registered in the chatlog config's ``host_agents`` map.
+
+    This makes ``host_agent`` config-extensible: a new host (e.g. an SDK
+    integration like ``langchain``) is registered by adding it to the chatlog
+    config, with NO code change. The built-ins are always valid (backward
+    compatible); config only ADDS. Falls back to the built-ins if config can't
+    be resolved (never narrows the allowlist)."""
+    try:
+        cfg = chatlog_config.resolve_config()
+        extra = set(getattr(cfg, "host_agents", {}) or {})
+        return VALID_HOST_AGENTS | extra
+    except Exception:
+        return VALID_HOST_AGENTS
+
+
 def _validate_write(item: dict) -> None:
     """Strict provenance validator. Raises ValueError on missing/invalid fields."""
     if not item.get("content") or not isinstance(item["content"], str):
@@ -131,8 +148,9 @@ def _validate_write(item: dict) -> None:
     if not item.get("conversation_id"):
         raise ValueError("conversation_id is required")
     host = item.get("host_agent")
-    if host not in VALID_HOST_AGENTS:
-        raise ValueError(f"host_agent must be one of {sorted(VALID_HOST_AGENTS)}")
+    _allowed_hosts = _valid_host_agents()
+    if host not in _allowed_hosts:
+        raise ValueError(f"host_agent must be one of {sorted(_allowed_hosts)}")
     provider = item.get("provider")
     if provider not in VALID_PROVIDERS:
         raise ValueError(f"provider must be one of {sorted(VALID_PROVIDERS)}")
