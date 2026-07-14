@@ -5,6 +5,10 @@
 *.sh       text eol=lf
 *.py       text eol=lf
 *.ps1      text eol=crlf
+# Generated SVGs (e.g. docs/star-history.svg) are byte-compared by their
+# generator to avoid spurious commits — pin LF so the committed file matches
+# what the generator writes on any runner, regardless of core.autocrlf.
+*.svg      text eol=lf
 
 # Git hooks are extensionless shell scripts — must stay LF so they execute
 # on Linux/macOS after a Windows checkout.

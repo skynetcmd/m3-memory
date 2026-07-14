@@ -370,9 +370,11 @@ See [NOTICE](NOTICE) for the full third-party attribution list.
 
 ### ⭐ Star History
 
-[![View Star History](https://img.shields.io/badge/⭐_Star_History-View_chart-blue?style=flat-square)](https://star-history.com/#skynetcmd/m3-memory&Date)
+<a href="https://star-history.com/#skynetcmd/m3-memory&Date">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/star-history.svg" alt="Star history for skynetcmd/m3-memory" width="100%">
+</a>
 
-<sup>GitHub now requires an authenticated token to read star data, so the chart can't be embedded anonymously. Click through to view it on star-history.com (sign in there if prompted).</sup>
+<sup>Chart regenerated on a schedule by [`.github/workflows/star-history.yml`](.github/workflows/star-history.yml) using the repo's own token — no third-party embed. Click through for the live interactive version.</sup>
 
 <!-- mcp-name: io.github.skynetcmd/m3-memory -->
 

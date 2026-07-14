@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400" viewBox="0 0 800 400" role="img" aria-label="Star history for skynetcmd/m3-memory: 15 stars">
+  <title>Star history for skynetcmd/m3-memory</title>
+  <style>
+    .bg { fill: #ffffff; }
+    .grid { stroke: #e1e4e8; stroke-width: 1; }
+    .tick, .axis { fill: #57606a; font: 12px -apple-system, Segoe UI, sans-serif; }
+    .title { fill: #24292f; font: 600 15px -apple-system, Segoe UI, sans-serif; }
+    .line { fill: none; stroke: #2f81f7; stroke-width: 2.5; stroke-linejoin: round; }
+    .area { fill: #2f81f7; opacity: 0.10; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .grid { stroke: #21262d; }
+      .tick, .axis { fill: #8b949e; }
+      .title { fill: #e6edf3; }
+    }
+  </style>
+  <rect class="bg" x="0" y="0" width="800" height="400" rx="6"/>
+  <text class="title" x="60" y="20">⭐ skynetcmd/m3-memory — 15 stars</text>
+  <line x1="60" y1="360.0" x2="780" y2="360.0" class="grid"/><text x="52" y="364.0" text-anchor="end" class="tick">0</text><line x1="60" y1="206.0" x2="780" y2="206.0" class="grid"/><text x="52" y="210.0" text-anchor="end" class="tick">7</text><line x1="60" y1="30.0" x2="780" y2="30.0" class="grid"/><text x="52" y="34.0" text-anchor="end" class="tick">15</text>
+  <polygon class="area" points="60.0,360.0 60.0,360.0 60.0,338.0 172.2,316.0 172.4,294.0 175.9,272.0 179.2,250.0 180.0,228.0 190.7,206.0 218.9,184.0 233.3,162.0 233.9,140.0 298.0,118.0 524.0,96.0 585.9,74.0 588.1,52.0 780.0,30.0 780.0,360.0"/>
+  <polyline class="line" points="60.0,360.0 60.0,338.0 172.2,316.0 172.4,294.0 175.9,272.0 179.2,250.0 180.0,228.0 190.7,206.0 218.9,184.0 233.3,162.0 233.9,140.0 298.0,118.0 524.0,96.0 585.9,74.0 588.1,52.0 780.0,30.0"/>
+  <text class="axis" x="60" y="388" text-anchor="start">2026-03-25</text>
+  <text class="axis" x="780" y="388" text-anchor="end">2026-07-07</text>
+  <text class="axis" x="400" y="388" text-anchor="middle">generated 2026-07-07</text>
+</svg>

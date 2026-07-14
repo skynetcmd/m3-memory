@@ -1,0 +1,54 @@
+# Regenerate docs/star-history.svg from the GitHub stargazers API and commit it
+# back to main. GitHub now gates star data behind an authenticated token, so the
+# anonymous star-history.com embed no longer renders in the README. This job
+# uses the workflow's own GITHUB_TOKEN (never exposed publicly) to fetch the
+# repo's stargazer timestamps and render a self-contained SVG, which the README
+# embeds. See bin/gen_star_history.py.
+#
+# The generator is idempotent: with no new stars it produces a byte-identical
+# SVG, so the commit step is a no-op and no empty commit is created.
+
+name: Star history
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"   # weekly, Mondays 06:17 UTC
+  workflow_dispatch: {}     # manual trigger from the Actions tab
+
+# Default workflow token permission in this repo is read-only; the commit-back
+# needs contents: write.
+permissions:
+  contents: write
+
+concurrency:
+  group: star-history
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    name: Regenerate star-history.svg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Regenerate star-history.svg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python bin/gen_star_history.py --repo "${{ github.repository }}" --out docs/star-history.svg
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- docs/star-history.svg; then
+            echo "No change to docs/star-history.svg — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/star-history.svg
+          git commit -m "chore(star-history): refresh docs/star-history.svg [skip ci]"
+          git push
