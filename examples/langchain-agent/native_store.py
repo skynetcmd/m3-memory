@@ -3,7 +3,7 @@
 M3Store is a plain LangGraph BaseStore, so no memory library is required — just
 pass it to create_react_agent. Memory survives restarts and is local-first.
 
-Run:  pip install "m3-memory[langchain]" langgraph
+Run:  pip install "m3-memory[langchain]"   # includes langchain-core + langgraph
       export ANTHROPIC_API_KEY=...   &&   python native_store.py
 """
 

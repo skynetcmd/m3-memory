@@ -5,7 +5,7 @@ asearch/aput/adelete/aget, passes a raw NL query, and lets the store embed — w
 is exactly what m3 does. So `store=M3Store()` needs NO index/embed config and NO
 shim. Unlike InMemoryStore, m3 persists across restarts.
 
-Run:  pip install "m3-memory[langchain]" langgraph langmem
+Run:  pip install "m3-memory[langchain]" langmem   # the extra already pulls langgraph
       export ANTHROPIC_API_KEY=...   &&   python langmem_on_m3.py
 """
 
