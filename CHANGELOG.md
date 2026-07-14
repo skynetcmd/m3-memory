@@ -19,7 +19,43 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.13.0] — 2026-07-13 — MCP lockup elimination: embed fast-lane + off-loop hot paths
+
 ### Fixed
+
+- **The memory MCP server no longer locks up under a slow or busy embedder.**
+  The plugin server is a single-process, single-event-loop stdio server, so any
+  inline blocking call froze *every* concurrent tool call — the recurring "MCP
+  server stalled / wedged" symptom. Three independent blocking causes were fixed:
+  - **Search no longer hangs on a degraded embedder.** A semantic search must
+    embed its query inline (unlike a write, which can defer), so a slow or
+    unreachable embedder could stack the fallback cascade into minutes. The
+    query embed is now gated on embedder health and bounded by a wall-clock
+    deadline (`M3_EMBED_SEARCH_DEADLINE_S`, default 8s); past it, search degrades
+    to keyword/FTS results instead of hanging.
+  - **The shared embedder serves interactive queries and bulk ingestion
+    concurrently, with a reserved fast-lane.** The shared GPU embedder was
+    serialized to one call at a time, so an interactive query could queue behind
+    a large ingestion batch. It now admits work up to the backend's real stream
+    pool with a slot permanently reserved for interactive single-query embeds, so
+    a search never waits behind bulk. Tunable via `M3_EMBED_SERVER_CONCURRENCY`
+    and `M3_EMBED_SERVER_INTERACTIVE_RESERVED`.
+  - **Slow SQLite reads and cross-encoder reranking no longer freeze the loop.**
+    Synchronous tool implementations, the search candidate-fetch, and the
+    optional rerank step now run off the event loop, so one slow query or a
+    first-time model load can't stall unrelated concurrent calls.
+
+- **The shared embedder server stays up when launched without a console
+  (Windows).** Under the windowless `pythonw.exe` launcher the server exited
+  immediately after binding its port (uvicorn's default run-loop depended on
+  console/signal state that isn't present), so the shared embedder silently
+  never came up. It now runs with an explicit server loop that survives a
+  no-console launch, and guards missing standard streams.
+
+- **Captured chat-log turns no longer carry harness control framing.** Injected
+  harness scaffolding could be persisted verbatim into the chat-log store (and a
+  backfill now strips it from existing rows), closing a prompt-injection feedback
+  loop where re-surfaced framing could be mistaken for instructions.
 
 - **`m3 doctor` now pinpoints an `M3_EMBED_GGUF` leak and stops sending you in a
   circle.** When the shared-embedder probe found `M3_EMBED_GGUF` set in the
@@ -142,6 +178,16 @@ Work-in-progress; not yet released. Tracking under `bin/dashboard_server.py`.
 - Live-streamed stdout/logs from non-blocking subprocesses, with completion exit codes surfaced in the dashboard.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the broader observability plan.
+
+### Security
+
+- **CVE-2026-5241 (transformers LightGlue model-load RCE) reviewed and accepted
+  as unreachable.** m3 never loads the affected vision model — its only
+  `transformers` surface is `sentence-transformers` embedding and cross-encoder
+  reranking (no arbitrary model-loading path) — and the patched release sits
+  above m3's pinned `transformers` range for an unrelated compatibility reason.
+  Documented alongside the existing accepted-because-unreachable CVEs; the fix
+  will be picked up when the pin is raised.
 
 ---
 
