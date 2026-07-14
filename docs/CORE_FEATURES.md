@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 100+ MCP tools. 563 end-to-end tests. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools. 1,283 tests across 154 files. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 

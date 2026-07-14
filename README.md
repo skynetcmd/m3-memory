@@ -6,7 +6,7 @@
 
 # 🧠 M3 Memory
 
-M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature. 
+M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature.
 
 Instead of every tool keeping its own throwaway context, M3 is a **shared, evolving, bitemporal knowledge base** that multiple heterogeneous agents and machines read and write. It is designed to solve a fundamental challenge: *How do agents maintain a consistent, evolving, and temporal knowledge base over months and years?*
 
@@ -156,15 +156,15 @@ To expose M3 to any Model Context Protocol host, add it to your configuration fi
 
 ## 🎚️ Domain Gating Keeps the Catalog Small
 
-Exposing 100+ tools can overwhelm an LLM's context window. To avoid this, M3 groups its tools into **8 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `admin`) and loads them lazily. 
+Exposing 100+ tools can overwhelm an LLM's context window. To avoid this, M3 groups its tools into **9 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `diagnostics`, `admin`) and loads them lazily.
 
-Only 10 core tools register at startup. When your agent needs advanced functionalities, it calls `tools_load_domain(domain="...")` to fetch them dynamically.
+Only the essential core set (~18) registers at startup. When your agent needs advanced functionalities, it calls `tools_load_domain(domain="...")` to fetch the rest dynamically.
 
 | Gating Mode | Registered Tools | Tokens in Schema | % of 200K Window |
 | :--- | :---: | :---: | :---: |
-| **Lazy (Default)** | **10** | **~3,540** | **1.8%** |
+| **Lazy (Default)** | **~18** | **~3,540** | **1.8%** |
 | Typical Active Session | 64 | ~17,975 | 9.0% |
-| Eager Mode (`M3_TOOLS_LAZY=0`) | 107 | ~24,918 | 12.5% |
+| Eager Mode (`M3_TOOLS_LAZY=0`) | 109 | ~24,918 | 12.5% |
 
 > 🛠️ *Note: If your client does not support dynamic tool registration, set the environment variable `M3_TOOLS_LAZY=0` to register all tools eagerly.*
 
@@ -172,7 +172,7 @@ Only 10 core tools register at startup. When your agent needs advanced functiona
 
 ## 🛡️ Sovereign & Air-Gapped Deployments
 
-M3 operates completely offline by default. 
+M3 operates completely offline by default.
 
 ### Sovereign Local Embedder
 A high-performance BGE-M3 embedder runs locally on `127.0.0.1:8082` after installation.
@@ -211,6 +211,17 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 | 🤖 **[Agent Instructions & Rules](docs/AGENT_INSTRUCTIONS.md)** | 🔍 **[Myths & Facts Guide](docs/MYTHS_AND_FACTS.md)** | 🏠 **[Homelab Patterns](docs/HOMELAB_PATTERNS.md)** |
 | 🧩 **[Tool Capability Matrix](docs/CAPABILITY_MATRIX.md)** | 🤖 **[AI Context Injection Profile](docs/llm-context.md)** | 🔢 **[Machine-Readable Features](docs/features.json)** |
 
+### More Documentation
+
+| Guide | Guide | Guide |
+| :--- | :--- | :--- |
+| 🗺️ [Roadmap](docs/ROADMAP.md) | 🔄 [Cross-Device Sync](docs/SYNC.md) | 👥 [Multi-Agent Orchestration](docs/MULTI_AGENT.md) |
+| ⚖️ [Comparison vs Alternatives](docs/COMPARISON.md) | ❓ [FAQ](docs/FAQ.md) | 🔐 [Security Policy](docs/SECURITY.md) |
+| 🩹 [Troubleshooting](docs/TROUBLESHOOTING.md) | ⌨️ [CLI Reference](docs/CLI_REFERENCE.md) | 📖 [API Reference](docs/API_REFERENCE.md) |
+| 📁 [Files Memory](docs/FILES_MEMORY.md) | 💬 [Chat Log Subsystem](docs/CHATLOG.md) | ✨ [Enrichment Guide](docs/M3_ENRICH_GUIDE.md) |
+| ⬆️ [Upgrade Guide](docs/HOW-TO-UPGRADE.md) | 🩺 [Health FAQ](docs/M3_HEALTH_FAQ.md) | 🧬 [Dual Embedding](docs/DUAL_EMBED.md) |
+| 📜 [Changelog](CHANGELOG.md) | 🤝 [Code of Conduct](docs/CODE_OF_CONDUCT.md) | 🏗️ [Build Wheels](docs/BUILD_WHEELS.md) |
+
 ---
 
 ## 🎯 Who This Is For
@@ -230,7 +241,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 
 ## 🛡️ Why Trust This
 
-*   **Robust Coverage:** Verified with **563 end-to-end tests** spanning search, sync, GDPR lifecycle, and files ingestion.
+*   **Robust Coverage:** Verified with **1,283 tests across 154 test files** (~2,070 cases with parametrization) spanning search, sync, GDPR lifecycle, and files ingestion.
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
 *   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.
 *   **Open Source:** Apache 2.0 licensed, free, with no SaaS walls or usage limits.
@@ -292,8 +303,8 @@ Copy and paste these prompts into your terminal client to let your agent set up 
 ```text
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
-~/.claude/settings.json under "mcpServers". For best retrieval, ensure 
-Ollama is running with qwen3-embedding:0.6b (optional, falls back 
+~/.claude/settings.json under "mcpServers". For best retrieval, ensure
+Ollama is running with qwen3-embedding:0.6b (optional, falls back
 to keyword search without it). Then use /mcp to verify the memory server loaded.
 ```
 
@@ -301,8 +312,8 @@ to keyword search without it). Then use /mcp to verify the memory server loaded.
 ```text
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
-~/.gemini/settings.json under "mcpServers". For best retrieval, ensure 
-Ollama is running with qwen3-embedding:0.6b (optional, falls back 
+~/.gemini/settings.json under "mcpServers". For best retrieval, ensure
+Ollama is running with qwen3-embedding:0.6b (optional, falls back
 to keyword search without it).
 ```
 
@@ -349,12 +360,19 @@ The agent executes `bin/chatlog_init.py` and configures execution triggers (see 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ### Asset & Icon Credits
-* **Hermes (Caduceus) Icon:** Derived from the Public Domain vector [Caduceus.svg](https://commons.wikimedia.org/wiki/File:Caduceus.svg) on Wikimedia Commons (originally by OpenClipart).
-* **OpenClaw & OpenCode Icons:** Derived from the MIT licensed icon set by [LobeHub](https://github.com/lobehub/lobe-icons).
+The provider badges under [`docs/badges/`](docs/badges/) embed small logo glyphs:
+* **OpenClaw & OpenCode icons** are from the MIT-licensed [LobeHub icon set](https://github.com/lobehub/lobe-icons) (`lobe-icons`).
+* **The Hermes badge** uses a generic caduceus glyph.
+
+See [NOTICE](NOTICE) for the full third-party attribution list.
 
 ---
 
-[![Star History Chart](https://api.star-history.com/svg?repos=skynetcmd/m3-memory&type=Date)](https://star-history.com/#skynetcmd/m3-memory&Date)
+### ⭐ Star History
+
+[![View Star History](https://img.shields.io/badge/⭐_Star_History-View_chart-blue?style=flat-square)](https://star-history.com/#skynetcmd/m3-memory&Date)
+
+<sup>The live chart is rendered by star-history.com; click through to view it.</sup>
 
 <!-- mcp-name: io.github.skynetcmd/m3-memory -->
 

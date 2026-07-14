@@ -45,3 +45,13 @@ Optional native acceleration ("Project Oxidation") is provided by the separate
 m3-core-rs package. Optional FIPS-mode cryptography uses wolfSSL / wolfCrypt,
 which the operator obtains separately under its own license (GPLv2 or a
 commercial wolfSSL license); M3 Memory does not bundle or redistribute it.
+
+------------------------------------------------------------------------------
+Icons and badge assets
+------------------------------------------------------------------------------
+
+The provider badge SVGs under docs/badges/ embed small logo glyphs:
+
+- The OpenClaw and OpenCode glyphs are from the LobeHub icon set
+  ("lobe-icons", https://github.com/lobehub/lobe-icons), MIT License.
+- The Hermes badge uses a generic caduceus glyph.

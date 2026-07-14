@@ -92,7 +92,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 ### Sustained engineering
 
 - [x] **100+ MCP tools** (was 66 at v2026.4.12b)
-- [x] **563 end-to-end tests** (was 193 at v2026.4.12b)
+- [x] **1,283 tests across 154 files** (~2,070 cases with parametrization; was 193 at v2026.4.12b)
 - [x] PyPI Trusted Publishing via OIDC — no token in CI
 - [x] Pre-push tool-catalog drift gate + bench-data leakage scan (`.githooks/pre-push`)
 - [x] CodeQL security gates + periodic Bandit + pip-audit + secrets-scan reports under [`docs/audits/`](./audits/)
