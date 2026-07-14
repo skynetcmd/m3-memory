@@ -25,6 +25,17 @@ the policy is forward-going only.
 
 ---
 
+## [2026.7.14.2] — 2026-07-14 — Fix stale benchmark figure in server.json
+
+### Fixed
+
+- `server.json` registry description advertised a stale **89% LongMemEval**
+  score (the earlier oracle-routed configuration). Corrected to **92%
+  LongMemEval-S**, matching the current no-oracle result in the README and the
+  [benchmarking report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
+
+---
+
 ## [2026.7.14.1] — 2026-07-14 — Docs refresh: reorganized README, self-hosted star history
 
 Documentation and repository-hygiene release. No changes to the installable
