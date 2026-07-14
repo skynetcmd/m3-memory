@@ -1,9 +1,16 @@
 # Regenerate docs/star-history.svg from the GitHub stargazers API and commit it
 # back to main. GitHub now gates star data behind an authenticated token, so the
-# anonymous star-history.com embed no longer renders in the README. This job
-# uses the workflow's own GITHUB_TOKEN (never exposed publicly) to fetch the
-# repo's stargazer timestamps and render a self-contained SVG, which the README
-# embeds. See bin/gen_star_history.py.
+# anonymous star-history.com embed no longer renders in the README.
+#
+# IMPORTANT — token: as of 2026-06-30 GitHub limits the stargazers endpoint to a
+# repo's own admins/collaborators. The built-in GITHUB_TOKEN is an installation
+# token that is NOT treated as an admin/collaborator, so it returns 403 on the
+# stargazers `starred_at` data. This workflow therefore uses a repo secret,
+# STAR_HISTORY_TOKEN — a fine-grained PAT owned by an admin, with only
+# "Metadata: read-only" permission on this repo. Create it at
+# https://github.com/settings/tokens?type=beta and add it under
+# Settings -> Secrets and variables -> Actions -> New repository secret.
+# Until that secret exists the job no-ops (it will not fail the Actions tab).
 #
 # The generator is idempotent: with no new stars it produces a byte-identical
 # SVG, so the commit step is a no-op and no empty commit is created.
@@ -36,12 +43,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Regenerate star-history.svg
+      - name: Check for star-history token
+        id: token
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STAR_HISTORY_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
+        run: |
+          if [ -z "$STAR_HISTORY_TOKEN" ]; then
+            echo "STAR_HISTORY_TOKEN secret is not set — skipping star-history refresh."
+            echo "The built-in GITHUB_TOKEN cannot read the stargazers endpoint"
+            echo "(GitHub restricts it to admins/collaborators). Add a fine-grained"
+            echo "PAT with Metadata:read as the STAR_HISTORY_TOKEN secret to enable."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Regenerate star-history.svg
+        if: steps.token.outputs.present == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
         run: python bin/gen_star_history.py --repo "${{ github.repository }}" --out docs/star-history.svg
 
       - name: Commit if changed
+        if: steps.token.outputs.present == 'true'
         run: |
           if git diff --quiet -- docs/star-history.svg; then
             echo "No change to docs/star-history.svg — nothing to commit."
