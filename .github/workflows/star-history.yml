@@ -6,7 +6,7 @@
 # repo's own admins/collaborators. The built-in GITHUB_TOKEN is an installation
 # token that is NOT treated as an admin/collaborator, so it returns 403 on the
 # stargazers `starred_at` data. This workflow therefore uses a repo secret,
-# STAR_HISTORY_TOKEN — a fine-grained PAT owned by an admin, with only
+# M3_STARGAZER — a fine-grained PAT owned by an admin, with only
 # "Metadata: read-only" permission on this repo. Create it at
 # https://github.com/settings/tokens?type=beta and add it under
 # Settings -> Secrets and variables -> Actions -> New repository secret.
@@ -46,13 +46,13 @@ jobs:
       - name: Check for star-history token
         id: token
         env:
-          STAR_HISTORY_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
+          M3_STARGAZER: ${{ secrets.M3_STARGAZER }}
         run: |
-          if [ -z "$STAR_HISTORY_TOKEN" ]; then
-            echo "STAR_HISTORY_TOKEN secret is not set — skipping star-history refresh."
+          if [ -z "$M3_STARGAZER" ]; then
+            echo "M3_STARGAZER secret is not set — skipping star-history refresh."
             echo "The built-in GITHUB_TOKEN cannot read the stargazers endpoint"
             echo "(GitHub restricts it to admins/collaborators). Add a fine-grained"
-            echo "PAT with Metadata:read as the STAR_HISTORY_TOKEN secret to enable."
+            echo "PAT with Metadata:read as the M3_STARGAZER secret to enable."
             echo "present=false" >> "$GITHUB_OUTPUT"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
@@ -61,7 +61,7 @@ jobs:
       - name: Regenerate star-history.svg
         if: steps.token.outputs.present == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.M3_STARGAZER }}
         run: python bin/gen_star_history.py --repo "${{ github.repository }}" --out docs/star-history.svg
 
       - name: Commit if changed
