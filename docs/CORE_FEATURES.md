@@ -122,6 +122,7 @@ Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
 ## 🔌 Portable & Interoperable
 
 - **MCP-native** — works with Claude Code, Gemini CLI, Aider, or any MCP client out of the box
+- **LangChain / LangGraph** — drop-in **Mem0 replacement** (one-line import swap), LangMem-compatible `M3Store`, chat-message history, and a RAG retriever. `pip install m3-memory[langchain]`; see [docs/integrations/LANGCHAIN.md](integrations/LANGCHAIN.md)
 - **Export/Import** — full memory dump as JSON (with base64 embeddings) for backup, migration, or sharing between M3 instances
 - **Cross-platform** — Windows 11, macOS (Apple Silicon), Linux. Native scheduling via cron or Task Scheduler.
 - **Model-agnostic** — any embedding model via any OpenAI-compatible server. Dimension-validated at runtime.

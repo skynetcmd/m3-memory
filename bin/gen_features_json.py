@@ -50,7 +50,9 @@ def main() -> int:
         ],
         "works_with": [
             "Claude Code", "Gemini CLI", "Aider", "Google Antigravity",
-            "OpenCode", "Hermes Agent", "any MCP-compatible agent",
+            "OpenCode", "Hermes Agent",
+            "LangChain / LangGraph (drop-in Mem0 replacement, backs LangMem)",
+            "any MCP-compatible agent",
         ],
         "retrieval": {
             # Verified against memory_search search_mode enum + MYTHS_AND_FACTS.md.
@@ -120,6 +122,27 @@ def main() -> int:
             "hooks": True,
             "cli": True,
             "multi_agent": True,
+        },
+        # Native Python framework surfaces (in addition to MCP). Verified against
+        # m3_memory/integrations/langchain/ and docs/integrations/LANGCHAIN.md.
+        "frameworks": {
+            "langchain": {
+                "supported": True,
+                "install_extra": "pip install m3-memory[langchain]",
+                "mem0_drop_in": True,          # Memory/M3Memory/MemoryClient, one-line import swap
+                "langgraph_basestore": True,   # M3Store — backs LangMem / any BaseStore consumer
+                "langmem_compatible": True,
+                "chat_message_history": True,  # M3ChatMessageHistory, with_m3_history
+                "rag_retriever": True,         # M3Retriever (LangChain BaseRetriever)
+                "docs": "docs/integrations/LANGCHAIN.md",
+                "examples": "examples/langchain-agent/",
+                "note": (
+                    "Superset for LangChain users: keeps Mem0/LangMem semantics and "
+                    "adds contradiction supersession, bitemporal as_of queries, GDPR "
+                    "forgetting, hybrid retrieval, a bundled embedder, and the full "
+                    "MCP tool set. m3 never imports mem0."
+                ),
+            },
         },
         "tools": {
             "total": len(tools),

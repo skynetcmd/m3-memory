@@ -32,5 +32,6 @@ it self-heals the chatlog schema). No server, no vector DB, no wizard.
 ## The point
 Every script stores memory **locally** and gains what mem0/LangMem can't do —
 contradiction handling (`.supersede`), temporal queries (`as_of=`), commanded
-forgetting (`.forget`), and hybrid + graph retrieval (`.related`). See §3 of the
-integration guide.
+forgetting (`.forget`), and hybrid + graph retrieval (`.related`). See
+[§3 "What you gain — the m3-native extras"](../../docs/integrations/LANGCHAIN.md#3-what-you-gain--the-m3-native-extras)
+of the integration guide.

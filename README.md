@@ -11,7 +11,7 @@
 
 That framing is what makes the rest different: memory as persistent infrastructure, **bitemporal history** ("what did we believe last Tuesday, and when was it corrected?"), **automatic contradiction management** (not just append-and-hope), a memory-first MCP **operational API** (not a bare store/fetch), and **local-first without giving up cross-agent interoperability**.
 
-Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · **drop-in LangChain / LangGraph memory** (Mem0-compatible, backs LangMem) · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable
+Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Antigravity · **drop-in LangChain / LangGraph memory** (Mem0-compatible, backs LangMem) · Hermes · Gemini · OpenCode · OpenClaw · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable
 
 ### In one sentence
 
@@ -40,7 +40,7 @@ Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
 
-Works with Claude Code, Gemini CLI, Aider, Google Antigravity, OpenCode, Hermes Agent, and any MCP-compatible agent. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
+Works with Claude Code, Gemini CLI, Aider, Google Antigravity, OpenCode, Hermes Agent, and any MCP-compatible agent — and, for Python builders, as a **drop-in LangChain / LangGraph memory** (Mem0-compatible, backs LangMem) via `pip install m3-memory[langchain]`. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
 
 > 👉 **I've read enough, I just want to install it on [Windows](docs/QUICKSTART_WINDOWS.md), [macOS](docs/QUICKSTART_MACOS.md), or [Linux](docs/QUICKSTART_LINUX.md).**
 

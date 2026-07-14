@@ -24,6 +24,7 @@
     "Google Antigravity",
     "OpenCode",
     "Hermes Agent",
+    "LangChain / LangGraph (drop-in Mem0 replacement, backs LangMem)",
     "any MCP-compatible agent"
   ],
   "retrieval": {
@@ -103,6 +104,20 @@
     "hooks": true,
     "cli": true,
     "multi_agent": true
+  },
+  "frameworks": {
+    "langchain": {
+      "supported": true,
+      "install_extra": "pip install m3-memory[langchain]",
+      "mem0_drop_in": true,
+      "langgraph_basestore": true,
+      "langmem_compatible": true,
+      "chat_message_history": true,
+      "rag_retriever": true,
+      "docs": "docs/integrations/LANGCHAIN.md",
+      "examples": "examples/langchain-agent/",
+      "note": "Superset for LangChain users: keeps Mem0/LangMem semantics and adds contradiction supersession, bitemporal as_of queries, GDPR forgetting, hybrid retrieval, a bundled embedder, and the full MCP tool set. m3 never imports mem0."
+    }
   },
   "tools": {
     "total": 111,

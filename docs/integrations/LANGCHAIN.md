@@ -315,5 +315,6 @@ memory.call("chatlog_status")
   async vector backfill completes. `get_all()` is deterministic and always current.
 - **"Replacing LangMem"** means backing it with m3, not deleting it — your code still
   calls LangMem's functions, now stored in m3. mem0 is a true delete-and-replace.
-- m3 honors per-user isolation at the SQL layer; a `user_id` is mandatory (there is
-  no anonymous/global mode — omitting it raises).
+- **Per-user isolation:** m3 enforces tenancy at the SQL layer, so a `user_id` is
+  mandatory on every call — there is no anonymous or global mode, and omitting it
+  raises rather than silently sharing memory across users.

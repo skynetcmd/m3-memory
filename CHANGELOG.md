@@ -19,8 +19,9 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+<!-- When adding the next change, replace the "None pending" line below with
+     the usual ### Added / ### Changed / ### Fixed sub-sections here. -->
 ### None pending at this time
-
 
 ## [2026.7.14.0] — 2026-07-14 — Drop-in LangChain / LangGraph memory
 
