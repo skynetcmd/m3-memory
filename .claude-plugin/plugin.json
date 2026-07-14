@@ -1,6 +1,6 @@
 {
   "name": "m3",
-  "version": "2026.7.7.3",
+  "version": "2026.7.13.0",
   "description": "Local-first persistent memory for Claude Code — 101 MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
   "keywords": [
     "memory",
