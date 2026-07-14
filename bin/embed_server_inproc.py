@@ -459,11 +459,17 @@ def _run_server(host: str, port: int) -> None:
     config = uvicorn.Config(
         app, host=host, port=port, log_level="warning", use_colors=False,
     )
-    server = uvicorn.Server(config)
-    # Do NOT let uvicorn install SIGINT/SIGTERM handlers: under pythonw there is
-    # no console to deliver them, and the attempt is part of why the default
-    # run() exits early. The task/parent stops us by terminating the process.
-    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+
+    class _NoSignalServer(uvicorn.Server):
+        # Do NOT install SIGINT/SIGTERM handlers: under pythonw there is no
+        # console to deliver them, and uvicorn's default attempt is part of why
+        # the plain run() exits early on a no-console launch. The task/parent
+        # stops us by terminating the process. (Overriding the method is
+        # type-clean vs. reassigning the instance attribute.)
+        def install_signal_handlers(self) -> None:
+            return None
+
+    server = _NoSignalServer(config)
     asyncio.run(server.serve())
 
 
