@@ -1,391 +1,295 @@
-![M3 Memory]
 <p align="center">
   <a href="https://github.com/skynetcmd/m3-memory">
-    <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/M3-banner.jpg" alt="M3 Memory" width="100%">
+    <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/M3-banner.jpg" alt="M3 Memory Banner" width="100%">
   </a>
 </p>
 
-# M3 Memory
+# 🧠 M3 Memory
 
-**M3 treats agent memory as a distributed-systems problem, not a retrieval feature.** Instead of every tool (Claude, Gemini, OpenCode, …) keeping its own throwaway memory, M3 is a **shared, evolving, bitemporal knowledge base** that multiple heterogeneous agents and machines read and write — built to answer *"how do agents maintain a consistent, evolving, temporal knowledge base over months and years?"* rather than just *"how do we retrieve a chunk?"*
+M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature. 
 
-That framing is what makes the rest different: memory as persistent infrastructure, **bitemporal history** ("what did we believe last Tuesday, and when was it corrected?"), **automatic contradiction management** (not just append-and-hope), a memory-first MCP **operational API** (not a bare store/fetch), and **local-first without giving up cross-agent interoperability**.
+Instead of every tool keeping its own throwaway context, M3 is a **shared, evolving, bitemporal knowledge base** that multiple heterogeneous agents and machines read and write. It is designed to solve a fundamental challenge: *How do agents maintain a consistent, evolving, and temporal knowledge base over months and years?*
 
-Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Antigravity · **drop-in LangChain / LangGraph memory** (Mem0-compatible, backs LangMem) · Hermes · Gemini · OpenCode · OpenClaw · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable
+> 🦜 **Core Release Feature: Drop-in LangChain & LangGraph Support**
+> M3 now functions as a drop-in **Mem0 replacement** (one-line import swap) and is fully **LangMem-compatible** (`store=M3Store()`). Gain automatic contradiction supersession, bitemporal historical queries, local sovereign embedding, and the full 100+ MCP tool set inside your LangChain apps via `pip install m3-memory[langchain]`. (See [LangChain Integration Guide](docs/integrations/LANGCHAIN.md)).
 
-### In one sentence
+---
 
-**M3 is a persistent, local-first memory layer for AI coding agents** — a shared, bitemporal knowledge base that multiple agents read and write over MCP.
-
-|  |  |
-|---|---|
-| **Works with** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · **LangChain / LangGraph** · any MCP agent |
-| **M3 is** | a memory layer · an MCP server · a hybrid retrieval engine · a bitemporal knowledge base |
-| **M3 is _not_** | an LLM · a chatbot · a plain vector database · a RAG framework · an IDE |
-| **For you if** | you use a desktop coding agent and want memory that's private, offline-capable, and shared across tools |
-| **Maturity** | production-grade — lightweight by design (SQLite primary), scales out to PostgreSQL for demanding environments; see [`features.json`](docs/features.json) |
-
-> **"Wait, you remember that?"** — Stop re-explaining your project to your AI. Give it a long-term brain that stays 100% on your machine.
->
-> 🚀 **[New to M3? Start here with our 5-minute "Human-First" guide.](docs/GETTING_STARTED.md)**
+## 🚀 Quick Links & Badges
 
 <p align="center">
-  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square"></a>
-  <a href="https://pypi.org/project/m3-memory/"><img alt="Downloads" src="https://img.shields.io/pypi/dm/m3-memory?style=flat-square"></a>
+  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square&color=blue"></a>
   <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
   <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-100+_tools-orange?style=flat-square"></a>
+</p>
+
+<p align="center">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
 
-Works with Claude Code, Gemini CLI, Aider, Google Antigravity, OpenCode, Hermes Agent, and any MCP-compatible agent — and, for Python builders, as a **drop-in LangChain / LangGraph memory** (Mem0-compatible, backs LangMem) via `pip install m3-memory[langchain]`. Quick one-line command to have your agent install chat log sub-system which saves verbatim chat log info, before compaction, with zero lag/latency and 100% retrieval recall. Just tell your AI agent "install m3-memory chat log sub-system" and your agent will automatically install it with all the proper hooks with some minimal customization questions from you (you can accept the default answers).
+<p align="center">
+  <a href="docs/integrations/LANGCHAIN.md"><img alt="LangChain" src="https://img.shields.io/badge/LangChain-1C3C3A?style=flat-square&logo=langchain&logoColor=white"></a>
+  <a href="docs/claude_code_plugin.md"><img alt="Claude" src="https://img.shields.io/badge/Claude-D97753?style=flat-square&logo=claude&logoColor=white"></a>
+  <a href="docs/antigravity_plugin.md"><img alt="Antigravity" src="https://img.shields.io/badge/Antigravity-4285F4?style=flat-square&logo=google&logoColor=white"></a>
+  <a href="docs/HERMES.md"><img alt="Hermes" src="https://img.shields.io/badge/Hermes-DD8E35?style=flat-square&logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAABgAAAAcCAYAAAB75n%2FuAAAC30lEQVR4nK3WS6xdcxQG8N89V1u9LdWSFPHWegYdSLwf1wgTkk5ESIwwKQZGBiIkOjIhkRggBoYSRAhBRCVCE9FoxasSr3qLoN7Okv%2Ftt5vdo865eq1kZ%2B%2Bc%2Fd%2Fff63v%2B9b6n6mq0osBhrmfiZWYwif4CJdiJ17GCZhBA%2FgQXwSjrd8Nut%2FIjw38UByHH7ENv%2BNYXInncAt%2Bxev4DauxFodhSy%2FBdp97EPDFWIcjcAgOTLZ%2FYAlW4Wr8hBX55k98lkSX4pwkOOwSH%2BTlkQHfPxk1gGuyuMUl%2BBhvBLCtuSDvTsONOBw%2FBOv04NZUVa0P13%2BF0y%2FDeQO%2FCJvwDC7HVpwdet7F3anuLXyaxHaG3pObNm2DJRHsvJS5HIvweRa3j17qMgoNL%2BLCVP0CzohWjYGDg9OSenZqxEXtxUEReVXKfgxXRehHcG0y3JSKNuK1JNOc9kFY2CVCNhjESY2mfpyL2VByTGhp3G9ORRfjAWwf%2BW635TsXDXvgbaPpXO%2FgCdwQ8b7HNzg%2FQj8Z8EVZ3yVq1Kb9qGw2jEVPxU1pptnwfX80mu5V3n2zB%2BejGvyjRLssdz0exfs4OgI3wHv7TbW3GLdBV%2BpKHI8NMcGdoeqs0NeabWyW46LS2VvSG8%2FjnoyKX3BK1gz2ZYOugplw3ezXeuYVfI01%2BX1sTKpAsm3efxjfZhZdEW22TtJA02DMNcj9tqraWFUzVbWsqh6sqhNH1uz1mkTREEfhqejwam%2B4retyHIMxLw3WBGQH3sZ16Y8VC92gix24LKfYtsydtb3OH48xTw02VNUdVXPjfbaq7qqqxZP4n6RBPx7POH4ab2b4LR%2Frnv9AkVByXyx6Ukb6shGt9rmT5Zi8GbdnDh2Qzp5eqMiVDN%2FDd3goB8vm3nsL2WAqIEtzHG7P%2FGkUzSvmU8EAP%2BOrnGJtkrYRsccfrH9HmGCzEbveWlWr8zw36v8vm3aVNO6bXcc6px9%2FA6xcmIWZPQotAAAAAElFTkSuQmCC&logoColor=white"></a>
+  <img alt="OpenClaw" src="https://img.shields.io/badge/OpenClaw-dc2626?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSIxZW0iIHN0eWxlPSJmbGV4Om5vbmU7bGluZS1oZWlnaHQ6MSIgdmlld0JveD0iMCAwIDI0IDI0IiB3aWR0aD0iMWVtIj48dGl0bGU%2BT3BlbkNsYXc8L3RpdGxlPjxnIGNsaXAtcGF0aD0idXJsKCNhKSI%2BPHBhdGggZD0iTTkuMDQ2IDcuMTA0YS41MjcuNTI3IDAgMTEwIDEuMDU1LjUyNy41MjcgMCAwMTAtMS4wNTV6IiAvPjxwYXRoIGQ9Ik0xNS4zNzYgNy4xMDRhLjUyOC41MjggMCAxMTAgMS4wNTYuNTI4LjUyOCAwIDAxMC0xLjA1NnoiIC8%2BPHBhdGggY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNMTYuODc3IDEuOTEyYy41OC0uMjcgMS4xNC0uMzIzIDEuNjE2LS4wMzdhLjMxNy4zMTcgMCAwMS0uMzI2LjU0MmMtLjIyNy0uMTM2LS41NDctLjE1My0xLjAyMi4wNjgtLjM1Mi4xNjUtLjc2NS40NS0xLjIzNC44NjYgMi42ODMgMS4xNyA0LjQgMy41IDUuMTQ4IDUuOTIxYTYuNDIxIDYuNDIxIDAgMDAtLjcwNC4xODRjLS41NzguMDE2LTEuMTc0LjIwNC0xLjUwMi43MzUtLjMzOC41NS0uMjY4IDEuMjc2LjA3MiAyLjA2OWwuMDA1LjAxMi4wMDcuMDE0Yy41MjMgMS4wNDUgMS4zMTggMS45MSAyLjIgMi4yODQtLjkxMiAzLjI3NC0zLjQ0IDYuMTQ0LTUuOTcyIDYuOTg4djIuMTA5aC0yLjExdi0yLjExYy0xLjA0My40MTctMi4wODYuMDEtMi4xMSAwdjIuMTFoLTIuMTF2LTIuMTFjLTIuNTMxLS44NDMtNS4wNjEtMy43MTMtNS45NzMtNi45ODcuODgyLS4zNzMgMS42NzgtMS4yMzggMi4yLTIuMjg0bC4wMDctLjAxNC4wMDYtLjAxMmMuMzQtLjc5My40MS0xLjUxOC4wNzEtMi4wNjktLjMyNy0uNTMxLS45MjMtLjcxOS0xLjUwMy0uNzM1YTYuNDA5IDYuNDA5IDAgMDAtLjcwNC0uMTgzYy43NDktMi40MjEgMi40NjYtNC43NTEgNS4xNDktNS45MjItLjQ3LS40MTYtLjg4LS43MDEtMS4yMzQtLjg2Ni0uNDc0LS4yMjEtLjc5NC0uMjA0LTEuMDIxLS4wNjhhLjMxOC4zMTggMCAwMS0uNDM1LS4xMDkuMzE3LjMxNyAwIDAxLjEwOS0uNDMzYy40NzYtLjI4NiAxLjAzNi0uMjMzIDEuNjE1LjAzNy40OS4yMjkgMS4wMzEuNjI4IDEuNjIxIDEuMTgyQTkuOTI0IDkuOTI0IDAgMDExMiAyLjU2OGMxLjE5OSAwIDIuMjg0LjE5IDMuMjU2LjUyNi41OS0uNTU0IDEuMTMtLjk1MyAxLjYyLTEuMTgyek04LjgzNSA2LjU3N2ExLjI2NiAxLjI2NiAwIDEwMCAyLjUzMiAxLjI2NiAxLjI2NiAwIDAwMC0yLjUzMnptNi4zMyAwYTEuMjY3IDEuMjY3IDAgMTAwIDIuNTMzIDEuMjY3IDEuMjY3IDAgMDAwLTIuNTMzeiIgLz48cGF0aCBkPSJNLjM5NSAxMy4xMThjLS45NjYtMS45MzItLjE2My0zLjg2MyAyLjQxLTMuMzY1di0uMDAxbC4wNS4wMWMuMDg0LjAxOC4xNy4wMzguMjYuMDYuMDMzLjAwOS4wNjcuMDE3LjEuMDI3LjA4NC4wMjIuMTY4LjA0OC4yNTUuMDc2bC4wOS4wMjdjLjUyOCAwIC45NS4xNTggMS4xNi41MDEuMjEyLjM0My4yMTIuODctLjEwNSAxLjYxLS4wODUuMTctLjE3OC4zMzMtLjI3Ni40ODlsLS4wMS4wMTdhNC45NjcgNC45NjcgMCAwMS0uNjIuNzkxbC0uMDE5LjAyYy0xLjA5MiAxLjExNy0yLjQ5NiAxLjMzNi0zLjI5NS0uMjYyeiIgLz48cGF0aCBkPSJNMjEuMTkzIDkuNzUzYzIuNTc0LS41IDMuMzc4IDEuNDMzIDIuNDExIDMuMzY1LS41OCAxLjE1OS0xLjQ3NiAxLjM2MS0yLjM0Mi45NmwtLjAxMS0uMDA1YTIuNDE5IDIuNDE5IDAgMDEtLjExNC0uMDU2bC0uMDE5LS4wMWEyLjc1MSAyLjc1MSAwIDAxLS4xMTUtLjA2N2wtLjAyMy0uMDE0Yy0uMDM1LS4wMjItLjA3MS0uMDQ0LS4xMDYtLjA2OGwtLjA1LS4wMzVjLS41NS0uMzg4LTEuMDYyLTEuMDA3LTEuNDQtMS43Ni0uMjc2LS42NDctLjMxMS0xLjEzMi0uMTc0LTEuNDcyLjE3Ni0uNDM5LjYzNi0uNjM5IDEuMjMtLjYzOS4wMzItLjAxMS4wNjYtLjAyLjA5OS0uMDMuMDgtLjAyNi4xNi0uMDUuMjM4LS4wNzJsLjExNy0uMDNhNS41MDIgNS41MDIgMCAwMS4zLS4wNjd6IiAvPjwvZz48ZGVmcz48bGluZWFyR3JhZGllbnQgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiIGlkPSJiIiB4MT0iLS42NTkiIHgyPSIyNy4wMjMiIHkxPSIuNDU4IiB5Mj0iMjIuODU1Ij48c3RvcCBzdG9wLWNvbG9yPSIjRkY0RDREIiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzk5MUIxQiIgLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImMiIHgxPSItLjY1OSIgeDI9IjI3LjAyMyIgeTE9Ii40NTgiIHkyPSIyMi44NTUiPjxzdG9wIHN0b3AtY29sb3I9IiNGRjRENEQiIC8%2BPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOTkxQjFCIiAvPjwvbGluZWFyR3JhZGllbnQ%2BPGxpbmVhckdyYWRpZW50IGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBpZD0iZCIgeDE9Ii0uNjU5IiB4Mj0iMjcuMDIzIiB5MT0iLjQ1OCIgeTI9IjIyLjg1NSI%2BPHN0b3Agc3RvcC1jb2xvcj0iI0ZGNEQ0RCIgLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiM5OTFCMUIiIC8%2BPC9saW5lYXJHcmFkaWVudD48bGluZWFyR3JhZGllbnQgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiIGlkPSJlIiB4MT0iLS42NTkiIHgyPSIyNy4wMjMiIHkxPSIuNDU4IiB5Mj0iMjIuODU1Ij48c3RvcCBzdG9wLWNvbG9yPSIjRkY0RDREIiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzk5MUIxQiIgLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImYiIHgxPSItLjY1OSIgeDI9IjI3LjAyMyIgeTE9Ii40NTgiIHkyPSIyMi44NTUiPjxzdG9wIHN0b3AtY29sb3I9IiNGRjRENEQiIC8%2BPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjOTkxQjFCIiAvPjwvbGluZWFyR3JhZGllbnQ%2BPGNsaXBQYXRoIGlkPSJhIj48cGF0aCBkPSJNMCAwaDI0djI0SDB6IiAvPjwvY2xpcFBhdGg%2BPC9kZWZzPjwvc3ZnPg%3D%3D&logoColor=white">
+  <img alt="OpenCode" src="https://img.shields.io/badge/OpenCode-10B981?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIGZpbGw9IiNmZmZmZmYiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSIxZW0iIHN0eWxlPSJmbGV4Om5vbmU7bGluZS1oZWlnaHQ6MSIgdmlld0JveD0iMCAwIDI0IDI0IiB3aWR0aD0iMWVtIj48dGl0bGU%2Bb3BlbmNvZGU8L3RpdGxlPjxwYXRoIGQ9Ik0xNiA2SDh2MTJoOFY2em00IDE2SDRWMmgxNnYyMHoiIC8%2BPC9zdmc%2B&logoColor=white">
+</p>
 
-> 👉 **I've read enough, I just want to install it on [Windows](docs/QUICKSTART_WINDOWS.md), [macOS](docs/QUICKSTART_MACOS.md), or [Linux](docs/QUICKSTART_LINUX.md).**
-
----
-
-## 🧠 Memory model at a glance
-
-Not a vector store with RAG sugar — a **typed, bitemporal, confidence-scored,
-self-maintaining knowledge base**. Every point below is a first-class column or
-named function, not a roadmap item ([full model →](docs/MEMORY_MODEL.md)):
-
-- **Typed & structured** — every memory has `type`, `source`, `confidence`, `scope`,
-  provenance (`change_agent`), and salience (`importance`, `decay_rate`) — a database
-  of facts, not a transcript.
-- **Bitemporal history** — separate valid-time and transaction-time, so m3 answers
-  *"what did we believe last Tuesday, and when was it corrected?"* — superseded facts
-  are closed, not deleted.
-- **Automatic contradiction handling** — conflicts are detected on write and the stale
-  fact is superseded (with `corroboration_count` / `contradiction_count` + a Bayesian
-  confidence posterior), instead of piling up contradictory history.
-- **Self-maintaining lifecycle** — decay, dedup, consolidation into higher-order
-  `belief` memories, TTL/expiry, retention, and GDPR erasure.
-- **Write-gating** — high-signal memories are promoted through an enrichment queue;
-  a content-safety gate rejects injection at the write boundary. Remember *fewer*
-  things, *better*.
-- **Explainable, goal-aware retrieval** — hybrid (vector + FTS5 BM25 + MMR + rerank),
-  intent-routed by query type, and `memory_suggest` returns the **per-result score
-  breakdown** (vector / bm25 / recency / title-overlap → final) so you can ask *"why
-  did you remember this?"* and get numbers. See
-  [CONFIDENCE_AND_TRUST.md](docs/CONFIDENCE_AND_TRUST.md).
-- **Measured, not asserted** — LongMemEval-S **92% end-to-end QA, 99.2% recall@10**
-  ([report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
+> 💡 **Get Started Quickly:**
+> * 🚀 **[5-Minute "Human-First" Guide](docs/GETTING_STARTED.md)**
+> * 🖥️ **OS Installation:** [Windows Setup](docs/QUICKSTART_WINDOWS.md) · [macOS Setup](docs/QUICKSTART_MACOS.md) · [Linux Setup](docs/QUICKSTART_LINUX.md)
 
 ---
 
-## 📦 Install
+## 📑 Table of Contents
 
+- [Overview & At a Glance](#-m3-at-a-glance)
+- [Memory Model](#-memory-model-at-a-glance)
+- [Installation & Onboarding](#-installation)
+- [Domain Gating (Token Optimization)](#-domain-gating-keeps-the-catalog-small)
+- [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments)
+- [Interactive Features & Capabilities](#-what-m3-does)
+- [Documentation Index](#-documentation-index)
+- [Target Audience & Fit](#-who-this-is-for)
+- [Quality Assurance & Compliance](#-why-trust-this)
+- [Benchmarks & Performance](#-benchmarks)
+- [Core Tools Reference](#-core-tools)
+- [Agent Integration Prompts](#-for-ai-agents)
+- [Interactive Demos](#-see-it-in-action)
+
+---
+
+## ⚡ M3 at a Glance
+
+| Feature | Details |
+| :--- | :--- |
+| **Works With** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · LangChain/LangGraph · Any MCP Agent |
+| **M3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
+| **M3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
+| **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools. |
+| **Maturity** | Production-grade. Uses SQLite by default for lightweight operation; scales out to PostgreSQL for enterprise sync. (See [features.json](docs/features.json)) |
+
+---
+
+## 🧠 Memory Model at a Glance
+
+M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base**. Every feature listed below is implemented natively (see [Memory Model Details](docs/MEMORY_MODEL.md)):
+
+*   **Structured Metadata:** Every memory contains a `type`, `source`, `confidence`, `scope`, provenance (`change_agent`), and salience (`importance`, `decay_rate`).
+*   **Bitemporal History:** Distinguishes valid-time from transaction-time. Superseded facts are closed rather than deleted, allowing you to query what the agent believed at any specific point in time.
+*   **Contradiction Management:** Conflicting facts are resolved automatically on write. The stale fact is marked as superseded, and confidence values are updated dynamically via Bayesian confidence posteriors.
+*   **Self-Maintaining Lifecycle:** Implements memory decay, deduplication, automatic consolidation into higher-order beliefs, TTL expiry, and GDPR erasure.
+*   **Write-Gating & Content Safety:** Filters out low-signal noise via an enrichment queue and content safety guardrails before storage.
+*   **Explainable Retrieval:** Hybrid engine combining vector similarity, BM25 (FTS5), MMR diversity, and reranking. `memory_suggest` returns the exact score breakdown per result. (See [Confidence and Trust Guide](docs/CONFIDENCE_AND_TRUST.md)).
+*   **Proven Accuracy:** Evaluated via LongMemEval-S, yielding **92.0% end-to-end QA accuracy** and **99.2% recall @ k=10** (see [Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
+
+---
+
+## 📦 Installation
+
+### The One-Liner (macOS & Linux)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
 ```
+*   *For Windows, please follow the [Windows Manual Installation Guide](docs/install_windows.md).*
+*   *To install manually on any platform, refer to the [OS-Specific Install Instructions](INSTALL.md#tldr--manual-path-per-os) or examine the [installer script](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh).*
 
-Installs on macOS or Linux with the single command above. Use this to [install on Windows](https://github.com/skynetcmd/m3-memory/blob/main/docs/install_windows.md). Use this link to [install manually](https://github.com/skynetcmd/m3-memory/blob/main/INSTALL.md#tldr--manual-path-per-os) and this to [examine the script](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh) and what it does.
-
-**Claude Code users** can also install as a plugin instead — gets you 15 `/m3:*` slash commands, two curator subagents (`m3:curate-memory`, `m3:curate-chatlog`), and auto-wired hooks:
-
-```
-/plugin marketplace add skynetcmd/m3-memory
-/plugin install m3@skynetcmd
-```
-
-[Plugin reference](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_code_plugin.md) · [Claude.ai (web/desktop) connector](https://github.com/skynetcmd/m3-memory/blob/main/docs/claude_ai_connector.md)
-
-**Google Antigravity users** can install the plugin directly:
-
-```bash
-agy plugin install https://github.com/skynetcmd/m3-memory
-```
-
-[Plugin reference](https://github.com/skynetcmd/m3-memory/blob/main/docs/antigravity_plugin.md)
-
-**Hermes Agent users** can install the memory-provider plugin directly (supports optimal replacement of default memory or parallel coexistence for rich SOTA retrieval):
-
-```bash
-# Handled automatically via our setup wizard:
-m3 setup
-```
-
-[Plugin integration guide](docs/HERMES.md)
-
----
-
-Add to your MCP config:
-
-```json
-{
-  "mcpServers": {
-    "memory": { "command": "m3" }
-  }
-}
-```
-
-### 🚀 One-command setup
-
+### Developer Setup Wizard
+If you are developing inside python environments:
 ```bash
 pip install m3-memory
 m3 setup
 ```
+The `m3 setup` wizard automatically scans your `PATH` for active agents (Claude Code, Gemini CLI, OpenCode, OpenClaw), installs settings files/hooks, provisions the sovereign CPU embedder, and performs a system diagnostic.
 
-`m3 setup` is an interactive wizard. It detects every agent on PATH (Claude
-Code, Gemini CLI, OpenCode, OpenClaw), asks a handful of questions, then
-drives the full install end-to-end: system payload, sovereign CPU embedder
-(BGE-M3 on port 8082), per-agent MCP wiring, chatlog hooks, and a brief
-`doctor` health check. Restart your agent — that's it.
+### Integrating with AI Coding Tools
 
-### 🛡️ Sovereign by default
+#### 🤖 Claude Code
+Install as a plugin to unlock `/m3:*` slash commands, curation subagents, and automatic hooks:
+```
+/plugin marketplace add skynetcmd/m3-memory
+/plugin install m3@skynetcmd
+```
+*See [Claude Code Plugin Reference](docs/claude_code_plugin.md) and [Claude.ai Connector Guide](docs/claude_ai_connector.md).*
 
-The embedder ships **in the repo**. Our own BGE-M3 CPU embedder runs as a
-small always-on service on `127.0.0.1:8082` after `m3 setup`. **No LM
-Studio, no Ollama, no GPU, no internet** required for embedding to work.
+#### 🪐 Google Antigravity
+Install the plugin directly:
+```bash
+agy plugin install https://github.com/skynetcmd/m3-memory
+```
+*See [Antigravity Plugin Reference](docs/antigravity_plugin.md).*
 
-| Embedder path | When it's used | What you do |
-|---|---|---|
-| **Sovereign CPU (port 8082)** | Always installed by `m3 setup`. Concurrency=2 BGE-M3, GGUF bundled via Git LFS at `_assets/models/bge-m3-Q4_K_M.gguf`. | Nothing — it's the default. |
-| **GPU in-process** | Optional opt-in for ~10-50× faster embedding. CUDA / Vulkan / Metal auto-detected. | `m3 embedder install-gpu` (needs the matching GPU toolchain). |
-| **External (Ollama, LM Studio, vLLM, …)** | Power users who want a different model or shared host service. | Set `EMBED_BASE_URL` to your endpoint; m3 falls back to it if the sovereign service is down. |
+#### 🦊 Hermes Agent
+Run the wizard to automatically wire up optimal memory providers:
+```bash
+m3 setup
+```
+*See [Hermes Plugin Integration Guide](docs/HERMES.md).*
 
-Want auto-classification, summarization, and consolidation? Load a small
-chat model for generation (e.g. `qwen2.5:0.5b` via Ollama, or any 0.5–1B
-instruct GGUF). M3 auto-selects it; embedding-only features work without
-it. See [docs/QUICKSTART.md → Optional: load a small chat model](docs/QUICKSTART.md#optional-load-a-small-chat-model-for-enrichment).
-
-> **⚡ Auto-Oxidation is ON by default.** Performance-critical hot paths (MMR rerank, batch cosine, FTS compile, redaction) run on an optional in-process Rust core (`m3_core_rs`, a local wheel — no service), with silent pure-Python fallback when it's absent. Micro-benchmarks show large wins where they matter (up to ~846× on packed MMR rerank, ~97–178× on batch-cosine). Full table + methodology: [docs/OXIDATION_BENCHMARKS.md](docs/OXIDATION_BENCHMARKS.md). Opt out with `M3_CORE_RS_DISABLE=1`.
-
-Restart your agent. Done!
-
----
-
-## 🎚️ 100+ tools, but they don't all crowd your context — domain gating keeps the catalog small
-
-M3 exposes 100+ MCP tools so power users can customize at fine granularity —
-single-id deletes, bulk variants, per-store searches, KG traversals, GDPR
-primitives, agent handoffs, watch-mode admin, the lot. Most agents never
-touch most of them in a typical session.
-
-To avoid burning context space on tool schemas you won't use, m3 groups
-its catalog into **8 domains** (`memory`, `chatlog`, `files`, `entity`,
-`agent`, `tasks`, `conversations`, `admin`) and **loads them lazily**.
-At MCP startup only the essentials register (6 data tools — memory +
-chatlog + files search/write — plus the 4 always-on dispatcher/meta tools);
-the rest expose on demand when the agent calls
-`tools_load_domain(domain="…")`.
-
-Measured on m3 main with the gpt-4o tokenizer over the serialized tool
-schemas (`{name, description, parameters}` per tool, as registered on the
-MCP wire):
-
-| Mode | Tools at startup | Tokens at startup | % of 200 K window | % of 256 K window |
-|---|---:|---:|---:|---:|
-| **Lazy (default)** | **10** | **~3,540** | **1.8 %** | **1.4 %** |
-| Typical session (lazy + agent loads files + memory) | 64 | ~17,975 | 9.0 % | 7.0 % |
-| Eager (`M3_TOOLS_LAZY=0` — legacy) | 107 | ~24,918 | 12.5 % | 9.7 % |
-
-For comparison, common alternatives: a 40-tool GitHub MCP server
-≈ 12,000 tokens; the full 93-tool GitHub MCP server ≈ 55,000 tokens
-([MCP Token Counter](https://mcpplaygroundonline.com/blog/mcp-token-counter-optimize-context-window)).
-m3's lazy default keeps the always-on surface ~7× smaller than the full
-eager catalog while giving the agent the full tool set whenever it
-actually needs them.
-
-Disable with `M3_TOOLS_LAZY=0` if your client doesn't support
-[dynamic tool registration](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
-or you want every tool at startup. Direct Python imports
-(`from memory_bridge import memory_write`) always expose every tool —
-this only gates the MCP wire surface.
+#### 🐍 Python / LangChain & LangGraph
+Use M3 as a drop-in Mem0 replacement or LangMem backend:
+```bash
+pip install m3-memory[langchain]
+```
+*See [LangChain Integration Guide](docs/integrations/LANGCHAIN.md).*
 
 ---
 
-## 🛡️ Air-gapped deployment
+### Manual MCP Server Configuration
+To expose M3 to any Model Context Protocol host, add it to your configuration file:
 
-M3 is sovereign **by default** — the baseline install needs no external services. For fully air-gapped environments, the only extra step is to pre-stage the repo (with the LFS-tracked GGUF materialized) and wheels on a connected machine, then sneakernet the folder and `pip install --no-index`. No `curl`, no LM Studio, no third-party model server.
-
-M3 is also **FIPS 140-3 deployment-ready**: it implements no custom crypto, uses only FIPS-approved algorithms, and routes every operation through a single provider boundary so a validated wolfCrypt module can serve it (`M3_FIPS_MODE=1` fails closed if absent). M3 itself is not a CMVP-validated module — no application is.
-
-**Full guides:** [Sovereign & Air-Gapped Deployment](docs/SOVEREIGN_DEPLOYMENT.md) · [FIPS module boundary & tiers](docs/FIPS_MODULE_BOUNDARY.md). Config/payload/backups live under `~/.m3-memory` (override with `M3_MEMORY_ROOT`).
-
----
-
-## 🔮 What happens next (benefits of use)
-
-You're at a coffee shop on your MacBook, asking Claude to debug a deployment issue. It remembers the architecture decisions you made last week, the server configs you stored yesterday, and the troubleshooting steps that worked last time — all from local SQLite, no internet required.
-
-Later, you're at your Windows desktop at home with Gemini CLI, and it picks up exactly where you left off. Same memories, same context, same knowledge graph. You didn't copy files, didn't export anything, didn't push to someone else's cloud. Your PostgreSQL sync handled everything in the background the moment your laptop hit the local network.
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "m3"
+    }
+  }
+}
+```
 
 ---
 
-## 💡 Why this exists
+## 🎚️ Domain Gating Keeps the Catalog Small
 
-Most AI agents don't persist state between sessions. You re-paste context, re-explain architecture, re-correct mistakes. When facts change, the agent has no mechanism to update what it "knows."
+Exposing 100+ tools can overwhelm an LLM's context window. To avoid this, M3 groups its tools into **8 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `admin`) and loads them lazily. 
 
-M3 Memory gives agents a structured, persistent memory layer that handles this.
+Only 10 core tools register at startup. When your agent needs advanced functionalities, it calls `tools_load_domain(domain="...")` to fetch them dynamically.
 
----
+| Gating Mode | Registered Tools | Tokens in Schema | % of 200K Window |
+| :--- | :---: | :---: | :---: |
+| **Lazy (Default)** | **10** | **~3,540** | **1.8%** |
+| Typical Active Session | 64 | ~17,975 | 9.0% |
+| Eager Mode (`M3_TOOLS_LAZY=0`) | 107 | ~24,918 | 12.5% |
 
-## ⚡ What it does
-
-**Autonomous cognitive loop** — optional background worker (`m3_cognitive_loop.py`) that extracts facts, resolves contradictions, and links entities while you sleep. Turns raw chat logs into a refined knowledge graph without human intervention.
-
-**Persistent memory** — facts, decisions, preferences survive across sessions. Stored in local SQLite.
-
-**Hybrid retrieval** — FTS5 keyword matching + semantic vector similarity + MMR diversity re-ranking. Automatic, no tuning required.
-
-**Contradiction handling** — conflicting facts are automatically superseded. Bitemporal versioning preserves the full history.
-
-**Knowledge graph** — related memories linked automatically on write. Nine relationship types, 3-hop traversal. Entity extraction (`entity_search`, `entity_get`) supplements the graph with first-class people / places / things resolution. The entity-graph layer ships a stock entity-type and predicate vocabulary, and it's **user-configurable**: point `M3_ENTITY_VOCAB_YAML` at your own profile to swap or extend the vocab for your domain — no code changes.
-
-**Zero-config local install** — `pip install m3-memory` plus one line in your MCP config, or `m3 setup` for a one-command wizard that detects agents, wires settings.json + hooks, installs the sovereign CPU embedder, and verifies with a brief `doctor` check in one shot. SQLite stores everything locally — no external databases, no cloud calls, no API costs. Works offline.
-
-**Context-frugal tool catalog** — 100+ MCP tools grouped into 8 domains, loaded lazily. Startup surface is **~3,540 tokens** (~1.8% of a 200K window) vs ~24,918 if every tool registered eagerly. Agent expands a domain when it needs the rest. See [§ 100+ tools, domain-gated](#-100-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small).
-
-**Cross-device sync** — optional, easy-to-add bi-directional delta sync via PostgreSQL or ChromaDB, with manifest-driven multi-DB support for fleet deployments. Set one environment variable and your memories follow you across machines.
+> 🛠️ *Note: If your client does not support dynamic tool registration, set the environment variable `M3_TOOLS_LAZY=0` to register all tools eagerly.*
 
 ---
 
-## 📚 Learn more
+## 🛡️ Sovereign & Air-Gapped Deployments
 
-| | |
-|---|---|
-| 🚀 **[Getting started](docs/GETTING_STARTED.md)** | 👥 **[Multi-agent orchestration](docs/MULTI_AGENT.md)** |
-| ✨ **[Core features](docs/CORE_FEATURES.md)** | 🧩 **[Multi-agent example](examples/multi-agent-team/README.md)** |
-| 🏗️ **[System design](docs/ARCHITECTURE.md)** | ⚖️ **[Compare M3 to alternatives](docs/COMPARISON.md)** ([sovereign substrates table](docs/M3_Comparison_Table.md)) |
-| 🔧 **[Implementation details](docs/TECHNICAL_DETAILS.md)** | ⚙️ **[Configuration](docs/ENVIRONMENT_VARIABLES.md)** |
-| 🤖 **[Agent rules + all tools](docs/AGENT_INSTRUCTIONS.md)** | 🛡️ **[Compliance & assurance](docs/COMPLIANCE.md)** (FISMA, CMMC, GDPR) |
-| 🦜 **[LangChain / LangGraph integration](docs/integrations/LANGCHAIN.md)** (drop-in Mem0 replacement, backs LangMem) | 🧩 **[Hermes Agent integration](docs/HERMES.md)** |
-| 🏠 **[Homelab patterns](docs/HOMELAB_PATTERNS.md)** | 🔍 **[Myths & facts](docs/MYTHS_AND_FACTS.md)** (verify claims about M3) |
-| 🗺️ **[Roadmap](docs/ROADMAP.md)** | 📜 **[Changelog](CHANGELOG.md)** |
-| 🛠️ **[Operations playbook](docs/OPERATIONS.md)** (run the memory brain) | 🧩 **[Capability matrix](docs/CAPABILITY_MATRIX.md)** (every tool, grouped) |
-| 🤖 **[AI agent context profile](docs/llm-context.md)** (inject into other LLMs) | 🔢 **[Machine-readable features](docs/features.json)** (`features.json`) |
+M3 operates completely offline by default. 
 
----
+### Sovereign Local Embedder
+A high-performance BGE-M3 embedder runs locally on `127.0.0.1:8082` after installation.
+*   **Default:** CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`).
+*   **Hardware Acceleration (GPU):** Execute `m3 embedder install-gpu` to compile with CUDA, Vulkan, or Metal.
+*   **External Provider Fallback:** Set `EMBED_BASE_URL` to route requests to Ollama, LM Studio, or vLLM.
 
-## 🎯 Who this is for
+### Rust-Oxidized Performance Core
+M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MMR re-ranking, batch cosine distance calculations, and FTS compilations by **90× to 800×**. If absent, M3 falls back to pure Python execution automatically. Disable with `M3_CORE_RS_DISABLE=1`. (See [Oxidation Benchmarks](docs/OXIDATION_BENCHMARKS.md)).
 
-### M3 is a good fit if…
-
-| | |
-|---|---|
-| 🤖 **You use coding agents** | Claude Code, Gemini CLI, Aider, OpenCode, or any MCP-compatible agent. Non-MCP clients work too via the built-in HTTP proxy. |
-| 🦜 **You build on LangChain / LangGraph** | **A superset for LangChain users** — keep everything Mem0 / LangMem give you and gain contradiction supersession, bitemporal `as_of` queries, GDPR forgetting, hybrid retrieval, a bundled embedder, and M3's full 100+ MCP tool set. Drop-in **Mem0 replacement** (one-line import swap), **LangMem-compatible** (`store=M3Store()`). See [docs/integrations/LANGCHAIN.md](docs/integrations/LANGCHAIN.md). |
-| 👥 **You run multiple agents** | Coordinating Claude + Gemini + a background worker on a shared local store, with handoffs and per-agent scoping. |
-| 🛡️ **You need compliance primitives** | `gdpr_forget` / `gdpr_export` as MCP tools, bitemporal valid-time / transaction-time, audit trail, no telemetry. |
-| 💾 **You want pure local-first** | Single-file SQLite. Works offline. No external database, no cloud calls, no API costs by default. |
-| 🌐 **You want memory across devices** | Optional bi-directional delta sync via PostgreSQL or ChromaDB — your data, your hardware. |
-
-### M3 is **not** the right tool if…
-
-| | Try instead |
-|---|---|
-| You're building **CrewAI** pipelines and want framework-native memory | [Mem0](https://mem0.ai) |
-| You want a hosted agent runtime with managed scaling, dashboards, and SLAs | [Letta](https://letta.ai), [Mem0 Pro](https://mem0.ai) |
-| You want a fully managed, hosted retrieval service and don't need local-first / sovereignty | [agentmemory](https://github.com/agentmemory), [Hindsight](https://github.com/vectorize-io/hindsight) |
-| You only need in-session chat context that's discarded after the conversation | Your agent's built-in conversation buffer; M3 is overkill |
+### Enterprise Security & Compliance
+*   **FIPS 140-3 Ready:** Standardized encryption pathways allow routing through validated cryptographic modules (e.g., wolfSSL via `M3_FIPS_MODE=1`).
+*   **Air-Gapped Install:** Supports installation without internet access via pre-compiled python wheels. (See [Sovereign Deployment Guide](docs/SOVEREIGN_DEPLOYMENT.md) & [FIPS Boundary Reference](docs/FIPS_MODULE_BOUNDARY.md)).
+*   **Storage Location:** All config and data files reside under `~/.m3-memory` (configurable via `M3_MEMORY_ROOT`).
 
 ---
 
-## 🛡️ Why trust this
+## 🔮 What M3 Does
 
-| | |
-|---|---|
-| **100+ MCP tools** | Memory, search, GDPR, refresh lifecycle — plus agent registry, handoffs, notifications, tasks, entity graph, fact enrichment, chat-log capture, and a 26-tool files-memory layer (directory ingestion, hierarchical chunking, ascension to core memory, watch-mode staleness review) |
-| **563 end-to-end tests** | Covering write, search, contradiction, sync, GDPR, maintenance, orchestration, and the files-memory pipeline |
-| **Explainable retrieval** | `memory_suggest` returns vector, BM25, and MMR scores per result |
-| **SQLite core** | No external database required. Single-file, portable, inspectable |
-| **GDPR compliance** | `gdpr_forget` (Article 17) and `gdpr_export` (Article 20) as built-in tools — see [compliance & assurance](docs/COMPLIANCE.md) for FISMA / CMMC alignment too |
-| **Self-maintaining** | Automatic decay, dedup, orphan pruning, retention enforcement |
-| **Audited security posture** | Periodic Bandit + pip-audit + secrets-scan reports published under [`docs/audits/`](docs/audits/); CI gates on core-dep CVEs |
-| **Apache 2.0 licensed** | Free. No SaaS tier, no usage limits, no lock-in |
+*   **Memory Persistence:** Saves system architecture, project decisions, and preferences across tool boundaries using a local SQLite database.
+*   **Autonomous Cognitive Loop:** Background worker (`m3_cognitive_loop.py`) that periodically sweeps chat logs to extract facts, reconcile contradictions, and construct an entity relationship graph.
+*   **Hybrid Vector & Keyword Search:** Seamlessly merges vector space, Full-Text Search (FTS5 BM25), and MMR diversity.
+*   **Hierarchical File Ingestion:** A dedicated 26-tool files domain reads directories, chunks files, extracts facts, and reviews staleness.
+*   **Cross-Device Sync:** Optional PostgreSQL or ChromaDB synchronization backend. Access the same memories on your laptop, desktop, or cloud environments.
 
-> 🧭 **Maturity.** The core — storage, retrieval, GDPR, MCP tools, sync — is stable and fully covered by the test suite. The enrichment + reflector pipeline shipped through 2026-Q2 with live-fire experience behind it and gets sharper with every release. **M3 runs in production today** — a durable memory substrate for personal, homelab, and multi-agent developer workflows, from a single laptop to a fleet of heterogeneous agents sharing one evolving knowledge base.
->
-> **Built privacy-focused from the ground up.** For regulated environments, M3 ships with first-class compliance primitives rather than bolting them on:
->
-> - **GDPR** — `gdpr_forget` (Article 17, right to erasure) and `gdpr_export` (Article 20, data portability) as built-in MCP tools.
-> - **FIPS 140-3 deployment-ready crypto boundary** — AES-256-GCM secrets vault, PBKDF2-HMAC-SHA256 key derivation, and TLS 1.3 with FIPS-approved ciphersuites, all routed through a single provider boundary. The crypto provider is obtained separately, not bundled: point it at the CMVP-validated wolfSSL FIPS module (under `M3_FIPS_STRICT`) for a validated deployment, or use the open-source wolfCrypt build for everything else — the validation belongs to that module, not to M3.
-> - **Bitemporal audit log** — valid-time and transaction-time captured on every write, backed by a tamper-evident hash chain.
-> - **Air-gap operability** — no network listeners, no telemetry, no implicit egress.
-> - **Framework alignment** — mapped to NIST SP 800-53 (FISMA) and CMMC 2.0 / NIST SP 800-171.
->
-> M3 is an application, not a validated cryptographic module or a certified system — the certificate and the ATO belong to your deployment. Evaluate it against your specific requirements first, as you should any memory tool. See [docs/COMPLIANCE.md](docs/COMPLIANCE.md) and [docs/FIPS_MODULE_BOUNDARY.md](docs/FIPS_MODULE_BOUNDARY.md) for the precise boundary, and [docs/MYTHS_AND_FACTS.md](docs/MYTHS_AND_FACTS.md) for where we draw the line.
+---
+
+## 📚 Documentation Index
+
+| Quick & Core | Advanced & Architecture | Integrations & Compliance |
+| :--- | :--- | :--- |
+| 🚀 **[Getting Started Guide](docs/GETTING_STARTED.md)** | 🏗️ **[System Architecture](docs/ARCHITECTURE.md)** | 🧩 **[LangChain/LangGraph](docs/integrations/LANGCHAIN.md)** |
+| ✨ **[Core Features](docs/CORE_FEATURES.md)** | 🔧 **[Technical Implementation](docs/TECHNICAL_DETAILS.md)** | 🧩 **[Hermes Agent](docs/HERMES.md)** |
+| ⚙️ **[Environment Variables](docs/ENVIRONMENT_VARIABLES.md)** | 🧠 **[Memory Model Guide](docs/MEMORY_MODEL.md)** | 🛡️ **[Compliance Guide](docs/COMPLIANCE.md)** (GDPR, FISMA) |
+| 🛠️ **[Operations Playbook](docs/OPERATIONS.md)** | ⚡ **[Rust Oxidation benchmarks](docs/OXIDATION_BENCHMARKS.md)** | 🛡️ **[FIPS Cryptographic Boundary](docs/FIPS_MODULE_BOUNDARY.md)** |
+| 🤖 **[Agent Instructions & Rules](docs/AGENT_INSTRUCTIONS.md)** | 🔍 **[Myths & Facts Guide](docs/MYTHS_AND_FACTS.md)** | 🏠 **[Homelab Patterns](docs/HOMELAB_PATTERNS.md)** |
+| 🧩 **[Tool Capability Matrix](docs/CAPABILITY_MATRIX.md)** | 🤖 **[AI Context Injection Profile](docs/llm-context.md)** | 🔢 **[Machine-Readable Features](docs/features.json)** |
+
+---
+
+## 🎯 Who This Is For
+
+### M3 is a great fit if...
+*   **You use multiple desktop coding agents:** Interoperate Claude Code, Gemini, and Aider on a shared local history.
+*   **You build with LangChain/LangGraph:** An advanced replacement for standard memory models, adding bitemporal queries, contradiction management, and local embeddings.
+*   **You need security and compliance:** Built-in `gdpr_forget` and `gdpr_export` tools, air-gapped support, and audit logs.
+*   **You value privacy:** Zero external cloud requests or subscriptions required.
+
+### M3 is NOT a fit if...
+*   You use **CrewAI** and want standard, framework-native memory models (use [Mem0](https://mem0.ai)).
+*   You need a hosted SaaS dashboard with managed infrastructure (use [Letta](https://letta.ai)).
+*   You only want transient in-session chat context that resets when you exit the terminal (rely on your agent's defaults).
+
+---
+
+## 🛡️ Why Trust This
+
+*   **Robust Coverage:** Verified with **563 end-to-end tests** spanning search, sync, GDPR lifecycle, and files ingestion.
+*   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
+*   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.
+*   **Open Source:** Apache 2.0 licensed, free, with no SaaS walls or usage limits.
 
 ---
 
 ## 📊 Benchmarks
 
-### Session Hit-Rate @ k (retrieval-only)
+### Retrieval Recall (Session Hit-Rate @ k)
+Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) dataset under default server configurations:
 
-| k | SHR | Hits / 500 | vs. prior report |
-|---:|---:|---:|---:|
-| 5  | **98.2%** | 491 / 500 | +2.0pp (was 96.2%) |
-| 10 | **99.2%** | 496 / 500 | +2.4pp (was 96.8%) |
-| 20 | **100.0%** | 500 / 500 | first time reported |
-
-**k=10 is M3's default search depth** — every column above uses the same engine settings the production `memory_search` tool ships with.
-
-Binary per-question SHR (`recall_any@k`) — same convention the adjacent LongMemEval-S submissions report as "R@k". Measured on [`longmemeval_s_cleaned.json`](https://github.com/xiaowu0162/LongMemEval) (500 questions), no oracle metadata, BGE-M3 hybrid retrieval (FTS5 + vector + MMR). Deterministic at T=0; reproducibility variance <0.1pp.
+| Retrieve Depth (k) | Session Hit-Rate (SHR) | Success Count | vs. Prior Version |
+| :---: | :---: | :---: | :---: |
+| 5 | **98.2%** | 491 / 500 | +2.0pp |
+| 10 (Default) | **99.2%** | 496 / 500 | +2.4pp |
+| 20 | **100.0%** | 500 / 500 | First Report |
 
 ### End-to-End QA Accuracy
+**92.0% accuracy** (460/500 correct responses) with zero oracle metadata routing:
 
-**92.0%** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) (460/500 correct) — a 500-question evaluation of long-horizon conversational memory — with **no oracle metadata** (routing inferred from the question text at runtime). Answer model: Claude Opus 4.6; judge: gpt-4o (unmodified upstream).
-
-| Question type | n | Accuracy |
-|---|---|---|
+| Question Domain | Count (n) | Accuracy |
+| :--- | :---: | :---: |
 | single-session-user | 70 | 94.3% |
 | single-session-assistant | 56 | 96.4% |
 | single-session-preference | 30 | 80.0% |
 | multi-session | 133 | 87.2% |
 | temporal-reasoning | 133 | 95.5% |
 | knowledge-update | 78 | 93.6% |
-| **Overall** | **500** | **92.0%** |
+| **Overall Summary** | **500** | **92.0%** |
 
-The retrieval-vs-QA gap (100% SHR @ k=20 → 92.0% QA) is dominated by answer-model errors on already-retrieved gold evidence, not retrieval misses.
-
-Full methodology, ablations, and honest caveats: [`benchmarks/longmemeval/LME-S_Benchmarking_Report.md`](benchmarks/longmemeval/LME-S_Benchmarking_Report.md). (An earlier oracle-routed configuration scored 89.0%.)
-Discussion threads: [xiaowu0162/LongMemEval#49](https://github.com/xiaowu0162/LongMemEval/issues/49) (v3, no-oracle) and [#43](https://github.com/xiaowu0162/LongMemEval/issues/43) (v1).
-LoCoMo audit pending — see [`benchmarks/locomo/README.md`](benchmarks/locomo/README.md).
-
-> 🔍 **Verifying claims about M3.** If a third-party AI assistant has described M3 with features or scores that don't match what's documented here, it's almost certainly hallucinating. See [`docs/MYTHS_AND_FACTS.md`](docs/MYTHS_AND_FACTS.md) for the source-of-truth list of what M3 actually implements (and what it doesn't).
+*Methodology and reproducibility details are located in the [LongMemEval-S Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md).*
 
 ---
 
-## 🧰 Core tools
+## 🧰 Core Tools
 
-Most sessions use three tools. The rest is there when you need it.
+While M3 features 100+ tools, these five serve as your primary interface:
 
-| Tool | Purpose |
-|------|---------|
-| `memory_write` | Store a fact, decision, preference, config, or observation |
-| `memory_search` | Retrieve relevant memories (hybrid search) |
-| `memory_update` | Refine existing knowledge |
-| `memory_suggest` | Search with full score breakdown |
-| `memory_get` | Fetch a specific memory by ID |
+| Tool Name | Operation Description |
+| :--- | :--- |
+| `memory_write` | Save a specific fact, project preference, or technical configuration. |
+| `memory_search` | Run hybrid keyword (BM25) and semantic vector search. |
+| `memory_update` | Edit existing facts to keep memory accurate. |
+| `memory_suggest` | Query memories alongside a mathematically explicit score breakdown. |
+| `memory_get` | Fetch details of a single memory using its unique ID. |
 
-All tools are documented in [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md) and the full inventory lives in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
-
----
-
-## 🤖 For AI agents
-
-M3 Memory exposes 100+ MCP tools for storing, searching, updating, and linking knowledge — including conversation grouping, a refresh lifecycle for aging memories, agent registry, handoffs, notifications, tasks, entity-graph extraction, fact enrichment, chat-log capture for multi-agent orchestration, and a files-memory layer that ingests entire directories (markdown, PDF, plain text) into a hierarchical store with hybrid search, fact extraction, ascension to core memory, and watch-mode staleness review. Any MCP-compatible agent can use them automatically.
-
-To teach your agent best practices (search before answering, write aggressively, update instead of duplicating), drop the compact rules file into your project:
-
-```
-examples/AGENT_RULES.md
-```
-
-Full tool reference with all parameters and behaviors: [docs/AGENT_INSTRUCTIONS.md](docs/AGENT_INSTRUCTIONS.md)
+*Refer to the [Agent Instructions Guide](docs/AGENT_INSTRUCTIONS.md) and [Full MCP Tool Catalog](docs/MCP_TOOLS.md) for complete parameter definitions.*
 
 ---
 
-## 🪄 Let your agent install it
+## 🤖 For AI Agents
 
-Already inside Claude Code or Gemini CLI? Paste one of these prompts:
+You can drop the agent ruleset file [`examples/AGENT_RULES.md`](examples/AGENT_RULES.md) into your workspace to teach your agent best practices (e.g., query before writing, update existing records instead of duplicating).
 
-**Claude Code:**
-```
+### Command Installation Prompts
+Copy and paste these prompts into your terminal client to let your agent set up M3 for you:
+
+#### Claude Code Prompt
+```text
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
 ~/.claude/settings.json under "mcpServers". For best retrieval, ensure 
@@ -393,8 +297,8 @@ Ollama is running with qwen3-embedding:0.6b (optional, falls back
 to keyword search without it). Then use /mcp to verify the memory server loaded.
 ```
 
-**Gemini CLI:**
-```
+#### Gemini CLI Prompt
+```text
 Install m3-memory for persistent memory. Run: pip install m3-memory
 Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
 ~/.gemini/settings.json under "mcpServers". For best retrieval, ensure 
@@ -402,53 +306,55 @@ Ollama is running with qwen3-embedding:0.6b (optional, falls back
 to keyword search without it).
 ```
 
-After install, test it:
-```
-Write a memory: "M3 Memory installed successfully on [today's date]"
-Then search for: "M3 install"
-```
-
-### Add the chat log subsystem
-
-Want auto-capture of every Claude Code / Gemini CLI / OpenCode / Aider conversation into a searchable, promotable chat log store? Once m3-memory is wired up, just say:
-
-```
+#### Active Chatlog Capture Plugin
+To configure instant conversation logging and backup, tell your active coding agent:
+```text
 Install the m3-memory chat log subsystem.
 ```
-
-The agent runs `bin/chatlog_init.py`, wires the host-agent hook, and installs the embed sweeper schedule. See [docs/CHATLOG.md](docs/CHATLOG.md) for the architecture and ops guide.
+The agent executes `bin/chatlog_init.py` and configures execution triggers (see [Chat Log Architecture Guide](docs/CHATLOG.md)).
 
 ---
 
 ## 🎬 See it in action
 
-### Contradiction detection
+### Contradiction Detection & Automatic Resolution
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_contradiction.svg" alt="Demo: contradiction detection and automatic resolution" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_contradiction.svg" alt="Contradiction Demo" width="100%">
 </p>
 
-### Hybrid search with scores
+### Hybrid Search Scoring Details
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_search.svg" alt="Demo: hybrid search with score breakdown" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_search.svg" alt="Hybrid Search Demo" width="100%">
 </p>
 
-### Cross-device, cross-platform sync
+### Multi-Device Database Sync
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_sync.svg" alt="Demo: cross-device, cross-platform memory sync" width="100%">
+  <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/demo_sync.svg" alt="Sync Demo" width="100%">
 </p>
 
 ---
 
 ## 💬 Community
 
-[![Discord](https://img.shields.io/badge/Discord-M3_Memory-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZcJ3EGC99B)
+[![Discord Badge](https://img.shields.io/badge/Discord-M3_Memory-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZcJ3EGC99B)
 &nbsp;
-[![GitHub Issues](https://img.shields.io/badge/GitHub-Issues-181717?logo=github&style=flat-square)](https://github.com/skynetcmd/m3-memory/issues)
-&nbsp;
-[Contributing](docs/CONTRIBUTING.md) · [Good first issues](docs/GOOD_FIRST_ISSUES.md)
+[![GitHub Issues Badge](https://img.shields.io/badge/GitHub-Issues-181717?logo=github&style=flat-square)](https://github.com/skynetcmd/m3-memory/issues)
+
+[How to Contribute](docs/CONTRIBUTING.md) · [Good First Issues](docs/GOOD_FIRST_ISSUES.md)
 
 ---
 
-[![Star History](https://api.star-history.com/svg?repos=skynetcmd/m3-memory&type=Date)](https://star-history.com/#skynetcmd/m3-memory&Date)
+## 📜 License & Attributions
+
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+### Asset & Icon Credits
+* **Hermes (Caduceus) Icon:** Derived from the Public Domain vector [Caduceus.svg](https://commons.wikimedia.org/wiki/File:Caduceus.svg) on Wikimedia Commons (originally by OpenClipart).
+* **OpenClaw & OpenCode Icons:** Derived from the MIT licensed icon set by [LobeHub](https://github.com/lobehub/lobe-icons).
+
+---
+
+[![Star History Chart](https://api.star-history.com/svg?repos=skynetcmd/m3-memory&type=Date)](https://star-history.com/#skynetcmd/m3-memory&Date)
 
 <!-- mcp-name: io.github.skynetcmd/m3-memory -->
+
