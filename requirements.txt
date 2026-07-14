@@ -57,13 +57,20 @@ sentence-transformers>=5.4.1,<6
 # pinned directly to floor out 18 of 20 known CVEs (all the <4.53.0 ones).
 # Ceiling is <5 (NOT <6): transformers 5.x removed `is_torch_fx_available`, which
 # FlagEmbedding imports — verified to break the embedder on 5.9.0; 4.57.x is the
-# latest working 4.x. Two CVEs remain and are ACCEPTED:
+# latest working 4.x. Three CVEs remain and are ACCEPTED:
 #   - CVE-2026-1839 (Trainer torch.load RCE) — fix only in 5.x; m3 never uses Trainer.
 #   - PYSEC-2025-217 (X-CLIP checkpoint-conversion RCE) — no fixed version exists;
 #     m3 never converts X-CLIP checkpoints.
-# Both require loading a malicious checkpoint; m3 only runs embedding inference on
-# its own trusted local model, so neither is reachable. Revisit when FlagEmbedding
-# supports transformers 5.x.
+#   - CVE-2026-5241 / GHSA-fgcw-684q-jj6r (LightGlue model-load RCE) — fix only in
+#     5.5.0 (above the <5 ceiling); m3 never loads LightGlue (a vision keypoint-
+#     matching model). m3's ONLY transformers surface is sentence-transformers'
+#     SentenceTransformer (embedder) + CrossEncoder (reranker) — no AutoModel /
+#     pipeline / arbitrary from_pretrained path, so the vulnerable code is
+#     unreachable. (Dependabot alert #12.)
+# All three require loading a malicious checkpoint/model; m3 only runs embedding
+# inference on its own trusted local model, so none is reachable. Revisit when
+# FlagEmbedding supports transformers 5.x (would let us raise to the patched 5.5.0+
+# and clear #12 for real) — see the to-do memory.
 transformers>=4.53.0,<5
 torch>=2.11.0,<3
 
