@@ -5,12 +5,14 @@ embedder, the oxidized governor and ingest paths — collectively **Project
 Oxidation**) lives in the companion crate **`m3-core-rs`** and is delivered as a
 prebuilt Python wheel named `m3-core-rs-<os>-<backend>`.
 
-> **These wheels are published on PyPI** — under the platform-suffixed names
-> (e.g. `m3-core-rs-linux-cpu`, `m3-core-rs-windows-cpu`, `m3-core-rs-linux-cuda`),
-> not the bare `m3-core-rs`. `m3 setup` picks the right one for your platform
-> automatically, so `pip install m3-core-rs` returning "not found" is expected —
-> it is not the package name. (If a tool told you "the Rust core isn't on PyPI,"
-> it was looking for the umbrella name; the per-platform wheels are there.)
+> **The lightweight wheels are published on PyPI** — under the platform-suffixed
+> names (`m3-core-rs-linux-cpu`, `m3-core-rs-windows-cpu`, `m3-core-rs-linux-vulkan`,
+> `m3-core-rs-macos-metal`, …), not the bare `m3-core-rs`. So
+> `pip install m3-core-rs` returning "not found" is expected — that is not a
+> package name. (If a tool told you "the Rust core isn't on PyPI," it was looking
+> for the umbrella name; the per-platform wheels are there.)
+>
+> **The CUDA wheels live on the [GitHub Release](https://github.com/skynetcmd/m3-core-rs/releases), not PyPI** — they bundle the CUDA runtime and exceed PyPI's per-file size limit. This is why `m3 setup` resolves wheels **PyPI first, then GitHub Release**: the small CPU/Vulkan/Metal builds come from PyPI, and the large `linux-cuda` / `windows-cuda` builds come from the Release. You don't choose — the installer picks the right source for your platform.
 
 **You almost never need this document.** `m3 setup` and `m3 embedder install-gpu`
 install the matching prebuilt wheel automatically (PyPI first, then the GitHub

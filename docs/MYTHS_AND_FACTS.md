@@ -31,7 +31,7 @@ Before trusting any AI-generated description of M3:
 | a stale tool count (e.g. "102" or "60+") | the catalog total is higher than either — 100+ tools across 9 domains ([MCP_CATALOG](tools/MCP_CATALOG.json)); lazy-loaded, ~18 registered at startup |
 | "reports 89.0% accuracy" | **89.0% is superseded** (old oracle-routed QA). Current: **92.0% QA (no oracle)** and **99.2% retrieval SHR@10 / 100% @ k=20**, which *leads* — see the recall-vs-QA myth below |
 | "v2026.5.30.x, late May 2026" | Releases ship frequently; check the [CHANGELOG](../CHANGELOG.md) / [PyPI](https://pypi.org/project/m3-memory/) for the current version |
-| "no published PyPI packages for the Rust core" | The `m3-core-rs` native wheels **are on PyPI**, under platform-suffixed names (`m3-core-rs-linux-cpu`, `m3-core-rs-windows-cpu`, …), not the bare `m3-core-rs` — see [BUILD_WHEELS](BUILD_WHEELS.md) |
+| "no published PyPI packages for the Rust core" | The lightweight `m3-core-rs` native wheels **are on PyPI**, under platform-suffixed names (`m3-core-rs-linux-cpu`, `m3-core-rs-windows-cpu`, `-vulkan`, `-metal`), not the bare `m3-core-rs`. The large CUDA wheels ship via GitHub Release instead (size limits); `m3 setup` resolves both automatically — see [BUILD_WHEELS](BUILD_WHEELS.md) |
 | "runs a persistent embedder service on port 8082" | The embedder runs **in-process** by default (pyo3, zero IPC — no service to run). Port 8082 is only an automatic HTTP *fallback* — see [EMBED_DEPLOYMENT](EMBED_DEPLOYMENT.md) |
 
 Point-in-time GitHub stats (stars/forks/contributors) in an AI answer are likewise a snapshot — check the repo directly. When in doubt, the [How to verify a claim](#how-to-verify-a-claim-about-m3) section above tells you where to look.
