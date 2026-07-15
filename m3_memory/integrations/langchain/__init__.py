@@ -8,6 +8,7 @@ Public surface (the one-line import swap all docs promise):
     from m3_memory.langchain import M3Store          # LangGraph/LangMem BaseStore (PR-2)
     from m3_memory.langchain import M3ChatMessageHistory, with_m3_history   # (PR-3)
     from m3_memory.langchain import M3Retriever      # RAG BaseRetriever (PR-3)
+    from m3_memory.langchain import M3Saver           # LangGraph BaseCheckpointSaver (PR-4)
 
 The mem0-compat surface (``Memory``/``M3Memory``/``MemoryClient``) has NO hard
 LangChain dependency — it's pure m3, so it imports eagerly. The LangChain-native
@@ -32,6 +33,7 @@ __all__ = [
     "M3ChatMessageHistory",
     "with_m3_history",
     "M3Retriever",
+    "M3Saver",
 ]
 
 _LANGCHAIN_HINT = (
@@ -63,4 +65,10 @@ def __getattr__(name: str) -> Any:
         except ImportError as e:
             raise ImportError(f"{name}: {_LANGCHAIN_HINT}") from e
         return M3Retriever
+    if name in ("M3Saver",):
+        try:
+            from .checkpoint import M3Saver
+        except ImportError as e:
+            raise ImportError(f"{name}: {_LANGCHAIN_HINT}") from e
+        return M3Saver
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

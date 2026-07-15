@@ -12,10 +12,11 @@ Full guide: [`docs/integrations/LANGCHAIN.md`](../../docs/integrations/LANGCHAIN
 | `native_store.py` | Plain LangGraph `create_react_agent(store=M3Store())` | raw LangGraph store |
 | `langmem_on_m3.py` | LangMem tools + background manager, backed by `M3Store()` | **LangMem** (backs it) |
 | `history_and_retriever.py` | `M3ChatMessageHistory` + `M3Retriever` — short-term chat + RAG | chat history / vector retriever |
+| `graph_checkpointer.py` | `M3Saver()` — pause/resume/time-travel a LangGraph run | LangGraph checkpointer (Sqlite/Postgres saver) |
 
-`mem0_migration.py` and `history_and_retriever.py` run with **no API key** (they
-exercise memory directly). `native_store.py` / `langmem_on_m3.py` build a real
-agent, so they need a chat-model key.
+`mem0_migration.py`, `history_and_retriever.py`, and `graph_checkpointer.py` run
+with **no API key** (they exercise memory/state directly). `native_store.py` /
+`langmem_on_m3.py` build a real agent, so they need a chat-model key.
 
 ## Setup
 ```bash
@@ -35,3 +36,18 @@ contradiction handling (`.supersede`), temporal queries (`as_of=`), commanded
 forgetting (`.forget`), and hybrid + graph retrieval (`.related`). See
 [§3 "What you gain — the m3-native extras"](../../docs/integrations/LANGCHAIN.md#3-what-you-gain--the-m3-native-extras)
 of the integration guide.
+
+## Migrating an existing mem0 codebase
+
+Point the scanner at your project to see the swap before you touch anything —
+it's AST-based, so it flags real mem0 usage, not the substring in a comment:
+
+```bash
+python bin/mem0_scan.py path/to/your/app        # report: imports + per-call notes
+python bin/mem0_scan.py path/to/your/app --fix  # rewrite `from mem0 import ...` in place
+```
+
+Each call site is classified: **OK** (drop-in, no change), **MAP** (works, but an
+m3-native verb like `.supersede`/`.forget` is stronger), or **STOP** (no
+equivalent — handle by hand). `--fix` only rewrites import lines; MAP/STOP call
+sites are left for you to review.

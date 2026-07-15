@@ -131,12 +131,17 @@ if not os.environ.get("M3_SKIP_MYPYC"):
 # Discover the real python packages (m3_memory + subpackages) the same way
 # pyproject's [tool.setuptools.packages.find] would, then ADD the payload trees.
 # Passing `packages`/`package_dir`/`package_data` here supersedes the pyproject
-# `find`, so we must reproduce its include/exclude (m3_memory*, minus
-# integrations which ship as data).
+# `find`, so we must reproduce its include/exclude.
+#
+# `m3_memory.integrations.langchain` is an IMPORTABLE subpackage (it has its own
+# __init__.py, as does the `integrations` parent) and must ship as code so the
+# documented `from m3_memory.langchain import Memory/M3Store/M3Saver` path works
+# for installed (non-dev) users. Only `hermes` is excluded — it ships as package
+# *data* (loaded by path, not imported), added to package_data below.
 from setuptools import find_packages
 
 _code_pkgs = find_packages(
-    where=".", include=["m3_memory*"], exclude=["m3_memory.integrations*"]
+    where=".", include=["m3_memory*"], exclude=["m3_memory.integrations.hermes*"]
 )
 
 # package_data for the CODE package: the mcp examples + the vendored Hermes
