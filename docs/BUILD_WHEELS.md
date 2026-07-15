@@ -5,6 +5,13 @@ embedder, the oxidized governor and ingest paths — collectively **Project
 Oxidation**) lives in the companion crate **`m3-core-rs`** and is delivered as a
 prebuilt Python wheel named `m3-core-rs-<os>-<backend>`.
 
+> **These wheels are published on PyPI** — under the platform-suffixed names
+> (e.g. `m3-core-rs-linux-cpu`, `m3-core-rs-windows-cpu`, `m3-core-rs-linux-cuda`),
+> not the bare `m3-core-rs`. `m3 setup` picks the right one for your platform
+> automatically, so `pip install m3-core-rs` returning "not found" is expected —
+> it is not the package name. (If a tool told you "the Rust core isn't on PyPI,"
+> it was looking for the umbrella name; the per-platform wheels are there.)
+
 **You almost never need this document.** `m3 setup` and `m3 embedder install-gpu`
 install the matching prebuilt wheel automatically (PyPI first, then the GitHub
 Release). You only build your own wheel when **no prebuilt wheel matches your

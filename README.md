@@ -178,8 +178,8 @@ Only the essential core set (~18, ~3,540 tokens) registers at startup. When your
 M3 operates completely offline by default.
 
 ### Sovereign Local Embedder
-A high-performance BGE-M3 embedder runs locally on `127.0.0.1:8082` after installation.
-*   **Default:** CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`).
+A high-performance BGE-M3 embedder runs locally after installation.
+*   **Default:** **in-process** via the `m3-core-rs` native module (llama.cpp linked in-process, zero IPC — *not* a separate service you have to run or monitor). CPU execution using GGUF format (`_assets/models/bge-m3-Q4_K_M.gguf`). A local HTTP embed server on `127.0.0.1:8082` exists only as an automatic fallback if the in-process path can't load.
 *   **Hardware Acceleration (GPU):** Execute `m3 embedder install-gpu` to compile with CUDA, Vulkan, or Metal.
 *   **External Provider Fallback:** Set `EMBED_BASE_URL` to route requests to Ollama, LM Studio, or vLLM.
 

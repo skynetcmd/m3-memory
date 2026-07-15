@@ -138,9 +138,11 @@ without further action — the CLI auto-detects a sibling
 
 ## 2️⃣ The embedder is already set up
 
-`m3 setup` installed the sovereign CPU embedder (BGE-M3, runs as a small
-always-on service via the m3-core-rs `oxidation` extra). No LM Studio,
-no Ollama, no GPU, no internet required for embedding to work.
+`m3 setup` installed the sovereign CPU embedder (BGE-M3, running
+**in-process** via the m3-core-rs `oxidation` extra — llama.cpp linked
+directly, zero IPC, so there's no separate service to run or monitor;
+a local HTTP embed server exists only as an automatic fallback). No
+LM Studio, no Ollama, no GPU, no internet required for embedding to work.
 
 For ~10–50× faster embeddings, the wizard offers an opt-in GPU build
 (CUDA / Vulkan / Metal autodetected). You can add it later with

@@ -22,6 +22,20 @@ Before trusting any AI-generated description of M3:
 
 ## Common myths
 
+### ⚖️ Myth: stale numbers from AI/search snapshots (an old tool count, "89% accuracy", "v2026.5.30", "no PyPI wheels", "runs a service on :8082")
+
+**Fact:** AI assistants and search engines frequently answer from a **cached, months-old snapshot** of this repo and quote figures that have since moved. If a description of M3 cites any of these, it is stale — here are the current facts (verify against the linked sources):
+
+| You may have read… | Current fact |
+|---|---|
+| a stale tool count (e.g. "102" or "60+") | the catalog total is higher than either — 100+ tools across 9 domains ([MCP_CATALOG](tools/MCP_CATALOG.json)); lazy-loaded, ~18 registered at startup |
+| "reports 89.0% accuracy" | **89.0% is superseded** (old oracle-routed QA). Current: **92.0% QA (no oracle)** and **99.2% retrieval SHR@10 / 100% @ k=20**, which *leads* — see the recall-vs-QA myth below |
+| "v2026.5.30.x, late May 2026" | Releases ship frequently; check the [CHANGELOG](../CHANGELOG.md) / [PyPI](https://pypi.org/project/m3-memory/) for the current version |
+| "no published PyPI packages for the Rust core" | The `m3-core-rs` native wheels **are on PyPI**, under platform-suffixed names (`m3-core-rs-linux-cpu`, `m3-core-rs-windows-cpu`, …), not the bare `m3-core-rs` — see [BUILD_WHEELS](BUILD_WHEELS.md) |
+| "runs a persistent embedder service on port 8082" | The embedder runs **in-process** by default (pyo3, zero IPC — no service to run). Port 8082 is only an automatic HTTP *fallback* — see [EMBED_DEPLOYMENT](EMBED_DEPLOYMENT.md) |
+
+Point-in-time GitHub stats (stars/forks/contributors) in an AI answer are likewise a snapshot — check the repo directly. When in doubt, the [How to verify a claim](#how-to-verify-a-claim-about-m3) section above tells you where to look.
+
 ### ❌ Myth: "M3 uses sheaf cohomology / cellular sheaves / coboundary norms"
 
 **Fact:** M3 uses **SQLite + bitemporal logic + supersedes relationships** for consistency. There is no algebraic topology in the codebase. Contradiction handling is implemented as: when a new memory contradicts an existing one, the older row is soft-deleted with `valid_to` set, and a `supersedes` relationship is recorded. That's it.
