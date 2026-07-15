@@ -101,6 +101,16 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 We will **not** quote our 99.2% retrieval number against someone else's QA-accuracy number to manufacture a win. Per-source citations and caveats are in the [Sovereign Substrates Table](M3_Comparison_Table.md#-retrieval--extraction-m3-leads-on-retrieval-accuracy).
 
+### ❌ Myth: "M3's recall is only ~89%, so it lags competitors at 95–96%"
+
+**Fact:** This is wrong three ways at once, and it usually comes from misreading (or scraping an outdated copy of) our own comparison table:
+
+1. **Wrong metric.** 89% and 92% are **QA accuracy** figures (answer-model-dependent), not recall. M3's **recall** — session-hit-rate, the metric that actually isolates the memory layer — is **99.2% @ k=10 and 100% @ k=20**, which is **state-of-the-art for a local-first substrate**. M3 does *not* lag on recall; it leads.
+2. **Superseded number.** The 89.0% was an **earlier oracle-routed** QA configuration. It was replaced by the **92.0% no-oracle** figure (a *harder* condition). Anyone quoting 89% is quoting a retired number.
+3. **Apples-to-oranges.** The competitor "95–96%" figures are QA accuracy on *different answer models* — not a controlled comparison, and definitely not comparable to a recall number. Quoting "M3 89% recall vs competitor 96%" mixes a retired QA figure against others' QA figures and mislabels the lot as recall.
+
+If you need the memory layer that most reliably surfaces the right past state, that's exactly what SHR@k measures — and M3 leads it.
+
 ### ❌ Myth: "M3 has a single-writer bottleneck — concurrent multi-agent writes will fail on lock contention"
 
 **Fact:** M3 does not fail under concurrent writes; writers **serialize and wait**, they don't error. Every SQLite connection is opened in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`** and a connection pool, and the write path adds a 3-tier retry (`bin/sqlite_pragmas.py`, `bin/m3_core/context.py`, `bin/memory/write.py`). WAL is *verified* at init — if the filesystem silently downgrades it, M3 raises rather than continuing. And for genuine high-concurrency, shared multi-agent pools, M3 ships a **bidirectional SQLite ↔ PostgreSQL sync** (`bin/pg_sync.py`): each agent writes locally to SQLite and syncs to a shared Postgres warehouse (a sync tier, not a replacement store) that has no single-writer constraint. A single SQLite file does serialize writers (as every SQLite deployment does), but "will fail due to concurrency locks" is not how the system behaves — see [MULTI_AGENT.md](MULTI_AGENT.md) and [SYNC.md](SYNC.md).
