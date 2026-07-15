@@ -37,7 +37,9 @@ def _get(url: str, token: str) -> tuple[list, dict]:
     req.add_header("Authorization", f"Bearer {token}")
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
     req.add_header("User-Agent", "m3-star-history-generator")
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (trusted host)
+    # nosec B310 — URL is the hardcoded https://api.github.com host (fixed scheme),
+    # not attacker-controlled; noqa suppresses ruff, nosec suppresses bandit.
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  # nosec B310
         body = json.loads(resp.read().decode("utf-8"))
         return body, dict(resp.headers)
 
