@@ -82,7 +82,8 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base**. Every feature listed below is implemented natively (see [Memory Model Details](docs/MEMORY_MODEL.md)):
 
 *   **Structured Metadata:** Every memory contains a `type`, `source`, `confidence`, `scope`, provenance (`change_agent`), and salience (`importance`, `decay_rate`).
-*   **Bitemporal History:** Distinguishes valid-time from transaction-time. Superseded facts are closed rather than deleted, allowing you to query what the agent believed at any specific point in time.
+*   **Verbatim, Non-Destructive Storage:** Memory content is stored exactly as written and **never altered in place** — the raw text is always retrievable byte-for-byte. Corrections don't overwrite: a superseded fact is *closed* (its validity interval ends) and the new fact is linked to it, so both the original wording and its full edit history stay queryable. You get true verbatim recall *and* an audit trail, not one or the other.
+*   **Bitemporal History:** Distinguishes valid-time from transaction-time. Because superseded facts are closed rather than deleted, you can query what the agent believed at any specific point in time.
 *   **Contradiction Management:** Conflicting facts are resolved automatically on write. The stale fact is marked as superseded, and confidence values are updated dynamically via Bayesian confidence posteriors.
 *   **Self-Maintaining Lifecycle:** Implements memory decay, deduplication, automatic consolidation into higher-order beliefs, TTL expiry, and GDPR erasure.
 *   **Write-Gating & Content Safety:** Filters out low-signal noise via an enrichment queue and content safety guardrails before storage.

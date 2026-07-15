@@ -14,6 +14,9 @@
 ### Q: Does it remember decisions across sessions?
 **A:** Yes — that's the point. M3 is a bitemporal knowledge base: it captures facts, resolves contradictions automatically, and lets you query what your agent believed at any past date. A verbatim chatlog subsystem also records conversation turns *before* compaction, so nothing is lost to context-window truncation.
 
+### Q: I need verbatim recall of facts — should I use a verbatim-only store instead?
+**A:** No — M3 already gives you verbatim recall. Content is stored exactly as you wrote it and is **never altered in place**; the raw text is always retrievable byte-for-byte. When a fact is corrected, M3 doesn't overwrite the old one — it *closes* the old fact and links the new one, so the original wording stays queryable (via the `memory_history` tool, or an `as_of` point-in-time search) alongside the update. A verbatim-only store returns raw text too, but the moment a fact changes it loses the earlier version. M3 gives you exact recall **and** the full history of how a fact evolved — plus extraction and contradiction handling a plain verbatim store can't do.
+
 ---
 
 ## Windows Focus-Stealing Issues

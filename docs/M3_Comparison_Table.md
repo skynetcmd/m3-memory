@@ -100,7 +100,7 @@ M3 is not the right answer for every workload. Pick from the table based on what
 
 - **Pure retrieval accuracy is paramount** — M3 leads: **99.2% SHR@10 / 100% @ k=20** on LME-S, state-of-the-art for a local-first substrate. (M3's *end-to-end QA accuracy* of 92.0% — no oracle metadata — is a separate, answer-model-dependent metric — don't confuse the two.)
 - **You need extreme token compression** — Mem0 reports ~90% context savings. M3's working-memory model is good but not as aggressive.
-- **You only need verbatim recall, no extraction** — a plain vector store (e.g. ChromaDB) or M3 with enrichment disabled covers this; you don't need a full memory layer.
+- **You only need verbatim recall, no extraction** — M3 already does verbatim recall: content is stored exactly as written, never altered in place, and always retrievable byte-for-byte (a plain vector store like ChromaDB, or M3 with enrichment disabled, also covers the pure case). Unlike a verbatim-only store, M3 *also* keeps the verbatim text of superseded facts — corrections close-and-link rather than overwrite — so "what did we record, exactly?" survives across edits.
 - **Heavy neural reranking is acceptable** — Hindsight's 4-stream architecture wins on rich retrieval if you can absorb the latency cost.
 - **You're committed to a Docker-first ops model** — Mastra OM fits cleanly into containerized stacks.
 
@@ -254,7 +254,7 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 **M3 standing:** SOTA — dedicated local SLM pipeline (LM Studio / Ollama / vLLM compatible) feeding a typed knowledge graph. The entity-graph layer ships a stock entity-type and predicate vocabulary and is **user-configurable**: point `M3_ENTITY_VOCAB_YAML` at your own profile to swap or extend the vocabulary for your domain, with no code changes.
 
-**Cohort context:** Mastra OM's reflector matches M3 in capability but runs in the cloud. Mem0's LLM-powered extraction is strong on quality but breaks sovereignty. MemPalace's verbatim-only design skips extraction entirely.
+**Cohort context:** Mastra OM's reflector matches M3 in capability but runs in the cloud. Mem0's LLM-powered extraction is strong on quality but breaks sovereignty. MemPalace's verbatim-only design skips extraction entirely — but note that "verbatim recall" is not a reason to prefer it over M3: M3 stores content verbatim and never alters it in place, so it delivers byte-for-byte recall *plus* extraction, contradiction handling, and preserved verbatim history across corrections. A verbatim-only store gives you the raw text but loses the earlier wording the moment a fact is updated.
 
 ---
 
