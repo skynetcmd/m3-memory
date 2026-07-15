@@ -246,6 +246,40 @@ own tables and deliberately **bypasses** m3's embedder and contradiction pipelin
 (`aget_tuple` / `aput` / `alist`) are both implemented. See a runnable end-to-end
 example in [`examples/langchain-agent/graph_checkpointer.py`](../../examples/langchain-agent/graph_checkpointer.py).
 
+### Which surface for which job — short-term vs. long-term vs. state
+
+The three surfaces are easy to conflate; they do genuinely different jobs, and a
+real agent often uses two or three together:
+
+| Surface | Holds | Lifetime | Use it for |
+|---|---|---|---|
+| `M3ChatMessageHistory` | raw chat turns | one conversation | short-term context; the turns also feed m3's async fact extraction into long-term |
+| `M3Store` / `Memory` | distilled facts & preferences | across conversations | long-term knowledge — what the agent *knows*; contradiction-superseded, bitemporal |
+| `M3Saver` | serialized graph state | one thread, resumable | pausing/resuming a run — the agent's *machine state*, not its knowledge |
+
+Rule of thumb: **history** is what was *said*, **store/Memory** is what is *true*,
+**saver** is where the *run* is. They compose — see
+[`agent_with_memory_and_persistence.py`](../../examples/langchain-agent/agent_with_memory_and_persistence.py)
+for `M3Store` (memory) + `M3Saver` (persistence) in one `create_react_agent`.
+All three share one local m3 engine, so a single `memory_search_multi_db` can
+search chat-log and curated memory together when you want unified recall.
+
+### Single-user apps — `M3_DEFAULT_USER_ID`
+
+m3 enforces per-user tenancy: `user_id` is required and there is no anonymous
+mode (a missing one raises, by design — it's how agents' private notes stay
+private). For a **single-user** app that's friction, so set `M3_DEFAULT_USER_ID`
+once and drop `user_id=` from your calls:
+
+```bash
+export M3_DEFAULT_USER_ID=alex
+```
+
+Resolution order is **explicit arg → constructor default → `M3_DEFAULT_USER_ID`
+→ raise**. A multi-tenant app simply leaves the env unset and keeps passing
+`user_id` per call, so the safety guarantee is unchanged — the env only fills the
+gap for the single-user case, it never invents a tenant.
+
 ---
 
 ## 3. What you gain — the m3-native extras

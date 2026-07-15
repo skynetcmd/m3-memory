@@ -13,6 +13,7 @@ Full guide: [`docs/integrations/LANGCHAIN.md`](../../docs/integrations/LANGCHAIN
 | `langmem_on_m3.py` | LangMem tools + background manager, backed by `M3Store()` | **LangMem** (backs it) |
 | `history_and_retriever.py` | `M3ChatMessageHistory` + `M3Retriever` — short-term chat + RAG | chat history / vector retriever |
 | `graph_checkpointer.py` | `M3Saver()` — pause/resume/time-travel a LangGraph run | LangGraph checkpointer (Sqlite/Postgres saver) |
+| `agent_with_memory_and_persistence.py` | `create_react_agent` with **both** `M3Store` (memory) + `M3Saver` (persistence) | a full agent's memory + state layer |
 
 `mem0_migration.py`, `history_and_retriever.py`, and `graph_checkpointer.py` run
 with **no API key** (they exercise memory/state directly). `native_store.py` /
