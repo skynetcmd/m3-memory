@@ -187,6 +187,6 @@ _Maintenance, cross-store sync, import/export, and lifecycle ops._
 | `notifications_ack_all` | Bulk-ack all unread notifications for an agent. | read-only |
 | `notifications_poll` | List notifications addressed to agent_id, newest first. | read-only |
 | `notify` | Send a notification to an agent. | read-only |
-| `tools_list_domains` | List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, admin) and their… | read-only |
+| `tools_list_domains` | List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, adm… | read-only |
 | `tools_load_domain` | Register a tool domain's full surface for the current MCP session. | read-only |
 

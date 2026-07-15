@@ -27,3 +27,11 @@ recursive-include memory/migrations *.sql
 global-exclude __pycache__/*
 global-exclude *.py[cod]
 global-exclude *.pdb
+
+# Prune colocated hermetic tests (e.g. integrations/langchain/test_provider_logic.py)
+# from BOTH the sdist and the wheel. Verified against an ISOLATED release build
+# (`python -m build`, which fetches the pinned setuptools>=77,<82): the resulting
+# wheel contains 0 test_*.py. (A non-isolated build using a newer local setuptools
+# — e.g. 82.x, outside our pin — can ignore this exclude for wheel package modules,
+# so always validate packaging with an isolated build, not the dev setuptools.)
+global-exclude test_*.py

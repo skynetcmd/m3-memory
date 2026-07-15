@@ -76,7 +76,7 @@ Memories written inside a multi-turn or multi-agent session can be tagged with a
 
 M3 uses your local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works (e.g., LM Studio, Ollama, vLLM, LocalAI, `llama.cpp --server`):
 
-- **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 21 types
+- **Auto-classification** — pass `type="auto"` and the LLM categorizes your memory into one of 30+ types
 - **Conversation summarization** — compress long conversation threads into 3-5 key points
 - **Multi-layered consolidation** — merge groups of related memories into comprehensive summaries
 
@@ -122,7 +122,7 @@ Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
 ## 🔌 Portable & Interoperable
 
 - **MCP-native** — works with Claude Code, Gemini CLI, Aider, or any MCP client out of the box
-- **LangChain / LangGraph** — drop-in **Mem0 replacement** (one-line import swap), LangMem-compatible `M3Store`, chat-message history, and a RAG retriever. `pip install m3-memory[langchain]`; see [docs/integrations/LANGCHAIN.md](integrations/LANGCHAIN.md)
+- **LangChain / LangGraph** — five drop-in surfaces: a **Mem0 replacement** (one-line import swap), LangMem-compatible `M3Store`, the `M3Saver` LangGraph checkpointer (pause/resume/time-travel), chat-message history, and a RAG retriever — plus LCEL-native `MemoryWrite`/`MemoryRetrieve`. `pip install m3-memory[langchain]`; see [docs/integrations/LANGCHAIN.md](integrations/LANGCHAIN.md)
 - **Export/Import** — full memory dump as JSON (with base64 embeddings) for backup, migration, or sharing between M3 instances
 - **Cross-platform** — Windows 11, macOS (Apple Silicon), Linux. Native scheduling via cron or Task Scheduler.
 - **Model-agnostic** — any embedding model via any OpenAI-compatible server. Dimension-validated at runtime.

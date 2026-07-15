@@ -8,14 +8,18 @@ Every DB-aware script accepts a standardized `--database PATH` flag. Resolution 
 
 1. `--database PATH` CLI flag
 2. `M3_DATABASE` environment variable
-3. Default: `memory/agent_memory.db`
+3. Default: `<engine_root>/agent_memory.db` — i.e. `~/.m3/engine/agent_memory.db`
+   (the engine root resolves `M3_ENGINE_ROOT` → `M3_MEMORY_ROOT/engine` → `~/.m3/engine`;
+   see [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md#roots--precedence-the-single-source-of-truth)).
+   A legacy `memory/agent_memory.db` in a dev checkout is used only if it already
+   holds data.
 
 The flag is wired through `bin/m3_sdk.add_database_arg(parser)` and every value is normalized via `resolve_db_path(explicit)` to an absolute path before use. Scripts that shell out to other scripts (e.g. `sync_all.py` → `pg_sync.py`) set `M3_DATABASE` in the environment so subprocesses inherit the override.
 
 Use the flag to route to separate stores for different workloads:
 
 ```bash
-# Default — hits memory/agent_memory.db
+# Default — hits <engine_root>/agent_memory.db (~/.m3/engine/agent_memory.db)
 python bin/memory_doctor.py
 
 # Scratch DB for testing

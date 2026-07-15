@@ -79,13 +79,19 @@ class M3Store(BaseStore):
     # ── namespace → tenancy (§7) ──────────────────────────────────────────────
     @staticmethod
     def _user_id(namespace: tuple[str, ...]) -> str:
-        if not namespace or not namespace[0]:
+        # Namespace element 0 is the tenancy key; fall back to M3_DEFAULT_USER_ID
+        # for single-user apps (resolve_user_id never invents a value — it returns
+        # None when the env is unset, so the raise below still guards isolation).
+        ns_uid = namespace[0] if namespace else None
+        uid = mapping.resolve_user_id(ns_uid)
+        if not uid:
             raise ValueError(
                 "M3Store namespace must start with a non-empty user_id: "
                 "namespace=(user_id, scope?, ...). m3 enforces per-user tenancy; "
-                "there is no anonymous/global namespace."
+                "there is no anonymous/global namespace. Set M3_DEFAULT_USER_ID "
+                "for a single-user app."
             )
-        return namespace[0]
+        return uid
 
     # ── the whole store: abatch + batch, both on the m3client loop-thread ─────
     async def abatch(self, ops: Iterable[Op]) -> list[Any]:

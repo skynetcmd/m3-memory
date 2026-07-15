@@ -92,6 +92,45 @@ class M3Retriever(BaseRetriever):
         md.update(mapping._loads_metadata(item.get("metadata_json")))
         return Document(page_content=item.get("content", ""), metadata=md)
 
+    # ── observability: honest retrieval explanation (LangSmith-friendly) ──────
+    def explain(self, query: str) -> dict:
+        """Return the REAL signal behind a retrieval, for tracing / debugging.
+
+        m3's search returns a single blended relevance ``score`` per hit (hybrid
+        FTS5 + vector + MMR + optional recency), not separated per-component
+        sub-scores — so this reports what m3 actually computes, never invented
+        component numbers. The shape is a plain dict you can attach to a LangSmith
+        run (``config={"metadata": {"m3_retrieval": r.explain(q)}}``) or log::
+
+            {"query", "config": {k, type_filter, as_of, recency_bias, scope},
+             "results": [{"id", "score", "confidence", "type", "valid_from",
+                          "valid_to", "preview"}, ...]}
+
+        Score is the blended relevance; ``confidence`` and the bitemporal validity
+        are m3's own per-memory signal. No component breakdown is fabricated.
+        """
+        docs = self._search(query)
+        return {
+            "query": query,
+            "config": {
+                "k": self.k, "type_filter": self.type_filter or None,
+                "as_of": self.as_of or None, "recency_bias": self.recency_bias,
+                "scope": self.scope,
+            },
+            "results": [
+                {
+                    "id": d.metadata.get("id"),
+                    "score": d.metadata.get("score"),
+                    "confidence": d.metadata.get("confidence"),
+                    "type": d.metadata.get("type"),
+                    "valid_from": d.metadata.get("valid_from"),
+                    "valid_to": d.metadata.get("valid_to"),
+                    "preview": (d.page_content or "")[:80],
+                }
+                for d in docs
+            ],
+        }
+
     # ── BaseRetriever contract ────────────────────────────────────────────────
     def _get_relevant_documents(
         self, query: str, *, run_manager: "CallbackManagerForRetrieverRun"

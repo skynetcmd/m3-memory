@@ -16,7 +16,7 @@ commanded forgetting, and hybrid + graph retrieval.**
 
 m3 is a local-first agent-memory system — hybrid FTS5 + vector + MMR recall, a
 bitemporal model, knowledge-graph supersession (real contradiction handling, not
-flat dedup), and async fact extraction — that speaks four standard LangChain
+flat dedup), and async fact extraction — that speaks five standard LangChain
 surfaces:
 
 | You use… | Swap in… | Section |
@@ -24,6 +24,7 @@ surfaces:
 | **mem0** | `from m3_memory.langchain import Memory` — one import | [§1](#1-replacing-mem0) |
 | **LangMem** / raw LangGraph | `store=M3Store()` | [§2](#2-replacing--backing-langmem) |
 | chat history / RAG retriever | `M3ChatMessageHistory` · `M3Retriever` | [§2](#short-term-chat-history--rag-retrieval) |
+| **LangGraph checkpointer** | `checkpointer=M3Saver()` — pause / resume / time-travel | [§2](#langgraph-checkpointing-with-m3saver) |
 | *the extras nothing else has* | `.supersede` · `as_of=` · `.forget` · `.related` | [§3](#3-what-you-gain-the-m3-native-extras) |
 
 > **Install** — `pip install "m3-memory[langchain]"`. m3 self-configures on first
@@ -216,6 +217,116 @@ retriever = M3Retriever(user_id="alex", k=4)
 docs = retriever.invoke("deadline")   # -> [Document(page_content=…, metadata={id, score, confidence, valid_from, …})]
 ```
 
+### LangGraph checkpointing with `M3Saver`
+
+`M3Store` (above) is *long-term memory* — what your agent knows. A **checkpointer**
+is a different slot: the *machine state* LangGraph needs to pause, resume, and
+time-travel a run. `M3Saver` implements LangGraph's `BaseCheckpointSaver`, so a
+graph can hit a human-in-the-loop `interrupt()`, the process can exit, and a later
+run resumes exactly where it stopped — persisted to m3's local engine DB, no
+external checkpoint store to run.
+
+```python
+from m3_memory.langchain import M3Saver
+from langgraph.types import Command   # for resuming after an interrupt()
+
+graph = builder.compile(checkpointer=M3Saver())
+cfg = {"configurable": {"thread_id": "t-1"}}   # thread_id is the resume key
+
+graph.invoke({"input": "…"}, cfg)              # runs until an interrupt() pauses it
+graph.get_state(cfg)                           # inspect the persisted state
+graph.invoke(Command(resume="yes"), cfg)       # resume to completion
+list(graph.get_state_history(cfg))             # every super-step — replay / time-travel
+```
+
+A checkpoint is opaque graph state, not knowledge, so `M3Saver` stores it in its
+own tables and deliberately **bypasses** m3's embedder and contradiction pipeline
+(two checkpoints of a thread aren't contradictions to reconcile). An optional
+`user_id` in `configurable` scopes reads to that user's threads. Sync and async
+(`aget_tuple` / `aput` / `alist`) are both implemented. See a runnable end-to-end
+example in [`examples/langchain-agent/graph_checkpointer.py`](../../examples/langchain-agent/graph_checkpointer.py).
+
+### Which surface for which job — short-term vs. long-term vs. state
+
+The three surfaces are easy to conflate; they do genuinely different jobs, and a
+real agent often uses two or three together:
+
+| Surface | Holds | Lifetime | Use it for |
+|---|---|---|---|
+| `M3ChatMessageHistory` | raw chat turns | one conversation | short-term context; the turns also feed m3's async fact extraction into long-term |
+| `M3Store` / `Memory` | distilled facts & preferences | across conversations | long-term knowledge — what the agent *knows*; contradiction-superseded, bitemporal |
+| `M3Saver` | serialized graph state | one thread, resumable | pausing/resuming a run — the agent's *machine state*, not its knowledge |
+
+Rule of thumb: **history** is what was *said*, **store/Memory** is what is *true*,
+**saver** is where the *run* is. They compose — see
+[`agent_with_memory_and_persistence.py`](../../examples/langchain-agent/agent_with_memory_and_persistence.py)
+for `M3Store` (memory) + `M3Saver` (persistence) in one `create_react_agent`.
+All three share one local m3 engine, so a single `memory_search_multi_db` can
+search chat-log and curated memory together when you want unified recall.
+
+### LCEL-native memory — compose reads and writes into a chain
+
+`M3Retriever` is already a `Runnable`, so retrieval pipes straight into LCEL. For
+the **write** side — which LangChain has no standard Runnable for — m3 adds
+`MemoryWrite` (persist-and-pass-through) and `MemoryRetrieve` (a callable head):
+
+```python
+from m3_memory.langchain import MemoryRetrieve, MemoryWrite
+
+# recall → prompt → llm → persist the turn, all in one pipe:
+chain = MemoryRetrieve(user_id="alex", k=4) | prompt | llm | MemoryWrite(user_id="alex")
+chain.invoke("what did we decide about the API?")   # llm output written to m3
+```
+
+`MemoryWrite` returns its input unchanged (so it composes at the *end* of a chain)
+and writes synchronously — immediately FTS-searchable, and it enqueues m3's async
+fact extraction like `Memory.add`.
+
+For zero-boilerplate capture, the `with_m3_memory` decorator records a callable's
+input and output with no body changes:
+
+```python
+from m3_memory.langchain import with_m3_memory
+
+@with_m3_memory(user_id="alex")     # or set M3_DEFAULT_USER_ID and drop user_id=
+def answer(question: str) -> str:
+    return agent.invoke(question)   # question + answer both captured
+```
+
+### Observability — honest retrieval explanation (LangSmith)
+
+`M3Retriever(...).explain(query)` returns the **real** signal behind a retrieval —
+the blended relevance `score`, plus per-memory `confidence`, `type`, and
+bitemporal validity — for attaching to a LangSmith run or logging:
+
+```python
+r = M3Retriever(user_id="alex", k=4)
+graph.invoke(inp, config={"metadata": {"m3_retrieval": r.explain(query)}})
+```
+
+m3's search produces a single blended score (hybrid FTS5 + vector + MMR +
+optional recency), not separated per-component sub-scores — so `explain()` reports
+what m3 actually computes and never invents a component breakdown. Every
+`Document` from the retriever also carries this signal in `.metadata`
+(`score`, `confidence`, `valid_from`/`valid_to`, `type`) for in-chain filtering
+or reranking.
+
+### Single-user apps — `M3_DEFAULT_USER_ID`
+
+m3 enforces per-user tenancy: `user_id` is required and there is no anonymous
+mode (a missing one raises, by design — it's how agents' private notes stay
+private). For a **single-user** app that's friction, so set `M3_DEFAULT_USER_ID`
+once and drop `user_id=` from your calls:
+
+```bash
+export M3_DEFAULT_USER_ID=alex
+```
+
+Resolution order is **explicit arg → constructor default → `M3_DEFAULT_USER_ID`
+→ raise**. A multi-tenant app simply leaves the env unset and keeps passing
+`user_id` per call, so the safety guarantee is unchanged — the env only fills the
+gap for the single-user case, it never invents a tenant.
+
 ---
 
 ## 3. What you gain — the m3-native extras
@@ -305,11 +416,15 @@ memory.call("chatlog_status")
 ## Notes & caveats
 - **Runnable examples:** see [`examples/langchain-agent/`](../../examples/langchain-agent/)
   — `mem0_migration.py`, `native_store.py`, `langmem_on_m3.py`,
-  `history_and_retriever.py`, plus a `perf_baseline.py` and its committed numbers.
-- **Versions:** the mem0-compat and LangMem surfaces are tested against **pinned**
-  langchain-core / langgraph versions (see the `[langchain]` extra); other versions
-  may drift. The mem0 mirror tracks mem0's OSS `.add`/`.search`/`.get_all`/`.delete`
-  shapes — m3 never imports mem0.
+  `history_and_retriever.py`, `graph_checkpointer.py`, plus a `perf_baseline.py`
+  and its committed numbers.
+- **Versions:** the `[langchain]` extra requires `langchain-core>=0.3.0,<1` and
+  `langgraph>=0.2.0,<1` — a major-version compatibility band, not a hard pin, so
+  any release inside that range is supported. Verified against langgraph 0.6.x /
+  langgraph-checkpoint 3.x. Across a `<1` range some API drift is possible; if you
+  hit it, the extra's floor/ceiling mark the tested boundary. The mem0 mirror
+  tracks mem0's OSS `.add`/`.search`/`.get_all`/`.delete` shapes — m3 never
+  imports mem0 (a clean reimplementation of the interface).
 - **Read-your-writes** is via m3's FTS index (a query sharing words with the stored
   text matches immediately); purely SEMANTIC matches sharpen a beat later as the
   async vector backfill completes. `get_all()` is deterministic and always current.

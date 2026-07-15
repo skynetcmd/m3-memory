@@ -42,7 +42,7 @@ Restart your agent and you're done. The rest of this doc covers the features.
 
 > **On Apple Silicon?** The wizard asks once whether to add Metal GPU acceleration on top of the default embedder for ~10-50× faster embeddings. Pre-compiled wheels for Python 3.11, 3.12, and 3.14 are available via the `m3-core-rs` repository.
 
-> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 8 domains (memory, chatlog, files, entity, agent, tasks, conversations, admin). Only ~6 essentials load at MCP startup (~2,400 tokens vs ~16,100 if all of them loaded eagerly). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
+> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but groups them into 9 domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, admin). Only the ~18 essentials load at MCP startup (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on demand). The agent pulls in a domain on demand — just say "load the files tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
 
 ---
 

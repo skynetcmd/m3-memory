@@ -60,7 +60,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **Multi-agent concurrent writes** | WAL mode + 30s busy_timeout + retry — concurrent writers serialize and wait, they don't fail; SQL-layer scope isolation keeps agents' private notes private; optional shared **PostgreSQL** pool for high-concurrency fleets (no single-writer limit) | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |
 | **Cognition placement** | Composable — disable, replace, or use built-in SLM extraction | LLM-driven extraction is welded into the memory layer |
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
-| **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`) and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |
+| **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`), `M3Saver` (LangGraph checkpointer — pause/resume/time-travel), and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |
 | **Feature coverage** | **Superset of Mem0** — everything Mem0 does (`.add()`/`.search()`) plus contradiction supersession, bitemporal `as_of`, commanded forgetting, hybrid+graph retrieval | Baseline |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
 | **Stars (Apr 2026)** | Newer project (fewer stars); 1,283-test codebase with SOTA local-first retrieval (99.2% SHR@10) | 20k+ (mindshare leader) |
@@ -212,9 +212,9 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 | Feature | M3-Memory | LangChain Memory / LangMem |
 |---------|-----------|---------------------------|
 | **Ecosystem** | Any MCP agent **and** LangChain/LangGraph (backs LangMem via `M3Store`) | LangChain / LangGraph only |
-| **Drop-in surfaces** | 👑 All four standard slots: mem0-compatible `Memory`, LangGraph `M3Store` (`BaseStore`), `M3ChatMessageHistory` (short-term), `M3Retriever` (RAG) | Native (its own classes) |
+| **Drop-in surfaces** | 👑 All five standard slots: mem0-compatible `Memory`, LangGraph `M3Store` (`BaseStore`), `M3Saver` (`BaseCheckpointSaver` — pause/resume/time-travel), `M3ChatMessageHistory` (short-term), `M3Retriever` (RAG) | Native (its own classes) |
 | **MCP support** | 👑 Native — 100+ tools, also exposed to LangChain agents | No |
-| **Memory types** | 21 types + auto-classification | Thread, store, episodic, semantic, procedural |
+| **Memory types** | 30+ types + auto-classification | Thread, store, episodic, semantic, procedural |
 | **Storage topology** | 🏆 Short-term chat-log and long-term memory can be **unified, kept separate, or searched together** by config — retrieve conversation turns and curated facts independently or in one merged query | Thread memory + store are distinct layers, not user-configurable as one |
 | **Contradiction handling** | 👑 Automatic heuristic detect + deterministic explicit supersede (bitemporal) | 🏆 Manual / LLM-driven via procedural memory |
 | **GDPR tooling** | 👑 Built-in `gdpr_forget` + `gdpr_export` | Custom implementation required |

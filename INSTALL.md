@@ -81,12 +81,12 @@ wiring, chatlog hooks, and a final `doctor` verification. Power users can
 still run each step manually with `m3 install-m3`, `m3 embedder install`,
 etc. — see `m3 --help`.
 
-> **Tool catalog stays small in your context.** m3 ships 87 MCP tools but
-> groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, admin). Only ~6 essentials load at MCP startup
-> (~2,400 tokens vs ~16,100 if all 87 loaded eagerly). The agent pulls in
-> a domain on demand — just say "load the files tools" and it does. Set
-> `M3_TOOLS_LAZY=0` to disable.
+> **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
+> groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
+> conversations, diagnostics, admin). Only the ~18 essentials load at MCP
+> startup (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on
+> demand). The agent pulls in a domain on demand — just say "load the files
+> tools" and it does. Set `M3_TOOLS_LAZY=0` to disable.
 
 If the TL;DR worked, stop here. The rest of this file explains why and what
 gets installed.

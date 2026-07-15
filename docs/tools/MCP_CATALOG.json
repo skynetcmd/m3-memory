@@ -317,7 +317,7 @@
       "destructive": false,
       "domain": "admin",
       "name": "tools_list_domains",
-      "summary": "List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, admin) and their\u2026"
+      "summary": "List m3 tool domains (memory, chatlog, files, entity, agent, tasks, conversations, diagnostics, adm\u2026"
     },
     {
       "args": [

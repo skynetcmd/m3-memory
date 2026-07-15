@@ -135,12 +135,12 @@ class Memory(M3ExtrasMixin):
 
     # ── tenancy (§7 privacy — enforced HERE, the tools don't) ─────────────────
     def _require_user(self, user_id: Optional[str]) -> str:
-        uid = user_id or self._default_user_id
+        uid = mapping.resolve_user_id(user_id, self._default_user_id)
         if not uid:
             raise ValueError(
                 "user_id is required (m3 enforces per-user tenancy — there is no "
                 "anonymous/global mode). Pass user_id= to the constructor or the "
-                "method call."
+                "method call, or set M3_DEFAULT_USER_ID for a single-user app."
             )
         return uid
 
