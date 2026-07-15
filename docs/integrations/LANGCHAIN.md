@@ -335,11 +335,15 @@ memory.call("chatlog_status")
 ## Notes & caveats
 - **Runnable examples:** see [`examples/langchain-agent/`](../../examples/langchain-agent/)
   — `mem0_migration.py`, `native_store.py`, `langmem_on_m3.py`,
-  `history_and_retriever.py`, plus a `perf_baseline.py` and its committed numbers.
-- **Versions:** the mem0-compat and LangMem surfaces are tested against **pinned**
-  langchain-core / langgraph versions (see the `[langchain]` extra); other versions
-  may drift. The mem0 mirror tracks mem0's OSS `.add`/`.search`/`.get_all`/`.delete`
-  shapes — m3 never imports mem0.
+  `history_and_retriever.py`, `graph_checkpointer.py`, plus a `perf_baseline.py`
+  and its committed numbers.
+- **Versions:** the `[langchain]` extra requires `langchain-core>=0.3.0,<1` and
+  `langgraph>=0.2.0,<1` — a major-version compatibility band, not a hard pin, so
+  any release inside that range is supported. Verified against langgraph 0.6.x /
+  langgraph-checkpoint 3.x. Across a `<1` range some API drift is possible; if you
+  hit it, the extra's floor/ceiling mark the tested boundary. The mem0 mirror
+  tracks mem0's OSS `.add`/`.search`/`.get_all`/`.delete` shapes — m3 never
+  imports mem0 (a clean reimplementation of the interface).
 - **Read-your-writes** is via m3's FTS index (a query sharing words with the stored
   text matches immediately); purely SEMANTIC matches sharpen a beat later as the
   async vector backfill completes. `get_all()` is deterministic and always current.
