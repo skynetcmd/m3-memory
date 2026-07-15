@@ -264,6 +264,53 @@ for `M3Store` (memory) + `M3Saver` (persistence) in one `create_react_agent`.
 All three share one local m3 engine, so a single `memory_search_multi_db` can
 search chat-log and curated memory together when you want unified recall.
 
+### LCEL-native memory — compose reads and writes into a chain
+
+`M3Retriever` is already a `Runnable`, so retrieval pipes straight into LCEL. For
+the **write** side — which LangChain has no standard Runnable for — m3 adds
+`MemoryWrite` (persist-and-pass-through) and `MemoryRetrieve` (a callable head):
+
+```python
+from m3_memory.langchain import MemoryRetrieve, MemoryWrite
+
+# recall → prompt → llm → persist the turn, all in one pipe:
+chain = MemoryRetrieve(user_id="alex", k=4) | prompt | llm | MemoryWrite(user_id="alex")
+chain.invoke("what did we decide about the API?")   # llm output written to m3
+```
+
+`MemoryWrite` returns its input unchanged (so it composes at the *end* of a chain)
+and writes synchronously — immediately FTS-searchable, and it enqueues m3's async
+fact extraction like `Memory.add`.
+
+For zero-boilerplate capture, the `with_m3_memory` decorator records a callable's
+input and output with no body changes:
+
+```python
+from m3_memory.langchain import with_m3_memory
+
+@with_m3_memory(user_id="alex")     # or set M3_DEFAULT_USER_ID and drop user_id=
+def answer(question: str) -> str:
+    return agent.invoke(question)   # question + answer both captured
+```
+
+### Observability — honest retrieval explanation (LangSmith)
+
+`M3Retriever(...).explain(query)` returns the **real** signal behind a retrieval —
+the blended relevance `score`, plus per-memory `confidence`, `type`, and
+bitemporal validity — for attaching to a LangSmith run or logging:
+
+```python
+r = M3Retriever(user_id="alex", k=4)
+graph.invoke(inp, config={"metadata": {"m3_retrieval": r.explain(query)}})
+```
+
+m3's search produces a single blended score (hybrid FTS5 + vector + MMR +
+optional recency), not separated per-component sub-scores — so `explain()` reports
+what m3 actually computes and never invents a component breakdown. Every
+`Document` from the retriever also carries this signal in `.metadata`
+(`score`, `confidence`, `valid_from`/`valid_to`, `type`) for in-chain filtering
+or reranking.
+
 ### Single-user apps — `M3_DEFAULT_USER_ID`
 
 m3 enforces per-user tenancy: `user_id` is required and there is no anonymous

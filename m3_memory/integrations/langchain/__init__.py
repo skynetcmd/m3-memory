@@ -34,6 +34,9 @@ __all__ = [
     "with_m3_history",
     "M3Retriever",
     "M3Saver",
+    "MemoryWrite",
+    "MemoryRetrieve",
+    "with_m3_memory",
 ]
 
 _LANGCHAIN_HINT = (
@@ -71,4 +74,11 @@ def __getattr__(name: str) -> Any:
         except ImportError as e:
             raise ImportError(f"{name}: {_LANGCHAIN_HINT}") from e
         return M3Saver
+    if name in ("MemoryWrite", "MemoryRetrieve", "with_m3_memory"):
+        try:
+            from .lcel import MemoryRetrieve, MemoryWrite, with_m3_memory
+        except ImportError as e:
+            raise ImportError(f"{name}: {_LANGCHAIN_HINT}") from e
+        return {"MemoryWrite": MemoryWrite, "MemoryRetrieve": MemoryRetrieve,
+                "with_m3_memory": with_m3_memory}[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

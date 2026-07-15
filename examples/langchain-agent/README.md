@@ -14,10 +14,12 @@ Full guide: [`docs/integrations/LANGCHAIN.md`](../../docs/integrations/LANGCHAIN
 | `history_and_retriever.py` | `M3ChatMessageHistory` + `M3Retriever` — short-term chat + RAG | chat history / vector retriever |
 | `graph_checkpointer.py` | `M3Saver()` — pause/resume/time-travel a LangGraph run | LangGraph checkpointer (Sqlite/Postgres saver) |
 | `agent_with_memory_and_persistence.py` | `create_react_agent` with **both** `M3Store` (memory) + `M3Saver` (persistence) | a full agent's memory + state layer |
+| `lcel_memory.py` | LCEL pipe `MemoryRetrieve \| … \| MemoryWrite`, the `with_m3_memory` decorator, and `.explain()` | composable memory in a chain |
 
-`mem0_migration.py`, `history_and_retriever.py`, and `graph_checkpointer.py` run
-with **no API key** (they exercise memory/state directly). `native_store.py` /
-`langmem_on_m3.py` build a real agent, so they need a chat-model key.
+`mem0_migration.py`, `history_and_retriever.py`, `graph_checkpointer.py`, and
+`lcel_memory.py` run with **no API key** (they exercise memory/state directly).
+`native_store.py` / `langmem_on_m3.py` / `agent_with_memory_and_persistence.py`
+build a real agent, so they need a chat-model key.
 
 ## Setup
 ```bash
