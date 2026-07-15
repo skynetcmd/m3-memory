@@ -21,6 +21,11 @@ the policy is forward-going only.
 
 <!-- When adding the next change, replace the "None pending" line below with
      the usual ### Added / ### Changed / ### Fixed sub-sections here. -->
+### None pending at this time
+
+---
+
+## [2026.7.15.1] — 2026-07-15 — LangChain checkpointer + LCEL surfaces
 
 ### Added
 
