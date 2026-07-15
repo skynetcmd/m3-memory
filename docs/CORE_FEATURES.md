@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 100+ MCP tools. 1,283 tests across 154 files. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 1,283 tests across 154 files. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -26,13 +26,13 @@ Memory is only useful if you can find what you need. M3 uses a **three-stage hyb
 
 - **Stage 1 — Keyword (FTS5):** BM25-ranked full-text search with injection-safe query sanitization
 - **Stage 2 — Semantic (Vector):** Cosine similarity against 1024-dim embeddings via numpy batch operations
-- **Stage 3 — Diversity (MMR):** Maximal Marginal Relevance re-ranking ensures diverse results — no more getting 5 near-identical memories back
+- **Stage 3 — Diversity (MMR):** Maximal Marginal Relevance re-ranking keeps the top-k diverse so the right answer surfaces early and near-duplicates don't crowd it out — the mechanism behind M3's **99.2% session-hit-rate at k=10** (correct memory in the top 10, not the top 50). Accurate retrieval at low top-K means less noise fed to the model and the answer found on the first search, not the fifth.
 
 **Explainable results.** Every search can return a full score breakdown (vector component, BM25 weight, MMR penalty) so you or your agent can understand *why* a memory was retrieved.
 
 ### ⏳ Bitemporal History
 
-M3's **bitemporal model** tracks not just *when a fact was stored*, but *when it was actually true*. Query with `as_of="2026-01-15"` to see the world as your agent knew it on that date — essential for debugging, compliance, and historical reasoning.
+M3's **bitemporal model** tracks two independent time axes — when a fact was *true* (valid time) and when M3 *recorded* it (transaction time) — so M3 can answer "what did we believe last Tuesday, and when was that corrected?" Most memory stores only know "now." Query with `as_of="2026-01-15"` to see the world as your agent knew it on that date — essential for debugging, compliance, and historical reasoning.
 
 ### ⚠️ Contradiction Detection
 
@@ -155,8 +155,9 @@ Headline benchmark on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval)
 (500-question long-horizon conversational memory suite):
 **99.2% retrieval session-hit-rate @ k=10** (496/500; 100% @ k=20) with the v3
 core engine — the retrieval-only metric memory systems publish as their headline.
-Separately, **92.0% end-to-end QA accuracy** (460/500, no oracle metadata) *(SHR=100% @ k=20; QA is
-very model-dependent)* — a different metric that also depends on the answer model.
+Under the harder no-oracle-metadata condition (no ground-truth session hints),
+end-to-end QA accuracy is **92.0%** (460/500) — and with retrieval SHR at 100% @ k=20,
+the ceiling here is the answer model, not M3's memory layer.
 Per-category breakdown, ablations, and full methodology live in
 the [README's Benchmarks section](../README.md#-benchmarks) and the
 [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
@@ -168,7 +169,9 @@ quality claim. Skips gracefully when the local LLM server is offline.
 
 ---
 
-## 🧰 96 MCP Tools at a Glance
+## 🧰 100+ MCP Tools at a Glance
+
+The full catalog spans 9 domains, but it costs near-zero context: **lazy tool-loading** registers only the ~18 essential tools at startup (~3,540 tokens, ~1.8% of a 200K window; full catalog loads on demand) and pulls the rest in on demand via `tools_load_domain`. Most MCP servers load their entire surface up front — M3 doesn't.
 
 | Category | Tools |
 |----------|-------|

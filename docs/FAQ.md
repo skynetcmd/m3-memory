@@ -1,5 +1,21 @@
 # M3 Memory FAQ
 
+## What is M3?
+
+### Q: Is my data private?
+**A:** Yes — 100% local. Memory lives in a SQLite file on your hardware, with zero cloud egress and zero telemetry. M3 runs fully air-gapped: the BGE-M3 embedder ships bundled and runs on your CPU with no API keys and no internet.
+
+### Q: How good is retrieval?
+**A:** State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10 and 100% @ k=20** on the LongMemEval-S benchmark (no oracle routing), with the correct session as the #1 result for ~92% of questions. End-to-end QA accuracy is 92.0% (no oracle metadata). See the [Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
+
+### Q: Can multiple agents share one memory?
+**A:** Yes. Claude Code, Gemini CLI, Aider, OpenCode and any MCP agent share one brain, with optional SQL-layer isolation so each agent's private notes stay private. See [Multi-Agent](MULTI_AGENT.md).
+
+### Q: Does it remember decisions across sessions?
+**A:** Yes — that's the point. M3 is a bitemporal knowledge base: it captures facts, resolves contradictions automatically, and lets you query what your agent believed at any past date. A verbatim chatlog subsystem also records conversation turns *before* compaction, so nothing is lost to context-window truncation.
+
+---
+
 ## Windows Focus-Stealing Issues
 
 ### Q: Why do blank command prompt windows keep popping up and stealing focus?

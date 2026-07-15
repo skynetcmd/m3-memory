@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 2026.04.x (latest) | ✅ Yes |
+| 2026.7.x (latest) | ✅ Yes |
 
 ---
 
@@ -25,7 +25,8 @@ We will acknowledge your report within 48 hours and aim to release a fix within 
 
 M3 Memory is designed with security as a first-class concern:
 
-- **Credential storage** — AES-256 encrypted vault (PBKDF2-HMAC-SHA256, 600K iterations). API keys and secrets never stored in plaintext. OS keyring integration (Keychain on macOS, Credential Manager on Windows).
+- **FIPS 140-3 deployment-ready** — all cryptography routes through wolfCrypt, with a Tier-2 path that runs on the CMVP-validated wolfCrypt FIPS module. Crypto fails closed when the FIPS provider is absent, power-up known-answer tests gate startup, and library loading is hardened against DLL-hijack. M3 is the *consumer* of the validated module, not itself a validated boundary — see [Sovereign Deployment](SOVEREIGN_DEPLOYMENT.md#fips-140-3-deployment-ready-hardened).
+- **Credential storage** — AES-256-GCM encrypted vault (PBKDF2-HMAC-SHA256, 600K iterations — meets OWASP guidance). API keys and secrets never stored in plaintext. OS keyring integration (Keychain on macOS, Credential Manager on Windows).
 - **Content integrity** — SHA-256 hash computed and stored on every write. `memory_verify` re-computes and compares to detect post-write tampering.
 - **Input safety** — write boundary rejects XSS, SQL injection, Python code injection, and prompt injection patterns before data reaches storage.
 - **Search safety** — FTS5 operator sanitization prevents query injection.

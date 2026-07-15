@@ -49,6 +49,9 @@ once the m3-memory MCP server is loaded in your client.
 
 ## What you get
 
+Measured on the fixed eval corpus: **22/22 top-5 text recall (100%)** and
+**100% fact recall** — see [Eval gates](#eval-gates) for the harness.
+
 - **Hierarchical chunking.** Markdown splits at heading tree; PDF splits
   by page; plain text uses a semantic paragraph chunker.
 - **Hybrid search.** FTS5 keyword + vector cosine + Reciprocal Rank
@@ -59,9 +62,10 @@ once the m3-memory MCP server is loaded in your client.
 - **Version history.** Re-ingesting a changed file supersedes the
   previous version; the prior content stays queryable with
   `include_history=True`.
-- **Carry-forward.** When one section of a multi-section file changes,
-  the unchanged sections reuse their embeddings — measured ~4× faster
-  re-ingest in P3 testing.
+- **4× faster incremental re-ingest.** When one section of a
+  multi-section file changes, only that section is re-embedded; unchanged
+  sections reuse cached embeddings — a measured ~4× speedup in P3 eval
+  gates, versus systems that re-embed the whole file on every edit.
 - **Fact extraction (optional).** Inline (sync inside ingest) or queue
   (drain later). Facts carry `source_span` back to the leaf text.
 - **Entity linking.** Extracted entity names resolve against

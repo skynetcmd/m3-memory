@@ -424,8 +424,8 @@
             <div class="term-header"><h3>Token Efficiency</h3><a href="#comparison-table" class="back-to-table">↑ Back to table</a></div>
             <p><strong>What it means:</strong> How effectively the system reduces context-window usage and downstream LLM costs.</p>
             <p><strong>Why it matters:</strong> Every token saved is dollars saved and latency reduced. At scale, the difference is order-of-magnitude.</p>
-            <p><strong>M3 standing:</strong> Strong — working-memory optimization plus 3-pillar retrieval keeps context tight without sacrificing recall coverage.</p>
-            <p><strong>Cohort context:</strong> Mem0's reported ~90% savings is the leader; M3 is mid-pack but balances token efficiency against bitemporal richness. Heavy reranking (Hindsight) wastes tokens.</p>
+            <p><strong>M3 standing:</strong> Strong — lazy tool-loading keeps the context window small, and SOTA retrieval means a low top-K (versus the typical K=20–50) is enough: less noise, and the correct answer tends to surface on the first search rather than in follow-up queries.</p>
+            <p><strong>Cohort context:</strong> Mem0 reports ~90% context savings. M3 attacks token cost from two directions instead — lazy-loading the tool surface, and retrieving accurately at low K so fewer results carry the answer — while preserving bitemporal richness. Heavy reranking (Hindsight) wastes tokens.</p>
         </div>
     </div>
 

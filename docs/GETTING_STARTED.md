@@ -2,7 +2,7 @@
 
 If you've ever felt like your AI agent is a "stranger" every time you start a new session—forgetting your architectural preferences, your naming conventions, or that specific bug you fixed yesterday—**you're in the right place.**
 
-M3 Memory is designed to be your agent's "long-term brain." It’s local, it’s private, and it’s built to grow with you.
+M3 Memory is designed to be your agent's "long-term brain." It’s local, it’s private, and it’s built to grow with you — and it leads on the numbers: **99.2% retrieval @ k=10 and 92% end-to-end QA** on the LongMemEval-S long-context benchmark, with an embedder that runs entirely on your CPU, offline.
 
 ---
 

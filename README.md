@@ -70,7 +70,9 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 | **Works With** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · LangChain/LangGraph · Any MCP Agent |
 | **M3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
 | **M3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
-| **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools. |
+| **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
+| **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with the correct session as the **#1 result for ~92% of questions**. See [Benchmarks](#-benchmarks). |
+| **Context Efficiency** | Exposes 100+ tools but occupies just **~1.8% of a 200K context window** at startup — lazy domain-gating loads the rest on demand. |
 | **Maturity** | Production-grade. Uses SQLite by default for lightweight operation; scales out to PostgreSQL for enterprise sync. (See [features.json](docs/features.json)) |
 
 ---
@@ -85,7 +87,7 @@ M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base*
 *   **Self-Maintaining Lifecycle:** Implements memory decay, deduplication, automatic consolidation into higher-order beliefs, TTL expiry, and GDPR erasure.
 *   **Write-Gating & Content Safety:** Filters out low-signal noise via an enrichment queue and content safety guardrails before storage.
 *   **Explainable Retrieval:** Hybrid engine combining vector similarity, BM25 (FTS5), MMR diversity, and reranking. `memory_suggest` returns the exact score breakdown per result. (See [Confidence and Trust Guide](docs/CONFIDENCE_AND_TRUST.md)).
-*   **Proven Accuracy:** Evaluated via LongMemEval-S, yielding **92.0% end-to-end QA accuracy** and **99.2% recall @ k=10** (see [Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
+*   **Proven Accuracy:** On LongMemEval-S, M3 delivers **state-of-the-art retrieval for a local-first substrate — 99.2% session-hit-rate @ k=10 and 100% @ k=20** (no oracle routing), with the correct session as the **#1 result for ~92% of questions**. End-to-end QA accuracy is **92.0%** with no oracle metadata (see [Benchmarking Report](benchmarks/longmemeval/LME-S_Benchmarking_Report.md)).
 
 ---
 
@@ -154,11 +156,11 @@ To expose M3 to any Model Context Protocol host, add it to your configuration fi
 
 ---
 
-## 🎚️ Domain Gating Keeps the Catalog Small
+## 🎚️ Domain Gating: the Full Catalog Without the Context Cost
 
-Exposing 100+ tools can overwhelm an LLM's context window. To avoid this, M3 groups its tools into **9 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `diagnostics`, `admin`) and loads them lazily.
+M3 gives you the full 100+ tool surface while occupying just **1.8% of a 200K context window** at startup — most MCP servers make you pay for every tool in every prompt. Tools are grouped into **9 domains** (`memory`, `chatlog`, `files`, `entity`, `agent`, `tasks`, `conversations`, `diagnostics`, `admin`) and loaded lazily.
 
-Only the essential core set (~18) registers at startup. When your agent needs advanced functionalities, it calls `tools_load_domain(domain="...")` to fetch the rest dynamically.
+Only the essential core set (~18, ~3,540 tokens) registers at startup. When your agent needs advanced functionality, it calls `tools_load_domain(domain="...")` to fetch the rest on demand — so a large catalog costs near-zero context until you actually use a domain.
 
 | Gating Mode | Registered Tools | Tokens in Schema | % of 200K Window |
 | :--- | :---: | :---: | :---: |
@@ -195,7 +197,8 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 *   **Memory Persistence:** Saves system architecture, project decisions, and preferences across tool boundaries using a local SQLite database.
 *   **Autonomous Cognitive Loop:** Background worker (`m3_cognitive_loop.py`) that periodically sweeps chat logs to extract facts, reconcile contradictions, and construct an entity relationship graph.
 *   **Hybrid Vector & Keyword Search:** Seamlessly merges vector space, Full-Text Search (FTS5 BM25), and MMR diversity.
-*   **Hierarchical File Ingestion:** A dedicated 26-tool files domain reads directories, chunks files, extracts facts, and reviews staleness.
+*   **Hierarchical File Ingestion:** A dedicated 26-tool files domain reads directories, chunks files, extracts facts, and reviews staleness — with ~4× faster incremental re-ingest (unchanged sections reuse cached embeddings).
+*   **Verbatim Chatlog Capture:** A dedicated 10-tool chatlog domain records conversation turns *before compaction*, so prior Claude/Gemini sessions stay searchable and nothing is lost to context-window truncation.
 *   **Cross-Device Sync:** Optional PostgreSQL or ChromaDB synchronization backend. Access the same memories on your laptop, desktop, or cloud environments.
 
 ---
@@ -241,6 +244,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 
 ## 🛡️ Why Trust This
 
+*   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
 *   **Robust Coverage:** Verified with **1,283 tests across 154 test files** (~2,070 cases with parametrization) spanning search, sync, GDPR lifecycle, and files ingestion.
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
 *   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.

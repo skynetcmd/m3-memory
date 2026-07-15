@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Quick Start
 
-Get persistent memory running with your MCP agent in under five minutes.
+Get persistent memory running with your MCP agent in under five minutes. Under the hood you're getting a benchmark-leading hybrid retriever (FTS5 + BGE-M3 vector + MMR) — **99.2% retrieval @ k=10 on LongMemEval-S**, SOTA-class recall running entirely on your CPU.
 
 This is the generic quick start. For OS-specific walkthroughs see
 [QUICKSTART_LINUX.md](./QUICKSTART_LINUX.md),

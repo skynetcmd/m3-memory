@@ -8,7 +8,7 @@ This page is the entry point to M3 Memory's compliance documentation. The detail
 
 ## What M3 helps with
 
-M3's local-first design — SQLite single-file store, local SLM extraction, zero telemetry by default — reduces the technical-controls portion of compliance work in regulated environments. It does **not** replace a compliance program; physical security, personnel screening, supply-chain controls, and most program-level requirements remain with the deploying organization.
+M3 ships compliance-relevant primitives natively — built-in GDPR erasure/export MCP tools, a bitemporal audit log capturing what was known and when, full air-gap operability, and zero telemetry by default. Combined with the local-first design (SQLite single-file store, local SLM extraction), this materially reduces the technical-controls portion of compliance work in regulated environments. It does **not** replace a compliance program; physical security, personnel screening, supply-chain controls, and most program-level requirements remain with the deploying organization.
 
 What M3 ships natively that's relevant here:
 
@@ -30,7 +30,7 @@ What M3 ships natively that's relevant here:
 
 ### What about FedRAMP?
 
-FedRAMP authorizes cloud service providers. M3 has no cloud component, so FedRAMP does not apply. For workloads that can stay local, M3 keeps the data path on agency-controlled hardware — eliminating the shared-responsibility surface that a FedRAMP authorization is designed to evaluate. This is *not* a substitute for FedRAMP where a cloud service is genuinely required; it's an option for the workloads that don't need one.
+Because M3 has no cloud component, it keeps the data path entirely on agency-controlled hardware — eliminating the shared-responsibility surface that a FedRAMP authorization exists to evaluate. FedRAMP authorizes cloud service providers, so it simply does not apply. This is *not* a substitute for FedRAMP where a cloud service is genuinely required; it's the better answer for the workloads that don't need one.
 
 ---
 

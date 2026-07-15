@@ -63,7 +63,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`) and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |
 | **Feature coverage** | **Superset of Mem0** — everything Mem0 does (`.add()`/`.search()`) plus contradiction supersession, bitemporal `as_of`, commanded forgetting, hybrid+graph retrieval | Baseline |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
-| **Stars (Apr 2026)** | Newer project (fewer stars), production-grade codebase | 20k+ |
+| **Stars (Apr 2026)** | Newer project (fewer stars); 1,283-test codebase with SOTA local-first retrieval (99.2% SHR@10) | 20k+ (mindshare leader) |
 
 ### When to choose M3-Memory over Mem0
 
@@ -134,7 +134,7 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 | Feature | M3-Memory | Zep |
 |---------|-----------|-----|
 | **Search** | FTS5 + vector + MMR | Vector + temporal knowledge graph |
-| **Temporal model** | 🏆 Bitemporal (valid time + transaction time), item-grain | 🏆 Bitemporal at fact/edge grain in a temporal KG |
+| **Temporal model** | 🏆 Bitemporal (valid time + transaction time), item-grain — **local-first, no graph DB to run** | 🏆 Bitemporal at fact/edge grain in a temporal KG (requires Neo4j/FalkorDB) |
 | **GDPR tooling** | 👑 Built-in MCP tools | 🏆 Partial |
 | **MCP support** | 👑 Native — 100+ tools | No |
 | **Deployment** | 👑 Local SQLite + bundled embedder — no external services | 🏆 Self-hosted or Zep Cloud |

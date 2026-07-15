@@ -57,7 +57,7 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 | **[Published LME-S headline](#lme-s-score)**<br>*(metric varies by vendor — see sourcing note)* | **92.0%** QA<br>(no oracle; SHR=100% @ k=20) | 96.2%ᵃ | 95.6%ᵇ | 91.4%ᶜ | 94.9%ᵈ | ~94% / ~67%ᵉ | 90.8%ᶠ | 96.6% R@5 ⚠️ᵍ |
 | **[Search Strategy](#search-strategy)** | ✅ **3-Pillar Hybrid** | 🏆 **6-Signal Hybrid** | ⚖️ **Dual-Index** | 🏆 **4-Stream Neural** | ✅ **Reflective** | ✅ **Vector-only** | ✅ **Compositional** | ⚖️ **Spatial / AAAK** |
 | **[Local Fact Extraction](#local-fact-extraction)** | 🏆 **Local SLM** | ✅ **Deterministic** | ✅ **ISO-Temporal** | ✅ **Entity-centric** | 🏆 **Reflector** | ✅ **LLM-Powered** | ✅ **Entity-Res.** | ❌ **Verbatim only** |
-| **[Token Efficiency](#token-efficiency)** | 🏆 **Working Memory** | ✅ **Signal Filter** | ✅ **Event-Pruned** | 🔻 **Heavy Rerank** | ✅ **Cache-Stable** | 🏆 **~90% Savings** | ✅ **Verbatim Fall.** | ⚖️ **AAAK Dialect** |
+| **[Token Efficiency](#token-efficiency)** | 🏆 **Lazy tools + low-K** (1.8% window at startup) | ✅ **Signal Filter** | ✅ **Event-Pruned** | 🔻 **Heavy Rerank** | ✅ **Cache-Stable** | 🏆 **~90% Savings** | ✅ **Verbatim Fall.** | ⚖️ **AAAK Dialect** |
 
 > **On the two retrieval rows.** *Retrieval SHR@10* is a like-for-like, retrieval-only metric (session-hit-rate: did a gold-session turn land in the top-k?). M3's **99.2% @ k=10 / 100% @ k=20** comes from the v3 core engine on raw turns — hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata ([report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md)). The *Published LME-S headline* row collects each vendor's top-line number **as they report it** — but those mix metrics (QA accuracy vs. recall@k) and use different answer models, judges, and ingest pipelines, so they are **not** a controlled head-to-head. M3's own headline there is **QA accuracy (92.0%, no oracle)**, which is answer-model-dependent and should only be compared against other systems' QA-accuracy figures.
 
@@ -276,9 +276,9 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 **Why it matters:** Every token saved is dollars saved and latency reduced. At scale, the difference is order-of-magnitude.
 
-**M3 standing:** Strong — working-memory optimization plus 3-pillar retrieval keeps context tight without sacrificing recall coverage.
+**M3 standing:** Strong — lazy tool-loading keeps the context window small, and SOTA retrieval means a low top-K (versus the typical K=20–50) is enough: less noise, and the correct answer tends to surface on the first search rather than in follow-up queries.
 
-**Cohort context:** Mem0's reported ~90% savings is the leader; M3 is mid-pack but balances token efficiency against bitemporal richness. Heavy reranking (Hindsight) wastes tokens.
+**Cohort context:** Mem0 reports ~90% context savings. M3 attacks token cost from two directions instead — lazy-loading the tool surface, and retrieving accurately at low K so fewer results carry the answer — while preserving bitemporal richness. Heavy reranking (Hindsight) wastes tokens.
 
 ---
 

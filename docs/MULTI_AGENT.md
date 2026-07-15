@@ -32,6 +32,8 @@ All scopes support the same `memory_search`, `memory_write`, and `memory_update`
 
 ### 🔐 Governance / Enforcement
 
+M3 supports **true SQL-layer agent isolation** — access control injected into the query itself (`WHERE (scope != 'agent' OR agent_id = ?)`), never a post-fetch filter that can leak. It's opt-in, so trusted single-operator setups keep full visibility by default and gain a hard boundary the moment they need one.
+
 By default, scope filtering is **caller-applied / advisory**: a search that supplies no `scope` or agent filter sees every agent's memories, including other agents' private `scope="agent"` notes. This is intentional — it fits a trusted, single-operator multi-agent setup where the operator (or the orchestrator itself) is allowed full visibility, and it keeps `memory_search` byte-identical to prior behavior for every existing caller.
 
 For setups that want a real access-control boundary, enforcement is **opt-in**:
