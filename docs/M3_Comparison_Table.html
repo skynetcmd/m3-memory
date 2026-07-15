@@ -303,7 +303,7 @@
         <h2>When another tool fits better</h2>
         <p>M3 is not the right answer for every workload. Pick from the table based on what matters most to <em>you</em>:</p>
         <ul>
-            <li><strong>Top-line QA accuracy is paramount</strong> — agentmemory (96.2%) or MemPalace (96.6% R@5) publish higher numbers. M3's 92.0% no-oracle QA is strong; on pure <em>retrieval</em> recall (100% SHR @ k=20) M3 is state-of-the-art for a local-first substrate.</li>
+            <li><strong>Top-line QA accuracy is paramount</strong> — agentmemory (96.2%) or MemPalace (96.6% R@5) publish higher numbers. M3's 92.0% no-oracle QA is strong; on pure <em>retrieval</em> recall (100% SHR @ k=20) M3 is state-of-the-art for a local-first substrate. (Note: an independent analysis, <a href="https://arxiv.org/abs/2604.21284">arXiv 2604.21284</a>, attributes MemPalace's 96.6% to ChromaDB embeddings and verbatim storage rather than its "memory-palace" architecture.)</li>
             <li><strong>You need extreme token compression</strong> — Mem0 reports ~90% context savings. M3's working-memory model is good but not as aggressive.</li>
             <li><strong>You only need verbatim recall, no extraction</strong> — MemPalace's verbatim-only mode is purpose-built for this.</li>
             <li><strong>Heavy neural reranking is acceptable</strong> — Hindsight's 4-stream architecture wins on rich retrieval if you can absorb the latency cost.</li>
