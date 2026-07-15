@@ -18,9 +18,18 @@ straight from PyPI. Read on only if you have an **NVIDIA GPU and want the CUDA
 build**, especially if your environment is restricted to a PyPI index and can't
 reach GitHub automatically.
 
-> M3 works **without** the native core at all — it falls back to a pure-Python
-> path. CUDA only accelerates the in-process embedder and a few hot paths. If
-> installing CUDA is inconvenient, you lose speed, not function.
+> **This is a PyPI file-size limit, not a deprioritization of GPU users.** The
+> CUDA build is a first-class, fully-supported backend — in fact it's the
+> *fastest* one (10–50× the CPU embedder). Nothing is stripped from it; it's
+> the same wheel as every other backend plus the bundled CUDA runtime, which is
+> exactly *why* it's too big for PyPI. We host it on the GitHub Release (no size
+> limit) rather than shipping a smaller-but-fragile "fetch the runtime at import
+> time" wheel that could break on your machine. GPU users get the most complete,
+> most reliable build — it just installs from a different place.
+
+> M3 also works **without** the native core at all — it falls back to a
+> pure-Python path. CUDA only accelerates the in-process embedder and a few hot
+> paths. If installing CUDA is inconvenient, you lose speed, not function.
 
 ---
 
@@ -127,7 +136,11 @@ statically bundle the CUDA runtime libraries to stay self-contained, which puts
 them at ~256 MB (Windows) to ~970 MB (Linux) — an order of magnitude over the
 limit. Rather than ship a fragile "download the runtime separately at import
 time" hack, M3 keeps the fully-bundled CUDA wheels on the GitHub Release, where
-there's no size limit, and serves the smaller backends from PyPI.
+there's no size limit, and serves the smaller backends from PyPI. This is a
+deliberate choice to give GPU users the **most complete and most reliable**
+build — a self-contained wheel that just works — not a sign that CUDA is an
+afterthought. It's the highest-performance backend M3 ships; it simply lives
+where a ~1 GB artifact is allowed to.
 
 The release pipeline still *attempts* the CUDA PyPI upload on every release —
 PyPI's limits can change, and if a CUDA wheel is ever accepted it'll resolve

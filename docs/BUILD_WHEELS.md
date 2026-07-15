@@ -15,12 +15,14 @@ prebuilt Python wheel named `m3-core-rs-<os>-<backend>`.
 > **The CUDA wheels are currently too large for PyPI** (they bundle the CUDA
 > runtime — `linux-cuda` ~970 MB, `windows-cuda` ~256 MB, vs PyPI's 100 MB
 > limit), so they're distributed via the
-> [GitHub Release](https://github.com/skynetcmd/m3-core-rs/releases). The release
-> pipeline attempts the PyPI upload anyway (limits may change) but doesn't fail
-> if it's rejected. **Every** wheel — CUDA included — is always attached to the
-> GitHub Release, so `m3 setup` resolves **PyPI first, then GitHub Release** and
-> always finds a match. CUDA-specific install paths (incl. PyPI-only mirrors):
-> see [CUDA_INSTALL.md](CUDA_INSTALL.md).
+> [GitHub Release](https://github.com/skynetcmd/m3-core-rs/releases). This is a
+> size-limit consequence, **not** a downgrade for GPU users — CUDA is the
+> fastest, fully-supported backend and ships complete; it just needs a home that
+> allows a ~1 GB file. The release pipeline attempts the PyPI upload anyway
+> (limits may change) but doesn't fail if it's rejected. **Every** wheel — CUDA
+> included — is always attached to the GitHub Release, so `m3 setup` resolves
+> **PyPI first, then GitHub Release** and always finds a match. CUDA-specific
+> install paths (incl. PyPI-only mirrors): see [CUDA_INSTALL.md](CUDA_INSTALL.md).
 
 **You almost never need this document.** `m3 setup` and `m3 embedder install-gpu`
 install the matching prebuilt wheel automatically (PyPI first, then the GitHub
