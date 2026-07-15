@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77,<82", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "m3-langchain"
+version = "2026.7.15.1"
+description = "Recognizable alias for m3-memory's LangChain / LangGraph integration (drop-in Mem0 replacement, M3Store, M3Saver checkpointer, retriever, LCEL). Re-exports m3_memory.langchain."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "skynetCMD" }]
+keywords = ["langchain", "langgraph", "mem0", "memory", "checkpointer", "m3", "mcp", "local-first"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# The integration lives in m3-memory. Pin the SAME version so `m3-langchain
+# X.Y.Z` always resolves the matching m3-memory, and pull its [langchain] extra
+# (langchain-core / langgraph) transitively — this shim adds no deps of its own.
+dependencies = ["m3-memory[langchain]==2026.7.15.1"]
+
+[project.urls]
+Homepage = "https://github.com/skynetcmd/m3-memory"
+Repository = "https://github.com/skynetcmd/m3-memory"
+Documentation = "https://github.com/skynetcmd/m3-memory/blob/main/docs/integrations/LANGCHAIN.md"
+"Bug Tracker" = "https://github.com/skynetcmd/m3-memory/issues"
+
+[tool.setuptools]
+packages = ["m3_langchain"]
