@@ -286,7 +286,7 @@ SLM-extraction pipeline to build a typed knowledge graph of entities and relatio
 
 ## Project Oxidation — Rust Core (`m3_core_rs`)
 
-Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)). Until wheels are published to PyPI, install it manually with `pip install "m3-core-rs @ git+https://github.com/skynetcmd/m3-core-rs.git@v0.9.0#subdirectory=crates/m3-core-py"` (needs a Rust toolchain ≥1.94 + maturin). When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, chat-log redaction, and pre-retrieval query routing — route through Rust. 
+Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)). Prebuilt wheels are published per platform — `m3 setup` / `m3 embedder install-gpu` install the matching one automatically (CPU/Vulkan/Metal from PyPI under the platform-suffixed names like `m3-core-rs-linux-cpu`; CUDA from the GitHub Release — see [CUDA_INSTALL.md](CUDA_INSTALL.md)). You only build from source when no prebuilt wheel matches your platform + Python version ([BUILD_WHEELS.md](BUILD_WHEELS.md)). When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, chat-log redaction, and pre-retrieval query routing — route through Rust. 
 
 **By default, when `m3_core_rs` is importable, all Rust integrations are active out-of-the-box.** Every pathway falls back gracefully and silently to the pure-Python implementation when the wheel is absent. Users can explicitly opt out of any Rust-accelerated hot paths by setting the escape-hatch environment variables described below.
 
