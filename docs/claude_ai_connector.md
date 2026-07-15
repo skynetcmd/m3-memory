@@ -18,7 +18,7 @@ This starts the same 87-tool bridge you use locally on
 `http://127.0.0.1:8080/mcp` (Streamable HTTP transport, the spec Claude
 expects). Domain-gated by default — only ~6 essentials register at session
 start, rest expand on demand via `tools_load_domain` (see the
-[lazy-loading note](../README.md#-100-tools-but-they-dont-all-crowd-your-context--domain-gating-keeps-the-catalog-small)).
+[lazy-loading note](../README.md#-domain-gating-the-full-catalog-without-the-context-cost)).
 
 You then need to make `127.0.0.1:8080` reachable by Claude's servers.
 Pick **one** of the tunnel options below.

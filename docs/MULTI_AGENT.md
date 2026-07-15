@@ -160,6 +160,12 @@ await tool(session, "task_tree", {"root_task_id": parent_id})
 
 All agents contribute facts and observations to `scope="org"` asynchronously, without a predefined sequence. Any agent can search the shared pool at any time. This is useful when agents are loosely coupled — each contributes what it knows, and others consume what they need.
 
+#### Concurrency & scale
+
+Concurrent writes from multiple agents do **not** fail on lock contention. Every SQLite connection runs in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`**, a connection pool, and a write-path retry — so simultaneous writers serialize and wait rather than erroring. WAL is verified at init; M3 raises rather than silently running in a slower journal mode.
+
+For **high-concurrency fleets** where many agents write to one shared pool continuously, run a shared **PostgreSQL** backend: each agent writes locally to its WAL-mode SQLite store and syncs bidirectionally to Postgres (`bin/pg_sync.py`), which has no single-writer constraint. See [SYNC.md](SYNC.md). This is the path for the "many autonomous bots writing a shared memory pool" scenario — the local SQLite store is the default; Postgres is the scale-out tier, not a rewrite.
+
 ### ⚡ Reactive (notification-driven)
 
 Agents react to events rather than following a fixed sequence. Add `task_completed` to the orchestrator's `notification_kinds` so a planner automatically wakes up when a subtask finishes. Agents can also use `notify` to broadcast custom signals.

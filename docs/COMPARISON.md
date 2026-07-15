@@ -57,7 +57,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **Cross-device sync** | SQLite ↔ PostgreSQL ↔ ChromaDB, bi-directional delta sync | Managed by Mem0 cloud |
 | **Storage topology** | 🏆 Chat-log and curated memory run as **one unified store, two independent stores, or two stores searched together** (`memory_search_multi_db`) — your choice by config, no rework | Single managed store |
 | **Knowledge graph** | Yes — 9 relationship types, 3-hop traversal | Yes — strong point |
-| **Multi-agent concurrent writes** | Atomic via SQLite WAL — multiple agents writing simultaneously without races | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |
+| **Multi-agent concurrent writes** | WAL mode + 30s busy_timeout + retry — concurrent writers serialize and wait, they don't fail; SQL-layer scope isolation keeps agents' private notes private; optional shared **PostgreSQL** pool for high-concurrency fleets (no single-writer limit) | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |
 | **Cognition placement** | Composable — disable, replace, or use built-in SLM extraction | LLM-driven extraction is welded into the memory layer |
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
 | **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`) and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |

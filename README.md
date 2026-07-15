@@ -50,7 +50,7 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 - [Overview & At a Glance](#-m3-at-a-glance)
 - [Memory Model](#-memory-model-at-a-glance)
 - [Installation & Onboarding](#-installation)
-- [Domain Gating (Token Optimization)](#-domain-gating-keeps-the-catalog-small)
+- [Domain Gating (Token Optimization)](#-domain-gating-the-full-catalog-without-the-context-cost)
 - [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments)
 - [Interactive Features & Capabilities](#-what-m3-does)
 - [Documentation Index](#-documentation-index)

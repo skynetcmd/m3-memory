@@ -101,6 +101,22 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 We will **not** quote our 99.2% retrieval number against someone else's QA-accuracy number to manufacture a win. Per-source citations and caveats are in the [Sovereign Substrates Table](M3_Comparison_Table.md#-retrieval--extraction-m3-leads-on-retrieval-accuracy).
 
+### ❌ Myth: "M3 has a single-writer bottleneck — concurrent multi-agent writes will fail on lock contention"
+
+**Fact:** M3 does not fail under concurrent writes; writers **serialize and wait**, they don't error. Every SQLite connection is opened in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`** and a connection pool, and the write path adds a 3-tier retry (`bin/sqlite_pragmas.py`, `bin/m3_core/context.py`, `bin/memory/write.py`). WAL is *verified* at init — if the filesystem silently downgrades it, M3 raises rather than continuing. And for genuine high-concurrency, shared multi-agent pools, M3 ships a **bidirectional SQLite ↔ PostgreSQL sync** (`bin/pg_sync.py`): each agent writes locally and syncs to a shared Postgres backend that has no single-writer constraint. A single SQLite file does serialize writers (as every SQLite deployment does), but "will fail due to concurrency locks" is not how the system behaves — see [MULTI_AGENT.md](MULTI_AGENT.md) and [SYNC.md](SYNC.md).
+
+### ❌ Myth: "M3 is English-only — its triage patterns are hardcoded English regex"
+
+**Fact:** M3's **primary** write and retrieval path is language-agnostic. The embedder is **BGE-M3, a multilingual model** (100+ languages); type classification and fact extraction are done by a **local LLM/SLM**, not regex; contradiction detection is embedding-cosine; and FTS5 uses a **Unicode** tokenizer, so BM25 isn't English-restricted either. What *is* English-biased is a handful of **auxiliary, non-gating heuristics** — a temporal query re-ranker, an opt-in event-row emitter, and the *default* rule-based entity extractor — which would underperform on non-English text. But the rule-based extractor is **one of three pluggable backends** selectable by the `M3_EXTRACTION_TYPE` env var (LLM and custom-script options ship in the box — **no fork required**), and none of these heuristics gate or drop memories; retrieval stays full BGE-M3 hybrid regardless of language.
+
+### ❌ Myth: "M3 floods the context with 60+ tool schemas, causing 'lost in the middle'"
+
+**Fact:** M3 loads tools **lazily by default**. At startup only ~18 essential tools register (~3,540 tokens, **~1.8% of a 200K window**); the full 100+ catalog loads on demand via `tools_load_domain` (`bin/memory_bridge.py`, `bin/tool_domains.py`). The "60+ schemas flood the context" concern describes the legacy **eager** mode (`M3_TOOLS_LAZY=0`), which M3 deliberately made non-default precisely to avoid this. See [the domain-gating section in the README](../README.md#-domain-gating-the-full-catalog-without-the-context-cost).
+
+### ❌ Myth: "M3's confidence is decorative and its deletion is a crude vector delete — stale facts win with unearned confidence"
+
+**Fact:** Confidence is **evidence-driven**, not decoration: it starts from provenance priors, moves with corroboration and contradiction, **decays toward neutral** when un-reinforced, and carries an optional **Bayesian Beta(α,β) posterior** — all wired into write-time aggregation and a scheduled maintenance pass (`bin/memory/confidence.py`, `bin/memory_maintenance.py`). A contradicted fact is auto-superseded and its confidence drops on the next pass. Deletion is **bitemporal and non-destructive**: supersession closes the old fact's validity interval and links the new one (it never overwrites content), the history stays queryable, and there's first-class **GDPR erasure/export** (Articles 17/20) with a full cascade (`bin/memory/write.py`, `bin/memory_maintenance.py`). This is the opposite of the "crude vector delete" the concern describes.
+
 ---
 
 ## What M3 actually is
@@ -118,7 +134,7 @@ For positive grounding, here's the short list of what M3 *does* implement (with 
 | Entity extraction | Optional SLM pipeline | `bin/m3_enrich.py`, `bin/run_observer.py` |
 | Knowledge graph | 9 relationship types, 3-hop traversal | `mcp__memory__memory_graph`, `memory_link` |
 | GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `m3_memory/gdpr.py` |
-| Multi-agent | Atomic writes via SQLite WAL; agent registry; handoffs | `mcp__memory__agent_*`, `memory_handoff` |
+| Multi-agent | WAL concurrent writes (30s busy_timeout + retry) + optional shared PostgreSQL pool; agent registry; SQL-layer scope isolation; handoffs | `mcp__memory__agent_*`, `memory_handoff`, `bin/pg_sync.py` |
 | Sync | Optional bi-directional delta sync to PostgreSQL or ChromaDB | `bin/sync_all.py` |
 | MCP | Native — 100+ tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
 
