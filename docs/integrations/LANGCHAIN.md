@@ -16,7 +16,7 @@ commanded forgetting, and hybrid + graph retrieval.**
 
 m3 is a local-first agent-memory system — hybrid FTS5 + vector + MMR recall, a
 bitemporal model, knowledge-graph supersession (real contradiction handling, not
-flat dedup), and async fact extraction — that speaks four standard LangChain
+flat dedup), and async fact extraction — that speaks five standard LangChain
 surfaces:
 
 | You use… | Swap in… | Section |
@@ -24,6 +24,7 @@ surfaces:
 | **mem0** | `from m3_memory.langchain import Memory` — one import | [§1](#1-replacing-mem0) |
 | **LangMem** / raw LangGraph | `store=M3Store()` | [§2](#2-replacing--backing-langmem) |
 | chat history / RAG retriever | `M3ChatMessageHistory` · `M3Retriever` | [§2](#short-term-chat-history--rag-retrieval) |
+| **LangGraph checkpointer** | `checkpointer=M3Saver()` — pause / resume / time-travel | [§2](#langgraph-checkpointing-with-m3saver) |
 | *the extras nothing else has* | `.supersede` · `as_of=` · `.forget` · `.related` | [§3](#3-what-you-gain-the-m3-native-extras) |
 
 > **Install** — `pip install "m3-memory[langchain]"`. m3 self-configures on first
@@ -215,6 +216,35 @@ chain.invoke({"input": "hi"}, config={"configurable": {"session_id": "conv-1"}})
 retriever = M3Retriever(user_id="alex", k=4)
 docs = retriever.invoke("deadline")   # -> [Document(page_content=…, metadata={id, score, confidence, valid_from, …})]
 ```
+
+### LangGraph checkpointing with `M3Saver`
+
+`M3Store` (above) is *long-term memory* — what your agent knows. A **checkpointer**
+is a different slot: the *machine state* LangGraph needs to pause, resume, and
+time-travel a run. `M3Saver` implements LangGraph's `BaseCheckpointSaver`, so a
+graph can hit a human-in-the-loop `interrupt()`, the process can exit, and a later
+run resumes exactly where it stopped — persisted to m3's local engine DB, no
+external checkpoint store to run.
+
+```python
+from m3_memory.langchain import M3Saver
+from langgraph.types import Command   # for resuming after an interrupt()
+
+graph = builder.compile(checkpointer=M3Saver())
+cfg = {"configurable": {"thread_id": "t-1"}}   # thread_id is the resume key
+
+graph.invoke({"input": "…"}, cfg)              # runs until an interrupt() pauses it
+graph.get_state(cfg)                           # inspect the persisted state
+graph.invoke(Command(resume="yes"), cfg)       # resume to completion
+list(graph.get_state_history(cfg))             # every super-step — replay / time-travel
+```
+
+A checkpoint is opaque graph state, not knowledge, so `M3Saver` stores it in its
+own tables and deliberately **bypasses** m3's embedder and contradiction pipeline
+(two checkpoints of a thread aren't contradictions to reconcile). An optional
+`user_id` in `configurable` scopes reads to that user's threads. Sync and async
+(`aget_tuple` / `aput` / `alist`) are both implemented. See a runnable end-to-end
+example in [`examples/langchain-agent/graph_checkpointer.py`](../../examples/langchain-agent/graph_checkpointer.py).
 
 ---
 
