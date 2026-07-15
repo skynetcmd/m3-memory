@@ -164,7 +164,7 @@ All agents contribute facts and observations to `scope="org"` asynchronously, wi
 
 Concurrent writes from multiple agents do **not** fail on lock contention. Every SQLite connection runs in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`**, a connection pool, and a write-path retry — so simultaneous writers serialize and wait rather than erroring. WAL is verified at init; M3 raises rather than silently running in a slower journal mode.
 
-For **high-concurrency fleets** where many agents write to one shared pool continuously, run a shared **PostgreSQL** backend: each agent writes locally to its WAL-mode SQLite store and syncs bidirectionally to Postgres (`bin/pg_sync.py`), which has no single-writer constraint. See [SYNC.md](SYNC.md). This is the path for the "many autonomous bots writing a shared memory pool" scenario — the local SQLite store is the default; Postgres is the scale-out tier, not a rewrite.
+For **high-concurrency fleets** where many agents write to one shared pool continuously, add a shared **PostgreSQL** sync tier: each agent still writes locally to its own WAL-mode SQLite store (SQLite remains the system of record) and syncs bidirectionally to a shared Postgres warehouse (`bin/pg_sync.py`), which has no single-writer constraint. See [SYNC.md](SYNC.md). This is the path for the "many autonomous bots writing a shared memory pool" scenario. Note that Postgres is a **sync/warehouse tier, not a drop-in replacement store** — you can't point M3 at Postgres as its live backend; the local SQLite store is always the source of truth.
 
 ### ⚡ Reactive (notification-driven)
 

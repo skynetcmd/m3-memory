@@ -17,6 +17,23 @@
 ### Q: I need verbatim recall of facts — should I use a verbatim-only store instead?
 **A:** No — M3 already gives you verbatim recall. Content is stored exactly as you wrote it and is **never altered in place**; the raw text is always retrievable byte-for-byte. When a fact is corrected, M3 doesn't overwrite the old one — it *closes* the old fact and links the new one, so the original wording stays queryable (via the `memory_history` tool, or an `as_of` point-in-time search) alongside the update. A verbatim-only store returns raw text too, but the moment a fact changes it loses the earlier version. M3 gives you exact recall **and** the full history of how a fact evolved — plus extraction and contradiction handling a plain verbatim store can't do.
 
+### Q: Is M3 right for my project? When is a simpler approach better?
+**A:** Be honest with yourself about the need. Persistent, evolving memory earns its keep when users (or agents) interact **repeatedly over time** and benefit from accumulated context — long-running autonomous agents, coding assistants that improve across sessions, personal/research assistants, multi-session workflows. If your need is really just **conversation history + RAG over a knowledge base + a small structured user profile**, that combination is simpler to build, test, and operate, and you may not need a memory framework at all. M3 doesn't punish you for starting small, though: you can run it as a plain store (disable enrichment/extraction — see below) and turn on the higher-order features only when you need them.
+
+### Q: What should I check before adopting M3? (evaluation checklist)
+**A:** Here are the standard "should I adopt this memory framework?" questions with M3's honest answers:
+
+| Question | M3's answer |
+|---|---|
+| **Actively maintained?** | Yes — frequent releases (see [CHANGELOG](../CHANGELOG.md)). |
+| **Memory format documented?** | Yes — a typed, code-cited schema ([MEMORY_MODEL.md](MEMORY_MODEL.md)) and a 100+ tool [API reference](API_REFERENCE.md). |
+| **Swap the storage backend?** | **Partly — be aware:** SQLite is always the system of record. You can *sync/federate* to PostgreSQL and ChromaDB ([SYNC.md](SYNC.md)), but you can't run M3 *on* Postgres as its live store. If a server-based store of record is a hard requirement, M3 isn't the fit. |
+| **Customize what's remembered/forgotten?** | Yes — write-gating, importance, confidence decay, TTL/expiry, and per-agent retention policies ([MEMORY_MODEL.md](MEMORY_MODEL.md)). |
+| **Debugging/introspection?** | Yes — `memory_suggest` returns a per-result score breakdown, `memory_history` shows the audit trail, `memory_verify` checks integrity, and `m3 doctor --fix` diagnoses the store. |
+| **Integrates with my stack?** | Yes for **MCP** (native) and **LangChain/LangGraph** (drop-in — [LANGCHAIN.md](integrations/LANGCHAIN.md)). Beyond those, you call the MCP tools directly. |
+| **Disable/replace components independently?** | Yes — run as a plain store (`M3_ENABLE_FACT_ENRICHED=0`, `M3_ENABLE_ENTITY_GRAPH=0`), swap the extractor (`M3_EXTRACTION_TYPE`), swap the embedder (`M3_EMBED_URL`/GGUF), or disable the Rust core — all via env vars, no fork ([ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)). |
+| **Portable data if I migrate away?** | Yes — `memory_export` / `gdpr_export` produce portable JSON (GDPR Article 20), and the store is a plain SQLite file any tool can read. |
+
 ---
 
 ## Windows Focus-Stealing Issues
