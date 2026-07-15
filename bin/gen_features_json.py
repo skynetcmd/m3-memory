@@ -131,9 +131,11 @@ def main() -> int:
                 "install_extra": "pip install m3-memory[langchain]",
                 "mem0_drop_in": True,          # Memory/M3Memory/MemoryClient, one-line import swap
                 "langgraph_basestore": True,   # M3Store — backs LangMem / any BaseStore consumer
+                "langgraph_checkpointer": True,  # M3Saver — BaseCheckpointSaver (pause/resume/time-travel)
                 "langmem_compatible": True,
                 "chat_message_history": True,  # M3ChatMessageHistory, with_m3_history
                 "rag_retriever": True,         # M3Retriever (LangChain BaseRetriever)
+                "lcel_runnables": True,        # MemoryWrite / MemoryRetrieve / with_m3_memory
                 "docs": "docs/integrations/LANGCHAIN.md",
                 "examples": "examples/langchain-agent/",
                 "note": (

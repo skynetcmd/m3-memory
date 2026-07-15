@@ -88,6 +88,12 @@ back to `M3_ENGINE_ROOT`. See `CLAUDE.md` "Homecoming Architecture".
 Every tool also accepts a per-call `database` arg (route one call to a non-default
 SQLite DB) and `timeout` arg — both are stripped before the impl runs.
 
+### LangChain / LangGraph integration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_DEFAULT_USER_ID` | (unset) | Fallback `user_id` for the LangChain surfaces (`Memory`, `M3Store`, `M3Retriever`, `MemoryWrite`, …) so a **single-user** app need not pass `user_id=` on every call. Resolution order is **explicit arg → constructor default → `M3_DEFAULT_USER_ID` → raise**. It never weakens tenancy: when unset and no `user_id` is supplied, the surfaces still raise (there is no anonymous/global mode). Multi-tenant apps leave it unset and keep passing `user_id` per call. |
+
 ### Infrastructure & Connectivity
 
 | Variable | Purpose | Example Keychain Command (macOS) |

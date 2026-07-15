@@ -26,8 +26,8 @@ TOOLS: list[ToolSpec] = [
         name="tools_list_domains",
         description=(
             "List m3 tool domains (memory, chatlog, files, entity, agent, tasks, "
-            "conversations, admin) and their tool counts. Call `tools_load_domain` "
-            "to expose a domain's full tool surface."
+            "conversations, diagnostics, admin) and their tool counts. Call "
+            "`tools_load_domain` to expose a domain's full tool surface."
         ),
         parameters={"type": "object", "properties": {}, "required": []},
         impl=_tool_loader.list_domains,
@@ -43,7 +43,7 @@ TOOLS: list[ToolSpec] = [
             "Use when you need tools beyond the essentials (memory_search, "
             "memory_write, memory_get, chatlog_search, chatlog_write, files_search). "
             "Valid domains: memory, chatlog, files, entity, agent, tasks, "
-            "conversations, admin."
+            "conversations, diagnostics, admin."
         ),
         parameters={
             "type": "object",
@@ -96,7 +96,8 @@ TOOLS: list[ToolSpec] = [
             "(name/type/required). Use this to discover the exact args for any "
             "tool before calling it via m3_call — cheaper than a failed call. "
             "Read-only catalog metadata; never returns tool output. Domains: "
-            "memory, chatlog, files, entity, agent, tasks, conversations, admin."
+            "memory, chatlog, files, entity, agent, tasks, conversations, "
+            "diagnostics, admin."
         ),
         parameters={
             "type": "object",

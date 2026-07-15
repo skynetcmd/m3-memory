@@ -368,13 +368,13 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 
 Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are prefixed to the embed text as `[YYYY-MM-DD] …` so absolute-date queries hit rows even when the source text says "yesterday". No flag; no-op when anchors are absent.
 
-### Valid Memory Types (21)
+### Valid Memory Types (32 + `auto`)
 
-`note`, `fact`, `decision`, `preference`, `conversation`, `message`, `task`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `home`, `user_fact`, `scratchpad`, `knowledge`, `event_extraction`, `auto` (triggers LLM classification)
+`note`, `fact`, `fact_enriched`, `decision`, `preference`, `conversation`, `message`, `chat_log`, `task`, `to_do`, `code`, `config`, `observation`, `plan`, `summary`, `snippet`, `reference`, `log`, `migration-log`, `home`, `home_automation`, `user_fact`, `scratchpad`, `knowledge`, `event_extraction`, `security`, `local_device`, `network_config`, `infrastructure`, `windows_only`, `macos_only`, `linux_only`, plus `auto` (triggers LLM classification). Source of truth: `VALID_MEMORY_TYPES` in `bin/mcp_catalog/base.py`.
 
-### Valid Relationship Types (8)
+### Valid Relationship Types (9)
 
-`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `message`, `consolidates`
+`related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `message`, `handoff`
 
 ---
 

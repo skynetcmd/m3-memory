@@ -166,7 +166,7 @@ Items with a non-NULL `variant` (typically benchmark rows) are **skipped by defa
 
 M3 uses a local LLM for features that benefit from language understanding. Any server that exposes OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` endpoints works.
 
-- **Auto-classification** — pass `type="auto"` and the LLM categorizes the memory into one of 21 types
+- **Auto-classification** — pass `type="auto"` and the LLM categorizes the memory into one of 30+ types
 - **Conversation summarization** — compress long threads into key points
 - **Memory consolidation** — merge groups of old memories into summaries, reducing noise while preserving knowledge
 

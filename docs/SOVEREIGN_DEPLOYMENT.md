@@ -100,11 +100,11 @@ LFS-tracked model file and any extra wheels you'll need offline.
    - `m3 doctor` verifies everything.
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
-> groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, admin). Only ~6 essentials load at MCP startup
-> (~2,400 tokens vs ~16,100 if all of them loaded eagerly). The agent pulls in a
-> domain on demand — just say "load the files tools" and it does. Set
-> `M3_TOOLS_LAZY=0` to disable. Especially relevant in air-gapped settings
+> groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
+> conversations, diagnostics, admin). Only the ~18 essentials load at MCP startup
+> (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on demand). The
+> agent pulls in a domain on demand — just say "load the files tools" and it does.
+> Set `M3_TOOLS_LAZY=0` to disable. Especially relevant in air-gapped settings
 > where every token of context margin counts.
 
 ### Air-gapped install-m3

@@ -144,7 +144,7 @@ def get_category_map():
     }
     return mapping
 
-def generate_markdown(all_tools):
+def generate_markdown(all_tools, counts=None):
     cat_map = get_category_map()
 
     # Sort tools by category then name
@@ -165,7 +165,21 @@ def generate_markdown(all_tools):
     ]
 
     md = "# MCP Tool Inventory\n\n"
-    md += f"This document provides a comprehensive inventory of all {len(all_tools)} MCP tools available in the M3 Memory system.\n\n"
+    md += (
+        f"This document provides a comprehensive inventory of all {len(all_tools)} "
+        "MCP tools available in the M3 Memory system.\n\n"
+    )
+    if counts:
+        md += (
+            f"> **How this reconciles with other docs.** The **{counts['catalog']}** "
+            "in-catalog tools (the number the README/COMPARISON quote as \"100+\", and "
+            f"the `count` in `docs/tools/MCP_CATALOG.json`, which excludes the two "
+            f"`tools_*` meta-tools → **{counts['catalog'] - 2}** there) plus "
+            f"**{counts['proxy']}** MCP-proxy protocol/debug tools (`mcp_proxy.py`) = "
+            f"**{len(all_tools)}** total listed here. The prose \"100+ tools\" refers to "
+            "the in-catalog surface; this inventory additionally documents the proxy "
+            "transport tools.\n\n"
+        )
 
     # Summary Table
     md += "## Summary Table\n\n"
@@ -230,7 +244,10 @@ def main():
     # 2. Proxy tools
     protocol_tools, debug_tools = extract_proxy_tools()
 
-    all_tools = catalog_tools
+    # NOTE: copy, don't alias — `all_tools = catalog_tools` would make the two the
+    # SAME list, so appending proxy tools below would also grow catalog_tools and
+    # corrupt the len(catalog_tools) used for the reconciliation counts.
+    all_tools = list(catalog_tools)
     for t in protocol_tools:
         f = t['function']
         all_tools.append({
@@ -257,8 +274,14 @@ def main():
     if len(all_tools) != EXPECTED_TOOL_COUNT:
         print(f"Warning: Expected {EXPECTED_TOOL_COUNT} tools, found {len(all_tools)} — update EXPECTED_TOOL_COUNT in gen_mcp_inventory.py if a tool was added/removed.")
 
-    # 3. Render
-    markdown = generate_markdown(all_tools)
+    # 3. Render — pass the catalog/proxy split so the intro can disclose exactly
+    # what the total counts (otherwise "122 tools" silently disagrees with the
+    # catalog's 111 and the "100+" prose — three numbers, no reconciliation).
+    counts = {
+        "catalog": len(catalog_tools),
+        "proxy": len(protocol_tools) + len(debug_tools),
+    }
+    markdown = generate_markdown(all_tools, counts)
 
     # 4. Save
     output_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs", "MCP_TOOLS.md")

@@ -54,10 +54,10 @@ That installs all 15 `/m3:*` slash commands as native agent Skills and auto-wire
 **Windows or manual install:** see the [README](../README.md#-install), [INSTALL.md](../INSTALL.md), or the per-OS quickstarts ([Linux](./QUICKSTART_LINUX.md) / [macOS](./QUICKSTART_MACOS.md) / [Windows](./QUICKSTART_WINDOWS.md)).
 
 > **Tool catalog stays small in your context.** m3 ships 100+ MCP tools but
-> groups them into 8 domains (memory, chatlog, files, entity, agent, tasks,
-> conversations, admin). Only ~6 essentials load at MCP startup
-> (~2,400 tokens vs ~16,100 if all of them loaded eagerly). The agent pulls in a
-> domain on demand — just say "load the files tools" and it does.
+> groups them into 9 domains (memory, chatlog, files, entity, agent, tasks,
+> conversations, diagnostics, admin). Only the ~18 essentials load at MCP startup
+> (~3,540 tokens, ~1.8% of a 200K window; the full catalog loads on demand). The
+> agent pulls in a domain on demand — just say "load the files tools" and it does.
 
 ### 2. The "Cat Test" (Our Favorite Ritual)
 Open your favorite agent and try this simple experiment:

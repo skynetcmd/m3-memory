@@ -21,7 +21,47 @@ the policy is forward-going only.
 
 <!-- When adding the next change, replace the "None pending" line below with
      the usual ### Added / ### Changed / ### Fixed sub-sections here. -->
-### None pending at this time
+
+### Added
+
+- **LangGraph checkpointer (`M3Saver`)** — a `BaseCheckpointSaver` backed by
+  m3's local engine DB, so a LangGraph run can pause at a human-in-the-loop
+  `interrupt()`, survive a process restart, and resume/time-travel. Stored in
+  dedicated tables that deliberately bypass the embedder/contradiction pipeline
+  (a checkpoint is machine state, not knowledge). Sync + async surfaces.
+- **LCEL-native memory components** — `MemoryWrite` (a pass-through `Runnable`
+  that persists each piped value, so it composes at the tail of a chain),
+  `MemoryRetrieve` (callable retrieval for the head), and the `with_m3_memory`
+  decorator for zero-boilerplate capture of a callable's input/output.
+- **`M3Retriever.explain(query)`** — the real retrieval signal (blended
+  relevance score, per-memory confidence, type, bitemporal validity) for
+  attaching to a LangSmith run or logging. Reports what m3 computes; never
+  fabricates per-component sub-scores.
+- **`M3_DEFAULT_USER_ID`** — an env fallback so single-user LangChain apps can
+  drop `user_id=` from every call. Resolution stays `explicit > constructor
+  default > env > raise`: there is still no anonymous mode, so tenancy isolation
+  is unchanged.
+- **New examples** under `examples/langchain-agent/`:
+  `graph_checkpointer.py`, `agent_with_memory_and_persistence.py`, and
+  `lcel_memory.py`; plus `bin/mem0_scan.py`, an AST scanner that reports mem0
+  usage and rewrites imports for migration.
+
+### Fixed
+
+- **LangChain integration was not shipped in built wheels.** `m3_memory/
+  integrations/` lacked an `__init__.py` and `setup.py` excluded the whole
+  integrations tree, so `from m3_memory.langchain import …` worked only from a
+  repo checkout. The integration now ships as importable code (verified against
+  an isolated release build). The `m3_memory.langchain` shim also now raises an
+  actionable "upgrade" error instead of a cryptic namespace error when the
+  payload is absent.
+
+### Changed
+
+- **LangChain docs updated** to cover all five drop-in surfaces (including the
+  new checkpointer) and the LCEL components; the version note now states the
+  supported `langchain-core` / `langgraph` compatibility band (major-version
+  range) rather than describing it as a hard pin.
 
 ---
 

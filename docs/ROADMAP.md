@@ -57,7 +57,7 @@ Roughly two months of releases (≈25 between `v2026.4.12b` and `v2026.6.8.1`); 
 - [x] **Hermes Agent** memory-provider plugin (file-based, vendored under `m3_memory/integrations/hermes/`)
 - [x] **Antigravity** CLI/Desktop wiring via `~/.gemini/antigravity-cli/settings.json`
 - [x] **OpenClaw** local proxy on `localhost:9000/v1` (no native MCP — bridged)
-- [x] **LangChain / LangGraph** native surfaces — drop-in Mem0 replacement, LangMem-compatible `M3Store`, chat-message history, and RAG retriever (`m3_memory/integrations/langchain/`, `pip install m3-memory[langchain]`)
+- [x] **LangChain / LangGraph** native surfaces — drop-in Mem0 replacement, LangMem-compatible `M3Store`, `M3Saver` LangGraph checkpointer (pause/resume/time-travel), chat-message history, RAG retriever, and LCEL-native `MemoryWrite`/`MemoryRetrieve`/`with_m3_memory` (`m3_memory/integrations/langchain/`, `pip install m3-memory[langchain]`)
 - [x] Chatlog capture hooks — Claude Code (Stop + PreCompact, zero-gap) and Gemini CLI (SessionEnd)
 - [x] curate-memory + curate-chatlog subagents with UUID-integrity defense (v2026.6.8.0)
 
