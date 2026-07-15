@@ -25,6 +25,53 @@ the policy is forward-going only.
 
 ---
 
+## [2026.7.15.0] — 2026-07-15 — Documentation accuracy, positioning, and a CUDA install guide
+
+Documentation and repository-hygiene release. No changes to the installable
+package's runtime behavior or tool surface.
+
+### Added
+
+- **New [CUDA install guide](docs/CUDA_INSTALL.md)** — installing the
+  CUDA-accelerated `m3-core-rs` core, including the manual prebuilt-wheel path
+  for PyPI-only environments, self-hosted-index mirroring, and the from-source
+  fallback.
+- **Adoption checklist in the [FAQ](docs/FAQ.md)** — an "Is M3 right for my
+  project?" section with straight answers on maintenance, storage backends,
+  customization, debugging, integration, and data portability.
+- **New myth/fact entries** in [MYTHS_AND_FACTS.md](docs/MYTHS_AND_FACTS.md)
+  covering concurrency, multilingual retrieval, lazy tool-loading, the
+  confidence model, and spotting stale figures from cached snapshots.
+
+### Changed
+
+- **Sharper positioning of proven strengths** — retrieval accuracy
+  (99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S), context
+  efficiency (~1.8% of a 200K window at startup via lazy tool-loading), and
+  verbatim, non-destructive storage are surfaced above the fold in the README
+  and comparison tables, each tied to its receipt.
+- **Maturity framing** reworded from a flat "production-grade" to "stable,
+  battle-tested core engine; new features and integrations added actively."
+- **Comparison table** clarified — plain-English descriptors replace opaque
+  competitor jargon, and the MemPalace caveat cites an independent analysis
+  ([arXiv 2604.21284](https://arxiv.org/abs/2604.21284)).
+
+### Fixed
+
+- **Retrieval-vs-QA metric clarity** — the comparison table and roadmap make
+  unmistakable that 99.2% / 100% is *retrieval* (SHR@k, where M3 leads) and
+  92.0% is a separate, answer-model-dependent *QA-accuracy* metric; the
+  superseded 89.0% figure is marked as such wherever it appears.
+- **Wheel-distribution docs corrected** — `m3-core-rs` prebuilt wheels are on
+  PyPI under platform-suffixed names (CPU/Vulkan/Metal); the CUDA wheels ship
+  via the GitHub Release (too large for PyPI). Fixed a stale
+  "install manually @v0.9.0" note in `ENVIRONMENT_VARIABLES.md`.
+- **Embedder description corrected** — the BGE-M3 embedder runs in-process by
+  default (zero IPC); the `127.0.0.1:8082` HTTP server is only an automatic
+  fallback, not a persistent service.
+
+---
+
 ## [2026.7.14.2] — 2026-07-14 — Fix stale benchmark figure in server.json
 
 ### Fixed
