@@ -101,6 +101,30 @@ class TestJson:
             d.json_extract_text("metadata_json", "x'; DROP TABLE")
 
 
+class TestTemporalOpenClause:
+    def test_sqlite_keeps_empty_string_disjunct_byte_identical(self):
+        # MUST match the exact string that was hardcoded in search.py before the
+        # refactor, so the SQLite path is a zero-behavior-change swap.
+        assert SQLITE.temporal_open_clause("mi.valid_from", "<=") == (
+            "(mi.valid_from IS NULL OR mi.valid_from = '' OR mi.valid_from <= ?)"
+        )
+        assert SQLITE.temporal_open_clause("mi.valid_to", ">") == (
+            "(mi.valid_to IS NULL OR mi.valid_to = '' OR mi.valid_to > ?)"
+        )
+
+    def test_postgres_drops_empty_string_disjunct(self):
+        # '' is not a legal TIMESTAMPTZ literal; only NULL + the op term remain.
+        assert POSTGRES.temporal_open_clause("mi.valid_from", "<=") == (
+            "(mi.valid_from IS NULL OR mi.valid_from <= %s)"
+        )
+        assert "= ''" not in POSTGRES.temporal_open_clause("mi.valid_to", ">")
+
+    @pytest.mark.parametrize("d", [SQLITE, POSTGRES])
+    def test_rejects_unexpected_operator(self, d: Dialect):
+        with pytest.raises(ValueError):
+            d.temporal_open_clause("mi.valid_from", "; DROP")
+
+
 class TestIntrospection:
     def test_sqlite_uses_pragma_no_params(self):
         sql, params = SQLITE.columns_of("memory_items")

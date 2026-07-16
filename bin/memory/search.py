@@ -743,10 +743,14 @@ async def memory_search_scored_impl(
 
     if as_of:
         # Open-ended validity is represented as NULL by new writes; legacy
-        # rows may still carry "". Match both so a future write-path change
-        # to use NULL exclusively doesn't break historical data.
-        where_clauses.append("(mi.valid_from IS NULL OR mi.valid_from = '' OR mi.valid_from <= ?)")
-        where_clauses.append("(mi.valid_to   IS NULL OR mi.valid_to   = '' OR mi.valid_to   > ?)")
+        # SQLite rows may still carry "". The dialect emits the ``= ''`` disjunct
+        # on SQLite (matching both) but drops it on Postgres, where the bound is
+        # a TIMESTAMPTZ that rejects '' (IS NULL already covers the unset case).
+        from memory.backends import active_backend
+
+        _d = active_backend().dialect()
+        where_clauses.append(_d.temporal_open_clause("mi.valid_from", "<="))
+        where_clauses.append(_d.temporal_open_clause("mi.valid_to", ">"))
         params.extend([as_of, as_of])
 
     # v022: filter the embeddings join by vector_kind unless caller opted

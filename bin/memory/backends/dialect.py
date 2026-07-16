@@ -125,6 +125,31 @@ class Dialect:
             return f"json_extract({column}, '$.{json_path}')"
         return f"{column} ->> '{json_path}'"
 
+    # -- temporal validity ---------------------------------------------------
+    def temporal_open_clause(self, column: str, op: str) -> str:
+        """A "validity bound is open OR satisfies `op`" WHERE fragment.
+
+        The temporal-validity filter treats an unset bound as open-ended. In
+        SQLite, unset is stored as either NULL or the empty string ''; in
+        Postgres the column is TIMESTAMPTZ and '' is not a legal value (it
+        raises ``invalid input syntax for type timestamp with time zone``), so
+        the ``= ''`` disjunct MUST be dropped there — ``IS NULL`` already covers
+        the unset case (the PG schema defaults these bounds to NULL).
+
+        ``temporal_open_clause("mi.valid_from", "<=")`` →
+        SQLite:   ``(mi.valid_from IS NULL OR mi.valid_from = '' OR mi.valid_from <= {p})``
+        Postgres: ``(mi.valid_from IS NULL OR mi.valid_from <= {p})``
+
+        ``op`` is a trusted comparison operator (``<=`` / ``>``); ``column`` is a
+        trusted identifier. The caller binds one parameter for the ``op`` term.
+        """
+        if op not in ("<=", ">=", "<", ">", "="):
+            raise ValueError(f"unexpected temporal operator {op!r}")
+        p = self.param()
+        if self.backend == "sqlite":
+            return f"({column} IS NULL OR {column} = '' OR {column} {op} {p})"
+        return f"({column} IS NULL OR {column} {op} {p})"
+
     # -- introspection -------------------------------------------------------
     def columns_of(self, table: str) -> tuple[str, tuple]:
         """A (sql, params) pair listing a table's column names.
