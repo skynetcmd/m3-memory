@@ -416,8 +416,12 @@ class M3Context:
             pool.put(conn)
 
     @contextmanager
-    def get_chatlog_conn(self) -> Iterator[sqlite3.Connection]:
+    def get_chatlog_conn(self) -> "Iterator[object]":
         """Yield a connection for chat log writes/reads.
+
+        Backend-neutral yield type ("object", matching StorageBackend.connection):
+        a ``sqlite3.Connection`` on SQLite, a psycopg2 connection on PostgreSQL.
+        NOT annotated ``sqlite3.Connection`` — that would be a lie on PG.
 
         On SQLite: the chatlog DB path comes from chatlog_config (CHATLOG_DB_PATH
         > active M3_DATABASE > default agent_chatlog.db). If the resolved chatlog
