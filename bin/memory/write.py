@@ -706,10 +706,14 @@ async def memory_supersede_impl(
     #    (step 4's conditional UPDATE is) — it just fails cheaply, before the
     #    expensive embed, on the common case, and supplies the fields to
     #    inherit. A concurrent close after this read is caught at step 4.
+    from memory.backends import active_backend as _active_backend_sup
+
+    _dsup = _active_backend_sup().dialect()
+    _psup = _dsup.param()
     with _db() as db:
         row = db.execute(
             "SELECT type, title, importance, scope, is_deleted "
-            "FROM memory_items WHERE id = ?",
+            f"FROM memory_items WHERE id = {_psup}",
             (old_id,),
         ).fetchone()
     if row is None:
@@ -782,7 +786,8 @@ async def memory_supersede_impl(
         try:
             with _db() as db:
                 db.execute(
-                    "UPDATE memory_items SET is_deleted = 1, updated_at = ? WHERE id = ?",
+                    f"UPDATE memory_items SET is_deleted = 1, updated_at = {_psup} "
+                    f"WHERE id = {_psup}",
                     (datetime.now(timezone.utc).isoformat(), new_id),
                 )
         except Exception as e:  # pragma: no cover - best-effort cleanup

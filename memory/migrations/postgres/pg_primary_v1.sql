@@ -196,6 +196,71 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mr_unique_edge
     ON memory_relationships(from_id, to_id, relationship_type);
 
 -- =====================================================
+-- memory_history (audit trail — the supersede/create path writes here)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS memory_history (
+    id          TEXT PRIMARY KEY,
+    memory_id   TEXT NOT NULL,
+    event       TEXT NOT NULL,
+    prev_value  TEXT,
+    new_value   TEXT,
+    field       TEXT DEFAULT 'content',
+    actor_id    TEXT DEFAULT '',
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mh_memory_id ON memory_history(memory_id);
+CREATE INDEX IF NOT EXISTS idx_mh_created ON memory_history(created_at);
+
+-- =====================================================
+-- chroma_sync_queue (L3 mirror sync queue)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS chroma_sync_queue (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    memory_id     TEXT NOT NULL,
+    operation     TEXT NOT NULL,
+    attempts      BIGINT DEFAULT 0,
+    stalled_since TIMESTAMPTZ,
+    queued_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_csq_memory_id ON chroma_sync_queue(memory_id);
+
+-- =====================================================
+-- agents (agent registry; trust ledger references it)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id       TEXT PRIMARY KEY,
+    role           TEXT DEFAULT '',
+    status         TEXT NOT NULL DEFAULT 'active',
+    capabilities   TEXT DEFAULT '[]',
+    metadata_json  JSONB DEFAULT '{}',
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    last_seen      TIMESTAMPTZ DEFAULT NOW(),
+    trust_score    DOUBLE PRECISION DEFAULT 1.0
+);
+
+-- =====================================================
+-- memory_corroborations (trust/corroboration ledger)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS memory_corroborations (
+    id             TEXT PRIMARY KEY,
+    memory_id      TEXT NOT NULL,
+    source_kind    TEXT NOT NULL DEFAULT 'agent',
+    source_ref     TEXT NOT NULL DEFAULT '',
+    trust_at_write DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    delta          DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    created_at     TIMESTAMPTZ DEFAULT NOW()
+);
+-- Partial unique index = the dedup arbiter for trust.py's ON CONFLICT (a source
+-- corroborating the same memory twice, with a positive delta, is a no-op).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_corrob_memory_source
+    ON memory_corroborations(memory_id, source_kind, source_ref)
+    WHERE delta > 0;
+
+-- =====================================================
 -- schema_versions
 -- =====================================================
 

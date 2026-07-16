@@ -94,8 +94,11 @@ def pg_seeded(monkeypatch):
                     setweight(to_tsvector('english', coalesce(title,'')),'A') ||
                     setweight(to_tsvector('english', coalesce(content,'')),'B')) STORED)"""
         )
+        # Own memory_embeddings too (another test's ensure_schema may have built
+        # the full shape with a NOT NULL id PK; this fixture inserts no id).
+        cur.execute("DROP TABLE IF EXISTS memory_embeddings CASCADE")
         cur.execute(
-            "CREATE TABLE IF NOT EXISTS memory_embeddings(memory_id TEXT, embedding BYTEA, "
+            "CREATE TABLE memory_embeddings(memory_id TEXT, embedding BYTEA, "
             "dim BIGINT, embed_model TEXT, vector_kind TEXT DEFAULT 'default')"
         )
         cur.execute("CREATE INDEX IF NOT EXISTS idx_sp_sv ON memory_items USING GIN(search_vector)")
@@ -179,6 +182,66 @@ def test_pg_memory_write_impl_end_to_end(monkeypatch):
     finally:
         with b.connection() as c:
             c.cursor().execute("DELETE FROM memory_items WHERE title LIKE 'e2e_%'")
+        b.close()
+
+
+def test_pg_write_supersede_lifecycle_persists(monkeypatch):
+    """Full write -> supersede lifecycle on PG persists all side effects.
+
+    Regression: memory_history was missing from the PG schema and _record_history
+    used ? placeholders, so on PG the history INSERT raised, aborted the shared
+    transaction, and silently rolled back the supersede's is_deleted/edge writes —
+    the caller logged success but nothing persisted. This exercises the whole
+    chain end-to-end and asserts persistence."""
+    monkeypatch.setenv("M3_DB_BACKEND", "postgres")
+    monkeypatch.setenv("M3_PG_URL", _DSN)
+
+    from memory.backends import selector as _selector
+
+    _selector._reset_for_tests()
+    from memory.backends.postgres_backend import PostgresBackend
+    from memory.write import memory_supersede_impl, memory_write_impl
+
+    b = PostgresBackend(dsn=_DSN)
+    # Own the schema: other live tests recreate memory_items with a minimal shape
+    # (no updated_at etc.), so drop the core tables and let ensure_schema rebuild
+    # the full schema — including memory_history/agents/corroborations.
+    with b.connection() as c:
+        c.cursor().execute(
+            "DROP TABLE IF EXISTS memory_history, memory_corroborations, "
+            "memory_relationships, memory_embeddings, memory_items CASCADE"
+        )
+    b._schema_ready = False
+    b.ensure_schema()
+    with b.connection() as c:
+        c.cursor().execute("DELETE FROM memory_items WHERE title LIKE 'lc_%'")
+
+    try:
+        r1 = asyncio.run(memory_write_impl(
+            "note", "original content", title="lc_original", embed=False
+        ))
+        old_id = r1.split("Created:", 1)[1].strip().split()[0]
+        asyncio.run(memory_supersede_impl(
+            old_id, "replacement content", title="lc_replacement", embed=False
+        ))
+
+        with b.connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT is_deleted FROM memory_items WHERE id = %s", (old_id,))
+            assert cur.fetchone()[0] == 1  # old row actually closed
+            cur.execute(
+                "SELECT count(*) FROM memory_relationships "
+                "WHERE to_id = %s AND relationship_type = 'supersedes'",
+                (old_id,),
+            )
+            assert cur.fetchone()[0] == 1  # supersedes edge written
+            cur.execute(
+                "SELECT count(*) FROM memory_history WHERE memory_id = %s", (old_id,)
+            )
+            assert cur.fetchone()[0] >= 1  # history event recorded
+    finally:
+        with b.connection() as conn:
+            conn.cursor().execute("DELETE FROM memory_items WHERE title LIKE 'lc_%'")
         b.close()
 
 

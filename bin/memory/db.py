@@ -298,11 +298,14 @@ def _record_history(
     outer one has an uncommitted writer causes SQLite WAL writer contention,
     which burns the full ``busy_timeout`` per call.
     """
+    from memory.backends import active_backend as _active_backend
+
+    _d = _active_backend().dialect()
     row = (str(uuid.uuid4()), memory_id, event, prev_value, new_value, field, actor_id)
     sql = (
         "INSERT INTO memory_history "
         "(id, memory_id, event, prev_value, new_value, field, actor_id) "
-        "VALUES (?,?,?,?,?,?,?)"
+        f"VALUES ({_d.placeholder(7)})"
     )
     try:
         if db is not None:
@@ -311,15 +314,24 @@ def _record_history(
             with _db() as inner:
                 inner.execute(sql, row)
     except Exception as e:
+        # NOTE: on PostgreSQL a failed statement aborts the WHOLE transaction, so
+        # a swallowed error here on the caller's shared `db` would silently roll
+        # back the caller's writes too. Dialecting the SQL above prevents the
+        # syntax error that used to trigger exactly that (superseded rows silently
+        # not persisting). Keep the catch for genuinely-tolerable failures (e.g. a
+        # pre-migration DB with no memory_history table).
         logger.debug(f"History recording failed: {e}")
 
 
 def memory_history_impl(memory_id: str, limit: int = 20) -> str:
     """Returns the change history for a memory item."""
+    from memory.backends import active_backend as _active_backend
+
+    _p = _active_backend().dialect().param()
     with _db() as db:
         rows = db.execute(
             "SELECT event, field, prev_value, new_value, actor_id, created_at "
-            "FROM memory_history WHERE memory_id = ? ORDER BY created_at DESC LIMIT ?",
+            f"FROM memory_history WHERE memory_id = {_p} ORDER BY created_at DESC LIMIT {_p}",
             (memory_id, limit),
         ).fetchall()
     if not rows:
