@@ -59,6 +59,13 @@ def apply_memory_plan(plan: dict) -> dict:
     Sections honored: delete (soft), delete_hard (cascade), link, update.
     Any section may be omitted or empty; result reports per-section counts.
     """
+    # This mutates the primary store via raw sqlite3 (bypassing the seam). On a
+    # PostgreSQL-primary deployment it would silently edit a stale SQLite file
+    # instead of the live PG store — refuse rather than corrupt. (Curation on PG
+    # is a later port; until then this MCP tool is SQLite-only.)
+    from memory.backends import require_sqlite_backend
+    require_sqlite_backend("curate_memory_apply")
+
     import memory_core
 
     out: dict[str, Any] = {

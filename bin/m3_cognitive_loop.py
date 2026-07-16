@@ -644,6 +644,14 @@ async def run_chatlog_prune_pass(args):
 
 async def main_loop(args):
     """Main execution loop with adaptive backoff and signal awareness."""
+    # This daemon writes the PRIMARY store continuously in-process (entity
+    # extraction, enrichment, observation drain, WAL checkpoints) via direct
+    # sqlite3. On a PostgreSQL-primary deployment it would keep writing a stale
+    # SQLite file while the MCP server writes PG — silent split-brain. Refuse to
+    # start under postgres until the background pipeline is ported (fail loud, §3).
+    from memory.backends import require_sqlite_backend
+    require_sqlite_backend("m3_cognitive_loop")
+
     logger.info(f"Cognitive Loop heartbeat started. Interval: {args.interval}s")
 
     # Register signal handlers for graceful shutdown

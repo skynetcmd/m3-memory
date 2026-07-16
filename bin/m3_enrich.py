@@ -633,6 +633,12 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
 
 
 async def _main_async(args) -> int:
+    # Writes the primary store (enrichment) via direct sqlite3 — refuse on a
+    # PostgreSQL-primary deployment rather than edit a stale SQLite file. Covers
+    # both the CLI and the in-process cognitive-loop call path.
+    from memory.backends import require_sqlite_backend
+    require_sqlite_backend("m3_enrich")
+
     profile = _load_profile_with_path(args.profile, args.profile_path)
     # --input-max-k overrides the profile's per-call input cap. Used to fit
     # a smaller per-slot ctx budget when raising server-side concurrency.

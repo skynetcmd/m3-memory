@@ -826,6 +826,12 @@ async def drain_queue_mode(args, profile, token: str) -> None:
 
 
 def main() -> None:
+    # Standalone-CLI guard: writes the primary store (observations) via direct
+    # sqlite3. The in-process path (cognitive_loop -> m3_enrich) is already gated;
+    # this covers a hand-run invocation on a PostgreSQL-primary deployment.
+    from memory.backends import require_sqlite_backend
+    require_sqlite_backend("run_observer")
+
     ap = argparse.ArgumentParser(description="Phase D Observer drainer (Mastra-style three-date observations)")
     ap.add_argument("--source-variant", default=None,
                     help="Variant-mode: pull conversations from this variant. "

@@ -698,6 +698,12 @@ def _print_dry_run(plan: dict) -> None:
 
 
 async def _main_async(args: argparse.Namespace) -> int:
+    # Writes the primary store (entity extraction) via direct sqlite3 — refuse on
+    # a PostgreSQL-primary deployment rather than edit a stale SQLite file. Covers
+    # both the CLI and the in-process cognitive-loop call path.
+    from memory.backends import require_sqlite_backend
+    require_sqlite_backend("m3_entities")
+
     profile = load_profile(args.profile)
     if profile is None:
         sys.exit(f"ERROR: profile {args.profile!r} not found")

@@ -566,6 +566,15 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         db.execute("ANALYZE")
         report.append("Statistics updated (ANALYZE)")
 
+    # VACUUM is SQLite-specific (PostgreSQL has autovacuum and no client-issued
+    # file-compaction). On a PG-primary deployment, skip it explicitly with a
+    # clear note rather than sqlite3.connect a stale file and appear to maintain
+    # the live store.
+    from memory.backends import resolve_backend_name
+    if resolve_backend_name() != "sqlite":
+        report.append("VACUUM skipped: not applicable on PostgreSQL (autovacuum handles this)")
+        return "Maintenance complete:\n" + "\n".join(report)
+
     # VACUUM must run outside any transaction and needs the *active* DB path,
     # which may differ from the import-time DB_PATH constant when a caller has
     # set active_database() or M3_DATABASE.
