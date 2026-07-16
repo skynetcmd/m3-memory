@@ -166,6 +166,23 @@ def test_ensure_schema_creates_primary_schema(backend):
     backend._schema_ready = False
     backend.ensure_schema()
 
+    # Version stamp: the cumulative schema records baseline version 39, once.
+    assert backend.schema_version() == 39
+    with backend.connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM schema_versions WHERE version = 39")
+        assert cur.fetchone()[0] == 1  # no duplicate on re-apply
+
+
+def test_schema_version_none_when_uninitialized(backend):
+    """schema_version() returns None when schema_versions is absent (fresh DB)."""
+    with backend.connection() as conn:
+        conn.cursor().execute("DROP TABLE IF EXISTS schema_versions CASCADE")
+    assert backend.schema_version() is None
+    # restore for other tests
+    backend._schema_ready = False
+    backend.ensure_schema()
+
 
 def test_cas_supersede_exactly_one_winner(backend):
     """The CAS close (UPDATE ... WHERE is_deleted=0, guard on rowcount==1) must

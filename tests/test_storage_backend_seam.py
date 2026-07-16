@@ -105,6 +105,21 @@ def test_sqlite_ensure_schema_is_noop(monkeypatch):
     backend.ensure_schema()  # no raise, no side effect
 
 
+def test_sqlite_schema_version_reports_current(monkeypatch, tmp_path):
+    """schema_version() reports the applied version. On SQLite, `_db()` lazily
+    runs the migration chain on a fresh DB, so an empty file comes back fully
+    migrated (a positive, not None) — the version is a real integer."""
+    db_path = tmp_path / "fresh.db"
+    import sqlite3
+
+    sqlite3.connect(str(db_path)).close()  # empty file; _db() will migrate it
+    monkeypatch.setenv("M3_DATABASE", str(db_path))
+    monkeypatch.setenv("M3_DB_BACKEND", "sqlite")
+    backend = active_backend()
+    v = backend.schema_version()
+    assert isinstance(v, int) and v >= 39  # migrated to at least the 039 baseline
+
+
 def test_require_sqlite_backend_noop_on_sqlite(monkeypatch):
     monkeypatch.delenv("M3_DB_BACKEND", raising=False)
     # Must not raise on the default (sqlite) backend.

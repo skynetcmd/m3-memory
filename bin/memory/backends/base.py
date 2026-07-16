@@ -125,6 +125,16 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def schema_version(self) -> "int | None":
+        """The highest applied schema version, or None if unknown/uninitialized.
+
+        Reads ``MAX(version)`` from ``schema_versions``. On both backends the same
+        table records applied migrations; the PG baseline (``pg_primary_v1.sql``)
+        stamps version 39 (the SQLite migration level it was translated from).
+        Returns None when the table is absent (schema not yet initialized).
+        """
+        ...
+
     def connection(self) -> AbstractContextManager:
         """A read/write connection context manager.
 

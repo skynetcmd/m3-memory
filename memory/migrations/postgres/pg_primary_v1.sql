@@ -205,4 +205,14 @@ CREATE TABLE IF NOT EXISTS schema_versions (
     applied_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Baseline version stamp. This cumulative schema is the SQLite schema after all
+-- migrations through 039 (memory_relationships_unique_edge), translated to PG —
+-- so a PG deployment starts AT version 39, not by replaying the SQLite-dialect
+-- NNN_*.up.sql files (which use rowid/AUTOINCREMENT/etc. that don't run on PG).
+-- ON CONFLICT DO NOTHING keeps re-applying this file idempotent. Future PG-native
+-- migrations continue the sequence from 40.
+INSERT INTO schema_versions (version, filename)
+VALUES (39, 'pg_primary_v1.sql')
+ON CONFLICT (version) DO NOTHING;
+
 COMMIT;

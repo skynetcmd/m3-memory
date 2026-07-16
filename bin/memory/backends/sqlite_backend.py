@@ -32,6 +32,25 @@ class SqliteBackend:
         ``memory.db._lazy_init``. Present for seam symmetry with PostgreSQL."""
         return
 
+    def schema_version(self) -> "int | None":
+        """MAX(version) from schema_versions, or None if the table is absent."""
+        from .. import db as _db_mod
+
+        try:
+            with _db_mod._db() as conn:
+                row = conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name='schema_versions'"
+                ).fetchone()
+                if row is None:
+                    return None
+                vrow = conn.execute(
+                    "SELECT MAX(version) FROM schema_versions"
+                ).fetchone()
+                return int(vrow[0]) if vrow and vrow[0] is not None else None
+        except Exception:
+            return None
+
     def capabilities(self) -> Capabilities:
         """Probe optional accelerators; baseline (FTS5 + Rust cosine) always holds.
 
