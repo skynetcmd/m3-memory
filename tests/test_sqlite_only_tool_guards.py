@@ -41,11 +41,20 @@ def test_cognitive_loop_refuses_on_postgres(monkeypatch):
         asyncio.run(m3_cognitive_loop.main_loop(argparse.Namespace(interval=1)))
 
 
-def test_m3_entities_refuses_on_postgres(monkeypatch):
+def test_m3_entities_not_gated_on_postgres(monkeypatch):
+    """m3_entities was ported to PG (mc._db() + dialected SQL, status column from
+    pg_041). It must NOT raise the require_sqlite_backend RuntimeError. With a
+    bogus profile it exits early (SystemExit) — proving the gate is gone.
+    (Full DB-path behavior is in test_m3_entities_pg_live.py.)"""
     _force_pg(monkeypatch)
     import m3_entities
-    with pytest.raises(RuntimeError, match="SQLite-only|stale SQLite"):
-        asyncio.run(m3_entities._main_async(argparse.Namespace(profile="default")))
+    try:
+        asyncio.run(m3_entities._main_async(argparse.Namespace(profile="__nope__")))
+    except SystemExit:
+        pass  # profile-not-found exit — acceptable, proves no SQLite refusal
+    except RuntimeError as e:
+        if "SQLite" in str(e) or "stale SQLite" in str(e):
+            pytest.fail(f"m3_entities still gated on PG: {e}")
 
 
 def test_m3_enrich_refuses_on_postgres(monkeypatch):

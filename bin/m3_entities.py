@@ -362,10 +362,14 @@ def _load_conv_list(path: Path) -> set[str]:
 
 
 def _ensure_extraction_status_column(conn) -> None:
-    """Idempotently add entity_extraction_queue.status TEXT. Best-effort — a DB
-    that predates this (or already has it) is a no-op. Mirrors the runtime-DDL
-    pattern used elsewhere (enrich/prep._ensure_migration_025). 'status' is
-    'done' (processed: entities emitted OR legitimately empty) or 'failed'."""
+    """Idempotently add entity_extraction_queue.status TEXT (SQLite runtime DDL).
+    'status' is 'done' (processed: entities emitted OR legitimately empty) or
+    'failed'. On PostgreSQL this column is created by migration pg_041 (schema is
+    migration-managed), and PRAGMA table_info is SQLite-only, so this is a no-op on
+    PG. Best-effort — an already-migrated DB is a no-op on both backends."""
+    from memory.backends import active_backend
+    if active_backend().name != "sqlite":
+        return  # PG: status column comes from pg_041, not runtime DDL
     try:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(entity_extraction_queue)")}
         if cols and "status" not in cols:
@@ -394,62 +398,87 @@ def _query_eligible_rows(
     Falls back to memory_items.conversation_id column when metadata is
     missing (handles legacy rows + Observer output uniformly).
     """
-    import sqlite3
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    # Is the status marker available? (RO conn can't ALTER; the writers add it.)
-    # Only reference entity_extraction_queue.status if the table+column exist,
-    # so an old DB / fresh DB without the queue degrades to entity-presence only.
-    _has_status = False
-    try:
-        _qcols = {r[1] for r in conn.execute("PRAGMA table_info(entity_extraction_queue)")}
-        _has_status = "status" in _qcols
-    except Exception:  # noqa: BLE001
-        _has_status = False
-    placeholders = ",".join("?" * len(type_allowlist))
-    excl_placeholders = ",".join("?" * len(ALWAYS_SKIP_TYPES))
+    from contextlib import contextmanager
+
+    from memory.backends import active_backend
+    _backend = active_backend()
+    _d = _backend.dialect()
+    _p = _d.param()
+    _je_conv = _d.json_extract_text("metadata_json", "conversation_id")
+    placeholders = _d.placeholder(len(type_allowlist))
+    excl_placeholders = _d.placeholder(len(ALWAYS_SKIP_TYPES))
     variant_clause = ""
     variant_params: list = []
     if source_variant == "__none__":
         variant_clause = " AND variant IS NULL"
     elif source_variant:
-        variant_clause = " AND variant = ?"
+        variant_clause = f" AND variant = {_p}"
         variant_params = [source_variant]
 
-    extracted_clause = ""
-    if skip_already_extracted:
-        # "Already extracted" = has an entity row OR was recorded processed
-        # (status='done') in the queue. The second half is essential: a turn
-        # that legitimately extracts to ZERO entities has no memory_item_entities
-        # row, so entity-presence alone would re-select it every run (worst-first
-        # under ORDER BY LENGTH DESC), re-sending it to the LLM forever. The
-        # `status='done'` marker (written by _mark_extracted on empty OR success)
-        # is what makes an empty extraction terminal. Failed rows (status='failed'
-        # or NULL) stay eligible for retry. Tolerant of an old DB lacking the
-        # status column via a table-existence-guarded sub-select.
-        extracted_clause = (
-            " AND id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)"
-        )
-        if _has_status:
-            extracted_clause += (
-                " AND id NOT IN (SELECT memory_id FROM entity_extraction_queue"
-                "                WHERE status = 'done')"
-            )
+    # Connection: on SQLite HONOR the explicit db_path (this function drives a
+    # SPECIFIC file — _run_db iterates several DBs, and callers/tests pass a path
+    # that is not necessarily the ambient M3_DATABASE). The old code opened a raw
+    # read-only sqlite3 connection to exactly db_path; preserve that. On PostgreSQL
+    # there is one pooled primary store and db_path is meaningless, so route
+    # through the backend-aware mc._db() (the read-only-URI form has no PG analogue).
+    @contextmanager
+    def _read_conn():
+        if _backend.name == "sqlite":
+            import sqlite3
+            c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                yield c
+            finally:
+                c.close()
+        else:
+            with mc._db() as c:
+                yield c
 
-    sql = f"""
-        SELECT id,
-               COALESCE(title, '') || CASE WHEN COALESCE(title,'') != '' THEN '\n\n' ELSE '' END || COALESCE(content, ''),
-               COALESCE(json_extract(metadata_json, '$.conversation_id'), conversation_id) AS conv_id
-        FROM memory_items
-        WHERE COALESCE(is_deleted, 0) = 0
-          AND type IN ({placeholders})
-          AND type NOT IN ({excl_placeholders})
-          {variant_clause}
-          {extracted_clause}
-        ORDER BY LENGTH(content) DESC
-    """
-    params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params
-    rows = conn.execute(sql, params).fetchall()
-    conn.close()
+    with _read_conn() as conn:
+        # Is the status marker available? Only reference the queue's status column
+        # if it exists, so a DB without it degrades to entity-presence only.
+        _has_status = False
+        try:
+            _cols_sql, _cols_params = _d.columns_of("entity_extraction_queue")
+            _qcols = {r[0] for r in conn.execute(_cols_sql, _cols_params).fetchall()}
+            _has_status = "status" in _qcols
+        except Exception:  # noqa: BLE001
+            _has_status = False
+
+        extracted_clause = ""
+        if skip_already_extracted:
+            # "Already extracted" = has an entity row OR was recorded processed
+            # (status='done') in the queue. The second half is essential: a turn
+            # that legitimately extracts to ZERO entities has no
+            # memory_item_entities row, so entity-presence alone would re-select it
+            # every run (worst-first under ORDER BY LENGTH DESC), re-sending it to
+            # the LLM forever. The `status='done'` marker (written by
+            # _mark_extracted on empty OR success) is what makes an empty
+            # extraction terminal. Failed rows (status='failed' or NULL) stay
+            # eligible for retry. Tolerant of a DB lacking the status column.
+            extracted_clause = (
+                " AND id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)"
+            )
+            if _has_status:
+                extracted_clause += (
+                    " AND id NOT IN (SELECT memory_id FROM entity_extraction_queue"
+                    "                WHERE status = 'done')"
+                )
+
+        sql = f"""
+            SELECT id,
+                   COALESCE(title, '') || CASE WHEN COALESCE(title,'') != '' THEN '\n\n' ELSE '' END || COALESCE(content, ''),
+                   COALESCE({_je_conv}, conversation_id) AS conv_id
+            FROM memory_items
+            WHERE COALESCE(is_deleted, 0) = 0
+              AND type IN ({placeholders})
+              AND type NOT IN ({excl_placeholders})
+              {variant_clause}
+              {extracted_clause}
+            ORDER BY LENGTH(content) DESC
+        """
+        params = list(type_allowlist) + list(ALWAYS_SKIP_TYPES) + variant_params
+        rows = conn.execute(sql, params).fetchall()
     if source_conv_list is not None:
         rows = [r for r in rows if r[2] in source_conv_list]
     if limit is not None:
@@ -509,35 +538,30 @@ async def _run_db(
         Concurrency-hardened (vs memory_core's live INSERT-OR-REPLACE): uses an
         atomic UPSERT (ON CONFLICT(memory_id) DO UPDATE) so the row is updated
         in place — no delete+insert churn, stable id, safe when the live
-        enricher or another batch worker touches the same queue. busy_timeout
-        lets it wait out a concurrent writer's lock rather than failing.
+        enricher or another batch worker touches the same queue. Routes through
+        the backend-aware mc._db() (SQLite pool handles busy-wait; PG uses the
+        connection pool), so it works on both backends.
         Best-effort: a queue-write failure must never mask the original error."""
-        qc = None
         try:
-            import sqlite3 as _sql
-            qc = _sql.connect(str(db_path), timeout=30)
-            qc.execute("PRAGMA busy_timeout=30000")
-            _ensure_extraction_status_column(qc)
-            qc.execute(
-                """INSERT INTO entity_extraction_queue
-                       (memory_id, attempts, last_error, last_attempt_at, status)
-                   VALUES (?, 1, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'failed')
-                   ON CONFLICT(memory_id) DO UPDATE SET
-                       attempts        = attempts + 1,
-                       last_error      = excluded.last_error,
-                       last_attempt_at = excluded.last_attempt_at,
-                       status          = 'failed'""",
-                (memory_id, f"{type(err).__name__}: {err}"[:500]),
-            )
-            qc.commit()
+            from memory.backends import active_backend
+            _d = active_backend().dialect()
+            _p = _d.param()
+            with mc._db() as qc:
+                _ensure_extraction_status_column(qc)
+                qc.execute(
+                    f"""INSERT INTO entity_extraction_queue
+                           (memory_id, attempts, last_error, last_attempt_at, status)
+                       VALUES ({_p}, 1, {_p}, {_d.now()}, 'failed')
+                       ON CONFLICT(memory_id) DO UPDATE SET
+                           attempts        = entity_extraction_queue.attempts + 1,
+                           last_error      = excluded.last_error,
+                           last_attempt_at = excluded.last_attempt_at,
+                           status          = 'failed'""",
+                    (memory_id, f"{type(err).__name__}: {err}"[:500]),
+                )
+                qc.commit()
         except Exception:
             pass  # never let queue bookkeeping break the run
-        finally:
-            if qc is not None:
-                try:
-                    qc.close()
-                except Exception:
-                    pass
 
     def _mark_extracted(memory_id: str) -> None:
         """Record that a turn was PROCESSED (entities emitted OR legitimately
@@ -547,33 +571,27 @@ async def _run_db(
         is re-selected and re-sent to the LLM on EVERY run, burning tokens
         indefinitely (worst-first, since selection is ORDER BY LENGTH DESC).
         Marks status='done' in the queue; the selection then skips done rows.
-        Best-effort + concurrency-hardened, same as _enqueue_failure."""
-        qc = None
+        Best-effort, backend-aware (mc._db()), same as _enqueue_failure."""
         try:
-            import sqlite3 as _sql
-            qc = _sql.connect(str(db_path), timeout=30)
-            qc.execute("PRAGMA busy_timeout=30000")
-            _ensure_extraction_status_column(qc)
-            qc.execute(
-                """INSERT INTO entity_extraction_queue
-                       (memory_id, attempts, last_error, last_attempt_at, status)
-                   VALUES (?, 1, NULL, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'done')
-                   ON CONFLICT(memory_id) DO UPDATE SET
-                       attempts        = attempts + 1,
-                       last_error      = NULL,
-                       last_attempt_at = excluded.last_attempt_at,
-                       status          = 'done'""",
-                (memory_id,),
-            )
-            qc.commit()
+            from memory.backends import active_backend
+            _d = active_backend().dialect()
+            _p = _d.param()
+            with mc._db() as qc:
+                _ensure_extraction_status_column(qc)
+                qc.execute(
+                    f"""INSERT INTO entity_extraction_queue
+                           (memory_id, attempts, last_error, last_attempt_at, status)
+                       VALUES ({_p}, 1, NULL, {_d.now()}, 'done')
+                       ON CONFLICT(memory_id) DO UPDATE SET
+                           attempts        = entity_extraction_queue.attempts + 1,
+                           last_error      = NULL,
+                           last_attempt_at = excluded.last_attempt_at,
+                           status          = 'done'""",
+                    (memory_id,),
+                )
+                qc.commit()
         except Exception:
             pass  # never let bookkeeping break the run
-        finally:
-            if qc is not None:
-                try:
-                    qc.close()
-                except Exception:
-                    pass
 
     rows = _query_eligible_rows(
         db_path, type_allowlist, source_variant, limit, skip_already_extracted,
@@ -698,12 +716,12 @@ def _print_dry_run(plan: dict) -> None:
 
 
 async def _main_async(args: argparse.Namespace) -> int:
-    # Writes the primary store (entity extraction) via direct sqlite3 — refuse on
-    # a PostgreSQL-primary deployment rather than edit a stale SQLite file. Covers
-    # both the CLI and the in-process cognitive-loop call path.
-    from memory.backends import require_sqlite_backend
-    require_sqlite_backend("m3_entities")
-
+    # Backend-agnostic: entity extraction reads/writes the primary store through
+    # the backend-aware mc._db() with dialected SQL (placeholders, columns_of,
+    # json_extract, now(), portable ON CONFLICT), and the status column comes from
+    # migration pg_041 on PG. Works on both SQLite and PostgreSQL. (Previously
+    # gated SQLite-only because it opened raw sqlite3 connections; those were moved
+    # onto the seam and verified on PG, so the gate was removed.)
     profile = load_profile(args.profile)
     if profile is None:
         sys.exit(f"ERROR: profile {args.profile!r} not found")

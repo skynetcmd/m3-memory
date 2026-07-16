@@ -212,14 +212,17 @@ class TestTableExists:
 
 
 class TestIntrospection:
-    def test_sqlite_uses_pragma_no_params(self):
+    def test_sqlite_uses_pragma_function_name_at_index_0(self):
+        # pragma_table_info() function form (not the bare PRAGMA statement) so the
+        # column name is at row[0], matching PG's column_name — one caller index.
         sql, params = SQLITE.columns_of("memory_items")
-        assert sql == "PRAGMA table_info(memory_items)"
+        assert sql == "SELECT name FROM pragma_table_info('memory_items')"
         assert params == ()
 
     def test_postgres_uses_information_schema_parameterized(self):
         sql, params = POSTGRES.columns_of("memory_items")
         assert "information_schema.columns" in sql
+        assert "column_name" in sql  # name at row[0], same as sqlite
         assert "%s" in sql  # table name is bound, not interpolated
         assert params == ("memory_items",)
 

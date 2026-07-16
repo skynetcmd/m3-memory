@@ -261,19 +261,24 @@ class Dialect:
     def columns_of(self, table: str) -> tuple[str, tuple]:
         """A (sql, params) pair listing a table's column names.
 
-        Replaces ``PRAGMA table_info(t)`` (SQLite) with an
-        ``information_schema.columns`` query (Postgres). Returns column names in
-        ordinal position. ``table`` is a trusted identifier.
+        The result row shape is IDENTICAL on both backends: the column NAME is at
+        ``row[0]`` (one column per row, ordinal order), so a caller reads
+        ``{r[0] for r in db.execute(sql, params)}`` unchanged on SQLite and PG.
+
+        SQLite uses the ``pragma_table_info()`` table-valued function (not the
+        bare ``PRAGMA table_info`` statement, whose name is at ``row[1]``) so the
+        index matches Postgres's ``information_schema.columns.column_name``.
+        ``table`` is a trusted identifier.
         """
-        # PRAGMA interpolates the table name (can't be bound), so the name must
-        # be a bare SQL identifier. Reject anything else on BOTH backends so the
-        # two paths accept exactly the same inputs (parity), even though the pg
-        # path binds it as a parameter and would be injection-safe regardless.
+        # The table name is interpolated into the SQLite pragma-function argument
+        # (it can't be a bound literal there), so require a bare identifier on BOTH
+        # backends for parity — even though the pg path binds it and is safe anyway.
         if not table.isidentifier():
             raise ValueError(f"table name must be a bare identifier: {table!r}")
         if self.backend == "sqlite":
-            # PRAGMA can't be parameterized; table is trusted. Caller reads row[1].
-            return (f"PRAGMA table_info({table})", ())
+            # pragma_table_info('t') is a table-valued function (SQLite >= 3.16);
+            # its `name` column is the column name. Caller reads row[0].
+            return (f"SELECT name FROM pragma_table_info('{table}')", ())
         sql = (
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = %s ORDER BY ordinal_position"
