@@ -184,6 +184,22 @@ def test_schema_version_none_when_uninitialized(backend):
     backend.ensure_schema()
 
 
+def test_dual_row_positional_and_named_access(backend):
+    """Rows from the compat connection support BOTH row[0] and row['col'] like
+    sqlite3.Row — the codebase uses both styles; a row that fails one is a latent
+    PG bug (regression: RealDictCursor gave dicts, so row[0] raised KeyError)."""
+    with backend.connection() as conn:
+        cur = conn.execute("SELECT 42 AS answer, 'hi' AS greeting")
+        row = cur.fetchone()
+        assert row[0] == 42                    # positional
+        assert row["answer"] == 42             # named
+        assert row[1] == "hi"
+        assert row["greeting"] == "hi"
+        assert list(row) == [42, "hi"]         # tuple-iterable
+        assert len(row) == 2
+        assert row.get("missing", "d") == "d"  # sqlite3.Row-like .get
+
+
 def test_cas_supersede_exactly_one_winner(backend):
     """The CAS close (UPDATE ... WHERE is_deleted=0, guard on rowcount==1) must
     yield exactly ONE winner under concurrent transactions on PG — the invariant

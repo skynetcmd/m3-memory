@@ -34,8 +34,11 @@ def get_agent_trust(db, agent_id: str) -> float:
     if not agent_id:
         return _conf.TRUST_NEUTRAL
     try:
+        from memory.backends import active_backend
+
+        _p = active_backend().dialect().param()
         row = db.execute(
-            "SELECT trust_score FROM agents WHERE agent_id = ?", (agent_id,)
+            f"SELECT trust_score FROM agents WHERE agent_id = {_p}", (agent_id,)
         ).fetchone()
     except Exception as e:  # noqa: BLE001 — pre-036 DB has no trust_score
         if _is_missing(e):
@@ -52,9 +55,12 @@ def set_agent_trust(db, agent_id: str, trust_score: float) -> float:
     caller — agent_set_trust tool — should surface that clearly)."""
     value = _conf.clamp_trust(float(trust_score))
     now = datetime.now(timezone.utc).isoformat()
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
     # Upsert: create a minimal agent row if it doesn't exist yet.
     db.execute(
-        "INSERT INTO agents (agent_id, trust_score, last_seen) VALUES (?, ?, ?) "
+        f"INSERT INTO agents (agent_id, trust_score, last_seen) VALUES ({_d.placeholder(3)}) "
         "ON CONFLICT(agent_id) DO UPDATE SET trust_score = excluded.trust_score",
         (agent_id, value, now),
     )
@@ -67,9 +73,12 @@ def corroboration_inputs(db, memory_id: str) -> tuple[float, int]:
     contradiction_count = number of negative-delta events. Neutral (0.0, 0) on a
     pre-036 DB."""
     try:
+        from memory.backends import active_backend
+
+        _p = active_backend().dialect().param()
         rows = db.execute(
             "SELECT source_kind, source_ref, trust_at_write, delta "
-            "FROM memory_corroborations WHERE memory_id = ?",
+            f"FROM memory_corroborations WHERE memory_id = {_p}",
             (memory_id,),
         ).fetchall()
     except Exception as e:  # noqa: BLE001 — pre-036 DB has no ledger
@@ -130,9 +139,13 @@ def reaggregate_confidence(db, memory_id: str) -> "float | None":
     """Recompute and store a memory's confidence from its current provenance +
     ledger. Returns the new value, or None if unsupported (pre-035/036). Keeps
     corroboration_count / contradiction_count columns in sync with the ledger."""
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    _p = _d.param()
     try:
         row = db.execute(
-            "SELECT source, change_agent, metadata_json FROM memory_items WHERE id = ?",
+            f"SELECT source, change_agent, metadata_json FROM memory_items WHERE id = {_p}",
             (memory_id,),
         ).fetchone()
     except Exception as e:  # noqa: BLE001
@@ -155,8 +168,8 @@ def reaggregate_confidence(db, memory_id: str) -> "float | None":
     )
     try:
         db.execute(
-            "UPDATE memory_items SET confidence = ?, "
-            "corroboration_count = ?, contradiction_count = ? WHERE id = ?",
+            f"UPDATE memory_items SET confidence = {_p}, "
+            f"corroboration_count = {_p}, contradiction_count = {_p} WHERE id = {_p}",
             (value, corr_count, contradictions, memory_id),
         )
     except Exception as e:  # noqa: BLE001 — pre-035 DB lacks the columns
@@ -168,9 +181,12 @@ def reaggregate_confidence(db, memory_id: str) -> "float | None":
 
 def _distinct_positive_count(db, memory_id: str) -> int:
     try:
+        from memory.backends import active_backend
+
+        _p = active_backend().dialect().param()
         row = db.execute(
             "SELECT COUNT(DISTINCT source_kind || '|' || source_ref) "
-            "FROM memory_corroborations WHERE memory_id = ? AND delta > 0",
+            f"FROM memory_corroborations WHERE memory_id = {_p} AND delta > 0",
             (memory_id,),
         ).fetchone()
         return int(row[0]) if row else 0

@@ -43,28 +43,99 @@ _DEFAULT_MINCONN = 1
 _DEFAULT_MAXCONN = 16
 
 
+def _make_compat_cursor_factory():
+    """A psycopg2 cursor whose rows behave like ``sqlite3.Row``: subscriptable by
+    BOTH position (``row[0]``) AND column name (``row["col"]``), and iterable /
+    len-able as a tuple.
+
+    The memory core (written against ``sqlite3.Row``) mixes both access styles —
+    the write path uses ``row["content"]`` while trust/graph/etc. use ``row[0]``.
+    psycopg2's default cursor gives tuples (no name access); ``RealDictCursor``
+    gives dicts (no positional access). Neither alone matches ``sqlite3.Row``, so
+    a row that fails one style is a latent bug on PG (e.g. ``row[0]`` -> KeyError
+    under RealDictCursor). This factory returns rows supporting both.
+    """
+    import psycopg2.extensions
+
+    class _DualRow(tuple):
+        """A result row: a tuple (positional) that also maps column name -> value.
+
+        No ``__slots__`` — a tuple subclass can't have non-empty slots, so
+        ``_columns`` lives in the instance ``__dict__``.
+        """
+
+        def __new__(cls, values, columns):
+            self = super().__new__(cls, values)
+            self._columns = columns
+            return self
+
+        def __getitem__(self, key):
+            if isinstance(key, str):
+                return tuple.__getitem__(self, self._columns[key])
+            return tuple.__getitem__(self, key)
+
+        def get(self, key, default=None):
+            try:
+                return self[key]
+            except (KeyError, IndexError):
+                return default
+
+        def keys(self):
+            return list(self._columns.keys())
+
+    class _DualCursor(psycopg2.extensions.cursor):
+        """Cursor emitting _DualRow instances (sqlite3.Row-like access)."""
+
+        def _colmap(self):
+            if self.description is None:
+                return {}
+            return {d[0]: i for i, d in enumerate(self.description)}
+
+        def fetchone(self):
+            row = super().fetchone()
+            return None if row is None else _DualRow(row, self._colmap())
+
+        def fetchall(self):
+            cols = self._colmap()
+            return [_DualRow(r, cols) for r in super().fetchall()]
+
+        def fetchmany(self, size=None):
+            cols = self._colmap()
+            rows = super().fetchmany(size) if size is not None else super().fetchmany()
+            return [_DualRow(r, cols) for r in rows]
+
+        def __iter__(self):
+            cols = self._colmap()
+            for r in super().__iter__():
+                yield _DualRow(r, cols)
+
+    return _DualCursor
+
+
 class _SqliteCompatConnection:
     """Wrap a psycopg2 connection to present the SQLite-connection surface the
-    memory core expects, so ``db.execute(...)`` and ``row["col"]`` work unchanged.
+    memory core expects, so ``db.execute(...)`` and ``row["col"]``/``row[0]`` both
+    work unchanged.
 
     The core was written against ``sqlite3.Connection`` with ``row_factory=Row``:
       * ``conn.execute(sql, params)`` is a shortcut that creates a cursor, runs
         the statement, and returns the CURSOR (so ``.fetchone()``/``.fetchall()``/
         ``.rowcount`` work on the result). psycopg2 has no connection-level
         ``execute`` — only cursors do.
-      * rows are accessed by name (``row["content"]``). psycopg2's default cursor
-        returns tuples; a ``RealDictCursor`` returns name-keyed dicts.
-    This adapter closes both gaps. It is intentionally minimal — only the surface
-    the write/search paths actually use — not a general DB-API façade.
+      * rows are accessed by NAME (``row["content"]``) AND by POSITION (``row[0]``)
+        across the codebase, exactly as ``sqlite3.Row`` allows. A ``_DualCursor``
+        (see ``_make_compat_cursor_factory``) emits rows supporting both.
+    This adapter closes those gaps. It is intentionally minimal — only the surface
+    the memory paths actually use — not a general DB-API façade.
     """
 
     def __init__(self, raw_conn: object) -> None:
         self._raw = raw_conn
 
     def execute(self, sql: str, params: "tuple | list" = ()):  # noqa: ANN001
-        from psycopg2.extras import RealDictCursor
-
-        cur = self._raw.cursor(cursor_factory=RealDictCursor)  # type: ignore[attr-defined]
+        cur = self._raw.cursor(  # type: ignore[attr-defined]
+            cursor_factory=_make_compat_cursor_factory()
+        )
         cur.execute(sql, params)
         return cur
 
