@@ -21,11 +21,17 @@ def _force_pg(monkeypatch):
     _sel._reset_for_tests()
 
 
-def test_curate_memory_apply_refuses_on_postgres(monkeypatch):
+def test_curate_memory_apply_works_on_postgres(monkeypatch):
+    """curate_memory_apply was PORTED to PG (its bulk impls are dialected +
+    backend-routed), so it must NOT refuse on postgres. An empty plan is a no-op
+    that returns a structured result, never the require_sqlite_backend RuntimeError.
+    (Full row-level behavior is covered by test_curator_apply_pg_live.py.)"""
     _force_pg(monkeypatch)
     import curator_apply
-    with pytest.raises(RuntimeError, match="SQLite-only|stale SQLite"):
-        curator_apply.apply_memory_plan({})
+    out = curator_apply.apply_memory_plan({})  # empty plan: no DB work, no refusal
+    assert out["store"] == "memory"
+    assert out["errors"] == []
+    assert out["summary"] == {"deleted_soft": 0, "deleted_hard": 0, "linked": 0, "updated": 0}
 
 
 def test_cognitive_loop_refuses_on_postgres(monkeypatch):
@@ -77,7 +83,7 @@ def test_guards_are_noop_on_sqlite(monkeypatch):
     from memory.backends import require_sqlite_backend
     from memory.backends import selector as _sel
     _sel._reset_for_tests()
-    # No raise for any of the tool names.
-    for tool in ("curate_memory_apply", "m3_cognitive_loop", "m3_entities",
-                 "m3_enrich", "run_observer"):
+    # No raise for any of the still-gated tool names. (curate_memory_apply was
+    # ported to PG and no longer uses this guard.)
+    for tool in ("m3_cognitive_loop", "chroma_sync"):
         require_sqlite_backend(tool)

@@ -1017,10 +1017,13 @@ def memory_delete_bulk_impl(ids, hard=False):
     not_found: list[str] = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    p = _d.param()
     with _db() as db:
         for start in range(0, len(id_list), _MEMORY_DELETE_BULK_CHUNK):
             chunk = id_list[start : start + _MEMORY_DELETE_BULK_CHUNK]
-            placeholders = ",".join("?" * len(chunk))
+            placeholders = _d.placeholder(len(chunk))
 
             # Discover which ids exist in this chunk. content is needed for
             # the history record; the rest is just existence.
@@ -1040,7 +1043,7 @@ def memory_delete_bulk_impl(ids, hard=False):
             for row in existing:
                 _record_history(row["id"], "delete", row["content"], None, "content", db=db)
 
-            ph_existing = ",".join("?" * len(existing_ids))
+            ph_existing = _d.placeholder(len(existing_ids))
             if hard:
                 db.execute(
                     f"DELETE FROM memory_embeddings WHERE memory_id IN ({ph_existing})",
@@ -1062,7 +1065,7 @@ def memory_delete_bulk_impl(ids, hard=False):
                 )
             else:
                 db.execute(
-                    f"UPDATE memory_items SET is_deleted = 1, updated_at = ? "
+                    f"UPDATE memory_items SET is_deleted = 1, updated_at = {p} "
                     f"WHERE id IN ({ph_existing})",
                     [now_iso, *existing_ids],
                 )
@@ -1154,10 +1157,13 @@ def memory_update_bulk_impl(updates):
     now_iso = datetime.now(timezone.utc).isoformat()
     id_list = list(by_id.keys())
 
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    p = _d.param()
     with _db() as db:
         for start in range(0, len(id_list), _MEMORY_UPDATE_BULK_CHUNK):
             chunk_ids = id_list[start : start + _MEMORY_UPDATE_BULK_CHUNK]
-            placeholders = ",".join("?" * len(chunk_ids))
+            placeholders = _d.placeholder(len(chunk_ids))
             rows = db.execute(
                 f"SELECT id, content, title, refresh_on, refresh_reason, conversation_id "
                 f"FROM memory_items WHERE id IN ({placeholders})",
@@ -1176,13 +1182,13 @@ def memory_update_bulk_impl(updates):
                 content = u.get("content", "")
                 if content:
                     _record_history(mid, "update", old["content"], content, "content", db=db)
-                    db.execute("UPDATE memory_items SET content = ? WHERE id = ?", (content, mid))
+                    db.execute(f"UPDATE memory_items SET content = {p} WHERE id = {p}", (content, mid))
                     changed_any = True
 
                 title = u.get("title", "")
                 if title:
                     _record_history(mid, "update", old["title"], title, "title", db=db)
-                    db.execute("UPDATE memory_items SET title = ? WHERE id = ?", (title, mid))
+                    db.execute(f"UPDATE memory_items SET title = {p} WHERE id = {p}", (title, mid))
                     changed_any = True
 
                 importance = u.get("importance", -1.0)
@@ -1191,39 +1197,39 @@ def memory_update_bulk_impl(updates):
                 except (TypeError, ValueError):
                     importance = -1.0
                 if importance >= 0:
-                    db.execute("UPDATE memory_items SET importance = ? WHERE id = ?", (importance, mid))
+                    db.execute(f"UPDATE memory_items SET importance = {p} WHERE id = {p}", (importance, mid))
                     changed_any = True
 
                 metadata = u.get("metadata", "")
                 if isinstance(metadata, dict):
                     metadata = json.dumps(metadata)
                 if metadata:
-                    db.execute("UPDATE memory_items SET metadata_json = ? WHERE id = ?", (metadata, mid))
+                    db.execute(f"UPDATE memory_items SET metadata_json = {p} WHERE id = {p}", (metadata, mid))
                     changed_any = True
 
                 refresh_on = u.get("refresh_on", "")
                 if refresh_on:
                     new_val = None if refresh_on == "clear" else refresh_on
                     _record_history(mid, "update", old["refresh_on"], new_val, "refresh_on", db=db)
-                    db.execute("UPDATE memory_items SET refresh_on = ? WHERE id = ?", (new_val, mid))
+                    db.execute(f"UPDATE memory_items SET refresh_on = {p} WHERE id = {p}", (new_val, mid))
                     changed_any = True
 
                 refresh_reason = u.get("refresh_reason", "")
                 if refresh_reason:
                     new_val = None if refresh_reason == "clear" else refresh_reason
                     _record_history(mid, "update", old["refresh_reason"], new_val, "refresh_reason", db=db)
-                    db.execute("UPDATE memory_items SET refresh_reason = ? WHERE id = ?", (new_val, mid))
+                    db.execute(f"UPDATE memory_items SET refresh_reason = {p} WHERE id = {p}", (new_val, mid))
                     changed_any = True
 
                 conversation_id = u.get("conversation_id", "")
                 if conversation_id:
                     new_val = None if conversation_id == "clear" else conversation_id
                     _record_history(mid, "update", old["conversation_id"], new_val, "conversation_id", db=db)
-                    db.execute("UPDATE memory_items SET conversation_id = ? WHERE id = ?", (new_val, mid))
+                    db.execute(f"UPDATE memory_items SET conversation_id = {p} WHERE id = {p}", (new_val, mid))
                     changed_any = True
 
                 if changed_any:
-                    db.execute("UPDATE memory_items SET updated_at = ? WHERE id = ?", (now_iso, mid))
+                    db.execute(f"UPDATE memory_items SET updated_at = {p} WHERE id = {p}", (now_iso, mid))
                     succeeded.append(mid)
                 else:
                     no_change.append(mid)
@@ -1305,6 +1311,9 @@ def memory_link_bulk_impl(links, relationship_type: str = "related"):
     skipped_duplicate: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    p = _d.param()
     with _db() as db:
         for start in range(0, len(normalized), _MEMORY_LINK_BULK_CHUNK):
             chunk = normalized[start : start + _MEMORY_LINK_BULK_CHUNK]
@@ -1312,7 +1321,7 @@ def memory_link_bulk_impl(links, relationship_type: str = "related"):
             # Collect every distinct memory_id referenced in this chunk to do
             # a single existence check.
             all_ids = list({mid for triple in chunk for mid in (triple[0], triple[1])})
-            placeholders = ",".join("?" * len(all_ids))
+            placeholders = _d.placeholder(len(all_ids))
             existing_rows = db.execute(
                 f"SELECT id FROM memory_items WHERE id IN ({placeholders})",
                 all_ids,
@@ -1338,8 +1347,8 @@ def memory_link_bulk_impl(links, relationship_type: str = "related"):
                     continue
                 # Duplicate check — same (from, to, type) already linked?
                 existing = db.execute(
-                    "SELECT id FROM memory_relationships "
-                    "WHERE from_id=? AND to_id=? AND relationship_type=?",
+                    f"SELECT id FROM memory_relationships "
+                    f"WHERE from_id={p} AND to_id={p} AND relationship_type={p}",
                     (from_id, to_id, rel_type),
                 ).fetchone()
                 if existing:
@@ -1353,7 +1362,7 @@ def memory_link_bulk_impl(links, relationship_type: str = "related"):
                 db.execute(
                     "INSERT INTO memory_relationships "
                     "(id, from_id, to_id, relationship_type, created_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    f"VALUES ({_d.placeholder(5)})",
                     (rid, from_id, to_id, rel_type, now_iso),
                 )
                 created.append({
