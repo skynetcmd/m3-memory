@@ -99,10 +99,23 @@ def record_corroboration(db, memory_id: str, *, source_kind: str, source_ref: st
     is absent (pre-036). Never raises on the tolerated missing-table case.
     """
     try:
+        # Dedup is on the PARTIAL unique index (memory_id, source_kind,
+        # source_ref) WHERE delta > 0 — NOT the random-uuid PK. On SQLite the
+        # dialect emits "INSERT OR IGNORE" with an empty suffix (unchanged); on
+        # Postgres it emits "INSERT INTO ... ON CONFLICT (...) WHERE delta > 0 DO
+        # NOTHING", naming that exact partial index so the conflict is caught.
+        from memory.backends import active_backend
+
+        _d = active_backend().dialect()
+        _ins = _d.insert_or_ignore()
+        _suffix = _d.on_conflict_ignore(
+            conflict_target="(memory_id, source_kind, source_ref)",
+            index_predicate="delta > 0",
+        )
         cur = db.execute(
-            "INSERT OR IGNORE INTO memory_corroborations "
+            f"{_ins} memory_corroborations "
             "(id, memory_id, source_kind, source_ref, trust_at_write, delta) "
-            "VALUES (?,?,?,?,?,?)",
+            f"VALUES ({_d.placeholder(6)}) {_suffix}".rstrip(),
             (str(uuid.uuid4()), memory_id, source_kind, source_ref,
              _conf.clamp_trust(trust_at_write), float(delta)),
         )

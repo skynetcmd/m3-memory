@@ -66,17 +66,34 @@ class Dialect:
         """
         return "INSERT OR IGNORE INTO" if self.backend == "sqlite" else "INSERT INTO"
 
-    def on_conflict_ignore(self, *, conflict_target: str = "") -> str:
+    def on_conflict_ignore(
+        self, *, conflict_target: str = "", index_predicate: str = ""
+    ) -> str:
         """Trailing clause that makes an INSERT a no-op on conflict.
 
         SQLite: empty (the OR IGNORE prefix already did it).
-        Postgres: ``ON CONFLICT [(cols)] DO NOTHING``. ``conflict_target`` is an
-        optional parenthesized column list or constraint, e.g. ``"(id)"``.
+        Postgres: ``ON CONFLICT [(cols) [WHERE pred]] DO NOTHING``.
+
+        ``conflict_target`` is the parenthesized arbiter, e.g. ``"(id)"`` or
+        ``"(memory_id, source_kind, source_ref)"``. ``index_predicate`` is the
+        WHERE clause of a PARTIAL unique index (e.g. ``"delta > 0"``) — Postgres
+        requires it in the arbiter to match a partial index, or the conflict is
+        not caught. Both are trusted, caller-supplied SQL fragments.
+
+        Note: with no ``conflict_target``, Postgres ``DO NOTHING`` catches a
+        conflict on ANY unique/exclusion constraint — which is what a target-less
+        SQLite ``OR IGNORE`` does. Prefer naming the target when a specific
+        (possibly partial) index carries the dedup semantics.
         """
         if self.backend == "sqlite":
             return ""
+        if index_predicate and not conflict_target:
+            raise ValueError(
+                "index_predicate requires a conflict_target (partial-index arbiter)"
+            )
         tgt = f" {conflict_target}" if conflict_target else ""
-        return f"ON CONFLICT{tgt} DO NOTHING"
+        pred = f" WHERE {index_predicate}" if index_predicate else ""
+        return f"ON CONFLICT{tgt}{pred} DO NOTHING"
 
     def on_conflict_update(self, conflict_target: str, set_columns: list[str]) -> str:
         """Trailing UPSERT clause: on conflict, overwrite the given columns.

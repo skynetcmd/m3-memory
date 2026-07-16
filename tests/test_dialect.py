@@ -61,6 +61,26 @@ class TestUpsert:
             == "ON CONFLICT (id) DO NOTHING"
         )
 
+    def test_on_conflict_ignore_partial_index_arbiter(self):
+        # Postgres needs the partial index's WHERE predicate in the arbiter or
+        # the conflict on a partial unique index is not caught.
+        got = POSTGRES.on_conflict_ignore(
+            conflict_target="(memory_id, source_kind, source_ref)",
+            index_predicate="delta > 0",
+        )
+        assert got == (
+            "ON CONFLICT (memory_id, source_kind, source_ref) "
+            "WHERE delta > 0 DO NOTHING"
+        )
+        # SQLite ignores all of this (the OR IGNORE prefix handled it)
+        assert SQLITE.on_conflict_ignore(
+            conflict_target="(a, b)", index_predicate="x > 0"
+        ) == ""
+
+    def test_index_predicate_requires_target(self):
+        with pytest.raises(ValueError):
+            POSTGRES.on_conflict_ignore(index_predicate="delta > 0")
+
     def test_on_conflict_update_shared_excluded_syntax(self):
         # both backends use the `excluded` pseudo-table
         got = POSTGRES.on_conflict_update("(id)", ["content", "updated_at"])
