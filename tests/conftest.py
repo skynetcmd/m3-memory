@@ -222,11 +222,22 @@ def _reset_storage_backend_cache(monkeypatch):
     funny state must never break an unrelated test.
     """
     def _clear():
-        try:
-            from memory.backends import selector as _sel
-            _sel._reset_for_tests()
-        except Exception:  # noqa: BLE001 — hygiene must never fail a test
-            pass
+        # IMPORTANT: only clear if the selector is ALREADY imported — do NOT
+        # trigger the import here. Importing memory.backends eagerly pulls the
+        # whole memory.* package (memory/__init__ imports all submodules incl.
+        # memory.embed in the host's shared-embedder mode). Doing that during
+        # this autouse fixture's setup polluted the module snapshot that
+        # _restore_memory_modules takes, so test_doctor's tier-1 probe read a
+        # shared-mode config and reported 'shared-mode' instead of
+        # 'not-configured' (regression from the test-isolation commit). Guarding
+        # on sys.modules keeps this fixture a no-op for tests that never touch the
+        # backend seam.
+        _sel = sys.modules.get("memory.backends.selector")
+        if _sel is not None:
+            try:
+                _sel._reset_for_tests()
+            except Exception:  # noqa: BLE001 — hygiene must never fail a test
+                pass
 
     # Force the default backend + a clean DB env unless a test explicitly opts
     # in. Clearing M3_PG_URL/PG_URL too keeps an ambient dev DSN (a developer
