@@ -541,8 +541,18 @@ async def memory_search_scored_impl(
     vector_weight = _maybe_route_query(query, vector_weight, intent_hint=intent_hint)
 
     # Pre-emptive FTS short-circuit check for high-specificity lookup queries
-    # to bypass embedding entirely
-    if len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
+    # to bypass embedding entirely.
+    #
+    # SQLite-only: this block uses `_db()`, the FTS5 `memory_items_fts` virtual
+    # table and `bm25()`, none of which exist on PostgreSQL. On PG the equivalent
+    # exact-lookup fast path is not implemented as a separate short-circuit; the
+    # normal candidate fetch (search_pg.fetch_candidates_pg, keyword_search +
+    # vector_search) handles the same queries with the same tenancy isolation. So
+    # gate the whole short-circuit on the SQLite backend and let PG fall through.
+    from memory.backends import active_backend as _active_backend_sc
+
+    _sc_is_sqlite = _active_backend_sc().name == "sqlite"
+    if _sc_is_sqlite and len(query.strip()) > 3 and not intent_hint and search_mode in ("hybrid", "fts5"):
         try:
             # Gating: Reject generic conversational queries from short-circuiting
             conversational_stops = {"show", "get", "find", "tell", "me", "the", "about", "what", "who", "when", "where", "why", "how", "list"}
@@ -818,6 +828,42 @@ async def memory_search_scored_impl(
     def _fetch_candidates():
         """Sync DB read. Returns (rows, has_vec) on success, or a sentinel
         (_RECURSE -> caller re-runs semantic; _EMPTY -> caller returns [])."""
+        # PostgreSQL: no FTS5/sqlite-vec fused SQL exists, so candidate fetch
+        # goes through the seam (keyword_search + vector_search) and returns the
+        # SAME row-dict shape with has_vec=False. Everything downstream (hybrid
+        # scoring, MMR, ranking) is backend-agnostic and runs unchanged. SQLite
+        # falls through to the existing code path below, byte-for-byte untouched.
+        from memory.backends import active_backend as _active_backend
+
+        _backend = _active_backend()
+        if _backend.name == "postgres":
+            from memory.search_pg import fetch_candidates_pg
+
+            # Build tenancy in %s form (the _tenancy_sql above is ?-style/SQLite).
+            _pg_tenancy_sql = ""
+            _pg_tenancy_params: list = []
+            if user_id:
+                _pg_tenancy_sql += " AND mi.user_id = %s"
+                _pg_tenancy_params.append(user_id)
+            if scope:
+                _pg_tenancy_sql += " AND mi.scope = %s"
+                _pg_tenancy_params.append(scope)
+            try:
+                with _backend.connection() as _pgconn:
+                    return fetch_candidates_pg(
+                        _backend, _pgconn,
+                        query=query, q_vec=q_vec, search_mode=search_mode,
+                        where_columns=extra_sql, dim=config.EMBED_DIM,
+                        embed_models=tuple(_compat),
+                        tenancy_sql=_pg_tenancy_sql,
+                        tenancy_params=tuple(_pg_tenancy_params),
+                        row_limit=sql_row_limit,
+                        extra_columns=list(extra_columns),
+                    )
+            except Exception as exc:
+                if os.environ.get("M3_DEBUG"):
+                    print(f"DEBUG PG fetch error: {exc}")
+                return (_RECURSE if search_mode != "fts5" else _EMPTY), False
         try:
             with _db() as db:
                 _has_vec = _detect_sqlite_vec(db)
