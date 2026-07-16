@@ -179,3 +179,70 @@ def test_keyword_search_tsvector(backend):
         conn.cursor().execute(
             "DELETE FROM memory_items WHERE id IN ('kw_a','kw_b','kw_c')"
         )
+
+
+def test_vector_search_matches_sqlite(backend):
+    """PG vector_search (BYTEA + Rust cosine) must produce IDENTICAL ordering and
+    scores to SQLite for the same vectors — the seam invariant."""
+    import sqlite3
+    import struct
+
+    dim = 4
+    def blob(v):
+        return struct.pack(f"{len(v)}f", *v)
+
+    query = [1.0, 0.0, 0.0, 0.0]
+    cands = [
+        ("vp_near", [0.9, 0.1, 0.0, 0.0]),
+        ("vp_mid", [0.5, 0.5, 0.5, 0.5]),
+        ("vp_neg", [-1.0, 0.0, 0.0, 0.0]),
+    ]
+
+    # SQLite reference
+    from memory.backends.sqlite_backend import SqliteBackend
+
+    sconn = sqlite3.connect(":memory:")
+    sconn.executescript(
+        "CREATE TABLE memory_items(id TEXT PRIMARY KEY, is_deleted INTEGER DEFAULT 0, user_id TEXT DEFAULT '');"
+        "CREATE TABLE memory_embeddings(memory_id TEXT, embedding BLOB, dim INTEGER, embed_model TEXT);"
+    )
+    for mid, vec in cands:
+        sconn.execute("INSERT INTO memory_items(id) VALUES (?)", (mid,))
+        sconn.execute(
+            "INSERT INTO memory_embeddings(memory_id,embedding,dim,embed_model) VALUES (?,?,?,?)",
+            (mid, blob(vec), dim, "m"),
+        )
+    sconn.commit()
+    s_hits = SqliteBackend().vector_search(
+        sconn, query, limit=10, dim=dim, embed_models=("m",)
+    )
+
+    # Postgres under test
+    with backend.connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DROP TABLE IF EXISTS memory_embeddings CASCADE")
+        cur.execute("DROP TABLE IF EXISTS memory_items CASCADE")
+        cur.execute(
+            "CREATE TABLE memory_items(id TEXT PRIMARY KEY, type TEXT DEFAULT 'note', "
+            "is_deleted INTEGER DEFAULT 0, user_id TEXT DEFAULT '')"
+        )
+        cur.execute(
+            "CREATE TABLE memory_embeddings(memory_id TEXT, embedding BYTEA, dim BIGINT, embed_model TEXT)"
+        )
+        for mid, vec in cands:
+            cur.execute("INSERT INTO memory_items(id) VALUES (%s)", (mid,))
+            cur.execute(
+                "INSERT INTO memory_embeddings(memory_id,embedding,dim,embed_model) VALUES (%s,%s,%s,%s)",
+                (mid, blob(vec), dim, "m"),
+            )
+    with backend.connection() as conn:
+        p_hits = backend.vector_search(conn, query, limit=10, dim=dim, embed_models=("m",))
+
+    s = [(h.memory_id, round(h.score, 5)) for h in s_hits]
+    p = [(h.memory_id, round(h.score, 5)) for h in p_hits]
+    assert p == s, f"parity mismatch: sqlite={s} postgres={p}"
+    assert p[0][0] == "vp_near"
+
+    with backend.connection() as conn:
+        conn.cursor().execute("DROP TABLE memory_embeddings CASCADE")
+        conn.cursor().execute("DROP TABLE memory_items CASCADE")

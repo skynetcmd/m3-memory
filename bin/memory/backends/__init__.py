@@ -23,7 +23,13 @@ Cycle-break rule (§2): modules in this package must NOT top-level-import
 """
 from __future__ import annotations
 
-from .base import BackendName, Capabilities, KeywordHit, StorageBackend
+from .base import (
+    BackendName,
+    Capabilities,
+    KeywordHit,
+    StorageBackend,
+    VectorHit,
+)
 from .selector import active_backend, resolve_backend_name
 
 __all__ = [
@@ -31,6 +37,7 @@ __all__ = [
     "Capabilities",
     "KeywordHit",
     "StorageBackend",
+    "VectorHit",
     "active_backend",
     "resolve_backend_name",
 ]

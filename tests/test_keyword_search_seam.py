@@ -12,9 +12,10 @@ skips without a cluster.
 from __future__ import annotations
 
 import sqlite3
+import struct
 
 import pytest
-from memory.backends import KeywordHit, active_backend
+from memory.backends import KeywordHit, VectorHit, active_backend
 from memory.backends import selector as _selector
 from memory.fts import _compile_fts_query, _compile_tsquery
 
@@ -125,3 +126,70 @@ class TestSqliteKeywordSearch:
             tenancy_sql=" AND mi.user_id = ?", tenancy_params=("alice",),
         )
         assert {h.memory_id for h in hits} == {"u1"}
+
+
+class TestSqliteVectorSearch:
+    DIM = 4
+
+    @staticmethod
+    def _blob(vec):
+        return struct.pack(f"{len(vec)}f", *vec)
+
+    def _make_db(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE memory_items(
+                id TEXT PRIMARY KEY, is_deleted INTEGER DEFAULT 0, user_id TEXT DEFAULT '');
+            CREATE TABLE memory_embeddings(
+                memory_id TEXT, embedding BLOB, dim INTEGER, embed_model TEXT);
+            """
+        )
+        return conn
+
+    def _seed(self, conn, mid, vec, model="test-model", is_deleted=0):
+        conn.execute(
+            "INSERT INTO memory_items(id, is_deleted) VALUES (?,?)", (mid, is_deleted)
+        )
+        conn.execute(
+            "INSERT INTO memory_embeddings(memory_id,embedding,dim,embed_model) "
+            "VALUES (?,?,?,?)",
+            (mid, self._blob(vec), self.DIM, model),
+        )
+        conn.commit()
+
+    def test_ranks_by_cosine_higher_better(self):
+        conn = self._make_db()
+        self._seed(conn, "near", [0.9, 0.1, 0.0, 0.0])
+        self._seed(conn, "mid", [0.5, 0.5, 0.5, 0.5])
+        self._seed(conn, "opp", [-1.0, 0.0, 0.0, 0.0])
+        hits = active_backend().vector_search(
+            conn, [1.0, 0.0, 0.0, 0.0], limit=10, dim=self.DIM,
+            embed_models=("test-model",),
+        )
+        assert all(isinstance(h, VectorHit) for h in hits)
+        ids = [h.memory_id for h in hits]
+        assert ids[0] == "near"          # highest cosine first
+        assert ids[-1] == "opp"          # opposite last
+        # scores descending (higher = better)
+        assert [h.score for h in hits] == sorted((h.score for h in hits), reverse=True)
+
+    def test_excludes_deleted_and_wrong_identity(self):
+        conn = self._make_db()
+        self._seed(conn, "keep", [1.0, 0.0, 0.0, 0.0])
+        self._seed(conn, "deleted", [1.0, 0.0, 0.0, 0.0], is_deleted=1)
+        self._seed(conn, "othermodel", [1.0, 0.0, 0.0, 0.0], model="other")
+        hits = active_backend().vector_search(
+            conn, [1.0, 0.0, 0.0, 0.0], limit=10, dim=self.DIM,
+            embed_models=("test-model",),
+        )
+        assert {h.memory_id for h in hits} == {"keep"}
+
+    def test_empty_candidates_returns_empty(self):
+        conn = self._make_db()
+        hits = active_backend().vector_search(
+            conn, [1.0, 0.0, 0.0, 0.0], limit=10, dim=self.DIM,
+            embed_models=("test-model",),
+        )
+        assert hits == []

@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Iterator
 
 from m3_sdk import getenv_compat
 
-from .base import BackendName, Capabilities, KeywordHit
+from .base import BackendName, Capabilities, KeywordHit, VectorHit
 from .dialect import POSTGRES, Dialect
 
 if TYPE_CHECKING:  # avoid importing the driver at module load
@@ -175,6 +175,45 @@ class PostgresBackend:
             (tsquery, tsquery, *tenancy_params, limit),
         )
         return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in cur.fetchall()]
+
+    def vector_search(
+        self,
+        conn: object,
+        query_vector: list,
+        *,
+        limit: int,
+        dim: int,
+        embed_models: tuple = (),
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+    ) -> "list[VectorHit]":
+        """Baseline vector search: BYTEA embeddings + Rust cosine (no pgvector).
+
+        Identical to the SQLite path except for placeholder style and that BYTEA
+        comes back as memoryview/bytes (normalized in the shared scorer). Works
+        on vanilla, locked-down federal Postgres — pgvector/HNSW is a Phase-4
+        opt-in behind the capability probe, never required here.
+        """
+        from ._vector import score_and_rank
+
+        params: list = []
+        model_sql = ""
+        if embed_models:
+            model_sql = " AND me.embed_model IN (%s)" % ", ".join(["%s"] * len(embed_models))
+            params.extend(embed_models)
+        params.extend(tenancy_params)
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        cur.execute(
+            f"""
+            SELECT mi.id AS id, me.embedding AS embedding
+            FROM memory_items mi
+            JOIN memory_embeddings me ON mi.id = me.memory_id
+            WHERE mi.is_deleted = 0 AND me.dim = %s{model_sql}{tenancy_sql}
+            """,
+            (dim, *params),
+        )
+        rows = [(r[0], r[1]) for r in cur.fetchall()]
+        return score_and_rank(query_vector, rows, dim, limit)
 
     def capabilities(self) -> Capabilities:
         """Probe optional accelerators; baseline (tsvector + Rust cosine) always holds.

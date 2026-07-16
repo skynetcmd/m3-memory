@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 
-from .base import BackendName, Capabilities, KeywordHit
+from .base import BackendName, Capabilities, KeywordHit, VectorHit
 from .dialect import SQLITE, Dialect
 
 
@@ -105,3 +105,40 @@ class SqliteBackend:
         ).fetchall()
         # rows may be sqlite3.Row or tuple; index by position to be safe.
         return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in rows]
+
+    def vector_search(
+        self,
+        conn: object,
+        query_vector: list,
+        *,
+        limit: int,
+        dim: int,
+        embed_models: tuple = (),
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+    ) -> "list[VectorHit]":
+        """Baseline vector search: fetch BLOB embeddings, score via Rust cosine.
+
+        The extension-free path (no sqlite-vec required) — identical scoring to
+        the non-vec branch of the existing search. Restricts to the compatible
+        embed identity and dim, then delegates ranking to the shared scorer so
+        the ordering matches the Postgres backend for the same rows.
+        """
+        from ._vector import score_and_rank
+
+        params: list = []
+        model_sql = ""
+        if embed_models:
+            model_sql = " AND me.embed_model IN (%s)" % ", ".join(["?"] * len(embed_models))
+            params.extend(embed_models)
+        params.extend(tenancy_params)
+        rows = conn.execute(  # type: ignore[attr-defined]
+            f"""
+            SELECT mi.id AS id, me.embedding AS embedding
+            FROM memory_items mi
+            JOIN memory_embeddings me ON mi.id = me.memory_id
+            WHERE mi.is_deleted = 0 AND me.dim = ?{model_sql}{tenancy_sql}
+            """,
+            (dim, *params),
+        ).fetchall()
+        return score_and_rank(query_vector, [(r[0], r[1]) for r in rows], dim, limit)

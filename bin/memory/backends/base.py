@@ -74,6 +74,24 @@ class KeywordHit:
     score: float
 
 
+@dataclass(frozen=True)
+class VectorHit:
+    """One vector-search result. IDENTICAL shape on every backend.
+
+    ``score`` is cosine similarity where HIGHER is better (the natural cosine
+    convention, matching the existing ``vec_score = 1.0 - distance`` path that
+    sorts DESC). This is the OPPOSITE direction from ``KeywordHit.score`` (bm25,
+    lower-is-better) — deliberately, because the two signals are genuinely on
+    different scales; the hybrid fusion step consumes both directions explicitly.
+    Cosine is computed by the DB-blind Rust core over packed float32 blobs, so
+    the score IS comparable across backends (same math, same embeddings) — unlike
+    keyword scores.
+    """
+
+    memory_id: str
+    score: float
+
+
 @runtime_checkable
 class StorageBackend(Protocol):
     """The capability seam every storage engine implements.
@@ -137,5 +155,37 @@ class StorageBackend(Protocol):
         this backend's placeholder style) with its ``tenancy_params``, appended
         to the WHERE so tenant scoping composes without this method knowing the
         tenancy model. Runs on the caller-supplied ``conn`` (same transaction).
+        """
+        ...
+
+    def vector_search(
+        self,
+        conn: object,
+        query_vector: "list[float]",
+        *,
+        limit: int,
+        dim: int,
+        embed_models: "tuple[str, ...]" = (),
+        tenancy_sql: str = "",
+        tenancy_params: "tuple[object, ...]" = (),
+    ) -> "list[VectorHit]":
+        """Backend-agnostic vector search: BYTEA/BLOB embeddings + Rust cosine.
+
+        The add-on-free baseline that works on BOTH backends with no extension
+        (no sqlite-vec, no pgvector): fetch candidate ``(id, embedding)`` rows
+        for the compatible embed identity, then score every packed float32 blob
+        against ``query_vector`` with the DB-blind Rust core
+        (``_cosine_batch_packed``). Returns ``list[VectorHit]`` (memory_id,
+        cosine) HIGHER-is-better, best-first, capped at ``limit``.
+
+        ``embed_models`` restricts the join to compatible embedder identities
+        (a blob from an incomparable vector space or wrong dim must not be
+        scored — the plan's identity guard). ``dim`` is the expected embedding
+        dimension. ``tenancy_sql``/``tenancy_params`` compose tenant scoping in
+        this backend's placeholder style. Runs on the caller's ``conn``.
+
+        NOTE: the baseline scores all candidates (bounded by tenancy + identity
+        + is_deleted); an ANN accelerator (pgvector HNSW / sqlite-vec) is a
+        Phase-4 opt-in chosen behind the capability probe, never required here.
         """
         ...
