@@ -370,12 +370,19 @@ def _ensure_pool() -> "queue.Queue[sqlite3.Connection]":
 
 @contextmanager
 def chatlog_sqlite_conn():
-    """Context-managed connection from the chatlog pool.
+    """Context-managed SQLite connection from the chatlog pool.
 
-    When chatlog_db_path() happens to equal the main DB, the pool here is
-    still chatlog-tuned (larger mmap/cache, 30s busy_timeout). Callers that
-    want the main-DB pool should route through ``M3Context.get_chatlog_conn``
-    which detects the path-equality case and reuses the main pool instead.
+    SQLite-only, as the name says: a connection from the chatlog-tuned pool
+    (larger mmap/cache, 30s busy_timeout) opened on the chatlog DB file. When
+    chatlog_db_path() happens to equal the main DB, the pool here is still
+    chatlog-tuned; callers that want the main-DB pool route through
+    ``M3Context.get_chatlog_conn`` (path-equality).
+
+    Backend routing does NOT live here. ``M3Context.get_chatlog_conn`` is the
+    single chokepoint that decides engine: on PostgreSQL it returns the core
+    backend connection directly and never calls this function (chatlog is
+    chat_log_* tables in the same PG database as core). So this stays honestly
+    SQLite-only — the name is not a lie.
     """
     pool = _ensure_pool()
     timeout = int(getenv_compat("M3_CHATLOG_DB_POOL_TIMEOUT", "CHATLOG_DB_POOL_TIMEOUT", "10"))

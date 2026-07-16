@@ -417,13 +417,32 @@ class M3Context:
 
     @contextmanager
     def get_chatlog_conn(self) -> Iterator[sqlite3.Connection]:
-        """Yield a SQLite connection for chat log writes/reads.
+        """Yield a connection for chat log writes/reads.
 
-        Resolution: the chatlog DB path comes from chatlog_config (which now
-        honors CHATLOG_DB_PATH > active M3_DATABASE > default agent_chatlog.db).
-        If the resolved chatlog path equals this context's main path, we reuse
-        the main pool. Otherwise a dedicated chatlog-tuned pool is used.
+        On SQLite: the chatlog DB path comes from chatlog_config (CHATLOG_DB_PATH
+        > active M3_DATABASE > default agent_chatlog.db). If the resolved chatlog
+        path equals this context's main path, reuse the main pool; otherwise a
+        dedicated chatlog-tuned pool.
+
+        On PostgreSQL: there is ONE database — chatlog lives in chat_log_* tables
+        in the same database/pool as core (one-schema/two-table). The SQLite
+        path-equality "unified vs separate" test is meaningless (no file path), so
+        we yield the ACTIVE backend connection (same as the core pool). Chatlog
+        queries target chat_log_* tables via memory.backends.chatlog_table; the
+        table name separates the stores, not the connection.
         """
+        # PG: one DB, no file path — route to the active backend pool.
+        try:
+            from memory.backends import active_backend as _ab
+
+            _backend = _ab()
+        except Exception:
+            _backend = None
+        if _backend is not None and _backend.name != "sqlite":
+            with _backend.connection() as conn:
+                yield conn
+            return
+
         try:
             import chatlog_config
         except ImportError:
