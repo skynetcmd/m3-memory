@@ -366,6 +366,24 @@ class PostgresBackend:
                 cur = conn.cursor()
                 cur.execute(schema_sql)
                 conn.commit()
+                # Apply any PG-native incremental migrations (pg_NNN_*.up.sql,
+                # version > the v39 baseline) — the PG analogue of SQLite's
+                # migrate_memory runner. Additive schema changes past v39 land here
+                # so a PG deployment doesn't drift behind the SQLite one. Each file
+                # commits in its own transaction inside the runner.
+                try:
+                    from migrate_pg import run_pending_pg_migrations
+
+                    applied = run_pending_pg_migrations(conn)
+                    if applied:
+                        import logging
+
+                        logging.getLogger("memory.backends.postgres").info(
+                            "Applied PG incremental migrations: %s", applied
+                        )
+                except ImportError:
+                    # bin/ not importable in this context — baseline still applied.
+                    pass
                 self._schema_ready = True
             except Exception:
                 conn.rollback()

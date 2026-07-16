@@ -432,7 +432,11 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 -- so a PG deployment starts AT version 39, not by replaying the SQLite-dialect
 -- NNN_*.up.sql files (which use rowid/AUTOINCREMENT/etc. that don't run on PG).
 -- ON CONFLICT DO NOTHING keeps re-applying this file idempotent. Future PG-native
--- migrations continue the sequence from 40.
+-- migrations continue the sequence from 40 as `pg_NNN_<name>.up.sql` (+ optional
+-- `.down.sql`) files in THIS directory, applied by `bin/migrate_pg.py` (the PG
+-- analogue of migrate_memory.py) — `PostgresBackend.ensure_schema` runs them
+-- automatically after this baseline. Use PG dialect (no AUTOINCREMENT/FTS5/rowid),
+-- one implicit transaction per file, no explicit COMMIT/BEGIN.
 INSERT INTO schema_versions (version, filename)
 VALUES (39, 'pg_primary_v1.sql')
 ON CONFLICT (version) DO NOTHING;
