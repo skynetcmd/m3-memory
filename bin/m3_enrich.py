@@ -132,6 +132,59 @@ async def _smoke_profile(profile: Profile) -> None:
 
 
 
+class _PgStateConn:
+    """A long-lived PG state connection mirroring the SQLite single-connection
+    model estate.* expects: `.execute(sql, params)` returns a cursor,
+    `.commit()`/`.rollback()` work, and `.close()` returns the connection to the
+    pool (not a hard close). All estate.* writes for a run funnel through ONE such
+    connection, serialized exactly as the SQLite path serializes on its single
+    connection — safe because the enrichment loop already routes every state write
+    through this one handle."""
+
+    def __init__(self, backend) -> None:
+        self._pool = backend._ensure_pool()
+        self._raw = self._pool.getconn()
+
+    def execute(self, sql, params=()):
+        from memory.backends.postgres_backend import _make_compat_cursor_factory
+        cur = self._raw.cursor(cursor_factory=_make_compat_cursor_factory())
+        cur.execute(sql, params)
+        return cur
+
+    def commit(self):
+        return self._raw.commit()
+
+    def rollback(self):
+        return self._raw.rollback()
+
+    def close(self):
+        try:
+            self._raw.rollback()  # drop any open txn before returning to pool
+        except Exception:
+            pass
+        self._pool.putconn(self._raw)
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+
+def _open_state_conn(db_path: "Path"):
+    """Open the enrichment-state connection for the active backend.
+
+    SQLite: a direct sqlite3 connection to db_path with the production pragma
+    stack (unchanged). PostgreSQL: a pooled connection wrapped as _PgStateConn
+    (apply_pragmas is SQLite-only and skipped). Held for the run; `.close()`
+    releases it."""
+    from memory.backends import active_backend
+    _backend = active_backend()
+    if _backend.name == "sqlite":
+        import sqlite3
+        c = sqlite3.connect(str(db_path), timeout=30.0)
+        apply_pragmas(c, "production")
+        return c
+    return _PgStateConn(_backend)
+
+
 async def _run_db(
     db_path: Path,
     profile: Profile,
@@ -225,15 +278,13 @@ async def _run_db(
             print("[m3-enrich] --track-state requires --source-variant; skipping state.", flush=True)
             track_state = False
         else:
-            state_conn = sqlite3.connect(str(db_path), timeout=30.0)
-            # Centralised pragma stack — "production" profile for state DB connections.
-            apply_pragmas(state_conn, "production")
+            state_conn = _open_state_conn(db_path)
             if not estate.has_state_tables(state_conn):
                 state_conn.close()
                 sys.exit(
-                    "ERROR: --track-state requires migration 028 applied to "
-                    f"{db_path}. Run: python bin/migrate_memory.py --db "
-                    f"{db_path} up"
+                    "ERROR: --track-state requires the enrichment state tables. "
+                    f"On SQLite run: python bin/migrate_memory.py --db {db_path} up. "
+                    "On PostgreSQL run: python bin/migrate_pg.py up (pg_040)."
                 )
             n_recovered = estate.recover_stale_claims(state_conn)
             if n_recovered:
@@ -489,19 +540,41 @@ async def _run_reflector_pass(
 ) -> dict:
     """Run Reflector on every (user_id, conversation_id) pair whose
     observation count meets `threshold`. Returns a counters dict."""
-    import sqlite3
+    import contextlib
+
     os.environ["M3_DATABASE"] = str(db_path)
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    rows = conn.execute("""
-        SELECT COALESCE(user_id,'') AS uid,
-               json_extract(metadata_json,'$.conversation_id') AS cid,
-               COUNT(*) AS n
-        FROM memory_items
-        WHERE type='observation' AND COALESCE(is_deleted,0)=0
-        GROUP BY uid, cid
-        HAVING n >= ?
-    """, (threshold,)).fetchall()
-    conn.close()
+    from memory.backends import active_backend
+    _backend = active_backend()
+    _d = _backend.dialect()
+    _p = _d.param()
+    _je_cid = _d.json_extract_text("metadata_json", "conversation_id")
+
+    # SQLite: honor the explicit db_path (read-only). PG: one pooled store, route
+    # through mc._db() (the read-only-URI form has no psycopg2 analogue).
+    @contextlib.contextmanager
+    def _read_conn():
+        if _backend.name == "sqlite":
+            import sqlite3
+            c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                yield c
+            finally:
+                c.close()
+        else:
+            import memory_core as _mc
+            with _mc._db() as c:
+                yield c
+
+    with _read_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT COALESCE(user_id,'') AS uid,
+                   {_je_cid} AS cid,
+                   COUNT(*) AS n
+            FROM memory_items
+            WHERE type='observation' AND COALESCE(is_deleted,0)=0
+            GROUP BY uid, cid
+            HAVING COUNT(*) >= {_p}
+        """, (threshold,)).fetchall()
     counters = {
         "processed": 0, "sup_emitted": 0, "sup_written": 0,
         "failed": 0, "empty_groups": 0,
@@ -605,17 +678,27 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
     # the unused init in 2026-05-01 cleanup.
     for label, db_path in db_targets:
         os.environ["M3_DATABASE"] = str(db_path)
-        # Ensure migration 025 + chroma_sync_queue exist (cheap idempotent check).
+        # Ensure migration 025 + chroma_sync_queue exist (cheap idempotent check;
+        # no-op on PG where the schema is migration-managed).
         _ensure_migration_025(db_path)
         # Count pending rows up-front so we can show what we're about to do.
-        import sqlite3
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-            try:
-                pending = conn.execute(
-                    "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
-                ).fetchone()[0]
-            except sqlite3.OperationalError:
-                pending = 0
+        from memory.backends import active_backend as _ab
+        pending = 0
+        try:
+            if _ab().name == "sqlite":
+                import sqlite3
+                with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+                    pending = conn.execute(
+                        "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
+                    ).fetchone()[0]
+            else:
+                import memory_core as _mc
+                with _mc._db() as conn:
+                    pending = conn.execute(
+                        "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
+                    ).fetchone()[0]
+        except Exception:
+            pending = 0
         if pending == 0:
             print(f"[m3-enrich] {db_path.name}: queue empty -- skipping", flush=True)
             continue
@@ -633,12 +716,13 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
 
 
 async def _main_async(args) -> int:
-    # Writes the primary store (enrichment) via direct sqlite3 — refuse on a
-    # PostgreSQL-primary deployment rather than edit a stale SQLite file. Covers
-    # both the CLI and the in-process cognitive-loop call path.
-    from memory.backends import require_sqlite_backend
-    require_sqlite_backend("m3_enrich")
-
+    # Backend-agnostic: enrichment reads via a db_path-honoring connection on
+    # SQLite / mc._db() on PG, writes via the seam, and the durable state machine
+    # (enrichment_state.py) is dialected with a backend-appropriate state
+    # connection (_open_state_conn: sqlite3+pragmas on SQLite, a pooled
+    # _PgStateConn on PG). The state tables come from pg_040/041/042 on PG. Works
+    # on both backends. (Previously gated SQLite-only for its raw sqlite3 writes;
+    # those were moved onto the seam and verified on PG, so the gate was removed.)
     profile = _load_profile_with_path(args.profile, args.profile_path)
     # --input-max-k overrides the profile's per-call input cap. Used to fit
     # a smaller per-slot ctx budget when raising server-side concurrency.
@@ -791,16 +875,13 @@ async def _main_async(args) -> int:
         # run_id per DB simplifies aggregation and budget reporting.
         per_db_run_id: Optional[str] = None
         if args.track_state:
-            import sqlite3 as _sqlite3
-            _sc = _sqlite3.connect(str(db_path), timeout=30.0)
-            # Centralised pragma stack — "production" profile for state DB connections.
-            apply_pragmas(_sc, "production")
+            _sc = _open_state_conn(db_path)
             if not estate.has_state_tables(_sc):
                 _sc.close()
                 sys.exit(
-                    f"ERROR: --track-state requires migration 028 applied to "
-                    f"{db_path}. Run: python bin/migrate_memory.py --db "
-                    f"{db_path} up"
+                    "ERROR: --track-state requires the enrichment state tables. "
+                    f"On SQLite run: python bin/migrate_memory.py --db {db_path} up. "
+                    "On PostgreSQL run: python bin/migrate_pg.py up (pg_040)."
                 )
             per_db_run_id = estate.start_run(
                 _sc,
@@ -838,8 +919,7 @@ async def _main_async(args) -> int:
 
         # Close out the run record with final counts.
         if args.track_state and per_db_run_id:
-            import sqlite3 as _sqlite3
-            _sc = _sqlite3.connect(str(db_path), timeout=30.0)
+            _sc = _open_state_conn(db_path)
             run_status = "aborted" if abort_reason else "completed"
             estate.end_run(
                 _sc, per_db_run_id,

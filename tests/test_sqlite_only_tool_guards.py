@@ -57,13 +57,22 @@ def test_m3_entities_not_gated_on_postgres(monkeypatch):
             pytest.fail(f"m3_entities still gated on PG: {e}")
 
 
-def test_m3_enrich_refuses_on_postgres(monkeypatch):
+def test_m3_enrich_not_gated_on_postgres(monkeypatch):
+    """m3_enrich was ported to PG (mc._db() reads, seam writes, _PgStateConn
+    state machine, tables from pg_040/041/042). It must NOT raise the
+    require_sqlite_backend RuntimeError. A bogus profile exits early (SystemExit).
+    (Full DB + state-machine behavior is in test_m3_enrich_pg_live.py.)"""
     _force_pg(monkeypatch)
     import m3_enrich
-    with pytest.raises(RuntimeError, match="SQLite-only|stale SQLite"):
+    try:
         asyncio.run(m3_enrich._main_async(
-            argparse.Namespace(profile="default", profile_path=None)
+            argparse.Namespace(profile="__nope__", profile_path=None)
         ))
+    except SystemExit:
+        pass  # profile-not-found exit — acceptable, proves no SQLite refusal
+    except RuntimeError as e:
+        if "SQLite" in str(e) or "stale SQLite" in str(e):
+            pytest.fail(f"m3_enrich still gated on PG: {e}")
 
 
 def test_chroma_sync_refuses_on_postgres(monkeypatch):

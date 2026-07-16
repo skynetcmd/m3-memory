@@ -89,11 +89,14 @@ def compute_content_size_k(turns: Sequence[tuple]) -> int:
 # ── Schema verification ────────────────────────────────────────────────────
 def has_state_tables(conn: sqlite3.Connection) -> bool:
     """True iff migration 028 has been applied to this DB."""
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' "
-        "AND name IN ('enrichment_groups','enrichment_runs')"
-    ).fetchall()
-    return len(rows) == 2
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    found = 0
+    for t in ("enrichment_groups", "enrichment_runs"):
+        sql, params = _d.table_exists(t)
+        if conn.execute(sql, params).fetchone() is not None:
+            found += 1
+    return found == 2
 
 
 # ── enrichment_runs ────────────────────────────────────────────────────────
@@ -125,12 +128,14 @@ def start_run(
 ) -> str:
     """Insert a new enrichment_runs row at status='running'. Returns run_id."""
     run_id = str(uuid.uuid4())
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
     conn.execute(
-        """
+        f"""
         INSERT INTO enrichment_runs (
             id, started_at, profile, model, source_variant, target_variant,
             db_path, concurrency, launch_argv, host, git_sha, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running')
+        ) VALUES ({_d.placeholder(11)}, 'running')
         """,
         (
             run_id, _utcnow_iso(), profile, model, source_variant, target_variant,
@@ -153,11 +158,14 @@ def end_run(
     notes: Optional[str] = None,
 ) -> None:
     """Update enrichment_runs row with final counts + status."""
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     counts = conn.execute(
-        """
+        f"""
         SELECT status, COUNT(*), COALESCE(SUM(cost_usd), 0)
         FROM enrichment_groups
-        WHERE enrich_run_id = ?
+        WHERE enrich_run_id = {_p}
         GROUP BY status
         """,
         (run_id,),
@@ -169,13 +177,13 @@ def end_run(
             n[st] = cnt
         total_cost += cost or 0.0
     conn.execute(
-        """
+        f"""
         UPDATE enrichment_runs
-        SET finished_at = ?, status = ?,
-            n_pending = ?, n_success = ?, n_failed = ?,
-            n_empty = ?, n_dead_letter = ?,
-            total_cost_usd = ?, abort_reason = ?, notes = ?
-        WHERE id = ?
+        SET finished_at = {_p}, status = {_p},
+            n_pending = {_p}, n_success = {_p}, n_failed = {_p},
+            n_empty = {_p}, n_dead_letter = {_p},
+            total_cost_usd = {_p}, abort_reason = {_p}, notes = {_p}
+        WHERE id = {_p}
         """,
         (
             _utcnow_iso(), status,
@@ -188,9 +196,12 @@ def end_run(
 
 def run_total_cost_usd(conn: sqlite3.Connection, run_id: str) -> float:
     """Sum cost_usd across all groups linked to a run. Used for budget checks."""
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     row = conn.execute(
-        "SELECT COALESCE(SUM(cost_usd), 0) FROM enrichment_groups "
-        "WHERE enrich_run_id = ?",
+        f"SELECT COALESCE(SUM(cost_usd), 0) FROM enrichment_groups "
+        f"WHERE enrich_run_id = {_p}",
         (run_id,),
     ).fetchone()
     return float(row[0] or 0.0)
@@ -218,11 +229,14 @@ def enroll_group(
 
     Caller is responsible for `commit()` — we keep this fast for batch enroll.
     """
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     cur = conn.execute(
-        """
+        f"""
         SELECT id, source_content_hash, status
         FROM enrichment_groups
-        WHERE source_variant = ? AND target_variant = ? AND group_key = ?
+        WHERE source_variant = {_p} AND target_variant = {_p} AND group_key = {_p}
         """,
         (source_variant, target_variant, group_key),
     )
@@ -240,14 +254,14 @@ def enroll_group(
                          (old_hash or "").startswith("backfill-pending::")
         if is_placeholder:
             conn.execute(
-                """
+                f"""
                 UPDATE enrichment_groups
-                SET source_content_hash=?, turn_count=?,
-                    content_size_k=COALESCE(?, content_size_k),
-                    profile=COALESCE(?, profile),
-                    model=COALESCE(?, model),
-                    enrich_run_id=COALESCE(?, enrich_run_id)
-                WHERE id = ?
+                SET source_content_hash={_p}, turn_count={_p},
+                    content_size_k=COALESCE({_p}, content_size_k),
+                    profile=COALESCE({_p}, profile),
+                    model=COALESCE({_p}, model),
+                    enrich_run_id=COALESCE({_p}, enrich_run_id)
+                WHERE id = {_p}
                 """,
                 (source_content_hash, turn_count, content_size_k,
                  profile, model, enrich_run_id, old_id),
@@ -260,28 +274,33 @@ def enroll_group(
         # hash remain in memory_items but become orphaned from run-level
         # state — Reflector or a separate cleanup pass owns that gardening.
         conn.execute(
-            """
+            f"""
             UPDATE enrichment_groups
-            SET status='pending', source_content_hash=?, turn_count=?,
-                content_size_k=?,
+            SET status='pending', source_content_hash={_p}, turn_count={_p},
+                content_size_k={_p},
                 obs_emitted=0, attempts=0, last_error=NULL, error_class=NULL,
                 enrichment_ms=NULL, tokens_in=NULL, tokens_out=NULL, cost_usd=NULL,
                 claim_token=NULL, claimed_at=NULL, next_eligible_at=NULL,
                 first_attempt_at=NULL, last_attempt_at=NULL,
-                profile=?, model=?, enrich_run_id=?
-            WHERE id = ?
+                profile={_p}, model={_p}, enrich_run_id={_p}
+            WHERE id = {_p}
             """,
             (source_content_hash, turn_count, content_size_k,
              profile, model, enrich_run_id, old_id),
         )
         return (old_id, "superseded")
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _is_pg = active_backend().name == "postgres"
+    # PG has no cur.lastrowid; read the generated IDENTITY id via RETURNING.
+    _returning = " RETURNING id" if _is_pg else ""
     cur = conn.execute(
-        """
+        f"""
         INSERT INTO enrichment_groups (
             source_variant, target_variant, group_key, user_id, db_path,
             turn_count, source_content_hash, content_size_k,
             profile, model, enrich_run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES ({_d.placeholder(11)}){_returning}
         """,
         (
             source_variant, target_variant, group_key, user_id, db_path,
@@ -289,7 +308,8 @@ def enroll_group(
             profile, model, enrich_run_id,
         ),
     )
-    return (cur.lastrowid, "inserted")
+    new_id = cur.fetchone()[0] if _is_pg else cur.lastrowid
+    return (new_id, "inserted")
 
 
 def enroll_groups_bulk(
@@ -337,11 +357,14 @@ def recover_stale_claims(
     to pending. Run at every resume to self-heal from crashed workers.
     Returns count of recovered rows."""
     cutoff = _iso_plus(-timeout_sec)
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     cur = conn.execute(
-        """
+        f"""
         UPDATE enrichment_groups
         SET status='pending', claim_token=NULL, claimed_at=NULL
-        WHERE status='in_progress' AND (claimed_at IS NULL OR claimed_at < ?)
+        WHERE status='in_progress' AND (claimed_at IS NULL OR claimed_at < {_p})
         """,
         (cutoff,),
     )
@@ -366,15 +389,19 @@ def claim_group(
     """
     token = str(uuid.uuid4())
     now = _utcnow_iso()
+    from memory.backends import active_backend
+    _p = active_backend().dialect().param()
+    # Plain UPDATE (not ON CONFLICT), so bare `attempts = attempts + 1` is
+    # unambiguous on both backends.
     cur = conn.execute(
-        """
+        f"""
         UPDATE enrichment_groups
-        SET status='in_progress', claim_token=?, claimed_at=?,
+        SET status='in_progress', claim_token={_p}, claimed_at={_p},
             attempts = attempts + 1,
-            first_attempt_at = COALESCE(first_attempt_at, ?),
-            last_attempt_at = ?,
-            enrich_run_id = ?
-        WHERE id = ? AND status IN ('pending','failed')
+            first_attempt_at = COALESCE(first_attempt_at, {_p}),
+            last_attempt_at = {_p},
+            enrich_run_id = {_p}
+        WHERE id = {_p} AND status IN ('pending','failed')
         """,
         (token, now, now, now, enrich_run_id, group_id),
     )
@@ -405,29 +432,32 @@ def mark_success(
     Migration 030 adds partial_failure_chunks. We use COALESCE() so callers
     on un-migrated DBs don't error out — the column simply stays NULL.
     """
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     if partial_failure_chunks:
         # Preserve last_error so the audit row carries why chunks failed.
         conn.execute(
-            """
+            f"""
             UPDATE enrichment_groups
-            SET status='success', obs_emitted=?, enrichment_ms=?,
-                tokens_in=?, tokens_out=?, cost_usd=?,
-                partial_failure_chunks=?,
+            SET status='success', obs_emitted={_p}, enrichment_ms={_p},
+                tokens_in={_p}, tokens_out={_p}, cost_usd={_p},
+                partial_failure_chunks={_p},
                 claim_token=NULL, claimed_at=NULL
-            WHERE id = ?
+            WHERE id = {_p}
             """,
             (obs_emitted, enrichment_ms, tokens_in, tokens_out, cost_usd,
              partial_failure_chunks, group_id),
         )
     else:
         conn.execute(
-            """
+            f"""
             UPDATE enrichment_groups
-            SET status='success', obs_emitted=?, enrichment_ms=?,
-                tokens_in=?, tokens_out=?, cost_usd=?,
+            SET status='success', obs_emitted={_p}, enrichment_ms={_p},
+                tokens_in={_p}, tokens_out={_p}, cost_usd={_p},
                 partial_failure_chunks=0,
                 claim_token=NULL, claimed_at=NULL, last_error=NULL, error_class=NULL
-            WHERE id = ?
+            WHERE id = {_p}
             """,
             (obs_emitted, enrichment_ms, tokens_in, tokens_out, cost_usd, group_id),
         )
@@ -443,13 +473,16 @@ def mark_empty(
     tokens_out: Optional[int] = None,
     cost_usd: Optional[float] = None,
 ) -> None:
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     conn.execute(
-        """
+        f"""
         UPDATE enrichment_groups
-        SET status='empty', obs_emitted=0, enrichment_ms=?,
-            tokens_in=?, tokens_out=?, cost_usd=?,
+        SET status='empty', obs_emitted=0, enrichment_ms={_p},
+            tokens_in={_p}, tokens_out={_p}, cost_usd={_p},
             claim_token=NULL, claimed_at=NULL, last_error=NULL, error_class=NULL
-        WHERE id = ?
+        WHERE id = {_p}
         """,
         (enrichment_ms, tokens_in, tokens_out, cost_usd, group_id),
     )
@@ -499,8 +532,11 @@ def mark_failed(
     group's retry budget. They still hit dead_letter via the deterministic
     branch only if classified as such (they aren't — http_status is not
     deterministic), so in practice 429s always stay at status='failed'."""
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     row = conn.execute(
-        "SELECT attempts FROM enrichment_groups WHERE id = ?",
+        f"SELECT attempts FROM enrichment_groups WHERE id = {_p}",
         (group_id,),
     ).fetchone()
     attempts = (row[0] if row else 0) or 0
@@ -520,15 +556,15 @@ def mark_failed(
     # success attempt charged (rather than overwrite). For the first
     # failure these are simply the chunk-success-before-fail amounts.
     conn.execute(
-        """
+        f"""
         UPDATE enrichment_groups
-        SET status=?, error_class=?, last_error=?,
-            next_eligible_at=?, enrichment_ms=?,
-            tokens_in=COALESCE(tokens_in,0)+COALESCE(?,0),
-            tokens_out=COALESCE(tokens_out,0)+COALESCE(?,0),
-            cost_usd=COALESCE(cost_usd,0)+COALESCE(?,0),
+        SET status={_p}, error_class={_p}, last_error={_p},
+            next_eligible_at={_p}, enrichment_ms={_p},
+            tokens_in=COALESCE(tokens_in,0)+COALESCE({_p},0),
+            tokens_out=COALESCE(tokens_out,0)+COALESCE({_p},0),
+            cost_usd=COALESCE(cost_usd,0)+COALESCE({_p},0),
             claim_token=NULL, claimed_at=NULL
-        WHERE id = ?
+        WHERE id = {_p}
         """,
         (new_status, error_class, truncated, next_eligible_at, enrichment_ms,
          tokens_in, tokens_out, cost_usd, group_id),
@@ -567,31 +603,34 @@ def eligible_for_resume(
     unassigned rows. When send_to is None (default), the column is
     ignored entirely (backwards compatible).
     """
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     statuses = ["pending", "failed"]
     if include_dead_letter:
         statuses.append("dead_letter")
-    placeholders = ",".join("?" * len(statuses))
+    placeholders = _d.placeholder(len(statuses))
     sql = f"""
         SELECT id, group_key, user_id
         FROM enrichment_groups
-        WHERE source_variant = ? AND target_variant = ?
+        WHERE source_variant = {_p} AND target_variant = {_p}
           AND status IN ({placeholders})
-          AND attempts < ?
-          AND (next_eligible_at IS NULL OR next_eligible_at <= ?)
+          AND attempts < {_p}
+          AND (next_eligible_at IS NULL OR next_eligible_at <= {_p})
     """
     params: list = [source_variant, target_variant, *statuses, max_attempts, _utcnow_iso()]
     if min_size_k is not None:
-        sql += " AND content_size_k >= ?"
+        sql += f" AND content_size_k >= {_p}"
         params.append(min_size_k)
     if max_size_k is not None:
-        sql += " AND content_size_k <= ?"
+        sql += f" AND content_size_k <= {_p}"
         params.append(max_size_k)
     if send_to is not None:
-        sql += " AND send_to = ?"
+        sql += f" AND send_to = {_p}"
         params.append(send_to)
     sql += " ORDER BY attempts ASC, turn_count DESC"
     if limit:
-        sql += " LIMIT ?"
+        sql += f" LIMIT {_p}"
         params.append(limit)
     rows = conn.execute(sql, params).fetchall()
     return [(r[0], r[1], r[2]) for r in rows]
@@ -604,13 +643,16 @@ def status_counts(
     target_variant: Optional[str] = None,
 ) -> dict[str, int]:
     """Per-status row counts. Useful for status-report CLI."""
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     where = "1=1"
     params: list = []
     if source_variant is not None:
-        where += " AND source_variant = ?"
+        where += f" AND source_variant = {_p}"
         params.append(source_variant)
     if target_variant is not None:
-        where += " AND target_variant = ?"
+        where += f" AND target_variant = {_p}"
         params.append(target_variant)
     rows = conn.execute(
         f"SELECT status, COUNT(*) FROM enrichment_groups WHERE {where} GROUP BY status",

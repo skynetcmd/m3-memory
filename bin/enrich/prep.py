@@ -75,7 +75,14 @@ def _ensure_migration_025(db_path: Path) -> None:
     Also lazy-creates `chroma_sync_queue` if it's missing — required for
     the embed=True write path. Chatlog DBs do not always carry this
     table because they were initialized via the chatlog migration chain
-    (separate from main). Without it, every observation write fails."""
+    (separate from main). Without it, every observation write fails.
+
+    No-op on PostgreSQL: this replays a SQLite-dialect migration file via
+    sqlite3.connect + executescript + sqlite_master, none of which apply to PG,
+    where these tables are created by the pg_040 migration + ensure_schema()."""
+    from memory.backends import active_backend
+    if active_backend().name != "sqlite":
+        return  # PG: observation_queue/chroma_sync_queue come from migrations
     import sqlite3
     conn = sqlite3.connect(str(db_path), timeout=10.0)
     try:
