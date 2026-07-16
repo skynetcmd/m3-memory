@@ -92,11 +92,51 @@ def _current_ctx_local() -> M3Context:
 
 @contextmanager
 def _db():
-    """Open a SQLite connection from the active context's pool.
+    """Open a read/write connection from the ACTIVE backend.
 
-    Triggers _lazy_init on first touch per DB path. Commits on clean exit,
-    rolls back on exception.
+    On SQLite (the default) this opens a pooled ``sqlite3.Connection`` from the
+    active context's pool, triggering ``_lazy_init`` on first touch per DB path,
+    committing on clean exit and rolling back on exception — byte-identical to
+    the pre-backend behavior.
+
+    On PostgreSQL it delegates to ``active_backend().connection()``, whose
+    context manager already applies the SAME discipline (commit on clean exit,
+    rollback on exception, return to pool). We therefore just yield through its
+    already-wrapped connection rather than re-implementing commit/rollback here.
+
+    Routing lives in this single canonical helper so every module that did
+    ``from .db import _db`` becomes backend-aware for free; the previous per-file
+    wrapper (memory.write._db) collapses into this. Tests that monkeypatch a
+    module-local ``_db`` still win — they replace the imported name, not this
+    definition — and all such tests run on the SQLite default, where this path is
+    unchanged.
     """
+    # Backend routing. The PROBE (is the active backend postgres?) is guarded so a
+    # missing/half-initialized backend layer falls through to the historical
+    # SQLite path unchanged. But once we've decided to route to PG, the connection
+    # and the caller's work run OUTSIDE that guard: a real PG error must propagate,
+    # never be swallowed into a silent fall-through to the wrong (SQLite) store.
+    _use_postgres = False
+    _backend = None
+    try:
+        from memory.backends import active_backend as _ab
+
+        _backend = _ab()
+        _use_postgres = _backend.name == "postgres"
+    except Exception:
+        if os.environ.get("M3_DEBUG"):
+            import traceback
+
+            traceback.print_exc()
+        _use_postgres = False
+
+    if _use_postgres:
+        # PostgresBackend.connection() already commits on clean exit / rolls back
+        # on exception, so we only yield through it. Errors propagate to the caller.
+        with _backend.connection() as conn:
+            yield conn
+        return
+
     active_ctx = _current_ctx_local()
     if os.environ.get("M3_DEBUG"):
         print(f"DEBUG DB PATH: {active_ctx.db_path}")

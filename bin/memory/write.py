@@ -61,19 +61,10 @@ def _db(*args, **kwargs):
     # inject a fake SQLite connection rely on this and never exercise PG.
     if override is not None and override is not _db and override is not _canonical_db:
         return override(*args, **kwargs)
-    # Backend routing: with no real test override and no caller-supplied `db`,
-    # route the connection to the ACTIVE backend. On PostgreSQL every write-path
-    # connection must come from its pool — else the dialect-generated %s SQL is
-    # sent to a sqlite3 connection ("near %: syntax error"). On SQLite this falls
-    # through to the canonical `_db()`, byte-identical to before.
-    if not args and not kwargs:
-        try:
-            from memory.backends import active_backend as _ab
-
-            if _ab().name == "postgres":
-                return _ab().connection()
-        except Exception:
-            pass
+    # Backend routing now lives in the canonical `memory.db._db` itself (it routes
+    # to active_backend().connection() on PostgreSQL, SQLite pool otherwise). This
+    # wrapper's ONLY remaining job is honoring the memory_core._db test override
+    # above; delegate everything else to the canonical helper.
     return _canonical_db(*args, **kwargs)
 from .embed import (
     _DENSE_ERR_RE,

@@ -120,6 +120,38 @@ class TestJson:
         with pytest.raises(ValueError):
             d.json_extract_text("metadata_json", "x'; DROP TABLE")
 
+    def test_extract_int(self):
+        assert (
+            SQLITE.json_extract_int("metadata_json", "session_idx")
+            == "CAST(json_extract(metadata_json, '$.session_idx') AS INTEGER)"
+        )
+        assert (
+            POSTGRES.json_extract_int("metadata_json", "session_idx")
+            == "(metadata_json ->> 'session_idx')::int"
+        )
+
+    @pytest.mark.parametrize("d", [SQLITE, POSTGRES])
+    def test_extract_int_rejects_quote_injection(self, d: Dialect):
+        with pytest.raises(ValueError):
+            d.json_extract_int("metadata_json", "x'; DROP TABLE")
+
+
+class TestCiEquals:
+    def test_lower_form_on_both_backends(self):
+        # SQLite: replaces `col = ? COLLATE NOCASE`; PG: valid ILIKE-free equality.
+        assert (
+            SQLITE.ci_equals("canonical_name", SQLITE.param())
+            == "LOWER(canonical_name) = LOWER(?)"
+        )
+        assert (
+            POSTGRES.ci_equals("canonical_name", POSTGRES.param())
+            == "LOWER(canonical_name) = LOWER(%s)"
+        )
+
+    def test_no_collate_nocase_leaks_to_postgres(self):
+        # COLLATE NOCASE is a hard syntax error on PG — it must never appear.
+        assert "COLLATE" not in POSTGRES.ci_equals("canonical_name", "%s")
+
 
 class TestTemporalOpenClause:
     def test_sqlite_keeps_empty_string_disjunct_byte_identical(self):

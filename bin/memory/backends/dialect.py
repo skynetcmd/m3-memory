@@ -142,6 +142,51 @@ class Dialect:
             return f"json_extract({column}, '$.{json_path}')"
         return f"{column} ->> '{json_path}'"
 
+    def json_extract_int(self, column: str, json_path: str) -> str:
+        """Extract a top-level JSON field AS INTEGER (a numeric-cast expression).
+
+        The graph session-window queries read ``session_idx`` / ``turn_idx`` out
+        of ``metadata_json`` and compare/order them numerically. In SQLite that is
+        ``CAST(json_extract(col, '$.k') AS INTEGER)``; in Postgres JSONB it is
+        ``(col ->> 'k')::int`` (``->>`` yields text, cast to int).
+
+        ``json_extract_int("metadata_json", "session_idx")`` →
+        SQLite:   ``CAST(json_extract(metadata_json, '$.session_idx') AS INTEGER)``
+        Postgres: ``(metadata_json ->> 'session_idx')::int``
+
+        A missing/NULL key yields SQL NULL on both backends (json_extract →
+        NULL → CAST NULL; ``->>`` missing → NULL → ``::int`` NULL), so ``IS NULL``
+        checks behave identically. ``json_path`` is a trusted bare identifier.
+        """
+        if not json_path.isidentifier():
+            raise ValueError(f"json_path must be a bare identifier: {json_path!r}")
+        if self.backend == "sqlite":
+            return f"CAST(json_extract({column}, '$.{json_path}') AS INTEGER)"
+        return f"({column} ->> '{json_path}')::int"
+
+    # -- text comparison -----------------------------------------------------
+    def ci_equals(self, column: str, placeholder: str) -> str:
+        """A case-insensitive equality WHERE fragment: ``column`` == bound value.
+
+        Replaces SQLite's ``column = ? COLLATE NOCASE`` (COLLATE NOCASE is a
+        SQLite-only clause that raises on Postgres). ``LOWER(col) = LOWER(<p>)``
+        is equivalent for the ASCII-identifier data these callers compare
+        (entity canonical names) and is valid on BOTH backends, so a single form
+        is emitted for each — differing only in the placeholder token.
+
+        ``ci_equals("canonical_name", self.param())`` →
+        SQLite:   ``LOWER(canonical_name) = LOWER(?)``
+        Postgres: ``LOWER(canonical_name) = LOWER(%s)``
+
+        NOTE: this changes the SQLite SQL text from ``canonical_name = ? COLLATE
+        NOCASE`` to a ``LOWER()``-based form. For ASCII data the match set is
+        identical; unlike a bare ``= ? COLLATE NOCASE`` it is NOT index-backed by
+        a plain index on ``canonical_name`` — acceptable here because these lookups
+        are already bounded (single-entity resolution), not hot scans. ``column``
+        is a trusted identifier; ``placeholder`` is the caller's bind marker.
+        """
+        return f"LOWER({column}) = LOWER({placeholder})"
+
     # -- temporal validity ---------------------------------------------------
     def temporal_open_clause(self, column: str, op: str) -> str:
         """A "validity bound is open OR satisfies `op`" WHERE fragment.
