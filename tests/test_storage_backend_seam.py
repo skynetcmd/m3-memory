@@ -97,6 +97,14 @@ def test_postgres_selection_no_dsn_fails_loud(monkeypatch):
         active_backend()
 
 
+def test_sqlite_ensure_schema_is_noop(monkeypatch):
+    """SQLite ensure_schema is a no-op (schema is lazy-inited by _db()); it must
+    not raise and must not require a connection."""
+    monkeypatch.setenv("M3_DB_BACKEND", "sqlite")
+    backend = active_backend()
+    backend.ensure_schema()  # no raise, no side effect
+
+
 def test_require_sqlite_backend_noop_on_sqlite(monkeypatch):
     monkeypatch.delenv("M3_DB_BACKEND", raising=False)
     # Must not raise on the default (sqlite) backend.

@@ -27,6 +27,11 @@ class SqliteBackend:
         """The SQLite SQL dialect (qmark placeholders, PRAGMA introspection)."""
         return SQLITE
 
+    def ensure_schema(self) -> None:
+        """No-op: SQLite auto-creates its schema on first `_db()` touch via
+        ``memory.db._lazy_init``. Present for seam symmetry with PostgreSQL."""
+        return
+
     def capabilities(self) -> Capabilities:
         """Probe optional accelerators; baseline (FTS5 + Rust cosine) always holds.
 

@@ -115,6 +115,16 @@ class StorageBackend(Protocol):
         """Return this backend's SQL dialect helper (see `dialect.py`)."""
         ...
 
+    def ensure_schema(self) -> None:
+        """Idempotently create the primary schema if absent.
+
+        SQLite does this lazily on first `_db()` touch (`_lazy_init`), so its
+        implementation is a no-op here. PostgreSQL had no equivalent — this
+        applies ``pg_primary_v1.sql`` once so a fresh PG deployment gets its
+        tables without a manual psql step. Safe to call repeatedly.
+        """
+        ...
+
     def connection(self) -> AbstractContextManager:
         """A read/write connection context manager.
 

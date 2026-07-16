@@ -135,6 +135,38 @@ def test_placeholder_zero_fails_loud(backend):
         backend.placeholder(0)
 
 
+def test_ensure_schema_creates_primary_schema(backend):
+    """ensure_schema() applies pg_primary_v1.sql on a fresh DB (the PG analogue of
+    SQLite's lazy _lazy_init) and is idempotent."""
+    # Simulate a fresh deployment: drop the core tables.
+    with backend.connection() as conn:
+        conn.cursor().execute(
+            "DROP TABLE IF EXISTS memory_embeddings, memory_relationships, "
+            "memory_items, schema_versions CASCADE"
+        )
+    backend._schema_ready = False  # allow a fresh apply after the drop
+
+    backend.ensure_schema()
+
+    with backend.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_name IN ('memory_items','memory_embeddings',"
+            "'memory_relationships','schema_versions')"
+        )
+        assert cur.fetchone()[0] == 4
+        cur.execute(
+            "SELECT count(*) FROM information_schema.columns "
+            "WHERE table_name = 'memory_items'"
+        )
+        assert cur.fetchone()[0] == 37  # full primary schema (36 + search_vector)
+
+    # Idempotent: re-applying the SQL (IF NOT EXISTS throughout) must not error.
+    backend._schema_ready = False
+    backend.ensure_schema()
+
+
 def test_cas_supersede_exactly_one_winner(backend):
     """The CAS close (UPDATE ... WHERE is_deleted=0, guard on rowcount==1) must
     yield exactly ONE winner under concurrent transactions on PG — the invariant

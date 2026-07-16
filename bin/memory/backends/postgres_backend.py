@@ -119,6 +119,57 @@ class PostgresBackend:
         self._pool: "ThreadedConnectionPool | None" = None
         self._lock = threading.Lock()
         self._caps: Capabilities | None = None
+        self._schema_ready = False
+
+    # -- schema init ---------------------------------------------------------
+    def ensure_schema(self) -> None:
+        """Apply the PG primary schema once, idempotently — the PG analogue of
+        SQLite's lazy `_lazy_init`.
+
+        SQLite auto-creates its schema on first `_db()` touch; a PG deployment had
+        no equivalent (tables had to be made by hand via psql). This reads
+        ``pg_primary_v1.sql`` (all ``CREATE TABLE/INDEX IF NOT EXISTS``, safe to
+        re-run) and applies it in one transaction. Runs at most once per backend
+        instance (guarded by ``_schema_ready``); the SQL's own IF NOT EXISTS makes
+        a concurrent double-apply harmless.
+
+        psycopg2 executes a multi-statement string in a single ``execute`` inside
+        a real transaction — so no SQLite ``executescript``/SAVEPOINT dance is
+        needed (that machinery stays SQLite-only in migrate_memory.py).
+        """
+        if self._schema_ready:
+            return
+        # Acquire the pool BEFORE taking _lock — _ensure_pool takes the same
+        # (non-reentrant) lock, so nesting them would deadlock.
+        pool = self._ensure_pool()
+        with self._lock:
+            if self._schema_ready:
+                return
+            import os
+
+            from memory import config as _cfg
+
+            sql_path = os.path.join(
+                _cfg.BASE_DIR, "memory", "migrations", "postgres", "pg_primary_v1.sql"
+            )
+            if not os.path.exists(sql_path):
+                raise RuntimeError(
+                    f"PG schema file not found at {sql_path}. Cannot initialize the "
+                    f"PostgreSQL primary schema."
+                )
+            with open(sql_path, encoding="utf-8") as f:
+                schema_sql = f.read()
+            conn = pool.getconn()
+            try:
+                cur = conn.cursor()
+                cur.execute(schema_sql)
+                conn.commit()
+                self._schema_ready = True
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                pool.putconn(conn)
 
     # -- pool lifecycle ------------------------------------------------------
     def _ensure_pool(self) -> "ThreadedConnectionPool":
