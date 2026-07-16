@@ -24,30 +24,66 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 # ── Stub psycopg2 (mirrors test_pg_sync_fk_safety.py) ─────────────────────────
-if "psycopg2" not in sys.modules:
-    psycopg2 = types.ModuleType("psycopg2")
-    psycopg2.Binary = bytes
-
+# Build the stub module unconditionally. The previous `if "psycopg2" not in
+# sys.modules` guard was an ISOLATION BUG: when an earlier test in the same run
+# imported the REAL psycopg2 (e.g. the live-PG backend tests), the guard skipped
+# the stub, `import pg_sync` bound to the real driver, and these tests — which
+# have no real PG — silently synced nothing ("got set()"). The autouse fixture
+# below force-installs this stub for every test here and restores whatever was
+# there afterward, so order no longer matters.
+def _build_psycopg2_stub():
+    stub = types.ModuleType("psycopg2")
+    stub.Binary = bytes
     extras = types.ModuleType("psycopg2.extras")
 
     def _execute_values(cur, sql, values):
-        """Minimal shim: pass the values list to cur.execute() as-is.
-
-        This matches the original FK-safety test shim exactly, so that
-        FakePgCursor.inserted_batches stores list-of-tuples and row[1]
-        correctly returns the second column value.
-
-        _SQLitePgCursor.execute() handles the list-of-tuples case by
-        converting to executemany calls for real SQLite.
-        """
+        """Minimal shim: pass the values list to cur.execute() as-is."""
         cur.execute(sql, values)
 
     extras.execute_values = _execute_values
-    psycopg2.extras = extras
-    sys.modules["psycopg2"] = psycopg2
-    sys.modules["psycopg2.extras"] = extras
+    stub.extras = extras
+    return stub, extras
 
-import pg_sync
+
+_PSYCOPG2_STUB, _PSYCOPG2_EXTRAS_STUB = _build_psycopg2_stub()
+
+# Install ONLY around the collection-time `import pg_sync`, then RESTORE the real
+# psycopg2 (if any). Leaving the stub in sys.modules at module scope poisoned
+# OTHER files' tests — e.g. the live-PG backend's `from psycopg2.pool import
+# ThreadedConnectionPool` got the stub (no .pool submodule). The autouse fixture
+# below re-installs the stub per-test for THIS file only.
+_saved_at_import = {k: sys.modules.get(k) for k in ("psycopg2", "psycopg2.extras")}
+sys.modules["psycopg2"] = _PSYCOPG2_STUB
+sys.modules["psycopg2.extras"] = _PSYCOPG2_EXTRAS_STUB
+
+import pg_sync  # noqa: E402
+
+for _k, _v in _saved_at_import.items():
+    if _v is None:
+        sys.modules.pop(_k, None)
+    else:
+        sys.modules[_k] = _v
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _force_psycopg2_stub():
+    """Force the psycopg2 stub for every test here and restore after.
+
+    pg_sync imports ``from psycopg2.extras import execute_values`` LAZILY inside
+    its functions, so what matters is that ``sys.modules['psycopg2.extras']`` is
+    the stub at call time. Force it (regardless of a prior real-psycopg2 import)
+    and restore whatever was there, so run order no longer matters."""
+    saved = {k: sys.modules.get(k) for k in ("psycopg2", "psycopg2.extras")}
+    sys.modules["psycopg2"] = _PSYCOPG2_STUB
+    sys.modules["psycopg2.extras"] = _PSYCOPG2_EXTRAS_STUB
+    yield
+    for k, v in saved.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
 
 # ── Manifest file paths ────────────────────────────────────────────────────────
 MANIFEST_DIR = REPO_ROOT / "config" / "sync_manifests"

@@ -206,6 +206,45 @@ def _close_db_pools():
 
 
 @pytest.fixture(autouse=True)
+def _reset_storage_backend_cache(monkeypatch):
+    """Reset the storage-backend selector cache + backend env around every test.
+
+    `memory.backends.selector` caches the resolved StorageBackend per name in a
+    process-global dict (so pools/capability probes aren't rebuilt every call).
+    A test that resolves `active_backend()` under `M3_DB_BACKEND=postgres` (the
+    seam unit tests, and every live-PG test) leaves the postgres backend cached;
+    a LATER test on a different file that expects the sqlite default then gets the
+    stale cached postgres backend and fails — an order-dependent cross-file leak.
+
+    Clearing the cache before AND after each test, plus forcing the env back to
+    the sqlite default, makes every test start from a clean, deterministic
+    backend regardless of run order. Best-effort: the selector must import, but a
+    funny state must never break an unrelated test.
+    """
+    def _clear():
+        try:
+            from memory.backends import selector as _sel
+            _sel._reset_for_tests()
+        except Exception:  # noqa: BLE001 — hygiene must never fail a test
+            pass
+
+    # Force the default backend + a clean DB env unless a test explicitly opts
+    # in. Clearing M3_PG_URL/PG_URL too keeps an ambient dev DSN (a developer
+    # running the suite with M3_PG_URL exported to a throwaway cluster) from
+    # leaking into tests that read it — e.g. test_backup_reminder's
+    # _detect_cdw_target, which sets the lower-precedence PG_URL but is overridden
+    # by a leaked higher-precedence M3_PG_URL. A test that needs these sets them
+    # via monkeypatch, which runs after this fixture and wins.
+    monkeypatch.delenv("M3_DB_BACKEND", raising=False)
+    monkeypatch.delenv("DB_BACKEND", raising=False)
+    monkeypatch.delenv("M3_PG_URL", raising=False)
+    monkeypatch.delenv("PG_URL", raising=False)
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_embed_global_cache():
     """Reset memory.embed's in-process embedder cache between tests.
 

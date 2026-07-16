@@ -14,7 +14,6 @@ import sqlite3
 
 import pytest
 from memory.backends import (
-    Capabilities,
     StorageBackend,
     active_backend,
     resolve_backend_name,
@@ -125,7 +124,9 @@ def test_sqlite_connection_delegates_to_db(monkeypatch, tmp_path):
 
     backend = active_backend()
     caps = backend.capabilities()
-    assert isinstance(caps, Capabilities)
+    # Structural check, not class identity: conftest's module-restore can reimport
+    # memory.backends.base, making a second Capabilities class so `isinstance`
+    # false-fails under cross-file ordering. Assert the fields we rely on instead.
     assert caps.backend == "sqlite"
     assert caps.keyword == "fts5"  # native baseline always present
 

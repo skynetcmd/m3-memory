@@ -14,20 +14,48 @@ import sqlite3
 import sys
 import types
 
+import pytest
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 # Stub psycopg2 so pg_sync import doesn't require it installed at test time.
-if "psycopg2" not in sys.modules:
-    psycopg2 = types.ModuleType("psycopg2")
-    psycopg2.Binary = bytes  # Binary(x) is used as a no-op wrapper
+# Built unconditionally (not gated on `not in sys.modules`): the guard was an
+# isolation bug — when an earlier test imported the REAL psycopg2, the stub was
+# skipped and these no-real-PG tests silently synced nothing. The autouse fixture
+# force-installs the stub per test and restores after, so order is irrelevant.
+def _build_psycopg2_stub():
+    stub = types.ModuleType("psycopg2")
+    stub.Binary = bytes  # Binary(x) is used as a no-op wrapper
     extras = types.ModuleType("psycopg2.extras")
+
     def _execute_values(cur, sql, values):  # minimal shim
         cur.execute(sql, values)
+
     extras.execute_values = _execute_values
-    psycopg2.extras = extras
-    sys.modules["psycopg2"] = psycopg2
-    sys.modules["psycopg2.extras"] = extras
+    stub.extras = extras
+    return stub, extras
+
+
+_PSYCOPG2_STUB, _PSYCOPG2_EXTRAS_STUB = _build_psycopg2_stub()
+# pg_sync is imported INSIDE the test functions here, so the module scope stays
+# clean — no lingering stub in sys.modules to poison other files' tests (e.g. the
+# live-PG backend's `from psycopg2.pool import ...`). The autouse fixture below
+# force-installs the stub per test and restores after, so run order is irrelevant.
+
+
+@pytest.fixture(autouse=True)
+def _force_psycopg2_stub():
+    """Force the psycopg2 stub per test and restore after (order-independence)."""
+    saved = {k: sys.modules.get(k) for k in ("psycopg2", "psycopg2.extras")}
+    sys.modules["psycopg2"] = _PSYCOPG2_STUB
+    sys.modules["psycopg2.extras"] = _PSYCOPG2_EXTRAS_STUB
+    yield
+    for k, v in saved.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
 
 
 class FakePgCursor:
