@@ -57,6 +57,23 @@ class Capabilities:
         )
 
 
+@dataclass(frozen=True)
+class KeywordHit:
+    """One keyword-search result. IDENTICAL shape on every backend.
+
+    ``memory_id`` is the item id; ``score`` is a relevance score where LOWER is
+    better (SQLite bm25 convention — the seam preserves it so callers that sort
+    ascending are backend-blind). Backends that natively rank higher-is-better
+    (Postgres ``ts_rank``) negate their score to honor this convention. The score
+    is opaque and NOT comparable across backends — only its ordering within one
+    result set is meaningful (bm25 and ts_rank are different scales; the plan
+    accepts this and documents it, §8.2).
+    """
+
+    memory_id: str
+    score: float
+
+
 @runtime_checkable
 class StorageBackend(Protocol):
     """The capability seam every storage engine implements.
@@ -95,5 +112,30 @@ class StorageBackend(Protocol):
         SQLite uses ``?``; psycopg uses ``%s``. Returns a comma-joined run, e.g.
         ``placeholder(3) -> "?, ?, ?"``. This replaces the scattered
         ``",".join("?" * n)`` idioms with one backend-aware helper (§6 port).
+        """
+        ...
+
+    def keyword_search(
+        self,
+        conn: object,
+        query: str,
+        *,
+        limit: int,
+        tenancy_sql: str = "",
+        tenancy_params: "tuple[object, ...]" = (),
+    ) -> "list[KeywordHit]":
+        """Native keyword search returning a backend-identical ranked list.
+
+        SQLite uses the FTS5 ``memory_items_fts`` virtual table + ``bm25()``;
+        Postgres uses a ``tsvector`` column + ``@@ tsquery`` + ``ts_rank``. Both
+        return ``list[KeywordHit]`` (memory_id, score) with LOWER score = more
+        relevant, ordered best-first — so the caller is identical on both. The
+        raw query is compiled to the backend's match syntax internally
+        (``_compile_fts_query`` / tsquery); an empty compile yields ``[]``.
+
+        ``tenancy_sql`` is an optional pre-built ``AND ...`` fragment (already in
+        this backend's placeholder style) with its ``tenancy_params``, appended
+        to the WHERE so tenant scoping composes without this method knowing the
+        tenancy model. Runs on the caller-supplied ``conn`` (same transaction).
         """
         ...

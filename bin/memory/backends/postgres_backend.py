@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Iterator
 
 from m3_sdk import getenv_compat
 
-from .base import BackendName, Capabilities
+from .base import BackendName, Capabilities, KeywordHit
 from .dialect import POSTGRES, Dialect
 
 if TYPE_CHECKING:  # avoid importing the driver at module load
@@ -134,6 +134,47 @@ class PostgresBackend:
     def placeholder(self, n: int = 1) -> str:
         """Positional binds for psycopg: ``placeholder(3) -> "%s, %s, %s"``."""
         return POSTGRES.placeholder(n)
+
+    def keyword_search(
+        self,
+        conn: object,
+        query: str,
+        *,
+        limit: int,
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+    ) -> "list[KeywordHit]":
+        """tsvector keyword search — the Postgres analogue of SQLite FTS5+bm25.
+
+        Compiles the query to a tsquery (same sanitization pipeline as the FTS5
+        path), matches the generated ``search_vector`` column with ``@@``, and
+        ranks with ``ts_rank``. ts_rank is higher-is-better, but the seam
+        contract is LOWER-is-better (bm25 convention), so the score is NEGATED —
+        callers sort ascending identically on both backends. Empty compile -> [].
+
+        ``tenancy_sql`` must already be in this backend's ``%s`` placeholder style.
+        """
+        from ..fts import _compile_tsquery
+
+        tsquery, ok = _compile_tsquery(query, "fts5")
+        if not ok or not tsquery:
+            return []
+        cur = conn.cursor()  # type: ignore[attr-defined]
+        # to_tsquery parses the compiled string; bind it as a parameter. Negate
+        # ts_rank so lower = more relevant (matches the bm25 seam convention).
+        cur.execute(
+            f"""
+            SELECT mi.id AS id,
+                   -ts_rank(mi.search_vector, to_tsquery('english', %s)) AS score
+            FROM memory_items mi
+            WHERE mi.search_vector @@ to_tsquery('english', %s)
+              AND mi.is_deleted = 0{tenancy_sql}
+            ORDER BY score ASC
+            LIMIT %s
+            """,
+            (tsquery, tsquery, *tenancy_params, limit),
+        )
+        return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in cur.fetchall()]
 
     def capabilities(self) -> Capabilities:
         """Probe optional accelerators; baseline (tsvector + Rust cosine) always holds.

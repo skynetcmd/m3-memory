@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 
-from .base import BackendName, Capabilities
+from .base import BackendName, Capabilities, KeywordHit
 from .dialect import SQLITE, Dialect
 
 
@@ -69,3 +69,39 @@ class SqliteBackend:
         if n < 1:
             raise ValueError(f"placeholder count must be >= 1, got {n}")
         return ", ".join(["?"] * n)
+
+    def keyword_search(
+        self,
+        conn: object,
+        query: str,
+        *,
+        limit: int,
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+    ) -> "list[KeywordHit]":
+        """FTS5 keyword search — a faithful extraction of the existing query.
+
+        Compiles the query with the same ``_compile_fts_query`` used everywhere,
+        runs the identical ``memory_items_fts MATCH ? ... bm25()`` SELECT, and
+        returns ``KeywordHit(id, bm25)`` ordered by bm25 ascending (lower =
+        better) — byte-for-byte the behavior of the inline block in search.py.
+        An empty/no-token compile yields ``[]``.
+        """
+        from ..fts import _compile_fts_query
+
+        fts_query, ok = _compile_fts_query(query, "fts5")
+        if not ok or not fts_query:
+            return []
+        rows = conn.execute(  # type: ignore[attr-defined]
+            f"""
+            SELECT mi.id AS id, bm25(memory_items_fts) AS _bm25
+            FROM memory_items_fts fts
+            JOIN memory_items mi ON fts.rowid = mi.rowid
+            WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{tenancy_sql}
+            ORDER BY _bm25 ASC
+            LIMIT ?
+            """,
+            (fts_query, *tenancy_params, limit),
+        ).fetchall()
+        # rows may be sqlite3.Row or tuple; index by position to be safe.
+        return [KeywordHit(memory_id=r[0], score=float(r[1])) for r in rows]

@@ -79,6 +79,22 @@ CREATE INDEX IF NOT EXISTS idx_mi_refresh_on
 CREATE INDEX IF NOT EXISTS idx_mi_conversation_id
     ON memory_items(conversation_id, created_at)
     WHERE is_deleted = 0;
+
+-- Full-text search (the tsvector analogue of SQLite's memory_items_fts / bm25).
+-- A GENERATED column keeps the search vector in sync automatically — no triggers
+-- (the FTS5 side needs external-content triggers; Postgres does it declaratively).
+-- title is weighted 'A' and content 'B' so a title hit outranks a body hit,
+-- mirroring the intent of TITLE_MATCH_BOOST on the SQLite side. Queried with
+-- `search_vector @@ tsquery` and ranked with ts_rank (see PostgresBackend
+-- .keyword_search). GIN index makes @@ index-accelerated.
+ALTER TABLE memory_items
+    ADD COLUMN IF NOT EXISTS search_vector tsvector
+    GENERATED ALWAYS AS (
+        setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(content, '')), 'B')
+    ) STORED;
+CREATE INDEX IF NOT EXISTS idx_mi_search_vector
+    ON memory_items USING GIN (search_vector);
 CREATE INDEX IF NOT EXISTS idx_mi_active_type_created
     ON memory_items(is_deleted, type, created_at DESC)
     WHERE is_deleted = 0;

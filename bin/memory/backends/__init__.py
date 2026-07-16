@@ -23,12 +23,13 @@ Cycle-break rule (§2): modules in this package must NOT top-level-import
 """
 from __future__ import annotations
 
-from .base import BackendName, Capabilities, StorageBackend
+from .base import BackendName, Capabilities, KeywordHit, StorageBackend
 from .selector import active_backend, resolve_backend_name
 
 __all__ = [
     "BackendName",
     "Capabilities",
+    "KeywordHit",
     "StorageBackend",
     "active_backend",
     "resolve_backend_name",

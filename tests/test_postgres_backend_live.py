@@ -133,3 +133,49 @@ def test_capabilities_baseline(backend):
 def test_placeholder_zero_fails_loud(backend):
     with pytest.raises(ValueError):
         backend.placeholder(0)
+
+
+def test_keyword_search_tsvector(backend):
+    """PG keyword_search: tsvector @@ tsquery, title-weighted, lower=better."""
+    # Requires the tsvector column; create a minimal memory_items if absent.
+    with backend.connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memory_items (
+                id TEXT PRIMARY KEY, type TEXT, title TEXT, content TEXT,
+                is_deleted INTEGER DEFAULT 0, user_id TEXT DEFAULT '',
+                scope TEXT DEFAULT 'agent',
+                search_vector tsvector GENERATED ALWAYS AS (
+                    setweight(to_tsvector('english', coalesce(title,'')), 'A') ||
+                    setweight(to_tsvector('english', coalesce(content,'')), 'B')
+                ) STORED
+            )
+            """
+        )
+        for _id, title, content in [
+            ("kw_a", "postgresql tuning", "shared buffers"),
+            ("kw_b", "database notes", "we evaluated postgresql"),
+            ("kw_c", "lunch menu", "tacos and salad"),
+        ]:
+            # `type` is NOT NULL in the full schema — always supply it.
+            cur.execute(
+                "INSERT INTO memory_items (id, type, title, content) "
+                "VALUES (%s,%s,%s,%s) "
+                "ON CONFLICT (id) DO UPDATE SET title=excluded.title, "
+                "content=excluded.content",
+                (_id, "note", title, content),
+            )
+
+    with backend.connection() as conn:
+        hits = backend.keyword_search(conn, "postgresql", limit=10)
+    ids = [h.memory_id for h in hits]
+    assert set(ids) == {"kw_a", "kw_b"}          # kw_c excluded
+    assert ids[0] == "kw_a"                        # title hit ranks first
+    assert hits[0].score <= hits[1].score          # lower = better
+
+    with backend.connection() as conn:
+        assert backend.keyword_search(conn, "!!!", limit=10) == []  # empty compile
+        conn.cursor().execute(
+            "DELETE FROM memory_items WHERE id IN ('kw_a','kw_b','kw_c')"
+        )

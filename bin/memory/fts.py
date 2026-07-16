@@ -17,6 +17,7 @@ __all__ = [
     "_sanitize_fts",
     "_sanitize_for_searchable",
     "_compile_fts_query",
+    "_compile_tsquery",
     "_augment_title_with_role",
     "_query_title_token_set",
     "_title_overlap_from_qset",
@@ -234,6 +235,52 @@ def _compile_fts_query(query: str, mode: str) -> tuple[str, bool]:
     if " " not in clean and clean.isalnum():
         return f"{clean}*", True
     return clean, True
+
+
+@lru_cache(maxsize=2048)
+def _compile_tsquery(query: str, mode: str) -> tuple[str, bool]:
+    """Compile a raw user query into a PostgreSQL ``tsquery`` string.
+
+    The Postgres analogue of :func:`_compile_fts_query`. Returns ``(tsquery, ok)``
+    with the same ``ok`` contract (False = no matchable tokens). It reuses the
+    IDENTICAL sanitization pipeline (``_sanitize_fts`` + ``_sanitize_for_searchable``)
+    so query terms normalize the same way on both backends — only the final
+    assembly into match syntax differs:
+
+      * FTS5 multi-token (fts5 mode) -> ``a OR b``;  tsquery -> ``a | b``
+      * single alnum token wildcard  ``foo*``    ;  tsquery -> ``foo:*``
+      * exact quoted phrase ``"a b"``            ;  tsquery -> ``a <-> b`` (phrase)
+
+    The result is meant to be passed to ``to_tsquery('english', <result>)``.
+    Terms are already sanitized to bare word characters, so they are safe to
+    interpolate — but the caller should still bind via a parameter and let
+    ``to_tsquery`` parse it. Ordering/scoring is NOT comparable to bm25 (§8.2).
+    """
+    is_exact_query = (query.startswith('"') and query.endswith('"')) or (
+        query.startswith("'") and query.endswith("'")
+    )
+    if is_exact_query:
+        inner = _sanitize_for_searchable(_sanitize_fts(query[1:-1]))
+        toks = [t for t in inner.split() if t]
+        if not toks:
+            return "", False
+        # phrase match: consecutive lexemes via the <-> (FOLLOWED BY) operator
+        return " <-> ".join(toks), True
+    clean = _sanitize_for_searchable(_sanitize_fts(query)).strip()
+    if not clean:
+        return "", False
+    toks = [t for t in clean.split() if t]
+    if not toks:
+        return "", False
+    if mode == "fts5":
+        if len(toks) > 1:
+            return " | ".join(toks), True  # OR, mirroring fts5-mode OR-join
+        tok = toks[0]
+        return (f"{tok}:*" if tok.isalnum() else tok), True
+    # hybrid / semantic fallback: single alnum token gets a prefix wildcard
+    if len(toks) == 1 and toks[0].isalnum():
+        return f"{toks[0]}:*", True
+    return " | ".join(toks), True
 
 
 # ──────────────────────────────────────────────────────────────────────────────
