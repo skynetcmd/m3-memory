@@ -96,6 +96,131 @@ class TestInstallHardFail:
         _paths.assert_no_deprecated_pg_url_on_install()  # must not raise
 
 
+class TestInstallerMultiLocationScan:
+    """The installer's scanner must find PG_URL in EVERY common location and
+    report them all at once — not stop at the first hit."""
+
+    def test_finds_env_and_config_and_shell_profile_together(self, monkeypatch, tmp_path):
+        from m3_memory import installer as I
+
+        # 1. live env
+        monkeypatch.setenv("PG_URL", "postgresql://env/legacy")
+
+        # 2. a client settings.json with PG_URL in an mcpServers env block
+        settings = tmp_path / "settings.json"
+        settings.write_text(
+            '{"mcpServers": {"memory": {"command": "py", "env": '
+            '{"PG_URL": "postgresql://cfg/legacy"}}}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(I, "_client_config_sources",
+                            lambda: {"Claude Code": [settings]})
+        # no cwd .env
+        monkeypatch.chdir(tmp_path)
+
+        # 3. a shell profile that exports PG_URL — point HOME at tmp_path
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".zshenv").write_text(
+            "# shell rc\nexport PG_URL=postgresql://shell/legacy\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(I.Path, "home", staticmethod(lambda: home))
+        # Isolate from the host's real Windows registry so the count is deterministic.
+        monkeypatch.setattr(I.sys, "platform", "linux")
+
+        locs = I._find_deprecated_pg_url_locations()
+        # ALL THREE surfaced — not just the first found.
+        assert any("environment" in x for x in locs)
+        assert str(settings) in locs
+        assert str(home / ".zshenv") in locs
+        assert len(locs) == 3
+
+        with pytest.raises(RuntimeError) as ei:
+            I._assert_no_deprecated_pg_url_anywhere()
+        msg = str(ei.value)
+        assert "3 location" in msg or "location(s)" in msg
+        assert str(settings) in msg and str(home / ".zshenv") in msg
+
+    def test_clean_when_nowhere_set(self, monkeypatch, tmp_path):
+        from m3_memory import installer as I
+
+        monkeypatch.delenv("PG_URL", raising=False)
+        monkeypatch.setattr(I, "_client_config_sources", lambda: {})
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(I.Path, "home", staticmethod(lambda: home))
+        monkeypatch.chdir(tmp_path)
+        # Neutralize the Windows registry branch so this "clean" case doesn't pick
+        # up a real HKCU PG_URL on the test machine (isolate the unit under test).
+        monkeypatch.setattr(I.sys, "platform", "linux")
+
+        assert I._find_deprecated_pg_url_locations() == []
+        I._assert_no_deprecated_pg_url_anywhere()  # must not raise
+
+    def test_windows_registry_user_scope_detected(self, monkeypatch, tmp_path):
+        """A persistent Windows User-scope PG_URL (registry) is surfaced, not just
+        the inherited process copy — unsetting the process alone wouldn't stick."""
+        from m3_memory import installer as I
+
+        monkeypatch.delenv("PG_URL", raising=False)
+        monkeypatch.setattr(I, "_client_config_sources", lambda: {})
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(I.Path, "home", staticmethod(lambda: home))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(I.sys, "platform", "win32")
+
+        # Fake winreg: PG_URL present at HKCU\Environment, absent at HKLM.
+        import types
+
+        fake = types.ModuleType("winreg")
+        fake.HKEY_CURRENT_USER = 1
+        fake.HKEY_LOCAL_MACHINE = 2
+
+        class _Key:
+            def __init__(self, hive):
+                self.hive = hive
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        def _open(hive, subkey):
+            return _Key(hive)
+
+        def _query(key, name):
+            if key.hive == fake.HKEY_CURRENT_USER and name == "PG_URL":
+                return ("postgresql://reg/legacy", 1)
+            raise FileNotFoundError
+
+        fake.OpenKey = _open
+        fake.QueryValueEx = _query
+        monkeypatch.setitem(__import__("sys").modules, "winreg", fake)
+
+        locs = I._find_deprecated_pg_url_locations()
+        assert any("HKCU" in x for x in locs), locs
+        assert not any("HKLM" in x for x in locs)  # absent at machine scope
+
+    def test_shell_profile_regex_ignores_m3_cdw_and_comments(self, monkeypatch, tmp_path):
+        """M3_CDW_PG_URL= and a commented PG_URL must NOT be flagged."""
+        from m3_memory import installer as I
+
+        monkeypatch.delenv("PG_URL", raising=False)
+        monkeypatch.setattr(I, "_client_config_sources", lambda: {})
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / ".bashrc").write_text(
+            "export M3_CDW_PG_URL=postgresql://ok/new\n"
+            "# export PG_URL=postgresql://old/commented\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(I.Path, "home", staticmethod(lambda: home))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(I.sys, "platform", "linux")  # isolate from host registry
+
+        assert I._find_deprecated_pg_url_locations() == []
+
+
 class TestPrimaryBackendGuards:
     """Forbidden-host + same-as-warehouse guards in postgres_backend._resolve_dsn."""
 

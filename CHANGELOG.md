@@ -32,8 +32,12 @@ the policy is forward-going only.
   sync keeps working mid-migration, but every read warns once, `m3 doctor` flags
   it (with `--fix` renaming it to `M3_CDW_PG_URL` in on-disk config), and
   **`m3 install` / `update` / `reinstall` now hard-fail while `PG_URL` is set** —
-  rename it before upgrading. Migration: `PG_URL` → `M3_CDW_PG_URL` (warehouse)
-  or `M3_PRIMARY_PG_URL` (primary store).
+  rename it before upgrading. The install check **scans every common location and
+  reports them all at once** (process env; each MCP client's `settings.json` /
+  `.mcp.json` env blocks and a cwd `.env`; shell startup files; and, on Windows,
+  the persistent User/Machine registry env) so a `PG_URL` hiding in several places
+  is fixed in one pass. Migration: `PG_URL` → `M3_CDW_PG_URL` (warehouse) or
+  `M3_PRIMARY_PG_URL` (primary store).
 
 ### Added
 - **PostgreSQL primary-store safeguards.** Beyond the rename: the primary backend

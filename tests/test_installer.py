@@ -23,6 +23,13 @@ def _isolate_home(monkeypatch, tmp_path):
     # Path.home() caches nothing; it reads HOME / USERPROFILE every call.
     # Still, drop any stale M3_BRIDGE_PATH.
     monkeypatch.delenv("M3_BRIDGE_PATH", raising=False)
+    # install_m3 now hard-fails if a deprecated PG_URL is set anywhere it can see
+    # (env / config / shell profiles / Windows registry). These tests exercise the
+    # fetch/overwrite/bridge logic, not that guard, so neutralize it: drop the env
+    # var and force sys.platform off win32 so the host machine's real HKCU PG_URL
+    # (if any) can't trip the guard. HOME already points at tmp_path (no profiles).
+    monkeypatch.delenv("PG_URL", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
     # Reload the installer module so any module-level paths re-resolve against
     # the new HOME. (There aren't any today, but cheap insurance.)
     if "m3_memory.installer" in sys.modules:
@@ -103,6 +110,23 @@ def test_config_roundtrip(tmp_path, monkeypatch):
     assert installer.load_config() == {}
     installer.save_config({"bridge_path": "/a/b", "version": "1.0"})
     assert installer.load_config() == {"bridge_path": "/a/b", "version": "1.0"}
+
+
+def test_install_m3_hard_fails_when_pg_url_set(tmp_path, monkeypatch):
+    """install_m3 refuses to run (before any fetch) while a deprecated PG_URL is
+    set, and its message names the split-role replacements."""
+    from m3_memory import installer
+
+    # Re-set PG_URL after the autouse fixture cleared it; keep platform off win32
+    # so only the env location trips (deterministic on any host).
+    monkeypatch.setenv("PG_URL", "postgresql://legacy/warehouse")
+    monkeypatch.setattr(installer, "_client_config_sources", lambda: {})
+
+    with pytest.raises(RuntimeError) as ei:
+        installer.install_m3(repo_path=tmp_path / "repo")
+    msg = str(ei.value)
+    assert "PG_URL" in msg
+    assert "M3_CDW_PG_URL" in msg and "M3_PRIMARY_PG_URL" in msg
 
 
 def test_load_config_tolerates_malformed_json(tmp_path, monkeypatch):

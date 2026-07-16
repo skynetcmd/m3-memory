@@ -818,20 +818,12 @@ def install_m3(
     """
     from m3_memory import __version__
 
-    # Fail LOUD if the deprecated, role-ambiguous PG_URL is set. Install/upgrade
-    # is the one moment the operator is present to fix config, so we force the
-    # rename here (runtime paths only warn). PG_URL has been split by role:
-    # M3_CDW_PG_URL (data-warehouse / pg_sync) vs M3_PRIMARY_PG_URL (a PostgreSQL
-    # PRIMARY store). Inlined — the thin pip package can't assume bin/m3_sdk is
-    # importable before the payload is fetched.
-    if os.environ.get("PG_URL") is not None:
-        raise RuntimeError(
-            "Deprecated env var PG_URL is set. It has been split by role and "
-            "renamed: use M3_CDW_PG_URL for the data-warehouse (pg_sync) DSN, or "
-            "M3_PRIMARY_PG_URL for a PostgreSQL PRIMARY store. Unset PG_URL and "
-            "set the correct one, then re-run install/update. "
-            "(See CHANGELOG: 'PG_URL split by role'.)"
-        )
+    # Fail LOUD if the deprecated, role-ambiguous PG_URL is set ANYWHERE we can
+    # see. Install/upgrade is the one moment the operator is present to fix config,
+    # so we force the rename here (runtime paths only warn). The scan sweeps EVERY
+    # common location and reports ALL of them at once, so the fix is one pass, not
+    # a re-run per hidden copy.
+    _assert_no_deprecated_pg_url_anywhere()
 
     if repo_path is None:
         repo_path = default_repo_path()
@@ -1247,6 +1239,104 @@ def _deprecated_env_in_config() -> "dict[Path, dict[str, str]]":
             pass
 
     return out
+
+
+def _find_deprecated_pg_url_locations() -> "list[str]":
+    """Return a human-readable location for EVERY place a deprecated PG_URL is set.
+
+    Sweeps all common locations and collects them all (does NOT stop at the first
+    hit — PG_URL can be set in several places at once, and the operator should see
+    them all in one pass rather than re-running install per hidden copy):
+
+      1. the live process environment (``os.environ``);
+      2. every MCP-client config file's ``mcpServers.<server>.env`` block plus the
+         cwd ``.env`` — via ``_deprecated_env_in_config`` (already multi-file);
+      3. shell startup files in ``$HOME`` (``.zshenv``, ``.zshrc``, ``.bashrc``,
+         ``.bash_profile``, ``.profile``, ``.zprofile``, ``.bash_login``) that
+         ``export``/set ``PG_URL`` — the usual home of a persistent DSN.
+
+    Best-effort and never raises: an unreadable file or a config-scan import
+    failure is skipped, not fatal. Returns a de-duplicated, sorted list of
+    location strings (empty when clean)."""
+    import re as _re
+
+    locations: "set[str]" = set()
+
+    # 1. Live process env.
+    if os.environ.get("PG_URL") is not None:
+        locations.add("environment (os.environ['PG_URL'])")
+
+    # 2. MCP client config env blocks + cwd .env — reuse the existing multi-file
+    #    scanner, which already walks every client's settings.json and .mcp.json.
+    try:
+        for path, renames in _deprecated_env_in_config().items():
+            if "PG_URL" in renames:
+                locations.add(str(path))
+    except Exception:  # noqa: BLE001 — informational scan, never fatal
+        pass
+
+    # 3. Shell startup files that set PG_URL. Match `PG_URL=` optionally preceded
+    #    by `export ` / `set ` / whitespace, at a line start, so `M3_CDW_PG_URL=`
+    #    and comments don't false-positive.
+    _pg = _re.compile(r'^\s*(?:export\s+|set\s+)?PG_URL\s*=', _re.MULTILINE)
+    home = Path.home()
+    for name in (".zshenv", ".zshrc", ".zprofile", ".bashrc",
+                 ".bash_profile", ".bash_login", ".profile"):
+        f = home / name
+        try:
+            if f.is_file() and _pg.search(f.read_text(encoding="utf-8", errors="ignore")):
+                locations.add(str(f))
+        except OSError:
+            continue
+
+    # 4. Windows PERSISTENT env vars live in the registry, not a profile file, so
+    #    a User/Machine-scope PG_URL wouldn't be caught by (1)-(3) beyond the
+    #    inherited process copy. Read HKCU\Environment (User) and the Session
+    #    Manager Environment (Machine) directly so the operator is told WHERE the
+    #    persistent value lives (unsetting the process copy alone wouldn't stick).
+    if sys.platform == "win32":
+        try:
+            import winreg  # noqa: PLC0415 — Windows-only, imported lazily
+
+            for hive, subkey, label in (
+                (winreg.HKEY_CURRENT_USER, r"Environment", "Windows User env (HKCU\\Environment)"),
+                (winreg.HKEY_LOCAL_MACHINE,
+                 r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+                 "Windows Machine env (HKLM Session Manager\\Environment)"),
+            ):
+                try:
+                    with winreg.OpenKey(hive, subkey) as k:
+                        winreg.QueryValueEx(k, "PG_URL")
+                    locations.add(label)
+                except FileNotFoundError:
+                    continue  # key or value absent — not set at this scope
+                except OSError:
+                    continue  # e.g. no permission to read HKLM — skip, best-effort
+        except Exception:  # noqa: BLE001 — winreg unavailable; never fatal
+            pass
+
+    return sorted(locations)
+
+
+def _assert_no_deprecated_pg_url_anywhere() -> None:
+    """Hard-fail install/upgrade if a deprecated PG_URL is set in ANY scanned
+    location, listing every one so the operator fixes them in a single pass.
+
+    PG_URL was split by role — ``M3_CDW_PG_URL`` (data-warehouse / pg_sync) vs
+    ``M3_PRIMARY_PG_URL`` (a PostgreSQL PRIMARY store) — so an ambiguous PG_URL
+    must be renamed to the correct one before proceeding."""
+    locations = _find_deprecated_pg_url_locations()
+    if not locations:
+        return
+    bullet = "\n  - ".join(locations)
+    raise RuntimeError(
+        "Deprecated env var PG_URL is set. It has been split by role and renamed: "
+        "use M3_CDW_PG_URL for the data-warehouse (pg_sync) DSN, or "
+        "M3_PRIMARY_PG_URL for a PostgreSQL PRIMARY store.\n"
+        f"Found PG_URL in {len(locations)} location(s) — fix ALL of them, then "
+        f"re-run install/update:\n  - {bullet}\n"
+        "(See CHANGELOG: 'PG_URL split by role'.)"
+    )
 
 
 def _migrate_env_names(*, apply: bool = False) -> "list[str]":
