@@ -769,7 +769,7 @@ async def _run_entity_extractor(
                         {_p},
                         COALESCE((SELECT attempts FROM entity_extraction_queue WHERE memory_id={_p}), 0) + 1,
                         {_p},
-                        strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                        {_d.now()}
                     )
                     {_suffix}
                     """.rstrip(),

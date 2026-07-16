@@ -340,9 +340,12 @@ async def _run_fact_enricher(memory_id: str, content: str, fact_enricher,
                     conflict_target="(memory_id)",
                     set_columns=["attempts", "last_error", "last_attempt_at"],
                 )
+                # last_attempt_at via _d.now(): the SQLite strftime literal both
+                # is wrong on PG *and* its %Y/%m tokens collide with psycopg's %s
+                # parameter parsing (raises before the SQL reaches the server).
                 db.execute(f"""
                     INSERT INTO fact_enrichment_queue(memory_id, attempts, last_error, last_attempt_at)
-                    VALUES ({_p}, COALESCE((SELECT attempts FROM fact_enrichment_queue WHERE memory_id={_p}),0)+1, {_p}, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                    VALUES ({_p}, COALESCE((SELECT attempts FROM fact_enrichment_queue WHERE memory_id={_p}),0)+1, {_p}, {_d.now()})
                     {_suffix}
                 """.rstrip(), (memory_id, memory_id, str(e)[:500]))
         except Exception as db_err:
