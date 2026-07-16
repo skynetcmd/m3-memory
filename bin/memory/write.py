@@ -581,30 +581,46 @@ def _mark_superseded(
     otherwise leave it None.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
-    # Two full literal statements rather than an f-string'd WHERE clause: keeps
-    # every SQL string a complete, greppable, parameterized literal (the `where`
-    # token would be module-controlled, not user input, but a static SQL scan
-    # can't know that — don't make it guess).
+    # Dialect-aware: `p` is the backend's bind marker (? / %s) and the valid_to
+    # COALESCE differs — SQLite needs NULLIF(valid_to,'') (its default is ''),
+    # but on PG valid_to is TIMESTAMPTZ where '' is not a legal value and NULLIF
+    # would raise; the dialect drops it (COALESCE(valid_to, %s)).
+    from memory.backends import active_backend as _active_backend
+
+    _d = _active_backend().dialect()
+    p = _d.param()
+    _vt = _d.coalesce_open_timestamp("valid_to", p)
+    # Two full statements rather than an f-string'd WHERE clause: keeps each SQL
+    # string a complete, greppable, parameterized literal.
     if require_active:
         cur = db.execute(
-            "UPDATE memory_items SET is_deleted = 1, "
-            "valid_to = COALESCE(NULLIF(valid_to, ''), ?), updated_at = ? "
-            "WHERE id = ? AND is_deleted = 0",
+            f"UPDATE memory_items SET is_deleted = 1, "
+            f"valid_to = {_vt}, updated_at = {p} "
+            f"WHERE id = {p} AND is_deleted = 0",
             (close_at, now_iso, old_id),
         )
     else:
         cur = db.execute(
-            "UPDATE memory_items SET is_deleted = 1, "
-            "valid_to = COALESCE(NULLIF(valid_to, ''), ?), updated_at = ? "
-            "WHERE id = ?",
+            f"UPDATE memory_items SET is_deleted = 1, "
+            f"valid_to = {_vt}, updated_at = {p} "
+            f"WHERE id = {p}",
             (close_at, now_iso, old_id),
         )
     if require_active and cur.rowcount != 1:
         # old_id was closed concurrently between the caller's pre-check and now.
         return False
+    # The supersedes edge is unique per (from,to,type) since migration 039; with
+    # the CAS above only one writer reaches here per old_id, so a plain insert is
+    # safe. ON CONFLICT DO NOTHING via the dialect is belt-and-suspenders and
+    # keeps a retry idempotent on both backends.
+    _ins = _d.insert_or_ignore()
+    _suffix = _d.on_conflict_ignore(
+        conflict_target="(from_id, to_id, relationship_type)"
+    )
     db.execute(
-        "INSERT INTO memory_relationships "
-        "(id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+        f"{_ins} memory_relationships "
+        f"(id, from_id, to_id, relationship_type, created_at) "
+        f"VALUES ({_d.placeholder(5)}) {_suffix}".rstrip(),
         (str(uuid.uuid4()), new_id, old_id, "supersedes", now_iso),
     )
     _record_history(old_id, "supersede", prev_value, new_id, "content", actor_id, db=db)
@@ -1354,10 +1370,25 @@ async def _check_contradictions(
                     # is unconditional.
                     _close_at = new_valid_from or datetime.now(timezone.utc).isoformat()
                     with _db() as db:
-                        _mark_superseded(
+                        # require_active=True (CAS): under a single-writer SQLite
+                        # this always wins, but on PostgreSQL two concurrent writes
+                        # can each select this same is_deleted=0 row as a
+                        # contradiction. Without the guard both close it AND both
+                        # write a 'supersedes' edge + history + ledger row —
+                        # empirically N concurrent writers produced N duplicate
+                        # edges (concurrency audit 2026-07-16). The CAS makes
+                        # exactly one writer win (verified MVCC-safe: the UPDATE's
+                        # WHERE is_deleted=0 is row-locked, the loser re-reads and
+                        # gets rowcount 0); the losers skip ALL side-effects, so PG
+                        # matches SQLite's exactly-once supersession.
+                        won = _mark_superseded(
                             row["id"], item_id, close_at=_close_at, db=db,
-                            prev_value=row["content"],
+                            prev_value=row["content"], require_active=True,
                         )
+                        if not won:
+                            # Another writer superseded this row first; its
+                            # side-effects already ran. Skip ours to avoid dupes.
+                            continue
                         # Record the contradiction in the ledger (Phase 2) so the
                         # corroboration/contradiction history is complete and
                         # auditable. Best-effort, absence-tolerant (no-op pre-036).

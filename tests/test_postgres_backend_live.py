@@ -135,6 +135,49 @@ def test_placeholder_zero_fails_loud(backend):
         backend.placeholder(0)
 
 
+def test_cas_supersede_exactly_one_winner(backend):
+    """The CAS close (UPDATE ... WHERE is_deleted=0, guard on rowcount==1) must
+    yield exactly ONE winner under concurrent transactions on PG — the invariant
+    the contradiction-supersession fix relies on. Without it, N concurrent
+    contradiction-writes each close the row and each write a 'supersedes' edge."""
+    import concurrent.futures as cf
+    import threading
+
+    dsn = _DSN
+    import psycopg2
+
+    def setup():
+        c = psycopg2.connect(dsn)
+        c.autocommit = True
+        cur = c.cursor()
+        cur.execute("DROP TABLE IF EXISTS cas_probe")
+        cur.execute("CREATE TABLE cas_probe(id TEXT PRIMARY KEY, is_deleted INT DEFAULT 0)")
+        cur.execute("INSERT INTO cas_probe(id) VALUES ('X')")
+        c.close()
+
+    def racer(barrier):
+        conn = psycopg2.connect(dsn)
+        cur = conn.cursor()
+        barrier.wait()
+        cur.execute("UPDATE cas_probe SET is_deleted=1 WHERE id='X' AND is_deleted=0")
+        won = cur.rowcount == 1
+        conn.commit()
+        conn.close()
+        return won
+
+    for n in (2, 5, 10):
+        setup()
+        barrier = threading.Barrier(n)
+        with cf.ThreadPoolExecutor(max_workers=n) as ex:
+            wins = sum(ex.map(lambda _: racer(barrier), range(n)))
+        assert wins == 1, f"N={n}: expected exactly 1 CAS winner, got {wins}"
+
+    c = psycopg2.connect(dsn)
+    c.autocommit = True
+    c.cursor().execute("DROP TABLE IF EXISTS cas_probe")
+    c.close()
+
+
 def test_keyword_search_tsvector(backend):
     """PG keyword_search: tsvector @@ tsquery, title-weighted, lower=better."""
     # Requires the tsvector column; create a minimal memory_items if absent.

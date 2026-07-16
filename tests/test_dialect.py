@@ -145,6 +145,20 @@ class TestTemporalOpenClause:
             d.temporal_open_clause("mi.valid_from", "; DROP")
 
 
+class TestCoalesceOpenTimestamp:
+    def test_sqlite_keeps_nullif(self):
+        # SQLite stores unset bounds as '' — must map '' -> NULL before COALESCE.
+        assert SQLITE.coalesce_open_timestamp("valid_to", "?") == (
+            "COALESCE(NULLIF(valid_to, ''), ?)"
+        )
+
+    def test_postgres_drops_nullif(self):
+        # PG TIMESTAMPTZ rejects '' — NULLIF(col,'') would raise; plain COALESCE.
+        got = POSTGRES.coalesce_open_timestamp("valid_to", "%s")
+        assert got == "COALESCE(valid_to, %s)"
+        assert "NULLIF" not in got
+
+
 class TestIntrospection:
     def test_sqlite_uses_pragma_no_params(self):
         sql, params = SQLITE.columns_of("memory_items")

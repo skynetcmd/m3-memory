@@ -167,6 +167,26 @@ class Dialect:
             return f"({column} IS NULL OR {column} = '' OR {column} {op} {p})"
         return f"({column} IS NULL OR {column} {op} {p})"
 
+    def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
+        """COALESCE an "open" timestamp bound to a fill value, backend-correct.
+
+        SQLite stores an unset bound as ``''`` (migration 010 default) OR NULL,
+        so it needs ``COALESCE(NULLIF(col, ''), <fill>)`` to treat both as open.
+        Postgres columns are TIMESTAMPTZ where ``''`` is not a legal value (the
+        PG schema defaults these to NULL), so ``NULLIF(col, '')`` itself raises —
+        a plain ``COALESCE(col, <fill>)`` is correct there.
+
+        ``coalesce_open_timestamp("valid_to", "?")`` ->
+        SQLite:   ``COALESCE(NULLIF(valid_to, ''), ?)``
+        Postgres: ``COALESCE(valid_to, %s)``
+
+        ``column`` is a trusted identifier; ``fill_placeholder`` is the caller's
+        bind marker for the fill value (usually ``self.param()``).
+        """
+        if self.backend == "sqlite":
+            return f"COALESCE(NULLIF({column}, ''), {fill_placeholder})"
+        return f"COALESCE({column}, {fill_placeholder})"
+
     # -- introspection -------------------------------------------------------
     def columns_of(self, table: str) -> tuple[str, tuple]:
         """A (sql, params) pair listing a table's column names.
