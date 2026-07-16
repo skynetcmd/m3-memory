@@ -61,8 +61,16 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
     main_db = os.path.abspath(resolve_db_path(None))
     unified = chatlog_db == main_db
 
+    # The main-store chat_log count comes from the primary DB. On a PostgreSQL-
+    # primary deployment `main_db` is a stale/absent SQLite path, so reading it
+    # would report a misleading count. Skip the SQLite read on PG and mark it —
+    # the chatlog DB portion below is unaffected (chatlog is its own subsystem).
+    from memory.backends import resolve_backend_name
+    _primary_is_sqlite = resolve_backend_name() == "sqlite"
     try:
-        if os.path.exists(main_db):
+        if not _primary_is_sqlite:
+            counts["main_chat_log_rows"] = "n/a (primary store is PostgreSQL)"
+        elif os.path.exists(main_db):
             try:
                 conn = sqlite3.connect(main_db, timeout=5)
                 conn.row_factory = sqlite3.Row

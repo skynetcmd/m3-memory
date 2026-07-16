@@ -261,6 +261,12 @@ async def _pull_from_chroma(client, col_id, col_path, max_items, target):
     return pulled, failed, ""
 
 async def chroma_sync_impl(max_items=50, direction="both", reset_stalled=True):
+    # Reads/writes the primary store via raw sqlite3 (_get_db) to mirror into
+    # ChromaDB. On a PostgreSQL-primary deployment it would sync a stale SQLite
+    # file, not the live PG store — refuse rather than mirror the wrong data.
+    from memory.backends import require_sqlite_backend
+    require_sqlite_backend("chroma_sync")
+
     if not ctx._check_circuit("chromadb"):
         return "ChromaDB sync skipped: Circuit Breaker is OPEN."
 

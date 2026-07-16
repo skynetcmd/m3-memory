@@ -51,6 +51,25 @@ def test_m3_enrich_refuses_on_postgres(monkeypatch):
         ))
 
 
+def test_chroma_sync_refuses_on_postgres(monkeypatch):
+    _force_pg(monkeypatch)
+    import memory_sync
+    with pytest.raises(RuntimeError, match="SQLite-only|stale SQLite"):
+        asyncio.run(memory_sync.chroma_sync_impl())
+
+
+def test_chatlog_status_main_count_na_on_postgres(monkeypatch):
+    """chatlog_status must NOT read a stale SQLite main store on PG — it reports
+    n/a for the primary-store count rather than crashing or misreporting."""
+    _force_pg(monkeypatch)
+    import chatlog_status
+
+    result = chatlog_status.chatlog_status_impl()
+    # the main-store chat_log count is marked n/a under postgres
+    text = str(result)
+    assert "PostgreSQL" in text or "n/a" in text
+
+
 def test_guards_are_noop_on_sqlite(monkeypatch):
     """The default (sqlite) backend must not trip any guard — proving these are
     pure fail-loud gates that never affect a normal SQLite deployment."""
