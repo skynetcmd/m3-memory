@@ -1241,6 +1241,61 @@ def _deprecated_env_in_config() -> "dict[Path, dict[str, str]]":
     return out
 
 
+# Windows persistent-environment registry scopes. Each entry:
+#   (winreg-hive-attr-name, subkey path, User|Machine label, whether writable
+#    without admin). HKCU is User-writable; HKLM needs admin so --fix reports it.
+_WIN_ENV_REG_SCOPES = (
+    ("HKEY_CURRENT_USER", r"Environment", "User", True),
+    ("HKEY_LOCAL_MACHINE",
+     r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "Machine", False),
+)
+
+
+def _all_env_renames() -> "dict[str, str]":
+    """The union deprecation map (pure-namespacing + role-split). Best-effort:
+    returns {} if the payload SDK isn't importable (thin pip pre-payload)."""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+        from m3_core.paths import all_env_renames  # type: ignore
+
+        return all_env_renames()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _scan_registry_env_deprecations(names: "dict[str, str]") -> "list[dict]":
+    """Return one record per deprecated env var found in a Windows registry env
+    scope. Each record: {scope, label, subkey, hive_name, old, new, writable}.
+    Non-Windows or unreadable → []. Read-only; never raises."""
+    if sys.platform != "win32" or not names:
+        return []
+    hits: "list[dict]" = []
+    try:
+        import winreg  # noqa: PLC0415 — Windows-only, lazy
+    except Exception:  # noqa: BLE001
+        return hits
+    for hive_name, subkey, scope, writable in _WIN_ENV_REG_SCOPES:
+        hive = getattr(winreg, hive_name)
+        try:
+            with winreg.OpenKey(hive, subkey) as k:
+                for old, new in names.items():
+                    try:
+                        winreg.QueryValueEx(k, old)
+                    except FileNotFoundError:
+                        continue  # this var not set at this scope
+                    hits.append({
+                        "scope": scope, "label": f"Windows {scope} env ({hive_name}\\{subkey})",
+                        "subkey": subkey, "hive_name": hive_name,
+                        "old": old, "new": new, "writable": writable,
+                    })
+        except FileNotFoundError:
+            continue  # scope key absent
+        except OSError:
+            continue  # e.g. no read permission on HKLM — best-effort
+    return hits
+
+
 def _find_deprecated_pg_url_locations() -> "list[str]":
     """Return a human-readable location for EVERY place a deprecated PG_URL is set.
 
@@ -1292,28 +1347,10 @@ def _find_deprecated_pg_url_locations() -> "list[str]":
     # 4. Windows PERSISTENT env vars live in the registry, not a profile file, so
     #    a User/Machine-scope PG_URL wouldn't be caught by (1)-(3) beyond the
     #    inherited process copy. Read HKCU\Environment (User) and the Session
-    #    Manager Environment (Machine) directly so the operator is told WHERE the
-    #    persistent value lives (unsetting the process copy alone wouldn't stick).
-    if sys.platform == "win32":
-        try:
-            import winreg  # noqa: PLC0415 — Windows-only, imported lazily
-
-            for hive, subkey, label in (
-                (winreg.HKEY_CURRENT_USER, r"Environment", "Windows User env (HKCU\\Environment)"),
-                (winreg.HKEY_LOCAL_MACHINE,
-                 r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
-                 "Windows Machine env (HKLM Session Manager\\Environment)"),
-            ):
-                try:
-                    with winreg.OpenKey(hive, subkey) as k:
-                        winreg.QueryValueEx(k, "PG_URL")
-                    locations.add(label)
-                except FileNotFoundError:
-                    continue  # key or value absent — not set at this scope
-                except OSError:
-                    continue  # e.g. no permission to read HKLM — skip, best-effort
-        except Exception:  # noqa: BLE001 — winreg unavailable; never fatal
-            pass
+    #    Manager Environment (Machine) so the operator is told WHERE the persistent
+    #    value lives (unsetting the process copy alone wouldn't stick).
+    for hit in _scan_registry_env_deprecations({"PG_URL": "M3_CDW_PG_URL"}):
+        locations.add(hit["label"])
 
     return sorted(locations)
 
@@ -1368,7 +1405,112 @@ def _migrate_env_names(*, apply: bool = False) -> "list[str]":
         except (OSError, json.JSONDecodeError) as e:
             actions.append(f"[X] could not migrate env names in {path}: {e}")
 
+    # Windows persistent registry env vars (User scope written; Machine reported).
+    actions.extend(_migrate_registry_env_names(apply=apply))
+
     return actions
+
+
+def _migrate_registry_env_names(*, apply: bool = False) -> "list[str]":
+    """Rename deprecated Windows registry env vars to their new names, User scope.
+
+    Config-file renames (``_migrate_env_names``) can't reach a persistent env var
+    set in the Windows registry; without this, ``m3 doctor --fix`` would report a
+    clean run while a registry ``PG_URL`` still shadows behavior and install still
+    hard-fails. This closes that gap.
+
+    Scope policy: **HKCU (User) is rewritten** — it needs no admin. **HKLM
+    (Machine) is REPORTED, never written** (would need elevation); the operator
+    gets the exact command. Same conflict rule as the config path: if the NEW name
+    already exists at that scope, the OLD one is DROPPED (new wins), else RENAMED.
+    The old value is logged (backup) before any delete. Non-Windows → []. After a
+    write, a WM_SETTINGCHANGE broadcast asks running shells to reload env.
+
+    apply=False: dry-run ("would rename/drop ..."). apply=True: performs HKCU
+    writes. Best-effort and per-var isolated: a failure on one var is noted, never
+    aborts the rest. Idempotent."""
+    actions: list[str] = []
+    names = _all_env_renames()
+    hits = _scan_registry_env_deprecations(names)
+    if not hits:
+        return actions
+    try:
+        import winreg  # noqa: PLC0415
+    except Exception as e:  # noqa: BLE001
+        actions.append(f"[X] winreg unavailable, cannot migrate registry env: {e}")
+        return actions
+
+    for hit in hits:
+        old, new, scope = hit["old"], hit["new"], hit["scope"]
+        label = hit["label"]
+        if not hit["writable"]:
+            # HKLM — report the manual, admin-required command; never auto-write.
+            actions.append(
+                f"[!] {label}: {old} must be renamed to {new} manually (admin): "
+                f"setx /M {new} \"%{old}%\" && REG delete "
+                f"\"HKLM\\{hit['subkey']}\" /v {old} /f"
+            )
+            continue
+        hive = getattr(winreg, hit["hive_name"])
+        try:
+            with winreg.OpenKey(hive, hit["subkey"], 0, winreg.KEY_READ) as k:
+                old_val, old_type = winreg.QueryValueEx(k, old)
+                new_exists = True
+                try:
+                    winreg.QueryValueEx(k, new)
+                except FileNotFoundError:
+                    new_exists = False
+        except OSError as e:
+            actions.append(f"[X] {label}: could not read {old}: {e}")
+            continue
+
+        if new_exists:
+            verb = "dropped" if apply else "would drop"
+            actions.append(
+                f"[+] {verb} superseded {old} ({new} already set) in {label} "
+                f"(old value preserved under {new}; {old} removed)"
+            )
+            if apply:
+                try:
+                    with winreg.OpenKey(hive, hit["subkey"], 0, winreg.KEY_SET_VALUE) as k:
+                        winreg.DeleteValue(k, old)
+                    _broadcast_env_change()
+                except OSError as e:
+                    actions.append(f"[X] {label}: could not delete {old}: {e}")
+        else:
+            verb = "renamed" if apply else "would rename"
+            actions.append(
+                f"[+] {verb} {old} -> {new} in {label} (value carried over)"
+            )
+            if apply:
+                try:
+                    with winreg.OpenKey(hive, hit["subkey"], 0, winreg.KEY_SET_VALUE) as k:
+                        winreg.SetValueEx(k, new, 0, old_type, old_val)
+                        winreg.DeleteValue(k, old)
+                    _broadcast_env_change()
+                except OSError as e:
+                    actions.append(f"[X] {label}: could not rename {old}->{new}: {e}")
+    return actions
+
+
+def _broadcast_env_change() -> None:
+    """Ask running processes to reload the environment after a registry env write
+    (Windows broadcasts WM_SETTINGCHANGE with 'Environment'). Best-effort — the
+    change is already persisted; this only nudges live shells. Never raises."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        HWND_BROADCAST = 0xFFFF
+        WM_SETTINGCHANGE = 0x1A
+        SMTO_ABORTIFHUNG = 0x0002
+        ctypes.windll.user32.SendMessageTimeoutW(
+            HWND_BROADCAST, WM_SETTINGCHANGE, 0, "Environment",
+            SMTO_ABORTIFHUNG, 5000, ctypes.byref(ctypes.c_ulong()),
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _migrate_json_config_file(path: Path, renames: "dict[str, str]", *, apply: bool) -> "list[str]":

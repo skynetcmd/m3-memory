@@ -459,10 +459,31 @@ def _deprecated_env_section() -> None:
     for old, new in ROLE_SPLIT_ENV_RENAMES.items():
         if _os.environ.get(old) is not None:
             in_use[old] = new
-    if not in_use:
+
+    # Windows PERSISTENT env vars live in the registry, not this process's env, so
+    # a User/Machine-scope deprecated var (any name, not just PG_URL) would be
+    # invisible to the checks above — doctor would report "clean" while the var is
+    # still active. Scan the registry and surface each with its scope so the report
+    # is complete on Windows. `m3 doctor --fix` rewrites the User-scope ones.
+    reg_lines: "list[str]" = []
+    try:
+        from m3_memory import installer as _I  # type: ignore
+        from m3_core.paths import all_env_renames  # type: ignore
+
+        for hit in _I._scan_registry_env_deprecations(all_env_renames()):
+            reg_lines.append(f"        {hit['old']}  ->  {hit['new']}   [{hit['label']}]")
+    except Exception:  # noqa: BLE001 — best-effort; registry scan is Windows-only
+        pass
+
+    if not in_use and not reg_lines:
         return  # clean — say nothing rather than add noise
     print()
     print("  [!] deprecated env vars in use (still work, but migrate — the old")
     print("      names will be removed; `m3 install`/`update` will refuse while set):")
     for old, new in sorted(in_use.items()):
         print(f"        {old}  ->  {new}")
+    for line in sorted(reg_lines):
+        print(line)
+    if reg_lines:
+        print("      (registry entries: `m3 doctor --fix` rewrites User scope; "
+              "Machine scope needs admin — command shown by --fix)")

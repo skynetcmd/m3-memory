@@ -171,35 +171,13 @@ class TestInstallerMultiLocationScan:
         monkeypatch.setattr(I.sys, "platform", "win32")
 
         # Fake winreg: PG_URL present at HKCU\Environment, absent at HKLM.
-        import types
-
-        fake = types.ModuleType("winreg")
-        fake.HKEY_CURRENT_USER = 1
-        fake.HKEY_LOCAL_MACHINE = 2
-
-        class _Key:
-            def __init__(self, hive):
-                self.hive = hive
-            def __enter__(self):
-                return self
-            def __exit__(self, *a):
-                return False
-
-        def _open(hive, subkey):
-            return _Key(hive)
-
-        def _query(key, name):
-            if key.hive == fake.HKEY_CURRENT_USER and name == "PG_URL":
-                return ("postgresql://reg/legacy", 1)
-            raise FileNotFoundError
-
-        fake.OpenKey = _open
-        fake.QueryValueEx = _query
-        monkeypatch.setitem(__import__("sys").modules, "winreg", fake)
+        store = {("HKCU", r"Environment"): {"PG_URL": ("postgresql://reg/legacy", 1)}}
+        monkeypatch.setitem(__import__("sys").modules, "winreg",
+                            _make_fake_winreg(store))
 
         locs = I._find_deprecated_pg_url_locations()
-        assert any("HKCU" in x for x in locs), locs
-        assert not any("HKLM" in x for x in locs)  # absent at machine scope
+        assert any("HKEY_CURRENT_USER" in x for x in locs), locs
+        assert not any("HKEY_LOCAL_MACHINE" in x for x in locs)  # absent at machine scope
 
     def test_shell_profile_regex_ignores_m3_cdw_and_comments(self, monkeypatch, tmp_path):
         """M3_CDW_PG_URL= and a commented PG_URL must NOT be flagged."""
@@ -316,3 +294,125 @@ class TestPrimaryBackendGuards:
         msg = str(ei.value)
         assert "M3_PRIMARY_PG_URL" in msg
         assert "does not read PG_URL" in msg  # the anti-footgun note
+
+
+# ── Windows registry env migration (doctor --fix auto-writes User scope) ──────
+def _make_fake_winreg(store):
+    """Build a fake `winreg` module backed by `store` = {(hive, subkey): {name: (val, type)}}.
+    Simulates OpenKey/QueryValueEx/SetValueEx/DeleteValue with mutation."""
+    import types
+
+    fake = types.ModuleType("winreg")
+    fake.HKEY_CURRENT_USER = "HKCU"
+    fake.HKEY_LOCAL_MACHINE = "HKLM"
+    fake.KEY_READ = 0x20019
+    fake.KEY_SET_VALUE = 0x0002
+    fake.REG_SZ = 1
+
+    class _Key:
+        def __init__(self, hive, subkey):
+            self.k = (hive, subkey)
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def OpenKey(hive, subkey, reserved=0, access=0):
+        if (hive, subkey) not in store:
+            raise FileNotFoundError(subkey)
+        return _Key(hive, subkey)
+
+    def QueryValueEx(key, name):
+        d = store[key.k]
+        if name not in d:
+            raise FileNotFoundError(name)
+        return d[name]
+
+    def SetValueEx(key, name, reserved, type_, value):
+        store[key.k][name] = (value, type_)
+
+    def DeleteValue(key, name):
+        store[key.k].pop(name, None)
+
+    fake.OpenKey = OpenKey
+    fake.QueryValueEx = QueryValueEx
+    fake.SetValueEx = SetValueEx
+    fake.DeleteValue = DeleteValue
+    return fake
+
+
+class TestRegistryEnvMigration:
+    def _wire(self, monkeypatch, store):
+        from m3_memory import installer as I
+
+        monkeypatch.setattr(I.sys, "platform", "win32")
+        monkeypatch.setitem(__import__("sys").modules, "winreg",
+                            _make_fake_winreg(store))
+        # avoid a real WM_SETTINGCHANGE broadcast in the test
+        monkeypatch.setattr(I, "_broadcast_env_change", lambda: None)
+        return I
+
+    def test_scan_all_names_not_just_pg_url(self, monkeypatch):
+        store = {("HKCU", r"Environment"): {
+            "PG_URL": ("postgresql://legacy", 1),
+            "SYNC_TARGET_IP": ("198.51.100.9", 1),  # RFC 5737 doc IP, not real infra
+            "M3_CHROMA_BASE_URL": ("http://ok", 1),  # already-new, must NOT flag
+        }}
+        I = self._wire(monkeypatch, store)
+        hits = I._scan_registry_env_deprecations(
+            {"PG_URL": "M3_CDW_PG_URL", "SYNC_TARGET_IP": "M3_SYNC_TARGET_IP",
+             "CHROMA_BASE_URL": "M3_CHROMA_BASE_URL"}
+        )
+        olds = {h["old"] for h in hits}
+        assert olds == {"PG_URL", "SYNC_TARGET_IP"}  # not the already-migrated one
+
+    def test_apply_renames_user_scope_and_carries_value(self, monkeypatch):
+        store = {("HKCU", r"Environment"): {"PG_URL": ("postgresql://secret@h/db", 1)}}
+        I = self._wire(monkeypatch, store)
+        actions = I._migrate_registry_env_names(apply=True)
+        env = store[("HKCU", r"Environment")]
+        assert "PG_URL" not in env
+        assert env["M3_CDW_PG_URL"] == ("postgresql://secret@h/db", 1)  # value carried
+        assert any("renamed PG_URL -> M3_CDW_PG_URL" in a for a in actions)
+
+    def test_actions_never_print_the_secret_value(self, monkeypatch):
+        # Obvious dummy credential (RFC 5737 doc host) — the test asserts these
+        # tokens do NOT appear in the action log (redaction), so they must be
+        # unmistakably fake and never a real secret.
+        secret_pw = "DUMMYPWDONOTLOG"
+        secret_host = "198.51.100.200"
+        store = {("HKCU", r"Environment"):
+                 {"PG_URL": (f"postgresql://user:{secret_pw}@{secret_host}/db", 1)}}
+        I = self._wire(monkeypatch, store)
+        blob = "\n".join(I._migrate_registry_env_names(apply=False))
+        assert secret_pw not in blob and secret_host not in blob
+
+    def test_conflict_drops_old_keeps_new(self, monkeypatch):
+        store = {("HKCU", r"Environment"): {
+            "PG_URL": ("postgresql://old", 1),
+            "M3_CDW_PG_URL": ("postgresql://new", 1),
+        }}
+        I = self._wire(monkeypatch, store)
+        actions = I._migrate_registry_env_names(apply=True)
+        env = store[("HKCU", r"Environment")]
+        assert "PG_URL" not in env
+        assert env["M3_CDW_PG_URL"] == ("postgresql://new", 1)  # new untouched
+        assert any("dropped superseded PG_URL" in a for a in actions)
+
+    def test_hklm_machine_scope_reported_not_written(self, monkeypatch):
+        store = {
+            ("HKCU", r"Environment"): {},
+            ("HKLM", r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"):
+                {"PG_URL": ("postgresql://machine", 1)},
+        }
+        I = self._wire(monkeypatch, store)
+        actions = I._migrate_registry_env_names(apply=True)
+        hklm = store[("HKLM", r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")]
+        assert "PG_URL" in hklm  # NOT written — machine scope needs admin
+        assert any("admin" in a.lower() and "PG_URL" in a for a in actions)
+
+    def test_noop_on_non_windows(self, monkeypatch):
+        from m3_memory import installer as I
+        monkeypatch.setattr(I.sys, "platform", "linux")
+        assert I._migrate_registry_env_names(apply=True) == []
+        assert I._scan_registry_env_deprecations({"PG_URL": "M3_CDW_PG_URL"}) == []

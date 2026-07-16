@@ -38,6 +38,16 @@ the policy is forward-going only.
   the persistent User/Machine registry env) so a `PG_URL` hiding in several places
   is fixed in one pass. Migration: `PG_URL` → `M3_CDW_PG_URL` (warehouse) or
   `M3_PRIMARY_PG_URL` (primary store).
+- **`m3 doctor` now covers Windows registry env vars.** The deprecated-env report
+  and `--fix` previously only scanned config files, so a deprecated env var set in
+  the persistent Windows registry (`HKCU\Environment` / Machine `Session Manager\
+  Environment`) was silently unreported — `doctor` could say "clean" while the var
+  was still active, and `--fix` claimed success while a registry copy persisted.
+  Now `doctor` reports registry hits for ALL deprecated names (not just `PG_URL`),
+  and **`--fix` auto-renames the User-scope ones** (value carried over, old key
+  removed, `WM_SETTINGCHANGE` broadcast to reload live shells). Machine-scope hits
+  are reported with the exact admin command, never silently written. Secret DSN
+  values are never printed in the action log.
 
 ### Added
 - **PostgreSQL primary-store safeguards.** Beyond the rename: the primary backend
