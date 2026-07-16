@@ -371,18 +371,18 @@ async def write_observation(
     # using the state machine" — backwards-compatible.
     if obs_id and source_group_id is not None:
         try:
-            db_path = os.environ.get("M3_DATABASE")
-            if db_path:
-                import sqlite3 as _sqlite3
-                conn = _sqlite3.connect(db_path, timeout=10.0)
-                try:
-                    conn.execute(
-                        "UPDATE memory_items SET source_group_id = ? WHERE id = ?",
-                        (source_group_id, obs_id),
-                    )
-                    conn.commit()
-                finally:
-                    conn.close()
+            # Route through the backend-aware _db() (the previous raw
+            # sqlite3.connect(M3_DATABASE) bypassed the seam and would edit a stale
+            # SQLite file on a PG-primary deployment). On PG this hits the pool; on
+            # SQLite it opens the same active-context connection as before.
+            from memory.backends import active_backend
+            _p = active_backend().dialect().param()
+            with mc._db() as conn:
+                conn.execute(
+                    f"UPDATE memory_items SET source_group_id = {_p} WHERE id = {_p}",
+                    (source_group_id, obs_id),
+                )
+                conn.commit()
         except Exception:
             # Don't break a successful write on a metadata-only failure.
             pass
@@ -639,14 +639,17 @@ async def drain_variant_mode(args, profile, token: str) -> None:
     bad = [t for t in src_types if t not in _ALLOWED_SRC_TYPES]
     if bad:
         sys.exit(f"ERROR: --source-type values not allowed: {bad} (allowed: {sorted(_ALLOWED_SRC_TYPES)})")
-    type_ph = ",".join(["?"] * len(src_types))
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
+    type_ph = _d.placeholder(len(src_types))
     # Variant filter: sentinel '__none__' selects NULL-variant rows (SQL '= NULL'
     # never matches — must be 'IS NULL'); any other value is an exact match.
     if args.source_variant == "__none__":
         variant_clause = "mi.variant IS NULL"
         variant_params: list = []
     else:
-        variant_clause = "mi.variant = ?"
+        variant_clause = f"mi.variant = {_p}"
         variant_params = [args.source_variant]
     # qid scoping column: production chatlog keys on user_id; corpora where the
     # scoping id lives in the conversation_id column (one row-group per instance)
@@ -654,16 +657,21 @@ async def drain_variant_mode(args, profile, token: str) -> None:
     qid_col = getattr(args, "qid_column", None) or "user_id"
     if qid_col not in ("user_id", "conversation_id"):
         sys.exit(f"ERROR: --qid-column must be user_id or conversation_id, got {qid_col!r}")
+    _role = _d.json_extract_text("mi.metadata_json", "role")
+    # turn_index/turn_idx are numeric (COALESCE'd with an int literal, ordered by):
+    # extract as INTEGER so PG doesn't hit a text/int COALESCE type mismatch.
+    _turn_i = _d.json_extract_int("mi.metadata_json", "turn_index")
+    _turn_ix = _d.json_extract_int("mi.metadata_json", "turn_idx")
+    _sess = _d.json_extract_text("mi.metadata_json", "session_id")
     with mc._db() as db:
         sql = f"""
         SELECT mi.id,
                mi.content,
-               json_extract(mi.metadata_json, '$.role') AS role,
-               COALESCE(json_extract(mi.metadata_json, '$.turn_index'),
-                        json_extract(mi.metadata_json, '$.turn_idx'), 0) AS turn_index,
+               {_role} AS role,
+               COALESCE({_turn_i}, {_turn_ix}, 0) AS turn_index,
                mi.created_at,
                mi.metadata_json,
-               json_extract(mi.metadata_json, '$.session_id') AS conversation_id,
+               {_sess} AS conversation_id,
                mi.user_id
         FROM memory_items mi
         WHERE {variant_clause}
@@ -672,12 +680,12 @@ async def drain_variant_mode(args, profile, token: str) -> None:
         """
         params: list = [*variant_params, *src_types]
         if qid_filter:
-            placeholder = ",".join(["?"] * len(qid_filter))
+            placeholder = _d.placeholder(len(qid_filter))
             sql += f" AND mi.{qid_col} IN ({placeholder})"
             params.extend(qid_filter)
         sql += " ORDER BY mi.user_id, conversation_id, turn_index"
         if args.limit:
-            sql += " LIMIT ?"
+            sql += f" LIMIT {_p}"
             params.append(int(args.limit))
         rows = list(db.execute(sql, params).fetchall())
 
@@ -743,6 +751,16 @@ async def drain_queue_mode(args, profile, token: str) -> None:
     sem = asyncio.Semaphore(args.concurrency)
     counters = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
     started = time.monotonic()
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
+    _je_role = _d.json_extract_text("metadata_json", "role")
+    # turn_index is compared/ordered numerically and COALESCE'd with an int
+    # literal — on PG `->>` yields text, so a text/int COALESCE mismatch errors.
+    # Extract as INTEGER so both COALESCE arms are integers on both backends.
+    _je_ti = _d.json_extract_int("metadata_json", "turn_index")
+    _je_sid = _d.json_extract_text("metadata_json", "session_id")
+    _je_cid = _d.json_extract_text("metadata_json", "conversation_id")
 
     from unified_ai import async_client_for_profile
     async with async_client_for_profile(profile) as client:
@@ -750,12 +768,12 @@ async def drain_queue_mode(args, profile, token: str) -> None:
         # invokes us repeatedly via the CLI (or cron) for ongoing drain.
         with mc._db() as db:
             queue_rows = db.execute(
-                """
+                f"""
                 SELECT id, conversation_id, user_id, attempts
                 FROM observation_queue
                 WHERE attempts < 5
                 ORDER BY attempts ASC, enqueued_at ASC
-                LIMIT ?
+                LIMIT {_p}
                 """,
                 (args.batch,)
             ).fetchall()
@@ -772,15 +790,13 @@ async def drain_queue_mode(args, profile, token: str) -> None:
                 # the named variant. We infer from a single turn's variant.
                 with mc._db() as db:
                     turns = db.execute(
-                        """
+                        f"""
                         SELECT id, content,
-                               json_extract(metadata_json, '$.role') AS role,
-                               COALESCE(json_extract(metadata_json, '$.turn_index'), 0) AS turn_index,
+                               {_je_role} AS role,
+                               COALESCE({_je_ti}, 0) AS turn_index,
                                created_at, metadata_json
                         FROM memory_items
-                        WHERE COALESCE(json_extract(metadata_json, '$.session_id'),
-                                       json_extract(metadata_json, '$.conversation_id'),
-                                       conversation_id) = ?
+                        WHERE COALESCE({_je_sid}, {_je_cid}, conversation_id) = {_p}
                           AND COALESCE(is_deleted,0)=0
                           AND type IN ('message','conversation')
                         ORDER BY turn_index ASC
@@ -789,7 +805,7 @@ async def drain_queue_mode(args, profile, token: str) -> None:
                     ).fetchall()
                 if not turns:
                     with mc._db() as db:
-                        db.execute("DELETE FROM observation_queue WHERE id=?", (qid,))
+                        db.execute(f"DELETE FROM observation_queue WHERE id={_p}", (qid,))
                         db.commit()
                     counters["empty_groups"] += 1
                     return
@@ -800,14 +816,14 @@ async def drain_queue_mode(args, profile, token: str) -> None:
                         args.target_variant or "", profile, client, token, counters,
                     )
                     with mc._db() as db:
-                        db.execute("DELETE FROM observation_queue WHERE id=?", (qid,))
+                        db.execute(f"DELETE FROM observation_queue WHERE id={_p}", (qid,))
                         db.commit()
                 except Exception as e:  # noqa: BLE001
                     with mc._db() as db:
                         db.execute(
-                            "UPDATE observation_queue SET attempts=attempts+1, "
-                            "last_error=?, last_attempt_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') "
-                            "WHERE id=?",
+                            f"UPDATE observation_queue SET attempts=attempts+1, "
+                            f"last_error={_p}, last_attempt_at={_d.now()} "
+                            f"WHERE id={_p}",
                             (str(e)[:500], qid),
                         )
                         db.commit()
@@ -826,12 +842,11 @@ async def drain_queue_mode(args, profile, token: str) -> None:
 
 
 def main() -> None:
-    # Standalone-CLI guard: writes the primary store (observations) via direct
-    # sqlite3. The in-process path (cognitive_loop -> m3_enrich) is already gated;
-    # this covers a hand-run invocation on a PostgreSQL-primary deployment.
-    from memory.backends import require_sqlite_backend
-    require_sqlite_backend("run_observer")
-
+    # Backend-agnostic: all DB access routes through the backend-aware mc._db()
+    # and is dialected (placeholders + json_extract + now()), so the observer
+    # drains the live primary store on both SQLite and PostgreSQL. (Previously
+    # gated SQLite-only because it opened a raw sqlite3.connect; that write path
+    # was moved onto the seam and verified on PG, so the gate was removed.)
     ap = argparse.ArgumentParser(description="Phase D Observer drainer (Mastra-style three-date observations)")
     ap.add_argument("--source-variant", default=None,
                     help="Variant-mode: pull conversations from this variant. "
