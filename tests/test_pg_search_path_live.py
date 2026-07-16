@@ -80,8 +80,11 @@ def pg_seeded(monkeypatch):
     b = PostgresBackend(dsn=_DSN)
     with b.connection() as c:
         cur = c.cursor()
+        # Own the schema (other live tests recreate memory_items with different
+        # columns): drop and build the full shape including search_vector.
+        cur.execute("DROP TABLE IF EXISTS memory_items CASCADE")
         cur.execute(
-            """CREATE TABLE IF NOT EXISTS memory_items(
+            """CREATE TABLE memory_items(
                 id TEXT PRIMARY KEY, type TEXT DEFAULT 'note', title TEXT, content TEXT,
                 metadata_json JSONB, importance DOUBLE PRECISION DEFAULT 0.5,
                 is_deleted INTEGER DEFAULT 0, user_id TEXT DEFAULT '',
@@ -119,6 +122,64 @@ def _id(r):
     if isinstance(r, tuple):
         return r[1].get("id") if isinstance(r[1], dict) else r[1]
     return r.get("id") if isinstance(r, dict) else r
+
+
+def test_pg_memory_write_impl_end_to_end(monkeypatch):
+    """memory_write_impl writes a real memory on PG and it reads back — proves the
+    full write path (dialected SQL + connection routing + sqlite-compat adapter +
+    JSONB empty-metadata normalization) works end to end."""
+    monkeypatch.setenv("M3_DB_BACKEND", "postgres")
+    monkeypatch.setenv("M3_PG_URL", _DSN)
+
+    from memory.backends import selector as _selector
+
+    _selector._reset_for_tests()
+    from memory.backends.postgres_backend import PostgresBackend
+    from memory.write import memory_write_impl
+
+    b = PostgresBackend(dsn=_DSN)
+    # Own the schema deterministically: other live tests recreate memory_items
+    # with varying columns, so drop and build the full shape the write path binds
+    # (21 columns) rather than relying on IF NOT EXISTS against a polluted table.
+    with b.connection() as c:
+        c.cursor().execute("DROP TABLE IF EXISTS memory_items CASCADE")
+        c.cursor().execute(
+            """CREATE TABLE memory_items(
+                id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT, content TEXT,
+                metadata_json JSONB, agent_id TEXT, model_id TEXT,
+                change_agent TEXT DEFAULT 'unknown', importance DOUBLE PRECISION DEFAULT 0.5,
+                source TEXT DEFAULT 'agent', origin_device TEXT DEFAULT 'dev',
+                user_id TEXT DEFAULT '', scope TEXT DEFAULT 'agent', expires_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(), valid_from TIMESTAMPTZ, valid_to TIMESTAMPTZ,
+                conversation_id TEXT, refresh_on TIMESTAMPTZ, refresh_reason TEXT, variant TEXT,
+                content_hash TEXT, confidence DOUBLE PRECISION, is_deleted INTEGER DEFAULT 0)"""
+        )
+        c.cursor().execute("DELETE FROM memory_items WHERE title LIKE 'e2e_%'")
+
+    try:
+        res_normal = asyncio.run(memory_write_impl(
+            "note", "e2e content one", title="e2e_normal",
+            metadata='{"role":"user"}', embed=False,
+        ))
+        res_empty = asyncio.run(memory_write_impl(
+            "note", "e2e content two", title="e2e_empty",
+            metadata="", embed=False,  # JSONB '' trap -> normalized to {}
+        ))
+        assert isinstance(res_normal, str) and isinstance(res_empty, str)
+
+        with b.connection() as c:
+            cur = c.cursor()
+            cur.execute(
+                "SELECT title, metadata_json FROM memory_items "
+                "WHERE title LIKE 'e2e_%' ORDER BY title"
+            )
+            rows = {r[0]: r[1] for r in cur.fetchall()}
+        assert rows["e2e_normal"] == {"role": "user"}
+        assert rows["e2e_empty"] == {}  # '' was normalized, not a crash
+    finally:
+        with b.connection() as c:
+            c.cursor().execute("DELETE FROM memory_items WHERE title LIKE 'e2e_%'")
+        b.close()
 
 
 @pytest.mark.parametrize("mode", ["hybrid", "fts5", "semantic"])

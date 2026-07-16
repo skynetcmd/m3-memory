@@ -183,9 +183,12 @@ def test_keyword_search_tsvector(backend):
     # Requires the tsvector column; create a minimal memory_items if absent.
     with backend.connection() as conn:
         cur = conn.cursor()
+        # Own the schema (live tests share memory_items with varying shapes):
+        # drop and build the exact columns this test needs.
+        cur.execute("DROP TABLE IF EXISTS memory_items CASCADE")
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS memory_items (
+            CREATE TABLE memory_items (
                 id TEXT PRIMARY KEY, type TEXT, title TEXT, content TEXT,
                 is_deleted INTEGER DEFAULT 0, user_id TEXT DEFAULT '',
                 scope TEXT DEFAULT 'agent',

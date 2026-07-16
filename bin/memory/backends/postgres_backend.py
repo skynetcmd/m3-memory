@@ -43,6 +43,45 @@ _DEFAULT_MINCONN = 1
 _DEFAULT_MAXCONN = 16
 
 
+class _SqliteCompatConnection:
+    """Wrap a psycopg2 connection to present the SQLite-connection surface the
+    memory core expects, so ``db.execute(...)`` and ``row["col"]`` work unchanged.
+
+    The core was written against ``sqlite3.Connection`` with ``row_factory=Row``:
+      * ``conn.execute(sql, params)`` is a shortcut that creates a cursor, runs
+        the statement, and returns the CURSOR (so ``.fetchone()``/``.fetchall()``/
+        ``.rowcount`` work on the result). psycopg2 has no connection-level
+        ``execute`` — only cursors do.
+      * rows are accessed by name (``row["content"]``). psycopg2's default cursor
+        returns tuples; a ``RealDictCursor`` returns name-keyed dicts.
+    This adapter closes both gaps. It is intentionally minimal — only the surface
+    the write/search paths actually use — not a general DB-API façade.
+    """
+
+    def __init__(self, raw_conn: object) -> None:
+        self._raw = raw_conn
+
+    def execute(self, sql: str, params: "tuple | list" = ()):  # noqa: ANN001
+        from psycopg2.extras import RealDictCursor
+
+        cur = self._raw.cursor(cursor_factory=RealDictCursor)  # type: ignore[attr-defined]
+        cur.execute(sql, params)
+        return cur
+
+    def cursor(self, *args, **kwargs):
+        return self._raw.cursor(*args, **kwargs)  # type: ignore[attr-defined]
+
+    def commit(self):
+        return self._raw.commit()  # type: ignore[attr-defined]
+
+    def rollback(self):
+        return self._raw.rollback()  # type: ignore[attr-defined]
+
+    def __getattr__(self, name):
+        # Anything not explicitly adapted falls through to the raw connection.
+        return getattr(self._raw, name)
+
+
 def _resolve_dsn() -> str:
     """Resolve the PostgreSQL DSN, fail loud if absent.
 
@@ -123,7 +162,9 @@ class PostgresBackend:
         pool = self._ensure_pool()
         conn = pool.getconn()
         try:
-            yield conn
+            # Wrap so the memory core's sqlite-style db.execute()/row["col"] works
+            # unchanged; commit/rollback operate on the raw connection underneath.
+            yield _SqliteCompatConnection(conn)
             conn.commit()
         except Exception:
             conn.rollback()

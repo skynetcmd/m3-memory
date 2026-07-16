@@ -50,15 +50,30 @@ def _db(*args, **kwargs):
     refactor and a handful of regression tests pin patching behavior
     that pre-dated the move.
     """
+    override = None
     try:
         import memory_core as _mc  # type: ignore
         override = getattr(_mc, "_db", None)
-        # Avoid infinite recursion if memory_core._db is the canonical
-        # `with` shim that simply re-exports us.
-        if override is not None and override is not _db:
-            return override(*args, **kwargs)
     except ImportError:
         pass
+    # A GENUINE test override (a monkeypatched fake DB) is neither this wrapper
+    # nor the canonical `_db` re-export — honor it and short-circuit. Tests that
+    # inject a fake SQLite connection rely on this and never exercise PG.
+    if override is not None and override is not _db and override is not _canonical_db:
+        return override(*args, **kwargs)
+    # Backend routing: with no real test override and no caller-supplied `db`,
+    # route the connection to the ACTIVE backend. On PostgreSQL every write-path
+    # connection must come from its pool — else the dialect-generated %s SQL is
+    # sent to a sqlite3 connection ("near %: syntax error"). On SQLite this falls
+    # through to the canonical `_db()`, byte-identical to before.
+    if not args and not kwargs:
+        try:
+            from memory.backends import active_backend as _ab
+
+            if _ab().name == "postgres":
+                return _ab().connection()
+        except Exception:
+            pass
     return _canonical_db(*args, **kwargs)
 from .embed import (
     _DENSE_ERR_RE,
@@ -282,6 +297,12 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                 meta_dict["entities"] = ents
                 metadata = json.dumps(meta_dict)
 
+    from memory.backends import active_backend as _active_backend_1
+
+    _d1 = _active_backend_1().dialect()
+    if _d1.backend == "postgres" and not (metadata and metadata.strip()):
+        metadata = "{}"
+
     with _db() as db:
         _vf = valid_from or now
         # Canonicalize "open-ended validity" as NULL, not "". The as_of range
@@ -297,8 +318,8 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
         # untagged rows with `variant IS NULL`.
         _variant = variant or None
         db.execute(
-            "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, variant) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, variant) "
+            f"VALUES ({_d1.placeholder(21)})").rstrip(),
             (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason, _variant)
         )
         # NOTE: chroma_sync_queue insert moved below into the `if vec:` block
@@ -315,15 +336,16 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
         _conf = _derive_confidence(
             source=source, change_agent=agent, metadata=metadata, explicit=confidence
         )
+        _p1 = _d1.param()
         try:
             db.execute(
-                "UPDATE memory_items SET content_hash = ?, confidence = ? WHERE id = ?",
+                f"UPDATE memory_items SET content_hash = {_p1}, confidence = {_p1} WHERE id = {_p1}",
                 (_chash, _conf, item_id),
             )
         except Exception as e:  # noqa: BLE001 — pre-035 DB lacks `confidence`
             if not _is_missing_confidence_column(e):
                 raise
-            db.execute("UPDATE memory_items SET content_hash = ? WHERE id = ?",
+            db.execute(f"UPDATE memory_items SET content_hash = {_p1} WHERE id = {_p1}",
                        (_chash, item_id))
 
     vec = None
@@ -448,8 +470,8 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                 kind = base_kind + kind_suffix
                 with _db() as db:
                     db.execute(
-                        "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
-                        "VALUES (?,?,?,?,?,?,?,?)",
+                        ("INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
+                        f"VALUES ({_d1.placeholder(8)})").rstrip(),
                         (str(uuid.uuid4()), item_id, _pack(cvec), m, len(cvec), now, _content_hash(sub_text), kind),
                     )
                 any_inserted = True
@@ -461,7 +483,8 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                 # Chroma sync replays whatever's currently in memory_embeddings
                 # for the memory_id.
                 db.execute(
-                    "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
+                    ("INSERT INTO chroma_sync_queue (memory_id, operation) "
+                    f"VALUES ({_d1.placeholder(2)})").rstrip(),
                     (item_id, "upsert"),
                 )
             # Downstream code (contradiction check, MMR, etc.) needs *a*
@@ -1017,13 +1040,18 @@ async def memory_write_bulk_impl(
         await asyncio.gather(*(_enrich_one(p) for p in prepared))
 
     # Phase 1: INSERT memory_items + chroma queue + history in one transaction.
+    from memory.backends import active_backend as _active_backend_bulk
+
+    _db_bulk = _active_backend_bulk().dialect()
     with _db() as db:
         for p in prepared:
+            if _db_bulk.backend == "postgres" and not (p["metadata"] and p["metadata"].strip()):
+                p["metadata"] = "{}"
             db.execute(
-                "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, "
+                ("INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, "
                 "change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, "
                 "valid_from, valid_to, conversation_id, refresh_on, refresh_reason, content_hash, variant) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                f"VALUES ({_db_bulk.placeholder(22)})").rstrip(),
                 (
                     p["id"], p["type"], p["title"], p["content"], p["metadata"],
                     p["agent_id"], p["model_id"], p["change_agent"], p["importance"],
@@ -1101,8 +1129,8 @@ async def memory_write_bulk_impl(
                     else p["embed_text"]
                 )
                 db.execute(
-                    "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
+                    ("INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash, vector_kind) "
+                    f"VALUES ({_db_bulk.placeholder(8)})").rstrip(),
                     (
                         str(uuid.uuid4()), p["id"], _pack(vec), m, len(vec), now,
                         _content_hash(text_for_hash), kind,
@@ -1117,7 +1145,8 @@ async def memory_write_bulk_impl(
             for p in to_embed:
                 if p["id"] in default_ok:
                     db.execute(
-                        "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
+                        ("INSERT INTO chroma_sync_queue (memory_id, operation) "
+                        f"VALUES ({_db_bulk.placeholder(2)})").rstrip(),
                         (p["id"], "upsert"),
                     )
         for mid in default_fail - default_ok:
@@ -1553,6 +1582,10 @@ async def memory_write_batch_impl(items: list[dict]):
     Speed Optimization: Parallelized batch memory write (Speed #1).
     Expects list of dicts with keys matching memory_write_impl args.
     """
+    from memory.backends import active_backend as _active_backend_batch
+
+    _d_batch = _active_backend_batch().dialect()
+
     results = []
     # 1. First pass: Insert metadata in one transaction
     now = datetime.now(timezone.utc).isoformat()
@@ -1562,11 +1595,15 @@ async def memory_write_batch_impl(items: list[dict]):
         mid = str(uuid.uuid4())
         agent = item.get("change_agent", "").strip().lower() or _infer_change_agent_util(item.get("agent_id", ""), item.get("model_id", ""), default=DEFAULT_CHANGE_AGENT)
 
+        _item_metadata = item.get("metadata", "{}")
+        if _d_batch.backend == "postgres" and not (_item_metadata and _item_metadata.strip()):
+            _item_metadata = "{}"
+
         with _db() as db:
             db.execute(
-                "INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (mid, item["type"], item.get("title", ""), item["content"], item.get("metadata", "{}"),
+                ("INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, change_agent, importance, source, origin_device, created_at) "
+                f"VALUES ({_d_batch.placeholder(12)})").rstrip(),
+                (mid, item["type"], item.get("title", ""), item["content"], _item_metadata,
                  item.get("agent_id", ""), item.get("model_id", ""), agent, item.get("importance", 0.5),
                  item.get("source", "agent"), ORIGIN_DEVICE, now)
             )
@@ -1609,12 +1646,13 @@ async def memory_write_batch_impl(items: list[dict]):
                 vec, m = result
                 if vec:
                     db.execute(
-                        "INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
-                        "VALUES (?,?,?,?,?,?,?)",
+                        ("INSERT INTO memory_embeddings (id, memory_id, embedding, embed_model, dim, created_at, content_hash) "
+                        f"VALUES ({_d_batch.placeholder(7)})").rstrip(),
                         (str(uuid.uuid4()), mid, _pack(vec), m, len(vec), now, _content_hash(text))
                     )
                     db.execute(
-                        "INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)",
+                        ("INSERT INTO chroma_sync_queue (memory_id, operation) "
+                        f"VALUES ({_d_batch.placeholder(2)})").rstrip(),
                         (mid, "upsert"),
                     )
                 else:
