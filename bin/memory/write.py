@@ -163,9 +163,23 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     production `db` is None and `_db()` resolves the active context's pooled
     connection with no argument.
     """
+    # Idempotent by (from_id, to_id, relationship_type): the unique index
+    # idx_mr_unique_edge (migration 039) is the arbiter. Before 039 this used
+    # INSERT OR REPLACE, which silently created duplicate edges because the only
+    # unique key was the `id` PK (absent from the insert) — nothing to conflict
+    # on. Now the dialect emits a real ON CONFLICT ... DO NOTHING on both
+    # backends; re-linking the same pair is a genuine no-op.
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    _ins = _d.insert_or_ignore()
+    _suffix = _d.on_conflict_ignore(
+        conflict_target="(from_id, to_id, relationship_type)"
+    )
     with (_db(db) if db is not None else _db()) as db_conn:
         db_conn.execute(
-            "INSERT OR REPLACE INTO memory_relationships (from_id, to_id, relationship_type) VALUES (?, ?, ?)",
+            f"{_ins} memory_relationships (from_id, to_id, relationship_type) "
+            f"VALUES ({_d.placeholder(3)}) {_suffix}".rstrip(),
             (from_id, to_id, relationship_type)
         )
     return f"Linked {from_id} --[{relationship_type}]--> {to_id}"

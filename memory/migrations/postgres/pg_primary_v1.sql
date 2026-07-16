@@ -174,6 +174,10 @@ CREATE TABLE IF NOT EXISTS memory_relationships (
 CREATE INDEX IF NOT EXISTS idx_mr_from ON memory_relationships(from_id);
 CREATE INDEX IF NOT EXISTS idx_mr_to   ON memory_relationships(to_id);
 CREATE INDEX IF NOT EXISTS idx_mr_rel_type ON memory_relationships(relationship_type);
+-- Unique edge (SQLite migration 039): the arbiter for memory_link_impl's
+-- idempotent ON CONFLICT (from_id, to_id, relationship_type) DO NOTHING.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mr_unique_edge
+    ON memory_relationships(from_id, to_id, relationship_type);
 
 -- =====================================================
 -- schema_versions
