@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Collection
 
 from . import config
+from .backends import active_backend
 from .config import EMBED_DIM, ENTITY_SEED_STOPLIST
 from .db import _db
 from .embed import _embed
@@ -56,11 +57,12 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
             seen_for_fetch: set = set(seed_ids)
             frontier: set = set(seed_ids)
             with _db() as db:
+                _d = active_backend().dialect()
                 for _ in range(depth):
                     if not frontier:
                         break
                     frontier_list = list(frontier)
-                    placeholders = ",".join("?" * len(frontier_list))
+                    placeholders = _d.placeholder(len(frontier_list))
                     rows = db.execute(
                         f"SELECT from_id, to_id FROM memory_relationships "
                         f"WHERE from_id IN ({placeholders}) "
@@ -90,11 +92,12 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
     seen: set = set(seed_ids)
     frontier = set(seed_ids)
     with _db() as db:
+        _d = active_backend().dialect()
         for _ in range(depth):
             if not frontier:
                 break
             frontier_list = list(frontier)
-            placeholders = ",".join("?" * len(frontier_list))
+            placeholders = _d.placeholder(len(frontier_list))
             rows = db.execute(
                 f"SELECT to_id AS nid FROM memory_relationships "
                 f"WHERE from_id IN ({placeholders}) "
@@ -130,17 +133,19 @@ def _session_neighbor_ids(seed_ids: list, session_cap: int = 12,
     """
     if not seed_ids:
         return {}
+    _d = active_backend().dialect()
+    p = _d.param()
     _tenancy_sql = ""
     _tenancy_params: list = []
     if user_id:
-        _tenancy_sql += " AND user_id = ?"
+        _tenancy_sql += f" AND user_id = {p}"
         _tenancy_params.append(user_id)
     if scope:
-        _tenancy_sql += " AND scope = ?"
+        _tenancy_sql += f" AND scope = {p}"
         _tenancy_params.append(scope)
     out: dict = {}
     with _db() as db:
-        placeholders = ",".join(["?"] * len(seed_ids))
+        placeholders = _d.placeholder(len(seed_ids))
         seed_rows = db.execute(
             f"SELECT id, conversation_id FROM memory_items WHERE id IN ({placeholders})",
             seed_ids,
@@ -156,9 +161,9 @@ def _session_neighbor_ids(seed_ids: list, session_cap: int = 12,
             rows = db.execute(
                 "SELECT id, type, title, content, metadata_json, conversation_id, "
                 "valid_from, user_id FROM memory_items "
-                "WHERE conversation_id = ? AND COALESCE(is_deleted, 0) = 0"
+                f"WHERE conversation_id = {p} AND COALESCE(is_deleted, 0) = 0"
                 f"{_tenancy_sql} "
-                "ORDER BY valid_from LIMIT ?",
+                f"ORDER BY valid_from LIMIT {p}",
                 (cid, *_tenancy_params, cap),
             ).fetchall()
             for r in rows:
@@ -199,6 +204,9 @@ async def _entity_graph_neighbor_ids(
     """
     if not query or not query.strip():
         return set()
+
+    _d = active_backend().dialect()
+    p = _d.param()
 
     # Clamp to safe limits (mirrors memory_graph_impl clamp for depth)
     depth = min(int(depth), 3)
@@ -242,7 +250,7 @@ async def _entity_graph_neighbor_ids(
     _stop_clause = ""
     _stop_params: list = []
     if _stoplist_lower:
-        _stop_ph = ",".join(["?"] * len(_stoplist_lower))
+        _stop_ph = _d.placeholder(len(_stoplist_lower))
         _stop_clause = f" AND LOWER(canonical_name) NOT IN ({_stop_ph})"
         _stop_params = list(_stoplist_lower)
 
@@ -252,7 +260,7 @@ async def _entity_graph_neighbor_ids(
     if _stoplist_lower:
         try:
             sl_rows = db.execute(
-                f"SELECT id FROM entities WHERE LOWER(canonical_name) IN ({','.join(['?']*len(_stoplist_lower))})",
+                f"SELECT id FROM entities WHERE LOWER(canonical_name) IN ({_d.placeholder(len(_stoplist_lower))})",
                 list(_stoplist_lower),
             ).fetchall()
             _stoplisted_eids = {r["id"] for r in sl_rows}
@@ -263,7 +271,7 @@ async def _entity_graph_neighbor_ids(
     _type_clause = ""
     _type_params: list = []
     if valid_types:
-        _type_ph = ",".join(["?"] * len(valid_types))
+        _type_ph = _d.placeholder(len(valid_types))
         _type_clause = f" AND entity_type IN ({_type_ph})"
         _type_params = list(valid_types)
 
@@ -283,7 +291,7 @@ async def _entity_graph_neighbor_ids(
     # candidates resolved so we know which need the Tier-2 LIKE fallback.
     resolved_cands: set[str] = set()
     try:
-        cand_ph = ",".join("?" * len(candidates))
+        cand_ph = _d.placeholder(len(candidates))
         tier1_rows = db.execute(
             f"SELECT id, canonical_name FROM entities "
             f"WHERE canonical_name IN ({cand_ph}){_type_clause}{_stop_clause}",
@@ -302,7 +310,7 @@ async def _entity_graph_neighbor_ids(
             continue
         try:
             rows = db.execute(
-                f"SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER(?){_type_clause}{_stop_clause} LIMIT 5",
+                f"SELECT id FROM entities WHERE LOWER(canonical_name) LIKE LOWER({p}){_type_clause}{_stop_clause} LIMIT 5",
                 [f"%{candidate}%"] + _type_params + _stop_params,
             ).fetchall()
             for r in rows:
@@ -321,7 +329,7 @@ async def _entity_graph_neighbor_ids(
     _pred_clause = ""
     _pred_params: list = []
     if valid_predicates:
-        _pred_ph = ",".join(["?"] * len(valid_predicates))
+        _pred_ph = _d.placeholder(len(valid_predicates))
         _pred_clause = f" AND predicate IN ({_pred_ph})"
         _pred_params = list(valid_predicates)
 
@@ -336,7 +344,7 @@ async def _entity_graph_neighbor_ids(
         if not frontier or len(seen_entities) >= max_neighbors:
             break
         frontier_list = list(frontier)
-        placeholders = ",".join("?" * len(frontier_list))
+        placeholders = _d.placeholder(len(frontier_list))
         try:
             rel_rows = db.execute(
                 f"SELECT to_entity AS neighbor FROM entity_relationships "
@@ -369,7 +377,7 @@ async def _entity_graph_neighbor_ids(
     if not seen_entities:
         return set()
     try:
-        placeholders = ",".join(["?"] * len(seen_entities))
+        placeholders = _d.placeholder(len(seen_entities))
         mie_rows = db.execute(
             f"SELECT DISTINCT memory_id FROM memory_item_entities "
             f"WHERE entity_id IN ({placeholders})",
@@ -397,8 +405,9 @@ async def _score_extra_rows(query: str, rows_by_id: dict, base_score: float = 0.
             out.append((base_score, item))
         return out
     with _db() as db:
+        _d = active_backend().dialect()
         ids = list(rows_by_id.keys())
-        placeholders = ",".join("?" * len(ids))
+        placeholders = _d.placeholder(len(ids))
         emb_rows = db.execute(
             f"SELECT memory_id, embedding FROM memory_embeddings "
             f"WHERE memory_id IN ({placeholders})",
@@ -422,20 +431,22 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
     """Returns the local graph neighborhood of a memory item up to N hops."""
     depth = min(max(int(depth), 1), 3)  # Clamp to 1-3
     with _db() as db:
+        _d = active_backend().dialect()
+        p = _d.param()
         # Verify item exists
-        root = db.execute("SELECT id, title, type FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
+        root = db.execute(f"SELECT id, title, type FROM memory_items WHERE id = {p}", (memory_id,)).fetchone()
         if not root:
             return f"Error: memory {memory_id} not found"
 
         # Recursive CTE to traverse relationships up to `depth` hops
-        rows = db.execute("""
+        rows = db.execute(f"""
             WITH RECURSIVE graph(node_id, hop) AS (
-                SELECT ?, 0
+                SELECT {p}, 0
                 UNION ALL
                 SELECT CASE WHEN mr.from_id = g.node_id THEN mr.to_id ELSE mr.from_id END, g.hop + 1
                 FROM memory_relationships mr
                 JOIN graph g ON (mr.from_id = g.node_id OR mr.to_id = g.node_id)
-                WHERE g.hop < ?
+                WHERE g.hop < {p}
             )
             SELECT DISTINCT mi.id, mi.title, mi.type, g.hop
             FROM graph g
@@ -448,7 +459,7 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
         node_ids = [r["id"] for r in rows]
         if not node_ids:
             return f"No graph neighborhood for {memory_id}"
-        placeholders = ",".join(["?"] * len(node_ids))
+        placeholders = _d.placeholder(len(node_ids))
         edges = db.execute(
             f"SELECT from_id, to_id, relationship_type FROM memory_relationships "
             f"WHERE from_id IN ({placeholders}) OR to_id IN ({placeholders})",
@@ -488,10 +499,14 @@ def _neighbor_session_ids(seed_ids: list, window: int, cap_per_session: int = 12
     out: dict = {}
     seed_set = set(seed_ids)
     with _db() as db:
-        placeholders = ",".join(["?"] * len(seed_ids))
+        _d = active_backend().dialect()
+        p = _d.param()
+        _sidx_expr = _d.json_extract_int("metadata_json", "session_idx")
+        _turn_expr = _d.json_extract_int("metadata_json", "turn_idx")
+        placeholders = _d.placeholder(len(seed_ids))
         seed_rows = db.execute(
             f"SELECT id, conversation_id, "
-            f"  CAST(json_extract(metadata_json, '$.session_idx') AS INTEGER) AS sidx "
+            f"  {_sidx_expr} AS sidx "
             f"FROM memory_items WHERE id IN ({placeholders})",
             seed_ids,
         ).fetchall()
@@ -512,11 +527,11 @@ def _neighbor_session_ids(seed_ids: list, window: int, cap_per_session: int = 12
             rows = db.execute(
                 "SELECT id, type, title, content, metadata_json, conversation_id, "
                 "valid_from, user_id FROM memory_items "
-                "WHERE conversation_id = ? "
-                "  AND CAST(json_extract(metadata_json, '$.session_idx') AS INTEGER) = ? "
+                f"WHERE conversation_id = {p} "
+                f"  AND {_sidx_expr} = {p} "
                 "  AND COALESCE(is_deleted, 0) = 0 "
-                "ORDER BY CAST(json_extract(metadata_json, '$.turn_idx') AS INTEGER) "
-                "LIMIT ?",
+                f"ORDER BY {_turn_expr} "
+                f"LIMIT {p}",
                 (cid, sidx, cap),
             ).fetchall()
             for r in rows:

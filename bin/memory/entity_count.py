@@ -8,7 +8,8 @@ Three impls expose direct-SQL aggregation over the entity-graph tables:
 
 All three are scoped to a single `conversation_id` (mandatory).
 Cross-conversation scans are not supported — every query is bottom-anchored
-to `WHERE mi.conversation_id = ?` at the SQL level. This is the privacy /
+to a `WHERE mi.conversation_id = <bind>` clause at the SQL level (the bind
+placeholder is backend-dialected). This is the privacy /
 multi-tenancy invariant the rest of m3-memory relies on.
 
 ## Why these exist
@@ -60,6 +61,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .backends import active_backend
 from .db import _db
 
 # ── Module limits ────────────────────────────────────────────────────────────
@@ -143,15 +145,17 @@ def count_entities_impl(
     cid = _require_conversation_id(conversation_id)
     pat = _validate_pattern(pattern)
     etype = (entity_type or "").strip()
+    _d = active_backend().dialect()
+    p = _d.param()
 
-    where_parts = ["mi.conversation_id = ?"]
+    where_parts = [f"mi.conversation_id = {p}"]
     params: list[Any] = [cid]
 
     if etype:
-        where_parts.append("e.entity_type = ?")
+        where_parts.append(f"e.entity_type = {p}")
         params.append(etype)
     if pat:
-        where_parts.append("e.canonical_name LIKE ?")
+        where_parts.append(f"e.canonical_name LIKE {p}")
         params.append(f"%{pat}%")
 
     sql = (
@@ -211,15 +215,17 @@ def count_mentions_impl(
     pat = _validate_pattern(pattern)
     etype = (entity_type or "").strip()
     lim = _validate_limit(limit)
+    _d = active_backend().dialect()
+    p = _d.param()
 
-    where_parts = ["mi.conversation_id = ?"]
+    where_parts = [f"mi.conversation_id = {p}"]
     params: list[Any] = [cid]
 
     if etype:
-        where_parts.append("e.entity_type = ?")
+        where_parts.append(f"e.entity_type = {p}")
         params.append(etype)
     if pat:
-        where_parts.append("e.canonical_name LIKE ?")
+        where_parts.append(f"e.canonical_name LIKE {p}")
         params.append(f"%{pat}%")
 
     where_clause = " AND ".join(where_parts)
@@ -232,7 +238,7 @@ def count_mentions_impl(
         f"WHERE {where_clause} "
         "GROUP BY e.id, e.canonical_name, e.entity_type "
         "ORDER BY mc DESC, e.canonical_name ASC "
-        "LIMIT ?"
+        f"LIMIT {p}"
     )
     count_sql = (
         "SELECT COUNT(DISTINCT e.id) "
@@ -316,26 +322,30 @@ def list_mentions_impl(
     resolved_cname = ""
     resolved_etype = ""
 
+    _d = active_backend().dialect()
+    p = _d.param()
+    ci_name = _d.ci_equals("canonical_name", p)
+
     with _db() as db:
         # Resolve to a concrete entity row first; cheaper than joining
         # canonical_name against every mention row.
         if eid_in:
             row = db.execute(
-                "SELECT id, canonical_name, entity_type FROM entities WHERE id = ?",
+                f"SELECT id, canonical_name, entity_type FROM entities WHERE id = {p}",
                 (eid_in,),
             ).fetchone()
         else:
             if etype_in:
                 row = db.execute(
                     "SELECT id, canonical_name, entity_type FROM entities "
-                    "WHERE canonical_name = ? COLLATE NOCASE AND entity_type = ? "
+                    f"WHERE {ci_name} AND entity_type = {p} "
                     "ORDER BY canonical_name LIMIT 1",
                     (cname_in, etype_in),
                 ).fetchone()
             else:
                 row = db.execute(
                     "SELECT id, canonical_name, entity_type FROM entities "
-                    "WHERE canonical_name = ? COLLATE NOCASE "
+                    f"WHERE {ci_name} "
                     "ORDER BY canonical_name LIMIT 1",
                     (cname_in,),
                 ).fetchone()
@@ -358,7 +368,7 @@ def list_mentions_impl(
             "SELECT COUNT(DISTINCT mie.memory_id) "
             "FROM memory_item_entities mie "
             "JOIN memory_items mi ON mie.memory_id = mi.id "
-            "WHERE mie.entity_id = ? AND mi.conversation_id = ?",
+            f"WHERE mie.entity_id = {p} AND mi.conversation_id = {p}",
             (resolved_id, cid),
         ).fetchone()
         total = int(total_row[0]) if total_row and total_row[0] is not None else 0
@@ -367,9 +377,9 @@ def list_mentions_impl(
             "SELECT DISTINCT mie.memory_id "
             "FROM memory_item_entities mie "
             "JOIN memory_items mi ON mie.memory_id = mi.id "
-            "WHERE mie.entity_id = ? AND mi.conversation_id = ? "
+            f"WHERE mie.entity_id = {p} AND mi.conversation_id = {p} "
             "ORDER BY mie.memory_id "
-            "LIMIT ?",
+            f"LIMIT {p}",
             (resolved_id, cid, lim),
         ).fetchall()
         memory_ids = [r[0] for r in mem_rows]

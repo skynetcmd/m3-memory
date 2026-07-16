@@ -261,6 +261,163 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_corrob_memory_source
     WHERE delta > 0;
 
 -- =====================================================
+-- entities + entity graph (SQLite migration 024)
+-- =====================================================
+-- The entity-relation graph: canonical entities, memory<->entity mention links,
+-- typed entity<->entity edges, and the extraction work queue. Translated from
+-- 024_entity_graph.up.sql — AUTOINCREMENT -> GENERATED ALWAYS AS IDENTITY,
+-- TEXT timestamps -> TIMESTAMPTZ, TEXT '{}' -> JSONB, REAL -> DOUBLE PRECISION.
+
+CREATE TABLE IF NOT EXISTS entities (
+    id              TEXT PRIMARY KEY,
+    canonical_name  TEXT NOT NULL,
+    entity_type     TEXT NOT NULL,
+    attributes_json JSONB DEFAULT '{}',
+    valid_from      TIMESTAMPTZ,
+    valid_to        TIMESTAMPTZ,
+    content_hash    TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_entities_canonical_type ON entities(canonical_name, entity_type);
+CREATE INDEX IF NOT EXISTS idx_entities_type           ON entities(entity_type);
+CREATE INDEX IF NOT EXISTS idx_entities_hash           ON entities(content_hash);
+
+CREATE TABLE IF NOT EXISTS memory_item_entities (
+    memory_id       TEXT NOT NULL,
+    entity_id       TEXT NOT NULL,
+    mention_text    TEXT,
+    mention_offset  INTEGER DEFAULT 0,
+    confidence      DOUBLE PRECISION DEFAULT 0.85,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (memory_id, entity_id, mention_offset),
+    FOREIGN KEY (memory_id) REFERENCES memory_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (entity_id) REFERENCES entities(id)     ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mie_entity ON memory_item_entities(entity_id);
+
+CREATE TABLE IF NOT EXISTS entity_relationships (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    from_entity      TEXT NOT NULL,
+    to_entity        TEXT NOT NULL,
+    predicate        TEXT NOT NULL,
+    confidence       DOUBLE PRECISION DEFAULT 0.85,
+    valid_from       TIMESTAMPTZ,
+    valid_to         TIMESTAMPTZ,
+    source_memory_id TEXT,
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    FOREIGN KEY (from_entity)      REFERENCES entities(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_entity)        REFERENCES entities(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_memory_id) REFERENCES memory_items(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_er_from      ON entity_relationships(from_entity, predicate);
+CREATE INDEX IF NOT EXISTS idx_er_to        ON entity_relationships(to_entity, predicate);
+CREATE INDEX IF NOT EXISTS idx_er_predicate ON entity_relationships(predicate);
+
+CREATE TABLE IF NOT EXISTS entity_extraction_queue (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    memory_id       TEXT NOT NULL,
+    enqueued_at     TIMESTAMPTZ DEFAULT NOW(),
+    attempts        INTEGER DEFAULT 0,
+    last_error      TEXT,
+    last_attempt_at TIMESTAMPTZ,
+    FOREIGN KEY (memory_id) REFERENCES memory_items(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_eeq_memory_id ON entity_extraction_queue(memory_id);
+CREATE INDEX IF NOT EXISTS idx_eeq_attempts ON entity_extraction_queue(attempts, enqueued_at);
+
+-- =====================================================
+-- entity_embeddings (SQLite migration 032)
+-- =====================================================
+-- Store-once entity-name vectors for Tier-3 cosine resolution. BLOB -> BYTEA
+-- (packed float32, scored by the DB-blind Rust cosine, same as memory_embeddings).
+
+CREATE TABLE IF NOT EXISTS entity_embeddings (
+    entity_id   TEXT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+    embedding   BYTEA NOT NULL,
+    embed_model TEXT,
+    dim         INTEGER,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =====================================================
+-- fact_enrichment_queue (SQLite migration 023)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS fact_enrichment_queue (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    memory_id       TEXT NOT NULL,
+    enqueued_at     TIMESTAMPTZ DEFAULT NOW(),
+    attempts        INTEGER DEFAULT 0,
+    last_error      TEXT,
+    last_attempt_at TIMESTAMPTZ,
+    FOREIGN KEY (memory_id) REFERENCES memory_items(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feq_memory_id ON fact_enrichment_queue(memory_id);
+CREATE INDEX IF NOT EXISTS idx_feq_attempts ON fact_enrichment_queue(attempts, enqueued_at);
+
+-- =====================================================
+-- notifications + tasks (SQLite migration 012 orchestration)
+-- =====================================================
+-- (The agents table from 012 already exists above with a superset of columns —
+-- role/status/capabilities/last_seen plus trust_score — so it is not repeated.)
+-- notifications.id is read back via RETURNING on PG (no last_insert_rowid()).
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_id       TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    payload_json   JSONB DEFAULT '{}',
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    read_at        TIMESTAMPTZ DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notif_agent_unread
+    ON notifications(agent_id, read_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_notif_agent_kind
+    ON notifications(agent_id, kind, read_at);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id                 TEXT PRIMARY KEY,
+    title              TEXT NOT NULL,
+    description        TEXT DEFAULT '',
+    state              TEXT NOT NULL DEFAULT 'pending',
+    owner_agent        TEXT DEFAULT NULL,
+    created_by         TEXT NOT NULL,
+    parent_task_id     TEXT DEFAULT NULL,
+    result_memory_id   TEXT DEFAULT NULL,
+    metadata_json      JSONB DEFAULT '{}',
+    created_at         TIMESTAMPTZ DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ DEFAULT NOW(),
+    completed_at       TIMESTAMPTZ DEFAULT NULL,
+    deleted_at         TIMESTAMPTZ DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_owner_state ON tasks(owner_agent, state);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks(parent_task_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_state       ON tasks(state);
+CREATE INDEX IF NOT EXISTS idx_tasks_created_by  ON tasks(created_by);
+CREATE INDEX IF NOT EXISTS idx_tasks_deleted_at  ON tasks(deleted_at);
+
+-- =====================================================
+-- bypass_surface (SQLite migration 033)
+-- =====================================================
+-- Materialized rank-independent recall surface (ADR-0001). Rebuildable from
+-- entities + observations via bin/memory/entity.build_bypass_surface().
+
+CREATE TABLE IF NOT EXISTS bypass_surface (
+    conversation_id TEXT NOT NULL,
+    memory_id       TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+    source          TEXT NOT NULL,
+    strategy        TEXT,
+    user_id         TEXT,
+    scope           TEXT NOT NULL DEFAULT 'agent',
+    cap             INTEGER,
+    built_at        TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (conversation_id, memory_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bypass_surface_scope
+    ON bypass_surface(conversation_id, scope, user_id);
+
+-- =====================================================
 -- schema_versions
 -- =====================================================
 

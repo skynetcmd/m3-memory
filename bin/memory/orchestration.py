@@ -27,6 +27,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from .backends import active_backend
 from .db import _db, _record_history
 
 logger = logging.getLogger("memory_core")
@@ -60,7 +61,8 @@ def _validate_task_transition(prev: str, new: str):
 def _agent_exists(agent_id: str) -> bool:
     """Checks if an agent is registered in the agents table."""
     with _db() as db:
-        row = db.execute("SELECT 1 FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+        p = active_backend().dialect().param()
+        row = db.execute(f"SELECT 1 FROM agents WHERE agent_id = {p}", (agent_id,)).fetchone()
         return row is not None
 
 # ── Agent Registry (5 functions) ──────────────────────────────────────────────────
@@ -75,9 +77,10 @@ def agent_register_impl(agent_id: str, role: str, capabilities: list, metadata: 
     meta_json = json.dumps(metadata or {})
 
     with _db() as db:
+        p = active_backend().dialect().param()
         db.execute(
-            """INSERT INTO agents (agent_id, role, capabilities, metadata_json, status, last_seen, created_at)
-               VALUES (?, ?, ?, ?, 'active', ?, ?)
+            f"""INSERT INTO agents (agent_id, role, capabilities, metadata_json, status, last_seen, created_at)
+               VALUES ({p}, {p}, {p}, {p}, 'active', {p}, {p})
                ON CONFLICT(agent_id) DO UPDATE SET
                  role=excluded.role,
                  capabilities=excluded.capabilities,
@@ -95,8 +98,9 @@ def agent_heartbeat_impl(agent_id: str) -> str:
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
+        p = active_backend().dialect().param()
         cur = db.execute(
-            "UPDATE agents SET last_seen = ?, status = 'active' WHERE agent_id = ?",
+            f"UPDATE agents SET last_seen = {p}, status = 'active' WHERE agent_id = {p}",
             (now, agent_id)
         )
         rowcount = cur.rowcount
@@ -110,12 +114,13 @@ def agent_list_impl(status: str = "", role: str = "") -> str:
     """Lists agents, optionally filtered by status and/or role."""
     where_clauses = []
     params = []
+    p = active_backend().dialect().param()
 
     if status:
-        where_clauses.append("status = ?")
+        where_clauses.append(f"status = {p}")
         params.append(status)
     if role:
-        where_clauses.append("role = ?")
+        where_clauses.append(f"role = {p}")
         params.append(role)
 
     where = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
@@ -138,8 +143,9 @@ def agent_list_impl(status: str = "", role: str = "") -> str:
 def agent_get_impl(agent_id: str) -> str:
     """Retrieves detailed information about a single agent."""
     with _db() as db:
+        p = active_backend().dialect().param()
         row = db.execute(
-            "SELECT * FROM agents WHERE agent_id = ?",
+            f"SELECT * FROM agents WHERE agent_id = {p}",
             (agent_id,)
         ).fetchone()
 
@@ -187,8 +193,9 @@ def agent_set_trust_impl(agent_id: str, trust_score: float) -> str:
 def agent_offline_impl(agent_id: str) -> str:
     """Marks an agent as offline."""
     with _db() as db:
+        p = active_backend().dialect().param()
         cur = db.execute(
-            "UPDATE agents SET status = 'offline' WHERE agent_id = ?",
+            f"UPDATE agents SET status = 'offline' WHERE agent_id = {p}",
             (agent_id,)
         )
         rowcount = cur.rowcount
@@ -207,20 +214,32 @@ def notify_impl(agent_id: str, kind: str, payload: dict = None) -> str:
     payload_json = json.dumps(payload or {})
 
     with _db() as db:
-        db.execute(
-            "INSERT INTO notifications (agent_id, kind, payload_json, created_at) VALUES (?, ?, ?, ?)",
-            (agent_id, kind, payload_json, now)
-        )
-        # Get the ID of the newly inserted row
-        new_id = db.execute(
-            "SELECT last_insert_rowid() as id"
-        ).fetchone()["id"]
+        _d = active_backend().dialect()
+        ph = _d.placeholder(4)
+        if active_backend().name == "postgres":
+            # PG has no last_insert_rowid(); RETURNING is the portable way to read
+            # the generated IDENTITY id in the same round-trip.
+            new_id = db.execute(
+                f"INSERT INTO notifications (agent_id, kind, payload_json, created_at) "
+                f"VALUES ({ph}) RETURNING id",
+                (agent_id, kind, payload_json, now)
+            ).fetchone()["id"]
+        else:
+            db.execute(
+                f"INSERT INTO notifications (agent_id, kind, payload_json, created_at) VALUES ({ph})",
+                (agent_id, kind, payload_json, now)
+            )
+            # Get the ID of the newly inserted row (SQLite last_insert_rowid()).
+            new_id = db.execute(
+                "SELECT last_insert_rowid() as id"
+            ).fetchone()["id"]
 
     return f"Notified {agent_id}: {kind} (id={new_id})"
 
 def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int = 20) -> str:
     """Retrieves notifications for an agent."""
-    where_clause = "WHERE agent_id = ?"
+    p = active_backend().dialect().param()
+    where_clause = f"WHERE agent_id = {p}"
     params = [agent_id]
 
     if unread_only:
@@ -228,7 +247,7 @@ def notifications_poll_impl(agent_id: str, unread_only: bool = True, limit: int 
 
     with _db() as db:
         rows = db.execute(
-            f"SELECT id, kind, payload_json, created_at, read_at FROM notifications {where_clause} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT id, kind, payload_json, created_at, read_at FROM notifications {where_clause} ORDER BY created_at DESC LIMIT {p}",
             params + [limit]
         ).fetchall()
 
@@ -247,8 +266,9 @@ def notifications_ack_impl(notification_id: int) -> str:
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
+        p = active_backend().dialect().param()
         cur = db.execute(
-            "UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL",
+            f"UPDATE notifications SET read_at = {p} WHERE id = {p} AND read_at IS NULL",
             (now, notification_id)
         )
         rowcount = cur.rowcount
@@ -263,8 +283,9 @@ def notifications_ack_all_impl(agent_id: str) -> str:
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
+        p = active_backend().dialect().param()
         cur = db.execute(
-            "UPDATE notifications SET read_at = ? WHERE agent_id = ? AND read_at IS NULL",
+            f"UPDATE notifications SET read_at = {p} WHERE agent_id = {p} AND read_at IS NULL",
             (now, agent_id)
         )
         rowcount = cur.rowcount
@@ -284,9 +305,10 @@ def task_create_impl(title: str, created_by: str, description: str = "", owner_a
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
+        p = active_backend().dialect().param()
         db.execute(
-            """INSERT INTO tasks (id, title, description, state, created_by, owner_agent, parent_task_id, metadata_json, created_at, updated_at)
-               VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)""",
+            f"""INSERT INTO tasks (id, title, description, state, created_by, owner_agent, parent_task_id, metadata_json, created_at, updated_at)
+               VALUES ({p}, {p}, {p}, 'pending', {p}, {p}, {p}, {p}, {p}, {p})""",
             (task_id, title, description, created_by, owner_agent or None, parent_task_id or None, json.dumps(metadata or {}), now, now)
         )
 
@@ -295,8 +317,9 @@ def task_create_impl(title: str, created_by: str, description: str = "", owner_a
 def task_assign_impl(task_id: str, owner_agent: str) -> str:
     """Assigns a task to an agent and transitions state to in_progress."""
     with _db() as db:
+        p = active_backend().dialect().param()
         row = db.execute(
-            "SELECT state, created_by FROM tasks WHERE id = ? AND deleted_at IS NULL",
+            f"SELECT state, created_by FROM tasks WHERE id = {p} AND deleted_at IS NULL",
             (task_id,)
         ).fetchone()
 
@@ -311,8 +334,9 @@ def task_assign_impl(task_id: str, owner_agent: str) -> str:
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
+        p = active_backend().dialect().param()
         db.execute(
-            "UPDATE tasks SET owner_agent = ?, state = 'in_progress', updated_at = ? WHERE id = ?",
+            f"UPDATE tasks SET owner_agent = {p}, state = 'in_progress', updated_at = {p} WHERE id = {p}",
             (owner_agent, now, task_id)
         )
 
@@ -328,9 +352,10 @@ def task_assign_impl(task_id: str, owner_agent: str) -> str:
 
 def task_update_impl(task_id: str, state: str = "", description: str = "", metadata: dict = None, actor: str = "") -> str:
     """Updates a task's state, description, and/or metadata."""
+    p = active_backend().dialect().param()
     with _db() as db:
         row = db.execute(
-            "SELECT state, description, metadata_json, created_by FROM tasks WHERE id = ? AND deleted_at IS NULL",
+            f"SELECT state, description, metadata_json, created_by FROM tasks WHERE id = {p} AND deleted_at IS NULL",
             (task_id,)
         ).fetchone()
 
@@ -346,30 +371,30 @@ def task_update_impl(task_id: str, state: str = "", description: str = "", metad
             return err
 
     now = datetime.now(timezone.utc).isoformat()
-    updates = ["updated_at = ?"]
+    updates = [f"updated_at = {p}"]
     params = [now]
 
     if state:
-        updates.append("state = ?")
+        updates.append(f"state = {p}")
         params.append(new_state)
 
     if description:
-        updates.append("description = ?")
+        updates.append(f"description = {p}")
         params.append(description)
 
     if metadata is not None:
-        updates.append("metadata_json = ?")
+        updates.append(f"metadata_json = {p}")
         params.append(json.dumps(metadata))
 
     if new_state in TERMINAL_TASK_STATES:
-        updates.append("completed_at = ?")
+        updates.append(f"completed_at = {p}")
         params.append(now)
 
     params.append(task_id)
 
     with _db() as db:
         db.execute(
-            f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?",
+            f"UPDATE tasks SET {', '.join(updates)} WHERE id = {p}",
             params
         )
 
@@ -392,8 +417,9 @@ def task_set_result_impl(task_id: str, result_memory_id: str) -> str:
     now = datetime.now(timezone.utc).isoformat()
 
     with _db() as db:
+        p = active_backend().dialect().param()
         cur = db.execute(
-            "UPDATE tasks SET result_memory_id = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+            f"UPDATE tasks SET result_memory_id = {p}, updated_at = {p} WHERE id = {p} AND deleted_at IS NULL",
             (result_memory_id, now, task_id)
         )
         rowcount = cur.rowcount
@@ -405,7 +431,8 @@ def task_set_result_impl(task_id: str, result_memory_id: str) -> str:
 
 def task_get_impl(task_id: str, include_deleted: bool = False) -> str:
     """Retrieves detailed information about a task."""
-    sql = "SELECT * FROM tasks WHERE id = ?"
+    p = active_backend().dialect().param()
+    sql = f"SELECT * FROM tasks WHERE id = {p}"
     if not include_deleted:
         sql += " AND deleted_at IS NULL"
     with _db() as db:
@@ -445,8 +472,9 @@ def task_delete_impl(task_id: str, hard: bool = False, actor: str = "") -> str:
     """
     now = datetime.now(timezone.utc).isoformat()
     with _db() as db:
+        p = active_backend().dialect().param()
         row = db.execute(
-            "SELECT state, deleted_at FROM tasks WHERE id = ?",
+            f"SELECT state, deleted_at FROM tasks WHERE id = {p}",
             (task_id,)
         ).fetchone()
 
@@ -459,7 +487,7 @@ def task_delete_impl(task_id: str, hard: bool = False, actor: str = "") -> str:
                     f"Error: task '{task_id}' must be soft-deleted before hard-delete. "
                     "Call task_delete with hard=False first."
                 )
-            db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+            db.execute(f"DELETE FROM tasks WHERE id = {p}", (task_id,))
             _record_history(task_id, "task_deleted", row["state"], "hard_deleted", "deleted_at", actor or "system")
             return f"Task {task_id} hard-deleted"
 
@@ -467,7 +495,7 @@ def task_delete_impl(task_id: str, hard: bool = False, actor: str = "") -> str:
             return f"Task {task_id} already soft-deleted at {row['deleted_at']}"
 
         db.execute(
-            "UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ?",
+            f"UPDATE tasks SET deleted_at = {p}, updated_at = {p} WHERE id = {p}",
             (now, now, task_id)
         )
 
@@ -478,24 +506,25 @@ def task_list_impl(owner_agent: str = "", state: str = "", parent_task_id: str =
     """Lists tasks, optionally filtered by owner, state, and/or parent."""
     where_clauses = []
     params = []
+    p = active_backend().dialect().param()
 
     if not include_deleted:
         where_clauses.append("deleted_at IS NULL")
     if owner_agent:
-        where_clauses.append("owner_agent = ?")
+        where_clauses.append(f"owner_agent = {p}")
         params.append(owner_agent)
     if state:
-        where_clauses.append("state = ?")
+        where_clauses.append(f"state = {p}")
         params.append(state)
     if parent_task_id:
-        where_clauses.append("parent_task_id = ?")
+        where_clauses.append(f"parent_task_id = {p}")
         params.append(parent_task_id)
 
     where = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
     with _db() as db:
         rows = db.execute(
-            f"SELECT id, title, state, owner_agent FROM tasks {where} ORDER BY updated_at DESC LIMIT ?",
+            f"SELECT id, title, state, owner_agent FROM tasks {where} ORDER BY updated_at DESC LIMIT {p}",
             params + [limit]
         ).fetchall()
 
@@ -513,8 +542,9 @@ def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
     max_depth = max(1, min(max_depth, 20))
 
     with _db() as db:
+        p = active_backend().dialect().param()
         row = db.execute(
-            "SELECT id, title, state, owner_agent FROM tasks WHERE id = ? AND deleted_at IS NULL",
+            f"SELECT id, title, state, owner_agent FROM tasks WHERE id = {p} AND deleted_at IS NULL",
             (root_task_id,)
         ).fetchone()
 
@@ -522,13 +552,13 @@ def task_tree_impl(root_task_id: str, max_depth: int = 10) -> str:
             return f"Error: task '{root_task_id}' not found"
 
         rows = db.execute(
-            """WITH RECURSIVE subtree(id, title, state, owner_agent, parent_task_id, depth) AS (
+            f"""WITH RECURSIVE subtree(id, title, state, owner_agent, parent_task_id, depth) AS (
                 SELECT id, title, state, owner_agent, parent_task_id, 0
-                  FROM tasks WHERE id = ? AND deleted_at IS NULL
+                  FROM tasks WHERE id = {p} AND deleted_at IS NULL
                 UNION ALL
                 SELECT t.id, t.title, t.state, t.owner_agent, t.parent_task_id, s.depth + 1
                   FROM tasks t JOIN subtree s ON t.parent_task_id = s.id
-                 WHERE s.depth + 1 <= ? AND t.deleted_at IS NULL
+                 WHERE s.depth + 1 <= {p} AND t.deleted_at IS NULL
             )
             SELECT * FROM subtree ORDER BY depth, id""",
             (root_task_id, max_depth)

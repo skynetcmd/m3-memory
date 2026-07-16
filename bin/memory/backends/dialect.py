@@ -233,6 +233,31 @@ class Dialect:
         return f"COALESCE({column}, {fill_placeholder})"
 
     # -- introspection -------------------------------------------------------
+    def table_exists(self, table: str) -> tuple[str, tuple]:
+        """A (sql, params) pair whose result is truthy iff ``table`` exists.
+
+        Replaces the ``SELECT 1 FROM sqlite_master WHERE type='table' AND
+        name='t'`` probe (sqlite_master is a SQLite-only catalog). The query
+        returns exactly one row when the table is present, zero rows otherwise,
+        so the caller pattern is unchanged: ``db.execute(sql, params).fetchone()
+        is not None``.
+
+        SQLite:   ``SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?``
+        Postgres: ``SELECT 1 WHERE to_regclass(%s) IS NOT NULL`` (schema-qualified
+        name resolved against the search_path). ``table`` is a trusted identifier,
+        bound as a parameter on both backends.
+        """
+        if not table.isidentifier():
+            raise ValueError(f"table name must be a bare identifier: {table!r}")
+        if self.backend == "sqlite":
+            return (
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+                (table,),
+            )
+        # to_regclass returns NULL for a non-existent relation; the WHERE keeps the
+        # result shape (0 or 1 rows) identical to the sqlite probe above.
+        return ("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (table,))
+
     def columns_of(self, table: str) -> tuple[str, tuple]:
         """A (sql, params) pair listing a table's column names.
 

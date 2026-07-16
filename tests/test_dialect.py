@@ -191,6 +191,26 @@ class TestCoalesceOpenTimestamp:
         assert "NULLIF" not in got
 
 
+class TestTableExists:
+    def test_sqlite_uses_sqlite_master(self):
+        sql, params = SQLITE.table_exists("entity_embeddings")
+        assert sql == (
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?"
+        )
+        assert params == ("entity_embeddings",)
+
+    def test_postgres_uses_to_regclass_bound(self):
+        sql, params = POSTGRES.table_exists("entity_embeddings")
+        assert "to_regclass(%s)" in sql
+        assert "sqlite_master" not in sql
+        assert params == ("entity_embeddings",)
+
+    @pytest.mark.parametrize("d", [SQLITE, POSTGRES])
+    def test_rejects_quote(self, d: Dialect):
+        with pytest.raises(ValueError):
+            d.table_exists("t; DROP TABLE x")
+
+
 class TestIntrospection:
     def test_sqlite_uses_pragma_no_params(self):
         sql, params = SQLITE.columns_of("memory_items")

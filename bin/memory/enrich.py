@@ -372,11 +372,13 @@ async def _write_fact_rows(memory_id: str, facts: list[dict]) -> None:
         }
 
         try:
+            from memory.backends import active_backend
+            _d = active_backend().dialect()
             with _db() as db:
                 # Insert the fact row
                 db.execute(
                     "INSERT INTO memory_items (id, type, title, content, metadata_json, change_agent, source, origin_device, scope, created_at, content_hash) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    f"VALUES ({_d.placeholder(11)})",
                     (
                         fact_id,
                         "fact_enriched",
@@ -393,7 +395,7 @@ async def _write_fact_rows(memory_id: str, facts: list[dict]) -> None:
                 )
                 # Link via references edge: fact_id -> memory_id (from fact to source)
                 db.execute(
-                    "INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES (?,?,?,?,?)",
+                    f"INSERT INTO memory_relationships (id, from_id, to_id, relationship_type, created_at) VALUES ({_d.placeholder(5)})",
                     (
                         str(uuid.uuid4()),
                         fact_id,
@@ -416,9 +418,12 @@ def _select_pending_fact_enrichment(db, limit: int | None = None, allowed_varian
     When allowed_variants is provided, loosen the variant filter from strict NULL
     to (variant IS NULL OR variant IN (...)).
     """
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    p = _d.param()
     # Build the variant clause
     if allowed_variants:
-        variant_clause = f"AND (mi.variant IS NULL OR mi.variant IN ({','.join(['?'] * len(allowed_variants))}))"
+        variant_clause = f"AND (mi.variant IS NULL OR mi.variant IN ({_d.placeholder(len(allowed_variants))}))"
         variant_params = list(allowed_variants)
     else:
         variant_clause = "AND mi.variant IS NULL"
@@ -443,7 +448,7 @@ def _select_pending_fact_enrichment(db, limit: int | None = None, allowed_varian
         SELECT mi.id, mi.content, q.attempts
         FROM fact_enrichment_queue q
         JOIN memory_items mi ON mi.id = q.memory_id
-        WHERE q.attempts < ?
+        WHERE q.attempts < {p}
     )
     SELECT id, content FROM queued
     UNION

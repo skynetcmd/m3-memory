@@ -80,9 +80,11 @@ def _entity_embeddings_available(db) -> bool:
     predate migration 032 won't have it; callers fall back to the
     embed-each-candidate path so behavior is preserved everywhere."""
     try:
-        row = db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entity_embeddings'"
-        ).fetchone()
+        from memory.backends import active_backend
+
+        _d = active_backend().dialect()
+        _sql, _params = _d.table_exists("entity_embeddings")
+        row = db.execute(_sql, _params).fetchone()
         return row is not None
     except Exception:
         return False
@@ -94,12 +96,14 @@ def _load_entity_vectors(db, entity_ids: list[str]) -> dict[str, list[float]]:
     if not entity_ids:
         return {}
     from embedding_utils import unpack as _unpack
+    from memory.backends import active_backend
 
+    _d = active_backend().dialect()
     out: dict[str, list[float]] = {}
     # Chunk the IN-list to stay under SQLite's variable limit.
     for i in range(0, len(entity_ids), 500):
         chunk = entity_ids[i : i + 500]
-        ph = ",".join("?" * len(chunk))
+        ph = _d.placeholder(len(chunk))
         try:
             rows = db.execute(
                 f"SELECT entity_id, embedding FROM entity_embeddings WHERE entity_id IN ({ph})",
@@ -402,9 +406,13 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
     Tier 2: fuzzy token-Jaccard >= ENTITY_RESOLVE_FUZZY_MIN within same entity_type.
     Tier 3 (embedding cosine) is handled by the async variant _resolve_entity_async.
     """
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
     # Tier 1: exact match
     row = db.execute(
-        "SELECT id FROM entities WHERE canonical_name = ? AND entity_type = ? LIMIT 1",
+        f"SELECT id FROM entities WHERE canonical_name = {p} AND entity_type = {p} LIMIT 1",
         (canonical_name, entity_type),
     ).fetchone()
     if row:
@@ -412,7 +420,7 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
 
     # Tier 2: fuzzy token-Jaccard within same entity_type
     candidates = db.execute(
-        "SELECT id, canonical_name FROM entities WHERE entity_type = ?",
+        f"SELECT id, canonical_name FROM entities WHERE entity_type = {p}",
         (entity_type,),
     ).fetchall()
 
@@ -444,6 +452,10 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
 
 async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> str | None:
     """Full 3-tier resolution including embedding cosine. Use from async context."""
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
     sync_id = _resolve_entity(canonical_name, entity_type, db)
     if sync_id is not None:
         return sync_id
@@ -460,7 +472,7 @@ async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> st
     # candidate via the in-process cache — identical behavior to before
     # store-once.
     candidates = db.execute(
-        "SELECT id, canonical_name FROM entities WHERE entity_type = ? ORDER BY created_at DESC LIMIT 100",
+        f"SELECT id, canonical_name FROM entities WHERE entity_type = {p} ORDER BY created_at DESC LIMIT 100",
         (entity_type,),
     ).fetchall()
     if not candidates:
@@ -531,9 +543,12 @@ def _create_entity(canonical_name: str, entity_type: str, attributes: dict, db) 
     content_hash = _sha256_hex(
         f"{canonical_name}|{entity_type}|{attrs_json}".encode("utf-8")
     )
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
     db.execute(
         "INSERT INTO entities (id, canonical_name, entity_type, attributes_json, content_hash) "
-        "VALUES (?, ?, ?, ?, ?)",
+        f"VALUES ({_d.placeholder(5)})",
         (entity_id, canonical_name, entity_type, attrs_json, content_hash),
     )
     return entity_id
@@ -581,10 +596,13 @@ def _link_entity_relationship(
             f"Invalid predicate '{predicate}'. "
             f"Valid predicates: {', '.join(sorted(VALID_ENTITY_PREDICATES))}"
         )
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
     db.execute(
         "INSERT INTO entity_relationships "
         "(from_entity, to_entity, predicate, confidence, source_memory_id) "
-        "VALUES (?, ?, ?, ?, ?)",
+        f"VALUES ({_d.placeholder(5)})",
         (from_entity_id, to_entity_id, predicate, confidence, source_memory_id),
     )
 
@@ -636,6 +654,11 @@ async def _run_entity_extractor(
     active_types: frozenset = valid_types if valid_types is not None else VALID_ENTITY_TYPES
     active_predicates: frozenset = valid_predicates if valid_predicates is not None else VALID_ENTITY_PREDICATES
 
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
+
     try:
         result = await entity_extractor(content)
         entities_raw = result.get("entities", []) if isinstance(result, dict) else []
@@ -646,7 +669,7 @@ async def _run_entity_extractor(
         # not the extraction-time timestamp.
         with _db() as db:
             src_row = db.execute(
-                "SELECT valid_from FROM memory_items WHERE id = ? LIMIT 1",
+                f"SELECT valid_from FROM memory_items WHERE id = {p} LIMIT 1",
                 (memory_id,),
             ).fetchone()
         source_valid_from: str | None = src_row["valid_from"] if src_row else None
@@ -672,7 +695,7 @@ async def _run_entity_extractor(
                         # Set valid_from on the newly created entity to inherit from source.
                         if source_valid_from:
                             db.execute(
-                                "UPDATE entities SET valid_from = ? WHERE id = ? AND valid_from IS NULL",
+                                f"UPDATE entities SET valid_from = {p} WHERE id = {p} AND valid_from IS NULL",
                                 (source_valid_from, entity_id),
                             )
                     except Exception as e:
@@ -717,15 +740,15 @@ async def _run_entity_extractor(
                     # doesn't accumulate duplicate relationship rows.
                     db.execute(
                         "DELETE FROM entity_relationships "
-                        "WHERE from_entity = ? AND to_entity = ? AND predicate = ? "
-                        "AND source_memory_id = ?",
+                        f"WHERE from_entity = {p} AND to_entity = {p} AND predicate = {p} "
+                        f"AND source_memory_id = {p}",
                         (from_id, to_id, predicate, memory_id),
                     )
                     rel_valid_from = rel.get("valid_from") or source_valid_from
                     db.execute(
                         "INSERT INTO entity_relationships "
                         "(from_entity, to_entity, predicate, confidence, source_memory_id, valid_from) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        f"VALUES ({_d.placeholder(6)})",
                         (from_id, to_id, predicate, confidence, memory_id, rel_valid_from),
                     )
                 except Exception as e:
@@ -735,7 +758,7 @@ async def _run_entity_extractor(
         try:
             with _db() as db:
                 db.execute(
-                    "DELETE FROM entity_extraction_queue WHERE memory_id = ?",
+                    f"DELETE FROM entity_extraction_queue WHERE memory_id = {p}",
                     (memory_id,),
                 )
         except Exception as db_err:
@@ -852,10 +875,14 @@ def _select_pending_entity_extraction(
     valid_from is included so callers can inherit bitemporal validity from the source
     memory when creating entities and relationships during extraction.
     """
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
     if allowed_variants:
         variant_clause = (
             f"AND (mi.variant IS NULL OR mi.variant IN "
-            f"({','.join(['?'] * len(allowed_variants))}))"
+            f"({_d.placeholder(len(allowed_variants))}))"
         )
         variant_params = list(allowed_variants)
     else:
@@ -875,7 +902,7 @@ def _select_pending_entity_extraction(
         SELECT mi.id, mi.content, mi.valid_from, q.attempts
         FROM entity_extraction_queue q
         JOIN memory_items mi ON mi.id = q.memory_id
-        WHERE q.attempts < ?
+        WHERE q.attempts < {p}
     )
     SELECT id, content, valid_from FROM queued
     UNION
@@ -1002,14 +1029,18 @@ def entity_extractor_health() -> dict:
       relationships_total  — total rows in entity_relationships table
       memory_item_entities_total — total rows in memory_item_entities table
     """
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
     with _db() as db:
         q_depth = db.execute(
-            "SELECT COUNT(*) FROM entity_extraction_queue WHERE attempts < ?",
+            f"SELECT COUNT(*) FROM entity_extraction_queue WHERE attempts < {p}",
             (ENTITY_EXTRACT_MAX_ATTEMPTS,),
         ).fetchone()[0]
 
         poisoned = db.execute(
-            "SELECT COUNT(*) FROM entity_extraction_queue WHERE attempts >= ?",
+            f"SELECT COUNT(*) FROM entity_extraction_queue WHERE attempts >= {p}",
             (ENTITY_EXTRACT_MAX_ATTEMPTS,),
         ).fetchone()[0]
 
@@ -1052,6 +1083,10 @@ def entity_search_impl(
         List of dicts: [{entity_id, canonical_name, entity_type, attributes_json, neighbor_count}]
         neighbor_count only computed if with_neighbors=True.
     """
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
     with _db() as db:
         # Build the WHERE clause
         where_parts: list[str] = []
@@ -1059,11 +1094,11 @@ def entity_search_impl(
 
         if query:
             # LIKE %query% on canonical_name (case-insensitive)
-            where_parts.append("canonical_name LIKE ?")
+            where_parts.append(f"canonical_name LIKE {p}")
             params.append(f"%{query}%")
 
         if entity_type:
-            where_parts.append("entity_type = ?")
+            where_parts.append(f"entity_type = {p}")
             params.append(entity_type)
 
         where_clause = " AND ".join(where_parts) if where_parts else "1=1"
@@ -1073,7 +1108,7 @@ def entity_search_impl(
         FROM entities
         WHERE {where_clause}
         ORDER BY canonical_name
-        LIMIT ?
+        LIMIT {p}
         """
         params.append(limit)
 
@@ -1084,10 +1119,10 @@ def entity_search_impl(
             neighbor_count = 0
             if with_neighbors:
                 # Count relationships where this entity is from_entity OR to_entity
-                neighbor_sql = """
+                neighbor_sql = f"""
                 SELECT COUNT(DISTINCT id)
                 FROM entity_relationships
-                WHERE from_entity = ? OR to_entity = ?
+                WHERE from_entity = {p} OR to_entity = {p}
                 """
                 neighbor_count = db.execute(
                     neighbor_sql, (entity_id, entity_id)
@@ -1117,12 +1152,16 @@ def entity_get_impl(entity_id: str, depth: int = 1) -> dict:
 
     Note: depth is accepted but unused beyond depth=1 (multi-hop is future work).
     """
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
     with _db() as db:
         # Load the entity itself
-        entity_sql = """
+        entity_sql = f"""
         SELECT id, canonical_name, entity_type, attributes_json, created_at
         FROM entities
-        WHERE id = ?
+        WHERE id = {p}
         """
         entity_row = db.execute(entity_sql, (entity_id,)).fetchone()
 
@@ -1144,11 +1183,11 @@ def entity_get_impl(entity_id: str, depth: int = 1) -> dict:
         }
 
         # Load predecessors (relationships where to_entity = this entity)
-        predecessors_sql = """
+        predecessors_sql = f"""
         SELECT er.from_entity, e.canonical_name, er.predicate, er.confidence
         FROM entity_relationships er
         JOIN entities e ON e.id = er.from_entity
-        WHERE er.to_entity = ?
+        WHERE er.to_entity = {p}
         """
         predecessors = [
             {
@@ -1161,11 +1200,11 @@ def entity_get_impl(entity_id: str, depth: int = 1) -> dict:
         ]
 
         # Load successors (relationships where from_entity = this entity)
-        successors_sql = """
+        successors_sql = f"""
         SELECT er.to_entity, e.canonical_name, er.predicate, er.confidence
         FROM entity_relationships er
         JOIN entities e ON e.id = er.to_entity
-        WHERE er.from_entity = ?
+        WHERE er.from_entity = {p}
         """
         successors = [
             {
@@ -1178,11 +1217,11 @@ def entity_get_impl(entity_id: str, depth: int = 1) -> dict:
         ]
 
         # Load linked memories
-        memories_sql = """
+        memories_sql = f"""
         SELECT DISTINCT mi.id, mi.title, mi.type
         FROM memory_item_entities mie
         JOIN memory_items mi ON mi.id = mie.memory_id
-        WHERE mie.entity_id = ?
+        WHERE mie.entity_id = {p}
         """
         linked_memories = [
             {
@@ -1316,6 +1355,11 @@ def build_bypass_surface(
     # Whitelist the ordering — unknown value falls back to the default, never raw SQL (§6).
     order_clause = _BYPASS_ORDER_BY.get(order_by, _BYPASS_ORDER_BY[_BYPASS_ORDER_DEFAULT])
 
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    p = _d.param()
+
     built_scopes = 0
     rows_written = 0
     skipped_off = 0
@@ -1327,13 +1371,13 @@ def build_bypass_surface(
             params: list = [scope]
             uid_clause = ""
             if user_id:
-                uid_clause = " AND user_id = ?"
+                uid_clause = f" AND user_id = {p}"
                 params.append(user_id)
             cids = [
                 r[0] for r in db.execute(
                     f"SELECT DISTINCT conversation_id FROM memory_items "
                     f"WHERE conversation_id IS NOT NULL AND conversation_id != '' "
-                    f"AND scope = ?{uid_clause}",
+                    f"AND scope = {p}{uid_clause}",
                     params,
                 ).fetchall()
             ]
@@ -1351,7 +1395,7 @@ def build_bypass_surface(
                       if strategy is not None else _BYPASS_DEFAULT_POLICY)
 
             # Incremental: clear this scope's existing surface rows before re-inserting.
-            db.execute("DELETE FROM bypass_surface WHERE conversation_id = ?", (cid,))
+            db.execute(f"DELETE FROM bypass_surface WHERE conversation_id = {p}", (cid,))
             built_scopes += 1
 
             if not policy["enabled"]:
@@ -1374,8 +1418,8 @@ def build_bypass_surface(
             # matched type, capped. Scope-isolated by construction (mi.conversation_id=?).
             # The observation surface is added by the caller's enrichment layer separately
             # (ADR-0001 §10 Q3) and is conditional on enrichment having run.
-            uid_clause = " AND mi.user_id = ?" if user_id else ""
-            type_ph = ",".join("?" * len(etypes))
+            uid_clause = f" AND mi.user_id = {p}" if user_id else ""
+            type_ph = _d.placeholder(len(etypes))
             q_params: list = [cid, scope]
             if user_id:
                 q_params.append(user_id)
@@ -1388,19 +1432,23 @@ def build_bypass_surface(
                 f"SELECT mi.id FROM memory_item_entities mie "
                 f"JOIN memory_items mi ON mi.id = mie.memory_id "
                 f"JOIN entities e ON e.id = mie.entity_id "
-                f"WHERE mi.conversation_id = ? AND mi.scope = ?{uid_clause} "
+                f"WHERE mi.conversation_id = {p} AND mi.scope = {p}{uid_clause} "
                 f"AND e.entity_type IN ({type_ph}) "
                 f"GROUP BY mi.id "
                 f"{order_clause} "
-                f"LIMIT ?",
+                f"LIMIT {p}",
                 q_params,
             ).fetchall()
 
             if surfaced:
+                _ins = _d.insert_or_ignore()
+                _suffix = _d.on_conflict_ignore(
+                    conflict_target="(conversation_id, memory_id)"
+                )
                 db.executemany(
-                    "INSERT OR IGNORE INTO bypass_surface "
+                    f"{_ins} bypass_surface "
                     "(conversation_id, memory_id, source, strategy, user_id, scope, cap) "
-                    "VALUES (?, ?, 'entity', ?, ?, ?, ?)",
+                    f"VALUES ({p}, {p}, 'entity', {p}, {p}, {p}, {p}) {_suffix}".rstrip(),
                     [(cid, r[0], strategy, user_id, scope, eff_cap) for r in surfaced],
                 )
                 rows_written += len(surfaced)
