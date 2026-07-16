@@ -150,6 +150,13 @@ EMBED_SEARCH_DEADLINE_S: float = float(
 )
 ORIGIN_DEVICE: str = getenv_compat("M3_ORIGIN_DEVICE", "ORIGIN_DEVICE") or os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or platform.node()
 
+# Storage backend selection (Phase 0 of PostgreSQL-as-primary). Default 'sqlite'
+# — the only required store (DESIGN_PHILOSOPHIES §1). 'postgres' is opt-in and
+# lands in a later phase; selecting it now raises a clear error via
+# backends.active_backend(). Read live at resolve time (backends.selector), not
+# cached here, so tests can flip it without reimporting config.
+DB_BACKEND: str = getenv_compat("M3_DB_BACKEND", "DB_BACKEND", "sqlite") or "sqlite"
+
 # Per-backend circuit-breaker thresholds for the embed cascade in
 # `bin/memory/embed.py`. Each backend gets its own m3_core_rs.CircuitBreaker;
 # after `_THRESHOLD` consecutive failures the breaker opens and skips that
