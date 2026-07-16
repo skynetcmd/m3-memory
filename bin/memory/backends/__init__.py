@@ -30,6 +30,10 @@ from .base import (
     StorageBackend,
     VectorHit,
 )
+from .dialect import (
+    chatlog_table,
+    chatlog_table_for,
+)
 from .selector import (
     active_backend,
     require_sqlite_backend,
@@ -43,6 +47,8 @@ __all__ = [
     "StorageBackend",
     "VectorHit",
     "active_backend",
+    "chatlog_table",
+    "chatlog_table_for",
     "require_sqlite_backend",
     "resolve_backend_name",
 ]

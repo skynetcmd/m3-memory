@@ -230,3 +230,50 @@ class TestIntrospection:
     def test_columns_of_rejects_quote(self, d: Dialect):
         with pytest.raises(ValueError):
             d.columns_of("memory_items; DROP")
+
+
+class TestChatlogTableFork:
+    """The chatlog table-name fork: memory_items on SQLite, chat_log_* on PG."""
+
+    def test_sqlite_uses_core_names(self):
+        from memory.backends.dialect import chatlog_table_for
+        assert chatlog_table_for("items", "sqlite") == "memory_items"
+        assert chatlog_table_for("embeddings", "sqlite") == "memory_embeddings"
+        assert chatlog_table_for("extraction_queue", "sqlite") == "entity_extraction_queue"
+
+    def test_postgres_uses_chat_log_names(self):
+        from memory.backends.dialect import chatlog_table_for
+        assert chatlog_table_for("items", "postgres") == "chat_log_items"
+        assert chatlog_table_for("embeddings", "postgres") == "chat_log_embeddings"
+        assert chatlog_table_for("item_entities", "postgres") == "chat_log_item_entities"
+        assert chatlog_table_for("entity_rel", "postgres") == "chat_log_entity_relationships"
+        assert chatlog_table_for("extraction_queue", "postgres") == "chat_log_extraction_queue"
+        assert chatlog_table_for("chroma_sync_queue", "postgres") == "chat_log_chroma_sync_queue"
+
+    def test_unknown_role_fails_loud(self):
+        from memory.backends.dialect import chatlog_table_for
+        with pytest.raises(KeyError):
+            chatlog_table_for("nonexistent_role", "postgres")
+
+    def test_every_role_maps_on_both_backends(self):
+        from memory.backends.dialect import _CHATLOG_TABLES, chatlog_table_for
+        for role in _CHATLOG_TABLES:
+            s = chatlog_table_for(role, "sqlite")
+            p = chatlog_table_for(role, "postgres")
+            assert s and p
+            assert p.startswith("chat_log_")  # every PG name is chat_log_ prefixed
+            assert not s.startswith("chat_log_")  # sqlite keeps core names
+
+    def test_no_fts_role(self):
+        # memory_items_fts has no entry — FTS5 has no PG analogue.
+        from memory.backends.dialect import _CHATLOG_TABLES
+        assert "fts" not in _CHATLOG_TABLES
+        assert not any("fts" in v[0] or "fts" in v[1] for v in _CHATLOG_TABLES.values())
+
+    def test_active_backend_wrapper(self, monkeypatch):
+        # chatlog_table() resolves the active backend.
+        from memory.backends import selector as _sel
+        monkeypatch.delenv("M3_DB_BACKEND", raising=False)
+        _sel._reset_for_tests()
+        from memory.backends.dialect import chatlog_table
+        assert chatlog_table("items") == "memory_items"  # default sqlite

@@ -298,3 +298,58 @@ def dialect_for(backend: BackendName) -> Dialect:
         return _BY_NAME[backend]
     except KeyError:
         raise ValueError(f"no dialect for backend {backend!r}") from None
+
+
+# ── Chatlog table-name fork (one-schema, two-table PG format) ────────────────
+# On SQLite the chatlog store is a SEPARATE .db FILE whose tables reuse the SAME
+# names as core (memory_items, ...). On PostgreSQL there is ONE database; chatlog
+# rows live in DISTINCT `chat_log_*` tables in the same schema as core (the
+# one-schema/two-table format — isolation of indexes/lifecycle/policy without the
+# connection-routing cost of separate schemas). So chatlog SQL must emit
+# `memory_items` on SQLite but `chat_log_items` on PG.
+#
+# This map is the single source of truth: LOGICAL role -> (sqlite name, pg name).
+# `chatlog_table(role)` resolves it for the active backend. Applied only at
+# chatlog-subsystem query sites — `memory_items` in shared core code ALWAYS means
+# core and is never routed through here. A map (not sql.replace) so it can't
+# corrupt substrings like memory_item_entities / memory_items_fts / column names.
+#
+# memory_items_fts (FTS5) has NO entry: it has no PG analogue; chatlog keyword
+# search on PG uses chat_log_items.search_vector via the seam's keyword_search.
+_CHATLOG_TABLES: dict[str, tuple[str, str]] = {
+    #  role                sqlite (separate file)     postgres (chat_log_* in core schema)
+    "items":             ("memory_items",            "chat_log_items"),
+    "embeddings":        ("memory_embeddings",       "chat_log_embeddings"),
+    "relationships":     ("memory_relationships",    "chat_log_relationships"),
+    "entities":          ("entities",                "chat_log_entities"),
+    "item_entities":     ("memory_item_entities",    "chat_log_item_entities"),
+    "entity_rel":        ("entity_relationships",    "chat_log_entity_relationships"),
+    "extraction_queue":  ("entity_extraction_queue", "chat_log_extraction_queue"),
+    "chroma_sync_queue": ("chroma_sync_queue",       "chat_log_chroma_sync_queue"),
+}
+
+
+def chatlog_table_for(role: str, backend: BackendName) -> str:
+    """Physical chatlog table name for ``role`` on ``backend``.
+
+    ``chatlog_table_for("items", "sqlite")`` -> ``"memory_items"``;
+    ``chatlog_table_for("items", "postgres")`` -> ``"chat_log_items"``.
+    Raises KeyError on an unknown role (fail loud — a typo shouldn't silently
+    fall through to a core table name).
+    """
+    sqlite_name, pg_name = _CHATLOG_TABLES[role]
+    return sqlite_name if backend == "sqlite" else pg_name
+
+
+def chatlog_table(role: str) -> str:
+    """Physical chatlog table name for ``role`` on the ACTIVE backend.
+
+    Convenience wrapper over :func:`chatlog_table_for` that resolves the active
+    backend. Use at chatlog-subsystem query sites:
+
+        T = chatlog_table("items")
+        sql = f"SELECT id FROM {T} WHERE ..."
+    """
+    from memory.backends import active_backend
+
+    return chatlog_table_for(role, active_backend().name)
