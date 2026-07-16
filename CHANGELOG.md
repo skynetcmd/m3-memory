@@ -19,9 +19,28 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-<!-- When adding the next change, replace the "None pending" line below with
-     the usual ### Added / ### Changed / ### Fixed sub-sections here. -->
-### None pending at this time
+### Changed
+- **`PG_URL` split by role (deprecation).** The PostgreSQL DSN env var was
+  overloaded across two unrelated roles — the opt-in **primary** store
+  (`M3_DB_BACKEND=postgres`) and the **data-warehouse** fan-in mirror
+  (`pg_sync`) — which meant setting one silently armed the other. They are now
+  separated:
+  - **Primary store:** `M3_PRIMARY_PG_URL` (falls back to `M3_PG_URL`). Never
+    reads `PG_URL` or any warehouse var.
+  - **Data-warehouse:** `M3_CDW_PG_URL` (falls back to the deprecated `PG_URL`).
+  `PG_URL` is **deprecated**: it still resolves for the warehouse role so live
+  sync keeps working mid-migration, but every read warns once, `m3 doctor` flags
+  it (with `--fix` renaming it to `M3_CDW_PG_URL` in on-disk config), and
+  **`m3 install` / `update` / `reinstall` now hard-fail while `PG_URL` is set** —
+  rename it before upgrading. Migration: `PG_URL` → `M3_CDW_PG_URL` (warehouse)
+  or `M3_PRIMARY_PG_URL` (primary store).
+
+### Added
+- **PostgreSQL primary-store safeguards.** Beyond the rename: the primary backend
+  now (1) rejects a DSN whose host is in `M3_PG_FORBIDDEN_HOSTS` (so a primary
+  DSN can never point at the shared warehouse), and (2) hard-errors if the
+  resolved primary DSN is byte-identical to the resolved warehouse DSN (a
+  different database on the same host is still allowed).
 
 ---
 

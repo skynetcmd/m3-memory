@@ -35,7 +35,9 @@ DEPRECATED_ENV_RENAMES: dict[str, str] = {
     "IMPORTANCE_WEIGHT":       "M3_IMPORTANCE_WEIGHT",
     "LLM_ENDPOINTS_CSV":       "M3_LLM_ENDPOINTS_CSV",
     "ORIGIN_DEVICE":           "M3_ORIGIN_DEVICE",
-    "PG_URL":                  "M3_PG_URL",
+    # PG_URL is NOT here: it was split by role (primary vs warehouse), so it lives
+    # in ROLE_SPLIT_ENV_RENAMES (-> M3_CDW_PG_URL) and is resolved by the
+    # role-specific resolvers, not getenv_compat. See below.
     "POSTGRES_SERVER":         "M3_POSTGRES_SERVER",
     "SEARCH_ROW_CAP":          "M3_SEARCH_ROW_CAP",
     "SHORT_TURN_THRESHOLD":    "M3_SHORT_TURN_THRESHOLD",
@@ -44,6 +46,36 @@ DEPRECATED_ENV_RENAMES: dict[str, str] = {
     "SYNC_TARGET_IP":          "M3_SYNC_TARGET_IP",
     "TITLE_MATCH_BOOST":       "M3_TITLE_MATCH_BOOST",
 }
+
+# ROLE_SPLIT_ENV_RENAMES: deprecations that are NOT pure M3_ namespacing because
+# the var was split by role (one old name -> a role-specific new name). Kept
+# separate from DEPRECATED_ENV_RENAMES so the "new == M3_ + old" invariant on that
+# map (test_env_rename_map_drift.test_rename_map_is_pure_namespacing) still holds.
+# `m3 doctor` scans BOTH maps when reporting/rewriting on-disk config (via
+# all_env_renames()); getenv_compat only consults the pure-namespacing map.
+#
+# PG_URL was overloaded (primary store vs data-warehouse). The doctor-fix target
+# is the WAREHOUSE name, since that is what a legacy PG_URL almost always meant
+# (pg_sync). An operator who actually wanted a PG PRIMARY store sets
+# M3_PRIMARY_PG_URL by hand — doctor can't tell the two intents apart, so it
+# rewrites to the common case and the deprecation message names both.
+ROLE_SPLIT_ENV_RENAMES: dict[str, str] = {
+    "PG_URL": "M3_CDW_PG_URL",
+}
+
+
+def all_env_renames() -> dict[str, str]:
+    """Union of the pure-namespacing and role-split deprecation maps.
+
+    The single source of truth for `m3 doctor`'s on-disk config scan/rewrite:
+    every old env-var KEY that should be reported and renamed, mapped to its new
+    name. getenv_compat does NOT use this (it only does pure namespacing); the
+    role-split names have dedicated resolvers (resolve_cdw_pg_dsn, etc.).
+    """
+    merged = dict(DEPRECATED_ENV_RENAMES)
+    merged.update(ROLE_SPLIT_ENV_RENAMES)
+    return merged
+
 
 # _DEPRECATED_ENV_SEEN maps old_name -> new_name for every deprecated var that
 # was actually read from the environment this process. Doctor reads it via
@@ -78,10 +110,118 @@ def getenv_compat(new_name: str, old_name: str, default: Optional[str] = None) -
 
 def deprecated_env_in_use() -> dict[str, str]:
     """Return {old_name: new_name} for every deprecated env var read so far this
-    process (via getenv_compat). Used by `m3 doctor` to report migration TODOs.
-    Only reflects names actually READ — a var set but never consulted won't show.
+    process (via getenv_compat OR the role-specific PG resolvers). Used by
+    `m3 doctor` to report migration TODOs. Only reflects names actually READ — a
+    var set but never consulted won't show.
     """
     return dict(_DEPRECATED_ENV_SEEN)
+
+
+# ── PostgreSQL DSN resolution: two ROLES, deliberately separated ──────────────
+# m3 uses PostgreSQL in two unrelated roles that historically read the SAME env
+# var (PG_URL / M3_PG_URL) — a footgun, because setting the warehouse DSN would
+# silently arm the primary-store path (and vice-versa). They are now separated:
+#
+#   * PRIMARY store   (opt-in `M3_DB_BACKEND=postgres`): a single instance's
+#     authoritative read/write DB. Resolved by `resolve_primary_pg_dsn`.
+#       precedence: M3_PRIMARY_PG_URL > M3_PG_URL > vault. NEVER reads a CDW var.
+#   * CDW / WAREHOUSE (pg_sync fan-in mirror, `m3_warehouse` namespace): a shared
+#     aggregate many instances UPSERT into. Resolved by `resolve_cdw_pg_dsn`.
+#       precedence: M3_CDW_PG_URL > PG_URL(deprecated, warns) > vault.
+#
+# `PG_URL` is DEPRECATED for the warehouse role: it still resolves as a last
+# resort so live sync doesn't break mid-migration, but every read warns once and
+# is recorded for `m3 doctor`, and install/upgrade HARD-FAILS if it is set (see
+# assert_no_deprecated_pg_url_on_install). Rename it to M3_CDW_PG_URL.
+#
+# The primary role does NOT accept `PG_URL` at all — a warehouse DSN can never
+# reach the primary store through env resolution.
+
+# The canonical deprecation: old PG_URL -> the warehouse (CDW) namespace. This is
+# NOT pure M3_ namespacing (PG_URL -> M3_CDW_PG_URL, not M3_PG_URL), so it is
+# tracked here rather than in DEPRECATED_ENV_RENAMES (which is namespacing-only).
+PG_URL_DEPRECATION: tuple[str, str] = ("PG_URL", "M3_CDW_PG_URL")
+
+
+def _warn_pg_url_deprecated() -> None:
+    """One-time warning + doctor-visible record that PG_URL is set (warehouse)."""
+    old, new = PG_URL_DEPRECATION
+    _DEPRECATED_ENV_SEEN[old] = new
+    if old not in _DEPRECATED_ENV_WARNED:
+        _DEPRECATED_ENV_WARNED.add(old)
+        logger.warning(
+            "Deprecated env var %s is set; use %s instead for the data-warehouse "
+            "DSN. The old name still works for now but will be removed, and "
+            "`m3 install`/`update` will refuse to run while it is set. "
+            "(`m3 doctor --fix` renames it.)",
+            old, new,
+        )
+
+
+def resolve_primary_pg_dsn(default: Optional[str] = None) -> Optional[str]:
+    """DSN for the PRIMARY PostgreSQL store (M3_DB_BACKEND=postgres).
+
+    Precedence: M3_PRIMARY_PG_URL > M3_PG_URL > default. Deliberately does NOT
+    read PG_URL or any M3_CDW_* var — the warehouse DSN must never reach the
+    primary store through env resolution. Callers add vault/forbidden-host checks.
+    """
+    val = os.environ.get("M3_PRIMARY_PG_URL")
+    if val is not None:
+        return val
+    val = os.environ.get("M3_PG_URL")
+    if val is not None:
+        return val
+    return default
+
+
+def resolve_cdw_pg_dsn(default: Optional[str] = None) -> Optional[str]:
+    """DSN for the CDW / data-warehouse PostgreSQL (pg_sync fan-in mirror).
+
+    Precedence: M3_CDW_PG_URL > PG_URL(deprecated) > default. Reading the legacy
+    PG_URL warns once and is recorded for `m3 doctor`. Does NOT read M3_PG_URL —
+    that is the primary-store var; a warehouse consumer that wants the old
+    behavior must set M3_CDW_PG_URL explicitly.
+    """
+    val = os.environ.get("M3_CDW_PG_URL")
+    if val is not None:
+        return val
+    val = os.environ.get("PG_URL")
+    if val is not None:
+        _warn_pg_url_deprecated()
+        return val
+    return default
+
+
+def _reset_pg_url_deprecation_state_for_tests() -> None:
+    """Clear the one-time PG_URL deprecation latch + seen-record. Test-only.
+
+    The 'warn once' behavior of ``resolve_cdw_pg_dsn`` is module-global; a test
+    that asserts the warning fires must reset this first or it gets order-dependent
+    flakiness. Exposed as a named helper so tests don't reach into private globals.
+    """
+    old, _ = PG_URL_DEPRECATION
+    _DEPRECATED_ENV_WARNED.discard(old)
+    _DEPRECATED_ENV_SEEN.pop(old, None)
+
+
+def assert_no_deprecated_pg_url_on_install() -> None:
+    """Hard-fail an install/upgrade if the deprecated PG_URL env var is set.
+
+    Rationale: install/upgrade is the one moment the operator is present and can
+    fix config, so we force the rename here rather than letting a stale PG_URL
+    keep shadowing behavior forever. Runtime paths only warn (a hard-fail there
+    would be an outage); install is the safe place to be strict. Raises
+    RuntimeError with the exact remediation.
+    """
+    old, new = PG_URL_DEPRECATION
+    if os.environ.get(old) is not None:
+        raise RuntimeError(
+            f"Deprecated env var {old} is set. It has been split by role and "
+            f"renamed: use {new} for the data-warehouse (pg_sync) DSN, or "
+            f"M3_PRIMARY_PG_URL for a PostgreSQL PRIMARY store. Unset {old} and "
+            f"set the correct one, then re-run. (See CHANGELOG: 'PG_URL split by "
+            f"role'.) Refusing to install/upgrade with an ambiguous {old} set."
+        )
 
 
 # ── Active-database ContextVar ────────────────────────────────────────────────

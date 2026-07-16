@@ -4,21 +4,25 @@ import sys
 
 import psycopg2
 from auth_utils import get_api_key
-from m3_sdk import getenv_compat
+from m3_sdk import resolve_cdw_pg_dsn
 
 logging.basicConfig(level=logging.INFO, format='%(name)s: [%(levelname)s] %(message)s')
 logger = logging.getLogger("pg_setup")
 
 def _get_pg_url() -> str:
-    """Resolve PostgreSQL connection URL from environment or encrypted vault."""
-    url = getenv_compat("M3_PG_URL", "PG_URL", "").strip()
+    """Resolve the data-warehouse PostgreSQL URL from environment or vault.
+
+    Warehouse role: M3_CDW_PG_URL > PG_URL(deprecated) > vault(PG_URL). Not
+    M3_PG_URL (the primary-store var).
+    """
+    url = (resolve_cdw_pg_dsn("") or "").strip()
     if url:
         return url
     url = get_api_key("PG_URL")
     if url:
         return url
     python_cmd = "python" if os.name == "nt" else "python3"
-    logger.error(f"PG_URL not found. Set PG_URL env var or store it via: {python_cmd} -c \"from auth_utils import set_api_key; set_api_key('PG_URL', 'postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host:5432/db')\"")
+    logger.error(f"Data-warehouse DSN not found. Set M3_CDW_PG_URL env var or store it via: {python_cmd} -c \"from auth_utils import set_api_key; set_api_key('PG_URL', 'postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host:5432/db')\"")
     sys.exit(1)
 
 SCHEMA_SQL = """

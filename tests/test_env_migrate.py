@@ -36,7 +36,7 @@ def test_detect_reports_old_names_in_env_block(tmp_path, monkeypatch):
     assert settings in found
     assert found[settings] == {
         "CHROMA_BASE_URL": "M3_CHROMA_BASE_URL",
-        "PG_URL": "M3_PG_URL",
+        "PG_URL": "M3_CDW_PG_URL",  # split by role: PG_URL -> warehouse var
     }
 
 
@@ -139,9 +139,9 @@ def test_migrate_one_bad_file_does_not_abort_others(tmp_path, monkeypatch):
     # bad file is dropped by the detector itself (unparseable -> skipped),
     # so only the good file's rename should appear, no raise anywhere.
     actions = I._migrate_env_names(apply=True)
-    assert any("PG_URL -> M3_PG_URL" in a for a in actions)
+    assert any("PG_URL -> M3_CDW_PG_URL" in a for a in actions)
     env = json.loads(good.read_text())["mcpServers"]["memory"]["env"]
-    assert env == {"M3_PG_URL": "postgres://z"}
+    assert env == {"M3_CDW_PG_URL": "postgres://z"}
 
 
 # ── .env file scan + rewrite ────────────────────────────────────────────────
@@ -177,10 +177,12 @@ def test_dotenv_detect_and_migrate_preserves_values_and_comments(tmp_path, monke
 
 
 def test_dotenv_conflict_drops_old_line_keeps_new(tmp_path, monkeypatch):
+    # PG_URL now renames to the warehouse var M3_CDW_PG_URL; if that new name is
+    # already present, the old PG_URL line is dropped as superseded.
     dotenv = tmp_path / ".env"
     dotenv.write_text(
         "PG_URL=postgres://old\n"
-        "M3_PG_URL=postgres://new\n",
+        "M3_CDW_PG_URL=postgres://new\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(I, "_client_config_sources", lambda: {})
@@ -191,7 +193,7 @@ def test_dotenv_conflict_drops_old_line_keeps_new(tmp_path, monkeypatch):
 
     text = dotenv.read_text(encoding="utf-8")
     assert "PG_URL=postgres://old" not in text
-    assert "M3_PG_URL=postgres://new" in text
+    assert "M3_CDW_PG_URL=postgres://new" in text
     assert I._migrate_env_names(apply=True) == []
 
 
@@ -204,5 +206,5 @@ def test_section_renders_without_error_when_clean(monkeypatch):
 def test_section_renders_without_error_when_dirty(tmp_path, monkeypatch):
     settings = tmp_path / "settings.json"
     monkeypatch.setattr(I, "_deprecated_env_in_config",
-                        lambda: {settings: {"PG_URL": "M3_PG_URL"}})
+                        lambda: {settings: {"PG_URL": "M3_CDW_PG_URL"}})
     I._deprecated_env_config_section()  # no exception = pass

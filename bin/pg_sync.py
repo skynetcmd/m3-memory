@@ -59,7 +59,7 @@ import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE_DIR, "bin"))
-from m3_sdk import getenv_compat, resolve_venv_python
+from m3_sdk import resolve_cdw_pg_dsn, resolve_venv_python
 
 
 def ensure_venv():
@@ -122,14 +122,21 @@ def _infer_manifest_path(db_path: str) -> str:
 # ── Credentials ──────────────────────────────────────────────────────────────
 
 def _get_pg_url() -> str:
-    """Resolve PostgreSQL connection URL from environment or encrypted vault."""
-    url = getenv_compat("M3_PG_URL", "PG_URL", "").strip()
+    """Resolve the data-warehouse PostgreSQL URL from environment or vault.
+
+    Warehouse role: M3_CDW_PG_URL > PG_URL(deprecated) > vault(PG_URL). Does NOT
+    read M3_PG_URL (the primary-store var) — pg_sync fans in to the CDW mirror.
+    """
+    url = (resolve_cdw_pg_dsn("") or "").strip()
     if url:
         return url
     url = ctx.get_secret("PG_URL")
     if url:
         return url
-    logger.error("PG_URL not found. Use `bin/auth_utils.py` to set it.")
+    logger.error(
+        "Data-warehouse DSN not found. Set M3_CDW_PG_URL (or store PG_URL via "
+        "`bin/auth_utils.py`). NOTE: M3_PG_URL is the primary-store var, not read here."
+    )
     sys.exit(1)
 
 

@@ -445,16 +445,24 @@ def _deprecated_env_section() -> None:
     Best-effort: skip silently if the SDK isn't importable.
     """
     try:
+        import os as _os
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "bin"))
         from m3_sdk import deprecated_env_in_use  # type: ignore
+        from m3_core.paths import ROLE_SPLIT_ENV_RENAMES  # type: ignore
     except Exception:  # noqa: BLE001 — informational only
         return
-    in_use = deprecated_env_in_use()
+    in_use = dict(deprecated_env_in_use())
+    # Role-split deprecations (e.g. PG_URL) may be SET but not read this process
+    # (doctor doesn't exercise pg_sync), so getenv_compat never recorded them.
+    # Surface them from the live environment directly so a set PG_URL is flagged.
+    for old, new in ROLE_SPLIT_ENV_RENAMES.items():
+        if _os.environ.get(old) is not None:
+            in_use[old] = new
     if not in_use:
         return  # clean — say nothing rather than add noise
     print()
     print("  [!] deprecated env vars in use (still work, but migrate — the old")
-    print("      names will be removed):")
+    print("      names will be removed; `m3 install`/`update` will refuse while set):")
     for old, new in sorted(in_use.items()):
         print(f"        {old}  ->  {new}")

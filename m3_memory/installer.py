@@ -733,15 +733,17 @@ def _detect_cdw_target() -> "Optional[str]":
     reminder can name where data is auto-syncing — never the password from
     PG_URL.
     """
-    from m3_sdk import getenv_compat
+    from m3_sdk import getenv_compat, resolve_cdw_pg_dsn
 
     # 1. Explicit warehouse IP/host (sync_all.py uses these).
     host = getenv_compat("M3_POSTGRES_SERVER", "POSTGRES_SERVER") or getenv_compat("M3_SYNC_TARGET_IP", "SYNC_TARGET_IP")
     if host:
         return host.strip()
 
-    # 2. PG_URL — from env, or the encrypted vault. Parse out ONLY the host.
-    pg_url = getenv_compat("M3_PG_URL", "PG_URL", "").strip()
+    # 2. Warehouse DSN (M3_CDW_PG_URL > PG_URL) — from env, or the encrypted
+    #    vault. Parse out ONLY the host. This is the WAREHOUSE host, not the
+    #    primary store, so it uses the CDW resolver (never M3_PG_URL).
+    pg_url = (resolve_cdw_pg_dsn("") or "").strip()
     if not pg_url:
         try:
             # Resolve via the SDK's secret vault without spinning up a full
@@ -815,6 +817,21 @@ def install_m3(
     if neither git nor the tarball fallback can fetch the repo.
     """
     from m3_memory import __version__
+
+    # Fail LOUD if the deprecated, role-ambiguous PG_URL is set. Install/upgrade
+    # is the one moment the operator is present to fix config, so we force the
+    # rename here (runtime paths only warn). PG_URL has been split by role:
+    # M3_CDW_PG_URL (data-warehouse / pg_sync) vs M3_PRIMARY_PG_URL (a PostgreSQL
+    # PRIMARY store). Inlined — the thin pip package can't assume bin/m3_sdk is
+    # importable before the payload is fetched.
+    if os.environ.get("PG_URL") is not None:
+        raise RuntimeError(
+            "Deprecated env var PG_URL is set. It has been split by role and "
+            "renamed: use M3_CDW_PG_URL for the data-warehouse (pg_sync) DSN, or "
+            "M3_PRIMARY_PG_URL for a PostgreSQL PRIMARY store. Unset PG_URL and "
+            "set the correct one, then re-run install/update. "
+            "(See CHANGELOG: 'PG_URL split by role'.)"
+        )
 
     if repo_path is None:
         repo_path = default_repo_path()
@@ -1175,16 +1192,20 @@ def _deprecated_env_in_config() -> "dict[Path, dict[str, str]]":
     (pre-M3_ namespacing) env var name. Scans the SAME config files
     ``_client_config_sources()`` reads (settings.json per client, plus Claude's
     .mcp.json), walking every ``mcpServers.<server>.env`` block, plus a plain
-    ``.env`` (KEY=VALUE) at the cwd if present. Uses ``DEPRECATED_ENV_RENAMES``
-    (bin/m3_core/paths.py) as the sole source of truth for what counts as an old
-    name — never a second hardcoded copy.
+    ``.env`` (KEY=VALUE) at the cwd if present. Uses ``all_env_renames()``
+    (bin/m3_core/paths.py — the union of the pure-namespacing map and the
+    role-split map, e.g. PG_URL -> M3_CDW_PG_URL) as the sole source of truth for
+    what counts as an old name — never a second hardcoded copy.
 
     Only files with >=1 old name are included. Tolerant: unreadable/unparseable
     files are skipped, never raised.
     """
     import sys as _sys
     _sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
-    from m3_core.paths import DEPRECATED_ENV_RENAMES  # type: ignore
+    from m3_core.paths import all_env_renames  # type: ignore
+
+    # Union of pure-namespacing + role-split (e.g. PG_URL -> M3_CDW_PG_URL) renames.
+    DEPRECATED_ENV_RENAMES = all_env_renames()
 
     out: "dict[Path, dict[str, str]]" = {}
 

@@ -27,7 +27,8 @@ _FORBIDDEN = [
 
 
 def _dsn() -> str | None:
-    url = (os.environ.get("M3_PG_URL") or os.environ.get("PG_URL") or "").strip()
+    # Primary-store DSN only — NEVER PG_URL (deprecated warehouse var → production).
+    url = (os.environ.get("M3_PRIMARY_PG_URL") or os.environ.get("M3_PG_URL") or "").strip()
     return url or None
 
 

@@ -21,6 +21,7 @@ from m3_core.paths import (
     get_m3_engine_root,
     get_m3_root,
     getenv_compat,
+    resolve_cdw_pg_dsn,
     resolve_db_path,
 )
 from m3_core.runtime import (
@@ -485,9 +486,15 @@ class M3Context:
         import psycopg2
         if not self._check_circuit("postgresql"):
             raise RuntimeError("PostgreSQL circuit breaker is open. Failing fast.")
-        url = getenv_compat("M3_PG_URL", "PG_URL") or self.get_secret("PG_URL")
+        # Warehouse role: M3_CDW_PG_URL > PG_URL(deprecated). The vault key stays
+        # PG_URL for continuity. Does NOT read M3_PG_URL (that is the primary store).
+        url = resolve_cdw_pg_dsn() or self.get_secret("PG_URL")
         if not url:
-            raise RuntimeError("PG_URL not found in environment or keychain.")
+            raise RuntimeError(
+                "Data-warehouse DSN not found. Set M3_CDW_PG_URL (or store PG_URL "
+                "in the keychain). NOTE: M3_PG_URL is the PRIMARY-store var and is "
+                "no longer read here."
+            )
         last_exc = None
         for attempt in range(2):
             try:

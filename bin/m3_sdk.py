@@ -78,7 +78,10 @@ from m3_core.paths import (  # noqa: F401
     get_m3_engine_root,
     get_m3_root,
     getenv_compat,
+    assert_no_deprecated_pg_url_on_install,
+    resolve_cdw_pg_dsn,
     resolve_db_path,
+    resolve_primary_pg_dsn,
     resolve_venv_python,
 )
 from m3_core.runtime import (  # noqa: F401

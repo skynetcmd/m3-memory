@@ -25,7 +25,10 @@ _FORBIDDEN = [
 
 
 def _dsn():
-    return (os.environ.get("M3_PG_URL") or os.environ.get("PG_URL") or "").strip() or None
+    # Primary-store DSN only — NEVER PG_URL (that is the deprecated warehouse var,
+    # which on a real deployment points at production; a live test resolving to it
+    # would run destructive DDL against the warehouse).
+    return (os.environ.get("M3_PRIMARY_PG_URL") or os.environ.get("M3_PG_URL") or "").strip() or None
 
 
 def _reachable(dsn):
@@ -73,6 +76,18 @@ def pg_backend(monkeypatch):
     from memory.backends.postgres_backend import PostgresBackend
 
     b = PostgresBackend(dsn=_DSN)
+    # Other live-PG tests share this cluster and recreate core tables with MINIMAL
+    # shapes; ensure_schema()'s CREATE TABLE IF NOT EXISTS would then skip them and
+    # leave columns missing (e.g. agents.agent_id). Drop the tables this suite owns
+    # first so ensure_schema rebuilds the FULL shape deterministically.
+    with b.connection() as c:
+        c.cursor().execute(
+            "DROP TABLE IF EXISTS notifications, tasks, bypass_surface, "
+            "memory_item_entities, entity_relationships, entity_extraction_queue, "
+            "entity_embeddings, fact_enrichment_queue, entities, agents, "
+            "memory_history, memory_corroborations, memory_relationships, "
+            "memory_embeddings, memory_items CASCADE"
+        )
     b._schema_ready = False
     b.ensure_schema()
     yield b

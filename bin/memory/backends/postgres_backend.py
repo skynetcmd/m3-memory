@@ -23,11 +23,12 @@ a silent fallback to SQLite.
 """
 from __future__ import annotations
 
+import os
 import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Iterator
 
-from m3_sdk import getenv_compat
+from m3_sdk import getenv_compat, resolve_primary_pg_dsn
 
 from .base import BackendName, Capabilities, KeywordHit, VectorHit
 from .dialect import POSTGRES, Dialect
@@ -153,18 +154,124 @@ class _SqliteCompatConnection:
         return getattr(self._raw, name)
 
 
-def _resolve_dsn() -> str:
-    """Resolve the PostgreSQL DSN, fail loud if absent.
+def _forbidden_pg_hosts() -> "list[str]":
+    """Hosts the PRIMARY store must never connect to (defense in depth).
 
-    Precedence mirrors the existing pg tooling (``pg_sync``/``pg_setup``):
-    ``M3_PG_URL`` env, then the legacy ``PG_URL`` alias, then the encrypted
-    vault. No default — selecting the postgres backend without a DSN is a
-    configuration error, not a reason to silently do something else.
+    The data-warehouse / CDW hub is a shared fan-in mirror; a primary-store DSN
+    pointing at it would read/write production warehouse data. Configurable via
+    ``M3_PG_FORBIDDEN_HOSTS`` (comma-separated). Empty by default here — the
+    deployment supplies its known warehouse host(s); tests supply the dev hub.
     """
-    url = (getenv_compat("M3_PG_URL", "PG_URL", "") or "").strip()
-    if url:
-        return url
-    # vault fallback, resolved lazily to avoid a core import at module load
+    return [h.strip() for h in os.environ.get("M3_PG_FORBIDDEN_HOSTS", "").split(",") if h.strip()]
+
+
+def _reject_forbidden_host(url: str) -> None:
+    """Raise if ``url`` targets a forbidden host (see ``_forbidden_pg_hosts``).
+
+    Matches on the PARSED host (exact, case-insensitive), so a forbidden
+    ``198.51.100.5`` does not spuriously reject ``198.51.100.51``, and a forbidden
+    host string appearing only inside a password does not trigger. Falls back to
+    a raw substring check only when the DSN can't be parsed — better to over-
+    refuse an unparseable DSN than to let a forbidden host slip through."""
+    forbidden = _forbidden_pg_hosts()
+    if not forbidden:
+        return
+    parsed_host = ""
+    try:
+        from urllib.parse import urlparse
+
+        parsed_host = (urlparse(url.strip()).hostname or "").lower()
+    except Exception:
+        parsed_host = ""
+
+    for host in forbidden:
+        if not host:
+            continue
+        hit = (parsed_host == host.lower()) if parsed_host else (host in url)
+        if hit:
+            raise RuntimeError(
+                f"PostgreSQL PRIMARY-store DSN targets a forbidden host {host!r} "
+                f"(M3_PG_FORBIDDEN_HOSTS). This host is the data-warehouse/CDW "
+                f"mirror, not a primary store — refusing to connect. Point "
+                f"M3_PRIMARY_PG_URL at a dedicated primary database."
+            )
+
+
+def _resolve_dsn() -> str:
+    """Resolve the PRIMARY-store PostgreSQL DSN, fail loud if absent.
+
+    Role-separated (see m3_core.paths): ``M3_PRIMARY_PG_URL`` > ``M3_PG_URL`` >
+    encrypted vault. It NEVER reads ``PG_URL`` or any CDW/warehouse var — the
+    warehouse DSN must not reach the primary store. The resolved DSN is then
+    checked against ``M3_PG_FORBIDDEN_HOSTS`` (the known warehouse host(s)). No
+    default — selecting the postgres backend without a DSN is a configuration
+    error, not a reason to silently do something else.
+    """
+    url = (resolve_primary_pg_dsn("") or "").strip()
+    if not url:
+        # Vault fallback, resolved lazily to avoid a core import at module load.
+        # ONLY the primary-specific vault key — deliberately NOT the legacy PG_URL
+        # key, which stores the WAREHOUSE DSN (pg_setup/pg_sync write it there). If
+        # we fell back to PG_URL here, a stored warehouse secret would silently
+        # become the primary store — the exact vault-level re-coupling the role
+        # split exists to prevent. Store the primary DSN as M3_PRIMARY_PG_URL.
+        try:
+            from m3_core.context import M3Context
+
+            secret = M3Context().get_secret("M3_PRIMARY_PG_URL")
+            if secret:
+                url = secret.strip()
+        except Exception:
+            pass
+    if not url:
+        raise RuntimeError(
+            "PostgreSQL backend selected (M3_DB_BACKEND=postgres) but no DSN found. "
+            "Set M3_PRIMARY_PG_URL (or M3_PG_URL) to a postgresql:// URL, or store "
+            "it in the encrypted vault as M3_PRIMARY_PG_URL. Refusing to fall back "
+            "to SQLite silently. NOTE: the primary store does not read PG_URL — "
+            "that is the data-warehouse DSN (now M3_CDW_PG_URL)."
+        )
+    _reject_forbidden_host(url)
+    _reject_same_as_warehouse(url)
+    return url
+
+
+def _dsn_identity(url: str) -> "tuple[str, int | None, str] | None":
+    """Normalize a DSN to its (host, port, dbname) identity for comparison.
+
+    Two DSNs that name the SAME database differ byte-for-byte in benign ways
+    (trailing slash, param order, an explicit vs. implicit default port, or
+    different credentials to the same DB). Comparing the parsed identity instead
+    of the raw string catches those. Returns None if the URL can't be parsed
+    (caller treats an unparseable DSN as "can't prove same" — the forbidden-host
+    guard and the rename remain the primary defenses)."""
+    try:
+        from urllib.parse import urlparse
+
+        p = urlparse(url.strip())
+        host = (p.hostname or "").lower()
+        port = p.port if p.port is not None else (5432 if p.scheme.startswith("postgres") else None)
+        dbname = (p.path or "").lstrip("/").rstrip("/")
+        if not host and not dbname:
+            return None
+        return (host, port, dbname)
+    except Exception:
+        return None
+
+
+def _resolve_warehouse_dsn_for_guard() -> str:
+    """Resolve the warehouse DSN the same way the warehouse consumers do —
+    env (M3_CDW_PG_URL > PG_URL) AND the vault key PG_URL — so the same-DSN guard
+    sees a vault-stored warehouse DSN too (the standard 'creds in keyring' setup),
+    not just an env one. Best-effort; returns '' on any failure."""
+    try:
+        from m3_sdk import resolve_cdw_pg_dsn
+
+        env = (resolve_cdw_pg_dsn("") or "").strip()
+        if env:
+            return env
+    except Exception:
+        pass
     try:
         from m3_core.context import M3Context
 
@@ -173,11 +280,35 @@ def _resolve_dsn() -> str:
             return secret.strip()
     except Exception:
         pass
-    raise RuntimeError(
-        "PostgreSQL backend selected (M3_DB_BACKEND=postgres) but no DSN found. "
-        "Set M3_PG_URL (or legacy PG_URL) to a postgresql:// URL, or store it in "
-        "the encrypted vault as PG_URL. Refusing to fall back to SQLite silently."
-    )
+    return ""
+
+
+def _reject_same_as_warehouse(primary_url: str) -> None:
+    """Raise if the PRIMARY DSN names the SAME database as the WAREHOUSE DSN.
+
+    The warehouse is a shared fan-in mirror that many instances UPSERT into; the
+    primary store is one instance's authoritative DB. If they were the SAME
+    database, every peer's pg_sync would overwrite another peer's live primary —
+    always a misconfiguration. Compared on the normalized (host, port, dbname)
+    identity (see ``_dsn_identity``): same host but a DIFFERENT database (a
+    single-node dev box running both) is legitimate and allowed; only the SAME
+    database is rejected. The warehouse DSN is resolved from env AND the vault so
+    the standard keyring-stored setup is covered, not just env.
+    """
+    cdw = _resolve_warehouse_dsn_for_guard()
+    if not cdw:
+        return
+    primary_id = _dsn_identity(primary_url)
+    cdw_id = _dsn_identity(cdw)
+    if primary_id is not None and primary_id == cdw_id:
+        raise RuntimeError(
+            "The PostgreSQL PRIMARY-store DSN names the SAME database as the "
+            "data-warehouse DSN (same host/port/dbname). The warehouse is a shared "
+            "pg_sync fan-in mirror; the primary is this instance's authoritative "
+            "store — they must be different databases (a different dbname on the "
+            "same host is fine). Point M3_PRIMARY_PG_URL and M3_CDW_PG_URL at "
+            "distinct databases."
+        )
 
 
 class PostgresBackend:
