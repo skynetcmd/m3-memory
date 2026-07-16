@@ -294,8 +294,16 @@ async def _try_enrich_or_enqueue(memory_id: str, content: str, fact_enricher, db
 def _enqueue_fact_enrichment(memory_id: str, db) -> None:
     """INSERT OR IGNORE into fact_enrichment_queue."""
     try:
+        # Dedup on UNIQUE(memory_id) (idx_feq_memory_id). SQLite: unchanged
+        # "INSERT OR IGNORE" with empty suffix. Postgres: "INSERT INTO ...
+        # ON CONFLICT (memory_id) DO NOTHING".
+        from memory.backends import active_backend
+
+        _d = active_backend().dialect()
+        _ins = _d.insert_or_ignore()
+        _suffix = _d.on_conflict_ignore(conflict_target="(memory_id)")
         db.execute(
-            "INSERT OR IGNORE INTO fact_enrichment_queue(memory_id) VALUES (?)",
+            f"{_ins} fact_enrichment_queue(memory_id) VALUES ({_d.placeholder(1)}) {_suffix}".rstrip(),
             (memory_id,)
         )
     except Exception as e:
@@ -320,10 +328,23 @@ async def _run_fact_enricher(memory_id: str, content: str, fact_enricher,
         # Record error and bump attempts in queue
         try:
             with _db() as db:
-                db.execute("""
-                    INSERT OR REPLACE INTO fact_enrichment_queue(memory_id, attempts, last_error, last_attempt_at)
-                    VALUES (?, COALESCE((SELECT attempts FROM fact_enrichment_queue WHERE memory_id=?),0)+1, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-                """, (memory_id, memory_id, str(e)[:500]))
+                # Dedup target is UNIQUE(memory_id) (idx_feq_memory_id). Verb is
+                # plain "INSERT INTO" on both backends (SQLite accepts ON
+                # CONFLICT DO UPDATE from a bare INSERT). attempts is a
+                # correlated-subquery increment computed pre-insert.
+                from memory.backends import active_backend
+
+                _d = active_backend().dialect()
+                _p = _d.param()
+                _suffix = _d.on_conflict_update(
+                    conflict_target="(memory_id)",
+                    set_columns=["attempts", "last_error", "last_attempt_at"],
+                )
+                db.execute(f"""
+                    INSERT INTO fact_enrichment_queue(memory_id, attempts, last_error, last_attempt_at)
+                    VALUES ({_p}, COALESCE((SELECT attempts FROM fact_enrichment_queue WHERE memory_id={_p}),0)+1, {_p}, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                    {_suffix}
+                """.rstrip(), (memory_id, memory_id, str(e)[:500]))
         except Exception as db_err:
             logger.debug(f"Failed to record enrichment error for {memory_id}: {db_err}")
     finally:

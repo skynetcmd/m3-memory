@@ -153,9 +153,20 @@ def flush_entity_vectors(db, buffered: list[tuple[str, list[float], str | None]]
 
     written = 0
     try:
+        # entity_id is the PK; OR REPLACE semantics = upsert overwriting the
+        # other inserted columns. Verb is plain "INSERT INTO" on BOTH backends
+        # (SQLite accepts ON CONFLICT DO UPDATE from a bare INSERT — proven
+        # against a scratch sqlite table before wiring this in).
+        from memory.backends import active_backend
+
+        _d = active_backend().dialect()
+        _suffix = _d.on_conflict_update(
+            conflict_target="(entity_id)",
+            set_columns=["embedding", "embed_model", "dim"],
+        )
         db.executemany(
-            "INSERT OR REPLACE INTO entity_embeddings (entity_id, embedding, embed_model, dim) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO entity_embeddings (entity_id, embedding, embed_model, dim) "
+            f"VALUES ({_d.placeholder(4)}) {_suffix}".rstrip(),
             [(eid, _pack(vec), model, len(vec)) for eid, vec, model in buffered if vec],
         )
         written = len(buffered)
@@ -185,9 +196,20 @@ def _store_entity_vector(db, entity_id: str, vec: list[float], model: str | None
     from embedding_utils import pack as _pack
 
     try:
+        # entity_id is the PK; OR REPLACE semantics = upsert overwriting the
+        # other inserted columns. Verb is plain "INSERT INTO" on BOTH backends
+        # (SQLite accepts ON CONFLICT DO UPDATE from a bare INSERT — proven
+        # against a scratch sqlite table before wiring this in).
+        from memory.backends import active_backend
+
+        _d = active_backend().dialect()
+        _suffix = _d.on_conflict_update(
+            conflict_target="(entity_id)",
+            set_columns=["embedding", "embed_model", "dim"],
+        )
         db.execute(
-            "INSERT OR REPLACE INTO entity_embeddings (entity_id, embedding, embed_model, dim) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO entity_embeddings (entity_id, embedding, embed_model, dim) "
+            f"VALUES ({_d.placeholder(4)}) {_suffix}".rstrip(),
             (entity_id, _pack(vec), model, len(vec)),
         )
     except Exception as e:  # pragma: no cover - defensive
@@ -526,10 +548,21 @@ def _link_memory_to_entity(
     db,
 ) -> None:
     """INSERT OR IGNORE into memory_item_entities."""
+    # Dedup on the composite PK (memory_id, entity_id, mention_offset). On
+    # SQLite the dialect emits "INSERT OR IGNORE" with an empty suffix
+    # (unchanged); on Postgres it emits "INSERT INTO ... ON CONFLICT
+    # (memory_id, entity_id, mention_offset) DO NOTHING".
+    from memory.backends import active_backend
+
+    _d = active_backend().dialect()
+    _ins = _d.insert_or_ignore()
+    _suffix = _d.on_conflict_ignore(
+        conflict_target="(memory_id, entity_id, mention_offset)"
+    )
     db.execute(
-        "INSERT OR IGNORE INTO memory_item_entities "
+        f"{_ins} memory_item_entities "
         "(memory_id, entity_id, mention_text, mention_offset, confidence) "
-        "VALUES (?, ?, ?, ?, ?)",
+        f"VALUES ({_d.placeholder(5)}) {_suffix}".rstrip(),
         (memory_id, entity_id, mention_text, mention_offset, confidence),
     )
 
@@ -559,8 +592,16 @@ def _link_entity_relationship(
 def _enqueue_entity_extraction(memory_id: str, db) -> None:
     """INSERT OR IGNORE into entity_extraction_queue."""
     try:
+        # Dedup on UNIQUE(memory_id) (idx_eeq_memory_id). SQLite: unchanged
+        # "INSERT OR IGNORE" with empty suffix. Postgres: "INSERT INTO ...
+        # ON CONFLICT (memory_id) DO NOTHING".
+        from memory.backends import active_backend
+
+        _d = active_backend().dialect()
+        _ins = _d.insert_or_ignore()
+        _suffix = _d.on_conflict_ignore(conflict_target="(memory_id)")
         db.execute(
-            "INSERT OR IGNORE INTO entity_extraction_queue(memory_id) VALUES (?)",
+            f"{_ins} entity_extraction_queue(memory_id) VALUES ({_d.placeholder(1)}) {_suffix}".rstrip(),
             (memory_id,),
         )
     except Exception as e:
@@ -706,17 +747,32 @@ async def _run_entity_extractor(
         # eligible set by _select_pending_entity_extraction (poisoned-item guard).
         try:
             with _db() as db:
+                # Dedup target is UNIQUE(memory_id) (idx_eeq_memory_id). Verb is
+                # plain "INSERT INTO" on both backends (SQLite accepts ON
+                # CONFLICT DO UPDATE from a bare INSERT). attempts is a
+                # correlated-subquery increment computed pre-insert so it works
+                # identically whether or not the row already exists; last_error
+                # and last_attempt_at are overwritten from the new row on conflict.
+                from memory.backends import active_backend
+
+                _d = active_backend().dialect()
+                _p = _d.param()
+                _suffix = _d.on_conflict_update(
+                    conflict_target="(memory_id)",
+                    set_columns=["attempts", "last_error", "last_attempt_at"],
+                )
                 db.execute(
-                    """
-                    INSERT OR REPLACE INTO entity_extraction_queue
+                    f"""
+                    INSERT INTO entity_extraction_queue
                         (memory_id, attempts, last_error, last_attempt_at)
                     VALUES (
-                        ?,
-                        COALESCE((SELECT attempts FROM entity_extraction_queue WHERE memory_id=?), 0) + 1,
-                        ?,
+                        {_p},
+                        COALESCE((SELECT attempts FROM entity_extraction_queue WHERE memory_id={_p}), 0) + 1,
+                        {_p},
                         strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                     )
-                    """,
+                    {_suffix}
+                    """.rstrip(),
                     (memory_id, memory_id, str(e)[:500]),
                 )
         except Exception as db_err:
