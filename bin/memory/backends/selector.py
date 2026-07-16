@@ -58,12 +58,9 @@ def active_backend() -> StorageBackend:
 
             backend: StorageBackend = SqliteBackend()
         elif name == "postgres":
-            raise NotImplementedError(
-                "M3_DB_BACKEND=postgres is not available yet. The PostgreSQL "
-                "backend lands in a later phase of the storage-backend seam "
-                "(see ~/.m3-private/plans/PG_PRIMARY_BACKEND_PLAN.md, Phase 1). "
-                "Use the default 'sqlite' for now."
-            )
+            from .postgres_backend import PostgresBackend
+
+            backend = PostgresBackend()
         else:  # pragma: no cover - resolve_backend_name already validated
             raise ValueError(f"unhandled backend {name!r}")
         _backends[name] = backend

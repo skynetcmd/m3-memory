@@ -1,0 +1,188 @@
+-- m3-memory PostgreSQL PRIMARY schema (pg_primary_v1.sql)
+--
+-- This is the PRIMARY-backend schema, NOT the warehouse mirror
+-- (see pg_warehouse_chatlog_v1.sql for that, kept separate and namespaced
+-- under m3_warehouse). This file is generated to match the live SQLite
+-- primary schema 1:1 (see memory/migrations, live_schema.sql ground truth)
+-- for the Phase 1 selectable-backend work (SQLite vs Postgres as primary
+-- store). Tables are created in the default `public` search_path — no
+-- custom schema/namespace.
+--
+-- Idempotent: CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS
+-- throughout. Safe to re-run.
+--
+-- Apply via psql:
+--   psql -h <host> -U <user> -d <database> -f pg_primary_v1.sql
+
+BEGIN;
+
+-- =====================================================
+-- memory_items
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS memory_items (
+    id                   TEXT PRIMARY KEY,
+    type                 TEXT NOT NULL,
+    title                TEXT,
+    content              TEXT,
+    metadata_json        JSONB,
+    agent_id             TEXT,
+    model_id             TEXT,
+    change_agent         TEXT DEFAULT 'unknown',
+    importance           DOUBLE PRECISION DEFAULT 0.5,
+    source               TEXT DEFAULT 'agent',
+    origin_device        TEXT DEFAULT 'macbook',
+    is_deleted           INTEGER DEFAULT 0,
+    expires_at           TIMESTAMPTZ,
+    decay_rate           DOUBLE PRECISION DEFAULT 0.0,
+    created_at           TIMESTAMPTZ DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ,
+    last_accessed_at     TIMESTAMPTZ,
+    access_count         BIGINT DEFAULT 0,
+    user_id              TEXT DEFAULT '',
+    scope                TEXT DEFAULT 'agent',
+    valid_from           TIMESTAMPTZ DEFAULT NULL,
+    valid_to             TIMESTAMPTZ DEFAULT NULL,
+    content_hash         TEXT DEFAULT '',
+    read_at              TIMESTAMPTZ DEFAULT NULL,
+    conversation_id      TEXT,
+    refresh_on           TIMESTAMPTZ,
+    refresh_reason       TEXT,
+    variant              TEXT DEFAULT NULL,
+    source_group_id      INTEGER,
+    stage1_kg_done       INTEGER DEFAULT 0,
+    confidence           DOUBLE PRECISION DEFAULT NULL,
+    belief_alpha         DOUBLE PRECISION DEFAULT NULL,
+    belief_beta          DOUBLE PRECISION DEFAULT NULL,
+    corroboration_count  BIGINT DEFAULT 0,
+    contradiction_count  BIGINT DEFAULT 0,
+    pinned               INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_mi_type       ON memory_items(type);
+CREATE INDEX IF NOT EXISTS idx_mi_agent      ON memory_items(agent_id);
+CREATE INDEX IF NOT EXISTS idx_mi_model      ON memory_items(model_id);
+CREATE INDEX IF NOT EXISTS idx_mi_created    ON memory_items(created_at);
+CREATE INDEX IF NOT EXISTS idx_mi_deleted    ON memory_items(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_mi_deleted_type ON memory_items(is_deleted, type);
+CREATE INDEX IF NOT EXISTS idx_mi_importance   ON memory_items(importance);
+CREATE INDEX IF NOT EXISTS idx_mi_updated      ON memory_items(updated_at);
+CREATE INDEX IF NOT EXISTS idx_mi_change_agent ON memory_items(change_agent);
+CREATE INDEX IF NOT EXISTS idx_mi_user_id ON memory_items(user_id);
+CREATE INDEX IF NOT EXISTS idx_mi_scope ON memory_items(scope);
+CREATE INDEX IF NOT EXISTS idx_mi_valid_from ON memory_items(valid_from);
+CREATE INDEX IF NOT EXISTS idx_mi_handoff_inbox
+    ON memory_items(agent_id, type, read_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_mi_refresh_on
+    ON memory_items(refresh_on)
+    WHERE refresh_on IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mi_conversation_id
+    ON memory_items(conversation_id, created_at)
+    WHERE is_deleted = 0;
+CREATE INDEX IF NOT EXISTS idx_mi_active_type_created
+    ON memory_items(is_deleted, type, created_at DESC)
+    WHERE is_deleted = 0;
+CREATE INDEX IF NOT EXISTS idx_mi_scope_type
+    ON memory_items(scope, type)
+    WHERE is_deleted = 0;
+CREATE INDEX IF NOT EXISTS idx_mi_user_agent
+    ON memory_items(user_id, agent_id);
+CREATE INDEX IF NOT EXISTS idx_mi_content_hash
+    ON memory_items(content_hash)
+    WHERE content_hash != '';
+CREATE INDEX IF NOT EXISTS idx_mi_source ON memory_items(source);
+CREATE INDEX IF NOT EXISTS idx_memory_items_variant
+    ON memory_items(variant) WHERE variant IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_items_user_variant
+    ON memory_items(user_id, variant) WHERE variant IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_items_chat_log
+    ON memory_items (conversation_id, created_at)
+    WHERE type='chat_log' AND is_deleted=0;
+
+-- NOTE: source used json_extract(metadata_json,'$.host_agent') etc against
+-- SQLite TEXT; metadata_json is now JSONB, translated to ->> expression indexes.
+CREATE INDEX IF NOT EXISTS idx_memory_items_host_agent
+    ON memory_items ((metadata_json->>'host_agent'))
+    WHERE type='chat_log';
+CREATE INDEX IF NOT EXISTS idx_memory_items_provider
+    ON memory_items ((metadata_json->>'provider'))
+    WHERE type='chat_log';
+CREATE INDEX IF NOT EXISTS idx_memory_items_model_id
+    ON memory_items ((metadata_json->>'model_id'))
+    WHERE type='chat_log';
+CREATE INDEX IF NOT EXISTS idx_memory_items_provider_time
+    ON memory_items ((metadata_json->>'provider'), created_at)
+    WHERE type='chat_log' AND is_deleted=0;
+CREATE INDEX IF NOT EXISTS idx_mi_type_user_obs
+  ON memory_items(type, user_id, valid_from)
+  WHERE type='observation';
+CREATE INDEX IF NOT EXISTS idx_mi_id_prefix8
+    ON memory_items(SUBSTR(id, 1, 8));
+CREATE INDEX IF NOT EXISTS idx_mi_source_group
+    ON memory_items(source_group_id) WHERE source_group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mi_stage1_kg_pending
+    ON memory_items(variant, type)
+    WHERE stage1_kg_done = 0;
+CREATE INDEX IF NOT EXISTS idx_memory_items_confidence
+    ON memory_items(confidence) WHERE confidence IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_memory_items_pinned
+    ON memory_items(pinned) WHERE pinned = 1;
+
+-- Note: SQLite FTS5 virtual tables (memory_items_fts, memory_items_fts_config,
+-- memory_items_fts_data, memory_items_fts_docsize, memory_items_fts_idx) are
+-- NOT translated here. Postgres full-text search uses native tsvector /
+-- GIN indexes, to be added separately (not part of this mechanical DDL pass).
+
+-- =====================================================
+-- memory_embeddings
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS memory_embeddings (
+    id          TEXT PRIMARY KEY,
+    memory_id   TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+    embedding   BYTEA NOT NULL,
+    -- NOTE: default embed_model is historically inaccurate; live data uses
+    -- text-embedding-bge-m3. Do not rely on this default.
+    embed_model TEXT DEFAULT 'jina-embeddings-v5',
+    dim         BIGINT DEFAULT 1024,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    content_hash TEXT,
+    vector_kind TEXT NOT NULL DEFAULT 'default'
+);
+
+CREATE INDEX IF NOT EXISTS idx_me_memory_id  ON memory_embeddings(memory_id);
+CREATE INDEX IF NOT EXISTS idx_me_memory_model
+    ON memory_embeddings(memory_id, embed_model);
+CREATE INDEX IF NOT EXISTS idx_me_content_hash_model
+    ON memory_embeddings(content_hash, embed_model);
+CREATE INDEX IF NOT EXISTS idx_me_memory_kind
+    ON memory_embeddings(memory_id, vector_kind);
+
+-- =====================================================
+-- memory_relationships
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS memory_relationships (
+    id                TEXT PRIMARY KEY,
+    from_id           TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+    to_id             TEXT NOT NULL REFERENCES memory_items(id) ON DELETE CASCADE,
+    relationship_type TEXT NOT NULL,
+    created_at        TIMESTAMPTZ DEFAULT NOW(),
+    weight            DOUBLE PRECISION
+);
+
+CREATE INDEX IF NOT EXISTS idx_mr_from ON memory_relationships(from_id);
+CREATE INDEX IF NOT EXISTS idx_mr_to   ON memory_relationships(to_id);
+CREATE INDEX IF NOT EXISTS idx_mr_rel_type ON memory_relationships(relationship_type);
+
+-- =====================================================
+-- schema_versions
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS schema_versions (
+    version     BIGINT PRIMARY KEY,
+    filename    TEXT NOT NULL,
+    applied_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+COMMIT;

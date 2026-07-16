@@ -15,12 +15,17 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 
 from .base import BackendName, Capabilities
+from .dialect import SQLITE, Dialect
 
 
 class SqliteBackend:
     """Adapter exposing the current SQLite path through the `StorageBackend` seam."""
 
     name: BackendName = "sqlite"
+
+    def dialect(self) -> Dialect:
+        """The SQLite SQL dialect (qmark placeholders, PRAGMA introspection)."""
+        return SQLITE
 
     def capabilities(self) -> Capabilities:
         """Probe optional accelerators; baseline (FTS5 + Rust cosine) always holds.

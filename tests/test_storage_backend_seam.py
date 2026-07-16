@@ -59,13 +59,41 @@ def test_invalid_backend_raises_not_silent(monkeypatch):
         resolve_backend_name()
 
 
-def test_postgres_selection_fails_loud(monkeypatch):
-    """Selecting postgres before it ships raises, not a silent SQLite fallback."""
+def test_postgres_selection_builds_backend(monkeypatch):
+    """Selecting postgres now builds a real PostgresBackend (Phase 1).
+
+    Construction must NOT open a connection (the pool is lazy), so this passes
+    with only a DSN present and no reachable server — the connection-time
+    behavior is covered by the live integration tests.
+    """
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
-    # Name resolution succeeds (postgres is a known name)...
+    monkeypatch.setenv("M3_PG_URL", "postgresql://u:p@127.0.0.1:5433/nonexistent")
     assert resolve_backend_name() == "postgres"
-    # ...but constructing the backend is an explicit NotImplementedError.
-    with pytest.raises(NotImplementedError, match="not available yet"):
+    backend = active_backend()
+    assert backend.name == "postgres"
+    assert isinstance(backend, StorageBackend)
+    # dialect is available without any connection (pure, lazy pool untouched)
+    assert backend.dialect().backend == "postgres"
+    assert backend.placeholder(2) == "%s, %s"
+
+
+def test_postgres_selection_no_dsn_fails_loud(monkeypatch):
+    """postgres backend with NO DSN anywhere raises, never silently uses SQLite."""
+    monkeypatch.setenv("M3_DB_BACKEND", "postgres")
+    monkeypatch.delenv("M3_PG_URL", raising=False)
+    monkeypatch.delenv("PG_URL", raising=False)
+    # Force the vault fallback to yield nothing, so the real _resolve_dsn runs
+    # its full env -> vault -> raise path with the vault deterministically empty
+    # (independent of whatever secret this machine/CI box has stored).
+    try:
+        from m3_core.context import M3Context
+
+        monkeypatch.setattr(M3Context, "get_secret", lambda self, name: None)
+    except ImportError:
+        pass
+    # With no env DSN and an empty vault, construction must raise -- never a
+    # silent fallback to SQLite.
+    with pytest.raises(RuntimeError, match="no DSN found|PG_URL"):
         active_backend()
 
 

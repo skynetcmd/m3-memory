@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .dialect import Dialect
 
 # The set of backend identities Phase 0 knows about. "postgres" is declared here
 # so the selector and config can name it, but no implementation ships until a
@@ -71,6 +74,10 @@ class StorageBackend(Protocol):
 
     def capabilities(self) -> Capabilities:
         """Return the capabilities discovered for this backend's connection."""
+        ...
+
+    def dialect(self) -> "Dialect":
+        """Return this backend's SQL dialect helper (see `dialect.py`)."""
         ...
 
     def connection(self) -> AbstractContextManager:
