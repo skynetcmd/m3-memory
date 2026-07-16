@@ -30,7 +30,11 @@ from .base import (
     StorageBackend,
     VectorHit,
 )
-from .selector import active_backend, resolve_backend_name
+from .selector import (
+    active_backend,
+    require_sqlite_backend,
+    resolve_backend_name,
+)
 
 __all__ = [
     "BackendName",
@@ -39,5 +43,6 @@ __all__ = [
     "StorageBackend",
     "VectorHit",
     "active_backend",
+    "require_sqlite_backend",
     "resolve_backend_name",
 ]

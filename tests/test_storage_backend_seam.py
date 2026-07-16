@@ -16,6 +16,7 @@ import pytest
 from memory.backends import (
     StorageBackend,
     active_backend,
+    require_sqlite_backend,
     resolve_backend_name,
 )
 from memory.backends import selector as _selector
@@ -94,6 +95,19 @@ def test_postgres_selection_no_dsn_fails_loud(monkeypatch):
     # silent fallback to SQLite.
     with pytest.raises(RuntimeError, match="no DSN found|PG_URL"):
         active_backend()
+
+
+def test_require_sqlite_backend_noop_on_sqlite(monkeypatch):
+    monkeypatch.delenv("M3_DB_BACKEND", raising=False)
+    # Must not raise on the default (sqlite) backend.
+    require_sqlite_backend("some_tool")
+
+
+def test_require_sqlite_backend_fails_loud_on_postgres(monkeypatch):
+    """A SQLite-only tool must REFUSE (not silently run) under postgres."""
+    monkeypatch.setenv("M3_DB_BACKEND", "postgres")
+    with pytest.raises(RuntimeError, match="SQLite-only|stale SQLite"):
+        require_sqlite_backend("backfill_content_hash")
 
 
 def test_placeholder_matches_qmark_idiom(monkeypatch):

@@ -67,6 +67,31 @@ def active_backend() -> StorageBackend:
         return backend
 
 
+def require_sqlite_backend(tool: str) -> None:
+    """Fail loud if a SQLite-only tool is run against a PostgreSQL deployment.
+
+    Many maintenance / migration / CLI tools open ``sqlite3.connect`` directly,
+    bypassing the backend seam. On a PostgreSQL-primary deployment that would
+    silently read or WRITE a stale, empty SQLite file instead of the live PG
+    store — a data-correctness hazard that gives no error. Such a tool calls this
+    at entry so an operator who set ``M3_DB_BACKEND=postgres`` gets a clear,
+    actionable refusal instead of silently editing the wrong database.
+
+    ``tool`` is a short human name for the message (e.g. ``"backfill_content_hash"``).
+    Raises ``RuntimeError`` when the active backend is not sqlite; a no-op on
+    sqlite (the default), so it never affects normal SQLite deployments.
+    """
+    name = resolve_backend_name()
+    if name != "sqlite":
+        raise RuntimeError(
+            f"{tool} operates directly on SQLite, but M3_DB_BACKEND={name!r} is "
+            f"selected. Running it would touch a stale SQLite file, not the live "
+            f"{name} store. This tool is SQLite-only; run it against a SQLite "
+            f"deployment, or unset M3_DB_BACKEND. (Refusing rather than silently "
+            f"editing the wrong database.)"
+        )
+
+
 def _reset_for_tests() -> None:
     """Clear the backend cache. Test-only — lets a test flip the env and re-resolve."""
     with _lock:
