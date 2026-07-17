@@ -297,9 +297,9 @@ def _enqueue_fact_enrichment(memory_id: str, db) -> None:
         # Dedup on UNIQUE(memory_id) (idx_feq_memory_id). SQLite: unchanged
         # "INSERT OR IGNORE" with empty suffix. Postgres: "INSERT INTO ...
         # ON CONFLICT (memory_id) DO NOTHING".
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _d = active_backend().dialect()
+        _d = dialect()
         _ins = _d.insert_or_ignore()
         _suffix = _d.on_conflict_ignore(conflict_target="(memory_id)")
         db.execute(
@@ -332,9 +332,9 @@ async def _run_fact_enricher(memory_id: str, content: str, fact_enricher,
                 # plain "INSERT INTO" on both backends (SQLite accepts ON
                 # CONFLICT DO UPDATE from a bare INSERT). attempts is a
                 # correlated-subquery increment computed pre-insert.
-                from memory.backends import active_backend
+                from memory.backends import dialect
 
-                _d = active_backend().dialect()
+                _d = dialect()
                 _p = _d.param()
                 _suffix = _d.on_conflict_update(
                     conflict_target="(memory_id)",
@@ -372,8 +372,8 @@ async def _write_fact_rows(memory_id: str, facts: list[dict]) -> None:
         }
 
         try:
-            from memory.backends import active_backend
-            _d = active_backend().dialect()
+            from memory.backends import dialect
+            _d = dialect()
             with _db() as db:
                 # Insert the fact row
                 db.execute(
@@ -418,8 +418,8 @@ def _select_pending_fact_enrichment(db, limit: int | None = None, allowed_varian
     When allowed_variants is provided, loosen the variant filter from strict NULL
     to (variant IS NULL OR variant IN (...)).
     """
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     p = _d.param()
     # Build the variant clause
     if allowed_variants:

@@ -89,8 +89,8 @@ def compute_content_size_k(turns: Sequence[tuple]) -> int:
 # ── Schema verification ────────────────────────────────────────────────────
 def has_state_tables(conn: sqlite3.Connection) -> bool:
     """True iff migration 028 has been applied to this DB."""
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     found = 0
     for t in ("enrichment_groups", "enrichment_runs"):
         sql, params = _d.table_exists(t)
@@ -128,8 +128,8 @@ def start_run(
 ) -> str:
     """Insert a new enrichment_runs row at status='running'. Returns run_id."""
     run_id = str(uuid.uuid4())
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     conn.execute(
         f"""
         INSERT INTO enrichment_runs (
@@ -158,8 +158,8 @@ def end_run(
     notes: Optional[str] = None,
 ) -> None:
     """Update enrichment_runs row with final counts + status."""
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     counts = conn.execute(
         f"""
@@ -196,8 +196,8 @@ def end_run(
 
 def run_total_cost_usd(conn: sqlite3.Connection, run_id: str) -> float:
     """Sum cost_usd across all groups linked to a run. Used for budget checks."""
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     row = conn.execute(
         f"SELECT COALESCE(SUM(cost_usd), 0) FROM enrichment_groups "
@@ -229,8 +229,8 @@ def enroll_group(
 
     Caller is responsible for `commit()` — we keep this fast for batch enroll.
     """
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     cur = conn.execute(
         f"""
@@ -289,8 +289,8 @@ def enroll_group(
              profile, model, enrich_run_id, old_id),
         )
         return (old_id, "superseded")
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     # Backend-neutral generated-id read via the dialect (RETURNING id on PG/MariaDB,
     # cur.lastrowid on SQLite) — not a `== "postgres"` name check.
     cur = conn.execute(
@@ -356,8 +356,8 @@ def recover_stale_claims(
     to pending. Run at every resume to self-heal from crashed workers.
     Returns count of recovered rows."""
     cutoff = _iso_plus(-timeout_sec)
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     cur = conn.execute(
         f"""
@@ -388,8 +388,8 @@ def claim_group(
     """
     token = str(uuid.uuid4())
     now = _utcnow_iso()
-    from memory.backends import active_backend
-    _p = active_backend().dialect().param()
+    from memory.backends import dialect
+    _p = dialect().param()
     # Plain UPDATE (not ON CONFLICT), so bare `attempts = attempts + 1` is
     # unambiguous on both backends.
     cur = conn.execute(
@@ -431,8 +431,8 @@ def mark_success(
     Migration 030 adds partial_failure_chunks. We use COALESCE() so callers
     on un-migrated DBs don't error out — the column simply stays NULL.
     """
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     if partial_failure_chunks:
         # Preserve last_error so the audit row carries why chunks failed.
@@ -472,8 +472,8 @@ def mark_empty(
     tokens_out: Optional[int] = None,
     cost_usd: Optional[float] = None,
 ) -> None:
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     conn.execute(
         f"""
@@ -531,8 +531,8 @@ def mark_failed(
     group's retry budget. They still hit dead_letter via the deterministic
     branch only if classified as such (they aren't — http_status is not
     deterministic), so in practice 429s always stay at status='failed'."""
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     row = conn.execute(
         f"SELECT attempts FROM enrichment_groups WHERE id = {_p}",
@@ -602,8 +602,8 @@ def eligible_for_resume(
     unassigned rows. When send_to is None (default), the column is
     ignored entirely (backwards compatible).
     """
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     statuses = ["pending", "failed"]
     if include_dead_letter:
@@ -642,8 +642,8 @@ def status_counts(
     target_variant: Optional[str] = None,
 ) -> dict[str, int]:
     """Per-status row counts. Useful for status-report CLI."""
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     where = "1=1"
     params: list = []

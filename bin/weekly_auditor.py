@@ -93,8 +93,8 @@ def section_memory_health(pdf, summary):
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 10)
 
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     with _db() as conn:
         total = conn.execute(
@@ -152,8 +152,8 @@ def section_decisions(pdf, summary):
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 10)
 
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     with _db() as conn:
         total_all = conn.execute("SELECT COUNT(*) FROM project_decisions").fetchone()[0]
         rows = conn.execute(
@@ -195,8 +195,8 @@ def section_activity(pdf, summary):
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 10)
 
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     with _db() as conn:
         rows = conn.execute(
             "SELECT timestamp, query, response FROM activity_logs "

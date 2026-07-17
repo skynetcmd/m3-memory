@@ -5,7 +5,7 @@ import sqlite3
 from collections.abc import Collection
 
 from . import config
-from .backends import active_backend
+from .backends import dialect
 from .config import EMBED_DIM, ENTITY_SEED_STOPLIST
 from .db import _db
 from .embed import _embed
@@ -57,7 +57,7 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
             seen_for_fetch: set = set(seed_ids)
             frontier: set = set(seed_ids)
             with _db() as db:
-                _d = active_backend().dialect()
+                _d = dialect()
                 for _ in range(depth):
                     if not frontier:
                         break
@@ -92,7 +92,7 @@ def _graph_neighbor_ids(seed_ids: list, depth: int) -> set:
     seen: set = set(seed_ids)
     frontier = set(seed_ids)
     with _db() as db:
-        _d = active_backend().dialect()
+        _d = dialect()
         for _ in range(depth):
             if not frontier:
                 break
@@ -133,7 +133,7 @@ def _session_neighbor_ids(seed_ids: list, session_cap: int = 12,
     """
     if not seed_ids:
         return {}
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     _tenancy_sql = ""
     _tenancy_params: list = []
@@ -205,7 +205,7 @@ async def _entity_graph_neighbor_ids(
     if not query or not query.strip():
         return set()
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
 
     # Clamp to safe limits (mirrors memory_graph_impl clamp for depth)
@@ -405,7 +405,7 @@ async def _score_extra_rows(query: str, rows_by_id: dict, base_score: float = 0.
             out.append((base_score, item))
         return out
     with _db() as db:
-        _d = active_backend().dialect()
+        _d = dialect()
         ids = list(rows_by_id.keys())
         placeholders = _d.placeholder(len(ids))
         emb_rows = db.execute(
@@ -431,7 +431,7 @@ def memory_graph_impl(memory_id: str, depth: int = 1) -> str:
     """Returns the local graph neighborhood of a memory item up to N hops."""
     depth = min(max(int(depth), 1), 3)  # Clamp to 1-3
     with _db() as db:
-        _d = active_backend().dialect()
+        _d = dialect()
         p = _d.param()
         # Verify item exists
         root = db.execute(f"SELECT id, title, type FROM memory_items WHERE id = {p}", (memory_id,)).fetchone()
@@ -499,7 +499,7 @@ def _neighbor_session_ids(seed_ids: list, window: int, cap_per_session: int = 12
     out: dict = {}
     seed_set = set(seed_ids)
     with _db() as db:
-        _d = active_backend().dialect()
+        _d = dialect()
         p = _d.param()
         _sidx_expr = _d.json_extract_int("metadata_json", "session_idx")
         _turn_expr = _d.json_extract_int("metadata_json", "turn_idx")

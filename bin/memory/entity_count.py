@@ -61,7 +61,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .backends import active_backend
+from .backends import dialect
 from .db import _db
 
 # ── Module limits ────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ def count_entities_impl(
     cid = _require_conversation_id(conversation_id)
     pat = _validate_pattern(pattern)
     etype = (entity_type or "").strip()
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
 
     where_parts = [f"mi.conversation_id = {p}"]
@@ -215,7 +215,7 @@ def count_mentions_impl(
     pat = _validate_pattern(pattern)
     etype = (entity_type or "").strip()
     lim = _validate_limit(limit)
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
 
     where_parts = [f"mi.conversation_id = {p}"]
@@ -322,7 +322,7 @@ def list_mentions_impl(
     resolved_cname = ""
     resolved_etype = ""
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     ci_name = _d.ci_equals("canonical_name", p)
 

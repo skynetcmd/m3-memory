@@ -80,9 +80,9 @@ def _entity_embeddings_available(db) -> bool:
     predate migration 032 won't have it; callers fall back to the
     embed-each-candidate path so behavior is preserved everywhere."""
     try:
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _d = active_backend().dialect()
+        _d = dialect()
         _sql, _params = _d.table_exists("entity_embeddings")
         row = db.execute(_sql, _params).fetchone()
         return row is not None
@@ -96,9 +96,9 @@ def _load_entity_vectors(db, entity_ids: list[str]) -> dict[str, list[float]]:
     if not entity_ids:
         return {}
     from embedding_utils import unpack as _unpack
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     out: dict[str, list[float]] = {}
     # Chunk the IN-list to stay under SQLite's variable limit.
     for i in range(0, len(entity_ids), 500):
@@ -161,9 +161,9 @@ def flush_entity_vectors(db, buffered: list[tuple[str, list[float], str | None]]
         # other inserted columns. Verb is plain "INSERT INTO" on BOTH backends
         # (SQLite accepts ON CONFLICT DO UPDATE from a bare INSERT — proven
         # against a scratch sqlite table before wiring this in).
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _d = active_backend().dialect()
+        _d = dialect()
         _suffix = _d.on_conflict_update(
             conflict_target="(entity_id)",
             set_columns=["embedding", "embed_model", "dim"],
@@ -204,9 +204,9 @@ def _store_entity_vector(db, entity_id: str, vec: list[float], model: str | None
         # other inserted columns. Verb is plain "INSERT INTO" on BOTH backends
         # (SQLite accepts ON CONFLICT DO UPDATE from a bare INSERT — proven
         # against a scratch sqlite table before wiring this in).
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _d = active_backend().dialect()
+        _d = dialect()
         _suffix = _d.on_conflict_update(
             conflict_target="(entity_id)",
             set_columns=["embedding", "embed_model", "dim"],
@@ -406,9 +406,9 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
     Tier 2: fuzzy token-Jaccard >= ENTITY_RESOLVE_FUZZY_MIN within same entity_type.
     Tier 3 (embedding cosine) is handled by the async variant _resolve_entity_async.
     """
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     # Tier 1: exact match
     row = db.execute(
@@ -452,9 +452,9 @@ def _resolve_entity(canonical_name: str, entity_type: str, db) -> str | None:
 
 async def _resolve_entity_async(canonical_name: str, entity_type: str, db) -> str | None:
     """Full 3-tier resolution including embedding cosine. Use from async context."""
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     sync_id = _resolve_entity(canonical_name, entity_type, db)
     if sync_id is not None:
@@ -543,9 +543,9 @@ def _create_entity(canonical_name: str, entity_type: str, attributes: dict, db) 
     content_hash = _sha256_hex(
         f"{canonical_name}|{entity_type}|{attrs_json}".encode("utf-8")
     )
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     db.execute(
         "INSERT INTO entities (id, canonical_name, entity_type, attributes_json, content_hash) "
         f"VALUES ({_d.placeholder(5)})",
@@ -567,9 +567,9 @@ def _link_memory_to_entity(
     # SQLite the dialect emits "INSERT OR IGNORE" with an empty suffix
     # (unchanged); on Postgres it emits "INSERT INTO ... ON CONFLICT
     # (memory_id, entity_id, mention_offset) DO NOTHING".
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     _ins = _d.insert_or_ignore()
     _suffix = _d.on_conflict_ignore(
         conflict_target="(memory_id, entity_id, mention_offset)"
@@ -596,9 +596,9 @@ def _link_entity_relationship(
             f"Invalid predicate '{predicate}'. "
             f"Valid predicates: {', '.join(sorted(VALID_ENTITY_PREDICATES))}"
         )
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     db.execute(
         "INSERT INTO entity_relationships "
         "(from_entity, to_entity, predicate, confidence, source_memory_id) "
@@ -613,9 +613,9 @@ def _enqueue_entity_extraction(memory_id: str, db) -> None:
         # Dedup on UNIQUE(memory_id) (idx_eeq_memory_id). SQLite: unchanged
         # "INSERT OR IGNORE" with empty suffix. Postgres: "INSERT INTO ...
         # ON CONFLICT (memory_id) DO NOTHING".
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _d = active_backend().dialect()
+        _d = dialect()
         _ins = _d.insert_or_ignore()
         _suffix = _d.on_conflict_ignore(conflict_target="(memory_id)")
         db.execute(
@@ -654,9 +654,9 @@ async def _run_entity_extractor(
     active_types: frozenset = valid_types if valid_types is not None else VALID_ENTITY_TYPES
     active_predicates: frozenset = valid_predicates if valid_predicates is not None else VALID_ENTITY_PREDICATES
 
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
 
     try:
@@ -776,9 +776,9 @@ async def _run_entity_extractor(
                 # correlated-subquery increment computed pre-insert so it works
                 # identically whether or not the row already exists; last_error
                 # and last_attempt_at are overwritten from the new row on conflict.
-                from memory.backends import active_backend
+                from memory.backends import dialect
 
-                _d = active_backend().dialect()
+                _d = dialect()
                 _p = _d.param()
                 _suffix = _d.on_conflict_update(
                     conflict_target="(memory_id)",
@@ -875,9 +875,9 @@ def _select_pending_entity_extraction(
     valid_from is included so callers can inherit bitemporal validity from the source
     memory when creating entities and relationships during extraction.
     """
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     if allowed_variants:
         variant_clause = (
@@ -1029,9 +1029,9 @@ def entity_extractor_health() -> dict:
       relationships_total  — total rows in entity_relationships table
       memory_item_entities_total — total rows in memory_item_entities table
     """
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     with _db() as db:
         q_depth = db.execute(
@@ -1083,9 +1083,9 @@ def entity_search_impl(
         List of dicts: [{entity_id, canonical_name, entity_type, attributes_json, neighbor_count}]
         neighbor_count only computed if with_neighbors=True.
     """
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     with _db() as db:
         # Build the WHERE clause
@@ -1152,9 +1152,9 @@ def entity_get_impl(entity_id: str, depth: int = 1) -> dict:
 
     Note: depth is accepted but unused beyond depth=1 (multi-hop is future work).
     """
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     with _db() as db:
         # Load the entity itself
@@ -1355,9 +1355,9 @@ def build_bypass_surface(
     # Whitelist the ordering — unknown value falls back to the default, never raw SQL (§6).
     order_clause = _BYPASS_ORDER_BY.get(order_by, _BYPASS_ORDER_BY[_BYPASS_ORDER_DEFAULT])
 
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     p = _d.param()
 
     built_scopes = 0

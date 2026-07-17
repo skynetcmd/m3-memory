@@ -968,8 +968,8 @@ def memory_delete_bulk_impl(ids, hard=False):
     not_found: list[str] = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     p = _d.param()
     with _db() as db:
         for start in range(0, len(id_list), _MEMORY_DELETE_BULK_CHUNK):
@@ -1097,8 +1097,8 @@ def memory_update_bulk_impl(updates):
     now_iso = datetime.now(timezone.utc).isoformat()
     id_list = list(by_id.keys())
 
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     p = _d.param()
     with _db() as db:
         for start in range(0, len(id_list), _MEMORY_UPDATE_BULK_CHUNK):
@@ -1251,8 +1251,8 @@ def memory_link_bulk_impl(links, relationship_type: str = "related"):
     skipped_duplicate: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     p = _d.param()
     with _db() as db:
         for start in range(0, len(normalized), _MEMORY_LINK_BULK_CHUNK):

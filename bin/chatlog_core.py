@@ -330,11 +330,11 @@ def _executemany_insert(batch: list[dict]) -> int:
     fall back to the live resolver.
     """
     from m3_sdk import M3Context, active_database
-    from memory.backends import active_backend, chatlog_table
+    from memory.backends import chatlog_table, dialect
 
     # Backend-aware chatlog table + placeholders: memory_items/? on SQLite (separate
     # file), chat_log_items/%s on PG (chat_log_* tables in the one core database).
-    _d = active_backend().dialect()
+    _d = dialect()
     _T = chatlog_table("items")
     sql = (
         f"INSERT INTO {_T} ("
@@ -954,8 +954,8 @@ def chatlog_list_conversations_impl(
     from m3_sdk import M3Context
     ctx = M3Context.for_db(None)
 
-    from memory.backends import active_backend, chatlog_table
-    _d = active_backend().dialect()
+    from memory.backends import chatlog_table, dialect
+    _d = dialect()
     _p = _d.param()
     _T = chatlog_table("items")
     _je_ha = _d.json_extract_text("metadata_json", "host_agent")
@@ -1013,8 +1013,8 @@ async def chatlog_cost_report_impl(
     from m3_sdk import M3Context
     ctx = M3Context.for_db(None)
 
-    from memory.backends import active_backend, chatlog_table
-    _d = active_backend().dialect()
+    from memory.backends import chatlog_table, dialect
+    _d = dialect()
     _p = _d.param()
     _T = chatlog_table("items")
     # numeric JSON extracts (tokens = int, cost = real): json_extract_int gives
@@ -1116,9 +1116,9 @@ async def chatlog_rescrub_impl(
     red_dict = _redaction_dict(cfg.redaction)
 
     from m3_sdk import M3Context
-    from memory.backends import active_backend, chatlog_table
+    from memory.backends import chatlog_table, dialect
     ctx = M3Context.for_db(None)
-    _d = active_backend().dialect()
+    _d = dialect()
     _p = _d.param()
     _T = chatlog_table("items")
 

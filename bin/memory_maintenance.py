@@ -604,8 +604,8 @@ def gdpr_export_impl(user_id: str) -> str:
     import json
     if not user_id or not user_id.strip():
         return "Error: user_id is required"
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     with _db() as db:
         rows = db.execute(
@@ -639,8 +639,8 @@ def gdpr_forget_impl(user_id: str) -> str:
     import uuid
     if not user_id or not user_id.strip():
         return "Error: user_id is required"
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
 
     req_id = str(uuid.uuid4())

@@ -78,10 +78,10 @@ def main() -> int:
     # both backends (on PG-primary a raw sqlite3.connect would hit a stale file).
     import memory_core as mc
     from m3_sdk import active_database
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
     with active_database(str(db)):
-        _d = active_backend().dialect()
+        _d = dialect()
         _p = _d.param()
 
         # Build the WHERE clause

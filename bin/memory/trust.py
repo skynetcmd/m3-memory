@@ -34,9 +34,9 @@ def get_agent_trust(db, agent_id: str) -> float:
     if not agent_id:
         return _conf.TRUST_NEUTRAL
     try:
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _p = active_backend().dialect().param()
+        _p = dialect().param()
         row = db.execute(
             f"SELECT trust_score FROM agents WHERE agent_id = {_p}", (agent_id,)
         ).fetchone()
@@ -55,9 +55,9 @@ def set_agent_trust(db, agent_id: str, trust_score: float) -> float:
     caller — agent_set_trust tool — should surface that clearly)."""
     value = _conf.clamp_trust(float(trust_score))
     now = datetime.now(timezone.utc).isoformat()
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     # Upsert: create a minimal agent row if it doesn't exist yet.
     db.execute(
         f"INSERT INTO agents (agent_id, trust_score, last_seen) VALUES ({_d.placeholder(3)}) "
@@ -73,9 +73,9 @@ def corroboration_inputs(db, memory_id: str) -> tuple[float, int]:
     contradiction_count = number of negative-delta events. Neutral (0.0, 0) on a
     pre-036 DB."""
     try:
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _p = active_backend().dialect().param()
+        _p = dialect().param()
         rows = db.execute(
             "SELECT source_kind, source_ref, trust_at_write, delta "
             f"FROM memory_corroborations WHERE memory_id = {_p}",
@@ -113,9 +113,9 @@ def record_corroboration(db, memory_id: str, *, source_kind: str, source_ref: st
         # dialect emits "INSERT OR IGNORE" with an empty suffix (unchanged); on
         # Postgres it emits "INSERT INTO ... ON CONFLICT (...) WHERE delta > 0 DO
         # NOTHING", naming that exact partial index so the conflict is caught.
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _d = active_backend().dialect()
+        _d = dialect()
         _ins = _d.insert_or_ignore()
         _suffix = _d.on_conflict_ignore(
             conflict_target="(memory_id, source_kind, source_ref)",
@@ -139,9 +139,9 @@ def reaggregate_confidence(db, memory_id: str) -> "float | None":
     """Recompute and store a memory's confidence from its current provenance +
     ledger. Returns the new value, or None if unsupported (pre-035/036). Keeps
     corroboration_count / contradiction_count columns in sync with the ledger."""
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     _p = _d.param()
     try:
         row = db.execute(
@@ -181,9 +181,9 @@ def reaggregate_confidence(db, memory_id: str) -> "float | None":
 
 def _distinct_positive_count(db, memory_id: str) -> int:
     try:
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _p = active_backend().dialect().param()
+        _p = dialect().param()
         row = db.execute(
             "SELECT COUNT(DISTINCT source_kind || '|' || source_ref) "
             f"FROM memory_corroborations WHERE memory_id = {_p} AND delta > 0",
