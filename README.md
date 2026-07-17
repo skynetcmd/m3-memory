@@ -23,6 +23,12 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
   <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-100+_tools-orange?style=flat-square"></a>
 </p>
+<p align="center">
+  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI downloads (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-downloads.json&style=flat-square&logo=pypi&logoColor=white"></a>
+  <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub unique clones (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-clones.json&style=flat-square&logo=github&logoColor=white"></a>
+  <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history — click to view" src="https://img.shields.io/badge/%E2%AD%90_star_history-view-181717?style=flat-square&logo=github&logoColor=white"></a>
+</p>
+<p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
 
 <p align="center">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
@@ -394,11 +400,18 @@ See [NOTICE](NOTICE) for the full third-party attribution list.
 
 ### ⭐ Star History
 
+<details>
+<summary><b>⭐ View star history →</b> (click to expand the chart)</summary>
+
+<br>
+
 <a href="https://star-history.com/#skynetcmd/m3-memory&Date">
   <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/star-history.svg" alt="Star history for skynetcmd/m3-memory" width="100%">
 </a>
 
 <sup>Chart regenerated on a schedule by [`.github/workflows/star-history.yml`](.github/workflows/star-history.yml) using the repo's own token — no third-party embed. Click through for the live interactive version.</sup>
+
+</details>
 
 <!-- mcp-name: io.github.skynetcmd/m3-memory -->
 

@@ -15,6 +15,13 @@
 # The generator is idempotent: with no new stars it produces a byte-identical
 # SVG, so the commit step is a no-op and no empty commit is created.
 
+# This workflow also refreshes the README download badges (PyPI + GitHub clones)
+# via bin/gen_download_badges.py — same schedule, same commit-back. The PyPI count
+# needs no token; the GitHub unique-clone count uses the same M3_STARGAZER PAT
+# (the traffic API, like the stargazers API, is admin/collaborator-only, so the
+# built-in GITHUB_TOKEN returns 403). Both badges are shields "endpoint" JSON
+# committed under docs/badges/, so shields renders the number we control.
+
 name: Star history
 
 on:
@@ -64,15 +71,26 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.M3_STARGAZER }}
         run: python bin/gen_star_history.py --repo "${{ github.repository }}" --out docs/star-history.svg
 
+      # Refresh the README download badges (PyPI total + GitHub unique clones).
+      # Runs even when the star token is absent: the PyPI count needs no token,
+      # and the generator skips the clone badge gracefully without one. When the
+      # M3_STARGAZER PAT IS present it's passed as GITHUB_TOKEN so the (admin-only)
+      # traffic API resolves and the running clone total accumulates.
+      - name: Refresh download badges
+        env:
+          GITHUB_TOKEN: ${{ secrets.M3_STARGAZER }}
+        run: python bin/gen_download_badges.py --repo "${{ github.repository }}" --package m3-memory
+
       - name: Commit if changed
-        if: steps.token.outputs.present == 'true'
         run: |
-          if git diff --quiet -- docs/star-history.svg; then
-            echo "No change to docs/star-history.svg — nothing to commit."
+          # Stage every asset either generator may have touched; commit only if
+          # something actually changed (idempotent — no empty commits).
+          git add docs/star-history.svg docs/badges/ 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No badge/chart changes — nothing to commit."
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/star-history.svg
-          git commit -m "chore(star-history): refresh docs/star-history.svg [skip ci]"
+          git commit -m "chore(badges): refresh star history + download counts [skip ci]"
           git push
