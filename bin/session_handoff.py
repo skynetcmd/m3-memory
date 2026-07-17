@@ -55,8 +55,8 @@ def save_handoff(project: str, summary: str, next_steps: str):
     """Saves the current AI session state for another agent to resume."""
     try:
         import memory_core as mc
-        from memory.backends import active_backend
-        _p = active_backend().dialect().param()
+        from memory.backends import dialect
+        _p = dialect().param()
         with mc._db() as conn:
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(

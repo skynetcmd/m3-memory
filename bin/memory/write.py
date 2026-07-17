@@ -175,9 +175,9 @@ def memory_link_impl(from_id: str, to_id: str, relationship_type: str = "related
     # unique key was the `id` PK (absent from the insert) — nothing to conflict
     # on. Now the dialect emits a real ON CONFLICT ... DO NOTHING on both
     # backends; re-linking the same pair is a genuine no-op.
-    from memory.backends import active_backend
+    from memory.backends import dialect
 
-    _d = active_backend().dialect()
+    _d = dialect()
     _ins = _d.insert_or_ignore()
     _suffix = _d.on_conflict_ignore(
         conflict_target="(from_id, to_id, relationship_type)"
@@ -288,9 +288,9 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                 meta_dict["entities"] = ents
                 metadata = json.dumps(meta_dict)
 
-    from memory.backends import active_backend as _active_backend_1
+    from memory.backends import dialect
 
-    _d1 = _active_backend_1().dialect()
+    _d1 = dialect()
     _blank_json = _d1.empty_json_default()
     # Normalize blank metadata to the backend's empty-JSON default ONLY when that
     # default is non-empty (JSON/JSONB backends — PG '{}', MariaDB '{}' — reject
@@ -594,9 +594,9 @@ def _mark_superseded(
     # COALESCE differs — SQLite needs NULLIF(valid_to,'') (its default is ''),
     # but on PG valid_to is TIMESTAMPTZ where '' is not a legal value and NULLIF
     # would raise; the dialect drops it (COALESCE(valid_to, %s)).
-    from memory.backends import active_backend as _active_backend
+    from memory.backends import dialect
 
-    _d = _active_backend().dialect()
+    _d = dialect()
     p = _d.param()
     _vt = _d.coalesce_open_timestamp("valid_to", p)
     # Two full statements rather than an f-string'd WHERE clause: keeps each SQL
@@ -692,9 +692,9 @@ async def memory_supersede_impl(
     #    (step 4's conditional UPDATE is) — it just fails cheaply, before the
     #    expensive embed, on the common case, and supplies the fields to
     #    inherit. A concurrent close after this read is caught at step 4.
-    from memory.backends import active_backend as _active_backend_sup
+    from memory.backends import dialect
 
-    _dsup = _active_backend_sup().dialect()
+    _dsup = dialect()
     _psup = _dsup.param()
     with _db() as db:
         row = db.execute(
@@ -1031,9 +1031,9 @@ async def memory_write_bulk_impl(
         await asyncio.gather(*(_enrich_one(p) for p in prepared))
 
     # Phase 1: INSERT memory_items + history in one transaction.
-    from memory.backends import active_backend as _active_backend_bulk
+    from memory.backends import dialect
 
-    _db_bulk = _active_backend_bulk().dialect()
+    _db_bulk = dialect()
     with _db() as db:
         for p in prepared:
             _blank_json_bulk = _db_bulk.empty_json_default()
@@ -1561,9 +1561,9 @@ async def memory_write_batch_impl(items: list[dict]):
     Speed Optimization: Parallelized batch memory write (Speed #1).
     Expects list of dicts with keys matching memory_write_impl args.
     """
-    from memory.backends import active_backend as _active_backend_batch
+    from memory.backends import dialect
 
-    _d_batch = _active_backend_batch().dialect()
+    _d_batch = dialect()
 
     results = []
     # 1. First pass: Insert metadata in one transaction

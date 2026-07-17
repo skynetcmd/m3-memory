@@ -526,8 +526,8 @@ async def _run_db(
         connection pool), so it works on both backends.
         Best-effort: a queue-write failure must never mask the original error."""
         try:
-            from memory.backends import active_backend
-            _d = active_backend().dialect()
+            from memory.backends import dialect
+            _d = dialect()
             _p = _d.param()
             with mc._db() as qc:
                 _ensure_extraction_status_column(qc)
@@ -556,8 +556,8 @@ async def _run_db(
         Marks status='done' in the queue; the selection then skips done rows.
         Best-effort, backend-aware (mc._db()), same as _enqueue_failure."""
         try:
-            from memory.backends import active_backend
-            _d = active_backend().dialect()
+            from memory.backends import dialect
+            _d = dialect()
             _p = _d.param()
             with mc._db() as qc:
                 _ensure_extraction_status_column(qc)

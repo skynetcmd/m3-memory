@@ -327,8 +327,8 @@ def has_consolidate_work(core_db: Optional[str], source_type: str,
     into a belief? Mirrors memory_consolidate_impl's group query so the loop only
     spends an LLM call when there's real work (event-driven, not time-driven)."""
     try:
-        from memory.backends import active_backend
-        _d = active_backend().dialect()
+        from memory.backends import dialect
+        _d = dialect()
         _p = _d.param()
         clause = ""
         params: tuple = (source_type, threshold)
@@ -566,10 +566,10 @@ async def run_classify_pass(args):
         logger.debug("No pending classification work. Skipping pass.")
         return
 
-    from memory.backends import active_backend
+    from memory.backends import dialect
     from memory.enrich import _auto_classify
 
-    _p = active_backend().dialect().param()
+    _p = dialect().param()
     deadline_s = float(os.environ.get("M3_CLASSIFY_DEADLINE_S", "10"))
 
     logger.info("Starting Classification pass...")
@@ -643,8 +643,8 @@ def has_chatlog_prune_work(chatlog_db: Optional[str], prune_days: float,
     Event-driven gate (mirrors has_consolidate_work) so the loop only does a
     sweep when a real backlog of prune-eligible noise has accumulated."""
     try:
-        from memory.backends import active_backend, chatlog_table
-        _d = active_backend().dialect()
+        from memory.backends import chatlog_table, dialect
+        _d = dialect()
         _p = _d.param()
         _T = chatlog_table("items")  # memory_items (sqlite) | chat_log_items (pg)
         sql = (

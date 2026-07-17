@@ -748,9 +748,9 @@ async def memory_search_scored_impl(
         # SQLite rows may still carry "". The dialect emits the ``= ''`` disjunct
         # on SQLite (matching both) but drops it on Postgres, where the bound is
         # a TIMESTAMPTZ that rejects '' (IS NULL already covers the unset case).
-        from memory.backends import active_backend
+        from memory.backends import dialect
 
-        _d = active_backend().dialect()
+        _d = dialect()
         where_clauses.append(_d.temporal_open_clause("mi.valid_from", "<="))
         where_clauses.append(_d.temporal_open_clause("mi.valid_to", ">"))
         params.extend([as_of, as_of])

@@ -342,9 +342,9 @@ def _record_history(
     outer one has an uncommitted writer causes SQLite WAL writer contention,
     which burns the full ``busy_timeout`` per call.
     """
-    from memory.backends import active_backend as _active_backend
+    from memory.backends import dialect
 
-    _d = _active_backend().dialect()
+    _d = dialect()
     row = (str(uuid.uuid4()), memory_id, event, prev_value, new_value, field, actor_id)
     sql = (
         "INSERT INTO memory_history "
@@ -369,9 +369,9 @@ def _record_history(
 
 def memory_history_impl(memory_id: str, limit: int = 20) -> str:
     """Returns the change history for a memory item."""
-    from memory.backends import active_backend as _active_backend
+    from memory.backends import dialect
 
-    _p = _active_backend().dialect().param()
+    _p = dialect().param()
     with _db() as db:
         rows = db.execute(
             "SELECT event, field, prev_value, new_value, actor_id, created_at "

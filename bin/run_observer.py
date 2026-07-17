@@ -375,8 +375,8 @@ async def write_observation(
             # sqlite3.connect(M3_DATABASE) bypassed the seam and would edit a stale
             # SQLite file on a PG-primary deployment). On PG this hits the pool; on
             # SQLite it opens the same active-context connection as before.
-            from memory.backends import active_backend
-            _p = active_backend().dialect().param()
+            from memory.backends import dialect
+            _p = dialect().param()
             with mc._db() as conn:
                 conn.execute(
                     f"UPDATE memory_items SET source_group_id = {_p} WHERE id = {_p}",
@@ -639,8 +639,8 @@ async def drain_variant_mode(args, profile, token: str) -> None:
     bad = [t for t in src_types if t not in _ALLOWED_SRC_TYPES]
     if bad:
         sys.exit(f"ERROR: --source-type values not allowed: {bad} (allowed: {sorted(_ALLOWED_SRC_TYPES)})")
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     type_ph = _d.placeholder(len(src_types))
     # Variant filter: sentinel '__none__' selects NULL-variant rows (SQL '= NULL'
@@ -751,8 +751,8 @@ async def drain_queue_mode(args, profile, token: str) -> None:
     sem = asyncio.Semaphore(args.concurrency)
     counters = {"processed": 0, "written": 0, "failed": 0, "empty_groups": 0}
     started = time.monotonic()
-    from memory.backends import active_backend
-    _d = active_backend().dialect()
+    from memory.backends import dialect
+    _d = dialect()
     _p = _d.param()
     _je_role = _d.json_extract_text("metadata_json", "role")
     # turn_index is compared/ordered numerically and COALESCE'd with an int
