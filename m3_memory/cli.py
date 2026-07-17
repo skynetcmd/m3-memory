@@ -210,6 +210,7 @@ def _cmd_install_m3(args: argparse.Namespace) -> int:
             endpoint=args.endpoint,
             capture_mode=args.capture_mode,
             cognitive_loop=args.cognitive_loop,
+            db_backend=args.db_backend,
         )
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -886,6 +887,11 @@ Examples:
     p_install.add_argument(
         "--cognitive-loop", action="store_true",
         help="Enable the background cognitive loop worker.",
+    )
+    p_install.add_argument(
+        "--db-backend", default=None, choices=("sqlite", "postgres"),
+        help="Primary database backend (default: sqlite). 'postgres' reads the "
+             "DSN from M3_PRIMARY_PG_URL/M3_PG_URL and skips the backend prompt.",
     )
     p_install.set_defaults(func=_cmd_install_m3)
 

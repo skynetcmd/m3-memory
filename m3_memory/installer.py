@@ -541,6 +541,89 @@ def _prompt_cognitive_loop(interactive: bool, cognitive_loop_flag: bool) -> bool
     return cognitive_loop_flag
 
 
+def _mask_dsn(dsn: str) -> str:
+    """Redact the password in a PostgreSQL DSN for safe logging.
+
+    ``postgresql://user:secret@host/db`` -> ``postgresql://user:***@host/db``.
+    Best-effort: a DSN we can't parse is returned with any ``:...@`` credential
+    span masked; if there's no recognizable credential, it's returned as-is
+    (nothing secret to hide). Never raises — logging must not crash install.
+    """
+    import re
+
+    if not dsn:
+        return dsn
+    # userinfo form: scheme://user[:password]@host...
+    return re.sub(r"(://[^:/@]+:)[^@/]+(@)", r"\1***\2", dsn)
+
+
+def _prompt_db_backend(
+    interactive: bool, backend_flag: Optional[str]
+) -> Optional[tuple[str, str]]:
+    """Ask which PRIMARY database backend to use.
+
+    Returns ``None`` to accept the default (SQLite — zero-infrastructure, the
+    same silent default every existing install gets), or ``("postgres", dsn)``
+    when the user opts into a PostgreSQL primary store and supplies a DSN.
+
+    ``backend_flag`` is the explicit ``--db-backend`` override (``sqlite`` /
+    ``postgres``); it skips the interactive prompt. A ``postgres`` flag still
+    needs a DSN, which comes from ``M3_PRIMARY_PG_URL``/``M3_PG_URL`` in the
+    environment (so a scripted install can pass it out-of-band); if none is set
+    we warn and fall back to SQLite rather than persist a backend with no DSN.
+
+    Non-interactive with no flag returns ``None`` (SQLite) — a headless install
+    never blocks on this prompt and never silently arms PostgreSQL.
+    """
+    from m3_sdk import resolve_primary_pg_dsn
+
+    def _postgres_with_dsn(dsn: Optional[str]) -> Optional[tuple[str, str]]:
+        dsn = (dsn or "").strip()
+        if not dsn:
+            print(
+                "[!] PostgreSQL selected but no DSN given "
+                "(set M3_PRIMARY_PG_URL, or enter one when prompted). "
+                "Falling back to SQLite for this install."
+            )
+            return None
+        return ("postgres", dsn)
+
+    # Explicit flag path: skip the prompt.
+    if backend_flag is not None:
+        choice = backend_flag.strip().lower()
+        if choice == "postgres":
+            return _postgres_with_dsn(resolve_primary_pg_dsn(""))
+        return None  # 'sqlite' (or anything else) → default
+
+    if not interactive:
+        return None
+
+    print("\nPrimary database backend:")
+    print("  1) SQLite     — zero-infrastructure, local file (default, recommended)")
+    print("  2) PostgreSQL — opt-in; needs a reachable server")
+    try:
+        reply = input("Choice [1/2, default 1]: ").strip() or "1"
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    if reply != "2":
+        return None
+
+    # Offer the env DSN as the default so the user can just hit enter.
+    env_dsn = (resolve_primary_pg_dsn("") or "").strip()
+    hint = f" [{_mask_dsn(env_dsn)}]" if env_dsn else ""
+    print(
+        "\nPostgreSQL primary-store DSN "
+        "(e.g. postgresql://m3:PASSWORD@localhost:5432/m3_primary):"
+    )
+    try:
+        entered = input(f"DSN{hint}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    return _postgres_with_dsn(entered or env_dsn)
+
+
 def _chatlog_init_supports(chatlog_init: Path, flag: str) -> bool:
     """Probe whether bin/chatlog_init.py advertises a given flag.
 
@@ -641,6 +724,259 @@ def _run_main_migrations(bridge: Path) -> Optional[str]:
         return f"[!] main DB init failed: {last}"
 
 
+# ── PostgreSQL primary-store setup (opt-in via _prompt_db_backend) ────────────
+def _pg_reachable(dsn: str) -> tuple[bool, str]:
+    """Try to connect to ``dsn``; return (ok, detail). Never raises.
+
+    The forbidden-host guard runs FIRST (a warehouse-hub DSN must never be
+    armed as a primary store), so an operator who pastes the CDW DSN here gets
+    a loud refusal, not a silent mis-wire. ``detail`` carries a masked, human
+    reason on failure — never the raw password.
+    """
+    try:
+        sys.path.insert(0, str(bin_dir() or ""))
+        from memory.backends.postgres_backend import _reject_forbidden_host
+
+        _reject_forbidden_host(dsn)  # raises on a forbidden (warehouse) host
+    except ImportError:
+        # Payload not importable (e.g. bin_dir unresolved mid-install) — skip
+        # the guard rather than crash; the runtime enforces it on first connect.
+        pass
+    except Exception as e:  # noqa: BLE001 — the forbidden-host refusal
+        return False, str(e)
+    try:
+        import psycopg2
+
+        conn = psycopg2.connect(dsn, connect_timeout=5)
+        conn.close()
+        return True, "reachable"
+    except Exception as e:  # noqa: BLE001 — connection/auth/DNS all land here
+        # psycopg2 error text can echo the DSN; mask before surfacing.
+        return False, _mask_dsn(str(e).strip())
+
+
+def _pg_server_present() -> bool:
+    """True if a PostgreSQL *server* binary looks installed on this box.
+
+    ``psql`` alone is just the client, so we check the server-side binaries
+    (``postgres`` / ``pg_ctl``) as well — a box with only the client can reach
+    a REMOTE server but can't host a local one, and the install-help text
+    should differ accordingly.
+    """
+    return any(shutil.which(b) for b in ("postgres", "pg_ctl", "pg_ctlcluster"))
+
+
+def _pg_install_offer(interactive: bool) -> Optional[str]:
+    """Guide (and, when safe, offer to run) a PostgreSQL server install.
+
+    Returns a status line, or None if there was nothing to say. Elevation is
+    always user-visible and consented: we run a package install ONLY in an
+    interactive TTY, ONLY when a package manager is present, and ONLY after an
+    explicit y/N. There is no sudo on Windows — winget/choco raise a UAC
+    consent dialog the user approves; we never silently ``RunAs``. In every
+    other case we just print the exact command for the user to run.
+    """
+    osname = _os_name()
+
+    # (label, command-as-list, needs_elevation_note)
+    offer: Optional[tuple[str, list[str], str]] = None
+    if osname == "Darwin" and shutil.which("brew"):
+        offer = ("Homebrew", ["brew", "install", "postgresql@16"], "")
+    elif osname == "Linux" and shutil.which("apt-get"):
+        offer = (
+            "apt",
+            ["sudo", "apt-get", "install", "-y", "postgresql"],
+            " (sudo will prompt for your password)",
+        )
+    elif osname == "Windows" and shutil.which("winget"):
+        offer = (
+            "winget",
+            ["winget", "install", "-e", "--id", "PostgreSQL.PostgreSQL"],
+            " (Windows will show a UAC consent dialog — click Yes)",
+        )
+    elif osname == "Windows" and shutil.which("choco"):
+        offer = (
+            "Chocolatey",
+            ["choco", "install", "postgresql", "-y"],
+            " (Windows will show a UAC consent dialog — click Yes)",
+        )
+
+    if offer is None:
+        # No package manager we can drive — print manual guidance and return.
+        manual = {
+            "Darwin": "Install Homebrew then: brew install postgresql@16",
+            "Linux": "sudo apt-get install -y postgresql  (or your distro's package)",
+            "Windows": "Install from https://www.postgresql.org/download/windows/ "
+            "(EDB installer), or `winget install PostgreSQL.PostgreSQL`",
+        }.get(osname, "See https://www.postgresql.org/download/")
+        print(f"    To install a PostgreSQL server: {manual}")
+        return "[i] PostgreSQL server not detected — printed manual install steps"
+
+    label, cmd, elev_note = offer
+    print(f"    A PostgreSQL server was not detected. It can be installed via {label}:")
+    print(f"      {' '.join(cmd)}{elev_note}")
+    if not interactive:
+        return f"[i] PostgreSQL not installed — run: {' '.join(cmd)}"
+    try:
+        reply = input(f"    Run this now via {label}? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        reply = "n"
+    if reply not in ("y", "yes"):
+        return f"[i] skipped PostgreSQL install — run it later: {' '.join(cmd)}"
+    try:
+        subprocess.run(cmd, check=True)
+        return f"[+] PostgreSQL installed via {label} — you may need to start/init the server next"
+    except (subprocess.CalledProcessError, OSError) as e:
+        return f"[!] {label} install failed ({e}); run manually: {' '.join(cmd)}"
+
+
+def _run_pg_migrations(bridge: Path, dsn: str) -> Optional[str]:
+    """Build the PostgreSQL primary schema now, via the backend's own bootstrap.
+
+    The parallel of ``_run_main_migrations`` for a PG-primary install. Runs in a
+    child process so a heavy import / a mid-install crash can't take the whole
+    installer down, and so it uses the freshly-installed payload's code.
+
+    We call the backend's ``ensure_schema()`` (NOT the standalone ``migrate_pg
+    up`` CLI): ensure_schema lays down the base schema ``pg_primary_v1.sql`` —
+    which creates AND seeds ``schema_versions`` — and THEN applies the pending
+    pg_NNN migrations. Running ``migrate_pg up`` alone on an empty DB fails
+    because it assumes ``schema_versions`` already exists. Only called when the
+    DSN is reachable; the unreachable case defers to first-connect ensure_schema.
+    The DSN is passed via env to the child (never on the command line, where it
+    could land in a process listing) and masked in any status line.
+    """
+    child = (
+        "import sys; sys.path.insert(0, r'%s'); "
+        "from memory.backends.postgres_backend import PostgresBackend; "
+        "b = PostgresBackend(); b.ensure_schema(); b.close(); "
+        "print('OK')" % str(bridge.parent)
+    )
+    env = dict(os.environ)
+    env["M3_DB_BACKEND"] = "postgres"
+    env["M3_PRIMARY_PG_URL"] = dsn
+    try:
+        subprocess.run(
+            [sys.executable, "-c", child], check=True, capture_output=True, text=True, env=env
+        )
+        return "[+] PostgreSQL primary schema initialized (base + migrations applied)"
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").strip()
+        last = _mask_dsn(stderr.splitlines()[-1]) if stderr else str(e)
+        return f"[!] PG schema init failed: {last} — it will retry on first connect"
+
+
+def _persist_pg_backend_env(dsn: str) -> list[str]:
+    """Make M3_DB_BACKEND=postgres + M3_PRIMARY_PG_URL=<dsn> take effect.
+
+    These are read from the ENVIRONMENT (resolve_primary_pg_dsn / the backend
+    selector), NOT the m3 config file — so persisting to config alone would be
+    inert. We therefore set them where the runtime will actually see them:
+
+      * this process (so any post-install step uses the new backend);
+      * Windows: the User-scope registry (reused persistent-env machinery);
+      * Unix: an idempotent, marked block appended to the shell profile —
+        but ONLY if the profile doesn't already define the var (a hand-set
+        value wins; we never shadow or duplicate it).
+
+    Returns human status lines. Because m3 runs from many surfaces (MCP server
+    env block, a LangChain/SDK process, the CLI), we ALSO print guidance so a
+    non-shell consumer gets the vars too — the env is the single source of truth.
+    """
+    msgs: list[str] = []
+    os.environ["M3_DB_BACKEND"] = "postgres"
+    os.environ["M3_PRIMARY_PG_URL"] = dsn
+
+    pairs = {"M3_DB_BACKEND": "postgres", "M3_PRIMARY_PG_URL": dsn}
+    if _os_name() == "Windows":
+        msgs.extend(_write_user_registry_env(pairs))
+    else:
+        msgs.append(_append_env_to_profile(pairs))
+
+    print(
+        "\n    m3 selects its backend from the ENVIRONMENT, not the config file. "
+        "Ensure these are set wherever m3 runs — your MCP server's `env` block, "
+        "and any process that imports m3 (LangChain / SDK / CLI):"
+    )
+    print("      M3_DB_BACKEND=postgres")
+    print(f"      M3_PRIMARY_PG_URL={_mask_dsn(dsn)}")
+    return [m for m in msgs if m]
+
+
+def _append_env_to_profile(pairs: dict[str, str]) -> Optional[str]:
+    """Append `export NAME=VALUE` lines to the shell profile, idempotently.
+
+    Mirrors ``_fix_npm_global_path``'s append pattern. Before writing, scans the
+    profile for an EXISTING definition of each var (in any form — ``export X=``
+    or ``X=``), and skips ones already present so a hand-set value is never
+    shadowed or duplicated. Reports what it did / found. Never raises.
+    """
+    import re
+
+    profile = Path.home() / ".profile"
+    existing = ""
+    if profile.is_file():
+        try:
+            existing = profile.read_text(encoding="utf-8")
+        except OSError:
+            names = ", ".join(f"{k}={v}" for k, v in pairs.items())
+            return f"[!] {profile} unreadable; add manually: {names}"
+
+    to_write: dict[str, str] = {}
+    already: list[str] = []
+    for name, value in pairs.items():
+        # Match a real assignment of this var (not a substring of another name).
+        if re.search(rf"(?m)^\s*(export\s+)?{re.escape(name)}=", existing):
+            already.append(name)
+        else:
+            to_write[name] = value
+
+    if not to_write:
+        return f"[=] {', '.join(already)} already set in {profile}; left as-is"
+
+    lines = "".join(f'export {n}="{v}"\n' for n, v in to_write.items())
+    suffix = "\n# Added by mcp-memory install-m3 (PostgreSQL primary backend)\n" + lines
+    if existing and not existing.endswith("\n"):
+        suffix = "\n" + suffix
+    try:
+        with profile.open("a", encoding="utf-8") as f:
+            f.write(suffix)
+    except OSError as e:
+        return f"[!] could not write {profile}: {e}"
+    wrote = ", ".join(to_write)
+    note = f" ({', '.join(already)} already present)" if already else ""
+    return f"[+] appended {wrote} to {profile}{note}"
+
+
+def _write_user_registry_env(pairs: dict[str, str]) -> list[str]:
+    """Set User-scope persistent env vars on Windows via `setx`, idempotently.
+
+    Only writes a var whose current User-scope value differs (setx rewrites the
+    whole value, so re-running is safe but we avoid noisy no-op writes). A
+    WM_SETTINGCHANGE broadcast (via the existing helper) nudges live shells.
+    Never raises — a failure is reported, not fatal.
+    """
+    msgs: list[str] = []
+    for name, value in pairs.items():
+        current = os.environ.get(name)
+        if current == value:
+            msgs.append(f"[=] {name} already set (User env)")
+            continue
+        try:
+            # setx writes HKCU\Environment (User scope); no elevation needed.
+            subprocess.run(["setx", name, value], check=True, capture_output=True, text=True)
+            shown = _mask_dsn(value) if "PG_URL" in name else value
+            msgs.append(f"[+] set {name}={shown} (User env; open a new shell to pick it up)")
+        except (subprocess.CalledProcessError, OSError) as e:
+            msgs.append(f"[!] could not set {name} via setx: {e}")
+    try:
+        _broadcast_env_change()  # nudge live shells to reload (best-effort)
+    except Exception:  # noqa: BLE001 — cosmetic
+        pass
+    return msgs
+
+
 def _run_os_install(bridge: Path) -> Optional[str]:
     """Execute the OS-specific installer (install_os.py) in the payload root."""
     # Resolve install_os.py via bin_dir() if available, else fall back to bridge-relative path.
@@ -664,6 +1000,7 @@ def _post_install(
     interactive: bool,
     endpoint_choice: Optional[str],
     capture_choice: Optional[str],
+    db_backend_choice: Optional[tuple[str, str]] = None,
 ) -> None:
     """Run the additive post-install steps. Each step prints its own status.
 
@@ -695,8 +1032,41 @@ def _post_install(
         cfg["chatlog_capture_mode"] = capture_choice
         messages.append(f"[+] pinned chatlog capture mode: {capture_choice}")
         changed = True
+    if db_backend_choice is not None:
+        # Record the choice in config for `doctor`/status/`m3 setup` to REPORT.
+        # (The runtime selects the backend from ENV, not config — see
+        # _persist_pg_backend_env — so this key is introspection, not the switch.)
+        backend_name, _dsn = db_backend_choice
+        cfg["db_backend"] = backend_name
+        changed = True
     if changed:
         save_config(cfg)
+
+    # PostgreSQL primary-store setup (opt-in). Runs after config so a failure
+    # here can't lose the other pins. Every step is best-effort: an unreachable
+    # DB defers schema creation to first connect rather than aborting install.
+    if db_backend_choice is not None and db_backend_choice[0] == "postgres":
+        _dsn = db_backend_choice[1]
+        messages.append(f"[+] primary backend: PostgreSQL ({_mask_dsn(_dsn)})")
+        ok, detail = _pg_reachable(_dsn)
+        if ok:
+            pg_msg = _run_pg_migrations(bridge, _dsn)
+            if pg_msg:
+                messages.append(pg_msg)
+        else:
+            messages.append(f"[!] PostgreSQL not reachable ({detail})")
+            if not _pg_server_present():
+                offer_msg = _pg_install_offer(interactive)
+                if offer_msg:
+                    messages.append(offer_msg)
+            messages.append(
+                "[i] schema deferred — m3 builds it automatically on the first "
+                "successful connect (no action needed once the server is up)"
+            )
+        # Persist the env vars the runtime actually reads (registry / profile),
+        # regardless of reachability — the choice stands even if the server is
+        # coming up later.
+        messages.extend(_persist_pg_backend_env(_dsn))
 
     # Wire chatlog hooks into agent settings.json files when the user picked
     # a capture mode. Skips silently when capture_choice is None (user accepted
@@ -802,6 +1172,7 @@ def install_m3(
     endpoint: Optional[str] = None,
     capture_mode: Optional[str] = None,
     cognitive_loop: bool = False,
+    db_backend: Optional[str] = None,
 ) -> Path:
     """Clone or download the m3-memory repo and record the bridge path in config.
 
@@ -841,6 +1212,7 @@ def install_m3(
     capture_choice = _prompt_capture_mode(interactive, capture_mode)
     cognitive_loop_choice = _prompt_cognitive_loop(interactive, cognitive_loop)
     del cognitive_loop_choice  # placeholder: wired downstream once the cognitive-loop install path lands
+    db_backend_choice = _prompt_db_backend(interactive, db_backend)  # None=sqlite, or ("postgres", dsn)
 
     # Preserve user data across --force / update. The repo tree under
     # repo_path/memory/ holds chatlog DBs, the chatlog config, and the
@@ -941,7 +1313,7 @@ def install_m3(
     print(f"[OK] installed. bridge_path = {bridge}")
     print(f"  config written to {config_file()}")
 
-    _post_install(bridge, interactive, endpoint_choice, capture_choice)
+    _post_install(bridge, interactive, endpoint_choice, capture_choice, db_backend_choice)
     return bridge
 
 

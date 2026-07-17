@@ -94,6 +94,24 @@ SQLite DB) and `timeout` arg — both are stripped before the impl runs.
 |---|---|---|
 | `M3_DEFAULT_USER_ID` | (unset) | Fallback `user_id` for the LangChain surfaces (`Memory`, `M3Store`, `M3Retriever`, `MemoryWrite`, …) so a **single-user** app need not pass `user_id=` on every call. Resolution order is **explicit arg → constructor default → `M3_DEFAULT_USER_ID` → raise**. It never weakens tenancy: when unset and no `user_id` is supplied, the surfaces still raise (there is no anonymous/global mode). Multi-tenant apps leave it unset and keep passing `user_id` per call. |
 
+### Primary database backend
+
+By default m3 stores everything in a local **SQLite** file — zero infrastructure,
+nothing to configure. PostgreSQL as the **primary** store is opt-in. The installer
+asks which backend to use (default SQLite); you can also pass
+`mcp-memory install-m3 --db-backend postgres` (it reads the DSN from
+`M3_PRIMARY_PG_URL`). m3 selects its backend from the **environment**, not the
+config file, so these must be set wherever m3 runs (your MCP server's `env` block,
+your shell, or the process that imports m3 — LangChain/SDK/CLI):
+
+| Variable | Purpose | Example |
+|---|---|---|
+| `M3_DB_BACKEND` | Primary backend: `sqlite` (default) or `postgres`. | `export M3_DB_BACKEND=postgres` |
+| `M3_PRIMARY_PG_URL` | Primary-store DSN when `M3_DB_BACKEND=postgres` (falls back to `M3_PG_URL`). Never reads a warehouse/CDW var. | `export M3_PRIMARY_PG_URL="postgresql://m3:PASSWORD@localhost:5432/m3_primary"` |
+
+The schema is created automatically on first connect if the server wasn't reachable
+at install time — nothing else to do once the database is up.
+
 ### Infrastructure & Connectivity
 
 | Variable | Purpose | Example Keychain Command (macOS) |

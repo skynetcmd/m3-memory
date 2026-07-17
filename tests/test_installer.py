@@ -14,6 +14,11 @@ from unittest.mock import patch
 
 import pytest
 
+# The real host platform, captured at import time BEFORE the autouse
+# _isolate_home fixture fakes sys.platform="linux". A few tests need the true
+# value to exercise cross-platform code paths honestly.
+_ORIG_PLATFORM = sys.platform
+
 
 @pytest.fixture(autouse=True)
 def _isolate_home(monkeypatch, tmp_path):
@@ -613,3 +618,104 @@ def test_drain_wal_safe_on_missing_and_nondb(tmp_path):
     junk = tmp_path / "junk.db"
     junk.write_text("not a database")
     _drain_wal(junk)  # must not raise
+
+
+# ── DB-backend selection (SQLite default / PostgreSQL opt-in) ─────────────────
+class TestDbBackendSelection:
+    """The installer's primary-backend prompt, DSN masking, connectivity probe,
+    and env persistence (registry on Windows / shell profile on Unix)."""
+
+    def test_mask_dsn_redacts_password(self):
+        from m3_memory.installer import _mask_dsn
+        assert _mask_dsn("postgresql://u:secret@h:5432/db") == "postgresql://u:***@h:5432/db"
+        # no credential → unchanged (nothing to hide)
+        assert _mask_dsn("postgresql://h/db") == "postgresql://h/db"
+        assert _mask_dsn("") == ""
+
+    def test_prompt_defaults_to_sqlite_noninteractive(self, monkeypatch):
+        from m3_memory.installer import _prompt_db_backend
+        for k in ("M3_PRIMARY_PG_URL", "M3_PG_URL"):
+            monkeypatch.delenv(k, raising=False)
+        # non-interactive, no flag → SQLite (None); existing installs unaffected
+        assert _prompt_db_backend(False, None) is None
+        # explicit sqlite flag → None
+        assert _prompt_db_backend(False, "sqlite") is None
+
+    def test_prompt_postgres_flag_needs_dsn(self, monkeypatch):
+        from m3_memory.installer import _prompt_db_backend
+        for k in ("M3_PRIMARY_PG_URL", "M3_PG_URL"):
+            monkeypatch.delenv(k, raising=False)
+        # postgres flag with NO env DSN → falls back to SQLite (None), never a
+        # backend with no DSN
+        assert _prompt_db_backend(False, "postgres") is None
+        # postgres flag WITH env DSN → ("postgres", dsn)
+        monkeypatch.setenv("M3_PRIMARY_PG_URL", "postgresql://u:p@127.0.0.1:5432/x")
+        assert _prompt_db_backend(False, "postgres") == (
+            "postgres", "postgresql://u:p@127.0.0.1:5432/x"
+        )
+
+    def test_prompt_interactive_choice(self, monkeypatch):
+        from m3_memory.installer import _prompt_db_backend
+        for k in ("M3_PRIMARY_PG_URL", "M3_PG_URL"):
+            monkeypatch.delenv(k, raising=False)
+        # choose SQLite (1) → None
+        monkeypatch.setattr("builtins.input", lambda *_: "1")
+        assert _prompt_db_backend(True, None) is None
+        # choose Postgres (2) then type a DSN
+        answers = iter(["2", "postgresql://a:b@h/db"])
+        monkeypatch.setattr("builtins.input", lambda *_: next(answers))
+        assert _prompt_db_backend(True, None) == ("postgres", "postgresql://a:b@h/db")
+
+    def test_probe_unreachable_masks_and_refuses_forbidden(self, monkeypatch):
+        # The autouse _isolate_home fixture fakes sys.platform="linux"; the PG
+        # backend's import chain then takes a POSIX path (os.uname) that doesn't
+        # exist on a Windows CI host. Restore the real platform for this probe —
+        # it exercises real cross-platform code, not the PG_URL guard the fake
+        # was added for.
+        import sys as _sys
+        monkeypatch.setattr(_sys, "platform", _ORIG_PLATFORM)
+        from m3_memory.installer import _pg_reachable
+        monkeypatch.setenv("M3_PG_FORBIDDEN_HOSTS", "198.51.100.9")
+        # unreachable port → (False, masked detail)
+        ok, detail = _pg_reachable("postgresql://u:p@127.0.0.1:5599/none")
+        assert ok is False
+        assert ":p@" not in detail  # password never surfaced
+        # forbidden (warehouse) host → refused before connecting
+        ok2, d2 = _pg_reachable("postgresql://u:p@198.51.100.9:5432/wh")
+        assert ok2 is False
+        assert "forbidden" in d2.lower() or "198.51.100.9" in d2
+
+    def test_append_env_to_profile_fresh_idempotent_partial(self, monkeypatch, tmp_path):
+        from m3_memory.installer import _append_env_to_profile
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        pairs = {"M3_DB_BACKEND": "postgres", "M3_PRIMARY_PG_URL": "postgresql://u:p@h/db"}
+        profile = tmp_path / ".profile"
+
+        # 1) fresh append writes both, in a marked block
+        msg1 = _append_env_to_profile(pairs)
+        assert msg1 and msg1.startswith("[+]")
+        txt = profile.read_text()
+        assert 'export M3_DB_BACKEND="postgres"' in txt
+        assert "M3_PRIMARY_PG_URL" in txt
+        assert "Added by mcp-memory" in txt
+
+        # 2) idempotent re-run: both already set, no duplication
+        msg2 = _append_env_to_profile(pairs)
+        assert "already set" in msg2
+        assert profile.read_text().count("M3_DB_BACKEND=") == 1
+
+    def test_append_env_preserves_handset_var(self, monkeypatch, tmp_path):
+        from m3_memory.installer import _append_env_to_profile
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        profile = tmp_path / ".profile"
+        # user already set one var by hand → we must NOT shadow/duplicate it
+        profile.write_text("export M3_DB_BACKEND=sqlite  # hand-set\n")
+        pairs = {"M3_DB_BACKEND": "postgres", "M3_PRIMARY_PG_URL": "postgresql://u:p@h/db"}
+        msg = _append_env_to_profile(pairs)
+        txt = profile.read_text()
+        assert txt.count("M3_DB_BACKEND=") == 1  # hand-set value untouched
+        assert "sqlite" in txt  # their value wins
+        assert "M3_PRIMARY_PG_URL" in txt  # the missing one still added
+        assert "already present" in msg
