@@ -167,8 +167,12 @@ def test_ensure_schema_creates_primary_schema(backend):
     backend._schema_ready = False
     backend.ensure_schema()
 
-    # Version stamp: the cumulative schema records baseline version 39, once.
-    assert backend.schema_version() == 39
+    # Version stamp: the cumulative baseline records version 39; ensure_schema then
+    # applies the PG-native incremental migrations (pg_040+), so the effective
+    # version is >= 39 (the exact tip moves as migrations are added — don't pin it).
+    # The invariant that matters: the v39 baseline is stamped EXACTLY ONCE (no
+    # duplicate on re-apply).
+    assert backend.schema_version() >= 39
     with backend.connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT count(*) FROM schema_versions WHERE version = 39")

@@ -5,6 +5,27 @@ SQLite and PostgreSQL live here. Everything else (all `m3_core_rs` pure-compute:
 cosine, rank, MMR, embedding, governor, circuit-breaker, hashing) stays
 backend-blind and is not represented in this protocol.
 
+SCOPE / BOUNDARY (important — do not overstate this seam):
+This is a **SQL / DB-API seam**, not a universal storage seam. It targets
+relational engines reached through a DB-API-2.0-style ``connection().execute(sql,
+params)`` surface — SQLite and PostgreSQL today, and **MariaDB** would fit as a
+new backend by adding a `Dialect` subclass + engine plumbing (small). The seam
+deliberately assumes SQL: the `Dialect` helpers emit SQL fragments (placeholders,
+ON CONFLICT, json_extract, NOW()), `connection()` yields a cursor-bearing DB-API
+connection, and `keyword_search`/`vector_search` accept a `tenancy_sql` string
+fragment. A **document store (e.g. MongoDB) does NOT fit this Protocol** and must
+NOT be forced into it — that would be the fat-abstraction failure mode
+(DESIGN_PHILOSOPHIES §1). A document backend would require lifting the seam above
+SQL (methods like ``upsert_item(dict)`` / ``search(query) -> hits`` with no SQL in
+any signature) — a separate, larger design, explicitly out of scope here.
+
+SCALING is likewise a layer ABOVE this seam, not a backend variant: m3 scales by
+running one self-contained store PER TENANT (per clinic/facility) with a tenant
+router (clinic -> DSN) and a cross-tenant fan-out layer for the rare cross-clinic
+query — engine-agnostic orchestration that sits over independent per-tenant
+backends. It is NOT distributed sharding of a single logical store, and it does
+not constrain (or belong in) this seam. See memory m3-scale-architecture-per-clinic.
+
 Invariant (directive c4e4a145): `keyword_search` and `vector_search` MUST return
 the same shape — ``list[tuple[str, float]]`` of ``(memory_id, score)`` — on every
 backend, regardless of which engine or accelerator produced it. The accelerator

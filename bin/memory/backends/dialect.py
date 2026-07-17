@@ -30,6 +30,15 @@ ParamStyle = Literal["qmark", "format"]  # sqlite '?'  vs  psycopg '%s'
 class Dialect:
     """A backend's SQL surface. Small, pure, table-free — safe to unit test.
 
+    This is the BASE class. It holds the fields plus the methods whose output is
+    IDENTICAL across backends (placeholder/param switch on ``param_style`` not
+    backend; ci_equals emits one string for both; on_conflict_update uses the
+    shared ``excluded`` pseudo-table). Every method whose SQL DIVERGES per backend
+    is left abstract here — it raises ``NotImplementedError`` so a NEW backend that
+    forgets to override it fails loudly rather than silently inheriting another
+    backend's SQL. Concrete backends are :class:`SqliteDialect` /
+    :class:`PostgresDialect`; adding a third is "add a subclass", no edits here.
+
     Obtain via :func:`dialect_for`; do not construct per call site. Two frozen
     singletons (SQLITE, POSTGRES) are shared.
     """
@@ -64,7 +73,7 @@ class Dialect:
         translate ``INSERT OR IGNORE INTO t ...`` → ``INSERT INTO t ... {suffix}``
         mechanically.
         """
-        return "INSERT OR IGNORE INTO" if self.backend == "sqlite" else "INSERT INTO"
+        raise NotImplementedError("subclass must implement insert_or_ignore()")
 
     def on_conflict_ignore(
         self, *, conflict_target: str = "", index_predicate: str = ""
@@ -85,15 +94,7 @@ class Dialect:
         SQLite ``OR IGNORE`` does. Prefer naming the target when a specific
         (possibly partial) index carries the dedup semantics.
         """
-        if self.backend == "sqlite":
-            return ""
-        if index_predicate and not conflict_target:
-            raise ValueError(
-                "index_predicate requires a conflict_target (partial-index arbiter)"
-            )
-        tgt = f" {conflict_target}" if conflict_target else ""
-        pred = f" WHERE {index_predicate}" if index_predicate else ""
-        return f"ON CONFLICT{tgt}{pred} DO NOTHING"
+        raise NotImplementedError("subclass must implement on_conflict_ignore()")
 
     def on_conflict_update(self, conflict_target: str, set_columns: list[str]) -> str:
         """Trailing UPSERT clause: on conflict, overwrite the given columns.
@@ -116,9 +117,7 @@ class Dialect:
         SQLite form matches the existing column default exactly so DDL generated
         for either backend keeps identical semantics.
         """
-        if self.backend == "sqlite":
-            return "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-        return "NOW()"
+        raise NotImplementedError("subclass must implement now()")
 
     # -- JSON ----------------------------------------------------------------
     def json_extract_text(self, column: str, json_path: str) -> str:
@@ -135,12 +134,16 @@ class Dialect:
         separately. ``json_path`` is a trusted key name, never end-user input.
         """
         # The key is interpolated into a quoted SQL literal on both backends, so
-        # it must be a bare identifier (no quote, dot, bracket, semicolon).
+        # it must be a bare identifier (no quote, dot, bracket, semicolon). The
+        # validation lives HERE (single-sourced); subclasses only supply the
+        # backend expression via _json_extract_text_expr.
         if not json_path.isidentifier():
             raise ValueError(f"json_path must be a bare identifier: {json_path!r}")
-        if self.backend == "sqlite":
-            return f"json_extract({column}, '$.{json_path}')"
-        return f"{column} ->> '{json_path}'"
+        return self._json_extract_text_expr(column, json_path)
+
+    def _json_extract_text_expr(self, column: str, json_path: str) -> str:
+        """Backend fragment for :meth:`json_extract_text` (post-validation)."""
+        raise NotImplementedError("subclass must implement _json_extract_text_expr()")
 
     def json_extract_int(self, column: str, json_path: str) -> str:
         """Extract a top-level JSON field AS INTEGER (a numeric-cast expression).
@@ -158,11 +161,14 @@ class Dialect:
         NULL → CAST NULL; ``->>`` missing → NULL → ``::int`` NULL), so ``IS NULL``
         checks behave identically. ``json_path`` is a trusted bare identifier.
         """
+        # Validation single-sourced here; subclasses supply the backend expression.
         if not json_path.isidentifier():
             raise ValueError(f"json_path must be a bare identifier: {json_path!r}")
-        if self.backend == "sqlite":
-            return f"CAST(json_extract({column}, '$.{json_path}') AS INTEGER)"
-        return f"({column} ->> '{json_path}')::int"
+        return self._json_extract_int_expr(column, json_path)
+
+    def _json_extract_int_expr(self, column: str, json_path: str) -> str:
+        """Backend fragment for :meth:`json_extract_int` (post-validation)."""
+        raise NotImplementedError("subclass must implement _json_extract_int_expr()")
 
     # -- text comparison -----------------------------------------------------
     def ci_equals(self, column: str, placeholder: str) -> str:
@@ -205,12 +211,17 @@ class Dialect:
         ``op`` is a trusted comparison operator (``<=`` / ``>``); ``column`` is a
         trusted identifier. The caller binds one parameter for the ``op`` term.
         """
+        # Operator whitelist single-sourced here; subclass assembles the clause.
         if op not in ("<=", ">=", "<", ">", "="):
             raise ValueError(f"unexpected temporal operator {op!r}")
         p = self.param()
-        if self.backend == "sqlite":
-            return f"({column} IS NULL OR {column} = '' OR {column} {op} {p})"
-        return f"({column} IS NULL OR {column} {op} {p})"
+        return self._temporal_open_clause_expr(column, op, p)
+
+    def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
+        """Backend fragment for :meth:`temporal_open_clause` (post-validation)."""
+        raise NotImplementedError(
+            "subclass must implement _temporal_open_clause_expr()"
+        )
 
     def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
         """COALESCE an "open" timestamp bound to a fill value, backend-correct.
@@ -228,9 +239,7 @@ class Dialect:
         ``column`` is a trusted identifier; ``fill_placeholder`` is the caller's
         bind marker for the fill value (usually ``self.param()``).
         """
-        if self.backend == "sqlite":
-            return f"COALESCE(NULLIF({column}, ''), {fill_placeholder})"
-        return f"COALESCE({column}, {fill_placeholder})"
+        raise NotImplementedError("subclass must implement coalesce_open_timestamp()")
 
     # -- introspection -------------------------------------------------------
     def table_exists(self, table: str) -> tuple[str, tuple]:
@@ -247,16 +256,14 @@ class Dialect:
         name resolved against the search_path). ``table`` is a trusted identifier,
         bound as a parameter on both backends.
         """
+        # Validation single-sourced here; subclass supplies the backend probe.
         if not table.isidentifier():
             raise ValueError(f"table name must be a bare identifier: {table!r}")
-        if self.backend == "sqlite":
-            return (
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
-                (table,),
-            )
-        # to_regclass returns NULL for a non-existent relation; the WHERE keeps the
-        # result shape (0 or 1 rows) identical to the sqlite probe above.
-        return ("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (table,))
+        return self._table_exists_query(table)
+
+    def _table_exists_query(self, table: str) -> tuple[str, tuple]:
+        """Backend fragment for :meth:`table_exists` (post-validation)."""
+        raise NotImplementedError("subclass must implement _table_exists_query()")
 
     def columns_of(self, table: str) -> tuple[str, tuple]:
         """A (sql, params) pair listing a table's column names.
@@ -273,12 +280,109 @@ class Dialect:
         # The table name is interpolated into the SQLite pragma-function argument
         # (it can't be a bound literal there), so require a bare identifier on BOTH
         # backends for parity — even though the pg path binds it and is safe anyway.
+        # Validation single-sourced here; subclass supplies the backend query.
         if not table.isidentifier():
             raise ValueError(f"table name must be a bare identifier: {table!r}")
-        if self.backend == "sqlite":
-            # pragma_table_info('t') is a table-valued function (SQLite >= 3.16);
-            # its `name` column is the column name. Caller reads row[0].
-            return (f"SELECT name FROM pragma_table_info('{table}')", ())
+        return self._columns_of_query(table)
+
+    def _columns_of_query(self, table: str) -> tuple[str, tuple]:
+        """Backend fragment for :meth:`columns_of` (post-validation)."""
+        raise NotImplementedError("subclass must implement _columns_of_query()")
+
+
+# ── Concrete per-backend dialects ────────────────────────────────────────────
+# Each subclass overrides ONLY the divergent methods/fragments, returning its
+# backend's SQL verbatim. Adding a third SQL backend (e.g. MariaDB) is a new
+# subclass here plus an entry in _BY_NAME — ZERO edits to the base method bodies.
+# Fields are set as frozen-dataclass defaults so ``SqliteDialect()`` is fully
+# specified and stays frozen (assignment raises FrozenInstanceError).
+
+
+@dataclass(frozen=True)
+class SqliteDialect(Dialect):
+    """SQLite SQL surface (separate-file chatlog, qmark binds)."""
+
+    backend: BackendName = "sqlite"
+    param_style: ParamStyle = "qmark"
+
+    def insert_or_ignore(self) -> str:
+        return "INSERT OR IGNORE INTO"
+
+    def on_conflict_ignore(
+        self, *, conflict_target: str = "", index_predicate: str = ""
+    ) -> str:
+        return ""  # the OR IGNORE prefix already handled it
+
+    def now(self) -> str:
+        return "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+
+    def _json_extract_text_expr(self, column: str, json_path: str) -> str:
+        return f"json_extract({column}, '$.{json_path}')"
+
+    def _json_extract_int_expr(self, column: str, json_path: str) -> str:
+        return f"CAST(json_extract({column}, '$.{json_path}') AS INTEGER)"
+
+    def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
+        return f"({column} IS NULL OR {column} = '' OR {column} {op} {p})"
+
+    def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
+        return f"COALESCE(NULLIF({column}, ''), {fill_placeholder})"
+
+    def _table_exists_query(self, table: str) -> tuple[str, tuple]:
+        return (
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+            (table,),
+        )
+
+    def _columns_of_query(self, table: str) -> tuple[str, tuple]:
+        # pragma_table_info('t') is a table-valued function (SQLite >= 3.16);
+        # its `name` column is the column name. Caller reads row[0].
+        return (f"SELECT name FROM pragma_table_info('{table}')", ())
+
+
+@dataclass(frozen=True)
+class PostgresDialect(Dialect):
+    """PostgreSQL SQL surface (one-schema chatlog, %s binds)."""
+
+    backend: BackendName = "postgres"
+    param_style: ParamStyle = "format"
+
+    def insert_or_ignore(self) -> str:
+        # postgres has no verb form — the arbiter goes in a trailing clause.
+        return "INSERT INTO"
+
+    def on_conflict_ignore(
+        self, *, conflict_target: str = "", index_predicate: str = ""
+    ) -> str:
+        if index_predicate and not conflict_target:
+            raise ValueError(
+                "index_predicate requires a conflict_target (partial-index arbiter)"
+            )
+        tgt = f" {conflict_target}" if conflict_target else ""
+        pred = f" WHERE {index_predicate}" if index_predicate else ""
+        return f"ON CONFLICT{tgt}{pred} DO NOTHING"
+
+    def now(self) -> str:
+        return "NOW()"
+
+    def _json_extract_text_expr(self, column: str, json_path: str) -> str:
+        return f"{column} ->> '{json_path}'"
+
+    def _json_extract_int_expr(self, column: str, json_path: str) -> str:
+        return f"({column} ->> '{json_path}')::int"
+
+    def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
+        return f"({column} IS NULL OR {column} {op} {p})"
+
+    def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
+        return f"COALESCE({column}, {fill_placeholder})"
+
+    def _table_exists_query(self, table: str) -> tuple[str, tuple]:
+        # to_regclass returns NULL for a non-existent relation; the WHERE keeps the
+        # result shape (0 or 1 rows) identical to the sqlite probe.
+        return ("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (table,))
+
+    def _columns_of_query(self, table: str) -> tuple[str, tuple]:
         sql = (
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = %s ORDER BY ordinal_position"
@@ -286,8 +390,8 @@ class Dialect:
         return (sql, (table,))
 
 
-SQLITE = Dialect(backend="sqlite", param_style="qmark")
-POSTGRES = Dialect(backend="postgres", param_style="format")
+SQLITE = SqliteDialect()
+POSTGRES = PostgresDialect()
 
 _BY_NAME = {"sqlite": SQLITE, "postgres": POSTGRES}
 
@@ -308,16 +412,23 @@ def dialect_for(backend: BackendName) -> Dialect:
 # connection-routing cost of separate schemas). So chatlog SQL must emit
 # `memory_items` on SQLite but `chat_log_items` on PG.
 #
-# This map is the single source of truth: LOGICAL role -> (sqlite name, pg name).
-# `chatlog_table(role)` resolves it for the active backend. Applied only at
+# This map is the single source of truth: LOGICAL role -> (core name, chat_log_*
+# name). `chatlog_table(role)` resolves it for the active backend. Applied only at
 # chatlog-subsystem query sites — `memory_items` in shared core code ALWAYS means
 # core and is never routed through here. A map (not sql.replace) so it can't
 # corrupt substrings like memory_item_entities / memory_items_fts / column names.
 #
+# THE RULE (N-backend safe): SQLite reuses the CORE table name (its chatlog is a
+# separate .db file). EVERY NON-sqlite SQL backend uses the `chat_log_*` name —
+# they share the one-schema/two-table model. So `chatlog_table_for` keys off the
+# explicit predicate "backend == 'sqlite'", NOT an else==postgres accident: a 3rd
+# SQL backend (e.g. MariaDB) correctly lands on the chat_log_* name with no edit
+# to this map. The columns below are (core_name, chat_log_name), not (sqlite, pg).
+#
 # memory_items_fts (FTS5) has NO entry: it has no PG analogue; chatlog keyword
 # search on PG uses chat_log_items.search_vector via the seam's keyword_search.
 _CHATLOG_TABLES: dict[str, tuple[str, str]] = {
-    #  role                sqlite (separate file)     postgres (chat_log_* in core schema)
+    #  role                core name (sqlite)         chat_log_* name (all non-sqlite)
     "items":             ("memory_items",            "chat_log_items"),
     "embeddings":        ("memory_embeddings",       "chat_log_embeddings"),
     "relationships":     ("memory_relationships",    "chat_log_relationships"),
@@ -334,11 +445,13 @@ def chatlog_table_for(role: str, backend: BackendName) -> str:
 
     ``chatlog_table_for("items", "sqlite")`` -> ``"memory_items"``;
     ``chatlog_table_for("items", "postgres")`` -> ``"chat_log_items"``.
-    Raises KeyError on an unknown role (fail loud — a typo shouldn't silently
-    fall through to a core table name).
+    The rule is explicit: SQLite gets the core name; EVERY other SQL backend gets
+    the ``chat_log_*`` name (the shared one-schema model), so a future 3rd backend
+    is correct without editing this function. Raises KeyError on an unknown role
+    (fail loud — a typo shouldn't silently fall through to a core table name).
     """
-    sqlite_name, pg_name = _CHATLOG_TABLES[role]
-    return sqlite_name if backend == "sqlite" else pg_name
+    core_name, chat_log_name = _CHATLOG_TABLES[role]
+    return core_name if backend == "sqlite" else chat_log_name
 
 
 def chatlog_table(role: str) -> str:
