@@ -366,7 +366,7 @@ def chatlog_status_impl() -> str:
         # `capture.healthy` for whether turns are landing — NOT these flags.
         # Kept a flat {agent_name: {...}} map (no sentinel keys) so consumers can
         # iterate it as pure agent data; the caveat lives here in code, not in
-        # the return shape (§3/§12: returns stay structured for machine callers).
+        # the return shape (§3/§12a: returns stay structured for machine callers).
         "hooks": {
             name: {
                 "wired": spec.enabled,

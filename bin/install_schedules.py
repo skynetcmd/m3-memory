@@ -608,7 +608,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
                 capture_output=True, text=True,
             )
         finally:
-            # Always clean up the temp file — no orphaned artifacts (§14).
+            # Always clean up the temp file — no orphaned artifacts (§12c).
             if xml_path and os.path.exists(xml_path):
                 try:
                     os.unlink(xml_path)

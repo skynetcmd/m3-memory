@@ -4,7 +4,7 @@ PR-5. ``M3Retriever`` (retriever.py) already IS a ``Runnable`` (a ``BaseRetrieve
 so retrieval drops into an LCEL pipe unchanged. What was missing is the *write*
 side — LangChain has no standard "persist this into memory" Runnable — and a
 zero-boilerplate way to auto-capture a function's turns. This module adds both,
-over the SAME canonical dispatch as the rest of the surface (§12), so behavior
+over the SAME canonical dispatch as the rest of the surface (§12a), so behavior
 can't drift:
 
   * ``MemoryWrite``    — a ``Runnable`` that persists its input to m3 and passes

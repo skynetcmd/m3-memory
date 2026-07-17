@@ -3,7 +3,7 @@
 Bridges LangChain / LangGraph code (synchronous ``Memory``/``M3Store.batch`` and
 async ``abatch``) to m3-memory's async catalog dispatch. Returns structured rows,
 never formatted strings (m3 DESIGN_PHILOSOPHIES §3 robustness); rides the one
-canonical dispatch path so behavior cannot drift (§12 tool-shape); runs
+canonical dispatch path so behavior cannot drift (§12a tool-shape); runs
 in-process — no HTTP/proxy hop (§4 efficiency).
 
 Unlike the Hermes facade, this adapter IS the installed memory module

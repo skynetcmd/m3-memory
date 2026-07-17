@@ -79,7 +79,7 @@ def test_memory_search_scored_is_catalogued():
     (default_allowed=True), and NOT inject agent_id.
 
     This is the assertion that fails until the spec is added — it makes the
-    missing structured surface visible rather than silently absent (§3, §12).
+    missing structured surface visible rather than silently absent (§3, §12a).
     """
     spec = mcp_tool_catalog.get_tool(_SCORED)
     assert spec is not None, (
@@ -156,7 +156,7 @@ def test_scored_returns_ranked_rows_via_execute_tool_structured():
 def test_scored_parity_with_m3_call_dispatch():
     """Dispatching memory_search_scored through m3_call must produce the SAME
     underlying rows as execute_tool_structured directly — both ride the
-    identical gate+db-context+validation path, so behavior cannot drift (§12).
+    identical gate+db-context+validation path, so behavior cannot drift (§12a).
 
     Note: m3_call json.dumps() at its boundary, which turns each (score, item)
     TUPLE into a 2-element ARRAY. The values must match element-wise; we compare

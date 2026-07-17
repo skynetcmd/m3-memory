@@ -3,7 +3,7 @@
 Bridges Hermes Agent's MemoryProvider (synchronous, called from daemon
 threads) to m3-memory's async catalog dispatch. Returns structured rows, never
 formatted strings (m3 DESIGN_PHILOSOPHIES §3); rides the one canonical dispatch
-path so behavior cannot drift (§12); no HTTP/proxy hop (§4).
+path so behavior cannot drift (§12a); no HTTP/proxy hop (§4).
 
 IMPROVEMENT 3 — ONE persistent event loop on ONE dedicated thread, not
 asyncio.run() per call. m3's search path uses a connection pool and an embedder

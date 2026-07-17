@@ -14,7 +14,7 @@ Public surface — the one-line wire-up CrewAI's own docs point at:
 ``M3StorageBackend`` implements CrewAI's ``StorageBackend`` Protocol
 (``crewai.memory.storage.backend``, introduced v1.10, Feb 2026). It subclasses
 nothing of ours — it IS the m3 backing store CrewAI writes to and reads from,
-riding m3's one canonical in-process dispatch (§2 narrow seam; §12 tool-shape).
+riding m3's one canonical in-process dispatch (§2 narrow seam; §12a tool-shape).
 
 Why cross-agent memory is the m3 edge here: CrewAI embeds with its OWN embedder
 (default OpenAI text-embedding-3-large, 3072-dim) and hands us records/queries
