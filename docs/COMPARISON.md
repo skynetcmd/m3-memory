@@ -61,6 +61,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **Cognition placement** | Composable — disable, replace, or use built-in SLM extraction | LLM-driven extraction is welded into the memory layer |
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
 | **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`), `M3Saver` (LangGraph checkpointer — pause/resume/time-travel), and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |
+| **CrewAI integration** | 👑 Native `StorageBackend` (CrewAI v1.10+): `Memory(storage=M3StorageBackend(...))`. A CrewAI memory can **also be searchable by every other m3 agent** (Claude Code, Gemini, LangChain) if you want — a shared cross-framework memory a single-vector store can't provide | 🏆 Native provider (CrewAI-only silo) |
 | **Feature coverage** | **Superset of Mem0** — everything Mem0 does (`.add()`/`.search()`) plus contradiction supersession, bitemporal `as_of`, commanded forgetting, hybrid+graph retrieval | Baseline |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
 | **Stars (Apr 2026)** | Newer project (fewer stars); 1,283-test codebase with SOTA local-first retrieval (99.2% SHR@10) | 20k+ (mindshare leader) |
@@ -265,7 +266,8 @@ for how we hold every entry (including M3's own) to source-of-truth.
 | LangChain / LangGraph memory (drop-in Mem0 replacement, or back LangMem) | **M3-Memory** |
 | Full 100+ MCP tool set available inside a LangChain agent | **M3-Memory** |
 | Managed cloud, multi-tenant, hosted dashboard (SaaS) | **Mem0** |
-| CrewAI integration | **Mem0** |
+| CrewAI memory backend (v1.10+ `StorageBackend`), local-first | **M3-Memory** |
+| CrewAI memory that's *also* searchable by your other agents (Claude Code, LangChain) | **M3-Memory** |
 | Long-lived autonomous agents that self-edit memory | **Letta** |
 | Full stateful agent runtime (not just memory) | **Letta** |
 | Git-backed agent state | **Letta** |

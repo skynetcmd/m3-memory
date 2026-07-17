@@ -233,11 +233,11 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ### M3 is a great fit if...
 *   **You use multiple desktop coding agents:** Interoperate Claude Code, Gemini, and Aider on a shared local history.
 *   **You build with LangChain/LangGraph:** An advanced replacement for standard memory models, adding bitemporal queries, contradiction management, and local embeddings.
+*   **You build with CrewAI (v1.10+):** A drop-in `StorageBackend` (`Memory(storage=M3StorageBackend(user_id="crew-alpha"))`) that gives CrewAI bitemporal recall, contradiction-aware supersession, and local embeddings — plus the thing single-vector stores can't do: a CrewAI-written memory can **also be searchable by every other m3 agent** (Claude Code, Gemini, LangChain) if you want. See [docs/EXTENDING.md](docs/EXTENDING.md).
 *   **You need security and compliance:** Built-in `gdpr_forget` and `gdpr_export` tools, air-gapped support, and audit logs.
 *   **You value privacy:** Zero external cloud requests or subscriptions required.
 
 ### M3 is NOT a fit if...
-*   You use **CrewAI** and want standard, framework-native memory models (use [Mem0](https://mem0.ai)).
 *   You need a hosted SaaS dashboard with managed infrastructure (use [Letta](https://letta.ai)).
 *   You only want transient in-session chat context that resets when you exit the terminal (rely on your agent's defaults).
 *   **Your need is only contextual retrieval + a little user state:** if plain conversation history, RAG over a knowledge base, and a small structured user profile cover you, that's simpler to build and operate — persistent evolving memory earns its keep when users interact repeatedly *over time* and benefit from accumulated context.

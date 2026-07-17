@@ -152,6 +152,19 @@ langchain = [
     "langchain-core>=0.3.0,<1",
     "langgraph>=0.2.0,<1",
 ]
+# CrewAI integration (m3_memory/integrations/crewai/). Optional by design: core
+# m3 gains NO hard CrewAI dependency — the adapter imports crewai lazily and is
+# version-guarded, so `pip install m3-memory` stays light and the integration
+# only activates for users who opt in with `[crewai]`. Pinned to >=1.10 because
+# the unified-memory StorageBackend protocol (crewai.memory.storage.backend) first
+# shipped there (PR #4420, Feb 2026) — v1.0 GA predates it. NO mem0 dependency:
+# CrewAI reads the "memory" result key natively; m3 never imports mem0.
+# NOTE: CrewAI 1.x requires Python >=3.10,<3.14 — so this extra resolves only on a
+# 3.10-3.13 interpreter, even though m3 itself runs on 3.14. Run the crew on a
+# supported Python; it talks to the same m3 store regardless.
+crewai = [
+    "crewai>=1.10,<2",
+]
 # "Project Oxidation" Rust compute core (m3_core_rs). `m3 setup` installs the
 # right prebuilt wheel from the m3-core-rs GitHub Releases (tag v2026.7.4 —
 # per bin/../rust_core_install.py M3_CORE_RS_GIT_TAG), one per platform/backend

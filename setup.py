@@ -156,6 +156,9 @@ _code_data = {
         "integrations/hermes/*.yaml",
         "integrations/hermes/*.md",
     ],
+    # The crewai integration ships as an importable subpackage (auto-discovered by
+    # find_packages); its README is data, included so `pip install`ed users get it.
+    "m3_memory.integrations.crewai": ["*.md"],
 }
 _pkg_data.update(_code_data)
 

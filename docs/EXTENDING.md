@@ -103,9 +103,18 @@ does not reimplement memory logic. It translates the framework's calls into
 Because the adapter only speaks tool-dispatch, it works over **every** storage
 backend with no per-backend code.
 
+**Two shipped examples of this recipe:**
+
+- **LangChain / LangGraph** — [`m3_memory/integrations/langchain/`](../m3_memory/integrations/langchain/). Shadows mem0's `Memory` API + native `BaseStore`/checkpointer surfaces.
+- **CrewAI (v1.10+)** — [`m3_memory/integrations/crewai/`](../m3_memory/integrations/crewai/). Implements CrewAI's `StorageBackend` protocol. A good template when the framework defines its *own* backend interface (rather than you subclassing its classes): `backend.py` implements the protocol, `mapping.py` converts `MemoryRecord ⇄ m3 row`, and the same `M3Client` dispatch core is reused. It also shows how a memory written through one framework can stay searchable by every other m3 agent — by keeping the framework's own vector *plus* m3's native vector under a second `embed_model` identity on the same item. That cross-framework reach is only possible because m3's `memory_embeddings` table is multi-identity (see Recipe 1); a single-vector store can't do it.
+
+Points to watch when adapting a new framework:
+- **Tenancy (§7):** if the framework's contract has no `user_id` (CrewAI's doesn't), take the tenant at *construction* and stamp it on every call — raise if absent, never fall back to a global scope.
+- **Version-guard + lazy import (§3):** import the framework lazily and fail loud with an install/upgrade hint if it's missing or too old (see the crewai package `__init__.py`).
+- **Implement only what's called; stub the rest cheaply.** Verify against the framework's real call sites which methods are hot vs. never-invoked, rather than implementing an entire protocol blind.
+
 ---
 
 *See [DESIGN_PHILOSOPHIES.md](DESIGN_PHILOSOPHIES.md) for the tenets these seams
 uphold. Out of scope today (documented future paths, not built): a fully
-per-backend `keyword_search`/`vector_search`, a pgvector ANN accelerator, and a
-second shipped framework adapter.*
+per-backend `keyword_search`/`vector_search`, and a pgvector ANN accelerator.*
