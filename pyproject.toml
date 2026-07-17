@@ -165,6 +165,16 @@ langchain = [
 crewai = [
     "crewai>=1.10,<2",
 ]
+# PydanticAI integration (m3_memory/integrations/pydantic_ai/). Optional by design,
+# same lazy/version-guarded pattern as the others — `pip install m3-memory` gains
+# no hard dependency. PydanticAI has NO built-in persistent memory; this adapter
+# supplies deps-injected tools + a recall history-processor (Tier 1) AND a formal
+# `M3MemoryToolset(AbstractToolset)` (Tier 2). Unlike CrewAI there is NO Python cap:
+# pydantic-ai is built on Pydantic v2 (no chromadb/pydantic-v1), so it installs and
+# runs on 3.14. `pydantic-ai-slim` (core, no model extras) is enough for the adapter.
+pydantic-ai = [
+    "pydantic-ai-slim>=2.0,<3",
+]
 # "Project Oxidation" Rust compute core (m3_core_rs). `m3 setup` installs the
 # right prebuilt wheel from the m3-core-rs GitHub Releases (tag v2026.7.4 —
 # per bin/../rust_core_install.py M3_CORE_RS_GIT_TAG), one per platform/backend

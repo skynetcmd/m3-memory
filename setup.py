@@ -159,6 +159,8 @@ _code_data = {
     # The crewai integration ships as an importable subpackage (auto-discovered by
     # find_packages); its README is data, included so `pip install`ed users get it.
     "m3_memory.integrations.crewai": ["*.md"],
+    # Same for the pydantic-ai integration subpackage.
+    "m3_memory.integrations.pydantic_ai": ["*.md"],
 }
 _pkg_data.update(_code_data)
 
