@@ -18,11 +18,11 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 ## 🚀 Quick Links & Badges
 
 <p align="center">
-  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square&color=blue"></a>
-  <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
-  <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-100+_tools-orange?style=flat-square"></a>
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
 </p>
+
 <p align="center">
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI downloads (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-downloads.json&style=flat-square&logo=pypi&logoColor=white"></a>
   <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub unique clones (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-clones.json&style=flat-square&logo=github&logoColor=white"></a>
@@ -30,9 +30,10 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 </p>
 
 <p align="center">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
-  <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
+  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square&color=blue"></a>
+  <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
+  <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-100+_tools-orange?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -395,6 +396,10 @@ The provider badges under [`docs/badges/`](docs/badges/) embed small logo glyphs
 
 See [NOTICE](NOTICE) for the full third-party attribution list.
 
+<br>
+<p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
+<p align="center"><sub><b>Python:</b> m3 core runs on 3.11+ (including 3.14). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
+</br><p></p>
 ---
 
 ### ⭐ Star History
@@ -403,9 +408,7 @@ See [NOTICE](NOTICE) for the full third-party attribution list.
 <summary><b>⭐ View star history →</b> (click to expand the chart)</summary>
 
 <br>
-<p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
-<p align="center"><sub><b>Python:</b> m3 core runs on 3.11+ (including 3.14). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
-<br>
+
 <a href="https://star-history.com/#skynetcmd/m3-memory&Date">
   <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/star-history.svg" alt="Star history for skynetcmd/m3-memory" width="100%">
 </a>
