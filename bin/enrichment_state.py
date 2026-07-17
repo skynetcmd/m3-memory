@@ -291,16 +291,15 @@ def enroll_group(
         return (old_id, "superseded")
     from memory.backends import active_backend
     _d = active_backend().dialect()
-    _is_pg = active_backend().name == "postgres"
-    # PG has no cur.lastrowid; read the generated IDENTITY id via RETURNING.
-    _returning = " RETURNING id" if _is_pg else ""
+    # Backend-neutral generated-id read via the dialect (RETURNING id on PG/MariaDB,
+    # cur.lastrowid on SQLite) — not a `== "postgres"` name check.
     cur = conn.execute(
         f"""
         INSERT INTO enrichment_groups (
             source_variant, target_variant, group_key, user_id, db_path,
             turn_count, source_content_hash, content_size_k,
             profile, model, enrich_run_id
-        ) VALUES ({_d.placeholder(11)}){_returning}
+        ) VALUES ({_d.placeholder(11)}){_d.returning_id_clause()}
         """,
         (
             source_variant, target_variant, group_key, user_id, db_path,
@@ -308,7 +307,7 @@ def enroll_group(
             profile, model, enrich_run_id,
         ),
     )
-    new_id = cur.fetchone()[0] if _is_pg else cur.lastrowid
+    new_id = _d.last_insert_id(cur)
     return (new_id, "inserted")
 
 

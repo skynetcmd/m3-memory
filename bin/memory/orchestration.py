@@ -216,23 +216,14 @@ def notify_impl(agent_id: str, kind: str, payload: dict = None) -> str:
     with _db() as db:
         _d = active_backend().dialect()
         ph = _d.placeholder(4)
-        if active_backend().name == "postgres":
-            # PG has no last_insert_rowid(); RETURNING is the portable way to read
-            # the generated IDENTITY id in the same round-trip.
-            new_id = db.execute(
-                f"INSERT INTO notifications (agent_id, kind, payload_json, created_at) "
-                f"VALUES ({ph}) RETURNING id",
-                (agent_id, kind, payload_json, now)
-            ).fetchone()["id"]
-        else:
-            db.execute(
-                f"INSERT INTO notifications (agent_id, kind, payload_json, created_at) VALUES ({ph})",
-                (agent_id, kind, payload_json, now)
-            )
-            # Get the ID of the newly inserted row (SQLite last_insert_rowid()).
-            new_id = db.execute(
-                "SELECT last_insert_rowid() as id"
-            ).fetchone()["id"]
+        # Backend-neutral generated-id read: RETURNING id on backends that support
+        # it (PG/MariaDB), cur.lastrowid on SQLite — via the dialect, not a name check.
+        cur = db.execute(
+            f"INSERT INTO notifications (agent_id, kind, payload_json, created_at) "
+            f"VALUES ({ph}){_d.returning_id_clause()}",
+            (agent_id, kind, payload_json, now)
+        )
+        new_id = _d.last_insert_id(cur)
 
     return f"Notified {agent_id}: {kind} (id={new_id})"
 

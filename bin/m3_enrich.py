@@ -540,8 +540,6 @@ async def _run_reflector_pass(
 ) -> dict:
     """Run Reflector on every (user_id, conversation_id) pair whose
     observation count meets `threshold`. Returns a counters dict."""
-    import contextlib
-
     os.environ["M3_DATABASE"] = str(db_path)
     from memory.backends import active_backend
     _backend = active_backend()
@@ -549,23 +547,9 @@ async def _run_reflector_pass(
     _p = _d.param()
     _je_cid = _d.json_extract_text("metadata_json", "conversation_id")
 
-    # SQLite: honor the explicit db_path (read-only). PG: one pooled store, route
-    # through mc._db() (the read-only-URI form has no psycopg2 analogue).
-    @contextlib.contextmanager
-    def _read_conn():
-        if _backend.name == "sqlite":
-            import sqlite3
-            c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            try:
-                yield c
-            finally:
-                c.close()
-        else:
-            import memory_core as _mc
-            with _mc._db() as c:
-                yield c
-
-    with _read_conn() as conn:
+    # Read-only connection: SQLite honors the explicit db_path (?mode=ro), PG
+    # yields a pooled connection (db_path ignored). Backend-blind via the seam.
+    with _backend.open_readonly(str(db_path)) as conn:
         rows = conn.execute(f"""
             SELECT COALESCE(user_id,'') AS uid,
                    {_je_cid} AS cid,
@@ -682,21 +666,14 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
         # no-op on PG where the schema is migration-managed).
         _ensure_migration_025(db_path)
         # Count pending rows up-front so we can show what we're about to do.
+        # Read-only via the seam (SQLite honors db_path ?mode=ro, PG pools).
         from memory.backends import active_backend as _ab
         pending = 0
         try:
-            if _ab().name == "sqlite":
-                import sqlite3
-                with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-                    pending = conn.execute(
-                        "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
-                    ).fetchone()[0]
-            else:
-                import memory_core as _mc
-                with _mc._db() as conn:
-                    pending = conn.execute(
-                        "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
-                    ).fetchone()[0]
+            with _ab().open_readonly(str(db_path)) as conn:
+                pending = conn.execute(
+                    "SELECT COUNT(*) FROM observation_queue WHERE attempts < 5"
+                ).fetchone()[0]
         except Exception:
             pending = 0
         if pending == 0:

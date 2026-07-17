@@ -88,6 +88,30 @@ class SqliteBackend:
 
         return _db_mod._db()
 
+    def open_readonly(self, db_path: str) -> AbstractContextManager:
+        """A READ-ONLY connection to a SPECIFIC db file (SQLite-only semantics).
+
+        Some tools (m3_entities/m3_enrich eligible-row scans) read a PARTICULAR
+        SQLite file — ``_run_db`` iterates several DBs and tests pass explicit
+        paths — via a read-only URI (``file:...?mode=ro``). This honors that
+        db_path. On pooled backends there is one store and db_path is meaningless,
+        so THEY ignore it and yield a pooled connection (see PostgresBackend); a
+        caller uses ``with backend.open_readonly(db_path) as conn:`` and stays
+        backend-blind instead of branching on the backend name.
+        """
+        from contextlib import contextmanager
+        import sqlite3
+
+        @contextmanager
+        def _ro():
+            c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                yield c
+            finally:
+                c.close()
+
+        return _ro()
+
     def placeholder(self, n: int = 1) -> str:
         """SQLite qmark placeholders: ``placeholder(3) -> "?, ?, ?"``."""
         if n < 1:

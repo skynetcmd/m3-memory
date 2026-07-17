@@ -443,6 +443,17 @@ class PostgresBackend:
         finally:
             pool.putconn(conn)
 
+    @contextmanager
+    def open_readonly(self, db_path: str) -> Iterator["object"]:
+        """Read-only-intent connection. On PG there is ONE pooled store, so the
+        ``db_path`` argument is meaningless and IGNORED (it names a SQLite file);
+        this yields a normal pooled connection. Callers pass db_path for the
+        SQLite case; here it's accepted-and-ignored so the call site stays
+        backend-blind. Reads only — no writes are performed by the caller."""
+        del db_path  # a SQLite file path; not applicable to the pooled PG store
+        with self.connection() as conn:
+            yield conn
+
     def placeholder(self, n: int = 1) -> str:
         """Positional binds for psycopg: ``placeholder(3) -> "%s, %s, %s"``."""
         return POSTGRES.placeholder(n)

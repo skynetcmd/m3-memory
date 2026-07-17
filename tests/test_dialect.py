@@ -293,3 +293,23 @@ class TestEmptyJsonDefault:
         # a JSON/JSONB backend '{}' -> normalize. A 3rd JSON backend returns '{}'.
         assert not SQLITE.empty_json_default()
         assert POSTGRES.empty_json_default()
+
+
+class TestGeneratedIds:
+    def test_returning_clause(self):
+        assert SQLITE.returning_id_clause() == ""
+        assert POSTGRES.returning_id_clause() == " RETURNING id"
+
+    def test_last_insert_id_sqlite_uses_lastrowid(self):
+        class _Cur:
+            lastrowid = 42
+            def fetchone(self):
+                raise AssertionError("SQLite must NOT call fetchone for the id")
+        assert SQLITE.last_insert_id(_Cur()) == 42
+
+    def test_last_insert_id_postgres_uses_returning_row(self):
+        class _Cur:
+            lastrowid = None
+            def fetchone(self):
+                return (99,)  # RETURNING id row
+        assert POSTGRES.last_insert_id(_Cur()) == 99

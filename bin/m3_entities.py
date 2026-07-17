@@ -398,8 +398,6 @@ def _query_eligible_rows(
     Falls back to memory_items.conversation_id column when metadata is
     missing (handles legacy rows + Observer output uniformly).
     """
-    from contextlib import contextmanager
-
     from memory.backends import active_backend
     _backend = active_backend()
     _d = _backend.dialect()
@@ -415,26 +413,11 @@ def _query_eligible_rows(
         variant_clause = f" AND variant = {_p}"
         variant_params = [source_variant]
 
-    # Connection: on SQLite HONOR the explicit db_path (this function drives a
-    # SPECIFIC file — _run_db iterates several DBs, and callers/tests pass a path
-    # that is not necessarily the ambient M3_DATABASE). The old code opened a raw
-    # read-only sqlite3 connection to exactly db_path; preserve that. On PostgreSQL
-    # there is one pooled primary store and db_path is meaningless, so route
-    # through the backend-aware mc._db() (the read-only-URI form has no PG analogue).
-    @contextmanager
-    def _read_conn():
-        if _backend.name == "sqlite":
-            import sqlite3
-            c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            try:
-                yield c
-            finally:
-                c.close()
-        else:
-            with mc._db() as c:
-                yield c
-
-    with _read_conn() as conn:
+    # Read-only connection to this SPECIFIC db_path on SQLite (this function drives
+    # a specific file — _run_db iterates several DBs, tests pass explicit paths);
+    # a pooled connection on PG (db_path ignored). backend.open_readonly() hides the
+    # difference so we don't branch on the backend name here.
+    with _backend.open_readonly(str(db_path)) as conn:
         # Is the status marker available? Only reference the queue's status column
         # if it exists, so a DB without it degrades to entity-presence only.
         _has_status = False
