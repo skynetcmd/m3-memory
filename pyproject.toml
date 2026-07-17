@@ -315,6 +315,15 @@ markers = [
 # Genuine per-test resource leaks are FIXED at the source (close()/with), not listed.
 filterwarnings = [
     "error",
+    # ── (0) harness/config, not a test-code signal ────────────────────────────
+    # The pre-push drift check runs a subset of tests with
+    # PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 (bin/check_tool_catalog_drift.py) to shave
+    # startup cost — which unloads pytest-asyncio, so this file's `asyncio_mode`
+    # option is then "unknown" and pytest emits a PytestConfigWarning. That's a
+    # harness-configuration artifact of the plugin-disabled invocation, NOT a
+    # warning from test code; without this the drift hook INTERNALERRORs under
+    # `error`. (Full runs load the plugin and never hit it.)
+    "ignore:Unknown config option. asyncio_mode:pytest.PytestConfigWarning",
     # ── (A) third-party, not fixable in our code ──────────────────────────────
     # langchain_core still imports pydantic.v1 shims; both warn on Python 3.14 and
     # are removed in 3.16 — resolved only by a langchain release that drops v1.
