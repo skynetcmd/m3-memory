@@ -26,7 +26,7 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 <p align="center">
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI downloads (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-downloads.json&style=flat-square&logo=pypi&logoColor=white"></a>
   <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub unique clones (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-clones.json&style=flat-square&logo=github&logoColor=white"></a>
-  <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history — click to view" src="https://img.shields.io/badge/%E2%AD%90_star_history-view-181717?style=flat-square&logo=github&logoColor=white"></a>
+  <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history — click to view" src="https://img.shields.io/badge/%E2%AD%90%20star%20history-181717?style=flat-square&logo=github&logoColor=white"></a>
 </p>
 <p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
 
