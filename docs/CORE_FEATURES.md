@@ -52,6 +52,17 @@ Left alone, memory systems accumulate noise. M3 fights entropy:
 - **Multi-layered consolidation** — when memory groups grow too large, the local LLM merges old items into summaries, preserving knowledge while reducing clutter
 - **Deduplication** — configurable cosine threshold catches near-duplicates across the last 1000 items
 
+### 📋 Procedural Memory
+
+Beyond facts, M3 remembers **how to do things** — a first-class `procedure` type (skill / runbook / how-to / checklist):
+
+- **Auto-distilled from experience** — the background loop rolls up a completed task run and its step/result memories into a reusable, step-by-step procedure. Successful work becomes a repeatable playbook without anyone writing it up.
+- **Provenance preserved** — each procedure links back to its source memories via `distills_from` edges (sources are kept, never deleted), so you can always trace *why* a procedure says what it does.
+- **Surfaced on demand** — a "how do I…" query gets a procedural retrieval boost, so the relevant runbook rises to the top.
+- **Pluggable, local-first model** — distillation runs on a local SLM by default (`M3_DISTILL_MODEL=slm`), the largest local model (`llm`), or any profile/cloud endpoint — off by default (`M3_DISTILL_AUTO=1` to enable autonomous writes).
+
+Few memory systems distill procedures automatically — most only store manually-authored ones.
+
 ### 🔄 Refresh Lifecycle
 
 Not all knowledge ages the same way. Some facts have **planned obsolescence** — a quarterly policy review, a config valid until the next release, a customer preference you want to re-verify in 90 days. M3 lets you flag these on write:
@@ -115,10 +126,6 @@ through a `Dialect`, so the primary store is selectable, not hard-wired:
 - **PostgreSQL** (first-class primary) — set `M3_DB_BACKEND=postgres` +
   `M3_PRIMARY_PG_URL` for shared, high-concurrency, or multi-user deployments.
   Same semantics as SQLite (behavior does not depend on the backend).
-- **MariaDB** — a documented next step: adding a backend is one
-  `Dialect` subclass + a `@register_backend` line (see [EXTENDING.md](EXTENDING.md)).
-- The seam is **SQL-only** by design — a document store like MongoDB is
-  deliberately out of scope (it would force a fat abstraction the seam exists to avoid).
 
 ---
 

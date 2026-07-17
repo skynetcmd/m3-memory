@@ -8,7 +8,7 @@ optionally injects relevant memories into the message history automatically each
 turn.
 
 Both go through ``M3Deps`` → the shared ``M3Client`` dispatch core, so they work
-over every m3 storage backend (SQLite / PostgreSQL / MariaDB) with no per-backend
+over every m3 storage backend (SQLite / PostgreSQL) with no per-backend
 code, and a memory written here is immediately searchable by every other m3 agent.
 """
 

@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Sovereign Memory Systems Comparison
 
-> Last updated: 2026-06-23. Honest dimensional comparison of local-first / sovereign memory substrates. Competitor benchmark figures are vendor/author self-reported and verified against primary sources through 2026-06-23 (see the sourcing note under Retrieval & Extraction); they are not independently audited and may be stale — corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).
+> Last updated: 2026-07-17 (m3 row refreshed to 2026.7.17.0). Honest dimensional comparison of local-first / sovereign memory substrates. Competitor benchmark figures are vendor/author self-reported and verified against primary sources through 2026-06-23 (see the sourcing note under Retrieval & Extraction); they are not independently audited and may be stale — corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).
 
 > 🔗 **Interactive version:** [M3_Comparison_Table.html](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) — same data, but with sticky columns, sticky section labels, hover tooltips on acronyms, and clickable jump-links into the dimension glossary. Recommended if you want to scroll across the cohort comparison.
 
@@ -25,7 +25,7 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 
 ## ▸ Sovereignty & Integrity (M3 strengths)
 
-| Dimension | m3-memory<br>(2026.6.8.1) | agentmemory<br>(V4) | Chronos<br>(High/Res) | Hindsight | Mastra OM | Mem0 | Memento | MemPalace ⚠️ |
+| Dimension | m3-memory<br>(2026.7.17.0) | agentmemory<br>(V4) | Chronos<br>(High/Res) | Hindsight | Mastra OM | Mem0 | Memento | MemPalace ⚠️ |
 |---|---|---|---|---|---|---|---|---|
 | **[Sovereignty (Main)](#sovereignty-main)** | 🛡️ **Full Sovereign** | 🛡️ **Full Sovereign** | ⚖️ **On-Prem** | ⚖️ **High Local** | ⚖️ **Hybrid** | 🔻 **Cloud-Tied** | ⚖️ **Config-Local** | 🛡️ **Full Verbatim** |
 | ↳ *Data Residency* | 🏆 Local SQLite (or PostgreSQL primary) | ✅ Local SQLite | ✅ Local Files | ✅ Local Files | ⚖️ Postgres / Container | 🔻 Cloud DB | ✅ Local SQLite | ✅ Local SQLite |
@@ -284,4 +284,4 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 ---
 
-Last updated 2026-06-23 — corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).
+Last updated 2026-07-17 (m3 row) — competitor figures verified through 2026-06-23; corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).

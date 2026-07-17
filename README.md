@@ -29,6 +29,7 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
   <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history — click to view" src="https://img.shields.io/badge/%E2%AD%90%20star%20history-181717?style=flat-square&logo=github&logoColor=white"></a>
 </p>
 <p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
+<p align="center"><sub><b>Python:</b> m3 core runs on 3.11+ (including 3.14). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
 
 <p align="center">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
@@ -221,7 +222,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 *   **Hybrid Vector & Keyword Search:** Seamlessly merges vector space, Full-Text Search (FTS5 BM25), and MMR diversity.
 *   **Hierarchical File Ingestion:** A dedicated 26-tool files domain reads directories, chunks files, extracts facts, and reviews staleness — with ~4× faster incremental re-ingest (unchanged sections reuse cached embeddings).
 *   **Verbatim Chatlog Capture:** A dedicated 10-tool chatlog domain records conversation turns *before compaction*, so prior Claude/Gemini sessions stay searchable and nothing is lost to context-window truncation.
-*   **Pluggable Storage Backend:** SQLite by default; select **PostgreSQL as a first-class primary store** with `M3_DB_BACKEND=postgres`. The storage seam is SQL/DB-API only — SQLite and PostgreSQL today, MariaDB via a `Dialect` subclass as a documented next step; a document store like MongoDB is deliberately out of scope.
+*   **Pluggable Storage Backend:** SQLite by default; select **PostgreSQL as a first-class primary store** with `M3_DB_BACKEND=postgres`. Same semantics on either backend — the choice doesn't change behavior.
 *   **Cross-Device Sync:** Optionally sync/federate to a PostgreSQL warehouse tier. Access the same memories on your laptop, desktop, or cloud environments.
 
 ---

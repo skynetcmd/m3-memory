@@ -26,10 +26,10 @@ dependency system + tools + history-processors. This adapter provides both tiers
     analog to CrewAI's StorageBackend conformance). See ``toolset.py``.
 
 Everything rides m3's one canonical in-process dispatch (Recipe 2,
-docs/EXTENDING.md), so it works over every storage backend (SQLite/PostgreSQL/
-MariaDB) unchanged, and a memory written here stays searchable by every other m3
-agent. PydanticAI is an OPTIONAL dependency, imported lazily so importing this
-package never hard-requires it (§3 fail-loud at access time).
+docs/EXTENDING.md), so it works over every storage backend (SQLite/PostgreSQL)
+unchanged, and a memory written here stays searchable by every other m3 agent.
+PydanticAI is an OPTIONAL dependency, imported lazily so importing this package
+never hard-requires it (§3 fail-loud at access time).
 """
 
 from __future__ import annotations

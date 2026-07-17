@@ -6,7 +6,7 @@ them and is single-sourced: you extend at a seam, you do not fork the core.
 
 | You want to add… | Seam | Shape | Template |
 |---|---|---|---|
-| A new **DB backend** (MariaDB, …) | Storage seam | One `<name>_backend.py` implementing ~15 varying methods | [`bin/memory/backends/sqlite_backend.py`](../bin/memory/backends/sqlite_backend.py) |
+| A new **SQL DB backend** | Storage seam | One `<name>_backend.py` implementing ~15 varying methods | [`bin/memory/backends/sqlite_backend.py`](../bin/memory/backends/sqlite_backend.py) |
 | A new **agent framework** (LlamaIndex, AutoGen, …) | Framework seam | A thin adapter over `_dispatch_one` + a `mapping.py` | [`m3_memory/integrations/langchain/`](../m3_memory/integrations/langchain/) |
 
 These are independent: a new backend works under every framework, and a new

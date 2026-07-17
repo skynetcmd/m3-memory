@@ -96,8 +96,6 @@ def main() -> int:
                 "sqlite (default, FTS5 + vector indexes; zero-infra)",
                 "postgresql (first-class primary, M3_DB_BACKEND=postgres)",
             ],
-            "future_backends": ["mariadb (add a Dialect subclass)"],
-            "backend_seam": "SQL/DB-API only; a document store (MongoDB) is out of scope",
             "core_store": "single SQLite file (FTS5 + vector indexes) by default",
             "optional_sync_backends": ["PostgreSQL"],
             "containers_required": False,

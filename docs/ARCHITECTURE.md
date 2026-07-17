@@ -85,8 +85,7 @@ interface, *not* an ORM. Adding a DB backend is one self-contained
 fragments), a backend class (`connection`/`ensure_schema`/`keyword_search`/
 `vector_search`), and one `@register_backend` line plus an allow-list entry.
 `active_backend()`/`dialect()` read the registry — no `if name ==` ladder. SQLite
-and PostgreSQL ship; MariaDB is the documented next backend. A document store
-(MongoDB) deliberately does not fit — the seam emits SQL.
+and PostgreSQL ship.
 
 **Framework seam** (`bin/catalog/dispatch.py` `_dispatch_one` + a `mapping.py`) —
 a thin adapter that translates a framework's calls into m3 tool dispatch and maps

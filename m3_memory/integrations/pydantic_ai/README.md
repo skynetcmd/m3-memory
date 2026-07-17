@@ -76,7 +76,7 @@ M3Deps(
   that refreshes on recall, bitemporal history, commanded forgetting (GDPR),
   hybrid FTS+vector+MMR retrieval — all local, no server, no API key.
 - **Backend-agnostic.** The adapter only speaks m3's tool dispatch, so it works
-  over SQLite, PostgreSQL, and (future) MariaDB with no per-backend code.
+  over SQLite and PostgreSQL with no per-backend code.
 
 ## Requirements
 

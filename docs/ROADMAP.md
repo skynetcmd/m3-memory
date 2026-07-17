@@ -1,8 +1,17 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Roadmap
 
-> Current version: **v2026.7.14.2** — actively maintained, with SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
+> Current version: **v2026.7.17.0** — actively maintained, with SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20; 92% end-to-end QA, no oracle metadata on LongMemEval-S). Priorities shift based on community feedback; open an issue to vote on a feature.
 
 ---
+
+## ✅ Shipped — 2026-Q3 highlights
+
+### Pluggable storage backend + framework breadth + procedural memory (v2026.7.17.0)
+- [x] **PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam (`bin/memory/backends/`) — SQLite and PostgreSQL ship, with identical semantics across backends.
+- [x] **CrewAI (v1.x) integration** — a native `StorageBackend` (`m3-memory[crewai]`); a CrewAI memory stays searchable by every other m3 agent.
+- [x] **PydanticAI integration** — deps-injected tools + a recall history-processor, plus a formal `M3MemoryToolset` (`m3-memory[pydantic-ai]`); Python 3.14-native.
+- [x] **Procedural memory** — a first-class `procedure` type (skill/runbook/how-to/checklist) auto-distilled from successful task runs, with `distills_from` provenance and a procedural retrieval boost.
+- [x] **Test suite hardening** — 2,179 tests across 180 files, run with `filterwarnings=error` (a new warning fails the build).
 
 ## ✅ Shipped — 2026-Q2 highlights
 

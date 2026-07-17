@@ -54,7 +54,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **API keys required** | None | Yes (cloud version) |
 | **Offline operation** | Full — SQLite + bundled embedder, no external services | No (cloud version) |
 | **FIPS 140-3** | 👑 **Deployment-ready** crypto boundary (AES-256-GCM vault, PBKDF2-HMAC-SHA256, TLS 1.3 FIPS ciphersuites); point it at the CMVP-validated wolfSSL FIPS module for a validated deployment. Note: the validation belongs to that module — M3 is not itself a CMVP-validated cryptographic module (no application is) | No |
-| **Storage backend** | 👑 Pluggable SQL storage seam — SQLite (default, zero-infra) **or PostgreSQL as a first-class primary store** (`M3_DB_BACKEND=postgres`) for shared/high-concurrency deployments; MariaDB documented as a future backend (add a `Dialect` subclass) | Single managed cloud store |
+| **Storage backend** | 👑 SQLite (default, zero-infra) **or PostgreSQL as a first-class primary store** (`M3_DB_BACKEND=postgres`) for shared/high-concurrency deployments — same semantics on either | Single managed cloud store |
 | **Cross-device sync** | Optionally sync/federate a SQLite deployment to a PostgreSQL warehouse tier, bi-directional delta sync | Managed by Mem0 cloud |
 | **Storage topology** | 🏆 Chat-log and curated memory run as **one unified store, two independent stores, or two stores searched together** (`memory_search_multi_db`) — your choice by config, no rework | Single managed store |
 | **Knowledge graph** | Yes — 9 relationship types, 3-hop traversal | Yes — strong point |
