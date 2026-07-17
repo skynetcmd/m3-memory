@@ -424,7 +424,7 @@ Creates a MemoryItem and optionally embeds it for semantic search. Contradiction
 
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
-| `type` | `string` | Yes | Memory type. One of: auto, belief, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
+| `type` | `string` | Yes | Memory type. One of: auto, belief, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, procedure, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
 | `content` | `string` | Yes | Memory body (max 50000 chars). | `-` |
 | `title` | `string` | No | Short title. | `` |
 | `metadata` | `string` | No | JSON-encoded metadata object. | `{}` |
@@ -458,7 +458,7 @@ Write a memory whose content is read from a file on disk. Use this when the memo
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `path` | `string` | Yes | Absolute path to a UTF-8 text file on the MCP server host. The file's contents become the memory `content`. | `-` |
-| `type` | `string` | Yes | Memory type. One of: auto, belief, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
+| `type` | `string` | Yes | Memory type. One of: auto, belief, chat_log, code, config, conversation, decision, event_extraction, fact, fact_enriched, home, home_automation, infrastructure, knowledge, linux_only, local_device, log, macos_only, message, migration-log, network_config, note, observation, plan, preference, procedure, reference, scratchpad, security, snippet, summary, task, to_do, user_fact, windows_only. | `-` |
 | `title` | `string` | No | Short title. | `` |
 | `metadata` | `string` | No | JSON-encoded metadata object. | `{}` |
 | `agent_id` | `string` | No | Owning agent id. Injected by the orchestrator. | `` |

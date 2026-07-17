@@ -40,6 +40,14 @@ VALID_MEMORY_TYPES = frozenset({
     # User-facing reminder / pending action. Lighter than 'task' which carries
     # the full task-state machine; 'to_do' is just "remember to do this".
     "to_do",
+    # Reusable, learned PROCEDURE — the "how to do X" memory (skill/runbook/
+    # how-to/checklist). A single head type; the sub-kind rides
+    # metadata_json.procedure_kind ∈ {skill, runbook, how_to, checklist} so the
+    # shipping taxonomy stays compact and users can extend the kind freely.
+    # Ordered steps ride content (markdown) + a structured metadata_json.steps
+    # array. Auto-distilled from successful task runs (memory_distill_procedures)
+    # and linked back to sources via 'distills_from' edges.
+    "procedure",
 })
 
 # Entity-graph enums — defined in memory_core to avoid circular import

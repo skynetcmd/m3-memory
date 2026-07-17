@@ -79,14 +79,17 @@ async def _auto_classify(content: str, title: str) -> str:
     # (auto is the sentinel that requests classification, not a classifier output).
     # Kept local to avoid circular import: mcp_tool_catalog imports memory_core.
     # Keep this list in sync with mcp_tool_catalog.VALID_MEMORY_TYPES.
+    # MUST stay in sync with mcp_tool_catalog.VALID_MEMORY_TYPES (spec.py) minus
+    # "auto" (auto is the sentinel that REQUESTS classification, not an output).
+    # tests/test_procedural_type.py asserts this parity so drift can't recur.
     valid_types = {
         "note", "fact", "decision", "preference", "conversation", "message",
         "task", "code", "config", "observation", "plan", "summary", "snippet",
         "reference", "log", "home", "user_fact", "scratchpad", "knowledge",
-        "event_extraction", "fact_enriched", "chat_log",
+        "event_extraction", "fact_enriched", "chat_log", "belief",
         "local_device", "network_config", "infrastructure", "home_automation",
         "migration-log", "security",
-        "windows_only", "macos_only", "linux_only", "to_do",
+        "windows_only", "macos_only", "linux_only", "to_do", "procedure",
     }
 
     token = _ctx().get_secret("LM_API_TOKEN") or "lm-studio"
