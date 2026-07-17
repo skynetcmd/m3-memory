@@ -313,3 +313,14 @@ class TestGeneratedIds:
             def fetchone(self):
                 return (99,)  # RETURNING id row
         assert POSTGRES.last_insert_id(_Cur()) == 99
+
+
+class TestNowMinusDays:
+    def test_sqlite_builds_modifier_string(self):
+        assert SQLITE.now_minus_days("?") == "datetime('now', '-' || ? || ' days')"
+
+    def test_postgres_multiplies_interval(self):
+        assert POSTGRES.now_minus_days("%s") == "NOW() - (%s * INTERVAL '1 day')"
+
+    def test_no_sqlite_datetime_leaks_to_pg(self):
+        assert "datetime(" not in POSTGRES.now_minus_days("%s")

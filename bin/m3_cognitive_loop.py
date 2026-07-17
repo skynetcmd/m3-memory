@@ -226,25 +226,78 @@ def _signal_handler():
     logger.info("Shutdown signal received. Gracefully stopping...")
     _STOP_EVENT.set()
 
+def _probe_core(db_path: Optional[str], sql: str, params: tuple = ()) -> list:
+    """Run a lightweight read-probe against the CORE store, backend-appropriately.
+
+    These cognitive-loop work-gates are cheap existence probes that (a) honor an
+    EXPLICIT db_path and (b) must NOT trigger lazy-init/migrations. On SQLite that
+    means a direct M3Context(db_path).query_memory (opens exactly db_path, read-
+    only-ish, no migration spawn). On PostgreSQL there is ONE pooled store and
+    db_path is meaningless, so route through the backend-aware mc._db(). Returns
+    the fetched rows (len()>0 == "there is work")."""
+    from memory.backends import active_backend
+    if active_backend().name == "sqlite":
+        return M3Context(db_path).query_memory(sql, params)
+    import memory_core as mc
+    with mc._db() as db:
+        return db.execute(sql, params).fetchall()
+
+
+def _conn_for_pass(db_path: Optional[str]):
+    """A WRITABLE connection context manager for a pass, backend-appropriately.
+
+    Like _probe_core but for read+write passes (classify): SQLite honors the
+    explicit db_path via M3Context(db_path).get_sqlite_conn() (no migration spawn,
+    write-capable); PG routes through mc._db() (pooled, db_path meaningless). Use
+    with a `with ... as conn:` block; conn.execute/commit work on both."""
+    from memory.backends import active_backend
+    if active_backend().name == "sqlite":
+        return M3Context(db_path).get_sqlite_conn()
+    import memory_core as mc
+    return mc._db()
+
+
+def _entity_work_sql(items_tbl: str, link_tbl: str) -> str:
+    """The un-entitized-rows probe over a given items + item-entities table pair.
+    Same SQL shape for core (memory_items/memory_item_entities) and chatlog
+    (chat_log_items/chat_log_item_entities on PG)."""
+    return f"""
+        SELECT 1 FROM {items_tbl} mi
+        LEFT JOIN {link_tbl} mie ON mi.id = mie.memory_id
+        WHERE mi.is_deleted = 0
+          AND mi.type IN ('message', 'chat_log', 'note', 'observation')
+          AND mie.memory_id IS NULL
+        LIMIT 1
+    """
+
+
 def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
-    """SQL check: Are there rows in memory_items that don't have entities yet?"""
+    """SQL check: Are there rows without entities yet? Backend-aware: on PG the
+    core + chatlog stores are memory_items / chat_log_items in one DB; on SQLite
+    they may be separate files."""
     try:
-        # 1. Check Core DB
-        ctx_core = M3Context(core_db)
-        sql = """
-            SELECT 1 FROM memory_items mi
-            LEFT JOIN memory_item_entities mie ON mi.id = mie.memory_id
-            WHERE mi.is_deleted = 0
-              AND mi.type IN ('message', 'chat_log', 'note', 'observation')
-              AND mie.memory_id IS NULL
-            LIMIT 1
-        """
-        if len(ctx_core.query_memory(sql)) > 0:
+        from memory.backends import active_backend, chatlog_table
+        _backend = active_backend()
+
+        # 1. Core store.
+        core_sql = _entity_work_sql("memory_items", "memory_item_entities")
+        if len(_probe_core(core_db, core_sql)) > 0:
             return True
 
-        # 2. Check Chatlog DB (if separate)
-        if chatlog_db and os.path.abspath(chatlog_db) != os.path.abspath(ctx_core.db_path):
+        # 2. Chatlog store.
+        if _backend.name != "sqlite":
+            # PG: chat_log_* tables in the same DB — probe them via the pool.
+            import memory_core as mc
+            cl_sql = _entity_work_sql(
+                chatlog_table("items"), chatlog_table("item_entities")
+            )
+            with mc._db() as db:
+                if len(db.execute(cl_sql).fetchall()) > 0:
+                    return True
+        elif chatlog_db and os.path.abspath(chatlog_db) != os.path.abspath(M3Context(core_db).db_path):
+            # SQLite: a SEPARATE chatlog file with the same table names.
             ctx_chat = M3Context(chatlog_db)
+            sql = _entity_work_sql("memory_items", "memory_item_entities")
             if len(ctx_chat.query_memory(sql)) > 0:
                 return True
 
@@ -254,12 +307,14 @@ def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
         return True # Default to True to be safe
 
 def has_enrich_work(core_db: Optional[str]) -> bool:
-    """SQL check: Is the observation_queue or reflector_queue non-empty?"""
+    """SQL check: Is the observation_queue or reflector_queue non-empty?
+
+    The queues always live in the CORE store (main DB on SQLite; core tables on
+    PG — observation_queue/reflector_queue are NOT chatlog-forked). Route through
+    the backend-aware mc._db()."""
     try:
-        # Queues always live in the CORE memory DB
-        ctx = M3Context(core_db)
-        res_obs = ctx.query_memory("SELECT 1 FROM observation_queue LIMIT 1")
-        res_ref = ctx.query_memory("SELECT 1 FROM reflector_queue LIMIT 1")
+        res_obs = _probe_core(core_db, "SELECT 1 FROM observation_queue LIMIT 1")
+        res_ref = _probe_core(core_db, "SELECT 1 FROM reflector_queue LIMIT 1")
         return len(res_obs) > 0 or len(res_ref) > 0
     except Exception as e:
         logger.debug(f"Enrich work check failed (non-fatal): {e}")
@@ -272,19 +327,22 @@ def has_consolidate_work(core_db: Optional[str], source_type: str,
     into a belief? Mirrors memory_consolidate_impl's group query so the loop only
     spends an LLM call when there's real work (event-driven, not time-driven)."""
     try:
-        ctx = M3Context(core_db)
+        from memory.backends import active_backend
+        _d = active_backend().dialect()
+        _p = _d.param()
         clause = ""
         params: tuple = (source_type, threshold)
         if stale_days > 0:
-            # Only count rows older than the staleness window.
-            clause = " AND created_at < datetime('now', ?)"
-            params = (source_type, f"-{int(stale_days)} days", threshold)
+            # Only count rows older than the staleness window. now_minus_days binds
+            # an INT number of days (portable), not a SQLite '-N days' modifier.
+            clause = f" AND created_at < {_d.now_minus_days(_p)}"
+            params = (source_type, int(stale_days), threshold)
         sql = (
-            "SELECT 1 FROM memory_items "
-            "WHERE is_deleted = 0 AND type = ?" + clause + " "
-            "GROUP BY type, agent_id, user_id HAVING COUNT(*) > ? LIMIT 1"
+            f"SELECT 1 FROM memory_items "
+            f"WHERE is_deleted = 0 AND type = {_p}" + clause + " "
+            f"GROUP BY type, agent_id, user_id HAVING COUNT(*) > {_p} LIMIT 1"
         )
-        return len(ctx.query_memory(sql, params)) > 0
+        return len(_probe_core(core_db, sql, params)) > 0
     except Exception as e:
         logger.debug(f"Consolidate work check failed (non-fatal): {e}")
         return False  # conservative: no LLM work unless we can confirm there is some
@@ -408,7 +466,17 @@ def _checkpoint_wal(db_path: Optional[str]) -> None:
     file size. It runs only after a cycle that did write work, off the event
     loop, and NEVER crashes the loop on failure (fail-safe): a busy checkpoint
     is retried next cycle, it does not stall the heartbeat.
+
+    No-op on non-SQLite backends: WAL is a SQLite-internal concept. PostgreSQL
+    manages its own WAL + checkpointing via the background checkpointer/autovacuum,
+    so there is nothing for the loop to do — return immediately.
     """
+    try:
+        from memory.backends import active_backend
+        if active_backend().name != "sqlite":
+            return  # PG self-manages WAL; nothing to checkpoint from here
+    except Exception:  # noqa: BLE001 — never let a backend probe break the loop
+        pass
     try:
         import sqlite3
 
@@ -478,18 +546,8 @@ def has_classify_work(core_db: Optional[str]) -> bool:
     and this sweep resolves the real type later. Cheap COUNT gate; skips the pass
     when nothing is pending."""
     try:
-        import sqlite3
-        db_path = core_db or os.environ.get("M3_DATABASE")
-        if not db_path:
-            return False
-        conn = sqlite3.connect(db_path, timeout=5)
-        try:
-            row = conn.execute(
-                "SELECT 1 FROM memory_items WHERE type='auto' AND COALESCE(is_deleted,0)=0 LIMIT 1"
-            ).fetchone()
-            return row is not None
-        finally:
-            conn.close()
+        sql = "SELECT 1 FROM memory_items WHERE type='auto' AND COALESCE(is_deleted,0)=0 LIMIT 1"
+        return len(_probe_core(core_db, sql)) > 0
     except Exception as e:  # noqa: BLE001 — conservative gate; don't spin on error
         logger.debug(f"Classify work check failed (non-fatal): {e}")
         return False
@@ -508,29 +566,25 @@ async def run_classify_pass(args):
         logger.debug("No pending classification work. Skipping pass.")
         return
 
-    import sqlite3
-
+    from memory.backends import active_backend
     from memory.enrich import _auto_classify
 
+    _p = active_backend().dialect().param()
     deadline_s = float(os.environ.get("M3_CLASSIFY_DEADLINE_S", "10"))
-    db_path = args.database or os.environ.get("M3_DATABASE")
-    if not db_path:
-        return
 
     logger.info("Starting Classification pass...")
     # Fetch the batch with a short-lived connection; do the (slow) LLM work
     # OUTSIDE any open cursor/transaction so we never hold a lock across an LLM
-    # call (§3 cursor/lock discipline, §10 WAL — don't wedge co-readers).
-    conn = sqlite3.connect(db_path, timeout=10)
-    try:
-        rows = conn.execute(
+    # call (§3 cursor/lock discipline, §10 WAL — don't wedge co-readers). Backend-
+    # appropriate connection (SQLite honors args.database; PG pools) replaces the
+    # raw sqlite3.connect (was a stale-file write on PG).
+    with _conn_for_pass(args.database) as db:
+        rows = db.execute(
             "SELECT id, content, title FROM memory_items "
             "WHERE type='auto' AND COALESCE(is_deleted,0)=0 "
-            "ORDER BY created_at LIMIT ?",
+            f"ORDER BY created_at LIMIT {_p}",
             (int(args.limit_per_pass),),
         ).fetchall()
-    finally:
-        conn.close()
 
     resolved = 0
     for item_id, content, title in rows:
@@ -546,16 +600,14 @@ async def run_classify_pass(args):
         # _auto_classify returns 'note' as its own fail-open default; only UPDATE
         # when we got a REAL classification (not the sentinel and not still 'auto').
         if new_type and new_type != "auto":
-            uconn = sqlite3.connect(db_path, timeout=10)
-            try:
+            with _conn_for_pass(args.database) as uconn:
                 uconn.execute(
-                    "UPDATE memory_items SET type=?, updated_at=? WHERE id=? AND type='auto'",
+                    f"UPDATE memory_items SET type={_p}, updated_at={_p} "
+                    f"WHERE id={_p} AND type='auto'",
                     (new_type, datetime.now(timezone.utc).isoformat(), item_id),
                 )
                 uconn.commit()
                 resolved += 1
-            finally:
-                uconn.close()
     logger.info("Classification pass: resolved %d/%d row(s).", resolved, len(rows))
 
 
@@ -591,14 +643,21 @@ def has_chatlog_prune_work(chatlog_db: Optional[str], prune_days: float,
     Event-driven gate (mirrors has_consolidate_work) so the loop only does a
     sweep when a real backlog of prune-eligible noise has accumulated."""
     try:
-        ctx = M3Context(chatlog_db)
+        from memory.backends import active_backend, chatlog_table
+        _d = active_backend().dialect()
+        _p = _d.param()
+        _T = chatlog_table("items")  # memory_items (sqlite) | chat_log_items (pg)
         sql = (
-            "SELECT 1 FROM memory_items "
-            "WHERE type='chat_log' AND is_deleted=0 AND importance <= 0.3 "
-            "AND created_at < datetime('now', ?) "
-            "GROUP BY type HAVING COUNT(*) > ? LIMIT 1"
+            f"SELECT 1 FROM {_T} "
+            f"WHERE type='chat_log' AND is_deleted=0 AND importance <= 0.3 "
+            f"AND created_at < {_d.now_minus_days(_p)} "
+            f"GROUP BY type HAVING COUNT(*) > {_p} LIMIT 1"
         )
-        return len(ctx.query_memory(sql, (f"-{int(prune_days)} days", min_rows))) > 0
+        # Route through the chatlog connection (PG: core pool + chat_log_* tables;
+        # SQLite: the chatlog file). now_minus_days binds an INT (portable).
+        ctx = M3Context.for_db(None)
+        with ctx.get_chatlog_conn() as conn:
+            return len(conn.execute(sql, (int(prune_days), min_rows)).fetchall()) > 0
     except Exception as e:
         logger.debug(f"Chatlog-prune work check failed (non-fatal): {e}")
         return False
@@ -644,14 +703,13 @@ async def run_chatlog_prune_pass(args):
 
 async def main_loop(args):
     """Main execution loop with adaptive backoff and signal awareness."""
-    # This daemon writes the PRIMARY store continuously in-process (entity
-    # extraction, enrichment, observation drain, WAL checkpoints) via direct
-    # sqlite3. On a PostgreSQL-primary deployment it would keep writing a stale
-    # SQLite file while the MCP server writes PG — silent split-brain. Refuse to
-    # start under postgres until the background pipeline is ported (fail loud, §3).
-    from memory.backends import require_sqlite_backend
-    require_sqlite_backend("m3_cognitive_loop")
-
+    # This daemon is a thin orchestrator: every pass delegates to an in-process
+    # module (m3_entities/m3_enrich/embed_backfill/memory.enrich/consolidate_beliefs/
+    # chatlog_prune) that is now backend-agnostic, its work-gates route through the
+    # backend-aware mc._db(), and the WAL checkpoint is skipped on PG (which manages
+    # its own WAL). So the loop runs on both SQLite and PostgreSQL. (Previously
+    # gated SQLite-only because the passes + WAL checkpoint hit raw sqlite3; those
+    # were ported/guarded and verified on PG, so the gate was removed.)
     logger.info(f"Cognitive Loop heartbeat started. Interval: {args.interval}s")
 
     # Register signal handlers for graceful shutdown

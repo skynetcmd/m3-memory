@@ -119,6 +119,22 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement now()")
 
+    def now_minus_days(self, days_placeholder: str) -> str:
+        """A "current time minus N days" expression; ``days_placeholder`` binds an
+        INTEGER number of days (positive), NOT a SQLite modifier string.
+
+        Replaces the SQLite-only ``datetime('now', ?)`` idiom (whose ``?`` bound a
+        ``'-N days'`` modifier string that PG can't parse). Callers bind a plain
+        int and get the right expression per backend:
+
+            sql = f"... WHERE created_at < {_d.now_minus_days(_d.param())} ..."
+            params = (..., stale_days, ...)   # an int, e.g. 5
+
+        SQLite:   ``datetime('now', '-' || ? || ' days')``
+        Postgres: ``NOW() - (%s * INTERVAL '1 day')``
+        """
+        raise NotImplementedError("subclass must implement now_minus_days()")
+
     # -- generated ids -------------------------------------------------------
     def returning_id_clause(self) -> str:
         """Trailing INSERT clause to make the statement return its generated id.
@@ -358,6 +374,10 @@ class SqliteDialect(Dialect):
     def now(self) -> str:
         return "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
 
+    def now_minus_days(self, days_placeholder: str) -> str:
+        # `?` binds an int; build the '-N days' modifier string in SQL.
+        return f"datetime('now', '-' || {days_placeholder} || ' days')"
+
     def empty_json_default(self) -> "str | None":
         return ""  # metadata_json is TEXT on SQLite; '' is fine (historical value)
 
@@ -415,6 +435,10 @@ class PostgresDialect(Dialect):
 
     def now(self) -> str:
         return "NOW()"
+
+    def now_minus_days(self, days_placeholder: str) -> str:
+        # %s binds an int number of days; multiply a 1-day interval.
+        return f"NOW() - ({days_placeholder} * INTERVAL '1 day')"
 
     def empty_json_default(self) -> "str | None":
         return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj

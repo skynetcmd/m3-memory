@@ -34,11 +34,22 @@ def test_curate_memory_apply_works_on_postgres(monkeypatch):
     assert out["summary"] == {"deleted_soft": 0, "deleted_hard": 0, "linked": 0, "updated": 0}
 
 
-def test_cognitive_loop_refuses_on_postgres(monkeypatch):
+def test_cognitive_loop_not_gated_on_postgres(monkeypatch):
+    """m3_cognitive_loop was ported to PG: its passes delegate to backend-agnostic
+    modules, work-gates route through _probe_core (M3Context on SQLite / mc._db on
+    PG), and the WAL checkpoint no-ops on PG. main_loop must NOT raise the
+    require_sqlite_backend 'SQLite-only' RuntimeError. (Full DB-path behavior is in
+    the ported-tool live tests; here we only assert the gate is gone — a minimal
+    Namespace legitimately errors later on a missing attribute, which is fine.)"""
     _force_pg(monkeypatch)
     import m3_cognitive_loop
-    with pytest.raises(RuntimeError, match="SQLite-only|stale SQLite"):
+    try:
         asyncio.run(m3_cognitive_loop.main_loop(argparse.Namespace(interval=1)))
+    except RuntimeError as e:
+        if "SQLite-only" in str(e) or "stale SQLite" in str(e):
+            pytest.fail(f"cognitive_loop still gated on PG: {e}")
+    except Exception:
+        pass  # incomplete-Namespace / other errors are fine — the gate is gone
 
 
 def test_m3_entities_not_gated_on_postgres(monkeypatch):
