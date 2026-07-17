@@ -291,8 +291,14 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     from memory.backends import active_backend as _active_backend_1
 
     _d1 = _active_backend_1().dialect()
-    if _d1.backend == "postgres" and not (metadata and metadata.strip()):
-        metadata = "{}"
+    _blank_json = _d1.empty_json_default()
+    # Normalize blank metadata to the backend's empty-JSON default ONLY when that
+    # default is non-empty (JSON/JSONB backends — PG '{}', MariaDB '{}' — reject
+    # ''). SQLite's default is '' so this is a no-op there, preserving the prior
+    # SQLite behavior byte-for-byte (blank metadata left as-is). Keyed on the
+    # dialect, not == "postgres".
+    if _blank_json and not (metadata and metadata.strip()):
+        metadata = _blank_json
 
     with _db() as db:
         _vf = valid_from or now
@@ -1041,8 +1047,9 @@ async def memory_write_bulk_impl(
     _db_bulk = _active_backend_bulk().dialect()
     with _db() as db:
         for p in prepared:
-            if _db_bulk.backend == "postgres" and not (p["metadata"] and p["metadata"].strip()):
-                p["metadata"] = "{}"
+            _blank_json_bulk = _db_bulk.empty_json_default()
+            if _blank_json_bulk and not (p["metadata"] and p["metadata"].strip()):
+                p["metadata"] = _blank_json_bulk  # '{}' on JSON/JSONB backends; no-op on SQLite
             db.execute(
                 ("INSERT INTO memory_items (id, type, title, content, metadata_json, agent_id, model_id, "
                 "change_agent, importance, source, origin_device, user_id, scope, expires_at, created_at, "
@@ -1592,8 +1599,9 @@ async def memory_write_batch_impl(items: list[dict]):
         agent = item.get("change_agent", "").strip().lower() or _infer_change_agent_util(item.get("agent_id", ""), item.get("model_id", ""), default=DEFAULT_CHANGE_AGENT)
 
         _item_metadata = item.get("metadata", "{}")
-        if _d_batch.backend == "postgres" and not (_item_metadata and _item_metadata.strip()):
-            _item_metadata = "{}"
+        _blank_json_batch = _d_batch.empty_json_default()
+        if _blank_json_batch and not (_item_metadata and _item_metadata.strip()):
+            _item_metadata = _blank_json_batch  # '{}' on JSON/JSONB backends; no-op on SQLite
 
         with _db() as db:
             db.execute(

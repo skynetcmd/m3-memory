@@ -864,6 +864,16 @@ async def memory_search_scored_impl(
                 if os.environ.get("M3_DEBUG"):
                     print(f"DEBUG PG fetch error: {exc}")
                 return (_RECURSE if search_mode != "fts5" else _EMPTY), False
+        # The block below is the SQLite fused candidate fetch (FTS5 + sqlite-vec +
+        # ?-style SQL). It is SQLite-ONLY — guard explicitly so a future backend
+        # without its own candidate-fetch path fails loud here rather than silently
+        # running SQLite-specific SQL against the wrong engine.
+        if _backend.name != "sqlite":
+            raise NotImplementedError(
+                f"candidate fetch is not implemented for backend {_backend.name!r}; "
+                "only sqlite (fused FTS5/sqlite-vec) and postgres (search_pg) have a "
+                "candidate-fetch path. Add one for this backend or route through the seam."
+            )
         try:
             with _db() as db:
                 _has_vec = _detect_sqlite_vec(db)

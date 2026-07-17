@@ -120,6 +120,23 @@ class Dialect:
         raise NotImplementedError("subclass must implement now()")
 
     # -- JSON ----------------------------------------------------------------
+    def empty_json_default(self) -> "str | None":
+        """The value to store for an EMPTY JSON column on this backend.
+
+        SQLite's metadata_json is TEXT — an empty string ``''`` is fine and is the
+        historical value. A native JSON/JSONB column (Postgres JSONB, MariaDB JSON)
+        REJECTS ``''`` ("invalid input syntax for type json"), so an empty value
+        must be the empty object ``'{}'``. Callers use this to normalize a blank
+        metadata before an INSERT so the write works on every backend:
+
+            if not (metadata and metadata.strip()):
+                metadata = _d.empty_json_default()
+
+        Keyed on the backend's JSON-column type, NOT on ``== "postgres"`` — a third
+        JSON-typed SQL backend (MariaDB) gets ``'{}'`` too, not the SQLite ``''``.
+        """
+        raise NotImplementedError("subclass must implement empty_json_default()")
+
     def json_extract_text(self, column: str, json_path: str) -> str:
         """Extract a top-level JSON field AS TEXT.
 
@@ -316,6 +333,9 @@ class SqliteDialect(Dialect):
     def now(self) -> str:
         return "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
 
+    def empty_json_default(self) -> "str | None":
+        return ""  # metadata_json is TEXT on SQLite; '' is fine (historical value)
+
     def _json_extract_text_expr(self, column: str, json_path: str) -> str:
         return f"json_extract({column}, '$.{json_path}')"
 
@@ -364,6 +384,9 @@ class PostgresDialect(Dialect):
 
     def now(self) -> str:
         return "NOW()"
+
+    def empty_json_default(self) -> "str | None":
+        return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj
 
     def _json_extract_text_expr(self, column: str, json_path: str) -> str:
         return f"{column} ->> '{json_path}'"

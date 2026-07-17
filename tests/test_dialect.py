@@ -277,3 +277,19 @@ class TestChatlogTableFork:
         _sel._reset_for_tests()
         from memory.backends.dialect import chatlog_table
         assert chatlog_table("items") == "memory_items"  # default sqlite
+
+
+class TestEmptyJsonDefault:
+    def test_sqlite_empty_string(self):
+        # metadata_json is TEXT on SQLite; '' is valid and is the historical value.
+        assert SQLITE.empty_json_default() == ""
+
+    def test_postgres_empty_object(self):
+        # JSONB rejects ''; '{}' is the empty object.
+        assert POSTGRES.empty_json_default() == "{}"
+
+    def test_sqlite_default_is_falsy_postgres_truthy(self):
+        # Callers gate on truthiness: SQLite '' -> no-op (preserve prior behavior),
+        # a JSON/JSONB backend '{}' -> normalize. A 3rd JSON backend returns '{}'.
+        assert not SQLITE.empty_json_default()
+        assert POSTGRES.empty_json_default()

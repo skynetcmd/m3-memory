@@ -111,28 +111,32 @@ def _db():
     definition — and all such tests run on the SQLite default, where this path is
     unchanged.
     """
-    # Backend routing. The PROBE (is the active backend postgres?) is guarded so a
-    # missing/half-initialized backend layer falls through to the historical
-    # SQLite path unchanged. But once we've decided to route to PG, the connection
-    # and the caller's work run OUTSIDE that guard: a real PG error must propagate,
-    # never be swallowed into a silent fall-through to the wrong (SQLite) store.
-    _use_postgres = False
+    # Backend routing. SQLite is the legacy special case (the M3Context pool path
+    # below); EVERY OTHER backend routes through the seam's connection(). Keyed on
+    # `!= "sqlite"`, not `== "postgres"`, so a future SQL backend (e.g. MariaDB)
+    # goes through the seam too rather than silently falling into the SQLite path
+    # and touching the wrong store. The PROBE is guarded so a missing/half-
+    # initialized backend layer falls through to the historical SQLite path; but
+    # once we route to the seam, the connection and the caller's work run OUTSIDE
+    # the guard — a real backend error must propagate, never be swallowed into a
+    # silent fall-through to the wrong store.
+    _use_seam = False
     _backend = None
     try:
         from memory.backends import active_backend as _ab
 
         _backend = _ab()
-        _use_postgres = _backend.name == "postgres"
+        _use_seam = _backend.name != "sqlite"
     except Exception:
         if os.environ.get("M3_DEBUG"):
             import traceback
 
             traceback.print_exc()
-        _use_postgres = False
+        _use_seam = False
 
-    if _use_postgres:
-        # PostgresBackend.connection() already commits on clean exit / rolls back
-        # on exception, so we only yield through it. Errors propagate to the caller.
+    if _use_seam:
+        # The backend's connection() applies its own commit/rollback discipline
+        # (see StorageBackend.connection); we only yield through it. Errors propagate.
         with _backend.connection() as conn:
             yield conn
         return
