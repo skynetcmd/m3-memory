@@ -95,6 +95,14 @@ def test_system_message_roundtrips():
     assert msgs[1].type == "human"
 
 
+@pytest.mark.filterwarnings(
+    # with_m3_history wraps LangChain's RunnableWithMessageHistory, which LangChain
+    # itself marked PendingDeprecation (in favor of LangGraph persistence). The
+    # surface still works and our shim intentionally supports it; scope-suppress
+    # the upstream notice here so it doesn't add noise, without hiding it globally.
+    "ignore:.*RunnableWithMessageHistory is deprecated.*:"
+    "langchain_core._api.deprecation.LangChainPendingDeprecationWarning"
+)
 def test_with_m3_history_builds_runnable():
     from langchain_core.runnables import RunnableLambda
 
