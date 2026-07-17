@@ -24,10 +24,11 @@ pytest.importorskip("langgraph", reason="needs the [langchain] extra")
 
 from m3_memory.langchain import M3Store  # noqa: E402
 
-# M3Store shares the persistent daemon loop-thread (§8); benign leftover thread.
-pytestmark = [
-    pytest.mark.filterwarnings("ignore:.*non-main thread.*:UserWarning"),
-]
+# Warning surfaced, NOT suppressed (repo policy: never hide a warning; annotate it):
+# a ".*non-main thread.*" UserWarning can appear because M3Store shares M3Client's
+# process-wide DAEMON asyncio loop-thread (§8), which is still alive at test end by
+# design (torn down at interpreter exit, not per test). Benign — not a leak. Left
+# visible on purpose; do NOT kill the shared loop per test to silence it.
 
 
 def test_put_get_roundtrip_and_metadata():

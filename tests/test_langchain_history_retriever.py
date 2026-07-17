@@ -29,10 +29,23 @@ from m3_memory.langchain import (  # noqa: E402
     with_m3_history,
 )
 
-pytestmark = [
-    pytest.mark.filterwarnings("ignore:.*non-main thread.*:UserWarning"),
-    pytest.mark.filterwarnings("ignore:.*Pydantic V1.*:UserWarning"),
-]
+# Warnings are surfaced, NOT suppressed (repo policy: never hide a warning; annotate
+# its disposition at the source so a reviewer sees the reasoning). Two UserWarnings
+# can appear when this file runs; both are understood and intentionally left visible:
+#
+#   1. ".*non-main thread.*" — pytest notes that M3Client's shared asyncio event-loop
+#      thread ("m3client-langchain-loop") is still alive at test end. That thread is a
+#      process-wide DAEMON by design (M3Client._ensure_loop): all m3 dispatch lands on
+#      one loop-thread, reused across tests and torn down at interpreter exit. Benign —
+#      not a leak; do NOT "fix" by killing the shared loop per test (that defeats its
+#      purpose and slows every adapter call).
+#
+#   2. ".*Pydantic V1.*" — langchain_core still imports pydantic.v1 shims, which warn on
+#      Python 3.14 ("Core Pydantic V1 functionality isn't compatible with 3.14+"). This
+#      is an UPSTREAM langchain dependency we don't control; it's a real tracking signal
+#      (pydantic v1 is removed in 3.16, so langchain must migrate before then). Left
+#      visible on purpose so the ticking-dependency stays in view; resolved only by a
+#      langchain release that drops pydantic-v1. Not fixable in our code.
 
 
 def _flush():
@@ -95,17 +108,19 @@ def test_system_message_roundtrips():
     assert msgs[1].type == "human"
 
 
-@pytest.mark.filterwarnings(
-    # with_m3_history wraps LangChain's RunnableWithMessageHistory, which LangChain
-    # itself marked PendingDeprecation (in favor of LangGraph persistence). The
-    # surface still works and our shim intentionally supports it; scope-suppress
-    # the upstream notice here so it doesn't add noise, without hiding it globally.
-    "ignore:.*RunnableWithMessageHistory is deprecated.*:"
-    "langchain_core._api.deprecation.LangChainPendingDeprecationWarning"
-)
 def test_with_m3_history_builds_runnable():
     from langchain_core.runnables import RunnableLambda
 
+    # NOTE (surfaced deprecation, intentionally NOT suppressed): this emits
+    # LangChainPendingDeprecationWarning because with_m3_history wraps LangChain's
+    # RunnableWithMessageHistory, which LangChain marked *Pending*Deprecation (in
+    # favor of LangGraph persistence). We keep the warning visible on purpose —
+    # it's the tracking signal for when to migrate. Disposition: the surface still
+    # works and is a deliberate compatibility shim for users on the older Runnable
+    # pattern; the LangGraph path already ships alongside it as M3Saver
+    # (BaseCheckpointSaver) / M3Store (BaseStore). Migrate with_m3_history to
+    # LangGraph (or remove it, pointing users at M3Saver) only when LangChain
+    # promotes this from Pending to an actual @deprecated with a removal version.
     chain = with_m3_history(RunnableLambda(lambda x: x), user_id="alex")
     # It's a RunnableWithMessageHistory; the factory produces M3ChatMessageHistory.
     hist = chain.get_session_history("sess-1")  # type: ignore[attr-defined]
