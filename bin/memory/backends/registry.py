@@ -95,13 +95,33 @@ def _ensure_registered(name: str) -> None:
     adding a backend still needs no edit here as long as it follows
     ``<name>_backend.py`` — kept explicit (not ``importlib`` on a computed name)
     so a typo fails loudly and static analysis can see the imports.
+
+    Resilient to ``sys.modules`` churn (test isolation): if the backend module is
+    ALREADY in ``sys.modules`` (so a plain ``import`` is a no-op) but THIS
+    registry's ``_REGISTRY`` is empty — the exact split conftest's memory.* purge
+    can create, where a stale ``<name>_backend`` registered into a now-discarded
+    ``registry`` instance — force a fresh import so ``@register_backend`` re-runs
+    against the live registry. Without this the reader would raise "not registered"
+    on a perfectly valid backend after an unrelated test reimported the namespace.
     """
     if name in _REGISTRY:
         return
-    if name == "sqlite":
-        from . import sqlite_backend  # noqa: F401  (import triggers registration)
-    elif name == "postgres":
-        from . import postgres_backend  # noqa: F401
+    module_name = {
+        "sqlite": "memory.backends.sqlite_backend",
+        "postgres": "memory.backends.postgres_backend",
+    }.get(name)
+    if module_name is None:
+        return  # unknown name; caller (dialect_singleton_for/backend_factory_for) raises
+    import importlib
+    import sys
+
+    existing = sys.modules.get(module_name)
+    if existing is not None and name not in _REGISTRY:
+        # Present but not registered here -> it registered into a discarded registry.
+        # Reload to re-run @register_backend against THIS module's _REGISTRY.
+        importlib.reload(existing)
+    else:
+        importlib.import_module(module_name)
 
 
 def backend_factory_for(name: "BackendName") -> "Callable[[], StorageBackend]":
