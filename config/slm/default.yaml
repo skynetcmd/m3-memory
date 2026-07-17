@@ -17,6 +17,7 @@
 #   - user-fact:          prefer user-authored turns, run predecessor pull
 #   - temporal-reasoning: route through date-aware retrieval
 #   - multi-session:      shift to BM25-heavy for cross-session queries
+#   - procedural:         boost reusable `procedure` memories ("how do I X")
 #   - general:            no special routing
 # Changing label names here without updating memory_core will make the
 # classifier's output unrecognized — rename on both sides together.
@@ -37,10 +38,12 @@ system: |
   - user-fact: asks about a fact the user stated (name, preference, profession, pet, location)
   - temporal-reasoning: asks about time, dates, sequences, or "when/before/after/how long"
   - multi-session: requires comparing or counting across multiple past sessions
+  - procedural: asks how to do or perform a task ("how do I", "steps to", "the procedure/runbook for")
   - general: anything else (chat, follow-ups, commands)
 labels:
   - user-fact
   - temporal-reasoning
   - multi-session
+  - procedural
   - general
 fallback: general

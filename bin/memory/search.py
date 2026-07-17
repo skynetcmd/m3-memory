@@ -45,6 +45,7 @@ from .config import (
     DEFAULT_RERANK_MODEL,
     EMBED_DIM,
     IMPORTANCE_WEIGHT,
+    INTENT_PROCEDURAL_BOOST,
     INTENT_ROUTING,
     INTENT_USER_FACT_BOOST,
     SEARCH_ROW_CAP,
@@ -529,6 +530,21 @@ async def memory_search_scored_impl(
     _track_cost("search_calls")
     if _depth > 1:
         return []
+
+    # Auto-classify the query's intent when the caller supplied none, IFF the
+    # SLM classifier gate is on (M3_SLM_CLASSIFIER). classify_intent() returns
+    # None when the gate is off, so this is strictly additive — gate-off ⇒ no
+    # auto-classification and byte-identical behavior. A "how do I X" query
+    # populates intent_hint="procedural", which the procedure_boosts block below
+    # uses to surface reusable `procedure` memories.
+    if not intent_hint:
+        try:
+            from slm_intent import classify_intent
+            _label = await classify_intent(query)
+            if _label:
+                intent_hint = _label
+        except Exception as _ie:  # noqa: BLE001 — never fail search on classifier error
+            logger.debug(f"intent auto-classification skipped: {_ie}")
 
     vector_weight = _maybe_route_query(query, vector_weight, intent_hint=intent_hint)
 
@@ -1045,6 +1061,17 @@ async def memory_search_scored_impl(
             except (json.JSONDecodeError, TypeError):
                 pass
 
+    # Procedural ranking: on a 'procedural' intent ("how do I X"), surface the
+    # reusable `procedure`-type memories. Additive term keyed on the single head
+    # type — exactly like role_boosts — so intent!='procedural' (or routing off)
+    # ⇒ byte-identical ranking. `type` is a base column, so this is backend-blind.
+    intent_procedural_active = INTENT_ROUTING and intent_hint == "procedural"
+    procedure_boosts: list[float] = [0.0] * len(rows)
+    if intent_procedural_active:
+        for i, row in enumerate(rows):
+            if row["type"] == "procedure":
+                procedure_boosts[i] = INTENT_PROCEDURAL_BOOST
+
     # Confidence ranking (knowledge-maintenance Phase 5, flag-gated, default off).
     # Additive term — exactly like role_boosts — so flag-off ranking is byte-
     # identical. A row's NULL confidence falls back to its importance, so an
@@ -1068,7 +1095,7 @@ async def memory_search_scored_impl(
 
     # ── Candidate Assembly & Ranking (Tier-A Oxidation) ───────────────────
     if not explain and m3_core_rs is not None and mmr and len(rows) > k:
-        relevance = [float(s + b + c) for s, b, c in zip(final_scores, role_boosts, confidence_boosts)]
+        relevance = [float(s + b + c + p) for s, b, c, p in zip(final_scores, role_boosts, confidence_boosts, procedure_boosts)]
         contents = [(r["content"] or "") for r in rows]
         _bytes_per_row = EMBED_DIM * 4
         if all(isinstance(b, (bytes, bytearray)) and len(b) == _bytes_per_row for b in page_blobs):
@@ -1095,7 +1122,7 @@ async def memory_search_scored_impl(
         bm25_w_complement = 1.0 - vector_weight
         for i, row in enumerate(rows):
             item = {k: row[k] for k in row.keys() if k != "embedding"}
-            final_score = final_scores[i] + role_boosts[i] + confidence_boosts[i]
+            final_score = final_scores[i] + role_boosts[i] + confidence_boosts[i] + procedure_boosts[i]
             if explain:
                 bm25_norm = 1.0 / (1.0 + abs(row["bm25_score"]))
                 length_penalty = max(0.3, content_lens[i] / short_turn_t) if content_lens[i] < short_turn_t else 1.0

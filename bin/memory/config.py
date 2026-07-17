@@ -311,6 +311,10 @@ INGEST_GIST_STRIDE: int = int(os.environ.get("M3_INGEST_GIST_STRIDE", "5"))
 QUERY_TYPE_ROUTING: bool = os.environ.get("M3_QUERY_TYPE_ROUTING", "1") == "1"
 INTENT_ROUTING: bool = os.environ.get("M3_INTENT_ROUTING", "1") == "1"
 INTENT_USER_FACT_BOOST: float = float(os.environ.get("M3_INTENT_USER_FACT_BOOST", "0.20"))
+# Additive boost applied to a `procedure`-type row when the query intent is
+# 'procedural' ("how do I X"). Mirrors INTENT_USER_FACT_BOOST exactly — gated by
+# M3_INTENT_ROUTING, and off (intent != 'procedural') ⇒ byte-identical ranking.
+INTENT_PROCEDURAL_BOOST: float = float(os.environ.get("M3_INTENT_PROCEDURAL_BOOST", "0.20"))
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Fact Enrichment & Entities
