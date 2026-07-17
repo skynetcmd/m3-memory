@@ -62,7 +62,6 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 | `bin/chatlog_embed_sweeper.py` | Lazy-embed unembedded chatlog rows | — |
 | `bin/cli_kb_browse.py` | Paginated knowledge base browser | `--db PATH` (legacy alias for `--database`) |
 | `bin/cli_knowledge.py` | Add/update/search/delete knowledge items | — |
-| `bin/chroma_sync_cli.py` | Bi-directional ChromaDB sync | — |
 | `bin/embed_agent_instructions.py` | Ingest AGENT_INSTRUCTIONS.md as memories | — |
 | `bin/memory_doctor.py` | Run health checks + repair | — |
 | `bin/migrate_memory.py` | Migration runner (schema up/down) | `--target {main,chatlog,all}` selects DB family |
@@ -73,7 +72,7 @@ M3_DATABASE=memory/_test.db python bin/test_memory_bridge.py
 | `bin/setup_memory.py` | Bootstrap (venv + deps + migrations) | Reads `M3_DATABASE` or `--database PATH` positionally |
 | `bin/setup_secret.py` | Add/list/delete vault keys | — |
 | `bin/setup_test_db.py` | Seed a scratch DB with the full schema (for test isolation) | `--force` wipes existing file before seeding |
-| `bin/sync_all.py` | Hourly sync runner (shells out to pg_sync + chroma_sync) | Propagates `--database` to subprocesses via `M3_DATABASE` |
+| `bin/sync_all.py` | Hourly sync runner (shells out to pg_sync) | Propagates `--database` to subprocesses via `M3_DATABASE` |
 | `bin/weekly_auditor.py` | PDF weekly audit report | — |
 
 ---

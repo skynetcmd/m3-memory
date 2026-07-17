@@ -44,8 +44,10 @@ graph LR
   chatlog_status --> chatlog_config
   chatlog_status --> m3_sdk
   chatlog_status_line --> chatlog_config
-  chroma_health --> m3_sdk
-  chroma_sync_cli --> memory_bridge
+  chatlog_strip_framing_backfill --> chatlog_config
+  chatlog_strip_framing_backfill --> chatlog_core
+  chatlog_strip_framing_backfill --> chatlog_redaction
+  chatlog_strip_framing_backfill --> m3_sdk
   cli_kb_browse --> m3_sdk
   cli_knowledge --> m3_sdk
   consolidate_beliefs --> _task_runtime
@@ -76,6 +78,7 @@ graph LR
   gen_mcp_inventory --> mcp_tool_catalog
   gen_tool_manifest --> mcp_tool_catalog
   gen_tool_manifest --> tool_domains
+  generate_configs --> m3_memory
   governor_cli --> governor_migration
   grok_bridge --> m3_sdk
   homecoming --> m3_sdk
@@ -93,12 +96,12 @@ graph LR
   m3_cognitive_loop --> m3_enrich
   m3_cognitive_loop --> m3_entities
   m3_cognitive_loop --> m3_sdk
+  m3_cognitive_loop --> memory_core
   m3_cognitive_loop --> slm_intent
   m3_cognitive_loop --> sqlite_pragmas
   m3_enrich --> _task_runtime
   m3_enrich --> auth_utils
   m3_enrich --> enrichment_state
-  m3_enrich --> m3_sdk
   m3_enrich --> memory_core
   m3_enrich --> run_observer
   m3_enrich --> run_reflector
@@ -146,13 +149,12 @@ graph LR
   memory_maintenance --> audit_trail
   memory_maintenance --> m3_sdk
   memory_maintenance --> memory_core
-  memory_sync --> memory_core
-  memory_sync --> migrate_memory
   migrate_entity_vocab --> m3_sdk
   migrate_flat_memory --> m3_sdk
   migrate_flat_memory --> memory_core
   migrate_memory --> chatlog_config
   migrate_memory --> m3_sdk
+  migrate_pg --> m3_sdk
   pg_setup --> auth_utils
   pg_setup --> m3_sdk
   re_embed_all --> m3_sdk
@@ -224,9 +226,8 @@ graph LR
   class chatlog_redaction lib
   class chatlog_status lib
   class chatlog_status_line lib
+  class chatlog_strip_framing_backfill lib
   class check_tool_catalog_drift lib
-  class chroma_health lib
-  class chroma_sync_cli sync
   class cleanup_logs lib
   class cli_kb_browse cli
   class cli_knowledge cli
@@ -240,6 +241,7 @@ graph LR
   class embed_agent_instructions sync
   class embed_backfill lib
   class embed_server sync
+  class embed_server_inproc lib
   class embed_sweep_lib lib
   class embedding_utils lib
   class enrichment_state lib
@@ -249,6 +251,7 @@ graph LR
   class gen_capability_matrix lib
   class gen_features_json lib
   class gen_mcp_inventory lib
+  class gen_star_history lib
   class gen_tool_manifest lib
   class generate_configs lib
   class governor_cli lib
@@ -278,17 +281,18 @@ graph LR
   class mcp_proxy lib
   class mcp_tool_catalog lib
   class measure_tool_tokens lib
+  class mem0_scan lib
   class memory_bridge lib
   class memory_core lib
   class memory_doctor cli
   class memory_embed lib
   class memory_maintenance lib
   class memory_search lib
-  class memory_sync sync
   class metadata_filler lib
   class migrate_entity_vocab lib
   class migrate_flat_memory cli
   class migrate_memory cli
+  class migrate_pg lib
   class news_fetcher lib
   class pg_setup sync
   class pg_sync sync
@@ -332,10 +336,10 @@ graph LR
   class weekly_auditor sync
 ```
 
-**Stats:** 120 tools, 191 edges, 129 total nodes.
+**Stats:** 122 tools, 193 edges, 131 total nodes.
 
 ## Notes
 
 - Solid arrows = Python import; dotted `exec` = subprocess launch.
 - Library modules (imported but not themselves tools): `_task_runtime`, `audit_trail`, `crypto_provider`, `governor_migration`, `m3_memory`, `sqlite_pragmas`, `tool_domains`, `tool_loader`, `version_drift`.
-- Orphans (no edges to or from other tools in this graph): `ENV_VAR_RECONCILE_REPORT`, `README`, `ai-audit`, `auto_route`, `check_tool_catalog_drift`, `cleanup_logs`, `deep_sync`, `embed_server`, `entity_extraction`, `files_memory`, `gen_capability_matrix`, `gen_features_json`, `generate_configs`, `install_wolfssl`, `inventory_graph`, `m3_autoenrich`, `m3_chatlog_enrich_backfill`, `m3_enrich_batch_parallel`, `m3_enrich_report`, `memory_embed`, `memory_search`, `metadata_filler`, `news_fetcher`, `pg_sync`, `promote_pipeline`, `release_orphan_claims`, `run_tests`, `scan_repo_v7`, `setup_hooks`, `start_mcp_proxy`, `statusline-command`, `temporal_utils`, `test_knowledge`, `test_unified_router`, `validate_env`. Either stdlib-only or they shell out without naming a sibling `bin/*.py`.
+- Orphans (no edges to or from other tools in this graph): `ENV_VAR_RECONCILE_REPORT`, `README`, `ai-audit`, `auto_route`, `check_tool_catalog_drift`, `cleanup_logs`, `deep_sync`, `embed_server`, `embed_server_inproc`, `entity_extraction`, `files_memory`, `gen_capability_matrix`, `gen_features_json`, `gen_star_history`, `install_wolfssl`, `inventory_graph`, `m3_autoenrich`, `m3_chatlog_enrich_backfill`, `m3_enrich_batch_parallel`, `m3_enrich_report`, `mem0_scan`, `memory_embed`, `memory_search`, `metadata_filler`, `news_fetcher`, `pg_sync`, `promote_pipeline`, `release_orphan_claims`, `run_tests`, `scan_repo_v7`, `setup_hooks`, `start_mcp_proxy`, `statusline-command`, `temporal_utils`, `test_knowledge`, `test_unified_router`, `validate_env`. Either stdlib-only or they shell out without naming a sibling `bin/*.py`.

@@ -10,12 +10,6 @@ This document details the core services, frameworks, and engines that power the 
 - **Features**: WAL (Write-Ahead Logging) mode enabled for concurrency; FTS5 for full-text search.
 - **Version**: Built-in Python 3.11+ `sqlite3` (SQLite 3.35.0+ required for UPSERT/RETURNING).
 
-### ChromaDB (Federated Memory) — Optional
-- **Role**: Distributed vector database for semantic retrieval across machines.
-- **API Version**: `v2` (ChromaDB v0.6.0+).
-- **Communication**: REST API over HTTP/HTTPS.
-- **Integration**: Handled by `bin/memory_sync.py`.
-
 ### PostgreSQL (Data Warehouse) — Optional
 - **Role**: Long-term archival and multi-device synchronization.
 - **Recommended Version**: v15 or v16.
@@ -50,7 +44,7 @@ This document details the core services, frameworks, and engines that power the 
 - **Role**: Bridges OpenAI-compatible chat completion clients (Aider, OpenClaw, custom HTTP clients) to the MCP tool catalog. Listens on `localhost:9000`.
 - **Sources**: Composes its tool list from three places — `PROTOCOL_TOOLS` (5 inline), `DEBUG_TOOLS` (6 inline), and `bin/mcp_tool_catalog.py` (46 default / 55 with destructive enabled).
 - **Agent identity**: Reads `X-Agent-Id` HTTP header and propagates it to catalog dispatch, enforcing `inject_agent_id` semantics so client requests cannot bypass identity.
-- **Destructive gating**: Set `MCP_PROXY_ALLOW_DESTRUCTIVE=1` to expose the 9 destructive tools (`memory_delete`, `chroma_sync`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`). Default mode hides them.
+- **Destructive gating**: Set `MCP_PROXY_ALLOW_DESTRUCTIVE=1` to expose the 8 destructive tools (`memory_delete`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`). Default mode hides them.
 - **Health check**: `GET /health` reports per-source counts and the `allow_destructive` flag.
 
 ### HTTP Stack

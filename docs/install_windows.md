@@ -261,7 +261,7 @@ Start-Process -WindowStyle Hidden -FilePath "m3-embed-server" `
 
 ## Advanced setup
 
-The full homelab walkthrough — Postgres sync, ChromaDB, multi-machine
+The full homelab walkthrough — Postgres sync, multi-machine
 federation — lives at [install_windows_homelab.md](install_windows_homelab.md).
 Most users don't need any of that; the quickstart above is enough for a
 working local install.

@@ -2,7 +2,7 @@
 
 > **Generated** by `bin/gen_capability_matrix.py` from `docs/tools/MCP_CATALOG.json` — do not edit by hand; re-run after any tool-catalog change. This is the single scannable index of *what M3 can do* and *which tool does it*, for humans, search engines, and AI agents.
 
-**111 tools across 9 capability groups.** A ⚠️ marks a destructive tool (mutates or deletes).
+**110 tools across 9 capability groups.** A ⚠️ marks a destructive tool (mutates or deletes).
 
 ## Capability groups
 
@@ -14,7 +14,7 @@
 - [👥 Agents](#agents) — Register agents, hand off tasks, and route multi-agent work. (6 tools)
 - [✅ Tasks](#tasks) — Track and coordinate agent tasks and their state. (8 tools)
 - [🩺 Diagnostics](#diagnostics) — Health, cost, and integrity checks for the memory store. (3 tools)
-- [⚙️ Admin & Sync](#admin--sync) — Maintenance, cross-store sync, import/export, and lifecycle ops. (15 tools)
+- [⚙️ Admin & Sync](#admin--sync) — Maintenance, cross-store sync, import/export, and lifecycle ops. (14 tools)
 
 ## 🧠 Memory
 
@@ -174,7 +174,6 @@ _Maintenance, cross-store sync, import/export, and lifecycle ops._
 
 | Tool | Description | Mutates? |
 |---|---|---|
-| `chroma_sync` | Bi-directional sync between local SQLite and ChromaDB. | ⚠️ yes |
 | `enrich_pending` | Enrich pending memory items with SLM-distilled facts. | ⚠️ yes |
 | `extract_entities` | Accepts raw text, extracts entities and relationship predicates based on the configured pluggable e… | read-only |
 | `extract_pending` | Extract pending entities from the queue. | ⚠️ yes |

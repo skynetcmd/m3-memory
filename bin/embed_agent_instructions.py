@@ -62,7 +62,7 @@ Embedding model: text-embedding-nomic-embed-text-v1.5 — 768 dims, also served 
         "MCP Bridges — server names, scripts, tools",
         """\
 custom_pc_tool  | bin/custom_tool_bridge.py  | log_activity, update_focus, query_decisions, retire_focus, check_thermal_load, query_local_model, web_search, grok_ask
-memory          | bin/memory_bridge.py        | memory_write, memory_search, memory_update, memory_delete, memory_get, conversation_start, conversation_append, conversation_messages, conversation_search, chroma_sync, memory_maintenance
+memory          | bin/memory_bridge.py        | memory_write, memory_search, memory_update, memory_delete, memory_get, conversation_start, conversation_append, conversation_messages, conversation_search, memory_maintenance
 grok_intel      | bin/grok_bridge.py          | Grok 3 — real-time X/Twitter data and fast reasoning
 web_research    | bin/web_research_bridge.py  | Perplexity sonar-pro — live web search
 debug_agent     | bin/debug_agent_bridge.py   | Autonomous RCA — debug_analyze, debug_bisect, debug_trace
@@ -71,18 +71,14 @@ Canonical local model call: use query_local_model in custom_pc_tool.
 Registered in: ~/.claude/settings.json and ~/.gemini/settings.json""",
     ),
     (
-        "Memory System — tables, embedding, ChromaDB, maintenance",
+        "Memory System — tables, embedding, maintenance",
         """\
 DB: memory/agent_memory.db (SQLite)
 Legacy tables: activity_logs, project_decisions, hardware_specs, system_focus
-Memory tables: memory_items, memory_embeddings, memory_relationships, chroma_sync_queue
+Memory tables: memory_items, memory_embeddings, memory_relationships
 
 Embedding model: text-embedding-nomic-embed-text-v1.5 — 768 dims via LM Studio localhost:1234
 Vector search: numpy batch cosine similarity; pure-Python fallback if numpy absent
-Federation: ChromaDB at http://10.x.x.x:8000 (v2 API — v1 deprecated), collection agent_memory
-  Collection live: 768-dim embeddings, synced via chroma_sync
-  Offline-tolerant: writes queue to chroma_sync_queue; call chroma_sync to flush
-  Other collections on same server: user_facts (768-dim), entities, home_memory
 Maintenance: memory_maintenance — 0.995x importance decay per day after 7 days,
   purge items past expires_at, prune orphan embeddings
 Phase 6 (Core Data): deferred — not implemented
@@ -202,7 +198,6 @@ HEALTH CHECKS:
   python3 bin/test_memory_bridge.py        — full memory system (48 tests)
 
 HOMELAB:
-  ChromaDB:   http://10.x.x.x:8000 (Proxmox VMID 501)
   UniFi API:  https://10.x.x.x:11443/proxy/network/api/s/<SITE_ID>/ (always use your site ID)
   SSH:        UXG <UXG_USER>@<UXG_IP> | Controller root@<CONTROLLER_IP> | pve-database-host root@<PVE_IP> — see OS keyring for actual values""",
     ),
@@ -228,8 +223,8 @@ Shell functions: claw-grok, claw-claude, claw-gemini, claw-perplexity, claw-loca
 Dashboard: http://localhost:8000/?token=$OPENCLAW_GATEWAY_TOKEN
 Doctor: docker exec openclaw-sandbox openclaw doctor
 
-NETWORKING: OrbStack gives containers full LAN access — can reach ChromaDB at 10.x.x.x:8000
-and all homelab VLANs. Container localhost is isolated from host localhost.""",
+NETWORKING: OrbStack gives containers full LAN access — can reach all homelab
+VLANs. Container localhost is isolated from host localhost.""",
     ),
 ]
 

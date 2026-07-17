@@ -38,7 +38,7 @@ Third-party components
 
 M3 Memory builds on third-party open-source software, each under its own
 license (see each project for details), including but not limited to:
-cryptography, httpx, numpy, mcp / fastmcp, chromadb-client, gliner, keyring,
+cryptography, httpx, numpy, mcp / fastmcp, gliner, keyring,
 psycopg, sqlite-vec, PyYAML, and python-dotenv.
 
 Optional native acceleration ("Project Oxidation") is provided by the separate

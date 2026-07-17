@@ -23,7 +23,7 @@ if _BIN not in sys.path:
 
 def test_scored_impl_has_floor_bindings_before_callback_resolution():
     """Even if `_resolve_mc_callbacks()` raises, the four locals
-    (_embed, _db, _batch_cosine, _query_chroma) must already be bound from
+    (_embed, _db, _batch_cosine) must already be bound from
     module globals BEFORE the callback resolution step. Otherwise a
     raised exception leaves them unbound and `LOAD_FAST` at the MMR call
     site (~line 1350) raises NameError.

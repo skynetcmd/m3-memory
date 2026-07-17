@@ -174,7 +174,6 @@ def test_gdpr_forget_removes_surface_rows_by_user(monkeypatch):
         "CREATE TABLE memory_items (id TEXT PRIMARY KEY, user_id TEXT, conversation_id TEXT, scope TEXT, expires_at TEXT);"
         "CREATE TABLE memory_embeddings (memory_id TEXT);"
         "CREATE TABLE memory_relationships (from_id TEXT, to_id TEXT);"
-        "CREATE TABLE chroma_sync_queue (memory_id TEXT);"
         "CREATE TABLE memory_history (memory_id TEXT);"
         "CREATE TABLE gdpr_requests (id TEXT, subject_id TEXT, request_type TEXT, status TEXT, items_affected INT, completed_at TEXT);"
     )

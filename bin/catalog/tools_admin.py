@@ -13,7 +13,6 @@ from .validators import _gdpr_user_id_validator
 
 memory_core = LazyModuleProxy("memory_core")
 memory_maintenance = LazyModuleProxy("memory_maintenance")
-memory_sync = LazyModuleProxy("memory_sync")
 
 import tool_loader as _tool_loader  # provides lazy domain-expansion impls
 
@@ -142,24 +141,6 @@ TOOLS: list[ToolSpec] = [
         is_async=True,
         validators=(),
         default_allowed=True,
-        inject_agent_id=False,
-    ),
-    ToolSpec(
-        name="chroma_sync",
-        description="Bi-directional sync between local SQLite and ChromaDB.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "max_items":     {"type": "integer", "description": "Max items per batch.", "default": 50},
-                "direction":     {"type": "string", "enum": ["both", "to_chroma", "from_chroma"], "description": "Sync direction.", "default": "both"},
-                "reset_stalled": {"type": "boolean", "description": "Reset stalled sync records.", "default": True},
-            },
-            "required": [],
-        },
-        impl=memory_sync.chroma_sync_impl,
-        is_async=True,
-        validators=(),
-        default_allowed=False,
         inject_agent_id=False,
     ),
     ToolSpec(

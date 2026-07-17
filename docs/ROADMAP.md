@@ -126,7 +126,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 - [x] Hybrid retrieval — FTS5 + vector similarity + MMR re-ranking
 - [x] Contradiction detection and bitemporal versioning
 - [x] Knowledge graph (9 memory-link relationship types; entity-graph layer with a user-configurable 34-predicate vocabulary via `M3_ENTITY_VOCAB_YAML`)
-- [x] Cross-device sync — SQLite ↔ PostgreSQL ↔ ChromaDB
+- [x] Cross-device sync — SQLite ↔ PostgreSQL
 - [x] LLM auto-classification, conversation summarization, memory consolidation
 
 ---

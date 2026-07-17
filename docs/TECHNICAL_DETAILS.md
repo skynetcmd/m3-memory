@@ -27,7 +27,7 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 ## 💾 Storage Implementation
 
-> For the conceptual storage hierarchy (SQLite → PostgreSQL → ChromaDB), see [ARCHITECTURE.md](ARCHITECTURE.md).
+> For the conceptual storage hierarchy (SQLite → PostgreSQL), see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### SQLite Configuration
 
@@ -44,12 +44,6 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 - Auto-creates `agent_retention_policies` and `gdpr_requests` tables if missing
 - Hourly automated sync via `bin/pg_sync.sh` cron job
 - Sync lock prevents concurrent runs (stale after 1 hour)
-
-### ChromaDB Federation Details
-
-- v2 API (configurable via `CHROMA_BASE_URL`), collection `agent_memory`
-- `chroma_mirror` table serves reads during outages
-- Stalled sync items auto-retry with configurable attempt limits
 
 ### Database Schema
 
@@ -76,8 +70,6 @@ Default endpoint: `http://localhost:1234/v1`. Override with `LLM_ENDPOINTS_CSV` 
 
 | Table | Purpose |
 |-------|---------|
-| `chroma_sync_queue` | Outbound queue for ChromaDB federation (with `stalled_since`, `attempts`) |
-| `chroma_mirror` / `chroma_mirror_embeddings` | Local cache of remote ChromaDB data for offline reads |
 | `sync_conflicts` | Conflict log for bi-directional sync resolution |
 | `sync_state` / `sync_watermarks` | Watermark tracking for delta sync |
 | `agent_retention_policies` | Per-agent: `max_memories`, `ttl_days`, `auto_archive` |
@@ -166,14 +158,12 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 **Score Formula:** `final = 0.7 × cosine_score + 0.3 × (1 / (1 + |bm25_score|))`
 
-**Federated Fallback:** If local results < 3 and no type filter, ChromaDB is queried as an L3 fallback. Duplicate IDs are excluded.
-
 **Explainability:** `explain=True` mode (via `memory_suggest` tool) returns per-result breakdowns: vector score, BM25 score, MMR penalty, and raw combined score.
 
 ### Embedding System
 
 - **Model:** Configurable via `EMBED_MODEL` env var (default: `qwen3-embedding`)
-- **Dimension:** All models across all devices must produce the same dimension (default 1024, configurable via `EMBED_DIM`). Mismatched dimensions break cosine similarity and ChromaDB upserts.
+- **Dimension:** All models across all devices must produce the same dimension (default 1024, configurable via `EMBED_DIM`). Mismatched dimensions break cosine similarity.
 - **Auto-detection:** `embedding_utils.py` + `llm_failover.get_best_embed()` probe the local LLM server's `/v1/models` endpoint for loaded models, preferring names containing `embed`, `nomic`, or `jina`
 - **Dimension validation:** First embedding call validates actual vs expected dimensions; logs warning on mismatch
 - **Concurrency:** Bounded by `asyncio.Semaphore(4)` with 30s timeout to prevent deadlocks
@@ -350,7 +340,6 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `DB_POOL_SIZE` | 5 | SQLite connection pool size |
 | `DB_POOL_TIMEOUT` | 30 | Pool acquisition timeout (seconds) |
 | `ORIGIN_DEVICE` | `platform.node()` | Device identifier for sync provenance |
-| `CHROMA_BASE_URL` | (auto-detected) | ChromaDB endpoint override |
 | `PG_URL` | (vault/env) | PostgreSQL connection string |
 | `LLM_ENDPOINTS_CSV` | `http://localhost:1234/v1` | Comma-separated OpenAI-compatible LLM server endpoints |
 | `MMR_LAMBDA` | 0.7 | MMR relevance vs. diversity balance |
@@ -390,7 +379,7 @@ Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are 
 | Search | 4, 20 | Hybrid FTS+semantic, scope filtering, semantic fallback |
 | Conversations | 6-7 | Start, append, messages ordering, search, relationship creation |
 | Delete | 8-9 | Soft-delete (recoverable), hard-delete (cascade to embeddings, relationships, sync queue) |
-| Sync & Federation | 10, 12-14, 16-18 | ChromaDB sync, mirror fallback, stalled retry, conflict schema, sync_status |
+| Sync | 10, 12-14, 16-18 | PostgreSQL delta sync, conflict schema, sync_status |
 | Integrity & Safety | 15, 25-28, 34-35 | Content hash (SHA-256), FTS sanitization, audit trail, tamper detection, poisoning rejection, schema validation |
 | Knowledge Graph | 21-24, 26 | History events, link creation, duplicate rejection, graph traversal, contradiction detection |
 | Tier 5 Features | 29-33, 37-41 | Retention policies, GDPR export/forget, cost report, bitemporal, explainability, export/import, consolidation, auto-classify, configurable thresholds |

@@ -56,6 +56,32 @@ the policy is forward-going only.
   resolved primary DSN is byte-identical to the resolved warehouse DSN (a
   different database on the same host is still allowed).
 
+### Removed
+- **ChromaDB support retired.** ChromaDB was an *optional* L3 sync/federation
+  backend — writes enqueued to a `chroma_sync_queue` for a background worker that
+  mirrored embeddings to a remote Chroma instance, and search could fall back to
+  federated Chroma results. It was **never on the vector-search critical path**:
+  SQLite scores with sqlite-vec/Rust cosine and PostgreSQL with BYTEA + Rust
+  cosine (pgvector is the native ANN accelerator), so Chroma provided no
+  capability the built-in backends lack while adding a sync pipeline, a second
+  datastore to run, and a duplicated copy of every memory. It has been removed
+  in full:
+  - The `chroma_sync` MCP tool, `bin/chroma_sync_cli.py`, `bin/chroma_health.py`,
+    `bin/memory_sync.py`, and the `memory.chroma` module are gone. The
+    `chromadb-client` dependency is dropped.
+  - Write no longer enqueues to `chroma_sync_queue`; search no longer performs a
+    federated Chroma fallback (`memory_get`'s `chroma_mirror` fallback is also
+    removed). `bin/sync_all.py` now runs the PostgreSQL warehouse sync only.
+  - Forward-only migrations drop the retired tables — `chroma_sync_queue`,
+    `chroma_mirror`, `chroma_mirror_embeddings`, `sync_conflicts`, `sync_state`
+    on the primary DB (migration `040`) and `chroma_sync_queue` on the chatlog DB
+    (chatlog migration `005`). Durable memories in `memory_items` /
+    `memory_embeddings` are untouched.
+  - `CHROMA_BASE_URL` configures nothing now. `m3 doctor` still scrubs a stale
+    `CHROMA_BASE_URL` out of on-disk config (renaming it `M3_CHROMA_BASE_URL`)
+    so the dead name stops lingering. `SYNC_TARGET_IP` / `POSTGRES_SERVER`
+    remain — they address the PostgreSQL warehouse, not Chroma.
+
 ---
 
 ## [2026.7.15.1] — 2026-07-15 — LangChain checkpointer + LCEL surfaces

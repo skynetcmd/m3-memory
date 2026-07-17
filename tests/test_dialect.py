@@ -248,7 +248,6 @@ class TestChatlogTableFork:
         assert chatlog_table_for("item_entities", "postgres") == "chat_log_item_entities"
         assert chatlog_table_for("entity_rel", "postgres") == "chat_log_entity_relationships"
         assert chatlog_table_for("extraction_queue", "postgres") == "chat_log_extraction_queue"
-        assert chatlog_table_for("chroma_sync_queue", "postgres") == "chat_log_chroma_sync_queue"
 
     def test_unknown_role_fails_loud(self):
         from memory.backends.dialect import chatlog_table_for

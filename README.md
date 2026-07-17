@@ -200,7 +200,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 *   **Hybrid Vector & Keyword Search:** Seamlessly merges vector space, Full-Text Search (FTS5 BM25), and MMR diversity.
 *   **Hierarchical File Ingestion:** A dedicated 26-tool files domain reads directories, chunks files, extracts facts, and reviews staleness — with ~4× faster incremental re-ingest (unchanged sections reuse cached embeddings).
 *   **Verbatim Chatlog Capture:** A dedicated 10-tool chatlog domain records conversation turns *before compaction*, so prior Claude/Gemini sessions stay searchable and nothing is lost to context-window truncation.
-*   **Cross-Device Sync:** Optional PostgreSQL or ChromaDB synchronization backend. Access the same memories on your laptop, desktop, or cloud environments.
+*   **Cross-Device Sync:** Optional PostgreSQL synchronization backend. Access the same memories on your laptop, desktop, or cloud environments.
 
 ---
 
@@ -241,7 +241,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 *   You need a hosted SaaS dashboard with managed infrastructure (use [Letta](https://letta.ai)).
 *   You only want transient in-session chat context that resets when you exit the terminal (rely on your agent's defaults).
 *   **Your need is only contextual retrieval + a little user state:** if plain conversation history, RAG over a knowledge base, and a small structured user profile cover you, that's simpler to build and operate — persistent evolving memory earns its keep when users interact repeatedly *over time* and benefit from accumulated context.
-*   **You require a server-based store as the system of record:** M3 is local-first — SQLite is always the source of truth. PostgreSQL and ChromaDB are optional sync/federation tiers, not a drop-in replacement backend.
+*   **You require a server-based store as the system of record:** M3 is local-first — SQLite is always the source of truth. PostgreSQL is an optional sync/federation tier, not a drop-in replacement backend.
 
 ---
 

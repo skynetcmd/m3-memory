@@ -343,7 +343,6 @@ Recommended as a safer alternative to manual `adaptive_k` tuning.
 |------|-------------|
 | `memory_cost_report()` | Check session operation counts (embed calls, tokens, searches, writes) |
 | `embedder_status()` | Check the status of the local sovereign embedder server (port 8082). |
-| `chroma_sync(direction)` | Manual sync with ChromaDB. Use `push`, `pull`, or `both`. |
 
 ---
 
@@ -432,9 +431,7 @@ When running through `bin/mcp_proxy.py`, additional tools are available for syst
 
 When you pass `conversation_id`, `agent_filter`, `user_id`, or `scope` to
 `memory_search`, the filter is enforced strictly: if nothing in the scoped
-subset matches, you get `"No results found."` The federated ChromaDB fallback
-is deliberately skipped when any scoping filter is active, because Chroma
-does not carry those metadata fields and could not honor them.
+subset matches, you get `"No results found."`
 
 Practical consequence: **don't use `conversation_id` as a loose hint.** If you
 want a global view that merely prefers in-conversation memories, run two

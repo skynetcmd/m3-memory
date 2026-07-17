@@ -5,10 +5,9 @@ Generates a PDF covering:
   1. Memory System Health (memory_items + embeddings)
   2. Project Decisions (last 7 days)
   3. Activity Timeline (legacy activity_logs)
-  4. ChromaDB Sync Status
-  5. Git Activity (~/m3-memory)
+  4. Git Activity (~/m3-memory)
 
-Optionally writes a consolidated summary into memory_items + ChromaDB.
+Optionally writes a consolidated summary into memory_items.
 Use --no-memory to skip the memory write step.
 """
 
@@ -212,36 +211,10 @@ def section_activity(pdf, summary):
     summary["activity"] = f"{len(rows)} activity log entries this week."
 
 
-# -- Section 4: ChromaDB Sync Status ------------------------------------------
-def section_chroma_sync(pdf, summary):
-    pdf.set_font("helvetica", "B", 14)
-    pdf.cell(0, 10, "4. ChromaDB Sync Status",
-             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("helvetica", "", 10)
-
-    conn = _db()
-    try:
-        pending = conn.execute("SELECT COUNT(*) FROM chroma_sync_queue").fetchone()[0]
-        failed = conn.execute(
-            "SELECT COUNT(*) FROM chroma_sync_queue WHERE attempts > 0"
-        ).fetchone()[0]
-    finally:
-        conn.close()
-
-    if pending == 0:
-        line = "All synced -- no pending items in queue."
-    else:
-        line = f"Pending sync items: {pending}  |  Failed attempts (retryable): {failed}"
-
-    pdf.mc(6, sanitize(line, 500))
-    pdf.ln(4)
-    summary["chroma_sync"] = line
-
-
-# -- Section 5: Git Activity --------------------------------------------------
+# -- Section 4: Git Activity --------------------------------------------------
 def section_git(pdf, summary):
     pdf.set_font("helvetica", "B", 14)
-    pdf.cell(0, 10, "5. Git Activity (m3-memory)",
+    pdf.cell(0, 10, "4. Git Activity (m3-memory)",
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 9)
 
@@ -264,7 +237,7 @@ def section_git(pdf, summary):
     summary["git"] = output[:500]
 
 
-# -- Section 6: Tool Inventory Refresh ---------------------------------------
+# -- Section 5: Tool Inventory Refresh ---------------------------------------
 def section_tool_inventory(pdf, summary):
     """Refresh docs/tools/ and report which tools drifted.
 
@@ -273,7 +246,7 @@ def section_tool_inventory(pdf, summary):
     then diff after.
     """
     pdf.set_font("helvetica", "B", 14)
-    pdf.cell(0, 10, "6. Tool Inventory",
+    pdf.cell(0, 10, "5. Tool Inventory",
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 9)
 
@@ -364,7 +337,7 @@ def write_summary_to_memory(summary_text, week_label):
     if bin_dir not in sys.path:
         sys.path.insert(0, bin_dir)
 
-    from memory_bridge import chroma_sync, memory_write
+    from memory_bridge import memory_write
 
     result = asyncio.run(memory_write(
         type="document",
@@ -378,16 +351,13 @@ def write_summary_to_memory(summary_text, week_label):
     ))
     print(f"Memory write: {result}")
 
-    sync_result = asyncio.run(chroma_sync())
-    print(f"ChromaDB sync: {sync_result}")
-
 
 # -- Main ---------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(description="M3 Max Weekly Audit Report")
     parser.add_argument(
         "--no-memory", action="store_true",
-        help="Skip writing summary to memory system and ChromaDB",
+        help="Skip writing summary to memory system",
     )
     from _task_runtime import add_log_file_arg, setup_task_runtime
     add_log_file_arg(parser)
@@ -408,7 +378,6 @@ def main():
     section_memory_health(pdf, summary)
     section_decisions(pdf, summary)
     section_activity(pdf, summary)
-    section_chroma_sync(pdf, summary)
     section_git(pdf, summary)
     section_tool_inventory(pdf, summary)
 
@@ -425,13 +394,12 @@ def main():
             f"MEMORY HEALTH:\n{summary.get('memory_health', 'N/A')}\n\n"
             f"DECISIONS:\n{summary.get('decisions', 'N/A')}\n\n"
             f"ACTIVITY:\n{summary.get('activity', 'N/A')}\n\n"
-            f"CHROMA SYNC:\n{summary.get('chroma_sync', 'N/A')}\n\n"
             f"GIT:\n{summary.get('git', 'N/A')}\n\n"
             f"TOOL INVENTORY:\n{summary.get('tool_inventory', 'N/A')}"
         )
         write_summary_to_memory(summary_text, week_label)
     else:
-        print("--no-memory: skipping memory write and ChromaDB sync.")
+        print("--no-memory: skipping memory write.")
 
 
 if __name__ == "__main__":

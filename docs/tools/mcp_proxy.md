@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_proxy.py
-sha1: ef1abcb6a0f3
-mtime_utc: 2026-07-02T21:51:11.648462+00:00
-generated_utc: 2026-07-03T20:00:03.641276+00:00
+sha1: 1fb56d9bdb6b
+mtime_utc: 2026-07-17T02:38:55.031479+00:00
+generated_utc: 2026-07-17T02:39:19.613661+00:00
 private: false
 ---
 
@@ -29,7 +29,7 @@ Tool sources (v2)
 3. m3-memory catalog tools from mcp_tool_catalog.TOOLS (44):
    memory_*, agent_*, task_*, conversation_*, notifications_*, etc.
 
-Default allowlist excludes destructive catalog tools (memory_delete, chroma_sync,
+Default allowlist excludes destructive catalog tools (memory_delete,
 gdpr_*, *_export, *_import, memory_maintenance, memory_set_retention, agent_offline).
 Set MCP_PROXY_ALLOW_DESTRUCTIVE=1 to expose them.
 

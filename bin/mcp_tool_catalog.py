@@ -179,7 +179,7 @@ _TIMEOUT_PARAM_SCHEMA = {
 # `timeout` arg still overrides them. Rationale per class:
 #   - *search / entity_search: first call after a cold start pays the bge-m3 GPU
 #     model load (~10-20s) on top of the query.
-#   - *_index / enrich_pending / chroma_sync: GPU/batch/network ops proportional
+#   - *_index / enrich_pending: GPU/batch/network ops proportional
 #     to corpus size.
 #   - *_bulk / *_dedup / promote: cost scales with the input set.
 # A tool absent from this map keeps the 30s default (fast-fail by construction).
@@ -198,7 +198,6 @@ _SLOW_TOOL_TIMEOUTS: dict[str, float] = {
     "files_dedup": 180,
     "m3_index": 300,
     "enrich_pending": 300,
-    "chroma_sync": 300,
     "memory_update_bulk": 120,
     "memory_delete_bulk": 120,
     "memory_dedup": 180,

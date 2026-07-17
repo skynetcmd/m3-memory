@@ -75,13 +75,6 @@ def scratch_db(monkeypatch, tmp_path):
             embed_model TEXT
         )
     """)
-    conn.execute("""
-        CREATE TABLE chroma_sync_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            memory_id TEXT,
-            operation TEXT
-        )
-    """)
     ids = [str(uuid.uuid4()) for _ in range(5)]
     for i, mid in enumerate(ids):
         conn.execute(

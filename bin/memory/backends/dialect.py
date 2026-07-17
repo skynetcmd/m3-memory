@@ -520,7 +520,6 @@ _CHATLOG_TABLES: dict[str, tuple[str, str]] = {
     "item_entities":     ("memory_item_entities",    "chat_log_item_entities"),
     "entity_rel":        ("entity_relationships",    "chat_log_entity_relationships"),
     "extraction_queue":  ("entity_extraction_queue", "chat_log_extraction_queue"),
-    "chroma_sync_queue": ("chroma_sync_queue",       "chat_log_chroma_sync_queue"),
 }
 
 

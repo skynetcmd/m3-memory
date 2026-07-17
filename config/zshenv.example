@@ -94,7 +94,6 @@ esac
 
 # --- AUTOMATIC LOADING ---
 export SYNC_TARGET_IP=$(get_secret "agentos_sync_target_ip")
-export CHROMA_BASE_URL="http://$SYNC_TARGET_IP:8000"
 export POSTGRES_SERVER=$SYNC_TARGET_IP
 
 export PG_URL=$(get_secret "agentos_pg_url")

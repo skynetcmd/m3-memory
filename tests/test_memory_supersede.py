@@ -81,11 +81,6 @@ CREATE TABLE IF NOT EXISTS memory_relationships (
     relationship_type TEXT NOT NULL,
     created_at TEXT
 );
-
-CREATE TABLE IF NOT EXISTS chroma_sync_queue (
-    memory_id TEXT,
-    operation TEXT
-);
 """
 
 

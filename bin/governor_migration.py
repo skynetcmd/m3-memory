@@ -10,7 +10,7 @@ removed so the two don't double-fire.
 Not every scheduled task is a governor candidate. We split them:
 
   GOVERNOR-ELIGIBLE (periodic, interruptible, resource-using — safe to migrate):
-    AgentOS_HourlySync          PG/Chroma sync (WAL + network)
+    AgentOS_HourlySync          PG sync (WAL + network)
     AgentOS_ChatlogEmbedSweep   GPU embedding backfill
     AgentOS_ObservationDrain    LLM fact-extraction from chatlog
     AgentOS_Maintenance         decay / prune (DB writes)

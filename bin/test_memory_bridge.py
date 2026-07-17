@@ -14,6 +14,7 @@ import os
 import sqlite3
 import struct
 import sys
+import uuid as _uuid
 
 import httpx
 
@@ -84,8 +85,7 @@ async def probe_lm_studio() -> tuple[bool, bool]:
 # ── DB helpers ────────────────────────────────────────────────────────────────
 _VALID_TABLES = {
     "memory_items", "memory_embeddings", "memory_relationships",
-    "chroma_sync_queue", "chroma_mirror", "chroma_mirror_embeddings",
-    "sync_conflicts", "sync_state", "activity_logs", "project_decisions",
+    "activity_logs", "project_decisions",
     "hardware_specs", "system_focus", "synchronized_secrets",
     "session_handoff", "conversation_log", "memory_history",
     "agent_retention_policies", "gdpr_requests",
@@ -115,7 +115,6 @@ def cleanup():
         placeholders = ",".join("?" * len(ids))
         conn.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", ids)
         conn.execute(f"DELETE FROM memory_relationships WHERE from_id IN ({placeholders}) OR to_id IN ({placeholders})", ids + ids)
-        conn.execute(f"DELETE FROM chroma_sync_queue WHERE memory_id IN ({placeholders})", ids)
         conn.execute(f"DELETE FROM memory_history WHERE memory_id IN ({placeholders})", ids)
         conn.execute("DELETE FROM memory_items WHERE agent_id = ?", (AGENT,))
     # Also clean up handoff items for test-agent-B
@@ -144,7 +143,6 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         agent_list,
         agent_offline,
         agent_register,
-        chroma_sync,
         conversation_append,
         conversation_messages,
         conversation_search,
@@ -175,7 +173,6 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         notifications_ack_all,
         notifications_poll,
         notify,
-        sync_status,
         task_assign,
         task_create,
         task_get,
@@ -400,14 +397,6 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     d_miss = memory_delete("00000000-0000-0000-0000-000000000000")
     check("delete missing ID → error string", "Error:" in d_miss)
 
-    # ── 10: chroma_sync ───────────────────────────────────────────────────────
-    print("\n── 10: chroma_sync (offline tolerance) ────────────────────────")
-    cs1 = await chroma_sync(max_items=5)
-    check("returns a string (no exception)",          isinstance(cs1, str))
-    check("handles offline or empty gracefully",
-          any(k in cs1 for k in ("unreachable", "empty", "pushed", "deferred", "sync")),
-          cs1[:120])
-
     # ── 11: memory_maintenance ────────────────────────────────────────────────
     print("\n── 11: memory_maintenance ─────────────────────────────────────")
     maint = memory_maintenance(decay=True, purge_expired=True, prune_orphan_embeddings=True)
@@ -424,50 +413,6 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     except Exception as e:
         check("_ensure_sync_tables idempotent (no error)", False, str(e))
 
-    conn = sqlite3.connect(DB_PATH)
-    tables = [r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()]
-    conn.close()
-    check("chroma_mirror table exists",             "chroma_mirror" in tables)
-    check("chroma_mirror_embeddings table exists",   "chroma_mirror_embeddings" in tables)
-    check("sync_conflicts table exists",            "sync_conflicts" in tables)
-    check("sync_state table exists",                "sync_state" in tables)
-
-    # Verify stalled_since column on chroma_sync_queue
-    conn = sqlite3.connect(DB_PATH)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(chroma_sync_queue)").fetchall()]
-    conn.close()
-    check("stalled_since column in chroma_sync_queue", "stalled_since" in cols)
-
-    # ── 13: sync_status ──────────────────────────────────────────────────────
-    print("\n── 13: sync_status ────────────────────────────────────────────")
-    ss = sync_status()
-    check("sync_status returns string",       isinstance(ss, str))
-    check("sync_status contains 'Queue:'",    "Queue:" in ss, ss[:120])
-    check("sync_status contains 'Mirror:'",   "Mirror:" in ss)
-    check("sync_status contains 'Conflicts:'","Conflicts:" in ss)
-
-    # ── 14: chroma_sync direction param ──────────────────────────────────────
-    print("\n── 14: chroma_sync direction param ────────────────────────────")
-    cs_push = await chroma_sync(max_items=5, direction="push")
-    check("direction=push returns string",   isinstance(cs_push, str))
-    check("push handles offline/empty",
-          any(k in cs_push for k in ("unreachable", "push queue empty", "pushed", "deferred", "sync")),
-          cs_push[:120])
-
-    cs_pull = await chroma_sync(max_items=5, direction="pull")
-    check("direction=pull returns string",   isinstance(cs_pull, str))
-    check("pull handles offline/empty",
-          any(k in cs_pull for k in ("unreachable", "pulled", "conflicts", "sync")),
-          cs_pull[:120])
-
-    cs_both = await chroma_sync(max_items=5, direction="both")
-    check("direction=both returns string",   isinstance(cs_both, str))
-
-    cs_bad = await chroma_sync(max_items=5, direction="invalid")
-    check("invalid direction returns error", "Error:" in cs_bad, cs_bad[:80])
-
     # ── 15: _content_hash ────────────────────────────────────────────────────
     print("\n── 15: _content_hash ──────────────────────────────────────────")
     h1 = _content_hash("hello world")
@@ -476,118 +421,6 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
     check("content_hash deterministic",      h1 == h2)
     check("content_hash differs for diff",   h1 != h3)
     check("content_hash is hex string",      len(h1) == 64 and all(c in "0123456789abcdef" for c in h1))
-
-    # ── 16: mirror search integration ────────────────────────────────────────
-    print("\n── 16: mirror search integration ──────────────────────────────")
-    # Insert a fake mirror item + embedding to verify search sees it
-    import uuid as _uuid
-    mirror_id = str(_uuid.uuid4())
-    now_ts = "2026-03-02T00:00:00Z"
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """INSERT INTO chroma_mirror
-             (id, type, title, content, metadata_json,
-              agent_id, model_id, origin_device,
-              importance, is_deleted,
-              remote_created_at, remote_updated_at,
-              pulled_at, is_local_origin)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (mirror_id, "note", "Mirror Test Note", "This is a mirrored note from a remote device",
-         "{}", AGENT, "", "windows-pc",
-         0.6, 0, now_ts, now_ts, now_ts, 0),
-    )
-    conn.commit()
-    conn.close()
-
-    # Insert a fake embedding for the mirror item (random 768-dim vector)
-    fake_emb = [0.01] * 768
-    emb_blob = _pack(fake_emb)
-    emb_id = str(_uuid.uuid4())
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO chroma_mirror_embeddings (id, mirror_id, embedding, dim, pulled_at) VALUES (?,?,?,?,?)",
-        (emb_id, mirror_id, emb_blob, 768, now_ts),
-    )
-    conn.commit()
-    conn.close()
-
-    # Test memory_get mirror fallback
-    mg = memory_get(mirror_id)
-    check("memory_get finds mirror item",    "mirror" in mg.lower() and mirror_id in mg)
-
-    # Clean up mirror test data
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM chroma_mirror_embeddings WHERE mirror_id = ?", (mirror_id,))
-    conn.execute("DELETE FROM chroma_mirror WHERE id = ?", (mirror_id,))
-    conn.commit()
-    conn.close()
-
-    # ── 17: conflict table schema ────────────────────────────────────────────
-    print("\n── 17: conflict table schema ──────────────────────────────────")
-    conflict_id = str(_uuid.uuid4())
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        conn.execute(
-            """INSERT INTO sync_conflicts
-                 (id, memory_id, local_content, remote_content,
-                  local_updated, remote_updated,
-                  local_device, remote_device,
-                  resolution, resolved_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (conflict_id, "test-mem-id",
-             "local version", "remote version",
-             now_ts, now_ts,
-             "macbook", "windows-pc",
-             "remote_wins", now_ts),
-        )
-        conn.commit()
-        check("conflict row insert succeeds", True)
-        row = conn.execute("SELECT resolution FROM sync_conflicts WHERE id = ?", (conflict_id,)).fetchone()
-        check("conflict row readable",        row is not None)
-        check("conflict resolution stored",   row[0] == "remote_wins" if row else False)
-        conn.execute("DELETE FROM sync_conflicts WHERE id = ?", (conflict_id,))
-        conn.commit()
-    except Exception as e:
-        check("conflict row insert succeeds", False, str(e))
-    finally:
-        conn.close()
-
-    # ── 18: stalled retry ────────────────────────────────────────────────────
-    print("\n── 18: stalled retry ──────────────────────────────────────────")
-    stalled_mem_id = "stalled-test-mem-" + str(_uuid.uuid4())[:8]
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO chroma_sync_queue (memory_id, operation, attempts, stalled_since) VALUES (?,?,?,?)",
-        (stalled_mem_id, "upsert", 5, now_ts),
-    )
-    conn.commit()
-    stalled_row = conn.execute(
-        "SELECT id, attempts FROM chroma_sync_queue WHERE memory_id = ?", (stalled_mem_id,)
-    ).fetchone()
-    stalled_id = stalled_row[0]
-    conn.close()
-    check("stalled item has attempts >= 3",   stalled_row[1] >= 3)
-
-    # chroma_sync with reset_stalled=True should reset it
-    await chroma_sync(max_items=1, direction="push", reset_stalled=True)
-
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT attempts, stalled_since FROM chroma_sync_queue WHERE id = ?", (stalled_id,)
-    ).fetchone()
-    conn.close()
-    if row:
-        check("stalled item attempts reset",     row[0] < 3, f"attempts={row[0]}")
-        check("stalled_since cleared",           row[1] is None, f"stalled_since={row[1]}")
-    else:
-        # Item was processed and removed from queue (possible if ChromaDB online)
-        check("stalled item processed or reset", True, "item removed from queue")
-
-    # Clean up
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM chroma_sync_queue WHERE memory_id = ?", (stalled_mem_id,))
-    conn.commit()
-    conn.close()
 
     # ── 19: memory_write with scoping ──────────────────────────────────────
     print("\n── 19: memory_write with scoping ──────────────────────────────")

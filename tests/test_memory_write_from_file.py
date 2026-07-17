@@ -9,8 +9,8 @@ Locks the contract for the file-backed memory write path:
 
 Mirrors the tmp-DB harness from test_memory_get_prefix.py — _initialized_dbs
 patch short-circuits the migration runner. embed=False on every call so we
-don't need an LM Studio sidecar or memory_embeddings/chroma_sync_queue
-write path. memory_history is still touched on success, so we include it
+don't need an LM Studio sidecar or the memory_embeddings write path.
+memory_history is still touched on success, so we include it
 in the schema.
 """
 
@@ -70,17 +70,6 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
     dim INTEGER,
     created_at TEXT,
     content_hash TEXT
-);
-
-CREATE TABLE IF NOT EXISTS chroma_sync_queue (
-    memory_id TEXT,
-    operation TEXT
-);
-
-CREATE TABLE IF NOT EXISTS chroma_mirror (
-    id TEXT PRIMARY KEY,
-    title TEXT,
-    content TEXT
 );
 """
 

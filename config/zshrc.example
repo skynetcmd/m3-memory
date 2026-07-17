@@ -29,7 +29,6 @@ else
     # Core Tools
     alias pulse='python3 $M3_MEMORY_ROOT/bin/mission_control.py'
     alias ai-audit='$M3_MEMORY_ROOT/bin/ai-audit.sh'
-    alias chroma-sync='python3 $M3_MEMORY_ROOT/bin/chroma_sync_cli.py'
     alias mcp-check='$M3_MEMORY_ROOT/bin/mcp_check.sh'
 
     # Aider Functions (with dynamic path)

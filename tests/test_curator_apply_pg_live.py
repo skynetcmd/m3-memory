@@ -56,7 +56,7 @@ def pg_seeded(monkeypatch):
     with b.connection() as c:
         c.cursor().execute(
             "DROP TABLE IF EXISTS memory_history, memory_relationships, "
-            "memory_embeddings, chroma_sync_queue, memory_items CASCADE"
+            "memory_embeddings, memory_items CASCADE"
         )
     b._schema_ready = False
     b.ensure_schema()

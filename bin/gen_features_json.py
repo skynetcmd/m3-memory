@@ -89,7 +89,7 @@ def main() -> int:
         },
         "storage": {
             "core_store": "single SQLite file (FTS5 + vector indexes)",
-            "optional_sync_backends": ["PostgreSQL", "ChromaDB"],
+            "optional_sync_backends": ["PostgreSQL"],
             "containers_required": False,
         },
         "maturity": {
@@ -110,7 +110,7 @@ def main() -> int:
             "scale_path": {
                 "default": "single SQLite file — fast, embedded, zero-infrastructure",
                 "scale_out": "PostgreSQL backend for corporate data warehouse + governance",
-                "sync_backends": ["PostgreSQL", "ChromaDB"],
+                "sync_backends": ["PostgreSQL"],
             },
             "notes": [
                 "FIPS 140-3 is deployment-ready via wolfCrypt; M3 is not itself a CMVP-validated module (no application is).",

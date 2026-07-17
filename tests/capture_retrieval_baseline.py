@@ -32,17 +32,6 @@ list.
   - `explain=False`            — keeps the result-dict shape stable.
   - `adaptive_k=False`         — disables the elbow trim so test_run = test_run
                                   on the same pool size.
-  - Federation is left at module default — `CHROMA_BASE_URL` is set,
-                                            so federation may fire and add
-                                            rows. That's intentional —
-                                            we WANT to detect if a
-                                            Chroma row drops out. But:
-  - **NOTE**: federation hits a remote ChromaDB. If that
-              host is down at compare time, the diff will show federated
-              row dropouts that are environmental, not regressions. The
-              suggested workflow is to capture and compare in the same
-              session (same Chroma state) — or to set `M3_DISABLE_FEDERATION`
-              first if you want corpus-only comparison.
 
 ## Sample queries
 

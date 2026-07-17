@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 # pg_sync.sh — macOS/Linux hourly sync wrapper.
-# Delegates to sync_all.py which handles both pg_sync and chroma_sync.
+# Delegates to sync_all.py which handles pg_sync.
 # Registered via cron: 0 * * * * /path/to/bin/pg_sync.sh
 
 WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"

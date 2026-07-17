@@ -82,8 +82,7 @@ async def probe_lm_studio() -> bool:
 # ── DB helpers ────────────────────────────────────────────────────────────────
 _VALID_TABLES = {
     "memory_items", "memory_embeddings", "memory_relationships",
-    "chroma_sync_queue", "chroma_mirror", "chroma_mirror_embeddings",
-    "sync_conflicts", "sync_state", "activity_logs", "project_decisions",
+    "activity_logs", "project_decisions",
     "hardware_specs", "system_focus", "synchronized_secrets",
     "session_handoff", "conversation_log", "debug_reports"
 }
@@ -116,7 +115,6 @@ def cleanup():
         if ids:
             placeholders = ",".join("?" * len(ids))
             conn.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", ids)
-            conn.execute(f"DELETE FROM chroma_sync_queue WHERE memory_id IN ({placeholders})", ids)
             conn.execute("DELETE FROM memory_items WHERE agent_id = ?", (AGENT,))
         # Also clean up test decisions and reports
         conn.execute("DELETE FROM project_decisions WHERE project LIKE '%test_debug_agent%'")

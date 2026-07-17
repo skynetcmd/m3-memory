@@ -205,7 +205,7 @@ for the ready-to-use XML template.
 
 ## Advanced setup
 
-The full homelab walkthrough — Postgres sync, ChromaDB, multi-machine
+The full homelab walkthrough — Postgres sync, multi-machine
 federation — lives at [install_macos_homelab.md](install_macos_homelab.md).
 Most users don't need any of that; the one-liner above is enough for a
 working local install.

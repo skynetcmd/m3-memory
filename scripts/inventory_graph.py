@@ -12,7 +12,7 @@ INV = Path(__file__).resolve().parent.parent / "docs" / "tools"
 
 BIN_SCRIPTS = {
     "weekly_auditor", "sync_all", "secret_rotator", "memory_maintenance",
-    "pg_sync", "chroma_sync_cli", "gen_tool_inventory", "migrate_memory",
+    "pg_sync", "gen_tool_inventory", "migrate_memory",
     "embed_server", "embed_server_gpu", "install_schedules",
     "test_debug_agent", "test_mcp_proxy", "test_memory_bridge",
     "bench_memory",

@@ -260,7 +260,7 @@ Quick installers for each OS:
 - [docs/install_macos.md](docs/install_macos.md) — `curl … | bash` via Homebrew
 - [docs/install_linux.md](docs/install_linux.md) — `curl … | bash` (apt / dnf / pacman / zypper / apk)
 
-Full homelab walkthroughs covering optional Postgres + ChromaDB + external
+Full homelab walkthroughs covering optional Postgres + external
 generation endpoints (not required for a local-only setup):
 
 - [docs/install_windows_homelab.md](docs/install_windows_homelab.md)

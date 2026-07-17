@@ -24,15 +24,11 @@ def _seed_db(tmp_path) -> str:
     conn = sqlite3.connect(db)
     conn.executescript(
         """
-        CREATE TABLE chroma_sync_queue (id INTEGER PRIMARY KEY, memory_id TEXT,
-            operation TEXT, queued_at TEXT);
         CREATE TABLE observation_queue (id INTEGER PRIMARY KEY, enqueued_at TEXT);
         CREATE TABLE reflector_queue (id INTEGER PRIMARY KEY, enqueued_at TEXT);
         CREATE TABLE memory_embeddings (id TEXT PRIMARY KEY, memory_id TEXT,
             created_at TEXT);
         CREATE TABLE memory_items (id TEXT PRIMARY KEY, type TEXT, created_at TEXT);
-        INSERT INTO chroma_sync_queue (memory_id, operation, queued_at)
-            VALUES ('m1','upsert','2020-01-01'), ('m2','upsert','2020-01-01');
         """
     )
     # 3 embeddings produced "now" -> nonzero recent throughput -> a real ETA.
@@ -55,13 +51,11 @@ def test_pipeline_route_renders_panel(tmp_path, monkeypatch):
     assert resp.status_code == 200
     html = resp.text
     assert "Governor" in html
-    # queue cards for all three pipelines
-    assert "Embeddings queue" in html
+    # queue cards for both pipelines
     assert "Enrichment queue" in html
     assert "Reflection queue" in html
     # throughput windows are shown
     for w in ("1m:", "10m:", "30m:", "60m:"):
         assert w in html
-    # drain ETA line present, and the seeded embed queue (2) with recent
-    # throughput yields a concrete estimate (not 'drained', not 'stalled')
+    # drain ETA line present
     assert "drain:" in html

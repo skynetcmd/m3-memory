@@ -67,10 +67,10 @@ class M3Client:
     def _ensure_m3_path_priority() -> None:
         """Make m3-memory's bin/ win the `memory` package name.
 
-        m3's internals do bare `import memory.chroma` etc. A host like Hermes
+        m3's internals do bare `import memory.search` etc. A host like Hermes
         Agent puts its own `plugins/` (containing `plugins/memory/`) on
         sys.path, which shadows m3's top-level `memory` package and breaks the
-        import with "No module named 'memory.chroma'". We resolve mcp_tool_catalog's
+        import with "No module named 'memory.search'". We resolve mcp_tool_catalog's
         own directory (m3's bin/) and move it to the FRONT of sys.path so m3's
         `memory` resolves first. Idempotent; cheap.
         """

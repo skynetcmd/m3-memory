@@ -11,7 +11,7 @@ logger = logging.getLogger("M3_SDK")
 
 # ── Deprecated env-var compatibility shim ─────────────────────────────────────
 # m3-specific config vars are being namespaced under M3_*. Old un-namespaced
-# names (PG_URL, CHROMA_BASE_URL, tuning knobs, ...) are collision-prone with
+# names (PG_URL, tuning knobs, ...) are collision-prone with
 # other tools. getenv_compat reads the new name, falls back to the old one with
 # a ONE-TIME deprecation warning, and records the hit so `m3 doctor` can report
 # which deprecated vars are still in use (fail loud + observable, §3).
@@ -28,7 +28,10 @@ DEPRECATED_ENV_RENAMES: dict[str, str] = {
     "CHATLOG_DB_PATH":         "M3_CHATLOG_DB_PATH",
     "CHATLOG_DB_POOL_SIZE":    "M3_CHATLOG_DB_POOL_SIZE",
     "CHATLOG_DB_POOL_TIMEOUT": "M3_CHATLOG_DB_POOL_TIMEOUT",
-    "CHROMA_BASE_URL":         "M3_CHROMA_BASE_URL",
+    # CHROMA_BASE_URL is NOT here: the ChromaDB feature was retired, so there is
+    # no live getenv_compat call site for it. It moved to RETIRED_ENV_RENAMES so
+    # `m3 doctor` still cleans a stale CHROMA_BASE_URL out of on-disk config. See
+    # below.
     "DB_BACKEND":              "M3_DB_BACKEND",
     "DB_POOL_SIZE":            "M3_DB_POOL_SIZE",
     "DB_POOL_TIMEOUT":         "M3_DB_POOL_TIMEOUT",
@@ -63,17 +66,34 @@ ROLE_SPLIT_ENV_RENAMES: dict[str, str] = {
     "PG_URL": "M3_CDW_PG_URL",
 }
 
+# RETIRED_ENV_RENAMES: vars for FEATURES THAT NO LONGER EXIST. There is no live
+# getenv_compat call site (the reading code is gone), so these are deliberately
+# NOT in DEPRECATED_ENV_RENAMES — the drift test asserts that map has a call site
+# for every entry. But `m3 doctor` should still scrub a stale old name out of a
+# user's on-disk config (a settings.json env block, a dotenv line), so they are
+# reported/rewritten via all_env_renames(). The rename is cosmetic: nothing reads
+# either name anymore. Kept separate from ROLE_SPLIT so the "new == M3_ + old"
+# invariant on THAT map is not muddied.
+#
+#   * CHROMA_BASE_URL — ChromaDB (optional L3 sync backend) was retired. Nothing
+#     reads it; doctor renames M3_-consistently so the old name stops lingering.
+RETIRED_ENV_RENAMES: dict[str, str] = {
+    "CHROMA_BASE_URL": "M3_CHROMA_BASE_URL",
+}
+
 
 def all_env_renames() -> dict[str, str]:
-    """Union of the pure-namespacing and role-split deprecation maps.
+    """Union of the pure-namespacing, role-split, and retired deprecation maps.
 
     The single source of truth for `m3 doctor`'s on-disk config scan/rewrite:
     every old env-var KEY that should be reported and renamed, mapped to its new
     name. getenv_compat does NOT use this (it only does pure namespacing); the
-    role-split names have dedicated resolvers (resolve_cdw_pg_dsn, etc.).
+    role-split names have dedicated resolvers (resolve_cdw_pg_dsn, etc.), and the
+    retired names have no reader at all — doctor just scrubs stale config.
     """
     merged = dict(DEPRECATED_ENV_RENAMES)
     merged.update(ROLE_SPLIT_ENV_RENAMES)
+    merged.update(RETIRED_ENV_RENAMES)
     return merged
 
 

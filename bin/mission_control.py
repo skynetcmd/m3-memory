@@ -408,13 +408,6 @@ def get_memory_health() -> dict:
         ).fetchall():
             stats["by_agent"][row[0]] = row[1]
 
-        # Chroma sync queue depth
-        try:
-            cur.execute("SELECT COUNT(*) FROM chroma_sync_queue")
-            stats["queue_depth"] = cur.fetchone()[0]
-        except sqlite3.OperationalError:
-            pass
-
         # Embedding coverage
         cur.execute(
             """SELECT

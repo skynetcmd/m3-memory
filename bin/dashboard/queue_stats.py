@@ -24,15 +24,6 @@ WINDOWS_MIN = (1, 10, 30, 60)
 # measure throughput (table + created-timestamp column + optional type filter).
 _PIPELINES = (
     {
-        "key": "embed",
-        "label": "Embeddings",
-        "queue_table": "chroma_sync_queue",   # pending vectors to sync/produce
-        "queue_ts": "queued_at",
-        "produced_table": "memory_embeddings",
-        "produced_ts": "created_at",
-        "produced_where": "",                  # every new row = one embed produced
-    },
-    {
         "key": "enrich",
         "label": "Enrichment",
         "queue_table": "observation_queue",

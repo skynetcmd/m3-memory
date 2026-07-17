@@ -260,12 +260,6 @@ timeouts:
 - Check the YAML's `max_tokens` — reasoning models like qwen3-8b need
   4096+ to leave room for the answer after internal thinking
 
-### "no such table: chroma_sync_queue"
-
-Auto-fixed by `m3_enrich`'s pre-flight — it lazy-creates the table on
-chatlog DBs that lack it. If you see this error, you're on an old
-version of the script; pull latest.
-
 ---
 
 ## Writing a custom profile
@@ -533,7 +527,6 @@ and add the env vars to the `memory` server's `env` block:
     "args": ["<path>/bin/memory_bridge.py"],
     "env": {
       "LM_STUDIO_EMBED_URL": "http://127.0.0.1:1234/v1/embeddings",
-      "CHROMA_BASE_URL": "http://<your-warehouse>:8000",
       "M3_PREFER_OBSERVATIONS": "1",
       "M3_TWO_STAGE_OBSERVATIONS": "1",
       "M3_ENABLE_ENTITY_GRAPH": "1"

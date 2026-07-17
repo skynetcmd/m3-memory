@@ -402,10 +402,9 @@ M3 Memory works standalone with local SQLite — no additional
 infrastructure needed. For multi-device sync, you can optionally connect:
 
 - **PostgreSQL** — bi-directional delta sync across machines
-- **ChromaDB** — federated vector search across your LAN
 
 See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL`
-and `CHROMA_BASE_URL` configuration.
+configuration.
 
 ---
 

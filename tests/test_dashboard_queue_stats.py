@@ -35,8 +35,6 @@ def _make_db(tmp_path) -> str:
     conn = sqlite3.connect(db)
     conn.executescript(
         """
-        CREATE TABLE chroma_sync_queue (id INTEGER PRIMARY KEY, memory_id TEXT,
-            operation TEXT, queued_at TEXT);
         CREATE TABLE observation_queue (id INTEGER PRIMARY KEY, enqueued_at TEXT);
         CREATE TABLE reflector_queue (id INTEGER PRIMARY KEY, enqueued_at TEXT);
         CREATE TABLE memory_embeddings (id TEXT PRIMARY KEY, memory_id TEXT,
@@ -55,33 +53,6 @@ def _seed(db, table, cols, rows):
     conn.executemany(f"INSERT INTO {table} ({','.join(cols)}) VALUES ({ph})", rows)
     conn.commit()
     conn.close()
-
-
-def test_queue_len_counts_pending(tmp_path):
-    db = _make_db(tmp_path)
-    _seed(db, "chroma_sync_queue", ["memory_id", "operation", "queued_at"],
-          [("m1", "upsert", "2020-01-01"), ("m2", "upsert", "2020-01-01")])
-    stats = qs.collect_pipeline_stats(db)
-    embed = next(p for p in stats["pipelines"] if p["key"] == "embed")
-    assert embed["queue_len"] == 2
-
-
-def test_throughput_from_produced_rows_recent(tmp_path):
-    db = _make_db(tmp_path)
-    # 5 embeddings produced "now" -> should show in the 1-min window.
-    _seed(db, "memory_embeddings", ["id", "memory_id", "created_at"],
-          [(f"e{i}", "m", "now") for i in range(5)])
-    # fix the created_at to actual now via SQL so the window math sees them
-    conn = sqlite3.connect(db)
-    conn.execute("UPDATE memory_embeddings SET created_at = datetime('now')")
-    conn.commit(); conn.close()
-
-    stats = qs.collect_pipeline_stats(db)
-    embed = next(p for p in stats["pipelines"] if p["key"] == "embed")
-    # 5 rows in the last minute => 5/min over the 1-min window
-    assert embed["rates"][1] == 5.0
-    # 5 rows over 60 min => ~0.083/min
-    assert abs(embed["rates"][60] - 5 / 60) < 1e-6
 
 
 def test_enrichment_filters_by_type(tmp_path):
@@ -118,5 +89,5 @@ def test_missing_tables_degrade_to_zero(tmp_path):
     db = str(tmp_path / "empty.db")
     sqlite3.connect(db).close()
     stats = qs.collect_pipeline_stats(db)
-    assert len(stats["pipelines"]) == 3
+    assert len(stats["pipelines"]) == 2
     assert all(p["queue_len"] == 0 for p in stats["pipelines"])

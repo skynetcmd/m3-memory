@@ -131,8 +131,8 @@ def _write_embeddings_batch(
     embeddings: list[tuple[str, list[float], str]],
 ) -> int:
     """Insert embedding rows directly via sqlite. Bypasses memory_core's
-    write path because we don't want to trigger contradiction-check or
-    chroma-sync queueing for backfill rows."""
+    write path because we don't want to trigger contradiction-check for
+    backfill rows."""
     if not embeddings:
         return 0
     from embedding_utils import pack as _pack

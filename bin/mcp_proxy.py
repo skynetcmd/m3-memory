@@ -19,7 +19,7 @@ Tool sources (v2)
 3. m3-memory catalog tools from mcp_tool_catalog.TOOLS (44):
    memory_*, agent_*, task_*, conversation_*, notifications_*, etc.
 
-Default allowlist excludes destructive catalog tools (memory_delete, chroma_sync,
+Default allowlist excludes destructive catalog tools (memory_delete,
 gdpr_*, *_export, *_import, memory_maintenance, memory_set_retention, agent_offline).
 Set MCP_PROXY_ALLOW_DESTRUCTIVE=1 to expose them.
 

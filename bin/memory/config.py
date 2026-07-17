@@ -135,6 +135,8 @@ EMBED_COMPATIBLE_MODELS: tuple[str, ...] = tuple(
     if m.strip())
 
 EMBED_TIMEOUT_READ: float = 30.0
+# TCP connect timeout for the embed HTTP client (LM Studio / embed server).
+EMBED_TIMEOUT_CONNECT: float = 3.0
 # Hard wall-clock ceiling for embedding a QUERY on the interactive search path
 # (bin/memory/search.py). The full _embed cascade can stack per-tier timeouts
 # (30s read × ×2 × ×4 + retries + a 30s semaphore wait) into multiple minutes
@@ -394,24 +396,9 @@ DEFAULT_RERANK_MODEL: str = os.environ.get(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Change-agent + Chroma + federation
+# Change-agent
 # ──────────────────────────────────────────────────────────────────────────────
 DEFAULT_CHANGE_AGENT: str = "unknown"
-
-CHROMA_BASE_URL: str | None = getenv_compat("M3_CHROMA_BASE_URL", "CHROMA_BASE_URL")
-CHROMA_COLLECTION: str = "agent_memory"
-CHROMA_COLLECTIONS: list[str] = ["agent_memory", "home_memory", "user_facts"]
-CHROMA_V2_PREFIX: str = "/api/v2/tenants/default_tenant/databases/default_database/collections"
-CHROMA_CONNECT_T: float = 3.0
-CHROMA_READ_T: float = 10.0
-CHROMA_PULL_PAGE_SIZE: int = 100
-CHROMA_CONTENT_MAX: int = 10_000
-
-# Federation fires when the best local hit scores below this threshold.
-# Override via M3_FEDERATION_LOW_SCORE_THRESHOLD env var.
-FEDERATION_LOW_SCORE_THRESHOLD: float = float(
-    os.environ.get("M3_FEDERATION_LOW_SCORE_THRESHOLD", "0.65")
-)
 
 AUTO_RELATED_LINK: bool = os.environ.get("M3_AUTO_RELATED_LINK", "1") == "1"
 AUTO_RELATED_LINK_SCOPE_BY_VARIANT: bool = os.environ.get("M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT", "1") == "1"

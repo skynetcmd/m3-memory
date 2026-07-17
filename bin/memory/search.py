@@ -36,16 +36,14 @@ from . import config
 from . import config as _scfg
 from . import graph as _graph_mod
 
-# `_query_chroma` / `_embed` / `_batch_cosine` (in the .util block below) are
-# imported here purely to populate this module's globals(). The retrieval
-# impls bind them via `globals()["_embed"]` etc. (the floor-binding pattern in
+# `_embed` / `_batch_cosine` (in the .util block below) are imported here
+# purely to populate this module's globals(). The retrieval impls bind them
+# via `globals()["_embed"]` etc. (the floor-binding pattern in
 # memory_search_scored_impl) so a test that monkeypatches memory_core can be
 # picked up. They have no static call site, hence the F401 suppression.
-from .chroma import _query_chroma  # noqa: F401 — runtime globals() lookup
 from .config import (
     DEFAULT_RERANK_MODEL,
     EMBED_DIM,
-    FEDERATION_LOW_SCORE_THRESHOLD,
     IMPORTANCE_WEIGHT,
     INTENT_ROUTING,
     INTENT_USER_FACT_BOOST,
@@ -460,8 +458,7 @@ async def memory_search_scored_impl(
 
     `extra_columns` is an optional list of extra `mi.<column>` names to include
     in each item dict (e.g. ["metadata_json", "conversation_id", "valid_from",
-    "valid_to", "user_id"]). Federated Chroma fallback results will NOT have
-    these extra fields.
+    "valid_to", "user_id"]).
 
     `intent_hint` is consumed only when M3_INTENT_ROUTING is on (or the
     narrower M3_QUERY_TYPE_ROUTING handles the weight shift). Supported
@@ -491,7 +488,6 @@ async def memory_search_scored_impl(
     _embed = globals()["_embed"]  # noqa: F811 — floor-bind module global as local
     _db = globals()["_db"]
     _batch_cosine = globals()["_batch_cosine"]  # noqa: F811 — floor-bind module global
-    _query_chroma = globals()["_query_chroma"]  # noqa: F811 — floor-bind module global
     # `_compile_fts_query` is used in two branches below (the FTS short-circuit
     # ~L957 and the keyword/FTS cascade ~L1152). A `from memory.fts import
     # _compile_fts_query` inside only the first branch makes the name a function
@@ -514,19 +510,15 @@ async def memory_search_scored_impl(
     #
     # IMPORTANT: only adopt the memory_core value when it is actually CALLABLE.
     # A bare `getattr(_mc, name, default)` returns the attribute even when it's
-    # None — and a lazily-bound symbol like `_query_chroma` can legitimately be
-    # None (e.g. memory.chroma unavailable, or transiently None during the
-    # test module-purge dance). Clobbering a valid floor-bind with None made the
-    # later `await _query_chroma(...)` raise "NoneType is not callable" under
-    # certain test orderings (test_vector_kind_strategy). Guarding on callable
-    # keeps the monkeypatch override working while never replacing a good
-    # default with None.
+    # None. Clobbering a valid floor-bind with None made later calls raise
+    # "NoneType is not callable" under certain test orderings
+    # (test_vector_kind_strategy). Guarding on callable keeps the monkeypatch
+    # override working while never replacing a good default with None.
     try:
         import memory_core as _mc  # type: ignore
         _embed = _mc_callable(_mc, "_embed", _embed)
         _db = _mc_callable(_mc, "_db", _db)
         _batch_cosine = _mc_callable(_mc, "_batch_cosine", _batch_cosine)
-        _query_chroma = _mc_callable(_mc, "_query_chroma", _query_chroma)
     except ImportError:
         pass  # already have floor bindings
 
@@ -1218,15 +1210,7 @@ async def memory_search_scored_impl(
         else:
             ranked = pre_ranked
 
-    # ── Post-Retrieval Expansions & Federation ───────────────────────────
-    local_top_score = ranked[0][0] if ranked else 0.0
-    if (len(ranked) < 3 or local_top_score < FEDERATION_LOW_SCORE_THRESHOLD) and not (conversation_id or type_filter):
-        fed_results = await _query_chroma(q_vec, k=3, scope_filter={"user_id": user_id, "scope": scope, "agent_id": agent_filter})
-        for fr in fed_results:
-            if not any(r[1]["id"] == fr["id"] for r in ranked):
-                if not explain: fr.setdefault("_explanation", {"source": "federated_chroma_scoped"})
-                ranked.append((fr["score"], fr))
-
+    # ── Post-Retrieval Expansions ────────────────────────────────────────
     if ranked:
         _enqueue_access_stamps([item[1]["id"] for item in ranked if "bm25_score" in item[1]])
 

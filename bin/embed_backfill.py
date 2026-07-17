@@ -270,10 +270,10 @@ async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
             conn.close()
 
     # ── Write callback ────────────────────────────────────────────────
-    # Persists one embedding row + the chroma_sync_queue marker. Uses
-    # mc._db() so writes funnel through memory_core's connection pool
-    # (keeps WAL / busy_timeout behavior consistent with the rest of
-    # the codebase). Returns True iff a row was newly written.
+    # Persists one embedding row. Uses mc._db() so writes funnel through
+    # memory_core's connection pool (keeps WAL / busy_timeout behavior
+    # consistent with the rest of the codebase). Returns True iff a row
+    # was newly written.
     def _write(mid: str, vec: list[float], model_str: str, content_hash: str) -> bool:
         now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with mc._db() as db:
@@ -292,11 +292,6 @@ async def _run_sweep(args: argparse.Namespace, counters: Counters) -> int:
                 ),
             )
             if cur.rowcount > 0:
-                db.execute(
-                    "INSERT INTO chroma_sync_queue (memory_id, operation) "
-                    "VALUES (?, ?)",
-                    (mid, "upsert"),
-                )
                 return True
             return False
 

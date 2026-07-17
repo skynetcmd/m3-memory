@@ -13,7 +13,7 @@ A few properties of M3's design happen to line up with what homelabs actually ne
 - **Concurrency-safe by default.** SQLite WAL handles multiple agents writing simultaneously without races. If you're running Claude Code on a laptop, Gemini CLI on a workstation, and a couple of background agents reacting to Home Assistant events, they can all share one M3 store without coordination.
 - **No GPU tax for memory operations.** Storage, retrieval, and graph traversal are all CPU + RAM only. Your GPU stays free for the LLM doing actual inference. Memory enrichment (the optional SLM-driven extraction layer) can run on the same GPU between calls, or on a separate small box, or be skipped entirely.
 - **Offline-tolerant.** No external dependencies in the data path. Internet drops don't stop your agents. Useful at the cabin, on the road, or in environments where intermittent connectivity is the rule.
-- **Cross-machine sync without a SaaS dependency.** Optional bi-directional delta sync via PostgreSQL or ChromaDB. One env var, your memories follow you across boxes.
+- **Cross-machine sync without a SaaS dependency.** Optional bi-directional delta sync via PostgreSQL. One env var, your memories follow you across boxes.
 - **Single-file SQLite.** Your entire memory store is one file. Easy to back up, easy to inspect with the standard `sqlite3` CLI, easy to move between machines.
 - **Runs everywhere.** macOS, Linux, Windows — same `pip install`. No Docker requirement, no Kubernetes, no service mesh.
 

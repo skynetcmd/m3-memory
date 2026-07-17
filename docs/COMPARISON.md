@@ -54,7 +54,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **API keys required** | None | Yes (cloud version) |
 | **Offline operation** | Full — SQLite + bundled embedder, no external services | No (cloud version) |
 | **FIPS 140-3** | 👑 **Deployment-ready** crypto boundary (AES-256-GCM vault, PBKDF2-HMAC-SHA256, TLS 1.3 FIPS ciphersuites); point it at the CMVP-validated wolfSSL FIPS module for a validated deployment. Note: the validation belongs to that module — M3 is not itself a CMVP-validated cryptographic module (no application is) | No |
-| **Cross-device sync** | SQLite ↔ PostgreSQL ↔ ChromaDB, bi-directional delta sync | Managed by Mem0 cloud |
+| **Cross-device sync** | SQLite ↔ PostgreSQL, bi-directional delta sync | Managed by Mem0 cloud |
 | **Storage topology** | 🏆 Chat-log and curated memory run as **one unified store, two independent stores, or two stores searched together** (`memory_search_multi_db`) — your choice by config, no rework | Single managed store |
 | **Knowledge graph** | Yes — 9 relationship types, 3-hop traversal | Yes — strong point |
 | **Multi-agent concurrent writes** | WAL mode + 30s busy_timeout + retry — concurrent writers serialize and wait, they don't fail; SQL-layer scope isolation keeps agents' private notes private; optional shared **PostgreSQL** pool for high-concurrency fleets (no single-writer limit) | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |

@@ -648,8 +648,6 @@ def gdpr_forget_impl(user_id: str) -> str:
             db.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", item_ids)
             # Delete relationships
             db.execute(f"DELETE FROM memory_relationships WHERE from_id IN ({placeholders}) OR to_id IN ({placeholders})", item_ids + item_ids)
-            # Delete sync queue entries
-            db.execute(f"DELETE FROM chroma_sync_queue WHERE memory_id IN ({placeholders})", item_ids)
             # Delete history
             db.execute(f"DELETE FROM memory_history WHERE memory_id IN ({placeholders})", item_ids)
             # Delete materialized bypass-surface rows (ADR-0001 §7/§9). The surface FK

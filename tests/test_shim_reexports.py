@@ -37,7 +37,6 @@ _SHIM_MODULES = [
     "memory.chunking",
     "memory.textprep",
     "memory.db",
-    "memory.chroma",
     "memory.fts",
     "memory.config",
     "memory_core",

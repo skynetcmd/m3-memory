@@ -71,8 +71,7 @@
   "storage": {
     "core_store": "single SQLite file (FTS5 + vector indexes)",
     "optional_sync_backends": [
-      "PostgreSQL",
-      "ChromaDB"
+      "PostgreSQL"
     ],
     "containers_required": false
   },
@@ -90,8 +89,7 @@
       "default": "single SQLite file \u2014 fast, embedded, zero-infrastructure",
       "scale_out": "PostgreSQL backend for corporate data warehouse + governance",
       "sync_backends": [
-        "PostgreSQL",
-        "ChromaDB"
+        "PostgreSQL"
       ]
     },
     "notes": [
@@ -122,9 +120,9 @@
     }
   },
   "tools": {
-    "total": 111,
+    "total": 110,
     "by_domain": {
-      "admin": 15,
+      "admin": 14,
       "agent": 6,
       "chatlog": 10,
       "conversations": 4,

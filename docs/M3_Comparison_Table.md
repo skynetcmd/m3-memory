@@ -210,7 +210,7 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 
 **Why it matters:** A laptop, a desktop, and a server should be able to share memory without giving the data to a SaaS provider.
 
-**M3 standing:** Bi-directional delta sync via PostgreSQL or ChromaDB — set one env var, your memories follow you across devices.
+**M3 standing:** Bi-directional delta sync via PostgreSQL — set one env var, your memories follow you across devices.
 
 **Cohort context:** Cloud-native systems (Mem0) deliver sync trivially but at the cost of sovereignty. MemPalace requires manual sync.
 

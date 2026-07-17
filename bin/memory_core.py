@@ -39,7 +39,7 @@ Retrieval / ranking: `M3_QUERY_TYPE_ROUTING`, `M3_TITLE_MATCH_BOOST`,
 `SEARCH_ROW_CAP`.
 
 Embeddings: `EMBED_MODEL`, `EMBED_DIM`, `EMBED_BULK_CHUNK`,
-`EMBED_BULK_CONCURRENCY`, `CHROMA_BASE_URL`.
+`EMBED_BULK_CONCURRENCY`.
 
 Other: `CONTRADICTION_THRESHOLD`, `DEDUP_LIMIT`, `DEDUP_THRESHOLD`,
 `LLM_TIMEOUT`, `ORIGIN_DEVICE`.
@@ -69,13 +69,6 @@ from m3_sdk import M3Context, resolve_db_path
 # startup overhead and context initialization footprint.
 
 _LAZY_IMPORTS = {
-    # memory.chroma
-    "_CHROMA_COLLECTION_ID_CACHE": "memory.chroma",
-    "_query_chroma": "memory.chroma",
-    "_queue_chroma": "memory.chroma",
-    "_resolve_chroma_collection_id": "memory.chroma",
-    "_mc_chroma": "memory",
-
     # memory.config
     "_DEFAULT_VALID_ENTITY_PREDICATES": "memory.config",
     "_DEFAULT_VALID_ENTITY_TYPES": "memory.config",
@@ -87,14 +80,6 @@ _LAZY_IMPORTS = {
     "AUTO_RELATED_LINK": "memory.config",
     "AUTO_RELATED_LINK_SCOPE_BY_VARIANT": "memory.config",
     "BASE_DIR": "memory.config",
-    "CHROMA_BASE_URL": "memory.config",
-    "CHROMA_COLLECTION": "memory.config",
-    "CHROMA_COLLECTIONS": "memory.config",
-    "CHROMA_CONNECT_T": "memory.config",
-    "CHROMA_CONTENT_MAX": "memory.config",
-    "CHROMA_PULL_PAGE_SIZE": "memory.config",
-    "CHROMA_READ_T": "memory.config",
-    "CHROMA_V2_PREFIX": "memory.config",
     "CONTRADICTION_THRESHOLD": "memory.config",
     "CONTRADICTION_TITLE_GATE": "memory.config",
     "CONTRADICTION_TYPE_EXCLUSIONS": "memory.config",
@@ -123,7 +108,6 @@ _LAZY_IMPORTS = {
     "EXPANSION_PROTECTED_RANKS": "memory.config",
     "FACT_ENRICH_CONCURRENCY": "memory.config",
     "FACT_ENRICH_MAX_ATTEMPTS": "memory.config",
-    "FEDERATION_LOW_SCORE_THRESHOLD": "memory.config",
     "IMPORTANCE_WEIGHT": "memory.config",
     "INGEST_EVENT_ROWS": "memory.config",
     "INGEST_GIST_MIN_TURNS": "memory.config",
@@ -596,8 +580,8 @@ from memory.orchestration import (  # noqa: F401,E402
 )
 from memory.util import _POISON_PATTERNS, _check_content_safety  # noqa: F401
 
-# DEFAULT_CHANGE_AGENT, CHROMA_*, FEDERATION_LOW_SCORE_THRESHOLD moved to
-# bin/memory/config.py in Phase 1. Re-exported via the shim at the top.
+# DEFAULT_CHANGE_AGENT moved to bin/memory/config.py in Phase 1.
+# Re-exported via the shim at the top.
 
 # _local / _init_lock / _initialized moved to bin/memory/db.py in Phase 2.B.
 # Re-exported via the shim at the top.
@@ -677,11 +661,6 @@ from threading import Lock as _ThreadLock  # noqa: F401
 
 
 
-# _queue_chroma moved to bin/memory/chroma.py in Phase 4.A.
-# Re-exported via the shim at the top.
-
-
-
 # ── Fact enrichment pipeline (Phase 4-5) ──────────────────────────────────────
 
 
@@ -725,9 +704,6 @@ from threading import Lock as _ThreadLock  # noqa: F401
 
 
 
-
-# _CHROMA_COLLECTION_ID_CACHE, _resolve_chroma_collection_id, _query_chroma
-# moved to bin/memory/chroma.py in Phase 4.A. Re-exported via the shim.
 
 # _apply_recency_bonus, _trim_by_elbow, _apply_temporal_boost moved to
 # bin/memory/search.py in Phase 4.B sub-3. Re-exported via the shim at the top.
@@ -784,10 +760,6 @@ def memory_get_impl(id):
         with _db() as db:
             row = db.execute("SELECT * FROM memory_items WHERE id = ?", (ident,)).fetchone()
             if not row:
-                # Fall back to chroma_mirror for items pulled from remote
-                mirror = db.execute("SELECT * FROM chroma_mirror WHERE id = ?", (ident,)).fetchone()
-                if mirror:
-                    return json.dumps(dict(mirror), indent=2, default=str)
                 return "Error: not found"
         return json.dumps(dict(row), indent=2, default=str)
     if len(ident) == 8:
@@ -797,17 +769,6 @@ def memory_get_impl(id):
                 (ident,),
             ).fetchall()
             if not rows:
-                # Fall back to chroma_mirror by prefix as well, for symmetry
-                # with the full-UUID path above.
-                mirror_rows = db.execute(
-                    "SELECT * FROM chroma_mirror WHERE SUBSTR(id,1,8) = ?",
-                    (ident,),
-                ).fetchall()
-                if len(mirror_rows) == 1:
-                    return json.dumps(dict(mirror_rows[0]), indent=2, default=str)
-                if len(mirror_rows) > 1:
-                    ids = ", ".join(r["id"] for r in mirror_rows)
-                    return f"Error: ambiguous prefix '{ident}': matches {ids}"
                 return "Error: not found"
             if len(rows) > 1:
                 ids = ", ".join(r["id"] for r in rows)
@@ -943,18 +904,10 @@ def memory_delete_impl(id, hard=False):
         if hard:
             db.execute("DELETE FROM memory_embeddings WHERE memory_id = ?", (id,))
             db.execute("DELETE FROM memory_relationships WHERE from_id = ? OR to_id = ?", (id, id))
-            db.execute("DELETE FROM chroma_sync_queue WHERE memory_id = ?", (id,))
             db.execute("DELETE FROM memory_items WHERE id = ?", (id,))
         else:
             db.execute("UPDATE memory_items SET is_deleted = 1, updated_at = ? WHERE id = ?",
                        (datetime.now(timezone.utc).isoformat(), id))
-            # Drop any pending upsert in chroma_sync_queue — the row is no
-            # longer eligible for sync. The tombstone enqueue (if the caller
-            # uses _queue_chroma(..., 'delete') downstream) is unaffected.
-            db.execute(
-                "DELETE FROM chroma_sync_queue WHERE memory_id = ? AND operation = 'upsert'",
-                (id,),
-            )
     try:
         from audit_trail import write_audit_entry
         write_audit_entry(
@@ -981,8 +934,8 @@ def memory_delete_bulk_impl(ids, hard=False):
 
     1. **Batched SQL.** Each chunk of up to _MEMORY_DELETE_BULK_CHUNK ids runs
        a single `IN (?,?,...)` per affected table (memory_items,
-       memory_embeddings, memory_relationships, chroma_sync_queue), inside
-       one `_db()` connection. For 178 deletes this collapses ~712 individual
+       memory_embeddings, memory_relationships), inside one `_db()`
+       connection. For 178 deletes this collapses ~712 individual
        statements + 178 connection-opens into ~8 statements + 1 connection.
 
     2. **Structured result.** Returns `{succeeded, not_found, mode}` instead
@@ -994,9 +947,7 @@ def memory_delete_bulk_impl(ids, hard=False):
     Args:
         ids: iterable of memory_item UUID strings.
         hard: if True, cascade-delete (memory_embeddings, memory_relationships,
-              chroma_sync_queue, memory_items). If False (default), soft-delete
-              with the same chroma_sync_queue upsert-pending cleanup that
-              memory_delete_impl performs.
+              memory_items). If False (default), soft-delete (tombstone).
 
     Returns:
         dict: {
@@ -1056,10 +1007,6 @@ def memory_delete_bulk_impl(ids, hard=False):
                     existing_ids + existing_ids,
                 )
                 db.execute(
-                    f"DELETE FROM chroma_sync_queue WHERE memory_id IN ({ph_existing})",
-                    existing_ids,
-                )
-                db.execute(
                     f"DELETE FROM memory_items WHERE id IN ({ph_existing})",
                     existing_ids,
                 )
@@ -1068,13 +1015,6 @@ def memory_delete_bulk_impl(ids, hard=False):
                     f"UPDATE memory_items SET is_deleted = 1, updated_at = {p} "
                     f"WHERE id IN ({ph_existing})",
                     [now_iso, *existing_ids],
-                )
-                # Mirror memory_delete_impl: drop pending upserts so soft-deleted
-                # rows don't get re-published to chroma after the tombstone.
-                db.execute(
-                    f"DELETE FROM chroma_sync_queue "
-                    f"WHERE memory_id IN ({ph_existing}) AND operation = 'upsert'",
-                    existing_ids,
                 )
 
             succeeded.extend(existing_ids)

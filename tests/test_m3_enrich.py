@@ -38,10 +38,6 @@ def stub_db(tmp_path, monkeypatch):
             id TEXT PRIMARY KEY, memory_id TEXT, embedding BLOB,
             embed_model TEXT, dim INTEGER, created_at TEXT
         );
-        CREATE TABLE chroma_sync_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, memory_id TEXT,
-            operation TEXT, enqueued_at TEXT
-        );
     """)
     conn.commit()
     conn.close()
@@ -282,13 +278,13 @@ def test_ensure_migration_025_creates_queues(stub_db, monkeypatch):
     conn.close()
 
 
-def test_ensure_migration_025_creates_chroma_sync_queue_if_missing(tmp_path, monkeypatch):
-    """Chatlog DBs lack chroma_sync_queue by default; the helper must
-    add it lazily so memory_write_impl(embed=True) doesn't crash."""
+def test_ensure_migration_025_creates_observation_queue_if_missing(tmp_path, monkeypatch):
+    """Chatlog DBs lack observation_queue by default; the helper must
+    add it lazily so the enrich drain path doesn't crash."""
     import m3_enrich
-    db_path = tmp_path / "no_chroma.db"
+    db_path = tmp_path / "no_obs_queue.db"
     conn = sqlite3.connect(str(db_path))
-    # Minimum schema EXCEPT chroma_sync_queue. memory_items needs the
+    # Minimum schema EXCEPT observation_queue. memory_items needs the
     # columns referenced by migration 025's partial index
     # (type, user_id, valid_from).
     conn.executescript("""
@@ -307,7 +303,6 @@ def test_ensure_migration_025_creates_chroma_sync_queue_if_missing(tmp_path, mon
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
     }
-    assert "chroma_sync_queue" in tables
     assert "observation_queue" in tables
     conn.close()
 

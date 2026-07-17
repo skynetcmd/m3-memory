@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-sync_all.py — Hourly sync runner (SQLite <-> PostgreSQL + ChromaDB).
-Runs pg_sync.py once per configured DB, then chroma_sync. Offline-tolerant.
+sync_all.py — Hourly sync runner (SQLite <-> PostgreSQL).
+Runs pg_sync.py once per configured DB. Offline-tolerant.
 Safe to call on any platform; skips gracefully if target unreachable or DB absent.
 
 Usage:
@@ -67,8 +67,8 @@ def _resolve_dbs() -> list[pathlib.Path]:
 
     Priority:
       1. M3_SYNC_DBS env var (explicit override; colon- or comma-separated paths).
-      2. m3_sdk.resolve_db_path() — the same Homecoming-aware resolver used by
-         chroma_sync_cli.py (honours M3_ENGINE_ROOT / M3_MEMORY_ROOT / M3_DATABASE).
+      2. m3_sdk.resolve_db_path() — the Homecoming-aware resolver (honours
+         M3_ENGINE_ROOT / M3_MEMORY_ROOT / M3_DATABASE).
       3. Repo-relative fallback (memory/agent_memory.db) if m3_sdk is not importable.
 
     Bench DBs and any other databases are NOT auto-detected — set M3_SYNC_DBS
@@ -85,8 +85,8 @@ def _resolve_dbs() -> list[pathlib.Path]:
             resolved.append(path.resolve())
         return resolved
 
-    # No explicit override — use the same DB resolver as chroma_sync_cli.py so
-    # both sync paths always agree on where the live database lives.
+    # No explicit override — use the Homecoming-aware DB resolver so we always
+    # sync the live database.
     try:
         from m3_sdk import resolve_db_path
         return [pathlib.Path(resolve_db_path()).resolve()]
@@ -102,12 +102,6 @@ def is_reachable(host: str, port: int = 5432, timeout: float = 3.0) -> bool:
     """TCP probe — faster and more reliable than ping across platforms."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        pass
-    # fallback: try ChromaDB port
-    try:
-        with socket.create_connection((host, 8000), timeout=timeout):
             return True
     except OSError:
         return False
@@ -161,40 +155,6 @@ def run_pg_sync(dry_run: bool) -> bool:
     return all(results)
 
 
-# ── chroma_sync runner ────────────────────────────────────────────────────────
-
-def run_chroma_sync(dry_run: bool) -> bool:
-    if dry_run:
-        log.info("[DRY-RUN] Would run chroma_sync via chroma_sync_cli.py")
-        return True
-    log.info("Running ChromaDB sync (both directions)...")
-    try:
-        from _task_runtime import no_window_kwargs
-        env = os.environ.copy()
-        env.setdefault("CHROMA_BASE_URL", f"http://{TARGET_IP}:8000")
-        env.setdefault("LM_STUDIO_EMBED_URL", "http://127.0.0.1:1234/v1/embeddings")
-        result = subprocess.run(
-            [str(PY), str(BASE / "bin" / "chroma_sync_cli.py"), "both"],
-            capture_output=True, text=True, timeout=120, env=env,
-            **no_window_kwargs(),
-        )
-        for line in (result.stdout + result.stderr).splitlines():
-            if line.strip():
-                log.info(f"  chroma: {line}")
-        if result.returncode == 0:
-            log.info("ChromaDB sync completed.")
-            return True
-        else:
-            log.error(f"chroma_sync exited with code {result.returncode}")
-            return False
-    except subprocess.TimeoutExpired:
-        log.error("chroma_sync timed out after 120s")
-        return False
-    except Exception as e:
-        log.error(f"chroma_sync failed: {type(e).__name__}: {e}")
-        return False
-
-
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -210,7 +170,7 @@ def main():
     setup_task_runtime(args.log_file or LOG_FILE, lock_name="sync_all")
 
     if args.database:
-        # Pass-through env so pg_sync and chroma_sync subprocesses inherit.
+        # Pass-through env so the pg_sync subprocess inherits.
         os.environ["M3_DATABASE"] = args.database
 
     # sys.platform, not platform.system() (WMI-hang risk on Py3.14/Windows).
@@ -227,14 +187,13 @@ def main():
 
     log.info(f"PostgreSQL data warehouse ({TARGET_IP}) reachable — running full sync.")
 
-    pg_ok     = run_pg_sync(args.dry_run)
-    chroma_ok = run_chroma_sync(args.dry_run)
+    pg_ok = run_pg_sync(args.dry_run)
 
-    if pg_ok and chroma_ok:
+    if pg_ok:
         log.info("=== sync_all complete: all systems synced ===")
         sys.exit(0)
     else:
-        log.error(f"=== sync_all finished with errors: pg={pg_ok} chroma={chroma_ok} ===")
+        log.error(f"=== sync_all finished with errors: pg={pg_ok} ===")
         sys.exit(1)
 
 

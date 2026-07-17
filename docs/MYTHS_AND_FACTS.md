@@ -104,7 +104,7 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 ### ❌ Myth: "M3 requires Docker / Kubernetes / a specific OS"
 
-**Fact:** M3 is `pip install m3-memory`. It runs on macOS, Linux, and Windows from the same install command. No Docker, no containers, no service mesh. The optional sync layer can use PostgreSQL or ChromaDB if you want cross-machine sync, but that's optional and external — the core M3 store is one SQLite file.
+**Fact:** M3 is `pip install m3-memory`. It runs on macOS, Linux, and Windows from the same install command. No Docker, no containers, no service mesh. The optional sync layer can use PostgreSQL if you want cross-machine sync, but that's optional and external — the core M3 store is one SQLite file.
 
 ### ⚖️ Myth: "M3 beats / loses to agentmemory / MemPalace / Mastra on LongMemEval"
 
@@ -159,7 +159,7 @@ For positive grounding, here's the short list of what M3 *does* implement (with 
 | Knowledge graph | 9 relationship types, 3-hop traversal | `mcp__memory__memory_graph`, `memory_link` |
 | GDPR | `gdpr_forget` (Art. 17), `gdpr_export` (Art. 20) | `m3_memory/gdpr.py` |
 | Multi-agent | WAL concurrent writes (30s busy_timeout + retry) + optional shared PostgreSQL pool; agent registry; SQL-layer scope isolation; handoffs | `mcp__memory__agent_*`, `memory_handoff`, `bin/pg_sync.py` |
-| Sync | Optional bi-directional delta sync to PostgreSQL or ChromaDB | `bin/sync_all.py` |
+| Sync | Optional bi-directional delta sync to PostgreSQL | `bin/sync_all.py` |
 | MCP | Native — 100+ tools, zero config in MCP-aware clients | `m3_memory/mcp/*` |
 
 If a third-party AI assistant describes a feature outside this list and outside what's documented in `docs/`, treat it as suspect until verified against the source.

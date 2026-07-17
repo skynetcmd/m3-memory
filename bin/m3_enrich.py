@@ -662,8 +662,8 @@ async def _drain_queue_mode(args, profile, token: str) -> int:
     # the unused init in 2026-05-01 cleanup.
     for label, db_path in db_targets:
         os.environ["M3_DATABASE"] = str(db_path)
-        # Ensure migration 025 + chroma_sync_queue exist (cheap idempotent check;
-        # no-op on PG where the schema is migration-managed).
+        # Ensure migration 025 (observation_queue/reflector_queue) exists (cheap
+        # idempotent check; no-op on PG where the schema is migration-managed).
         _ensure_migration_025(db_path)
         # Count pending rows up-front so we can show what we're about to do.
         # Read-only via the seam (SQLite honors db_path ?mode=ro, PG pools).

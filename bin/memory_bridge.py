@@ -57,20 +57,6 @@ def conversation_messages(conversation_id):
         return f"Error: no messages found for conversation {conversation_id}"
     return "\n".join(f"{row['role']}: {row['content']}" for row in rows)
 
-def sync_status():
-    """Returns a summary string of the Chroma sync queue, mirror, and conflict counts."""
-    try:
-        with memory_core._db() as db:
-            row = db.execute("SELECT COUNT(*) FROM chroma_sync_queue").fetchone()
-            queue_count = row[0] if row else 0
-            row = db.execute("SELECT COUNT(*) FROM chroma_mirror").fetchone()
-            mirror_count = row[0] if row else 0
-            row = db.execute("SELECT COUNT(*) FROM sync_conflicts WHERE resolution = 'pending'").fetchone()
-            conflict_count = row[0] if row else 0
-        return f"Queue: {queue_count} | Mirror: {mirror_count} | Conflicts: {conflict_count}"
-    except Exception as e:
-        return f"Sync status unavailable: {e}"
-
 # ── Typed function builder for FastMCP schema introspection ──────────────────
 def _build_typed_function(spec, *, for_mcp: bool = False):
     """Build a typed function from spec.parameters so FastMCP can introspect it.

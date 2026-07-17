@@ -56,7 +56,7 @@ class TestMcpProxyImportAndCatalog(unittest.TestCase):
         catalog_schemas, specs = self.mcp_proxy._build_catalog_tools()
         catalog_names = {t["function"]["name"] for t in catalog_schemas}
         destructive = {
-            "memory_delete", "chroma_sync", "memory_maintenance",
+            "memory_delete", "memory_maintenance",
             "memory_set_retention", "memory_export", "memory_import",
             "gdpr_export", "gdpr_forget", "agent_offline",
         }
@@ -137,7 +137,7 @@ class TestMcpProxyAllowDestructive(unittest.TestCase):
         catalog_schemas, _ = self.mcp_proxy._build_catalog_tools()
         catalog_names = {t["function"]["name"] for t in catalog_schemas}
         destructive = {
-            "memory_delete", "chroma_sync", "memory_maintenance",
+            "memory_delete", "memory_maintenance",
             "memory_set_retention", "memory_export", "memory_import",
             "gdpr_export", "gdpr_forget", "agent_offline",
         }

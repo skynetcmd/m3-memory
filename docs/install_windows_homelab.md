@@ -1,12 +1,12 @@
 # M3 Agentic Memory — Full Install Plan (Windows / PowerShell)
 
 > **Looking for the standard install?** This document covers the advanced
-> repo-clone / homelab path (Postgres sync, ChromaDB, scheduled tasks).
+> repo-clone / homelab path (Postgres sync, scheduled tasks).
 > For a normal install see [install_windows.md](install_windows.md) and
 > [QUICKSTART_WINDOWS.md](QUICKSTART_WINDOWS.md).
 
 > **Minimum viable install** (no homelab): Steps 1-4 + 6-8.
-> The memory system works fully local via SQLite without Postgres or ChromaDB.
+> The memory system works fully local via SQLite without Postgres.
 
 ---
 
@@ -117,7 +117,6 @@ python -c "import keyring; print(keyring.get_password('system', 'AGENT_OS_MASTER
 
 ```powershell
 $env:POSTGRES_SERVER = "YOUR_SERVER_IP"
-$env:CHROMA_BASE_URL = "http://YOUR_SERVER_IP:8000"
 ```
 
 For persistence across sessions, add these to your PowerShell profile:
@@ -128,7 +127,6 @@ notepad $PROFILE
 
 # Add these lines and save:
 $env:POSTGRES_SERVER = "YOUR_SERVER_IP"
-$env:CHROMA_BASE_URL = "http://YOUR_SERVER_IP:8000"
 ```
 
 > If `$PROFILE` does not exist yet:

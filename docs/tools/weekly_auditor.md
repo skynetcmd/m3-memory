@@ -1,8 +1,8 @@
 ---
 tool: bin/weekly_auditor.py
-sha1: b05175ce385e
-mtime_utc: 2026-05-30T18:38:21.562559+00:00
-generated_utc: 2026-05-31T18:42:53.059054+00:00
+sha1: 5dbde5d0a8d3
+mtime_utc: 2026-07-17T02:13:20.398105+00:00
+generated_utc: 2026-07-17T02:18:40.947012+00:00
 private: false
 ---
 
@@ -16,17 +16,16 @@ Generates a PDF covering:
   1. Memory System Health (memory_items + embeddings)
   2. Project Decisions (last 7 days)
   3. Activity Timeline (legacy activity_logs)
-  4. ChromaDB Sync Status
-  5. Git Activity (~/m3-memory)
+  4. Git Activity (~/m3-memory)
 
-Optionally writes a consolidated summary into memory_items + ChromaDB.
+Optionally writes a consolidated summary into memory_items.
 Use --no-memory to skip the memory write step.
 
 ---
 
 ## Entry points
 
-- `def main()` (line 386)
+- `def main()` (line 356)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -35,7 +34,7 @@ Use --no-memory to skip the memory write step.
 
 | Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
 |---|---|---|---|---|---|
-| `--no-memory` | Skip writing summary to memory system and ChromaDB | `False` | Generates PDF + writes summary to memory_items + chroma_sync | store_true | Generates PDF only; skips memory_write & chroma_sync (line 414) |
+| `--no-memory` | Skip writing summary to memory system | `False` | Generates PDF + writes summary to memory_items | store_true | Generates PDF only; skips memory_write |
 | `--database` | SQLite database path. Env: M3_DATABASE. Default: memory/agent_memory.db. | None | Falls back to M3_DATABASE env then memory/agent_memory.db. | str | Routes all DB reads/writes against PATH for this run. |
 
 ---
@@ -51,7 +50,7 @@ Use --no-memory to skip the memory write step.
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `_task_runtime (no_window_kwargs)`
 - `m3_sdk (add_database_arg, resolve_db_path)`
-- `memory_bridge (chroma_sync, memory_write)`
+- `memory_bridge (memory_write)`
 
 ---
 
@@ -59,13 +58,13 @@ Use --no-memory to skip the memory write step.
 
 **subprocess**
 
-- `subprocess.check_call()  → `[sys.executable, gen_script]`` (line 303)
-- `subprocess.check_call()  → `[sys.executable, graph_script]`` (line 320)
-- `subprocess.check_output()  → `cmd`` (line 253)
+- `subprocess.check_call()  → `[sys.executable, gen_script]`` (line 276)
+- `subprocess.check_call()  → `[sys.executable, graph_script]`` (line 293)
+- `subprocess.check_output()  → `cmd`` (line 226)
 
 **sqlite**
 
-- `sqlite3.connect()  → `resolve_db_path(None)`` (line 70)
+- `sqlite3.connect()  → `resolve_db_path(None)`` (line 69)
 
 
 ---

@@ -24,7 +24,6 @@ urllib3>=2.7.0,<3  # 2.7.0 fixes PYSEC-2026-141/142
 # --- Database & Storage ---
 psycopg2-binary>=2.9.12,<3
 psycopg[binary]>=3.2.0,<4
-chromadb-client>=1.5.8,<2
 sqlglot>=30.6.0,<31
 
 # --- Security & Auth ---

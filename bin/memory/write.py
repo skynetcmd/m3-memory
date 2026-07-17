@@ -319,8 +319,6 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
             f"VALUES ({_d1.placeholder(21)})").rstrip(),
             (item_id, type, title, content, metadata, agent_id, model_id, agent, importance, source, ORIGIN_DEVICE, user_id, scope, expires_at, now, _vf, _vt, _cid, _ron, _rreason, _variant)
         )
-        # NOTE: chroma_sync_queue insert moved below into the `if vec:` block
-        # so embed failures don't leave orphan queue rows.
         # Stamp content_hash and (knowledge-maintenance P1) first-class confidence
         # in ONE post-INSERT UPDATE on the common path (§4 efficiency: no extra
         # statement). Confidence is derived from provenance + the Observer SLM's
@@ -475,15 +473,6 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
                 if first_vec is None:
                     first_vec = cvec
         if any_inserted:
-            with _db() as db:
-                # One chroma_sync_queue entry per memory_id, not per window.
-                # Chroma sync replays whatever's currently in memory_embeddings
-                # for the memory_id.
-                db.execute(
-                    ("INSERT INTO chroma_sync_queue (memory_id, operation) "
-                    f"VALUES ({_d1.placeholder(2)})").rstrip(),
-                    (item_id, "upsert"),
-                )
             # Downstream code (contradiction check, MMR, etc.) needs *a*
             # vector for this memory. The first window's vector is the
             # closest analogue to the legacy single-vector behavior — it
@@ -492,7 +481,7 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
         else:
             logger.warning(
                 f"memory_write_impl: all embed calls failed for {item_id}; "
-                f"skipping memory_embeddings + chroma_sync_queue insert"
+                f"skipping memory_embeddings insert"
             )
 
     _record_history(item_id, "create", None, content, "content", agent_id or agent)
@@ -1041,7 +1030,7 @@ async def memory_write_bulk_impl(
 
         await asyncio.gather(*(_enrich_one(p) for p in prepared))
 
-    # Phase 1: INSERT memory_items + chroma queue + history in one transaction.
+    # Phase 1: INSERT memory_items + history in one transaction.
     from memory.backends import active_backend as _active_backend_bulk
 
     _db_bulk = _active_backend_bulk().dialect()
@@ -1065,8 +1054,6 @@ async def memory_write_bulk_impl(
                     p["variant"],
                 ),
             )
-            # NOTE: chroma_sync_queue insert moved to Phase 2 (post-embed) so
-            # we don't enqueue rows whose embedding fails (orphan accumulation).
             _record_history(
                 p["id"], "create", None, p["content"], "content",
                 p["agent_id"] or p["change_agent"], db=db,
@@ -1141,21 +1128,10 @@ async def memory_write_bulk_impl(
                 )
                 if kind == "default":
                     default_ok.add(p["id"])
-            # Only enqueue chroma sync for items whose canonical default-kind
-            # vector landed. This prevents orphan queue rows when the embed
-            # server fails (e.g. context-size 400) — see chroma_sync_queue
-            # orphan accumulation 2026-04-22.
-            for p in to_embed:
-                if p["id"] in default_ok:
-                    db.execute(
-                        ("INSERT INTO chroma_sync_queue (memory_id, operation) "
-                        f"VALUES ({_db_bulk.placeholder(2)})").rstrip(),
-                        (p["id"], "upsert"),
-                    )
         for mid in default_fail - default_ok:
             logger.warning(
                 f"memory_write_bulk_impl: embed failed for {mid}; "
-                f"skipping memory_embeddings + chroma_sync_queue insert"
+                f"skipping memory_embeddings insert"
             )
 
     # Phase 2.5: Fact enrichment (Phase 4 on-write hook).
@@ -1611,8 +1587,6 @@ async def memory_write_batch_impl(items: list[dict]):
                  item.get("agent_id", ""), item.get("model_id", ""), agent, item.get("importance", 0.5),
                  item.get("source", "agent"), ORIGIN_DEVICE, now)
             )
-            # NOTE: chroma_sync_queue insert moved to Phase 2 below so embed
-            # failures don't leave orphan queue rows.
 
         if item.get("embed", True):
             # Queue for parallel embedding (gather)
@@ -1642,10 +1616,10 @@ async def memory_write_batch_impl(items: list[dict]):
                 # Exception — widen the guard so the post-guard type narrows to
                 # the real (vec, meta) tuple (fixes mypy "not iterable").
                 if isinstance(result, BaseException):
-                    logger.warning(f"Batch embed failed for {mid}: {result}; skipping chroma_sync_queue insert")
+                    logger.warning(f"Batch embed failed for {mid}: {result}; skipping memory_embeddings insert")
                     continue
                 if result is None:
-                    logger.warning(f"Batch embed returned None for {mid}; skipping chroma_sync_queue insert")
+                    logger.warning(f"Batch embed returned None for {mid}; skipping memory_embeddings insert")
                     continue
                 vec, m = result
                 if vec:
@@ -1654,13 +1628,8 @@ async def memory_write_batch_impl(items: list[dict]):
                         f"VALUES ({_d_batch.placeholder(7)})").rstrip(),
                         (str(uuid.uuid4()), mid, _pack(vec), m, len(vec), now, _content_hash(text))
                     )
-                    db.execute(
-                        ("INSERT INTO chroma_sync_queue (memory_id, operation) "
-                        f"VALUES ({_d_batch.placeholder(2)})").rstrip(),
-                        (mid, "upsert"),
-                    )
                 else:
-                    logger.warning(f"Batch embed empty vec for {mid}; skipping chroma_sync_queue insert")
+                    logger.warning(f"Batch embed empty vec for {mid}; skipping memory_embeddings insert")
 
     return f"Batch created: {len(results)} items"
 

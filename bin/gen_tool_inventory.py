@@ -90,10 +90,10 @@ CORE_LIBRARIES = {
     "m3_sdk.py", "auth_utils.py", "temporal_utils.py", "agent_protocol.py",
     "embedding_utils.py", "custom_tool_bridge.py", "debug_agent_bridge.py",
     "_task_runtime.py",
-    # Post-2026-04-21 refactor additions: chatlog + maintenance + sync + LLM
+    # Post-2026-04-21 refactor additions: chatlog + maintenance + LLM
     # failover are load-bearing even without a CLI surface.
     "chatlog_config.py", "chatlog_core.py", "chatlog_redaction.py",
-    "chatlog_status.py", "memory_maintenance.py", "memory_sync.py",
+    "chatlog_status.py", "memory_maintenance.py",
     "llm_failover.py", "m3_cognitive_loop.py",
     "enrichment_state.py", "thermal_utils.py", "embed_sweep_lib.py",
     "batch_runner.py",

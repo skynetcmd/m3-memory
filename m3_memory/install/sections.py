@@ -436,7 +436,7 @@ def _deprecated_env_section() -> None:
     """Surface deprecated (un-namespaced) env vars that are actually in use.
 
     m3-specific config vars are migrating under the M3_ namespace; the old
-    generic names (PG_URL, CHROMA_BASE_URL, tuning knobs, ...) still work via a
+    generic names (PG_URL, tuning knobs, ...) still work via a
     back-compat shim but will be removed. This process's config modules read
     their env at import time, so by the time doctor runs, getenv_compat has
     recorded any deprecated name that resolved. Report only what's genuinely in

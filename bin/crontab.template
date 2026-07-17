@@ -12,8 +12,8 @@
 # Weekly auditor (Fridays 4pm)
 0 16 * * 5 [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/weekly_auditor.py --log-file [M3_MEMORY_ROOT]/logs/auditor.log
 
-# Hourly sync: SQLite <-> PostgreSQL + ChromaDB (pve-database-host)
-# pg_sync.sh delegates to sync_all.py — covers both pg + chroma
+# Hourly sync: SQLite <-> PostgreSQL (pve-database-host)
+# pg_sync.sh delegates to sync_all.py
 0 * * * * [M3_MEMORY_ROOT]/bin/pg_sync.sh >> [M3_MEMORY_ROOT]/logs/sync_all.log 2>&1
 
 # Daily Memory Maintenance (3:00 AM) - Decay scores, prune orphans

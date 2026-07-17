@@ -6,7 +6,7 @@ The embed_many call is mocked to keep tests offline; we assert:
   - empty content is skipped without an embed call
   - oversized rows are skipped
   - mismatched dim is skipped, not written
-  - successful batch writes both memory_embeddings and chroma_sync_queue
+  - successful batch writes memory_embeddings
   - INSERT OR IGNORE protects against double-write on memory_id
   - lockfile prevents two concurrent sweepers
   - schema sanity check fails clearly on missing tables
@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO / "bin"))
 
 def _make_min_schema(db_path: Path) -> None:
     """Create the minimum schema embed_backfill operates on.
-    Mirrors test_observer.py's pattern but adds chroma_sync_queue +
+    Mirrors test_observer.py's pattern but adds
     memory_embeddings.content_hash which embed_backfill writes to.
     """
     conn = sqlite3.connect(str(db_path))
@@ -60,12 +60,6 @@ def _make_min_schema(db_path: Path) -> None:
             created_at TEXT,
             content_hash TEXT,
             UNIQUE(memory_id, embed_model)
-        );
-        CREATE TABLE chroma_sync_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            memory_id TEXT NOT NULL,
-            operation TEXT NOT NULL,
-            attempts INTEGER DEFAULT 0
         );
     """)
     conn.commit()
@@ -294,7 +288,7 @@ def test_counters_record_error():
 
 @pytest.mark.asyncio
 async def test_sweep_writes_embeddings_and_queue(db, monkeypatch):
-    """Full async sweep with _embed_many mocked. Assert embeddings + queue land."""
+    """Full async sweep with _embed_many mocked. Assert embeddings land."""
     import embed_backfill as eb
 
     _seed_rows(db, [
@@ -335,10 +329,8 @@ async def test_sweep_writes_embeddings_and_queue(db, monkeypatch):
 
     conn = sqlite3.connect(str(db))
     n_embeddings = conn.execute("SELECT COUNT(*) FROM memory_embeddings").fetchone()[0]
-    n_queue = conn.execute("SELECT COUNT(*) FROM chroma_sync_queue").fetchone()[0]
     conn.close()
     assert n_embeddings == 2
-    assert n_queue == 2
 
 
 @pytest.mark.asyncio

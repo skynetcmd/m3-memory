@@ -112,10 +112,9 @@ Your memory follows you across machines:
 
 - **Bi-directional delta sync** between SQLite (local) and PostgreSQL (warehouse) via UUID-based UPSERT
 - **Crash-resistant** — watermark-based tracking with at-least-once delivery semantics
-- **ChromaDB federation** — distributed vector search across LAN with offline fallback via `chroma_mirror`
 - **Encrypted secrets** synced across devices through the vault — no manual key copying
 
-Hourly automated sync. Manual sync anytime via `chroma_sync` tool.
+Hourly automated sync.
 
 ---
 
@@ -186,7 +185,7 @@ The full catalog spans 9 domains, but it costs near-zero context: **lazy tool-lo
 | **Data Governance** | `gdpr_export`, `gdpr_forget`, `memory_export`, `memory_import` |
 | **Operational Protocol** | `log_activity`, `query_decisions`, `update_focus`, `retire_focus`, `check_thermal_load` |
 | **Debug Agent** | `debug_analyze`, `debug_bisect`, `debug_trace`, `debug_correlate`, `debug_history`, `debug_report` |
-| **Infrastructure** | `memory_cost_report`, `chroma_sync`, `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention` |
+| **Infrastructure** | `memory_cost_report`, `memory_maintenance`, `memory_dedup`, `memory_consolidate`, `memory_set_retention` |
 
 ---
 

@@ -7,9 +7,9 @@ a fat abstraction; the antidote is a narrow capability interface with native
 per-backend implementations and accelerators chosen behind runtime probes.
 
 Design of record: DESIGN_PHILOSOPHIES §1 (L1 SQLite is the only required store;
-L2 PostgreSQL / L3 Chroma are opt-in; same code path laptop <-> air-gapped
-enclave) and §2 (modularity, shim-preserved identity). The m3 memory directive
-c4e4a145 carries the full rationale.
+L2 PostgreSQL is opt-in; same code path laptop <-> air-gapped enclave) and §2
+(modularity, shim-preserved identity). The m3 memory directive c4e4a145 carries
+the full rationale.
 
 Phase 0 scope (this commit): the protocol, the backend selector
 (`M3_DB_BACKEND`), and a SQLite backend that DELEGATES to the existing, proven

@@ -101,12 +101,6 @@ def bench_db(tmp_path, monkeypatch):
             last_error TEXT,
             last_attempt_at TEXT
         );
-        CREATE TABLE chroma_sync_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            memory_id TEXT,
-            operation TEXT,
-            enqueued_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-        );
     """)
     conn.commit()
     conn.close()

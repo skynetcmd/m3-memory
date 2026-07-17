@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 3baad8d0ff15
-mtime_utc: 2026-07-02T21:51:11.653462+00:00
-generated_utc: 2026-07-03T20:00:03.689479+00:00
+sha1: 7abb6619b66c
+mtime_utc: 2026-07-17T02:08:18.835123+00:00
+generated_utc: 2026-07-17T02:18:40.746457+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Retrieval / ranking: `M3_QUERY_TYPE_ROUTING`, `M3_TITLE_MATCH_BOOST`,
 `SEARCH_ROW_CAP`.
 
 Embeddings: `EMBED_MODEL`, `EMBED_DIM`, `EMBED_BULK_CHUNK`,
-`EMBED_BULK_CONCURRENCY`, `CHROMA_BASE_URL`.
+`EMBED_BULK_CONCURRENCY`.
 
 Other: `CONTRADICTION_THRESHOLD`, `DEDUP_LIMIT`, `DEDUP_THRESHOLD`,
 `LLM_TIMEOUT`, `ORIGIN_DEVICE`.
@@ -98,9 +98,10 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `importlib`
+- `memory.backends (active_backend)`
 - `memory.config (FACT_ENRICH_CONCURRENCY)`
 - `memory.db (ensure_pinned_column)`
-- `memory.orchestration (TASK_STATE_TRANSITIONS, VALID_TASK_STATES, TERMINAL_TASK_STATES, VALID_AGENT_STATUSES, _validate_task_transition, _agent_exists, agent_register_impl, agent_heartbeat_impl, agent_list_impl, agent_get_impl, agent_set_trust_impl, agent_offline_impl, notify_impl, notifications_poll_impl, notifications_ack_impl, notifications_ack_all_impl, task_create_impl, task_assign_impl, task_update_impl, task_set_result_impl, task_get_impl, task_delete_impl, task_list_impl, task_tree_impl)`
+- `memory.orchestration (TASK_STATE_TRANSITIONS, TERMINAL_TASK_STATES, VALID_AGENT_STATUSES, VALID_TASK_STATES, _agent_exists, _validate_task_transition, agent_get_impl, agent_heartbeat_impl, agent_list_impl, agent_offline_impl, agent_register_impl, agent_set_trust_impl, notifications_ack_all_impl, notifications_ack_impl, notifications_poll_impl, notify_impl, task_assign_impl, task_create_impl, task_delete_impl, task_get_impl, task_list_impl, task_set_result_impl, task_tree_impl, task_update_impl)`
 - `memory.util (_POISON_PATTERNS, _check_content_safety)`
 
 ---

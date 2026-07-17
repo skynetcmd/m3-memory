@@ -6,7 +6,7 @@
 
 ## 👁️ System Overview
 
-M3 Memory is a local-first persistent memory system for MCP agents. An agent calls MCP tools to write, search, link, and manage memories. All data lives in local SQLite. Optional sync layers (PostgreSQL, ChromaDB) enable cross-device and federated search.
+M3 Memory is a local-first persistent memory system for MCP agents. An agent calls MCP tools to write, search, link, and manage memories. All data lives in local SQLite. An optional PostgreSQL sync layer enables cross-device search.
 
 ```
 Agent (Claude Code / Gemini CLI / Aider)
@@ -15,7 +15,7 @@ Memory Bridge — 100+ catalog tools (bin/memory_bridge.py, sourced from bin/mcp
     ↕
 SQLite (local, primary)
     ↕ optional
-PostgreSQL (cross-device sync)    ChromaDB (federated vector search)
+PostgreSQL (cross-device sync)
 ```
 
 ---
@@ -34,7 +34,6 @@ bin/
     fts.py               # FTS5 helpers, title overlap
     db.py                # _db, _conn, _lazy_init, schema, history, gates, access-stamp batcher
     embed.py             # cascade, in-process Rust embedder, HTTP client, sliding window + dense recovery
-    chroma.py            # federation, _queue_chroma, _query_chroma
     search.py            # scoring + ranker + reranker + query routing + the four retrieval impls
     entity.py            # vocab loading, 3-tier canonical-name resolution, entity CRUD, extraction queue + runner, entity_search / entity_get / extract_pending impls
 ```
@@ -54,7 +53,7 @@ See [MEMORY_CORE_MODULARIZATION.md](MEMORY_CORE_MODULARIZATION.md) for the per-c
 
 ## 💾 Storage Hierarchy
 
-Three layers, only the first is required.
+Two layers, only the first is required.
 
 ```mermaid
 graph TD
@@ -64,20 +63,13 @@ graph TD
     subgraph "L2: Sync Warehouse (optional)"
         PG[(PostgreSQL)]
     end
-    subgraph "L3: Federated Vectors (optional)"
-        CH[(ChromaDB)]
-    end
 
     SQ <-->|Bi-directional Delta Sync| PG
-    SQ -->|Push Queue| CH
-    CH -->|Mirror Pull| SQ
 ```
 
 **L1 — SQLite** is the primary store. All reads and writes hit local SQLite first. WAL mode enables concurrent access. No external dependencies.
 
 **L2 — PostgreSQL** *(optional)* provides cross-device sync. Bi-directional delta sync uses UUID-based UPSERT with watermark tracking. Syncs memories, relationships, embeddings, and encrypted secrets. Configurable via `PG_URL`.
-
-**L3 — ChromaDB** *(optional)* provides federated vector search across machines. Falls back to a local `chroma_mirror` table during outages. Configurable via `CHROMA_BASE_URL`.
 
 ---
 
@@ -100,8 +92,6 @@ graph TD
 1. **FTS5 keyword matching** — BM25-ranked full-text search with query sanitization. Falls back to pure semantic search when no keyword matches are found.
 2. **Vector similarity** — cosine similarity against locally-generated embeddings (any OpenAI-compatible embedding server).
 3. **MMR diversity re-ranking** — prevents near-duplicate results. Balances relevance (70%) against diversity (30%).
-
-If local results are sparse, ChromaDB is queried as an L3 fallback.
 
 ### Routed Retrieval (optional)
 

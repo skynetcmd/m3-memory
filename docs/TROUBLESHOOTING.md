@@ -102,12 +102,3 @@ See [FIPS_MODULE_BOUNDARY.md](FIPS_MODULE_BOUNDARY.md) for the full model.
   (override with `M3_MEMORY_ROOT`).
 - The bridge resolves the DB from `M3_MEMORY_ROOT` regardless of the
   directory `m3` was launched from.
-
----
-
-## ChromaDB Issues
-
-### "ChromaDB unreachable"
-- Verify `CHROMA_BASE_URL` is set to the correct endpoint.
-- Check that the ChromaDB server is running on the target host.
-- M3 falls back to a local `chroma_mirror` table when ChromaDB is unreachable. Memories are queued and synced when the connection is restored.

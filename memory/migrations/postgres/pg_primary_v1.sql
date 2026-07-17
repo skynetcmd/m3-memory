@@ -213,20 +213,6 @@ CREATE INDEX IF NOT EXISTS idx_mh_memory_id ON memory_history(memory_id);
 CREATE INDEX IF NOT EXISTS idx_mh_created ON memory_history(created_at);
 
 -- =====================================================
--- chroma_sync_queue (L3 mirror sync queue)
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS chroma_sync_queue (
-    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    memory_id     TEXT NOT NULL,
-    operation     TEXT NOT NULL,
-    attempts      BIGINT DEFAULT 0,
-    stalled_since TIMESTAMPTZ,
-    queued_at     TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_csq_memory_id ON chroma_sync_queue(memory_id);
-
--- =====================================================
 -- agents (agent registry; trust ledger references it)
 -- =====================================================
 

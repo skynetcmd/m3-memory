@@ -94,8 +94,7 @@ config = {
         "command": str(PY),
         "args": [str(BASE / "bin" / "memory_bridge.py")],
         "env": {
-            "LM_STUDIO_EMBED_URL": "http://127.0.0.1:1234/v1/embeddings",
-            "CHROMA_BASE_URL": getenv_compat("M3_CHROMA_BASE_URL", "CHROMA_BASE_URL", "")
+            "LM_STUDIO_EMBED_URL": "http://127.0.0.1:1234/v1/embeddings"
         }
     },
     "custom_pc_tool": {

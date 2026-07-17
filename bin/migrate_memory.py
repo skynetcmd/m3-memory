@@ -116,9 +116,9 @@ def _classify_db(db_path: str) -> str:
     the runner robust to whatever path-resolution surprises arise.
 
     Note: a chatlog DB that has been *lazy-touched* by memory_core picks up
-    memory_items + memory_embeddings + chroma_sync_queue, but never the
-    main-only tables in _MAIN_SIGNATURE_TABLES. So presence-of-storage
-    plus absence-of-main-signatures is a reliable "this is chatlog".
+    memory_items + memory_embeddings, but never the main-only tables in
+    _MAIN_SIGNATURE_TABLES. So presence-of-storage plus absence-of-main-
+    signatures is a reliable "this is chatlog".
     """
     if not os.path.exists(db_path):
         return "empty"

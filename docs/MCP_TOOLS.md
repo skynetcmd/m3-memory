@@ -1,8 +1,8 @@
 # MCP Tool Inventory
 
-This document provides a comprehensive inventory of all 122 MCP tools available in the M3 Memory system.
+This document provides a comprehensive inventory of all 121 MCP tools available in the M3 Memory system.
 
-> **How this reconciles with other docs.** The **111** in-catalog tools (the number the README/COMPARISON quote as "100+", and the `count` in `docs/tools/MCP_CATALOG.json`, which excludes the two `tools_*` meta-tools → **109** there) plus **11** MCP-proxy protocol/debug tools (`mcp_proxy.py`) = **122** total listed here. The prose "100+ tools" refers to the in-catalog surface; this inventory additionally documents the proxy transport tools.
+> **How this reconciles with other docs.** The **110** in-catalog tools (the number the README/COMPARISON quote as "100+", and the `count` in `docs/tools/MCP_CATALOG.json`, which excludes the two `tools_*` meta-tools → **108** there) plus **11** MCP-proxy protocol/debug tools (`mcp_proxy.py`) = **121** total listed here. The prose "100+ tools" refers to the in-catalog surface; this inventory additionally documents the proxy transport tools.
 
 ## Summary Table
 
@@ -84,7 +84,6 @@ This document provides a comprehensive inventory of all 122 MCP tools available 
 | `gdpr_forget` | Data Governance | Right to be forgotten — hard-deletes ALL data for a user_id including memories, embeddings, relationships, and history. |
 | `memory_export` | Data Governance | Export memories as portable JSON. Filter by agent, type, or date. |
 | `memory_import` | Data Governance | Import memories from a JSON export. UPSERT semantics — safe to re-run. |
-| `chroma_sync` | Infrastructure Operations | Bi-directional sync between local SQLite and ChromaDB. |
 | `embedder_status` | Infrastructure Operations | Check the status of the local sovereign embedder server (default port 8082, override via M3_EMBED_FALLBACK_URL). |
 | `memory_cost_report` | Infrastructure Operations | Returns current session operation counts and estimated token usage for memory operations. |
 | `curate_chatlog_apply` | Uncategorized | Deterministically apply a chatlog.db curator plan in ONE call. No LLM in the loop. Plan sections: decay (True/dict to run chatlog_decay), dedup (list of {keep_id, drop_ids}), promote (list of {ids, target_type}), prune (list of {conversation_id, reason}). Any section may be omitted. Returns structured per-section results + summary. |
@@ -1469,22 +1468,6 @@ Import memories from a JSON export. UPSERT semantics — safe to re-run.
 ---
 
 ## Infrastructure Operations
-
-### `chroma_sync`
-
-Bi-directional sync between local SQLite and ChromaDB.
-
-**Source:** mcp_tool_catalog.py
-
-**Parameters:**
-
-| Parameter | Type | Required | Description | Default |
-| --- | --- | --- | --- | --- |
-| `max_items` | `integer` | No | Max items per batch. | `50` |
-| `direction` | `string` | No | Sync direction. | `both` |
-| `reset_stalled` | `boolean` | No | Reset stalled sync records. | `True` |
-| `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
-| `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 
 ### `embedder_status`
 

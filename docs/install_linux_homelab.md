@@ -1,7 +1,7 @@
 # M3 Agentic Memory — Full Install Plan (Linux)
 
 > **Looking for the standard install?** This document covers the advanced
-> repo-clone / homelab path (Postgres sync, ChromaDB, scheduled tasks).
+> repo-clone / homelab path (Postgres sync, scheduled tasks).
 > For a normal install use the one-liner:
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/skynetcmd/m3-memory/main/install.sh | bash
@@ -9,7 +9,7 @@
 > See [install_linux.md](install_linux.md) and [QUICKSTART_LINUX.md](QUICKSTART_LINUX.md).
 
 > **Minimum viable install** (no homelab): Steps 1-4 + 6-7.
-> The memory system works fully local via SQLite without Postgres or ChromaDB.
+> The memory system works fully local via SQLite without Postgres.
 
 ---
 
@@ -124,14 +124,12 @@ python -c "import keyring; print(keyring.get_password('system', 'AGENT_OS_MASTER
 
 ```bash
 export POSTGRES_SERVER="YOUR_SERVER_IP"
-export CHROMA_BASE_URL="http://YOUR_SERVER_IP:8000"
 ```
 
 For persistence across sessions, add these lines to `~/.bashrc` (or `~/.zshrc` if using Zsh):
 
 ```bash
 echo 'export POSTGRES_SERVER="YOUR_SERVER_IP"' >> ~/.bashrc
-echo 'export CHROMA_BASE_URL="http://YOUR_SERVER_IP:8000"' >> ~/.bashrc
 source ~/.bashrc
 ```
 

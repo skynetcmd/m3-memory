@@ -124,14 +124,6 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
         logger.error(f"Embed failed: {type(exc).__name__}")
     return None, model_to_use
 
-def _queue_chroma(memory_id: str, operation: str) -> None:
-    """Queue item for ChromaDB sync."""
-    try:
-        with ctx.get_sqlite_conn() as db:
-            db.execute("INSERT INTO chroma_sync_queue (memory_id, operation) VALUES (?,?)", (memory_id, operation))
-    except Exception as exc:
-        logger.warning(f"chroma queue insert failed: {exc}")
-
 # ── Thermal check ─────────────────────────────────────────────────────────────
 def _check_thermal() -> str:
     return get_thermal_status()

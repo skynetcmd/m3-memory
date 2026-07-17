@@ -43,7 +43,7 @@ The benchmark script prints results as plain text. Add a `--json` flag to emit s
 - Skills: Python, MCP tool schema
 
 ### 7. Write a `docker-compose.yml` for the full stack
-Create a `docker-compose.yml` that spins up PostgreSQL + ChromaDB alongside M3 Memory for easy local federation setup.
+Create a `docker-compose.yml` that spins up PostgreSQL alongside M3 Memory for easy local sync setup.
 - Skills: Docker, docker-compose, networking
 
 ### 8. Add Windows Task Scheduler instructions to install guide

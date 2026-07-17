@@ -86,13 +86,6 @@ def test_m3_enrich_not_gated_on_postgres(monkeypatch):
             pytest.fail(f"m3_enrich still gated on PG: {e}")
 
 
-def test_chroma_sync_refuses_on_postgres(monkeypatch):
-    _force_pg(monkeypatch)
-    import memory_sync
-    with pytest.raises(RuntimeError, match="SQLite-only|stale SQLite"):
-        asyncio.run(memory_sync.chroma_sync_impl())
-
-
 def test_chatlog_status_main_count_na_on_postgres(monkeypatch):
     """chatlog_status must NOT read a stale SQLite main store on PG — it reports
     n/a for the primary-store count rather than crashing or misreporting."""
@@ -112,7 +105,6 @@ def test_guards_are_noop_on_sqlite(monkeypatch):
     from memory.backends import require_sqlite_backend
     from memory.backends import selector as _sel
     _sel._reset_for_tests()
-    # No raise for any of the still-gated tool names. (curate_memory_apply was
-    # ported to PG and no longer uses this guard.)
-    for tool in ("m3_cognitive_loop", "chroma_sync"):
-        require_sqlite_backend(tool)
+    # No raise for the still-gated tool name. (curate_memory_apply was ported to
+    # PG and no longer uses this guard; chroma_sync was removed entirely.)
+    require_sqlite_backend("m3_cognitive_loop")

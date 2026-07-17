@@ -155,11 +155,10 @@ pytest -q
 python3 bin/mcp_tool_catalog.py --check
 ```
 
-If you use Postgres sync or ChromaDB, also run:
+If you use Postgres sync, also run:
 
 ```bash
 python3 bin/pg_setup.py --check
-python3 bin/chroma_sync_cli.py status
 ```
 
 ---
@@ -247,20 +246,6 @@ sudo systemctl restart postgresql
 # Then reapply any PG-side schema changes
 python3 bin/pg_setup.py
 python3 bin/pg_sync.py --once
-```
-
-### ChromaDB (optional, if running a local Chroma server)
-
-```bash
-pip install --upgrade chromadb-client
-# If you run the server too:
-pip install --upgrade chromadb
-```
-
-Then:
-
-```bash
-python3 bin/chroma_sync_cli.py reindex
 ```
 
 ---

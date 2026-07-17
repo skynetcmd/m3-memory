@@ -99,8 +99,7 @@ SQLite DB) and `timeout` arg — both are stripped before the impl runs.
 | Variable | Purpose | Example Keychain Command (macOS) |
 |---|---|---|
 | `M3_MEMORY_ROOT` | Optional master state-root override (see [Roots & precedence](#roots--precedence-the-single-source-of-truth)). Defaults to `~/.m3-memory`. | `export M3_MEMORY_ROOT="/path/to/state"` (Set directly) |
-| `SYNC_TARGET_IP` | IP address of the central PostgreSQL/ChromaDB server. | `_keychain_set agentos_sync_target_ip "YOUR_SERVER_IP"` |
-| `CHROMA_BASE_URL`| Full URL to the ChromaDB API. | `_keychain_set agentos_chroma_url "http://YOUR_SERVER_IP:8000"` |
+| `SYNC_TARGET_IP` | IP address of the central PostgreSQL server. | `_keychain_set agentos_sync_target_ip "YOUR_SERVER_IP"` |
 | `PG_URL`| **Required.** Full PostgreSQL connection string with credentials. | `_keychain_set agentos_pg_url "postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db"` |
 
 ### API Keys & Authentication
@@ -136,7 +135,7 @@ The MCP proxy bridges OpenAI-compatible chat clients (Aider, OpenClaw) to the MC
 |---|---|---|
 | `LM_STUDIO_BASE` | Base URL of the local LLM endpoint that the proxy forwards completion requests to. | `http://localhost:1234/v1` |
 | `LM_READ_TIMEOUT` | Read timeout (seconds) for upstream LLM calls. | `300` |
-| `MCP_PROXY_ALLOW_DESTRUCTIVE` | When set to `1`, `true`, or `yes`, exposes the 9 destructive catalog tools (`memory_delete`, `chroma_sync`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`). Default hides them. | unset |
+| `MCP_PROXY_ALLOW_DESTRUCTIVE` | When set to `1`, `true`, or `yes`, exposes the 8 destructive catalog tools (`memory_delete`, `memory_maintenance`, `memory_set_retention`, `memory_export`, `memory_import`, `gdpr_export`, `gdpr_forget`, `agent_offline`). Default hides them. | unset |
 
 **Per-request header**: clients should send `X-Agent-Id: <agent-name>` on `/v1/chat/completions`. The proxy propagates this to the catalog dispatcher and enforces `inject_agent_id` for tools that record agent identity (`memory_write`, `agent_heartbeat`, etc.) — clients cannot spoof identity in the request body.
 

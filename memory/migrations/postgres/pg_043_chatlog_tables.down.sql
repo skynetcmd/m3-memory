@@ -7,7 +7,6 @@
 -- last. CASCADE also handles the FK edges, but ordering keeps intent explicit.
 -- No explicit BEGIN/COMMIT — migrate_pg.py wraps each file in one transaction.
 
-DROP TABLE IF EXISTS chat_log_chroma_sync_queue CASCADE;
 DROP TABLE IF EXISTS chat_log_extraction_queue CASCADE;
 DROP TABLE IF EXISTS chat_log_entity_relationships CASCADE;
 DROP TABLE IF EXISTS chat_log_item_entities CASCADE;

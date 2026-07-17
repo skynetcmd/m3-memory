@@ -75,7 +75,7 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("memory_count_entities", "memory"),
     ("memory_count_mentions", "memory"),
     # System-diagnostic tools — separate from admin (which is GDPR /
-    # notifications / chroma sync) so users grouping "what's wrong with
+    # notifications) so users grouping "what's wrong with
     # my install" can load just this bucket.
     ("memory_doctor",       "diagnostics"),
     ("embedder_status",     "diagnostics"),
@@ -97,7 +97,6 @@ _DOMAIN_PREFIXES: list[tuple[str, str]] = [
     ("enrich",              "admin"),
     ("extract",             "admin"),
     ("gdpr",                "admin"),
-    ("chroma",              "admin"),
     ("embedder",            "diagnostics"),
     # entity_mentions is the renamed memory_list_mentions: same impl, but
     # the natural place to look for "given an entity, what mentions it"
@@ -157,7 +156,7 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
     "agent":         "Multi-agent registration, heartbeat, presence.",
     "tasks":         "Task creation, assignment, tree, results.",
     "conversations": "Conversation start/append/search/summarize.",
-    "admin":         "Notifications, enrichment, GDPR, Chroma sync.",
+    "admin":         "Notifications, enrichment, GDPR.",
     "diagnostics":   "Self-service health probes: embedder_status, memory_doctor (run when search hangs or embeds look wrong).",
 }
 

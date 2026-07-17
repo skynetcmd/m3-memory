@@ -64,15 +64,6 @@ CREATE TABLE memory_embeddings (
     content_hash TEXT
 );
 
-CREATE TABLE chroma_sync_queue (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    memory_id TEXT NOT NULL,
-    operation TEXT NOT NULL,
-    attempts  INTEGER DEFAULT 0,
-    stalled_since TEXT,
-    queued_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-);
-
 CREATE TABLE memory_history (
     id         TEXT PRIMARY KEY,
     memory_id  TEXT NOT NULL,

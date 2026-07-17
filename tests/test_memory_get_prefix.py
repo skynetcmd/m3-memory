@@ -43,13 +43,6 @@ CREATE TABLE IF NOT EXISTS memory_items (
     variant TEXT
 );
 
--- Mirror table memory_get_impl falls back to on miss.
-CREATE TABLE IF NOT EXISTS chroma_mirror (
-    id TEXT PRIMARY KEY,
-    title TEXT,
-    content TEXT
-);
-
 -- Same expression index migration 027 installs, so the prefix path is
 -- exercised the way it will be in production.
 CREATE INDEX IF NOT EXISTS idx_mi_id_prefix8

@@ -401,22 +401,6 @@ def _get_wal_size_mb(path: str) -> float:
     return _get_file_size_mb(path + "-wal")
 
 
-def _get_chroma_queue_count(main_db: str) -> int:
-    if os.path.exists(main_db):
-        try:
-            conn = sqlite3.connect(main_db, timeout=2)
-            try:
-                row = conn.execute("SELECT COUNT(*) FROM chroma_sync_queue").fetchone()
-                return row[0] if row else 0
-            except sqlite3.Error:
-                pass
-            finally:
-                conn.close()
-        except Exception:
-            pass
-    return 0
-
-
 def _get_last_turns(main_db: str) -> list[dict[str, str]]:
     turns = []
     if os.path.exists(main_db):
@@ -639,7 +623,6 @@ def run_live_tui(interval: float = 5.0):
         files_sz = _get_file_size_mb(files_db)
         files_wal_sz = _get_wal_size_mb(files_db)
 
-        chroma_q = _get_chroma_queue_count(main_db)
         last_turns = _get_last_turns(main_db)
 
         # Refresh embedding cascade stats every tick if interval is slow, or every 10 ticks if fast
@@ -714,7 +697,6 @@ def run_live_tui(interval: float = 5.0):
 
         lines.append(_make_line(f"  Chatlog Queue Depth: {depth} / {max_depth}"))
         lines.append(_make_line(f"  Compaction Spill:    {spill_files} files ({spill_bytes / 1024:.1f} KB)"))
-        lines.append(_make_line(f"  Chroma Sync Queue:   {chroma_q} pending upserts"))
         lines.append(_make_line(f"  Files DB Chunks:     {files_leaves} total ({files_unembedded} pending embeddings)"))
         lines.append("├────────────────────────────────────────────────────────────────────────────┤")
         lines.append(_make_line(" SYSTEM INTEGRATION HOOKS"))

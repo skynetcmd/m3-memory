@@ -19,7 +19,6 @@
 --   memory_item_entities    -> chat_log_item_entities
 --   entity_relationships    -> chat_log_entity_relationships
 --   entity_extraction_queue -> chat_log_extraction_queue
---   chroma_sync_queue       -> chat_log_chroma_sync_queue
 --
 -- Transformations applied:
 --   * Table names renamed per the map above (NOT a blind string prefix).
@@ -276,17 +275,3 @@ CREATE TABLE IF NOT EXISTS chat_log_extraction_queue (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cl_extraction_queue_memory_id ON chat_log_extraction_queue(memory_id);
 CREATE INDEX IF NOT EXISTS idx_cl_extraction_queue_attempts ON chat_log_extraction_queue(attempts, enqueued_at);
-
--- =====================================================
--- chat_log_chroma_sync_queue  (clone of chroma_sync_queue)
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS chat_log_chroma_sync_queue (
-    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    memory_id     TEXT NOT NULL,
-    operation     TEXT NOT NULL,
-    attempts      BIGINT DEFAULT 0,
-    stalled_since TIMESTAMPTZ,
-    queued_at     TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_cl_chroma_sync_queue_memory_id ON chat_log_chroma_sync_queue(memory_id);

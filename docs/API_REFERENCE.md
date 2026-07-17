@@ -310,10 +310,6 @@ Import from a previous export. UPSERT semantics — safe to re-run.
 Check session operation counts (embed calls, tokens, searches, writes).
 - **Args**: None
 
-### `chroma_sync`
-Manual sync with ChromaDB.
-- **Args**: `direction` (str: push|pull|both), `max_items` (int), `reset_stalled` (bool)
-
 ### `embedder_status`
 Check the status of the local sovereign embedder server (port 8081).
 - **Args**: None

@@ -336,29 +336,6 @@ at fusion — same reason the guard re-runs inside `_apply_rerank`.
 
 ---
 
-## Federation — remote Chroma fallback
-
-`_query_chroma` (re-exported from `memory.chroma`, called from
-`search.py:1308-1316`) fires when local results are weak:
-
-```python
-_local_weak = (
-    len(ranked) < 3
-    or local_top_score < FEDERATION_LOW_SCORE_THRESHOLD
-)
-```
-
-Hard skips: `conversation_id` filter set (strict scope boundary,
-never cross-peer) or `type_filter` set (avoid type pollution from
-remote stores).
-
-Federation hits are tagged so audit tooling can identify them. See
-`bin/memory/chroma.py` (152 lines) for the HTTP client and result-shape
-adapters. Env: `FEDERATION_LOW_SCORE_THRESHOLD` (config.py),
-`M3_CHROMA_URL` and friends (env-vars doc).
-
----
-
 ## Vector-kind strategy (dual-embed v022)
 
 | `vector_kind_strategy` | Behavior |

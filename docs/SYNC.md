@@ -14,8 +14,6 @@ run benchmarks (most users don't), see [BENCH_SYNC.md](BENCH_SYNC.md).
   delta sync to PostgreSQL via `bin/pg_sync.py`.
 - **`memory/agent_chatlog.db`** — raw chat archive (Claude Code, Codex logs)
   awaiting promotion. Synced if the file exists; skipped silently if not.
-- **ChromaDB embeddings** — vector store mirror, push/pull both directions
-  via `bin/chroma_sync_cli.py`.
 
 That's it. The repo does not ship sync support for bench result DBs or other
 custom databases. If you self-host a more complex layout (e.g., separate
@@ -30,8 +28,7 @@ is no shipped warehouse migration for non-default DBs.
 You need:
 
 1. A reachable PostgreSQL server (your warehouse).
-2. A reachable ChromaDB instance (typically on the same host as Postgres).
-3. The connection string stored in your OS keyring or env var.
+2. The connection string stored in your OS keyring or env var.
 
 Set two env vars (typical values shown):
 
@@ -70,8 +67,7 @@ What it does:
 
 1. TCP-probes `$POSTGRES_SERVER` (3-second timeout).
 2. If reachable, runs `bin/pg_sync.py` for `agent_memory.db`.
-3. Runs `bin/chroma_sync_cli.py both` (bidirectional).
-4. Logs to `logs/sync_all.log`.
+3. Logs to `logs/sync_all.log`.
 
 Dry-run (just check connectivity, don't write):
 
@@ -130,13 +126,8 @@ the newer one wins. This means:
 `logs/sync_all.log` for orphaned PIDs. The lock file is at
 `memory/.pg_sync.lock`; remove it manually if stale.
 
-**"chroma_sync timed out after 120s"** → ChromaDB is slow or wedged. Check:
-- ChromaDB heartbeat: `curl -m 5 http://$POSTGRES_SERVER:8000/api/v2/heartbeat`
-- ChromaDB queue size — if growing without bound, the service may need a
-  restart. Out of scope here; see your warehouse host's docs.
-
 **"Schema mismatch / missing column"** → You haven't applied the latest
-warehouse migration. See setup, step 3.
+warehouse migration. See setup.
 
 **Hourly task stops running on Windows** → Task may auto-disable after
 repeated failures. Check `schtasks /Query /FO LIST /V | grep -i m3-memory`

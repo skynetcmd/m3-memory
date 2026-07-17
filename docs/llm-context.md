@@ -12,7 +12,7 @@
 - **Name:** `m3-memory`
 - **Class:** Model Context Protocol (MCP) server / local-first agentic memory layer.
 - **Function:** Persistent, bitemporal, hybrid-search long-term memory for AI agents.
-- **Execution:** Local-first; fully offline-capable; core has no external API dependency. Optional cloud/sync backends (PostgreSQL, ChromaDB).
+- **Execution:** Local-first; fully offline-capable; core has no external API dependency. Optional cloud/sync backend (PostgreSQL).
 - **M3 IS:** a persistent memory layer · an MCP server · a hybrid retrieval engine (FTS5 + vector + MMR) · a bitemporal knowledge base.
 - **M3 IS NOT:** an LLM · a chatbot · a standalone vector database · a RAG framework · an IDE · a replacement for Claude/Gemini.
 

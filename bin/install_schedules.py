@@ -243,7 +243,7 @@ def get_schedule_specs(m3_memory_root):
             "schedule": "HOURLY",
             "modifier": "1",
             "time": "00:00",
-            "description": "Hourly sync: SQLite <-> PostgreSQL + ChromaDB"
+            "description": "Hourly sync: SQLite <-> PostgreSQL"
         },
         {
             "name": "AgentOS_Maintenance",

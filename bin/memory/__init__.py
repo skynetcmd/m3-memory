@@ -20,7 +20,6 @@ defer imports here, because:
      paid all of this already.
 """
 from . import (
-    chroma,  # noqa: F401
     chunking,  # noqa: F401
     config,  # noqa: F401
     db,  # noqa: F401
@@ -34,5 +33,5 @@ from . import (
     util,  # noqa: F401
 )
 
-__all__ = ["config", "util", "fts", "db", "embed", "chroma", "search",
+__all__ = ["config", "util", "fts", "db", "embed", "search",
             "entity", "entity_count", "doctor", "chunking", "textprep"]

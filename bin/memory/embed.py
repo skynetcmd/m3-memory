@@ -695,7 +695,7 @@ def _get_embed_client() -> _httpx.AsyncClient:
                     keepalive_expiry=_EMBED_HTTP_KEEPALIVE_EXPIRY,
                 )
                 timeout = _httpx.Timeout(
-                    connect=config.CHROMA_CONNECT_T,
+                    connect=config.EMBED_TIMEOUT_CONNECT,
                     read=config.EMBED_TIMEOUT_READ,
                     write=10.0,
                     pool=5.0,
@@ -847,7 +847,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                 # "MCP server locked up" wedge). The server also infers this
                 # from the batch size of 1, but the header makes it explicit.
                 headers={"X-M3-Embed-Priority": "interactive"},
-                timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ),
+                timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ),
             )
             resp.raise_for_status()
             payload = resp.json()
@@ -912,7 +912,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                         f"{base_url}/embeddings",
                         json={"model": model, "input": text},
                         headers={"Authorization": f"Bearer {token}"},
-                        timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ),
+                        timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ),
                     )
                     resp.raise_for_status()
                     emb = resp.json()["data"][0]["embedding"]
@@ -1005,7 +1005,7 @@ async def _embed(text: str) -> tuple[list[float] | None, str]:
                         post_url,
                         json={"model": config.EMBED_MODEL, "input": scrubbed_text},
                         headers=headers,
-                        timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 2),
+                        timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ * 2),
                     )
                     resp.raise_for_status()
                     emb = resp.json()["data"][0]["embedding"]
@@ -1148,7 +1148,7 @@ async def _embed_many_cloud_fallback(
             post_url,
             json={"model": config.EMBED_MODEL, "input": cloud_texts},
             headers=headers,
-            timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 4),
+            timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ * 4),
         )
         resp.raise_for_status()
         data = resp.json()["data"]
@@ -1284,7 +1284,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
             # server's interactive threshold) isn't misrouted into the reserved
             # interactive fast-lane. The lane is for latency-sensitive queries.
             headers={"X-M3-Embed-Priority": "bulk"},
-            timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 4),
+            timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ * 4),
         )
         resp.raise_for_status()
         data = resp.json()["data"]
@@ -1337,7 +1337,7 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
                 f"{base_url}/embeddings",
                 json={"model": model, "input": chunk_texts},
                 headers={"Authorization": f"Bearer {token}"},
-                timeout=_httpx.Timeout(config.CHROMA_CONNECT_T, read=config.EMBED_TIMEOUT_READ * 4),
+                timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ * 4),
             )
             resp.raise_for_status()
             data = resp.json()["data"]
