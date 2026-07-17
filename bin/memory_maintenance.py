@@ -954,6 +954,286 @@ async def memory_consolidate_impl(
     return "\n".join(results)
 
 
+# ── Procedural distillation (tasks → reusable `procedure` memories) ──────────
+#
+# Sibling of memory_consolidate_impl: where consolidation rolls up N episodic
+# `observation` memories into a `belief`, distillation rolls up successful task
+# runs (a task + its step/result memories) into a reusable `procedure` memory
+# via a `distills_from` edge. KEY DIFFERENCE from consolidation: sources are
+# PRESERVED (never soft-deleted) — the completed tasks stay queryable; a
+# procedure augments history, it doesn't replace it.
+#
+# BACKEND-AGNOSTIC throughout: all SQL goes through dialect() (param()/
+# now_minus_days()), and the write reuses the already-agnostic
+# memory_write_impl (which embeds + inserts via the seam) and memory_link_impl.
+# No raw SQLite INSERTs, no per-backend branch — runs on SQLite, PostgreSQL, and
+# a future MariaDB unchanged.
+
+# Valid procedure sub-kinds. Soft-validated: an unknown kind is allowed (users
+# extend), but a model reply outside this set defaults to "skill".
+VALID_PROCEDURE_KINDS = frozenset({"skill", "runbook", "how_to", "checklist"})
+
+
+def _resolve_distill_model() -> str:
+    """Return the M3_DISTILL_MODEL selector (local-first default).
+
+    - unset / "slm"  → the local `procedure_local` SLM profile (sovereign default)
+    - "llm"          → largest local model via get_best_llm failover
+    - any other value → treated as a profile NAME (another local model, or a
+                        cloud endpoint via a `backend: anthropic|openai` profile)
+    """
+    return (os.environ.get("M3_DISTILL_MODEL", "") or "slm").strip()
+
+
+async def _distill_call_model(prompt: str) -> "str | None":
+    """Run the distillation prompt through the resolved model. Returns the raw
+    reply text, or None if no model is available / the call fails. Local-first,
+    cloud-capable — the resolution is config, never a forced cloud dependency."""
+    selector = _resolve_distill_model()
+
+    if selector == "llm":
+        # Largest local model (the belief-consolidation path).
+        token = ctx.get_secret("LM_API_TOKEN") or "lm-studio"
+        client = _get_embed_client()
+        result = await get_best_llm(client, token)
+        if not result:
+            return None
+        base_url, model = result
+        try:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                json={"model": model,
+                      "messages": [{"role": "user", "content": prompt}],
+                      "temperature": 0.2},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=memory_core.LLM_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("choices"):
+                return None
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"distill llm call failed: {type(e).__name__}: {e}")
+            return None
+
+    # "slm" (default) or a named profile → the shared Profile loader + _call_model
+    # (which already dispatches openai|anthropic, so cloud is config-only).
+    import httpx
+
+    from slm_intent import _call_model, load_profile
+
+    prof_name = "procedure_local" if selector in ("", "slm") else selector
+    prof = load_profile(prof_name)
+    if prof is None:
+        logger.warning(f"distill profile {prof_name!r} not found; skipping distillation")
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=prof.timeout_s) as client:
+            return await _call_model(prof, prompt, client)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"distill slm call failed (profile={prof_name!r}): {type(e).__name__}: {e}")
+        return None
+
+
+def _parse_procedure(text: str) -> "dict | None":
+    """Parse the model's JSON procedure. Mirrors run_reflector's parse pattern
+    (strip fences + JSON_RE + json.loads). Returns None on malformed / empty
+    (no steps) output."""
+    from agent_protocol import strip_code_fences
+    from run_reflector import JSON_RE
+
+    m = JSON_RE.search(strip_code_fences(text or ""))
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    steps = obj.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return None
+    kind = str(obj.get("procedure_kind", "skill")).strip().lower()
+    if kind not in VALID_PROCEDURE_KINDS:
+        kind = "skill"
+    obj["procedure_kind"] = kind
+    return obj
+
+
+def _render_procedure_markdown(proc: dict) -> str:
+    """Human-readable markdown body for a distilled procedure (also what gets
+    embedded, so it's searchable)."""
+    lines = [f"# {proc.get('name') or 'Procedure'}", ""]
+    pre = proc.get("preconditions") or []
+    if isinstance(pre, list) and pre:
+        lines.append("## Preconditions")
+        lines.extend(f"- {p}" for p in pre)
+        lines.append("")
+    lines.append("## Steps")
+    for i, step in enumerate(proc.get("steps") or [], 1):
+        lines.append(f"{i}. {step}")
+    lines.append("")
+    got = proc.get("gotchas") or []
+    if isinstance(got, list) and got:
+        lines.append("## Gotchas")
+        lines.extend(f"- {g}" for g in got)
+    return "\n".join(lines).strip()
+
+
+async def memory_distill_procedures_impl(
+    stale_days: int = 3,
+    threshold: int = 1,
+    max_procedures: int = 20,
+    dry_run: bool = False,
+):
+    """Distill successful (completed) task runs into reusable `procedure` memories.
+
+    Backend-agnostic via dialect() + memory_write_impl + memory_link_impl.
+
+    Args:
+      stale_days: only consider tasks completed more than N days ago (lets a
+        just-finished task settle before it's distilled). 0 = no age filter.
+      threshold: minimum number of candidate completed tasks required before any
+        distillation runs (anti-noise). Default 1.
+      max_procedures: cap procedures written per run (anti-runaway).
+      dry_run: preview candidates without any LLM call or write.
+
+    A source task must be state='completed', not deleted, and carry a
+    result_memory_id (so there is a distillable result). Sources are PRESERVED
+    (linked via 'distills_from', never soft-deleted).
+    """
+    from memory.backends import dialect
+    from memory_core import memory_write_impl
+
+    _d = dialect()
+    p = _d.param()
+
+    # 1. Select completed, non-deleted tasks with a result, aged past stale_days.
+    #    Built through the dialect so the same SQL runs on SQLite / PG / MariaDB.
+    where = ["state = 'completed'", "deleted_at IS NULL", "result_memory_id IS NOT NULL"]
+    params: list = []
+    if stale_days > 0:
+        where.append(f"completed_at IS NOT NULL AND completed_at < {_d.now_minus_days(p)}")
+        params.append(stale_days)
+    # NOTE: the tasks table carries no conversation_id/user_id/agent_id — those
+    # live on the memories. We derive conversation_id + user_id from the task's
+    # RESULT memory below, and use owner_agent/created_by for attribution.
+    sql = (
+        "SELECT id, title, description, result_memory_id, owner_agent, "
+        "created_by FROM tasks WHERE "
+        + " AND ".join(where)
+        + " ORDER BY completed_at ASC"
+    )
+
+    with _db() as db:
+        tasks = db.execute(sql, params).fetchall()
+
+    if len(tasks) < max(threshold, 1):
+        return (f"No procedural distillation: {len(tasks)} completed task(s) "
+                f"with results (threshold {threshold}).")
+
+    tasks = tasks[:max_procedures]
+
+    if dry_run:
+        preview = [f"- task {t['id']}: {t['title'] or '(untitled)'}" for t in tasks]
+        return (f"DRY RUN — {len(tasks)} task(s) would distill into procedures:\n"
+                + "\n".join(preview))
+
+    results: list[str] = []
+    for t in tasks:
+        # 2. Gather the task's result + step memories. The result memory is the
+        #    anchor; sibling step memories share its conversation_id (if any).
+        #    conversation_id + user_id are read from the RESULT memory (the tasks
+        #    table carries neither), so the procedure lands under the same tenant.
+        src_ids: list[str] = []
+        step_texts: list[str] = []
+        conv = None
+        res_user_id = ""
+        with _db() as db:
+            res = db.execute(
+                f"SELECT id, title, content, conversation_id, user_id "
+                f"FROM memory_items WHERE id = {p} AND is_deleted = 0",
+                (t["result_memory_id"],),
+            ).fetchone()
+            if res:
+                src_ids.append(res["id"])
+                step_texts.append(f"- RESULT: {res['title'] or ''}: {res['content']}")
+                conv = res["conversation_id"]
+                res_user_id = res["user_id"] or ""
+            if conv:
+                steps = db.execute(
+                    f"SELECT id, title, content FROM memory_items "
+                    f"WHERE conversation_id = {p} AND is_deleted = 0 "
+                    f"AND id <> {p} ORDER BY created_at ASC LIMIT 50",
+                    (conv, t["result_memory_id"]),
+                ).fetchall()
+                for s in steps:
+                    src_ids.append(s["id"])
+                    step_texts.append(f"- STEP: {s['title'] or ''}: {s['content']}")
+
+        if not src_ids:
+            continue
+
+        # 3. Distill via the pluggable local-first/cloud model.
+        prompt = (
+            "Distill this successful task run into a reusable procedure.\n\n"
+            f"TASK: {t['title'] or '(untitled)'}\n"
+            f"DESCRIPTION: {t['description'] or ''}\n\n"
+            "STEPS AND RESULT:\n" + "\n".join(step_texts)
+        )
+        reply = await _distill_call_model(prompt)
+        if not reply:
+            results.append(f"Skipped task {t['id']}: no distillation model output.")
+            continue
+        proc = _parse_procedure(reply)
+        if proc is None:
+            results.append(f"Skipped task {t['id']}: model returned no coherent procedure.")
+            continue
+
+        # 4. Write the procedure via the backend-agnostic impl (embeds + inserts
+        #    through the seam). procedure_kind + steps ride metadata_json.
+        body = _render_procedure_markdown(proc)
+        meta = json.dumps({
+            "procedure_kind": proc["procedure_kind"],
+            "steps": proc.get("steps") or [],
+            "preconditions": proc.get("preconditions") or [],
+            "gotchas": proc.get("gotchas") or [],
+            "distilled_from_task": t["id"],
+        })
+        proc_id = await memory_write_impl(
+            type="procedure",
+            content=body,
+            title=(proc.get("name") or (t["title"] or "Procedure"))[:200],
+            metadata=meta,
+            agent_id=t["owner_agent"] or t["created_by"] or "",
+            importance=0.8,
+            source="distillation",
+            user_id=res_user_id,
+            confidence=0.85,
+        )
+        # memory_write_impl's success string is "Created: <uuid>[ (…)]". Parse
+        # the uuid defensively (same contract supersede relies on); skip the
+        # provenance link if the write was rejected / the format changed.
+        if not (isinstance(proc_id, str) and proc_id.startswith("Created:")):
+            results.append(f"Skipped task {t['id']}: procedure write failed: {proc_id}")
+            continue
+        new_id = proc_id.split("Created:", 1)[1].strip().split()[0]
+
+        # 5. Provenance: link the procedure to each source (sources PRESERVED).
+        with _db() as db:
+            for sid in src_ids:
+                memory_link_impl(new_id, sid, "distills_from", db=db)
+
+        results.append(
+            f"Distilled task {t['id']} → procedure {new_id} "
+            f"(kind={proc['procedure_kind']}, {len(src_ids)} source(s))"
+        )
+
+    return "\n".join(results) if results else "No procedures distilled."
+
+
 if __name__ == "__main__":
     # Scheduled-task entrypoint. Previously invoked via
     #   python -c "import memory_maintenance; memory_maintenance.memory_maintenance_impl()"

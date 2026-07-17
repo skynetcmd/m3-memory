@@ -637,6 +637,55 @@ async def run_consolidate_pass(args):
         logger.error(f"Consolidation pass error: {type(e).__name__}: {e}")
 
 
+def has_distill_work(core_db: Optional[str], threshold: int, stale_days: int) -> bool:
+    """SQL check: are there enough completed tasks (with a result, aged past
+    stale_days) to bother distilling into procedures? Mirrors
+    memory_distill_procedures_impl's selection so the loop only spends a model
+    call when there's real work (event-driven, backend-agnostic via dialect)."""
+    try:
+        from memory.backends import dialect
+        _d = dialect()
+        _p = _d.param()
+        clause = ""
+        params: tuple = (threshold,)
+        if stale_days > 0:
+            clause = f" AND completed_at IS NOT NULL AND completed_at < {_d.now_minus_days(_p)}"
+            params = (int(stale_days), threshold)
+        sql = (
+            "SELECT 1 FROM tasks "
+            "WHERE state='completed' AND deleted_at IS NULL "
+            "AND result_memory_id IS NOT NULL" + clause + " "
+            f"GROUP BY state HAVING COUNT(*) >= {_p} LIMIT 1"
+        )
+        return len(_probe_core(core_db, sql, params)) > 0
+    except Exception as e:
+        logger.debug(f"Distill work check failed (non-fatal): {e}")
+        return False  # conservative: no model work unless we can confirm some
+
+
+async def run_distill_pass(args):
+    """Distill successful task runs into reusable 'procedure' memories —
+    governor-gated, event-driven. Only fires when enough completed tasks exist
+    AND M3_DISTILL_AUTO=1 is set (the job itself enforces the dry-run-unless-
+    opted-in + activity-yield contract). Delegates to distill_procedures._run so
+    the loop and the standalone cron/CLI share ONE implementation."""
+    if not has_distill_work(args.database, args.distill_threshold, args.distill_stale_days):
+        logger.debug("No distillation work (no completed tasks over threshold). Skipping.")
+        return
+    logger.info("Starting Procedural Distillation pass...")
+    try:
+        import distill_procedures
+        out = await distill_procedures._run(
+            apply=True,  # the job gates real writes on M3_DISTILL_AUTO + idle
+            threshold=args.distill_threshold,
+            stale_days=args.distill_stale_days,
+            max_procedures=args.distill_max_procedures,
+        )
+        logger.info("Distillation pass: %s", out.strip().replace("\n", " | "))
+    except Exception as e:
+        logger.error(f"Distillation pass error: {type(e).__name__}: {e}")
+
+
 def has_chatlog_prune_work(chatlog_db: Optional[str], prune_days: float,
                            min_rows: int) -> bool:
     """SQL check: are there enough aged chat_log turns to bother pruning?
@@ -768,6 +817,12 @@ async def main_loop(args):
         entity_local = _profile_is_local(args.profile_entities)
         enrich_local = _profile_is_local(args.profile_enrich)
         consolidate_local = True  # belief consolidation uses the local LLM
+        # Distillation's default model is local (M3_DISTILL_MODEL=slm/llm); it's
+        # only non-local when pointed at a cloud profile, so gate on the GPU by
+        # default (mirrors consolidate). A cloud endpoint won't touch the GPU,
+        # but treating it as local here only makes the loop slightly more
+        # conservative under GPU load, never wrong.
+        distill_local = True
 
         def _effective_limit(pace: dict) -> int:
             return _THROTTLED_LIMIT if pace["background"] == "THROTTLED" else _full_limit
@@ -792,6 +847,7 @@ async def main_loop(args):
             {"name": "embed",      "skip": args.skip_embed,         "gpu": True,              "sets_limit": True,  "run": run_embed_pass},
             {"name": "classify",   "skip": args.skip_classify,      "gpu": enrich_local,      "sets_limit": True,  "run": run_classify_pass},
             {"name": "consolidate","skip": args.skip_consolidate,   "gpu": consolidate_local, "sets_limit": False, "run": run_consolidate_pass},
+            {"name": "distill",    "skip": args.skip_distill,       "gpu": distill_local,     "sets_limit": False, "run": run_distill_pass},
             {"name": "prune",      "skip": args.skip_chatlog_prune, "gpu": None,              "sets_limit": False, "run": run_chatlog_prune_pass},
         ]
         # Round-robin order + idle-aware intensity (see _select_pass_order). When
@@ -910,6 +966,18 @@ def main():
                         help="Only consolidate items older than N days (default: 7)")
     parser.add_argument("--consolidate-source-type", default="observation",
                         help="Episodic source memory type to roll up (default: observation)")
+
+    # Procedural distillation pass. Event-driven + governor-gated inside the
+    # loop; the job still requires M3_DISTILL_AUTO=1 to actually write (else
+    # dry-run). Rolls up completed task runs → reusable 'procedure' memories.
+    parser.add_argument("--skip-distill", action="store_true",
+                        help="Skip the procedural-distillation pass")
+    parser.add_argument("--distill-threshold", type=int, default=1,
+                        help="Min completed tasks before distilling (default: 1)")
+    parser.add_argument("--distill-stale-days", type=int, default=3,
+                        help="Only distill tasks completed > N days ago (default: 3)")
+    parser.add_argument("--distill-max-procedures", type=int, default=20,
+                        help="Max procedures written per distillation run (default: 20)")
 
     # Chatlog aged noise-prune pass. Governor-gated + event-driven; real
     # writes require M3_CHATLOG_PRUNE_AUTO=1 (else dry-run). Replaces a fixed cron.

@@ -1,0 +1,50 @@
+# Procedural-distillation SLM profile — the LOCAL-FIRST default model that
+# memory_distill_procedures uses to roll up successful task+step runs into a
+# reusable `procedure` memory. Sibling of the observer/reflector profiles.
+#
+# This is the DEFAULT resolution of M3_DISTILL_MODEL (=`slm`). To use a bigger
+# local model instead, set M3_DISTILL_MODEL=llm (largest local via get_best_llm),
+# or point M3_DISTILL_MODEL at another profile name. To use a CLOUD model, copy
+# this file, set `backend: anthropic` (or keep `openai` for an OpenAI-compatible
+# endpoint), and point `url`/`model`/`api_key_service` at the cloud endpoint —
+# cloud is config, not new code. Local-first by default, cloud-capable by config.
+#
+# The wire protocol is OpenAI-compatible /v1/chat/completions by default. Edit
+# url/model/api_key_service to match your environment (Ollama/LM Studio/vLLM/…).
+# Output is structured JSON (see the system prompt); the engine parses it with
+# the same strip-fences + JSON_RE + json.loads pattern the Reflector uses.
+
+url: http://127.0.0.1:11434/v1/chat/completions
+model: qwen2.5:7b-instruct
+api_key_service: LM_API_TOKEN
+backend: openai
+timeout_s: 60.0
+temperature: 0.2
+max_tokens: 1200
+system: |
+  You distill one or more SUCCESSFUL task runs (a task title, its description,
+  and the ordered step/result memories it produced) into a single REUSABLE
+  procedure another agent could follow next time.
+
+  Reply with ONLY a JSON object, no prose, no code fences:
+  {
+    "name": "<short imperative procedure name>",
+    "procedure_kind": "<one of: skill | runbook | how_to | checklist>",
+    "preconditions": ["<what must be true before starting>"],
+    "steps": ["<ordered step>", "..."],
+    "gotchas": ["<pitfall or thing that went wrong and how it was handled>"]
+  }
+
+  Choose procedure_kind by shape: runbook for an operational recovery/deploy
+  sequence, how_to for a task-oriented walkthrough, checklist for a verification
+  list, skill for a general reusable capability. Keep steps concrete and ordered.
+  If the runs don't form a coherent procedure, return {"steps": []}.
+# labels/fallback are unused for distillation (this profile is called directly
+# for free-form structured output, not label classification) but kept so the
+# Profile loader — shared with classify_intent — accepts the file.
+labels:
+  - skill
+  - runbook
+  - how_to
+  - checklist
+fallback: skill
