@@ -65,11 +65,40 @@ M3StorageBackend(
 - **CrewAI ≥ 1.10** (the unified-memory `StorageBackend` protocol shipped in
   v1.10, Feb 2026; v1.0 GA predates it). Older versions fail loud with an upgrade
   hint. This adapter targets CrewAI **v1.x** only.
-- **Python ≥ 3.10 and < 3.14.** This is a CrewAI constraint (every CrewAI 1.x
-  release requires `>=3.10,<3.14`), not m3's — `pip install m3-memory[crewai]`
-  can only resolve on a supported interpreter. m3 itself runs on 3.14; use a
-  3.10–3.13 environment for the crew that talks to it.
+- **Python ≥ 3.10 and < 3.14 (default path).** This is a CrewAI constraint
+  (every CrewAI 1.x release, through 1.15.4, declares `>=3.10,<3.14`), not m3's —
+  a plain `pip install m3-memory[crewai]` can only resolve on a supported
+  interpreter. m3 itself runs on 3.14; the simplest path is a 3.10–3.13
+  environment for the crew that talks to it.
 - No mem0 dependency — m3 satisfies CrewAI's contract natively.
+
+### Python 3.14 escape hatch (unofficial — verified 2026-07-17)
+
+CrewAI's `<3.14` cap is a **transitive dependency lag, not a code
+incompatibility.** CrewAI 1.x is a pure-Python wheel; the actual blocker is that
+it pins `chromadb~=1.1.0`, and `chromadb 1.1.x` imports `pydantic.v1`, which
+raises on Python 3.14 (`Core Pydantic V1 functionality isn't compatible with
+Python 3.14 or greater`). A newer chromadb (≥ 1.5) dropped that dependency.
+
+If you must run the crew on 3.14, you can force it — at your own risk:
+
+```bash
+pip install --ignore-requires-python "crewai>=1.15,<2"
+pip install --ignore-requires-python "chromadb>=1.5"   # overrides crewai's ~=1.1.0 pin
+```
+
+Verified 2026-07-17 on **Python 3.14.6** against **crewai 1.15.4** + **chromadb
+1.5.9**: `import crewai` succeeds, m3's conformance suite passes 6/6
+(`isinstance(M3StorageBackend(...), StorageBackend)` + field contracts), and a
+real `save()` → `search()` round-trip returns the correct record ranked first.
+
+Caveats: (1) the `chromadb>=1.5` bump **violates CrewAI's own `chromadb~=1.1.0`
+pin** — m3's save/search path was verified, but CrewAI's *other* Chroma-backed
+subsystems (e.g. its built-in short-term memory) were not exercised and may
+misbehave under the override. (2) This is **not tested or supported by CrewAI**;
+`--ignore-requires-python` bypasses their guard deliberately. Prefer the 3.10–3.13
+path for production until CrewAI lifts the cap upstream (which only needs the
+chromadb pin bumped).
 
 ## How it maps
 
