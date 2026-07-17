@@ -335,7 +335,11 @@ filterwarnings = [
     # with_m3_history intentionally wraps LangChain's RunnableWithMessageHistory,
     # which LangChain marked *Pending*Deprecation (favoring LangGraph persistence).
     # Deliberate compat shim; migrate when LangChain promotes it to real @deprecated.
-    "ignore:.*RunnableWithMessageHistory is deprecated.*:langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
+    # Category is the built-in PendingDeprecationWarning (LangChainPendingDeprecationWarning
+    # subclasses it) — NOT the langchain_core class path, because pytest imports the
+    # category module to resolve the filter, and the drift-check CI job runs without
+    # langchain installed (that import would fail the whole run under `error`).
+    "ignore:.*RunnableWithMessageHistory is deprecated.*:PendingDeprecationWarning",
     # ── (B) our own process-lifetime singletons (by design; not per-test leaks) ─
     # M3Client's shared daemon asyncio loop-thread (§8) is alive at test end by
     # design (torn down at interpreter exit). See tests/test_langchain_*.py comments.
