@@ -9,6 +9,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import importlib.util
+import inspect
 import json
 import logging
 import os
@@ -375,8 +376,10 @@ class CustomScriptExtractor(BaseExtractor):
 
             fn = getattr(mod, self.function_name)
 
-            # Support both async and sync custom functions
-            if asyncio.iscoroutinefunction(fn):
+            # Support both async and sync custom functions. inspect.iscoroutinefunction
+            # is the supported form — asyncio.iscoroutinefunction is deprecated (3.14)
+            # and slated for removal in 3.16.
+            if inspect.iscoroutinefunction(fn):
                 res = await fn(text)
             else:
                 res = fn(text)
