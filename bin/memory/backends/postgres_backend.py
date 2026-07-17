@@ -619,12 +619,47 @@ class PostgresBackend:
         tenancy_sql: str = "",
         tenancy_params: tuple = (),
     ) -> "list[VectorHit]":
-        """Baseline vector search: BYTEA embeddings + Rust cosine (no pgvector).
+        """Vector search, dispatched by capability to the best available path.
 
-        Identical to the SQLite path except for placeholder style and that BYTEA
-        comes back as memoryview/bytes (normalized in the shared scorer). Works
-        on vanilla, locked-down federal Postgres — pgvector/HNSW is a Phase-4
-        opt-in behind the capability probe, never required here.
+        The result SHAPE is identical regardless of arm (base.py invariant). Today
+        only the add-on-free baseline exists; the ``if caps.has("pgvector")`` fork
+        is the declared SEAM POINT so a future pgvector/HNSW ANN arm is a NEW ARM
+        in this file, not a signature change across the seam (§1: CPU-only floor
+        never regresses; pgvector is a Phase-4 opt-in behind the probe).
+        """
+        if self._detect_vector_accelerator(conn):
+            # Placeholder for the pgvector ANN arm (Phase-4 opt-in). It MUST return
+            # the same list[VectorHit] shape as the baseline. Until implemented,
+            # fall through to the always-correct baseline (no behavior change).
+            # Probes the CALLER'S conn, never a fresh pooled connection.
+            pass
+        return self._vector_search_baseline(
+            conn,
+            query_vector,
+            limit=limit,
+            dim=dim,
+            embed_models=embed_models,
+            tenancy_sql=tenancy_sql,
+            tenancy_params=tenancy_params,
+        )
+
+    def _vector_search_baseline(
+        self,
+        conn: object,
+        query_vector: list,
+        *,
+        limit: int,
+        dim: int,
+        embed_models: tuple = (),
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+    ) -> "list[VectorHit]":
+        """The extension-free arm: BYTEA embeddings + Rust cosine (no pgvector).
+
+        Identical to the SQLite baseline except for placeholder style and that
+        BYTEA comes back as memoryview/bytes (normalized in the shared scorer).
+        Works on vanilla, locked-down federal Postgres — the CPU-only floor the
+        conformance test asserts.
         """
         from ._vector import score_and_rank
 
@@ -659,11 +694,7 @@ class PostgresBackend:
         vector_accel = "none"
         try:
             with self.connection() as conn:
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT 1 FROM pg_extension WHERE extname = 'vector'"
-                )
-                if cur.fetchone() is not None:
+                if self._detect_vector_accelerator(conn):
                     vector_accel = "pgvector"
         except Exception:
             vector_accel = "none"
@@ -673,3 +704,17 @@ class PostgresBackend:
             vector_accelerator=vector_accel,  # type: ignore[arg-type]
         )
         return self._caps
+
+    @staticmethod
+    def _detect_vector_accelerator(conn: object) -> bool:
+        """True iff pgvector is installed, probed on the GIVEN connection (never
+        opens a new pooled connection — so ``vector_search``, which already holds
+        ``conn``, doesn't borrow a second one and risk starving a small pool).
+        Never raises: any failure means the always-correct BYTEA+Rust floor.
+        """
+        try:
+            cur = conn.cursor()  # type: ignore[attr-defined]
+            cur.execute("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
+            return cur.fetchone() is not None
+        except Exception:
+            return False

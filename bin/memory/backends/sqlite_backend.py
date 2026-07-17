@@ -128,13 +128,10 @@ class SqliteBackend:
         """
         vector_accel = "none"
         try:
-            # Lazy import: search_routing already owns the canonical probe
-            # (SELECT vec_version()); reuse it rather than re-implementing.
             from .. import db as _db_mod
-            from ..search_routing import _detect_sqlite_vec
 
             with _db_mod._db() as conn:
-                if _detect_sqlite_vec(conn):
+                if self._detect_vector_accelerator(conn):
                     vector_accel = "sqlite_vec"
         except Exception:
             # Any probe failure -> stay on the add-on-free baseline. Never raise
@@ -145,6 +142,21 @@ class SqliteBackend:
             keyword="fts5",
             vector_accelerator=vector_accel,  # type: ignore[arg-type]
         )
+
+    @staticmethod
+    def _detect_vector_accelerator(conn: object) -> bool:
+        """True iff sqlite-vec is loadable on ``conn``. Probes the GIVEN connection
+        (never opens a new one), so a caller that already holds a conn — e.g.
+        ``vector_search`` — checks against the same session without touching global
+        pool state. Reuses ``search_routing``'s canonical ``vec_version()`` probe.
+        Never raises: any failure means "no accelerator", the always-correct floor.
+        """
+        try:
+            from ..search_routing import _detect_sqlite_vec
+
+            return bool(_detect_sqlite_vec(conn))
+        except Exception:
+            return False
 
     def connection(self) -> AbstractContextManager:
         """The pooled SQLite connection context manager used everywhere today.
@@ -242,12 +254,52 @@ class SqliteBackend:
         tenancy_sql: str = "",
         tenancy_params: tuple = (),
     ) -> "list[VectorHit]":
-        """Baseline vector search: fetch BLOB embeddings, score via Rust cosine.
+        """Vector search, dispatched by capability to the best available path.
 
-        The extension-free path (no sqlite-vec required) — identical scoring to
-        the non-vec branch of the existing search. Restricts to the compatible
-        embed identity and dim, then delegates ranking to the shared scorer so
-        the ordering matches the Postgres backend for the same rows.
+        The result SHAPE is identical regardless of which path runs (base.py
+        invariant): an accelerator changes *speed*, never the returned list. Today
+        only the add-on-free baseline arm exists; the ``if caps.has(...)`` fork is
+        the declared SEAM POINT so a future accelerator (sqlite-vec ANN) is a NEW
+        ARM in this file — not a signature change across the seam (§1: the
+        universal CPU-only floor never regresses; accelerators are opt-in behind
+        the probe).
+        """
+        if self._detect_vector_accelerator(conn):
+            # Placeholder for the sqlite-vec ANN arm (Phase-4 opt-in). It MUST
+            # return the same list[VectorHit] shape as the baseline. Until it is
+            # implemented, fall through to the always-correct baseline rather than
+            # silently degrading — the probe being present doesn't yet mean an ANN
+            # index exists. (No behavior change vs today.) Probes the CALLER'S conn,
+            # never a fresh global connection.
+            pass
+        return self._vector_search_baseline(
+            conn,
+            query_vector,
+            limit=limit,
+            dim=dim,
+            embed_models=embed_models,
+            tenancy_sql=tenancy_sql,
+            tenancy_params=tenancy_params,
+        )
+
+    def _vector_search_baseline(
+        self,
+        conn: object,
+        query_vector: list,
+        *,
+        limit: int,
+        dim: int,
+        embed_models: tuple = (),
+        tenancy_sql: str = "",
+        tenancy_params: tuple = (),
+    ) -> "list[VectorHit]":
+        """The extension-free arm: fetch BLOB embeddings, score via Rust cosine.
+
+        No sqlite-vec required — identical scoring to the non-vec branch of the
+        existing search. Restricts to the compatible embed identity and dim, then
+        delegates ranking to the shared scorer so the ordering matches the Postgres
+        backend for the same rows. This is the CPU-only floor the conformance test
+        asserts; every future accelerator arm is measured against it.
         """
         from ._vector import score_and_rank
 
