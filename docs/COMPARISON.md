@@ -216,6 +216,7 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 | **Drop-in surfaces** | 👑 All five standard slots: mem0-compatible `Memory`, LangGraph `M3Store` (`BaseStore`), `M3Saver` (`BaseCheckpointSaver` — pause/resume/time-travel), `M3ChatMessageHistory` (short-term), `M3Retriever` (RAG) | Native (its own classes) |
 | **MCP support** | 👑 Native — 100+ tools, also exposed to LangChain agents | No |
 | **Memory types** | 30+ types + auto-classification | Thread, store, episodic, semantic, procedural |
+| **Procedural memory** | 👑 First-class `procedure` type (skill/runbook/how_to/checklist) **auto-distilled from successful task runs**, with `distills_from` provenance and a procedural retrieval boost | 🏆 `procedural` type, manually authored/updated |
 | **Storage topology** | 🏆 Short-term chat-log and long-term memory can be **unified, kept separate, or searched together** by config — retrieve conversation turns and curated facts independently or in one merged query | Thread memory + store are distinct layers, not user-configurable as one |
 | **Contradiction handling** | 👑 Automatic heuristic detect + deterministic explicit supersede (bitemporal) | 🏆 Manual / LLM-driven via procedural memory |
 | **GDPR tooling** | 👑 Built-in `gdpr_forget` + `gdpr_export` | Custom implementation required |
