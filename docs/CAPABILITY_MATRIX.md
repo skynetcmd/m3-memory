@@ -4,6 +4,8 @@
 
 **110 tools across 9 capability groups.** A ⚠️ marks a destructive tool (mutates or deletes).
 
+> **Beyond MCP tools:** M3 also ships a pluggable SQL **storage backend** (SQLite default; PostgreSQL as a first-class primary via `M3_DB_BACKEND=postgres`; MariaDB documented-future) and native **framework adapters** — LangChain/LangGraph, CrewAI, and PydanticAI. These are deployment/framework facts, not MCP tools, so they don't appear in the table below. See [CORE_FEATURES](CORE_FEATURES.md), [COMPARISON](COMPARISON.md), and [EXTENDING](EXTENDING.md).
+
 ## Capability groups
 
 - [🧠 Memory](#memory) — Write, retrieve, version, and reconcile long-term agent memory. (36 tools)

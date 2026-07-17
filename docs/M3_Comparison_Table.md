@@ -28,10 +28,10 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 | Dimension | m3-memory<br>(2026.6.8.1) | agentmemory<br>(V4) | Chronos<br>(High/Res) | Hindsight | Mastra OM | Mem0 | Memento | MemPalace ⚠️ |
 |---|---|---|---|---|---|---|---|---|
 | **[Sovereignty (Main)](#sovereignty-main)** | 🛡️ **Full Sovereign** | 🛡️ **Full Sovereign** | ⚖️ **On-Prem** | ⚖️ **High Local** | ⚖️ **Hybrid** | 🔻 **Cloud-Tied** | ⚖️ **Config-Local** | 🛡️ **Full Verbatim** |
-| ↳ *Data Residency* | 🏆 Local SQLite | ✅ Local SQLite | ✅ Local Files | ✅ Local Files | ⚖️ Postgres / Container | 🔻 Cloud DB | ✅ Local SQLite | ✅ Local SQLite |
+| ↳ *Data Residency* | 🏆 Local SQLite (or PostgreSQL primary) | ✅ Local SQLite | ✅ Local Files | ✅ Local Files | ⚖️ Postgres / Container | 🔻 Cloud DB | ✅ Local SQLite | ✅ Local SQLite |
 | ↳ *Extraction Compute* | 🏆 Local SLM | ✅ Deterministic | ✅ ISO-Temporal | ✅ Neural / Local | 🔻 Cloud Reflector | 🔻 Cloud LLM | ⚖️ User-Defined | ❌ Verbatim only |
 | ↳ *Telemetry / Audit* | 🏆 Zero / Bitemporal | ✅ Zero / Merkle | ✅ Event Logs | ✅ Internal | ⚖️ Usage Logs | 🔻 SaaS Metrics | ✅ Zero / Merkle | 🛡️ Total Dark |
-| ↳ *Infrastructure* | 🏆 Native Python + SQLite (optional in-process Rust core) | ✅ Native Python | ⚖️ Linux / Python | ⚖️ Py / Services | 🔻 Docker stack | ✅ SDK / API | ✅ Native Python | ✅ Native Python |
+| ↳ *Infrastructure* | 🏆 Native Python + pluggable storage (SQLite default / PostgreSQL primary; optional in-process Rust core) | ✅ Native Python | ⚖️ Linux / Python | ⚖️ Py / Services | 🔻 Docker stack | ✅ SDK / API | ✅ Native Python | ✅ Native Python |
 | **[Data Integrity](#data-integrity)** | 🏆 **Bitemporal Logic + Undo** | 🏆 **Merkle Tree** | ✅ **Event Logs** | ✅ **Traceable** | ⚖️ **DB-Level only** | 🔻 **Managed only** | 🏆 **Merkle-Audit** | 🔻 **JSON Desync Risk** |
 | **[Bitemporal & Undo](#bitemporal--undo)** | 🏆 **Full bitemp + Undo** | ⚖️ **Temporal sig.** | ✅ **Audit log** | ✅ **Traceable** | ✅ **3-Date Anchor** | 🔻 **No Undo** | 🏆 **Merkle-Audit** | ❌ **Verbatim only** |
 | **[Privacy / GDPR](#privacy--gdpr)** | 🏆 **Native GDPR tools** | ✅ **Local-only** | ✅ **On-Prem** | ✅ **Local-only** | ⚖️ **Hybrid** | 🔻 **No native** | ✅ **Local-only** | 🛡️ **Total sovereignty** |

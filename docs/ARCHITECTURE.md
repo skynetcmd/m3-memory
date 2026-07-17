@@ -6,7 +6,7 @@
 
 ## 👁️ System Overview
 
-M3 Memory is a local-first persistent memory system for MCP agents. An agent calls MCP tools to write, search, link, and manage memories. All data lives in local SQLite. An optional PostgreSQL sync layer enables cross-device search.
+M3 Memory is a local-first persistent memory system for MCP agents. An agent calls MCP tools to write, search, link, and manage memories. The primary store is pluggable — a local SQLite file by default, or PostgreSQL as a first-class primary backend (`M3_DB_BACKEND=postgres`; see Storage Hierarchy). A separate optional PostgreSQL sync layer enables cross-device search.
 
 ```
 Agent (Claude Code / Gemini CLI / Aider)
@@ -70,6 +70,32 @@ graph TD
 **L1 — Primary store** *(pluggable)*. SQLite by default: all reads and writes hit local SQLite first, WAL mode enables concurrent access, no external dependencies — the recommended default for single-user/local. The primary backend can instead be **PostgreSQL** via `M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL` (opt-in, chosen at install or with `mcp-memory install-m3 --db-backend postgres`), for a shared/server-hosted live store. Note: on the PostgreSQL primary, vector search is currently brute-force Rust cosine; pgvector/HNSW ANN is a future accelerator, not yet implemented.
 
 **L2 — PostgreSQL warehouse** *(optional, separate role)* provides cross-device sync. Bi-directional delta sync uses UUID-based UPSERT with watermark tracking. Syncs memories, relationships, embeddings, and encrypted secrets. Configurable via `M3_CDW_PG_URL` (`PG_URL` still works but is deprecated). This is distinct from using PostgreSQL as the L1 primary store above.
+
+---
+
+## 🧩 Extension Seams
+
+M3 has **two orthogonal extension seams**. The shared `*_impl` business logic
+(write, search, entity resolution, GDPR, …) is single-sourced between them — you
+extend at a seam, you don't fork the core. Full recipes in [EXTENDING.md](EXTENDING.md).
+
+**Storage seam** (`bin/memory/backends/`) — a narrow SQL/DB-API capability
+interface, *not* an ORM. Adding a DB backend is one self-contained
+`<name>_backend.py`: a co-located `Dialect` subclass (the divergent SQL
+fragments), a backend class (`connection`/`ensure_schema`/`keyword_search`/
+`vector_search`), and one `@register_backend` line plus an allow-list entry.
+`active_backend()`/`dialect()` read the registry — no `if name ==` ladder. SQLite
+and PostgreSQL ship; MariaDB is the documented next backend. A document store
+(MongoDB) deliberately does not fit — the seam emits SQL.
+
+**Framework seam** (`bin/catalog/dispatch.py` `_dispatch_one` + a `mapping.py`) —
+a thin adapter that translates a framework's calls into m3 tool dispatch and maps
+structured rows back into the framework's shapes, reusing the framework-agnostic
+`M3Client` dispatch core. Because it only speaks tool-dispatch, an adapter works
+over *every* storage backend with no per-backend code. Shipped adapters:
+LangChain/LangGraph, CrewAI (implements CrewAI's `StorageBackend` protocol), and
+PydanticAI (deps-injected tools + a recall history-processor, plus a formal
+`M3MemoryToolset`).
 
 ---
 

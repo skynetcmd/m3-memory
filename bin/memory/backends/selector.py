@@ -61,9 +61,11 @@ def resolve_backend_name() -> BackendName:
 def active_backend() -> StorageBackend:
     """Return the `StorageBackend` for the configured engine.
 
-    Phase 0: only ``sqlite`` is implemented. Selecting ``postgres`` raises a
-    clear NotImplementedError pointing at the phase that adds it — so the flag
-    can be wired end-to-end and tested now without a half-built PG path.
+    ``sqlite`` (default) and ``postgres`` both ship. The registry resolves the
+    validated name to its backend factory, importing the backend module on
+    demand — no ``if name ==`` ladder here, so adding a backend (e.g. MariaDB)
+    touches only its own file. An allow-listed-but-unregistered name still fails
+    loud at selection time.
     """
     name = resolve_backend_name()
     cached = _backends.get(name)

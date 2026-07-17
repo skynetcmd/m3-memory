@@ -1,22 +1,24 @@
-"""Storage-backend abstraction (Phase 0 of PostgreSQL-as-primary).
+"""Storage-backend abstraction (the pluggable SQL storage seam).
 
-This package introduces a *capability seam* — a narrow protocol describing only
-the storage operations the memory core genuinely needs to vary by backend. It
-does NOT abstract SQL generically and it is NOT an ORM. The failure mode here is
-a fat abstraction; the antidote is a narrow capability interface with native
+This package is a *capability seam* — a narrow protocol describing only the
+storage operations the memory core genuinely needs to vary by backend. It does
+NOT abstract SQL generically and it is NOT an ORM. The failure mode here is a fat
+abstraction; the antidote is a narrow capability interface with native
 per-backend implementations and accelerators chosen behind runtime probes.
 
 Design of record: DESIGN_PHILOSOPHIES §1 (L1 SQLite is the only required store;
-L2 PostgreSQL is opt-in; same code path laptop <-> air-gapped enclave) and §2
-(modularity, shim-preserved identity). The m3 memory directive c4e4a145 carries
-the full rationale.
+L2 PostgreSQL is opt-in — as a first-class primary backend for shared/high-
+concurrency use, or as a warehouse sync tier; same code path laptop <->
+air-gapped enclave) and §2 (modularity, shim-preserved identity). The m3 memory
+directive c4e4a145 carries the full rationale.
 
-Phase 0 scope (this commit): the protocol, the backend selector
-(`M3_DB_BACKEND`), and a SQLite backend that DELEGATES to the existing, proven
-`M3Context`/`_db()` machinery — i.e. a pure refactor with zero behavior change.
-No PostgreSQL implementation exists yet; the hot path is untouched. Subsequent
-phases add the PostgreSQL backend and progressively route call sites through the
-seam, each guarded by the cross-backend parity suite.
+Shipped backends: ``sqlite`` (default; delegates to the proven `M3Context`/
+`_db()` machinery) and ``postgres`` (selected via `M3_DB_BACKEND=postgres`).
+Both are registered via `@register_backend` and resolved through the registry —
+adding another SQL backend (e.g. MariaDB) is one `<name>_backend.py` with a
+co-located `Dialect` subclass plus an allow-list entry, no edits to the shared
+modules. The seam is SQL/DB-API only; a document store (MongoDB) does not fit and
+is deliberately out of scope. See docs/EXTENDING.md (Recipe 1).
 
 Cycle-break rule (§2): modules in this package must NOT top-level-import
 ``memory_core``. Resolve any core callback lazily inside a function body.

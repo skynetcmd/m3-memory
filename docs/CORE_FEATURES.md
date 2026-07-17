@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 1,283 tests across 154 files. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Cross-device sync. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 2,179 tests across 180 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -106,9 +106,27 @@ All LLM features use the local model — zero API costs, zero data exfiltration.
 
 ---
 
+## 🗄️ Pluggable Storage Backend
+
+The storage layer is a narrow SQL/DB-API seam — the engine talks to the backend
+through a `Dialect`, so the primary store is selectable, not hard-wired:
+
+- **SQLite** (default) — zero-infra, a single local file. The battle-tested path.
+- **PostgreSQL** (first-class primary) — set `M3_DB_BACKEND=postgres` +
+  `M3_PRIMARY_PG_URL` for shared, high-concurrency, or multi-user deployments.
+  Same semantics as SQLite (behavior does not depend on the backend).
+- **MariaDB** — a documented next step: adding a backend is one
+  `Dialect` subclass + a `@register_backend` line (see [EXTENDING.md](EXTENDING.md)).
+- The seam is **SQL-only** by design — a document store like MongoDB is
+  deliberately out of scope (it would force a fat abstraction the seam exists to avoid).
+
+---
+
 ## 🔁 Cross-Device Sync
 
-Your memory follows you across machines:
+Your memory follows you across machines. Separately from the primary-backend
+choice above, m3 can **sync/federate a SQLite deployment to a PostgreSQL
+warehouse tier**:
 
 - **Bi-directional delta sync** between SQLite (local) and PostgreSQL (warehouse) via UUID-based UPSERT
 - **Crash-resistant** — watermark-based tracking with at-least-once delivery semantics
@@ -122,6 +140,8 @@ Hourly automated sync.
 
 - **MCP-native** — works with Claude Code, Gemini CLI, Aider, or any MCP client out of the box
 - **LangChain / LangGraph** — five drop-in surfaces: a **Mem0 replacement** (one-line import swap), LangMem-compatible `M3Store`, the `M3Saver` LangGraph checkpointer (pause/resume/time-travel), chat-message history, and a RAG retriever — plus LCEL-native `MemoryWrite`/`MemoryRetrieve`. `pip install m3-memory[langchain]`; see [docs/integrations/LANGCHAIN.md](integrations/LANGCHAIN.md)
+- **CrewAI (v1.x)** — a native `StorageBackend`: `Memory(storage=M3StorageBackend(user_id=…))`. `pip install m3-memory[crewai]`; a CrewAI-written memory stays searchable by your other m3 agents. See [the CrewAI guide](../m3_memory/integrations/crewai/README.md)
+- **PydanticAI** — two tiers: `register_m3_tools` + `m3_recall_processor()` for drop-in tools and auto-recall, and a formal `M3MemoryToolset` (a real PydanticAI `AbstractToolset`). `pip install m3-memory[pydantic-ai]`; runs on Python 3.14. See [the PydanticAI guide](../m3_memory/integrations/pydantic_ai/README.md)
 - **Export/Import** — full memory dump as JSON (with base64 embeddings) for backup, migration, or sharing between M3 instances
 - **Cross-platform** — Windows 11, macOS (Apple Silicon), Linux. Native scheduling via cron or Task Scheduler.
 - **Model-agnostic** — any embedding model via any OpenAI-compatible server. Dimension-validated at runtime.
@@ -130,9 +150,10 @@ Hourly automated sync.
 
 ## 🧪 Tested and Measured
 
-### 193 End-to-End Tests
+### 2,179 Tests (warnings-as-errors)
 
-Every feature is tested — not just the happy path:
+Every feature is tested — not just the happy path (the suite runs with
+`filterwarnings=error`, so a new warning fails the build):
 
 - Memory CRUD with soft and hard delete (cascade verification)
 - Hybrid search with FTS and semantic fallback

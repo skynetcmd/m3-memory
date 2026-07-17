@@ -103,10 +103,13 @@ does not reimplement memory logic. It translates the framework's calls into
 Because the adapter only speaks tool-dispatch, it works over **every** storage
 backend with no per-backend code.
 
-**Two shipped examples of this recipe:**
+All three shipped adapters reuse the framework-agnostic **`M3Client`** dispatch core (`m3_memory/integrations/langchain/m3client.py`) — it owns the shared event-loop thread and the `_dispatch_one` bridge, so a new adapter never re-implements dispatch.
+
+**Three shipped examples of this recipe:**
 
 - **LangChain / LangGraph** — [`m3_memory/integrations/langchain/`](../m3_memory/integrations/langchain/). Shadows mem0's `Memory` API + native `BaseStore`/checkpointer surfaces.
 - **CrewAI (v1.10+)** — [`m3_memory/integrations/crewai/`](../m3_memory/integrations/crewai/). Implements CrewAI's `StorageBackend` protocol. A good template when the framework defines its *own* backend interface (rather than you subclassing its classes): `backend.py` implements the protocol, `mapping.py` converts `MemoryRecord ⇄ m3 row`, and the same `M3Client` dispatch core is reused. It also shows how a memory written through one framework can stay searchable by every other m3 agent — by keeping the framework's own vector *plus* m3's native vector under a second `embed_model` identity on the same item. That cross-framework reach is only possible because m3's `memory_embeddings` table is multi-identity (see Recipe 1); a single-vector store can't do it.
+- **PydanticAI** — [`m3_memory/integrations/pydantic_ai/`](../m3_memory/integrations/pydantic_ai/). The template when a framework has **no memory interface at all** (PydanticAI ships none). Two tiers: Tier 1 is deps-injected tools + a history-processor (`register_m3_tools(agent)` adds `remember`/`recall`/`forget`; `m3_recall_processor()` auto-injects recalled memories); Tier 2 is `M3MemoryToolset`, which subclasses PydanticAI's concrete `FunctionToolset` so `isinstance(ts, AbstractToolset)` is `True` — a formal, attachable toolset without hand-rolling `ToolsetTool` objects. Since PydanticAI hands the adapter *text* (not a vector, unlike CrewAI), recall uses the standard search path — no dual-vector handling. Runs on Python 3.14 (no interpreter cap).
 
 Points to watch when adapting a new framework:
 - **Tenancy (§7):** if the framework's contract has no `user_id` (CrewAI's doesn't), take the tenant at *construction* and stamp it on every call — raise if absent, never fall back to a global scope.

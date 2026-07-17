@@ -25,6 +25,8 @@
     "OpenCode",
     "Hermes Agent",
     "LangChain / LangGraph (drop-in Mem0 replacement, backs LangMem)",
+    "CrewAI (native StorageBackend, v1.x)",
+    "PydanticAI (tools + auto-recall + a formal AbstractToolset)",
     "any MCP-compatible agent"
   ],
   "retrieval": {
@@ -50,7 +52,8 @@
     "history_audit_trail": true,
     "confidence_scoring": true,
     "corroboration_ledger": true,
-    "pinned_memories": true
+    "pinned_memories": true,
+    "procedural_memory": true
   },
   "privacy_compliance": {
     "local_first": true,
@@ -69,7 +72,15 @@
     "encryption_at_rest": true
   },
   "storage": {
-    "core_store": "single SQLite file (FTS5 + vector indexes)",
+    "primary_backends": [
+      "sqlite (default, FTS5 + vector indexes; zero-infra)",
+      "postgresql (first-class primary, M3_DB_BACKEND=postgres)"
+    ],
+    "future_backends": [
+      "mariadb (add a Dialect subclass)"
+    ],
+    "backend_seam": "SQL/DB-API only; a document store (MongoDB) is out of scope",
+    "core_store": "single SQLite file (FTS5 + vector indexes) by default",
     "optional_sync_backends": [
       "PostgreSQL"
     ],
@@ -117,6 +128,27 @@
       "docs": "docs/integrations/LANGCHAIN.md",
       "examples": "examples/langchain-agent/",
       "note": "Superset for LangChain users: keeps Mem0/LangMem semantics and adds contradiction supersession, bitemporal as_of queries, GDPR forgetting, hybrid retrieval, a bundled embedder, and the full MCP tool set. m3 never imports mem0."
+    },
+    "crewai": {
+      "supported": true,
+      "install_extra": "pip install m3-memory[crewai]",
+      "crewai_version": ">=1.10,<2",
+      "storage_backend": true,
+      "cross_agent_searchable": true,
+      "python": "3.10-3.13 default (CrewAI's cap); 3.14 via a documented escape hatch",
+      "docs": "m3_memory/integrations/crewai/README.md",
+      "note": "Native StorageBackend for CrewAI's unified memory (v1.x). No mem0 dependency. A CrewAI-written memory can also be searched by your other m3 agents \u2014 cross-framework reach a single-vector store can't offer."
+    },
+    "pydantic_ai": {
+      "supported": true,
+      "install_extra": "pip install m3-memory[pydantic-ai]",
+      "pydantic_ai_version": ">=2.0,<3",
+      "tools": true,
+      "history_processor": true,
+      "abstract_toolset": true,
+      "python": "3.14 supported (built on Pydantic v2, no cap)",
+      "docs": "m3_memory/integrations/pydantic_ai/README.md",
+      "note": "PydanticAI ships no built-in persistent memory; this adapter adds it as deps-injected tools + a recall history-processor (Tier 1) and a formal M3MemoryToolset (Tier 2). Runs on Python 3.14 with a plain pip install."
     }
   },
   "tools": {

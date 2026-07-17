@@ -36,8 +36,9 @@ agent.run_sync("remember I prefer dark roast", deps=M3Deps(user_id="alice"))
 
 ## Tier 2 — a first-class toolset (formal conformance)
 
-`M3MemoryToolset` **is** a PydanticAI `AbstractToolset` — attach it like any
-native toolset, compose it (`.prefixed()`, `.filtered()`), introspect it:
+`M3MemoryToolset` subclasses PydanticAI's concrete `FunctionToolset`, so it **is**
+a PydanticAI `AbstractToolset` — attach it like any native toolset, compose it
+(`.prefixed()`, `.filtered()`), introspect it:
 
 ```python
 from pydantic_ai import Agent
@@ -79,11 +80,17 @@ M3Deps(
 
 ## Requirements
 
-- **pydantic-ai ≥ 2.0** (either `pydantic-ai` or the lighter `pydantic-ai-slim`).
-  Older versions fail loud with an upgrade hint.
+- **pydantic-ai ≥ 2.0, < 3** (either `pydantic-ai` or the lighter
+  `pydantic-ai-slim`). Older versions fail loud with an upgrade hint.
 - **No Python cap.** Unlike the CrewAI adapter, PydanticAI is built on Pydantic v2
   (no chromadb / pydantic-v1), so it installs and runs on **Python 3.14** with a
   normal `pip install` — same interpreter m3 itself runs on.
+
+> **Verified 2026-07-17 on Python 3.14.6** against **pydantic-ai-slim 2.12.0**:
+> `import` succeeds with a plain `pip install` (no override), `isinstance(
+> M3MemoryToolset(), AbstractToolset)` holds, all three tools register, an `Agent`
+> built with the toolset runs every tool via `TestModel`, and a `remember()` →
+> `recall()` round-trip returns the written memory.
 
 ## How it maps
 

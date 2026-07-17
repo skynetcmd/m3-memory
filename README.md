@@ -67,13 +67,13 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 
 | Feature | Details |
 | :--- | :--- |
-| **Works With** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · LangChain/LangGraph · Any MCP Agent |
+| **Works With** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · LangChain/LangGraph · CrewAI · PydanticAI · Any MCP Agent |
 | **M3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
 | **M3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
 | **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with the correct session as the **#1 result for ~92% of questions**. See [Benchmarks](#-benchmarks). |
 | **Context Efficiency** | Exposes 100+ tools but occupies just **~1.8% of a 200K context window** at startup — lazy domain-gating loads the rest on demand. |
-| **Maturity** | Stable, battle-tested core engine (1,283 tests) that's safe to build on today; new features and integrations are added actively. SQLite by default for lightweight operation; scales out to PostgreSQL for enterprise sync. (See [features.json](docs/features.json)) |
+| **Maturity** | Stable, battle-tested core engine (2,179 tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
 
 ---
 
@@ -141,6 +141,20 @@ pip install m3-memory[langchain]
 ```
 *See [LangChain Integration Guide](docs/integrations/LANGCHAIN.md).*
 
+#### 👥 CrewAI (v1.x)
+A drop-in `StorageBackend` for CrewAI's unified memory:
+```bash
+pip install m3-memory[crewai]   # crewai>=1.10,<2 · Python 3.10–3.13 (a 3.14 escape hatch is documented)
+```
+*See [CrewAI Integration Guide](m3_memory/integrations/crewai/README.md).*
+
+#### 🧩 PydanticAI
+m3 tools + auto-recall, or a formal `M3MemoryToolset`. Built on Pydantic v2 — runs natively on Python 3.14:
+```bash
+pip install m3-memory[pydantic-ai]   # pydantic-ai-slim>=2,<3
+```
+*See [PydanticAI Integration Guide](m3_memory/integrations/pydantic_ai/README.md).*
+
 ---
 
 ### Manual MCP Server Configuration
@@ -201,7 +215,8 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 *   **Hybrid Vector & Keyword Search:** Seamlessly merges vector space, Full-Text Search (FTS5 BM25), and MMR diversity.
 *   **Hierarchical File Ingestion:** A dedicated 26-tool files domain reads directories, chunks files, extracts facts, and reviews staleness — with ~4× faster incremental re-ingest (unchanged sections reuse cached embeddings).
 *   **Verbatim Chatlog Capture:** A dedicated 10-tool chatlog domain records conversation turns *before compaction*, so prior Claude/Gemini sessions stay searchable and nothing is lost to context-window truncation.
-*   **Cross-Device Sync:** Optional PostgreSQL synchronization backend. Access the same memories on your laptop, desktop, or cloud environments.
+*   **Pluggable Storage Backend:** SQLite by default; select **PostgreSQL as a first-class primary store** with `M3_DB_BACKEND=postgres`. The storage seam is SQL/DB-API only — SQLite and PostgreSQL today, MariaDB via a `Dialect` subclass as a documented next step; a document store like MongoDB is deliberately out of scope.
+*   **Cross-Device Sync:** Optionally sync/federate to a PostgreSQL warehouse tier. Access the same memories on your laptop, desktop, or cloud environments.
 
 ---
 
@@ -234,7 +249,8 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ### M3 is a great fit if...
 *   **You use multiple desktop coding agents:** Interoperate Claude Code, Gemini, and Aider on a shared local history.
 *   **You build with LangChain/LangGraph:** An advanced replacement for standard memory models, adding bitemporal queries, contradiction management, and local embeddings.
-*   **You build with CrewAI (v1.10+):** A drop-in `StorageBackend` (`Memory(storage=M3StorageBackend(user_id="crew-alpha"))`) that gives CrewAI bitemporal recall, contradiction-aware supersession, and local embeddings — plus the thing single-vector stores can't do: a CrewAI-written memory can **also be searchable by every other m3 agent** (Claude Code, Gemini, LangChain) if you want. See [docs/EXTENDING.md](docs/EXTENDING.md).
+*   **You build with CrewAI (v1.10–1.x):** A drop-in `StorageBackend` (`Memory(storage=M3StorageBackend(user_id="crew-alpha"))`) that gives CrewAI bitemporal recall, contradiction-aware supersession, and local embeddings — plus the thing single-vector stores can't do: a CrewAI-written memory can **also be searchable by every other m3 agent** (Claude Code, Gemini, LangChain) if you want. `pip install m3-memory[crewai]`. See the [CrewAI integration guide](m3_memory/integrations/crewai/README.md).
+*   **You build with PydanticAI:** m3-backed memory as either drop-in tools + auto-recall (`register_m3_tools`, `m3_recall_processor`) **or** a formal `M3MemoryToolset` (a real PydanticAI `AbstractToolset`). Built on Pydantic v2, so it runs on Python 3.14 with a plain `pip install m3-memory[pydantic-ai]`. See the [PydanticAI integration guide](m3_memory/integrations/pydantic_ai/README.md).
 *   **You need security and compliance:** Built-in `gdpr_forget` and `gdpr_export` tools, air-gapped support, and audit logs.
 *   **You value privacy:** Zero external cloud requests or subscriptions required.
 
@@ -249,7 +265,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ## 🛡️ Why Trust This
 
 *   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
-*   **Robust Coverage:** Verified with **1,283 tests across 154 test files** (~2,070 cases with parametrization) spanning search, sync, GDPR lifecycle, and files ingestion.
+*   **Robust Coverage:** Verified with **2,179 tests across 180 test files** spanning search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite.
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
 *   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.
 *   **Open Source:** Apache 2.0 licensed, free, with no SaaS walls or usage limits.

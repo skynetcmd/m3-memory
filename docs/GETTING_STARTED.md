@@ -77,7 +77,7 @@ Open your favorite agent and try this simple experiment:
 
 We believe your thoughts and project details are your own. 
 
-- **Zero Cloud Egress:** Your memories live in a local SQLite database on your machine.
+- **Zero Cloud Egress:** Your memories live in a local SQLite database on your machine (or a PostgreSQL instance you operate, if you choose — same local-first guarantee, never a managed cloud DB).
 - **No API Keys for Memory:** You don't need a subscription to "remember" things.
 - **Explainable:** Use `memory_suggest` anytime to ask the agent: *"Why did you remember this specific fact?"* It will show you the exact math behind its retrieval.
 
@@ -89,6 +89,7 @@ Once you've had your first "Magic Moment," you might want to dive deeper:
 
 - **[Core Features](./CORE_FEATURES.md)** — Learn about contradiction detection and the knowledge graph.
 - **[Multi-Agent Teams](./MULTI_AGENT.md)** — How to let two different agents (like Claude and Gemini) share the same brain.
+- **[Framework Integrations](../README.md#-installation)** — Use M3 as a drop-in memory backend for LangChain/LangGraph, CrewAI, or PydanticAI.
 - **[Technical Details](./TECHNICAL_DETAILS.md)** — For the curious: schemas, search weights, and bitemporal logic.
 
 **Welcome to the fleet. We're glad to have you building with us.** 🤝

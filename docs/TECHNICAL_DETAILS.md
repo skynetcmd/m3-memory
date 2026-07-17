@@ -370,9 +370,9 @@ Always-on: when `metadata.temporal_anchors` is supplied, resolved ISO dates are 
 
 ## 🧪 Testing
 
-### End-to-End Test Suite (`bin/test_memory_bridge.py`)
+### Test Suite (`tests/`)
 
-193 tests across all feature categories (memory CRUD, search, contradictions, GDPR, sync, maintenance, orchestration, refresh lifecycle, multi-agent handoffs, tasks, notifications):
+2,179 tests (180 files) across all feature categories — memory CRUD, search, contradictions, GDPR, sync, maintenance, orchestration, refresh lifecycle, multi-agent handoffs, tasks, and notifications. The suite runs with `filterwarnings=error`, so a new warning fails the build. Representative categories:
 
 | Category | Tests | What's Verified |
 |----------|-------|----------------|

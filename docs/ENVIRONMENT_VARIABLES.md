@@ -168,6 +168,7 @@ These knobs change how results are ranked. Defaults are safe — override only i
 | `M3_TITLE_MATCH_BOOST` | `0.05` | Multiplier for the title-overlap boost: if a fraction `f` of query tokens appear in the title, add `M3_TITLE_MATCH_BOOST * f` to the final score. Set to `0` to disable. |
 | `M3_IMPORTANCE_WEIGHT` | `0.05` | Weight of the caller-supplied `importance` field (0.0–1.0) in final ranking. Set to `0` to ignore importance entirely. |
 | `M3_INTENT_ROUTING` | `1` | Retrieval-side intent routing (role-boost + predecessor-pull). On by default; set `0` to disable. Distinct from the SLM intent classifier (`M3_SLM_CLASSIFIER`, off by default). |
+| `M3_INTENT_PROCEDURAL_BOOST` | `0.20` | Additive ranking boost applied to a `procedure`-type memory when the query intent is `procedural` ("how do I X"). Gated by `M3_INTENT_ROUTING`; a non-procedural intent (or routing off) leaves ranking byte-identical. Set `0` to disable. |
 | `M3_ROUTER_TEMPORAL_K_BUMP` | `5` | Extra `k` added when a query is routed as temporal (e.g. contains "when", "before", "days ago"), widening verbatim retrieval for date-sensitive questions. |
 | `SUPERSEDES_PENALTY` | `0.5` | At retrieval time, an older fact that has been superseded by a newer one is demoted by this multiplier (0.5 = ranked at half score). Set to `1.0` to disable demotion. |
 | `CONTRADICTION_TITLE_GATE` | `loose` | How contradiction detection decides two memories are about the same thing: `strict` (legacy — require a title substring match), `loose` (cosine + type + content-diff, default), or `off` (no title check). |
@@ -287,6 +288,17 @@ SLM-distillation pipeline to extract atomic facts from stored memories. **On by 
 | `M3_FACT_ENRICH_MAX_ATTEMPTS` | `5` | Maximum retries for failed enrichment queue items before they are marked as poison (poisoned items remain visible in queue with `last_error` for manual inspection). |
 | `M3_FACT_ENRICHED_URL` | (empty) | Override SLM endpoint URL. If unset, reads from the `fact_enriched.yaml` profile `url` field. |
 | `M3_FACT_ENRICHED_MODEL` | (empty) | Override SLM model name. If unset, reads from the `fact_enriched.yaml` profile `model` field. Both URL and model must be non-empty when enrichment runs, or the extraction fails with a clear error. |
+
+---
+
+## Procedure Distillation
+
+Autonomous pipeline that rolls up successful (completed) task runs — a task plus its step/result memories — into reusable `procedure` memories (skill / runbook / how-to / checklist), linked back to their sources via `distills_from` edges (sources are **preserved**, never deleted). The engine is `memory_distill_procedures_impl`; `bin/distill_procedures.py` is the trigger, and the cognitive loop runs it event-driven + governor-gated. The distillation model is **local-first, cloud-capable**. See ARCHITECTURE.md / EXTENDING.md for design overview.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_DISTILL_AUTO` | `0` | Hard gate for autonomous procedure **writes**. Distillation runs **dry-run** unless `--apply` AND `M3_DISTILL_AUTO=1` — so a scheduled/loop invocation is a safe no-op until you opt in. |
+| `M3_DISTILL_MODEL` | `slm` | Distillation model selector: unset/`slm` → the local `procedure_local` SLM profile (sovereign default); `llm` → the largest local model via `get_best_llm` failover; any other value → a profile name (another local model, or a cloud endpoint via a `backend: anthropic\|openai` profile — cloud is config, not new code). |
 
 ---
 

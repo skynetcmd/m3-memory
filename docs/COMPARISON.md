@@ -39,7 +39,7 @@ If "the LLM should decide what's worth remembering" matches your worldview, Mem0
 
 ## ⚔️ M3-Memory vs Mem0
 
-Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memory offers a **superset of Mem0's capabilities** and ships a drop-in Mem0-compatible surface (`from m3_memory.langchain import Memory` — a one-line import swap), so LangChain/LangGraph users get everything Mem0 does plus contradiction supersession, bitemporal history, commanded forgetting, and hybrid+graph retrieval — locally, with no server or API key. M3 also serves developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
+Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memory offers a **superset of Mem0's capabilities** and ships a drop-in Mem0-compatible surface (`from m3_memory.langchain import Memory` — a one-line import swap), so LangChain/LangGraph users get everything Mem0 does plus contradiction supersession, bitemporal history, commanded forgetting, and hybrid+graph retrieval — locally, with no server or API key. M3 also backs **CrewAI** (native `StorageBackend`) and **PydanticAI** (drop-in tools + a formal `M3MemoryToolset`) from the same store — so one local memory serves LangChain, CrewAI, and PydanticAI agents at once. And it serves developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
 
 | Feature | M3-Memory | Mem0 |
 |---------|-----------|------|
@@ -54,7 +54,8 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **API keys required** | None | Yes (cloud version) |
 | **Offline operation** | Full — SQLite + bundled embedder, no external services | No (cloud version) |
 | **FIPS 140-3** | 👑 **Deployment-ready** crypto boundary (AES-256-GCM vault, PBKDF2-HMAC-SHA256, TLS 1.3 FIPS ciphersuites); point it at the CMVP-validated wolfSSL FIPS module for a validated deployment. Note: the validation belongs to that module — M3 is not itself a CMVP-validated cryptographic module (no application is) | No |
-| **Cross-device sync** | SQLite ↔ PostgreSQL, bi-directional delta sync | Managed by Mem0 cloud |
+| **Storage backend** | 👑 Pluggable SQL storage seam — SQLite (default, zero-infra) **or PostgreSQL as a first-class primary store** (`M3_DB_BACKEND=postgres`) for shared/high-concurrency deployments; MariaDB documented as a future backend (add a `Dialect` subclass) | Single managed cloud store |
+| **Cross-device sync** | Optionally sync/federate a SQLite deployment to a PostgreSQL warehouse tier, bi-directional delta sync | Managed by Mem0 cloud |
 | **Storage topology** | 🏆 Chat-log and curated memory run as **one unified store, two independent stores, or two stores searched together** (`memory_search_multi_db`) — your choice by config, no rework | Single managed store |
 | **Knowledge graph** | Yes — 9 relationship types, 3-hop traversal | Yes — strong point |
 | **Multi-agent concurrent writes** | WAL mode + 30s busy_timeout + retry — concurrent writers serialize and wait, they don't fail; SQL-layer scope isolation keeps agents' private notes private; optional shared **PostgreSQL** pool for high-concurrency fleets (no single-writer limit) | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |
@@ -62,9 +63,10 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
 | **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`), `M3Saver` (LangGraph checkpointer — pause/resume/time-travel), and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |
 | **CrewAI integration** | 👑 Native `StorageBackend` (CrewAI v1.10+): `Memory(storage=M3StorageBackend(...))`. A CrewAI memory can **also be searchable by every other m3 agent** (Claude Code, Gemini, LangChain) if you want — a shared cross-framework memory a single-vector store can't provide | 🏆 Native provider (CrewAI-only silo) |
+| **PydanticAI integration** | 👑 Native — two tiers: drop-in tools + auto-recall (`register_m3_tools`, `m3_recall_processor`) **and** a formal `M3MemoryToolset` (a real PydanticAI `AbstractToolset`); `pip install m3-memory[pydantic-ai]`, runs on Python 3.14 | ❌ None |
 | **Feature coverage** | **Superset of Mem0** — everything Mem0 does (`.add()`/`.search()`) plus contradiction supersession, bitemporal `as_of`, commanded forgetting, hybrid+graph retrieval | Baseline |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
-| **Stars (Apr 2026)** | Newer project (fewer stars); 1,283-test codebase with SOTA local-first retrieval (99.2% SHR@10) | 20k+ (mindshare leader) |
+| **Stars** | Newer project (fewer stars); 2,179-test codebase with SOTA local-first retrieval (99.2% SHR@10) | 20k+ (mindshare leader) |
 
 ### When to choose M3-Memory over Mem0
 
@@ -269,6 +271,9 @@ for how we hold every entry (including M3's own) to source-of-truth.
 | Managed cloud, multi-tenant, hosted dashboard (SaaS) | **Mem0** |
 | CrewAI memory backend (v1.10+ `StorageBackend`), local-first | **M3-Memory** |
 | CrewAI memory that's *also* searchable by your other agents (Claude Code, LangChain) | **M3-Memory** |
+| PydanticAI agent memory (drop-in tools + auto-recall, or a formal `AbstractToolset`) | **M3-Memory** |
+| One memory store backing LangChain, CrewAI, *and* PydanticAI at once | **M3-Memory** |
+| PostgreSQL as a first-class primary backend, local-first (not a managed cloud DB) | **M3-Memory** |
 | Long-lived autonomous agents that self-edit memory | **Letta** |
 | Full stateful agent runtime (not just memory) | **Letta** |
 | Git-backed agent state | **Letta** |

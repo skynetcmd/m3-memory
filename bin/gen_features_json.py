@@ -52,6 +52,8 @@ def main() -> int:
             "Claude Code", "Gemini CLI", "Aider", "Google Antigravity",
             "OpenCode", "Hermes Agent",
             "LangChain / LangGraph (drop-in Mem0 replacement, backs LangMem)",
+            "CrewAI (native StorageBackend, v1.x)",
+            "PydanticAI (tools + auto-recall + a formal AbstractToolset)",
             "any MCP-compatible agent",
         ],
         "retrieval": {
@@ -72,6 +74,7 @@ def main() -> int:
             "confidence_scoring": True,        # migration 035
             "corroboration_ledger": True,      # migration 036
             "pinned_memories": True,           # migration 037 — exempt from decay/expiry/retention
+            "procedural_memory": True,         # `procedure` type (skill/runbook/how_to/checklist), auto-distilled from task runs
         },
         "privacy_compliance": {
             "local_first": True,
@@ -88,7 +91,14 @@ def main() -> int:
             "encryption_at_rest": True,
         },
         "storage": {
-            "core_store": "single SQLite file (FTS5 + vector indexes)",
+            # Pluggable SQL storage seam — the primary backend is selectable.
+            "primary_backends": [
+                "sqlite (default, FTS5 + vector indexes; zero-infra)",
+                "postgresql (first-class primary, M3_DB_BACKEND=postgres)",
+            ],
+            "future_backends": ["mariadb (add a Dialect subclass)"],
+            "backend_seam": "SQL/DB-API only; a document store (MongoDB) is out of scope",
+            "core_store": "single SQLite file (FTS5 + vector indexes) by default",
             "optional_sync_backends": ["PostgreSQL"],
             "containers_required": False,
         },
@@ -143,6 +153,35 @@ def main() -> int:
                     "adds contradiction supersession, bitemporal as_of queries, GDPR "
                     "forgetting, hybrid retrieval, a bundled embedder, and the full "
                     "MCP tool set. m3 never imports mem0."
+                ),
+            },
+            "crewai": {
+                "supported": True,
+                "install_extra": "pip install m3-memory[crewai]",
+                "crewai_version": ">=1.10,<2",
+                "storage_backend": True,       # implements CrewAI's StorageBackend protocol
+                "cross_agent_searchable": True,  # a CrewAI memory stays searchable by every other m3 agent
+                "python": "3.10-3.13 default (CrewAI's cap); 3.14 via a documented escape hatch",
+                "docs": "m3_memory/integrations/crewai/README.md",
+                "note": (
+                    "Native StorageBackend for CrewAI's unified memory (v1.x). No mem0 "
+                    "dependency. A CrewAI-written memory can also be searched by your "
+                    "other m3 agents — cross-framework reach a single-vector store can't offer."
+                ),
+            },
+            "pydantic_ai": {
+                "supported": True,
+                "install_extra": "pip install m3-memory[pydantic-ai]",
+                "pydantic_ai_version": ">=2.0,<3",
+                "tools": True,                 # register_m3_tools: remember/recall/forget
+                "history_processor": True,     # m3_recall_processor auto-injects recalled memories
+                "abstract_toolset": True,      # M3MemoryToolset is a formal PydanticAI AbstractToolset
+                "python": "3.14 supported (built on Pydantic v2, no cap)",
+                "docs": "m3_memory/integrations/pydantic_ai/README.md",
+                "note": (
+                    "PydanticAI ships no built-in persistent memory; this adapter adds it "
+                    "as deps-injected tools + a recall history-processor (Tier 1) and a "
+                    "formal M3MemoryToolset (Tier 2). Runs on Python 3.14 with a plain pip install."
                 ),
             },
         },
