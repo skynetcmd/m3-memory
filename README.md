@@ -28,8 +28,6 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
   <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub unique clones (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-clones.json&style=flat-square&logo=github&logoColor=white"></a>
   <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history — click to view" src="https://img.shields.io/badge/%E2%AD%90%20star%20history-181717?style=flat-square&logo=github&logoColor=white"></a>
 </p>
-<p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
-<p align="center"><sub><b>Python:</b> m3 core runs on 3.11+ (including 3.14). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
 
 <p align="center">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
@@ -405,7 +403,9 @@ See [NOTICE](NOTICE) for the full third-party attribution list.
 <summary><b>⭐ View star history →</b> (click to expand the chart)</summary>
 
 <br>
-
+<p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
+<p align="center"><sub><b>Python:</b> m3 core runs on 3.11+ (including 3.14). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
+<br>
 <a href="https://star-history.com/#skynetcmd/m3-memory&Date">
   <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/star-history.svg" alt="Star history for skynetcmd/m3-memory" width="100%">
 </a>
