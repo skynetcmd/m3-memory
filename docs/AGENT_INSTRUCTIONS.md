@@ -78,7 +78,7 @@ Before any push to a remote:
    changes code (`bin/`/`m3_memory/` `.py`), the hook prints a short reminder
    of the core tenets — Effectiveness (§5), Robustness (§3), Efficiency/
    Performance (§4/§8), Hardening/Privacy (§6/§7), Modularity / one-feature-
-   per-PR (§2), Tool-shape (§12a). This is a **prompt, not a gate**: there is no
+   per-PR (§2), Clean code (§12a). This is a **prompt, not a gate**: there is no
    auto-checker to satisfy or bypass. You are expected to hold these as you
    write and push. Re-read [`DESIGN_PHILOSOPHIES.md`](DESIGN_PHILOSOPHIES.md)
    (especially §2–§8) before adding a tool, submodule, or impl function.

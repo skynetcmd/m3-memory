@@ -107,7 +107,7 @@ def test_structured_timeout_disabled_runs_to_completion():
 
 def test_timeout_injected_into_every_spec():
     """The universal timeout param is present on real catalog tools so agents
-    can discover it (§12a tool-shape)."""
+    can discover it (§12a)."""
     for spec in C.TOOLS[:20]:
         props = spec.parameters.get("properties", {})
         assert "timeout" in props, f"{spec.name} missing timeout param"
