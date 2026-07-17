@@ -303,6 +303,43 @@ markers = [
     "slow: long-running tests (>1s); use -m 'not slow' to skip",
     "real_is_current: opt out of the rust_core_install is_rust_core_current autouse stub",
 ]
+# Warnings are ERRORS by default: a NEW, un-reviewed warning fails the suite, so it
+# can't slip in unnoticed. Every `ignore` below is a REVIEWED exception with its
+# rationale — the list IS the audit trail (repo policy: never hide a warning without
+# recording why). To add an entry you must justify it here. Two classes only:
+#   (A) third-party warnings we don't control (fixed by upgrading the dep), and
+#   (B) our own BY-DESIGN process-lifetime singletons (the shared asyncio daemon
+#       loop-thread, the M3Context SQLite connection pool, the shared embedder HTTP
+#       client) — torn down at interpreter exit / atexit, not per test, so they warn
+#       under -W error only as finalizer-timing artifacts, never a real leak.
+# Genuine per-test resource leaks are FIXED at the source (close()/with), not listed.
+filterwarnings = [
+    "error",
+    # ── (A) third-party, not fixable in our code ──────────────────────────────
+    # langchain_core still imports pydantic.v1 shims; both warn on Python 3.14 and
+    # are removed in 3.16 — resolved only by a langchain release that drops v1.
+    "ignore:.*ForwardRef._evaluate is a private API.*:DeprecationWarning",
+    "ignore:.*Core Pydantic V1 functionality isn't compatible.*:UserWarning",
+    # langchain_core/runnables/utils.py uses the deprecated asyncio form (ours was
+    # migrated to inspect.iscoroutinefunction; this remaining one is upstream).
+    "ignore:.*asyncio.iscoroutinefunction.*is deprecated.*:DeprecationWarning:langchain_core",
+    # with_m3_history intentionally wraps LangChain's RunnableWithMessageHistory,
+    # which LangChain marked *Pending*Deprecation (favoring LangGraph persistence).
+    # Deliberate compat shim; migrate when LangChain promotes it to real @deprecated.
+    "ignore:.*RunnableWithMessageHistory is deprecated.*:langchain_core._api.deprecation.LangChainPendingDeprecationWarning",
+    # ── (B) our own process-lifetime singletons (by design; not per-test leaks) ─
+    # M3Client's shared daemon asyncio loop-thread (§8) is alive at test end by
+    # design (torn down at interpreter exit). See tests/test_langchain_*.py comments.
+    "ignore:.*non-main thread.*:UserWarning",
+    # The M3Context SQLite connection pool + shared embedder httpx.AsyncClient are
+    # process singletons closed via atexit/_close_db_pools, not per test — so under
+    # -W error their connections/sockets read as unclosed only as a finalizer-timing
+    # artifact. (Genuine per-test connection/file leaks were fixed at the source.)
+    "ignore:unclosed database.*:ResourceWarning",
+    "ignore:unclosed <socket.socket.*:ResourceWarning",
+    "ignore:unclosed transport.*:ResourceWarning",
+    "ignore:Implicitly cleaning up.*:ResourceWarning",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests", "benchmarks", ".venv", "venv"]

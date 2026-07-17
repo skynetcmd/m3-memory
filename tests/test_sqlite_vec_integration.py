@@ -32,9 +32,11 @@ def test_detect_sqlite_vec_active():
             return mock_res
 
     conn = sqlite3.connect(":memory:", factory=ActiveConnection)
-
-    assert _detect_sqlite_vec(conn) is True
-    assert executed == ["SELECT vec_version()"]
+    try:
+        assert _detect_sqlite_vec(conn) is True
+        assert executed == ["SELECT vec_version()"]
+    finally:
+        conn.close()
 
 
 def test_detect_sqlite_vec_inactive():
@@ -42,8 +44,11 @@ def test_detect_sqlite_vec_inactive():
     from memory.search import _detect_sqlite_vec
 
     conn = sqlite3.connect(":memory:")
-    # A clean Connection raises sqlite3.OperationalError for vec_version(), returning False
-    assert _detect_sqlite_vec(conn) is False
+    try:
+        # A clean Connection raises sqlite3.OperationalError for vec_version(), returning False
+        assert _detect_sqlite_vec(conn) is False
+    finally:
+        conn.close()
 
 
 @pytest.mark.asyncio
@@ -98,32 +103,34 @@ async def test_search_uses_sqlite_vec_when_active(monkeypatch):
             return MockCursor()
 
     conn = sqlite3.connect(":memory:", factory=ActiveSearchConnection)
+    try:
+        # Stub the DB context manager to yield our connection
+        class MockDBContext:
+            def __enter__(self):
+                return conn
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
 
-    # Stub the DB context manager to yield our connection
-    class MockDBContext:
-        def __enter__(self):
-            return conn
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            pass
+        monkeypatch.setattr(memory_core, "_db", lambda: MockDBContext())
+        monkeypatch.setattr(search, "_db", lambda: MockDBContext())
+        monkeypatch.setattr(search, "EMBED_DIM", 3)
 
-    monkeypatch.setattr(memory_core, "_db", lambda: MockDBContext())
-    monkeypatch.setattr(search, "_db", lambda: MockDBContext())
-    monkeypatch.setattr(search, "EMBED_DIM", 3)
+        results = await search.memory_search_scored_impl("test query", search_mode="semantic", k=5)
 
-    results = await search.memory_search_scored_impl("test query", search_mode="semantic", k=5)
+        assert len(results) == 1
+        score, hit = results[0]
+        assert hit["id"] == "mem1"
 
-    assert len(results) == 1
-    score, hit = results[0]
-    assert hit["id"] == "mem1"
-
-    # Verify that vec_distance_cosine was in the executed query
-    assert len(executed_queries) == 1
-    sql, params = executed_queries[0]
-    assert "vec_distance_cosine" in sql
-    assert len(params) >= 1
-    # First parameter must be the packed query vector blob
-    expected_blob = struct.pack("3f", *dummy_q_vec)
-    assert params[0] == expected_blob
+        # Verify that vec_distance_cosine was in the executed query
+        assert len(executed_queries) == 1
+        sql, params = executed_queries[0]
+        assert "vec_distance_cosine" in sql
+        assert len(params) >= 1
+        # First parameter must be the packed query vector blob
+        expected_blob = struct.pack("3f", *dummy_q_vec)
+        assert params[0] == expected_blob
+    finally:
+        conn.close()
 
 
 @pytest.mark.asyncio
@@ -179,25 +186,27 @@ async def test_search_falls_back_when_sqlite_vec_inactive(monkeypatch):
             return MockCursor()
 
     conn = sqlite3.connect(":memory:", factory=InactiveSearchConnection)
+    try:
+        # Stub the DB context manager to yield our connection
+        class MockDBContext:
+            def __enter__(self):
+                return conn
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
 
-    # Stub the DB context manager to yield our connection
-    class MockDBContext:
-        def __enter__(self):
-            return conn
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            pass
+        monkeypatch.setattr(memory_core, "_db", lambda: MockDBContext())
+        monkeypatch.setattr(search, "_db", lambda: MockDBContext())
+        monkeypatch.setattr(search, "EMBED_DIM", 3)
 
-    monkeypatch.setattr(memory_core, "_db", lambda: MockDBContext())
-    monkeypatch.setattr(search, "_db", lambda: MockDBContext())
-    monkeypatch.setattr(search, "EMBED_DIM", 3)
+        results = await search.memory_search_scored_impl("test query", search_mode="semantic", k=5)
 
-    results = await search.memory_search_scored_impl("test query", search_mode="semantic", k=5)
+        assert len(results) == 1
+        score, hit = results[0]
+        assert hit["id"] == "mem2"
 
-    assert len(results) == 1
-    score, hit = results[0]
-    assert hit["id"] == "mem2"
-
-    # Verify that vec_distance_cosine was NOT in the executed query
-    assert len(executed_queries) == 1
-    sql, params = executed_queries[0]
-    assert "vec_distance_cosine" not in sql
+        # Verify that vec_distance_cosine was NOT in the executed query
+        assert len(executed_queries) == 1
+        sql, params = executed_queries[0]
+        assert "vec_distance_cosine" not in sql
+    finally:
+        conn.close()

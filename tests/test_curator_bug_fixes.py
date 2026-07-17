@@ -35,7 +35,8 @@ def test_scored_impl_has_floor_bindings_before_callback_resolution():
 
     import memory.search as ms
 
-    src = open(ms.__file__).read()
+    with open(ms.__file__, encoding="utf-8") as _f:
+        src = _f.read()
     tree = ast.parse(src)
     scored = next(
         n for n in ast.walk(tree)
@@ -90,7 +91,8 @@ def test_callback_resolution_is_wrapped_in_try_except():
 
     import memory.search as ms
 
-    src = open(ms.__file__).read()
+    with open(ms.__file__, encoding="utf-8") as _f:
+        src = _f.read()
     tree = ast.parse(src)
     scored = next(
         n for n in ast.walk(tree)

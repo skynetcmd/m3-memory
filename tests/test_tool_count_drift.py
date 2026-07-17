@@ -92,7 +92,8 @@ def test_manifest_count_matches_catalog():
     assert os.path.exists(_MANIFEST), (
         f"{_MANIFEST} missing — run `python bin/gen_tool_manifest.py`"
     )
-    manifest = json.load(open(_MANIFEST, encoding="utf-8"))
+    with open(_MANIFEST, encoding="utf-8") as _f:
+        manifest = json.load(_f)
     computed = _computed_count()
     assert manifest["count"] == computed, (
         f"MCP_CATALOG.json count={manifest['count']} but the live catalog has "
@@ -103,7 +104,8 @@ def test_manifest_count_matches_catalog():
 def test_manifest_tool_records_are_well_formed():
     """Every manifest tool record carries the documented fields and the
     universal `database` arg is never present in the per-tool args."""
-    manifest = json.load(open(_MANIFEST, encoding="utf-8"))
+    with open(_MANIFEST, encoding="utf-8") as _f:
+        manifest = json.load(_f)
     for t in manifest["tools"]:
         assert {"name", "domain", "summary", "destructive", "args"} <= set(t), t
         assert isinstance(t["destructive"], bool), t
@@ -168,7 +170,8 @@ def test_registry_manifests_match_pyproject_version():
     expected = _pyproject_version()
     mismatches: list[str] = []
     for path in _VERSIONED_MANIFESTS:
-        data = json.load(open(path, encoding="utf-8"))
+        with open(path, encoding="utf-8") as _f:
+            data = json.load(_f)
         rel = os.path.relpath(path, _ROOT)
         if str(data.get("version", expected)) != expected:
             mismatches.append(f"{rel}: version={data.get('version')!r} != {expected!r}")

@@ -188,7 +188,8 @@ def test_seed_shared_config_shape_and_idempotency():
     root = tempfile.mkdtemp()
     path, wrote1 = seed_shared_config(root, gguf_path="C:/m/bge.gguf")
     assert wrote1 is True
-    cfg = json.load(open(path))
+    with open(path) as f:
+        cfg = json.load(f)
     assert cfg["disable_inproc_embedder"] is True
     assert cfg["fallback_url"] == "http://127.0.0.1:8082"
     assert cfg["gguf_path"] == "C:/m/bge.gguf"
@@ -202,7 +203,8 @@ def test_seed_preserves_existing_keys():
     with open(os.path.join(root, ".embed_config.json"), "w") as f:
         json.dump({"fallback_url": "http://127.0.0.1:9999", "custom": "keep"}, f)
     path, _ = seed_shared_config(root)
-    cfg = json.load(open(path))
+    with open(path) as f:
+        cfg = json.load(f)
     assert cfg["fallback_url"] == "http://127.0.0.1:9999", "must not clobber existing url"
     assert cfg["custom"] == "keep"
     assert cfg["disable_inproc_embedder"] is True
@@ -237,7 +239,8 @@ def test_installer_scrub_is_m3_only_and_idempotent():
     path = _write_settings_with_leak(tmp)
     actions = installer._scrub_embed_gguf_from_settings(Path(path), apply=True)
     assert any("memory" in a for a in actions)
-    data = json.load(open(path))
+    with open(path) as f:
+        data = json.load(f)
     assert "M3_EMBED_GGUF" not in data["mcpServers"]["memory"]["env"]
     assert "M3_EMBED_GGUF" in data["mcpServers"]["unrelated"]["env"], "non-m3 untouched"
     assert os.path.exists(path + ".bak")
@@ -467,19 +470,21 @@ async def test_search_scored_degrades_when_no_fast_tier(monkeypatch):
             return _Cur()
 
     conn = sqlite3.connect(":memory:", factory=_Conn)
+    try:
+        class _Ctx:
+            def __enter__(self): return conn
+            def __exit__(self, *a): return False
 
-    class _Ctx:
-        def __enter__(self): return conn
-        def __exit__(self, *a): return False
+        monkeypatch.setattr(search, "_db", lambda: _Ctx())
+        monkeypatch.setattr(memory_core, "_db", lambda: _Ctx())
+        monkeypatch.setattr(search, "_detect_sqlite_vec", lambda db: False)
+        monkeypatch.setattr(search, "_prefer_observations_gate", lambda: False)
+        monkeypatch.setattr(search, "_two_stage_observations_gate", lambda: False)
 
-    monkeypatch.setattr(search, "_db", lambda: _Ctx())
-    monkeypatch.setattr(memory_core, "_db", lambda: _Ctx())
-    monkeypatch.setattr(search, "_detect_sqlite_vec", lambda db: False)
-    monkeypatch.setattr(search, "_prefer_observations_gate", lambda: False)
-    monkeypatch.setattr(search, "_two_stage_observations_gate", lambda: False)
-
-    # A non-exact query so the FTS short-circuit does not early-return.
-    results = await search.memory_search_scored_impl(
-        "some semantic query that is not an exact substring", search_mode="semantic", k=5
-    )
-    assert results == [], "no fast tier -> semantic search must degrade to empty, not hang or return vec rows"
+        # A non-exact query so the FTS short-circuit does not early-return.
+        results = await search.memory_search_scored_impl(
+            "some semantic query that is not an exact substring", search_mode="semantic", k=5
+        )
+        assert results == [], "no fast tier -> semantic search must degrade to empty, not hang or return vec rows"
+    finally:
+        conn.close()

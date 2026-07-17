@@ -320,6 +320,14 @@ def test_ensure_std_streams_replaces_none(monkeypatch):
     # writable (won't raise)
     sys.stdout.write("x")
     sys.stderr.write("y")
+    # _ensure_std_streams opened os.devnull-backed substitutes; close them so the
+    # file handles don't outlive the test (monkeypatch restores sys.stdout/err to
+    # the originals, orphaning these otherwise). Guard: only close what we opened.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.close()
+        except Exception:  # noqa: BLE001 — teardown hygiene, never fail the assert
+            pass
 
 
 def test_ensure_std_streams_preserves_existing(monkeypatch):
