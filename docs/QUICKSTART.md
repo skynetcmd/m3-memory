@@ -401,10 +401,21 @@ If the memory you wrote comes back, everything is working.
 M3 Memory works standalone with local SQLite — no additional
 infrastructure needed. For multi-device sync, you can optionally connect:
 
-- **PostgreSQL** — bi-directional delta sync across machines
+- **PostgreSQL** — bi-directional delta sync across machines, via
+  `M3_CDW_PG_URL` (the `PG_URL` name still works but is deprecated)
 
-See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for `PG_URL`
+See [ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md) for warehouse-sync
 configuration.
+
+**PostgreSQL as primary store (not just sync).** Separately from the warehouse
+role above, PostgreSQL can be M3's *primary* live backend instead of SQLite —
+opt in with `M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`, chosen at install
+(the installer prompts) or non-interactively with
+`mcp-memory install-m3 --db-backend postgres`. SQLite remains the recommended
+default for single-user/local. Note: on a PostgreSQL primary, vector search is
+currently brute-force Rust cosine — pgvector/HNSW ANN is a future accelerator,
+not yet implemented — so pick PG for a shared/server store, not for faster
+vector search.
 
 ---
 

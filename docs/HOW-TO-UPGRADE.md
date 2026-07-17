@@ -42,7 +42,7 @@ Migrations are reversible by design, but DB corruption from a mid-flight crash i
 python3 bin/migrate_memory.py backup --yes
 ```
 
-The backup uses SQLite's online-backup API (consistent snapshot even under concurrent writes) and lands in the backup directory saved in settings. Pass `--out /path/to/dir` to override.
+The backup uses SQLite's online-backup API (consistent snapshot even under concurrent writes) and lands in the backup directory saved in settings. Pass `--out /path/to/dir` to override. (This path is for the default SQLite store; if you run a **PostgreSQL primary backend** there is no local `.db` file — take your pre-upgrade snapshot with `pg_dump` instead.)
 
 You'll also see `.bak` files in `memory/` from the tooling's safety net — e.g., `agent_memory.db.pre-up-<timestamp>.bak`. Those are created automatically by `up`/`down`/`restore`; keep them until you've verified the upgrade.
 

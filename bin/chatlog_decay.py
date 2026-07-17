@@ -215,9 +215,9 @@ def _decay_decision(role: str, content: str, age_days: float, now_ts: float):
 
 
 # ── Sweep ──────────────────────────────────────────────────────────────────
-def _has_column(conn: sqlite3.Connection, table: str, col: str) -> bool:
-    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    return any(r[1] == col for r in rows)
+def _has_column(conn, dialect, table: str, col: str) -> bool:
+    sql, params = dialect.columns_of(table)
+    return any(r[0] == col for r in conn.execute(sql, params).fetchall())
 
 
 def run_sweep(db_path: str, *, apply: bool, batch_size: int = 1000) -> dict:
@@ -237,93 +237,107 @@ def run_sweep(db_path: str, *, apply: bool, batch_size: int = 1000) -> dict:
         "errors": [],
     }
 
-    conn = sqlite3.connect(db_path, timeout=30)
-    conn.row_factory = sqlite3.Row
-    try:
-        # Sanity: schema must have the columns we touch.
-        # NOTE: chatlog has no top-level `role` column. We derive role from
-        # the `title` prefix using the `<role>@<host_agent>: ...` convention.
-        # See `_extract_role_from_title` in the SQL CASE expression below.
-        for col in ("id", "type", "title", "content", "importance", "created_at"):
-            if not _has_column(conn, "memory_items", col):
-                return {"error": f"memory_items.{col} missing in {db_path}"}
-        has_valid_to = _has_column(conn, "memory_items", "valid_to")
+    # Backend-aware. On SQLite: connect directly to the caller's chatlog file
+    # (byte-identical to the original; get_chatlog_conn's resolver could target a
+    # DIFFERENT path than the db_path passed in). On PG: one DB, chatlog isolated
+    # by the chat_log_* table name via the backend pool — hits the LIVE store.
+    from contextlib import closing
 
-        # MANDATORY: type='chat_log' filter, regardless of layout (per m3:curate-chatlog policy).
-        # Role is derived from `title` prefix using the `<role>@<host_agent>: ...`
-        # convention enforced by chatlog_core's writer. Empirical match rate vs
-        # metadata_json.role on 1000-row sample: 99.8% (2 mismatches).
-        # Rows whose title doesn't match the convention land in the
-        # "unflagged_role" bucket and are reported separately. They get the
-        # general-ephemeral schedule (short-command decay does not fire on them)
-        # so misclassification is in the safe direction.
-        cur = conn.execute("""
-            SELECT id,
-                   CASE
-                       WHEN title LIKE 'user@%'      THEN 'user'
-                       WHEN title LIKE 'assistant@%' THEN 'assistant'
-                       WHEN title LIKE 'system@%'    THEN 'system'
-                       WHEN title LIKE 'tool@%'      THEN 'tool'
-                       ELSE ''
-                   END AS role,
-                   content,
-                   importance,
-                   created_at
-            FROM memory_items
-            WHERE type='chat_log' AND is_deleted=0
-        """)
+    from memory.backends import active_backend, chatlog_table
 
-        write_buffer = []
-        for row in cur:
-            summary["scanned"] += 1
-            role = row["role"] or ""
-            if role == "":
-                summary["unflagged_role"] += 1
-            content = row["content"] or ""
-            cur_imp = float(row["importance"]) if row["importance"] is not None else 0.3
-            age = _age_days(row["created_at"], now_ts)
+    backend = active_backend()
+    _d = backend.dialect()
+    _p = _d.param()
+    if backend.name == "sqlite":
+        _tbl = "memory_items"
+        _conn_cm = closing(sqlite3.connect(db_path, timeout=30))
+    else:
+        _tbl = chatlog_table("items")
+        _conn_cm = backend.connection()
+    with _conn_cm as conn:
+            try:
+                # Sanity: schema must have the columns we touch.
+                # NOTE: chatlog has no top-level `role` column. We derive role from
+                # the `title` prefix using the `<role>@<host_agent>: ...` convention.
+                # See `_extract_role_from_title` in the SQL CASE expression below.
+                for col in ("id", "type", "title", "content", "importance", "created_at"):
+                    if not _has_column(conn, _d, _tbl, col):
+                        return {"error": f"{_tbl}.{col} missing in {db_path}"}
+                has_valid_to = _has_column(conn, _d, _tbl, "valid_to")
 
-            factor, retire_at, category = _decay_decision(role, content, age, now_ts)
-            if category is None:
-                continue
-            summary["by_category"][category] = summary["by_category"].get(category, 0) + 1
+                # MANDATORY: type='chat_log' filter, regardless of layout (per m3:curate-chatlog policy).
+                # Role is derived from `title` prefix using the `<role>@<host_agent>: ...`
+                # convention enforced by chatlog_core's writer. Empirical match rate vs
+                # metadata_json.role on 1000-row sample: 99.8% (2 mismatches).
+                # Rows whose title doesn't match the convention land in the
+                # "unflagged_role" bucket and are reported separately. They get the
+                # general-ephemeral schedule (short-command decay does not fire on them)
+                # so misclassification is in the safe direction.
+                cur = conn.execute(f"""
+                    SELECT id,
+                           CASE
+                               WHEN title LIKE 'user@%'      THEN 'user'
+                               WHEN title LIKE 'assistant@%' THEN 'assistant'
+                               WHEN title LIKE 'system@%'    THEN 'system'
+                               WHEN title LIKE 'tool@%'      THEN 'tool'
+                               ELSE ''
+                           END AS role,
+                           content,
+                           importance,
+                           created_at
+                    FROM {_tbl}
+                    WHERE type='chat_log' AND is_deleted=0
+                """)
 
-            new_imp = round(cur_imp * factor, 4)
-            if abs(new_imp - cur_imp) < 0.001 and retire_at is None:
-                continue   # no-op (e.g., ephemeral_fresh with factor=1.0)
+                write_buffer = []
+                for row in cur:
+                    summary["scanned"] += 1
+                    role = row["role"] or ""
+                    if role == "":
+                        summary["unflagged_role"] += 1
+                    content = row["content"] or ""
+                    cur_imp = float(row["importance"]) if row["importance"] is not None else 0.3
+                    age = _age_days(row["created_at"], now_ts)
 
-            write_buffer.append((row["id"], new_imp, retire_at))
-            if len(write_buffer) >= batch_size:
-                summary["applied_writes"] += _flush(conn, write_buffer, apply, has_valid_to)
-                write_buffer.clear()
+                    factor, retire_at, category = _decay_decision(role, content, age, now_ts)
+                    if category is None:
+                        continue
+                    summary["by_category"][category] = summary["by_category"].get(category, 0) + 1
 
-        if write_buffer:
-            summary["applied_writes"] += _flush(conn, write_buffer, apply, has_valid_to)
+                    new_imp = round(cur_imp * factor, 4)
+                    if abs(new_imp - cur_imp) < 0.001 and retire_at is None:
+                        continue   # no-op (e.g., ephemeral_fresh with factor=1.0)
 
-        if apply:
-            conn.commit()
-    except Exception as exc:
-        summary["errors"].append(repr(exc))
-    finally:
-        conn.close()
+                    write_buffer.append((row["id"], new_imp, retire_at))
+                    if len(write_buffer) >= batch_size:
+                        summary["applied_writes"] += _flush(conn, _tbl, _p, write_buffer, apply, has_valid_to)
+                        write_buffer.clear()
+
+                if write_buffer:
+                    summary["applied_writes"] += _flush(conn, _tbl, _p, write_buffer, apply, has_valid_to)
+
+                if apply:
+                    conn.commit()
+            except Exception as exc:
+                summary["errors"].append(repr(exc))
     return summary
 
 
-def _flush(conn: sqlite3.Connection, buf: list[tuple], apply: bool, has_valid_to: bool) -> int:
+def _flush(conn, tbl: str, p: str, buf: list[tuple], apply: bool, has_valid_to: bool) -> int:
     if not apply:
         return len(buf)
     written = 0
     for row_id, new_imp, retire_at in buf:
         if retire_at and has_valid_to:
             conn.execute(
-                "UPDATE memory_items SET importance=?, valid_to=?, updated_at=? "
-                "WHERE id=? AND type='chat_log'",
+                f"UPDATE {tbl} SET importance={p}, valid_to={p}, updated_at={p} "
+                f"WHERE id={p} AND type='chat_log'",
                 (new_imp, retire_at, datetime.now(timezone.utc).isoformat(), row_id),
             )
         else:
             conn.execute(
-                "UPDATE memory_items SET importance=?, updated_at=? "
-                "WHERE id=? AND type='chat_log'",
+                f"UPDATE {tbl} SET importance={p}, updated_at={p} "
+                f"WHERE id={p} AND type='chat_log'",
                 (new_imp, datetime.now(timezone.utc).isoformat(), row_id),
             )
         written += 1

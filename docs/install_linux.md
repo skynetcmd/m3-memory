@@ -17,6 +17,10 @@ The script:
    OpenCode / OpenClaw), installs chatlog hooks, runs a brief `m3 doctor`
    health check.
 
+The wizard also asks for the **primary database backend** — SQLite (default,
+zero-infrastructure) or PostgreSQL. Choosing PostgreSQL (`--db-backend postgres`,
+or `M3_DB_BACKEND=postgres`) requires a reachable server via `M3_PRIMARY_PG_URL`.
+
 Refuses to run as root. Sudo is invoked individually for the package install
 step so you see what's being elevated.
 

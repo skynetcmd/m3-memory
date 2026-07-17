@@ -34,10 +34,10 @@ Set two env vars (typical values shown):
 
 ```bash
 export POSTGRES_SERVER=192.0.2.10    # your PostgreSQL host IP; or SYNC_TARGET_IP — same thing
-export PG_URL='postgresql://user:pass@host:5432/agent_memory'
+export M3_CDW_PG_URL='postgresql://user:pass@host:5432/agent_memory'   # warehouse URL (PG_URL still works but is deprecated)
 ```
 
-Or store `PG_URL` in your OS keyring (macOS Keychain, Windows Credential
+Or store `M3_CDW_PG_URL` in your OS keyring (macOS Keychain, Windows Credential
 Manager, Linux Secret Service) — the codebase uses `auth_utils.get_api_key`
 to look it up safely.
 
@@ -140,7 +140,7 @@ for `Status: Disabled`. Re-enable with `schtasks /Change /TN "<name>" /ENABLE`.
 Setting up a second machine to sync against the same warehouse:
 
 1. Clone the repo on machine B.
-2. Set `POSTGRES_SERVER` and `PG_URL` env vars (same warehouse as A).
+2. Set `POSTGRES_SERVER` and `M3_CDW_PG_URL` env vars (same warehouse as A; the `PG_URL` name still works but is deprecated).
 3. First sync pulls everything from the warehouse — let it finish.
 4. From then on, edits on either machine appear on the other after sync.
 

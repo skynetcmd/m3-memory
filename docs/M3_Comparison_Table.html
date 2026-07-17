@@ -324,7 +324,7 @@
             <p><strong>M3 standing:</strong> Full Sovereign. Local SQLite, local SLM extraction, zero telemetry, native Python — runs on a laptop or in an air-gapped enclave with the same code path.</p>
             <p><strong>Sub-dimensions:</strong></p>
             <ul class="sub-bullets">
-                <li><strong>Data Residency:</strong> Local SQLite — single file, portable, inspectable.</li>
+                <li><strong>Data Residency:</strong> Local SQLite — single file, portable, inspectable (or PostgreSQL as the primary backend for a shared/server store).</li>
                 <li><strong>Extraction Compute:</strong> Local <span class="acronym" title="Small Language Model">SLM</span> via LM Studio / Ollama / vLLM — no data egress.</li>
                 <li><strong>Telemetry / Audit:</strong> Zero by default; bitemporal log gives auditability without phoning home.</li>
                 <li><strong>Infrastructure:</strong> <code>pip install</code> — no Docker, no services, no daemons.</li>

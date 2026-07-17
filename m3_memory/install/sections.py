@@ -432,6 +432,83 @@ def _roots_section() -> None:
         print("      See CLAUDE.md → 'Split-brain hazard'.")
 
 
+def _backend_section(cfg: dict) -> None:
+    """Report the active PRIMARY database backend and, on PostgreSQL, its health.
+
+    The runtime selects its backend from the ENVIRONMENT (M3_DB_BACKEND +
+    M3_PRIMARY_PG_URL / the selector), not the config file — so a mismatch
+    between what the installer recorded in config (`db_backend`) and what the
+    live env resolves to is a real footgun (the operator thinks they're on PG
+    but the process still opens SQLite, or vice-versa). doctor is the place to
+    surface both and flag the divergence, and to confirm a PG DSN is reachable
+    rather than let the first real query be the discovery.
+
+    Best-effort: importing the seam can fail on a stripped env — skip the section
+    rather than crash doctor.
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "bin"))
+        from memory.backends import resolve_backend_name  # type: ignore
+    except Exception:  # noqa: BLE001 — informational only
+        return
+
+    print()
+    print("primary database backend:")
+    try:
+        live = resolve_backend_name()
+    except Exception as e:  # noqa: BLE001 — a bad M3_DB_BACKEND value lands here
+        print(f"  [!] backend unresolved: {e}")
+        return
+    env_set = os.environ.get("M3_DB_BACKEND")
+    src = "(M3_DB_BACKEND env)" if env_set else "(default)"
+    print(f"  active backend (runtime): {live}  {src}")
+
+    # Config vs env divergence — the switch is env, config is only a record.
+    recorded = cfg.get("db_backend")
+    if recorded and recorded != live:
+        print(
+            f"  [!] config records db_backend={recorded!r} but the live environment "
+            f"resolves to {live!r}."
+        )
+        print("      The runtime uses the ENV value. Set M3_DB_BACKEND (and, for")
+        print("      postgres, M3_PRIMARY_PG_URL) wherever m3 runs — the MCP server")
+        print("      `env` block and any process that imports m3 — or re-run install.")
+
+    if live == "sqlite":
+        return  # nothing more to probe — SQLite is a local file, always present
+
+    # PostgreSQL: report the (masked) DSN and probe reachability.
+    try:
+        from m3_sdk import resolve_primary_pg_dsn  # type: ignore
+
+        dsn = (resolve_primary_pg_dsn("") or "").strip()
+    except Exception:  # noqa: BLE001
+        dsn = ""
+    if not dsn:
+        print("  [!] M3_DB_BACKEND=postgres but no M3_PRIMARY_PG_URL/M3_PG_URL is set —")
+        print("      the primary store has no DSN. Set M3_PRIMARY_PG_URL.")
+        return
+
+    import re as _re
+    masked = _re.sub(r"(://[^:/@]+:)[^@/]+(@)", r"\1***\2", dsn)
+    print(f"  primary DSN:              {masked}")
+    try:
+        import psycopg2  # type: ignore
+
+        conn = psycopg2.connect(dsn, connect_timeout=5)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM memory_items")
+        n = cur.fetchone()[0]
+        conn.close()
+        print(f"  reachable:                yes ({n} memory_items in the live store)")
+    except Exception as e:  # noqa: BLE001 — connection / auth / undefined-table
+        detail = _re.sub(r"(://[^:/@]+:)[^@/]+(@)", r"\1***\2", str(e).strip())
+        print(f"  reachable:                NO — {detail}")
+        print("      Start/reach the PostgreSQL server. The schema builds")
+        print("      automatically on the first successful connect.")
+
+
 def _deprecated_env_section() -> None:
     """Surface deprecated (un-namespaced) env vars that are actually in use.
 

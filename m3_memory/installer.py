@@ -38,6 +38,7 @@ from m3_memory.install.fs import (  # noqa: F401  (re-exported facade surface �
     _safe_tar_member,
 )
 from m3_memory.install.sections import (  # noqa: F401  (re-exported facade surface)
+    _backend_section,
     _chatlog_db_stats,
     _chatlog_section,
     _claude_hook_state,
@@ -1133,15 +1134,59 @@ def _detect_cdw_target() -> "Optional[str]":
     return None
 
 
+def _primary_backend_name() -> str:
+    """The active primary backend ('sqlite' / 'postgres'), best-effort.
+
+    Reads the live selector (env-driven). Falls back to 'sqlite' if the seam
+    can't be imported — the default and the safe assumption for backup guidance.
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(bin_dir() or ""))
+        from memory.backends import resolve_backend_name  # type: ignore
+
+        return resolve_backend_name()
+    except Exception:  # noqa: BLE001
+        return "sqlite"
+
+
 def _print_backup_reminder() -> None:
     """Remind the user to back up their databases regularly.
 
-    Branches on whether a CDW (PostgreSQL data warehouse) is configured:
-      - No CDW: a plain "back up your local DBs" reminder.
-      - CDW configured: note that auto-sync to the warehouse exists (and where),
-        but that it is NOT a substitute for backups — the warehouse itself, and
-        the local DBs, should be backed up to the user's risk tolerance.
+    Backend-aware: on a PostgreSQL-primary install the memories/chatlog live in
+    PG (not SQLite files under the engine root), so "copy your .db files" is the
+    wrong advice — we give pg_dump guidance instead. The file-index stays local
+    SQLite either way. Also branches on whether a CDW warehouse is configured.
     """
+    if _primary_backend_name() != "sqlite":
+        # PostgreSQL primary store — the durable data is in PG, not local .db files.
+        dsn_masked = ""
+        try:
+            import re as _re
+
+            from m3_sdk import resolve_primary_pg_dsn  # type: ignore
+
+            _dsn = (resolve_primary_pg_dsn("") or "").strip()
+            dsn_masked = _re.sub(r"(://[^:/@]+:)[^@/]+(@)", r"\1***\2", _dsn)
+        except Exception:  # noqa: BLE001
+            pass
+        print()
+        print("  " + "-" * 68)
+        print("  DATA SAFETY — back up your PostgreSQL primary store regularly")
+        print("  Your memories and chatlog live in PostgreSQL, NOT in local .db")
+        print("  files. install/upgrade does NOT back them up.")
+        print()
+        print("  • Snapshot the database with pg_dump on a cadence that matches")
+        print("    your risk tolerance, e.g.:")
+        if dsn_masked:
+            print(f"        pg_dump '{dsn_masked}' > m3_primary_$(date +%F).sql")
+        else:
+            print("        pg_dump \"$M3_PRIMARY_PG_URL\" > m3_primary_$(date +%F).sql")
+        print("  • The local file index (files_*.db under the engine root) is still")
+        print("    SQLite — copy it too if you use file search.")
+        print("  " + "-" * 68)
+        return
+
     cdw = _detect_cdw_target()
     print()
     print("  " + "-" * 68)
@@ -2229,6 +2274,8 @@ def doctor(fix: bool = False, brief: bool = False) -> int:
         print("developer sibling bridge:  (not found)")
 
     _roots_section()
+
+    _backend_section(cfg)
 
     _deprecated_env_section()
 

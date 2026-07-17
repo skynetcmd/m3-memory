@@ -363,19 +363,20 @@ def get_hw_info() -> tuple[str, str]:
 
 
 def get_latest_activity() -> tuple:
+    # Backend-aware core-store read (mc._db()); on a PG-primary deployment the
+    # stale/empty SQLite file must not be read directly. system_focus and
+    # activity_logs both live in the core store.
     try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur  = conn.cursor()
-        cur.execute("SELECT summary FROM system_focus LIMIT 1")
-        row   = cur.fetchone()
-        focus = row[0] if row else "IDLE"
-        cur.execute(
-            "SELECT query, model_used FROM activity_logs "
-            "ORDER BY timestamp DESC LIMIT 3"
-        )
-        logs = cur.fetchall()
-        conn.close()
-        return focus, logs
+        import memory_core as mc
+        with mc._db() as conn:
+            cur = conn.execute("SELECT summary FROM system_focus LIMIT 1")
+            row   = cur.fetchone()
+            focus = row[0] if row else "IDLE"
+            logs = conn.execute(
+                "SELECT query, model_used FROM activity_logs "
+                "ORDER BY timestamp DESC LIMIT 3"
+            ).fetchall()
+        return focus, [(r[0], r[1]) for r in logs]
     except Exception:
         return "N/A", []
 
@@ -389,43 +390,46 @@ def get_memory_health() -> dict:
         "watermarks": {},
     }
     try:
-        conn = sqlite3.connect(str(DB_PATH), timeout=5)
-        cur = conn.cursor()
+        # Backend-aware core-store read (mc._db()); all tables below —
+        # memory_items, memory_embeddings, sync_watermarks — live in the core
+        # store, so on a PG-primary deployment this reports the live numbers
+        # instead of a stale/empty SQLite file. No value binds or date exprs,
+        # so no dialect placeholders are needed; positional row access is
+        # backend-safe.
+        import memory_core as mc
+        with mc._db() as conn:
+            # Total active items
+            stats["total"] = conn.execute(
+                "SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0"
+            ).fetchone()[0]
 
-        # Total active items
-        cur.execute("SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0")
-        stats["total"] = cur.fetchone()[0]
+            # By type
+            for row in conn.execute(
+                "SELECT type, COUNT(*) FROM memory_items WHERE is_deleted = 0 GROUP BY type ORDER BY COUNT(*) DESC"
+            ).fetchall():
+                stats["by_type"][row[0]] = row[1]
 
-        # By type
-        for row in cur.execute(
-            "SELECT type, COUNT(*) FROM memory_items WHERE is_deleted = 0 GROUP BY type ORDER BY COUNT(*) DESC"
-        ).fetchall():
-            stats["by_type"][row[0]] = row[1]
+            # By change_agent
+            for row in conn.execute(
+                "SELECT COALESCE(change_agent, 'unknown'), COUNT(*) FROM memory_items WHERE is_deleted = 0 GROUP BY change_agent ORDER BY COUNT(*) DESC"
+            ).fetchall():
+                stats["by_agent"][row[0]] = row[1]
 
-        # By change_agent
-        for row in cur.execute(
-            "SELECT COALESCE(change_agent, 'unknown'), COUNT(*) FROM memory_items WHERE is_deleted = 0 GROUP BY change_agent ORDER BY COUNT(*) DESC"
-        ).fetchall():
-            stats["by_agent"][row[0]] = row[1]
+            # Embedding coverage
+            row = conn.execute(
+                """SELECT
+                     (SELECT COUNT(DISTINCT memory_id) FROM memory_embeddings) AS embedded,
+                     (SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0) AS total"""
+            ).fetchone()
+            stats["embedded"] = row[0]
+            stats["unembedded"] = row[1] - row[0]
 
-        # Embedding coverage
-        cur.execute(
-            """SELECT
-                 (SELECT COUNT(DISTINCT memory_id) FROM memory_embeddings) AS embedded,
-                 (SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0) AS total"""
-        )
-        row = cur.fetchone()
-        stats["embedded"] = row[0]
-        stats["unembedded"] = row[1] - row[0]
-
-        # Sync watermarks
-        try:
-            for row in cur.execute("SELECT direction, last_synced_at FROM sync_watermarks").fetchall():
-                stats["watermarks"][row[0]] = row[1]
-        except sqlite3.OperationalError:
-            pass
-
-        conn.close()
+            # Sync watermarks
+            try:
+                for row in conn.execute("SELECT direction, last_synced_at FROM sync_watermarks").fetchall():
+                    stats["watermarks"][row[0]] = row[1]
+            except Exception:
+                pass
     except Exception as e:
         logger.debug(f"Memory health query failed: {type(e).__name__}")
     return stats

@@ -164,7 +164,12 @@ All agents contribute facts and observations to `scope="org"` asynchronously, wi
 
 Concurrent writes from multiple agents do **not** fail on lock contention. Every SQLite connection runs in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`**, a connection pool, and a write-path retry — so simultaneous writers serialize and wait rather than erroring. WAL is verified at init; M3 raises rather than silently running in a slower journal mode.
 
-For **high-concurrency fleets** where many agents write to one shared pool continuously, add a shared **PostgreSQL** sync tier: each agent still writes locally to its own WAL-mode SQLite store (SQLite remains the system of record) and syncs bidirectionally to a shared Postgres warehouse (`bin/pg_sync.py`), which has no single-writer constraint. See [SYNC.md](SYNC.md). This is the path for the "many autonomous bots writing a shared memory pool" scenario. Note that Postgres is a **sync/warehouse tier, not a drop-in replacement store** — you can't point M3 at Postgres as its live backend; the local SQLite store is always the source of truth.
+For **high-concurrency fleets** where many agents write to one shared pool continuously, there are two paths:
+
+1. **PostgreSQL as the shared primary store** (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`): every agent reads and writes the *same* Postgres database directly — no per-agent local store, no sync lag. Postgres has no single-writer constraint, so concurrent writers don't serialize the way one SQLite file does. This is the simplest topology when the agents share infrastructure.
+2. **Local SQLite + bidirectional warehouse sync** (`bin/pg_sync.py`): each agent writes locally to its own WAL-mode SQLite store and syncs bidirectionally to a shared Postgres *warehouse* (`M3_CDW_PG_URL`). This suits agents that must keep working offline / air-gapped and reconcile later. See [SYNC.md](SYNC.md).
+
+The warehouse (path 2) is a *sync tier*, distinct from using Postgres as the primary backend (path 1) — pick based on whether the fleet shares a live database or each agent owns a local one.
 
 ### ⚡ Reactive (notification-driven)
 

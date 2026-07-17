@@ -149,8 +149,9 @@ def _age_days(created_at: str | None, now_ts: float) -> float:
     return max(0.0, (now_ts - dt.timestamp()) / 86400.0)
 
 
-def _has_column(conn, table, col) -> bool:
-    return any(r[1] == col for r in conn.execute(f'pragma table_info("{table}")'))
+def _has_column(conn, dialect, table, col) -> bool:
+    sql, params = dialect.columns_of(table)
+    return any(r[0] == col for r in conn.execute(sql, params).fetchall())
 
 
 def classify(role: str, content: str, importance: float, norm: str,
@@ -194,23 +195,47 @@ def run(db_path: str, args) -> dict:
                    "status_min_cluster": args.status_min_cluster,
                    "generic_imp_max": args.generic_imp_max, "generic": not args.no_generic},
     }
-    conn = sqlite3.connect(db_path, timeout=30)
-    conn.row_factory = sqlite3.Row
+    # Backend-aware. On SQLite: connect directly to the caller's chatlog file
+    # (byte-identical to the original) — the core table name, no path indirection
+    # (get_chatlog_conn's own resolver could point at a DIFFERENT chatlog path
+    # than the db_path the caller passed). On PG: one DB, chatlog isolated by the
+    # chat_log_* table name via the backend pool, hitting the LIVE store.
+    from memory.backends import active_backend, chatlog_table
+
+    backend = active_backend()
+    _d = backend.dialect()
+    _p = _d.param()
+    if backend.name == "sqlite":
+        conn = sqlite3.connect(db_path, timeout=30)
+        conn.row_factory = sqlite3.Row  # name-based row access (r["content"] etc.)
+        try:
+            return _run_sweep(conn, db_path, args, now_ts, S, _d, _p, "memory_items", True)
+        finally:
+            conn.close()
+    else:
+        _tbl = chatlog_table("items")
+        with backend.connection() as conn:
+            return _run_sweep(conn, db_path, args, now_ts, S, _d, _p, _tbl, False)
+
+
+def _run_sweep(conn, db_path, args, now_ts, S, _d, _p, _tbl, _is_sqlite) -> dict:
     # §10 DB hygiene: tune the connection (WAL autocheckpoint, journal_size_limit,
     # mmap/cache) so an --apply run doesn't bloat the chatlog WAL. Best-effort —
-    # a missing helper or odd path must not abort a prune.
-    try:
-        import sys as _sys
-        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from sqlite_pragmas import apply_pragmas, checkpoint_truncate, profile_for_db
-        apply_pragmas(conn, profile_for_db(db_path))
-    except Exception:
-        checkpoint_truncate = None  # type: ignore[assignment]
+    # a missing helper or odd path must not abort a prune. SQLite-only pragmas.
+    checkpoint_truncate = None
+    if _is_sqlite:
+        try:
+            import sys as _sys
+            _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from sqlite_pragmas import apply_pragmas, checkpoint_truncate, profile_for_db
+            apply_pragmas(conn, profile_for_db(db_path))
+        except Exception:
+            checkpoint_truncate = None  # type: ignore[assignment]
     try:
         for col in ("id", "type", "title", "content", "importance", "created_at", "is_deleted"):
-            if not _has_column(conn, "memory_items", col):
-                return {"error": f"memory_items.{col} missing"}
-        has_valid_to = _has_column(conn, "memory_items", "valid_to")
+            if not _has_column(conn, _d, _tbl, col):
+                return {"error": f"{_tbl}.{col} missing"}
+        has_valid_to = _has_column(conn, _d, _tbl, "valid_to")
         role_sql = """CASE WHEN title LIKE 'user@%' THEN 'user'
                            WHEN title LIKE 'assistant@%' THEN 'assistant'
                            WHEN title LIKE 'system@%' THEN 'system'
@@ -227,9 +252,9 @@ def run(db_path: str, args) -> dict:
             now_ts - args.fresh_days * 86400.0, timezone.utc
         ).isoformat()
         rows = conn.execute(f"""SELECT id, {role_sql} AS role, content, importance, created_at
-                                FROM memory_items
+                                FROM {_tbl}
                                 WHERE type='chat_log' AND is_deleted=0
-                                  AND created_at < ?
+                                  AND created_at < {_p}
                                 ORDER BY created_at ASC""", (fresh_cutoff,)).fetchall()
         # PASS 1: build normalized-content cluster sizes (for repeat-status)
         cluster: dict[str, int] = {}
@@ -286,18 +311,19 @@ def run(db_path: str, args) -> dict:
         S["prune_content_mb"] = round(S["prune_content_mb"], 1)
         if args.apply:
             ts = datetime.now(timezone.utc).isoformat()
-            conn.execute("BEGIN IMMEDIATE")
+            if _is_sqlite:
+                conn.execute("BEGIN IMMEDIATE")
             if has_valid_to:
                 conn.executemany(
-                    "UPDATE memory_items SET importance=?, valid_to=?, updated_at=? "
-                    "WHERE id=? AND type='chat_log'",
+                    f"UPDATE {_tbl} SET importance={_p}, valid_to={_p}, updated_at={_p} "
+                    f"WHERE id={_p} AND type='chat_log'",
                     [(ni, ts, ts, rid) for rid, ni in decay_buf])
             else:
                 conn.executemany(
-                    "UPDATE memory_items SET importance=?, updated_at=? WHERE id=? AND type='chat_log'",
+                    f"UPDATE {_tbl} SET importance={_p}, updated_at={_p} WHERE id={_p} AND type='chat_log'",
                     [(ni, ts, rid) for rid, ni in decay_buf])
             conn.executemany(
-                "UPDATE memory_items SET is_deleted=1, updated_at=? WHERE id=? AND type='chat_log'",
+                f"UPDATE {_tbl} SET is_deleted=1, updated_at={_p} WHERE id={_p} AND type='chat_log'",
                 [(ts, rid) for (rid,) in prune_buf])
             conn.commit()
             S["writes_decay"], S["writes_prune"] = len(decay_buf), len(prune_buf)
@@ -309,8 +335,6 @@ def run(db_path: str, args) -> dict:
                     S["errors"].append(f"wal_checkpoint: {exc!r}")
     except Exception as exc:
         conn.rollback(); S["errors"].append(repr(exc))
-    finally:
-        conn.close()
     return S
 
 

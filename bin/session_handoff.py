@@ -26,9 +26,27 @@ from datetime import datetime, timezone
 
 
 # Ensure table exists at module load (M13)
+# session_handoff is a CORE-store table, so it is created/read/written through
+# the backend-aware seam (mc._db()). On a PG-primary deployment the old
+# sqlite3.connect(DB_PATH) created/wrote a stale SQLite file that the live store
+# never sees. The DDL diverges per backend (SQLite INTEGER PRIMARY KEY +
+# DATETIME vs PG SERIAL + TIMESTAMPTZ), so the id/timestamp column types are
+# chosen from the active backend.
 def _ensure_table():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS session_handoff (id INTEGER PRIMARY KEY, project TEXT, summary TEXT, next_steps TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+    import memory_core as mc
+    from memory.backends import active_backend
+    is_pg = active_backend().name != "sqlite"
+    id_col = "id SERIAL PRIMARY KEY" if is_pg else "id INTEGER PRIMARY KEY"
+    ts_col = (
+        "timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP"
+        if is_pg
+        else "timestamp DATETIME DEFAULT CURRENT_TIMESTAMP"
+    )
+    with mc._db() as conn:
+        conn.execute(
+            f"CREATE TABLE IF NOT EXISTS session_handoff ({id_col}, project TEXT, "
+            f"summary TEXT, next_steps TEXT, {ts_col})"
+        )
 
 _ensure_table()
 
@@ -36,9 +54,16 @@ _ensure_table()
 def save_handoff(project: str, summary: str, next_steps: str):
     """Saves the current AI session state for another agent to resume."""
     try:
-        with sqlite3.connect(DB_PATH) as conn:
+        import memory_core as mc
+        from memory.backends import active_backend
+        _p = active_backend().dialect().param()
+        with mc._db() as conn:
             now = datetime.now(timezone.utc).isoformat()
-            conn.execute("INSERT INTO session_handoff (project, summary, next_steps, timestamp) VALUES (?, ?, ?, ?)", (project, summary, next_steps, now))
+            conn.execute(
+                f"INSERT INTO session_handoff (project, summary, next_steps, timestamp) "
+                f"VALUES ({_p}, {_p}, {_p}, {_p})",
+                (project, summary, next_steps, now),
+            )
         return f"State saved for {project}."
     except Exception as exc:
         return f"Error saving handoff: {type(exc).__name__}"

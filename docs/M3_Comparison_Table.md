@@ -123,7 +123,7 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 **M3 standing:** Full Sovereign. Local SQLite, local SLM extraction, zero telemetry, native Python with an optional in-process Rust acceleration core (`m3_core_rs`) that ships as a local wheel — no service, no daemon, graceful pure-Python fallback — runs on a laptop or in an air-gapped enclave with the same code path. The Rust core gives large per-operation wins where it matters (up to ~846× on packed MMR rerank, ~97–178× on packed batch-cosine, 11–15× redaction, 1.4–10× on FTS/token-Jaccard; [benchmarks](OXIDATION_BENCHMARKS.md)) without adding any external dependency.
 
 **Sub-dimensions:**
-- **Data Residency:** Local SQLite — single file, portable, inspectable.
+- **Data Residency:** Local SQLite — single file, portable, inspectable (or PostgreSQL as the primary backend for a shared/server store).
 - **Extraction Compute:** Local SLM via LM Studio / Ollama / vLLM — no data egress.
 - **Telemetry / Audit:** Zero by default; bitemporal log gives auditability without phoning home.
 - **Infrastructure:** `pip install` — no Docker, no services, no daemons.

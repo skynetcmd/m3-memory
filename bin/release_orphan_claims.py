@@ -35,7 +35,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -75,90 +74,97 @@ def main() -> int:
     if not db.exists():
         sys.exit(f"ERROR: db not found: {db}")
 
-    conn = sqlite3.connect(db, timeout=60)
-    conn.execute("PRAGMA busy_timeout=60000")
+    # Route through the storage seam so this reads/writes the LIVE core store on
+    # both backends (on PG-primary a raw sqlite3.connect would hit a stale file).
+    import memory_core as mc
+    from m3_sdk import active_database
+    from memory.backends import active_backend
 
-    # Build the WHERE clause
-    where = "status='in_progress'"
-    params: list = []
-    desc_lines: list[str] = []
+    with active_database(str(db)):
+        _d = active_backend().dialect()
+        _p = _d.param()
 
-    if args.run_id:
-        where += " AND enrich_run_id = ?"
-        params.append(args.run_id)
-        desc_lines.append(f"  enrich_run_id = {args.run_id}")
-    elif args.older_than:
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=args.older_than)).strftime(
-            "%Y-%m-%dT%H:%M:%SZ")
-        where += " AND claimed_at < ?"
-        params.append(cutoff)
-        desc_lines.append(f"  claimed_at < {cutoff}  (older than {args.older_than} min)")
-    elif args.all:
-        desc_lines.append("  ALL in_progress rows")
+        # Build the WHERE clause
+        where = "status='in_progress'"
+        params: list = []
+        desc_lines: list[str] = []
 
-    if args.skip_qps_done:
-        # Defensive: only release if qps says pending or failed (not already terminal)
-        where += """ AND NOT EXISTS (
-            SELECT 1 FROM question_pipeline_state q
-            WHERE q.convo_id = enrichment_groups.group_key
-              AND q.result IN ('done_text','done_empty')
-        )"""
-        desc_lines.append("  AND qps.result NOT IN (done_text,done_empty)")
+        if args.run_id:
+            where += f" AND enrich_run_id = {_p}"
+            params.append(args.run_id)
+            desc_lines.append(f"  enrich_run_id = {args.run_id}")
+        elif args.older_than:
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=args.older_than)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ")
+            where += f" AND claimed_at < {_p}"
+            params.append(cutoff)
+            desc_lines.append(f"  claimed_at < {cutoff}  (older than {args.older_than} min)")
+        elif args.all:
+            desc_lines.append("  ALL in_progress rows")
 
-    # Preview
-    cnt = conn.execute(
-        f"SELECT COUNT(*) FROM enrichment_groups WHERE {where}",
-        params,
-    ).fetchone()[0]
-    print("=== release_orphan_claims preview ===")
-    print(f"DB: {db}")
-    print("Filters:")
-    for line in desc_lines:
-        print(line)
-    print(f"Rows that would be released: {cnt}")
+        if args.skip_qps_done:
+            # Defensive: only release if qps says pending or failed (not already terminal)
+            where += """ AND NOT EXISTS (
+                SELECT 1 FROM question_pipeline_state q
+                WHERE q.convo_id = enrichment_groups.group_key
+                  AND q.result IN ('done_text','done_empty')
+            )"""
+            desc_lines.append("  AND qps.result NOT IN (done_text,done_empty)")
 
-    if cnt == 0:
-        print("Nothing to do.")
-        return 0
+        with mc._db() as conn:
+            # Preview
+            cnt = conn.execute(
+                f"SELECT COUNT(*) FROM enrichment_groups WHERE {where}",
+                params,
+            ).fetchone()[0]
+            print("=== release_orphan_claims preview ===")
+            print(f"DB: {db}")
+            print("Filters:")
+            for line in desc_lines:
+                print(line)
+            print(f"Rows that would be released: {cnt}")
 
-    if args.dry_run:
-        print("--dry-run: not committing.")
-        return 0
+            if cnt == 0:
+                print("Nothing to do.")
+                return 0
 
-    if not args.yes:
-        try:
-            ans = input(f"Release {cnt} rows? [y/N]: ").strip().lower()
-        except EOFError:
-            ans = "n"
-        if ans != "y":
-            print("Aborted.")
-            return 1
+            if args.dry_run:
+                print("--dry-run: not committing.")
+                return 0
 
-    cur = conn.execute(
-        f"""UPDATE enrichment_groups
-            SET status='pending', claim_token=NULL, claimed_at=NULL,
-                enrich_run_id=NULL
-            WHERE {where}""",
-        params,
-    )
-    conn.commit()
-    print(f"Released {cur.rowcount} rows.")
+            if not args.yes:
+                try:
+                    ans = input(f"Release {cnt} rows? [y/N]: ").strip().lower()
+                except EOFError:
+                    ans = "n"
+                if ans != "y":
+                    print("Aborted.")
+                    return 1
 
-    # If --run-id was given, also try to mark the run row as aborted (cosmetic
-    # — keeps enrichment_runs audit clean).
-    if args.run_id:
-        n = conn.execute(
-            """UPDATE enrichment_runs
-               SET finished_at=?, status='aborted',
-                   abort_reason=COALESCE(abort_reason,'orphan_release')
-               WHERE id=? AND finished_at IS NULL""",
-            (_utcnow_iso(), args.run_id),
-        ).rowcount
-        conn.commit()
-        if n:
-            print(f"Also marked run {args.run_id} as aborted in enrichment_runs.")
+            cur = conn.execute(
+                f"""UPDATE enrichment_groups
+                    SET status='pending', claim_token=NULL, claimed_at=NULL,
+                        enrich_run_id=NULL
+                    WHERE {where}""",
+                params,
+            )
+            conn.commit()
+            print(f"Released {cur.rowcount} rows.")
 
-    conn.close()
+            # If --run-id was given, also try to mark the run row as aborted (cosmetic
+            # — keeps enrichment_runs audit clean).
+            if args.run_id:
+                n = conn.execute(
+                    f"""UPDATE enrichment_runs
+                       SET finished_at={_p}, status='aborted',
+                           abort_reason=COALESCE(abort_reason,'orphan_release')
+                       WHERE id={_p} AND finished_at IS NULL""",
+                    (_utcnow_iso(), args.run_id),
+                ).rowcount
+                conn.commit()
+                if n:
+                    print(f"Also marked run {args.run_id} as aborted in enrichment_runs.")
+
     return 0
 
 

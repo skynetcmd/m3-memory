@@ -118,7 +118,7 @@ at install time — nothing else to do once the database is up.
 |---|---|---|
 | `M3_MEMORY_ROOT` | Optional master state-root override (see [Roots & precedence](#roots--precedence-the-single-source-of-truth)). Defaults to `~/.m3-memory`. | `export M3_MEMORY_ROOT="/path/to/state"` (Set directly) |
 | `SYNC_TARGET_IP` | IP address of the central PostgreSQL server. | `_keychain_set agentos_sync_target_ip "YOUR_SERVER_IP"` |
-| `PG_URL`| **Required.** Full PostgreSQL connection string with credentials. | `_keychain_set agentos_pg_url "postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db"` |
+| `PG_URL`| **Optional — deprecated.** Legacy warehouse DSN. Use `M3_CDW_PG_URL` for the data-warehouse role or `M3_PRIMARY_PG_URL` for a PostgreSQL primary store (see "Primary database backend" above). The default install is SQLite and needs no PostgreSQL at all. | `_keychain_set agentos_cdw_pg_url "postgresql://USERNAME:REPLACE_WITH_YOUR_PASSWORD@host/db"` |
 
 ### API Keys & Authentication
 

@@ -152,7 +152,7 @@ M3 is memory-first rather than graph-first: the primary store is a bitemporal SQ
 | Feature | M3-Memory | Graphiti |
 |---------|-----------|----------|
 | **Core abstraction** | Bitemporal memory store + hybrid retrieval | Temporal knowledge graph (nodes/edges) |
-| **Backing store** | Single SQLite file (FTS5 + vector) | Graph DB (Neo4j / FalkorDB) |
+| **Backing store** | Single SQLite file (FTS5 + vector), or PostgreSQL as the primary backend | Graph DB (Neo4j / FalkorDB) |
 | **Search** | FTS5 + vector + MMR | Graph traversal + semantic + BM25 |
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain | 🏆 Bi-temporal edge validity (fact/edge grain) |
 | **MCP support** | 👑 Native — 100+ tools | 🏆 Via a separate MCP server |
@@ -162,7 +162,7 @@ M3 is memory-first rather than graph-first: the primary store is a bitemporal SQ
 | **Cost** | Free, Apache 2.0 | Free, OSS |
 
 ### When to choose M3-Memory over Graphiti
-- You want zero-infrastructure local memory (one SQLite file, no graph DB to run).
+- You want zero-infrastructure local memory (one SQLite file, no graph DB to run — or PostgreSQL as the primary backend if you need a shared/server store).
 - Retrieval — "recall what's relevant and still valid" — matters more than graph reasoning.
 - You need MCP-native tools and offline operation out of the box.
 

@@ -92,11 +92,11 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 ### ❌ Myth: "M3 stores memory as Markdown files in a Git repo / uses recursive summarization trees / has a Reader-Judge architecture"
 
-**Fact:** None of these. M3 is a **single SQLite file** with FTS5 and vector indexes. Markdown-in-Git is a different design choice that other memory tools have made; M3 hasn't.
+**Fact:** None of these. In its default deployment M3 is a **single SQLite file** with FTS5 and vector indexes (PostgreSQL is an opt-in primary backend — see below). Markdown-in-Git is a different design choice that other memory tools have made; M3 hasn't.
 
 ### ❌ Myth: "M3 is just SQLite, so it's a toy / not production-grade / can't scale"
 
-**Fact:** M3 is **production-grade**, and SQLite is a deliberate design choice, not a limitation. M3 is **lightweight by design**: SQLite is the primary store because it gives a fast, embedded, zero-infrastructure, fully local-first deployment — the right default for desktop agents, homelabs, and sovereign setups. SQLite runs in production in countless systems. For **more demanding environments**, M3 scales out to **PostgreSQL as a corporate data warehouse**, unlocking more nuanced data-governance options (centralized retention, multi-node access, enterprise backup/audit) — see [SYNC.md](SYNC.md) and [SOVEREIGN_DEPLOYMENT.md](SOVEREIGN_DEPLOYMENT.md). You choose the tier: lightweight SQLite by default, PostgreSQL warehouse when you need it.
+**Fact:** M3 is **production-grade**, and SQLite is a deliberate design choice, not a limitation. M3 is **lightweight by design**: SQLite is the default primary store because it gives a fast, embedded, zero-infrastructure, fully local-first deployment — the right default for desktop agents, homelabs, and sovereign setups. SQLite runs in production in countless systems. For **more demanding environments**, PostgreSQL can be the **primary live store** (opt-in via `M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`, chosen at install), giving a shared/server-hosted backend; separately, PostgreSQL can also serve as a **corporate data warehouse** sync target, unlocking more nuanced data-governance options (centralized retention, multi-node access, enterprise backup/audit) — see [SYNC.md](SYNC.md) and [SOVEREIGN_DEPLOYMENT.md](SOVEREIGN_DEPLOYMENT.md). You choose the tier: lightweight SQLite by default, PostgreSQL primary or warehouse when you need it. (On a PostgreSQL primary, vector search is currently brute-force Rust cosine; pgvector/HNSW ANN is a future accelerator, not yet implemented.)
 
 ### ❌ Myth: "M3 has Hindsight Credit Assignment / learns from retrieval mistakes / updates embeddings in real time"
 
@@ -104,7 +104,7 @@ What M3 **does not** do is LLM-driven cognitive graph reasoning during retrieval
 
 ### ❌ Myth: "M3 requires Docker / Kubernetes / a specific OS"
 
-**Fact:** M3 is `pip install m3-memory`. It runs on macOS, Linux, and Windows from the same install command. No Docker, no containers, no service mesh. The optional sync layer can use PostgreSQL if you want cross-machine sync, but that's optional and external — the core M3 store is one SQLite file.
+**Fact:** M3 is `pip install m3-memory`. It runs on macOS, Linux, and Windows from the same install command. No Docker, no containers, no service mesh. The optional sync layer can use PostgreSQL if you want cross-machine sync, but that's optional and external — in the default deployment the core M3 store is one SQLite file (PostgreSQL can also be chosen as the primary backend via `M3_DB_BACKEND=postgres`).
 
 ### ⚖️ Myth: "M3 beats / loses to agentmemory / MemPalace / Mastra on LongMemEval"
 
@@ -127,7 +127,7 @@ If you need the memory layer that most reliably surfaces the right past state, t
 
 ### ❌ Myth: "M3 has a single-writer bottleneck — concurrent multi-agent writes will fail on lock contention"
 
-**Fact:** M3 does not fail under concurrent writes; writers **serialize and wait**, they don't error. Every SQLite connection is opened in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`** and a connection pool, and the write path adds a 3-tier retry (`bin/sqlite_pragmas.py`, `bin/m3_core/context.py`, `bin/memory/write.py`). WAL is *verified* at init — if the filesystem silently downgrades it, M3 raises rather than continuing. And for genuine high-concurrency, shared multi-agent pools, M3 ships a **bidirectional SQLite ↔ PostgreSQL sync** (`bin/pg_sync.py`): each agent writes locally to SQLite and syncs to a shared Postgres warehouse (a sync tier, not a replacement store) that has no single-writer constraint. A single SQLite file does serialize writers (as every SQLite deployment does), but "will fail due to concurrency locks" is not how the system behaves — see [MULTI_AGENT.md](MULTI_AGENT.md) and [SYNC.md](SYNC.md).
+**Fact:** M3 does not fail under concurrent writes; writers **serialize and wait**, they don't error. Every SQLite connection is opened in **WAL mode** (concurrent readers alongside a writer) with a **30-second `busy_timeout`** and a connection pool, and the write path adds a 3-tier retry (`bin/sqlite_pragmas.py`, `bin/m3_core/context.py`, `bin/memory/write.py`). WAL is *verified* at init — if the filesystem silently downgrades it, M3 raises rather than continuing. And for genuine high-concurrency, shared multi-agent pools, M3 can run directly on **PostgreSQL as the primary store** (`M3_DB_BACKEND=postgres`) — a shared server database with no single-writer constraint — or keep local SQLite per agent and **sync bidirectionally to a shared Postgres warehouse** (`bin/pg_sync.py`). A single SQLite file does serialize writers (as every SQLite deployment does), but "will fail due to concurrency locks" is not how the system behaves — see [MULTI_AGENT.md](MULTI_AGENT.md) and [SYNC.md](SYNC.md).
 
 ### ❌ Myth: "M3 is English-only — its triage patterns are hardcoded English regex"
 

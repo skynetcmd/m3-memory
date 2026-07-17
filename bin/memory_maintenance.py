@@ -595,14 +595,22 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
     return "Maintenance complete:\n" + "\n".join(report)
 
 def gdpr_export_impl(user_id: str) -> str:
-    """Export all memories for a data subject (GDPR Article 20 - Right to data portability)."""
+    """Export all memories for a data subject (GDPR Article 20 - Right to data portability).
+
+    Backend-aware: routes through the seam (_db()) and dialects placeholders /
+    now() so it works on a PostgreSQL-primary store, not just SQLite. Previously
+    the ``?`` placeholders + ``strftime('now')`` were SQLite-only, so GDPR export
+    silently failed on PG."""
     import json
     if not user_id or not user_id.strip():
         return "Error: user_id is required"
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
     with _db() as db:
         rows = db.execute(
             "SELECT id, type, title, content, metadata_json, agent_id, importance, created_at, updated_at "
-            "FROM memory_items WHERE user_id = ? AND is_deleted = 0",
+            f"FROM memory_items WHERE user_id = {_p} AND is_deleted = 0",
             (user_id,)
         ).fetchall()
         items = [dict(r) for r in rows]
@@ -613,7 +621,7 @@ def gdpr_export_impl(user_id: str) -> str:
         try:
             db.execute(
                 "INSERT INTO gdpr_requests (id, subject_id, request_type, status, items_affected, completed_at) "
-                "VALUES (?, ?, 'export', 'completed', ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                f"VALUES ({_p}, {_p}, 'export', 'completed', {_p}, {_d.now()})",
                 (req_id, user_id, len(items))
             )
         except Exception:
@@ -622,10 +630,18 @@ def gdpr_export_impl(user_id: str) -> str:
     return json.dumps({"user_id": user_id, "request_id": req_id, "items_count": len(items), "items": items}, indent=2, default=str)
 
 def gdpr_forget_impl(user_id: str) -> str:
-    """Right to be forgotten (GDPR Article 17). Hard-deletes all data for a user_id."""
+    """Right to be forgotten (GDPR Article 17). Hard-deletes all data for a user_id.
+
+    Backend-aware: seam (_db()) + dialected placeholders / now() so the cascade
+    delete runs on PostgreSQL as well as SQLite. The bypass_surface guard catches
+    the backend-specific "table absent" error (sqlite3.OperationalError /
+    psycopg2 UndefinedTable) rather than only the SQLite one."""
     import uuid
     if not user_id or not user_id.strip():
         return "Error: user_id is required"
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
 
     req_id = str(uuid.uuid4())
     total_deleted = 0
@@ -633,17 +649,17 @@ def gdpr_forget_impl(user_id: str) -> str:
     with _db() as db:
         # Count items before deletion
         count_row = db.execute(
-            "SELECT COUNT(*) as cnt FROM memory_items WHERE user_id = ?", (user_id,)
+            f"SELECT COUNT(*) as cnt FROM memory_items WHERE user_id = {_p}", (user_id,)
         ).fetchone()
         total_deleted = count_row["cnt"] if count_row else 0
 
         # Get all memory IDs for cascade deletion
         item_ids = [r["id"] for r in db.execute(
-            "SELECT id FROM memory_items WHERE user_id = ?", (user_id,)
+            f"SELECT id FROM memory_items WHERE user_id = {_p}", (user_id,)
         ).fetchall()]
 
         if item_ids:
-            placeholders = ",".join(["?"] * len(item_ids))
+            placeholders = _d.placeholder(len(item_ids))
             # Delete embeddings
             db.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", item_ids)
             # Delete relationships
@@ -656,16 +672,19 @@ def gdpr_forget_impl(user_id: str) -> str:
             # DB migrated below v033. By memory_id (the surfaced pointer) AND user_id.
             try:
                 db.execute(f"DELETE FROM bypass_surface WHERE memory_id IN ({placeholders})", item_ids)
-                db.execute("DELETE FROM bypass_surface WHERE user_id = ?", (user_id,))
-            except sqlite3.OperationalError:
-                pass  # table absent (pre-v033) — nothing to purge
+                db.execute(f"DELETE FROM bypass_surface WHERE user_id = {_p}", (user_id,))
+            except Exception:
+                # table absent (pre-v033 SQLite, or not-yet-migrated PG) — nothing
+                # to purge. Broadened from sqlite3.OperationalError so a PG
+                # UndefinedTable doesn't abort the forget.
+                pass
             # Hard-delete the items themselves
-            db.execute("DELETE FROM memory_items WHERE user_id = ?", (user_id,))
+            db.execute(f"DELETE FROM memory_items WHERE user_id = {_p}", (user_id,))
 
         try:
             db.execute(
                 "INSERT INTO gdpr_requests (id, subject_id, request_type, status, items_affected, completed_at) "
-                "VALUES (?, ?, 'forget', 'completed', ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                f"VALUES ({_p}, {_p}, 'forget', 'completed', {_p}, {_d.now()})",
                 (req_id, user_id, total_deleted)
             )
         except Exception:

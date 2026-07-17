@@ -27,7 +27,7 @@
 |---|---|
 | **Actively maintained?** | Yes — frequent releases (see [CHANGELOG](../CHANGELOG.md)). |
 | **Memory format documented?** | Yes — a typed, code-cited schema ([MEMORY_MODEL.md](MEMORY_MODEL.md)) and a 100+ tool [API reference](API_REFERENCE.md). |
-| **Swap the storage backend?** | **Partly — be aware:** SQLite is always the system of record. You can *sync/federate* to PostgreSQL ([SYNC.md](SYNC.md)), but you can't run M3 *on* Postgres as its live store. If a server-based store of record is a hard requirement, M3 isn't the fit. |
+| **Swap the storage backend?** | **Yes.** SQLite is the zero-infrastructure default, but you can run M3 with **PostgreSQL as the primary store** (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`) — the installer asks which backend to use, and the whole runtime works on either. (Separately, you can also *sync/federate* to a PostgreSQL data warehouse — see [SYNC.md](SYNC.md).) Note: on PostgreSQL, vector search is currently brute-force cosine; ANN indexing (pgvector) is a future item. |
 | **Customize what's remembered/forgotten?** | Yes — write-gating, importance, confidence decay, TTL/expiry, and per-agent retention policies ([MEMORY_MODEL.md](MEMORY_MODEL.md)). |
 | **Debugging/introspection?** | Yes — `memory_suggest` returns a per-result score breakdown, `memory_history` shows the audit trail, `memory_verify` checks integrity, and `m3 doctor --fix` diagnoses the store. |
 | **Integrates with my stack?** | Yes for **MCP** (native) and **LangChain/LangGraph** (drop-in — [LANGCHAIN.md](integrations/LANGCHAIN.md)). Beyond those, you call the MCP tools directly. |

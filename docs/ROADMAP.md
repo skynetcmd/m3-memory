@@ -148,6 +148,7 @@ Memory as a maintained body of knowledge, not a flat index. All additive and
 
 ## 📦 Planned — Distribution & Deployment
 
+- [ ] **pgvector / HNSW ANN on the PostgreSQL primary backend** — PostgreSQL can already be M3's primary live store (`M3_DB_BACKEND=postgres` + `M3_PRIMARY_PG_URL`), but vector search there is still **brute-force Rust cosine**, the same as on SQLite. Index-accelerated approximate nearest-neighbor via pgvector/HNSW is not yet implemented — so PG-primary today is about a shared/server store, not faster vector search.
 - [ ] **Docker image** — `docker run -v ~/.m3-memory:/data ghcr.io/skynetcmd/m3-memory:latest`
 - [ ] **Auto MCP Registry** — zero-config discovery in Claude Code and other MCP clients via published `mcp-server.json`
 - [ ] **TestPyPI dry-run CI gate** — catch packaging regressions before every release

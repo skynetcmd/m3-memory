@@ -236,21 +236,31 @@ def _run_promotes(promote_specs: list) -> list:
 
 def _apply_prunes(db_path: str, prune_specs: list) -> dict:
     """For each prune spec, soft-delete every chat_log row in that conversation.
-    Direct SQL inside one connection. Always filters type='chat_log'."""
+
+    Backend-aware. On SQLite: connect directly to ``db_path`` (the chatlog file
+    the caller resolved) — byte-identical to the original behavior. On a
+    PostgreSQL-primary deployment: route through the active backend pool and the
+    chatlog table-name fork (``chat_log_items``), since there is no per-store file
+    path. The previous raw ``sqlite3.connect(db_path)`` silently edited a stale
+    SQLite file on PG; this keeps the SQLite path exact while making PG correct.
+    """
     from datetime import datetime, timezone
 
+    from memory.backends import active_backend, chatlog_table
+
     now_iso = datetime.now(timezone.utc).isoformat()
+    backend = active_backend()
     results: list[dict] = []
-    conn = sqlite3.connect(db_path, timeout=30)
-    try:
+
+    def _run(conn, tbl: str, p: str) -> None:
         for spec in prune_specs:
             conv_id = spec.get("conversation_id")
             if not conv_id:
                 results.append({"spec": spec, "skipped": "no_conversation_id"})
                 continue
             cur = conn.execute(
-                "UPDATE memory_items SET is_deleted=1, updated_at=? "
-                "WHERE type='chat_log' AND conversation_id=? AND is_deleted=0",
+                f"UPDATE {tbl} SET is_deleted=1, updated_at={p} "
+                f"WHERE type='chat_log' AND conversation_id={p} AND is_deleted=0",
                 (now_iso, conv_id),
             )
             results.append({
@@ -259,8 +269,21 @@ def _apply_prunes(db_path: str, prune_specs: list) -> dict:
                 "rows_pruned": cur.rowcount,
             })
         conn.commit()
-    finally:
-        conn.close()
+
+    if backend.name == "sqlite":
+        # Exact original path: the caller's chatlog file, core table name.
+        conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            _run(conn, "memory_items", "?")
+        finally:
+            conn.close()
+    else:
+        # PG: one DB, chatlog isolated by the chat_log_* table name.
+        _p = backend.dialect().param()
+        _tbl = chatlog_table("items")
+        with backend.connection() as conn:
+            _run(conn, _tbl, _p)
+
     return {
         "conversations": results,
         "total_rows_pruned": sum(r.get("rows_pruned", 0) for r in results),

@@ -50,11 +50,43 @@ the policy is forward-going only.
   values are never printed in the action log.
 
 ### Added
+- **PostgreSQL as an opt-in PRIMARY database backend.** SQLite remains the
+  zero-infrastructure default; setting `M3_DB_BACKEND=postgres` +
+  `M3_PRIMARY_PG_URL` routes the core memory store, chatlog, entity graph,
+  enrichment, and cognitive-loop through PostgreSQL instead. The whole runtime
+  surface works on either backend through a narrow storage seam (no ORM) —
+  including the maintenance/CLI tools (GDPR export/forget, chatlog decay/prune,
+  curator apply, the orphan-claim reaper, mission-control/weekly-audit stats),
+  which previously opened SQLite directly and would have silently read a stale
+  file on a PG deployment. The PG schema is created automatically on first
+  connect (base `pg_primary_v1` + `pg_NNN` migrations). **Known limitation:** PG
+  vector search is brute-force Rust cosine over candidate rows; pgvector/HNSW is
+  a future accelerator, not yet wired in.
+- **Installer asks which primary backend to use.** `mcp-memory install-m3` now
+  prompts SQLite (default) vs PostgreSQL, or takes `--db-backend {sqlite,postgres}`.
+  Choosing PostgreSQL prompts for the DSN, probes reachability, builds the schema
+  when reachable, and — when the server isn't up yet — offers a platform-aware
+  install (brew / apt / winget / choco, elevation always user-visible) and defers
+  schema creation to first connect rather than failing. It persists
+  `M3_DB_BACKEND`/`M3_PRIMARY_PG_URL` where the runtime reads them (env: Windows
+  registry / an idempotent shell-profile block that never shadows a hand-set var)
+  and prints guidance for non-shell surfaces (MCP server `env` block, a
+  LangChain/SDK process). `m3 doctor` now reports the active backend and probes
+  the PG DSN's health, and the post-install backup reminder is backend-aware
+  (`pg_dump` guidance on PostgreSQL instead of "copy your .db files").
 - **PostgreSQL primary-store safeguards.** Beyond the rename: the primary backend
   now (1) rejects a DSN whose host is in `M3_PG_FORBIDDEN_HOSTS` (so a primary
   DSN can never point at the shared warehouse), and (2) hard-errors if the
   resolved primary DSN is byte-identical to the resolved warehouse DSN (a
   different database on the same host is still allowed).
+
+### Fixed
+- **PostgreSQL schema parity with SQLite.** The hand-maintained PG schema had
+  drifted: `gdpr_requests` (SQLite migration 010) was never mirrored, so GDPR
+  request logging silently no-op'd on PG, and `observation_queue.stage` /
+  `reflector_queue.stage` (migration 026) were missing. Migration `pg_044` adds
+  them, and a new `tests/test_schema_parity_pg_live.py` compares the two schemas'
+  columns so future divergence fails CI instead of shipping.
 
 ### Removed
 - **ChromaDB support retired.** ChromaDB was an *optional* L3 sync/federation

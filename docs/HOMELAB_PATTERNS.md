@@ -14,7 +14,7 @@ A few properties of M3's design happen to line up with what homelabs actually ne
 - **No GPU tax for memory operations.** Storage, retrieval, and graph traversal are all CPU + RAM only. Your GPU stays free for the LLM doing actual inference. Memory enrichment (the optional SLM-driven extraction layer) can run on the same GPU between calls, or on a separate small box, or be skipped entirely.
 - **Offline-tolerant.** No external dependencies in the data path. Internet drops don't stop your agents. Useful at the cabin, on the road, or in environments where intermittent connectivity is the rule.
 - **Cross-machine sync without a SaaS dependency.** Optional bi-directional delta sync via PostgreSQL. One env var, your memories follow you across boxes.
-- **Single-file SQLite.** Your entire memory store is one file. Easy to back up, easy to inspect with the standard `sqlite3` CLI, easy to move between machines.
+- **Single-file SQLite (default).** In the default deployment your entire memory store is one file — easy to back up, easy to inspect with the standard `sqlite3` CLI, easy to move between machines. (If you opt into a PostgreSQL primary backend via `M3_DB_BACKEND=postgres`, the store lives in Postgres instead; back it up with `pg_dump`, not a file copy.)
 - **Runs everywhere.** macOS, Linux, Windows — same `pip install`. No Docker requirement, no Kubernetes, no service mesh.
 
 **What M3 doesn't try to be:** a high-scale multi-tenant SaaS. If you're building memory for thousands of paying users with team dashboards and SLAs, a hosted cognitive memory product (Mem0 cloud, Letta Cloud, Zep) probably fits better. M3 is built for one developer or one household running real agents on real hardware they own.
@@ -100,7 +100,7 @@ The store itself is small. Even with 100K memories and embeddings, the `agent_me
 
 This is where M3 earns its keep. A typical pattern:
 
-- **One M3 store** (single SQLite file on whichever box is most always-on).
+- **One M3 store** (a single SQLite file on whichever box is most always-on — or a PostgreSQL primary backend if you'd rather run a shared server).
 - **Multiple agents** read and write through MCP — a Claude Code instance on your laptop, a Gemini CLI agent on your desktop, an OpenCode agent on a server, plus any background workers (a Home Assistant integration, a periodic web scraper, etc.).
 - **Per-agent scoping** via `agent_id` and optional `scope` keeps each agent's working memory tidy without preventing cross-agent reads. Use the agent registry (`mcp__memory__agent_register`) so each writer is identified.
 - **Handoffs** via `memory_handoff` — agent A leaves a structured task for agent B, agent B's next session sees it via its inbox.
@@ -119,7 +119,7 @@ If you've ever tried to coordinate multiple agents over a Redis pub/sub or a sha
 
 Things we've seen go wrong, and what to do about them:
 
-- **Backups.** The `agent_memory.db` is a single file. `cp` it during a quiet moment, or use `sqlite3 .backup` for an online snapshot. Restic / Borg / your existing backup tool is fine — it's just a file.
+- **Backups.** In the default SQLite deployment the `agent_memory.db` is a single file. `cp` it during a quiet moment, or use `sqlite3 .backup` for an online snapshot. Restic / Borg / your existing backup tool is fine — it's just a file. (On a PostgreSQL primary backend there is no single file to copy — back up with `pg_dump` instead.)
 - **Power loss.** SQLite WAL is crash-safe by default. After a hard reboot, the database recovers cleanly on the next open. No fsck-style intervention needed.
 - **Multi-machine sync conflicts.** The bi-directional delta sync is last-writer-wins per memory ID, with conflict logs preserved in a separate table. If two machines edited the same memory while disconnected, the later edit wins but you can audit and replay.
 - **Disk full.** SQLite handles disk-full gracefully — writes fail, reads keep working. Configure retention (`memory_set_retention`) and decay if your store grows faster than expected.

@@ -14,6 +14,10 @@ That's all you need. The script:
    sovereign CPU embedder, wires every agent it finds on PATH (Claude / Gemini /
    OpenCode / OpenClaw), installs chatlog hooks, runs `m3 doctor`.
 
+The wizard also asks for the **primary database backend** — SQLite (default,
+zero-infrastructure) or PostgreSQL. Choosing PostgreSQL (`--db-backend postgres`,
+or `M3_DB_BACKEND=postgres`) requires a reachable server via `M3_PRIMARY_PG_URL`.
+
 **Cautious version** (audit before running):
 
 ```bash

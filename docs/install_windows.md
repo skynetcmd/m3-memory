@@ -56,6 +56,10 @@ pip install --user m3-memory
 m3 setup
 ```
 
+The wizard also asks for the **primary database backend** — SQLite (default,
+zero-infrastructure) or PostgreSQL. Choosing PostgreSQL (`--db-backend postgres`,
+or `M3_DB_BACKEND=postgres`) requires a reachable server via `M3_PRIMARY_PG_URL`.
+
 **Prefer a graphical setup?** `m3 setup --gui` opens a window with the same
 questions the terminal wizard asks (recommended defaults pre-selected), then
 runs the install and shows a summary. See [Graphical setup](#graphical-setup)

@@ -64,11 +64,20 @@ def sanitize(text, max_len=200):
 
 
 def _db():
-    # Re-resolve per call so a late --database flag in main() is honored by
-    # section helpers invoked afterwards.
-    conn = sqlite3.connect(resolve_db_path(None), timeout=10)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # Backend-aware core-store connection via the seam (mc._db()). On a
+    # PG-primary deployment (M3_DB_BACKEND=postgres) the old
+    # sqlite3.connect(resolve_db_path(None)) read a stale/empty SQLite file;
+    # mc._db() reads the live store. Returns a context manager — callers use
+    # `with _db() as conn:` so the connection commits/returns-to-pool correctly
+    # on both backends. The seam's rows support BOTH positional (row[0]) and name
+    # (row["col"]) access, so the existing row["timestamp"]-style callers work
+    # unchanged.
+    #
+    # Every caller of _db() here queries ONLY core-store tables (memory_items,
+    # memory_embeddings, project_decisions, activity_logs), so mc._db() is the
+    # correct route for all of them — none query the chatlog or files store.
+    import memory_core as mc
+    return mc._db()
 
 
 def _week_label():
@@ -84,8 +93,10 @@ def section_memory_health(pdf, summary):
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 10)
 
-    conn = _db()
-    try:
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    _p = _d.param()
+    with _db() as conn:
         total = conn.execute(
             "SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0"
         ).fetchone()[0]
@@ -94,11 +105,11 @@ def section_memory_health(pdf, summary):
             "%Y-%m-%dT%H:%M:%SZ"
         )
         added = conn.execute(
-            "SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0 AND created_at > ?",
+            f"SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0 AND created_at > {_p}",
             (week_ago,),
         ).fetchone()[0]
         updated = conn.execute(
-            "SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0 AND updated_at > ?",
+            f"SELECT COUNT(*) FROM memory_items WHERE is_deleted = 0 AND updated_at > {_p}",
             (week_ago,),
         ).fetchone()[0]
 
@@ -119,8 +130,6 @@ def section_memory_health(pdf, summary):
             "JOIN memory_items mi ON me.memory_id = mi.id WHERE mi.is_deleted = 0"
         ).fetchone()[0]
         without_embed = total - with_embed
-    finally:
-        conn.close()
 
     lines = [
         f"Total memory items (active): {total}",
@@ -143,16 +152,16 @@ def section_decisions(pdf, summary):
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 10)
 
-    conn = _db()
-    try:
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    with _db() as conn:
         total_all = conn.execute("SELECT COUNT(*) FROM project_decisions").fetchone()[0]
         rows = conn.execute(
             "SELECT timestamp, project, decision, rationale FROM project_decisions "
-            "WHERE timestamp > datetime('now', '-7 days') "
-            "ORDER BY timestamp DESC"
+            f"WHERE timestamp > {_d.now_minus_days(_d.param())} "
+            "ORDER BY timestamp DESC",
+            (7,),
         ).fetchall()
-    finally:
-        conn.close()
 
     pdf.mc(6, sanitize(
         f"Total decisions (all time): {total_all}  |  This week: {len(rows)}", 500
@@ -186,15 +195,15 @@ def section_activity(pdf, summary):
              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("helvetica", "", 10)
 
-    conn = _db()
-    try:
+    from memory.backends import active_backend
+    _d = active_backend().dialect()
+    with _db() as conn:
         rows = conn.execute(
             "SELECT timestamp, query, response FROM activity_logs "
-            "WHERE timestamp > datetime('now', '-7 days') "
-            "ORDER BY timestamp DESC LIMIT 50"
+            f"WHERE timestamp > {_d.now_minus_days(_d.param())} "
+            "ORDER BY timestamp DESC LIMIT 50",
+            (7,),
         ).fetchall()
-    finally:
-        conn.close()
 
     if not rows:
         pdf.mc(6, "No activity log entries this week.")

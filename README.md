@@ -241,7 +241,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 *   You need a hosted SaaS dashboard with managed infrastructure (use [Letta](https://letta.ai)).
 *   You only want transient in-session chat context that resets when you exit the terminal (rely on your agent's defaults).
 *   **Your need is only contextual retrieval + a little user state:** if plain conversation history, RAG over a knowledge base, and a small structured user profile cover you, that's simpler to build and operate — persistent evolving memory earns its keep when users interact repeatedly *over time* and benefit from accumulated context.
-*   **You require a server-based store as the system of record:** M3 is local-first — SQLite is always the source of truth. PostgreSQL is an optional sync/federation tier, not a drop-in replacement backend.
+*   **You want a hosted/managed database as the system of record:** M3 is local-first. It *can* use PostgreSQL as its primary store (`M3_DB_BACKEND=postgres`) for scale or multi-user deployments, but it's designed to run on your own infrastructure (a local SQLite file by default, or a Postgres you operate) — not against a managed cloud DB you don't control.
 
 ---
 

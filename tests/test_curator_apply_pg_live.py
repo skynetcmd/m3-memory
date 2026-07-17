@@ -117,3 +117,73 @@ def test_curate_no_longer_gated_on_pg(pg_seeded):
     # No "SQLite-only" refusal in errors, and the update landed.
     assert not any("SQLite" in str(e) for e in out["errors"])
     assert out["summary"]["updated"] == 1
+
+
+def test_apply_chatlog_plan_prune_on_pg(monkeypatch):
+    """apply_chatlog_plan's PRUNE path (_apply_prunes) must soft-delete chat_log
+    rows in the PG chat_log_items table, not a stale SQLite file. Self-contained:
+    builds the full PG schema (base + pg_043 chat_log_* + pg_044) and seeds
+    chat_log_items directly."""
+    import uuid
+
+    monkeypatch.setenv("M3_DB_BACKEND", "postgres")
+    monkeypatch.setenv("M3_PG_URL", _DSN)
+    monkeypatch.setenv("M3_PRIMARY_PG_URL", _DSN)
+    from memory.backends import selector as _selector
+
+    _selector._reset_for_tests()
+    from memory.backends.postgres_backend import PostgresBackend
+
+    b = PostgresBackend(dsn=_DSN)
+    with b.connection() as c:
+        cur = c.cursor()
+        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+        for (t,) in cur.fetchall():
+            cur.execute(f'DROP TABLE IF EXISTS "{t}" CASCADE')
+    b._schema_ready = False
+    b.ensure_schema()
+    import migrate_pg
+
+    with b.connection() as c:
+        migrate_pg.run_pending_pg_migrations(c)  # includes pg_043 chat_log_*
+
+    conv = str(uuid.uuid4())
+    try:
+        with b.connection() as c:
+            cur = c.cursor()
+            for _ in range(3):
+                cur.execute(
+                    "INSERT INTO chat_log_items (id,type,title,content,scope,conversation_id) "
+                    "VALUES (%s,'chat_log','x','turn','agent',%s)",
+                    (str(uuid.uuid4()), conv),
+                )
+            # a non-chat_log row in the same conversation must survive
+            cur.execute(
+                "INSERT INTO chat_log_items (id,type,title,content,scope,conversation_id) "
+                "VALUES (%s,'decision','keep','important','agent',%s)",
+                (str(uuid.uuid4()), conv),
+            )
+
+        from curator_apply import apply_chatlog_plan
+
+        out = apply_chatlog_plan({"prune": [{"conversation_id": conv, "reason": "abandoned"}]})
+        assert out["summary"]["pruned"] == 3, out
+
+        with b.connection() as c:
+            cur = c.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM chat_log_items "
+                "WHERE conversation_id=%s AND type='chat_log' AND is_deleted=1",
+                (conv,),
+            )
+            assert cur.fetchone()[0] == 3  # all 3 chat_log rows soft-deleted
+            cur.execute(
+                "SELECT COUNT(*) FROM chat_log_items "
+                "WHERE conversation_id=%s AND type='decision' AND is_deleted=0",
+                (conv,),
+            )
+            assert cur.fetchone()[0] == 1  # the decision row untouched
+    finally:
+        with b.connection() as c:
+            c.cursor().execute("DELETE FROM chat_log_items WHERE conversation_id=%s", (conv,))
+        b.close()
