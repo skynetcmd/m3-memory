@@ -8,10 +8,14 @@ ships raises a clear, actionable error rather than silently falling back — §3
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING
 
 from m3_sdk import getenv_compat
 
 from .base import BackendName, StorageBackend
+
+if TYPE_CHECKING:
+    from .dialect import Dialect
 
 _VALID: tuple[BackendName, ...] = ("sqlite", "postgres")
 
@@ -20,21 +24,37 @@ _VALID: tuple[BackendName, ...] = ("sqlite", "postgres")
 _backends: dict[str, StorageBackend] = {}
 _lock = threading.Lock()
 
+# Memoized backend NAME. The backend KIND (sqlite vs postgres) is fixed for a
+# process — `active_database()` overrides the DB *path/resolver*, never
+# M3_DB_BACKEND — so re-reading the env on every call (getenv_compat, ~0.9µs)
+# was pure waste across 100+ hot-path dispatch sites. Resolve once, then serve
+# from this cache. `_reset_for_tests()` clears it so a test can flip the env.
+_resolved_name: "BackendName | None" = None
+
 
 def resolve_backend_name() -> BackendName:
-    """Resolve the configured backend name.
+    """Resolve the configured backend name (memoized after first call).
 
     Precedence mirrors every other m3 flag: ``M3_DB_BACKEND`` env, then the
     legacy ``DB_BACKEND`` alias (via ``getenv_compat``), then ``sqlite``.
     An unrecognized value raises rather than defaulting — a typo like
     ``postgre`` must not silently run SQLite.
+
+    The result is cached process-wide: the backend kind cannot change within a
+    process (unlike the active DB path, which ``active_database()`` can override).
+    Tests that flip ``M3_DB_BACKEND`` must call ``_reset_for_tests()`` first.
     """
+    global _resolved_name
+    cached = _resolved_name
+    if cached is not None:
+        return cached
     raw = (getenv_compat("M3_DB_BACKEND", "DB_BACKEND", "sqlite") or "sqlite").strip().lower()
     if raw not in _VALID:
         raise ValueError(
             f"M3_DB_BACKEND={raw!r} is not recognized; expected one of {_VALID}. "
             f"Unset it to use the default 'sqlite'."
         )
+    _resolved_name = raw  # type: ignore[assignment]
     return raw  # type: ignore[return-value]
 
 
@@ -53,18 +73,28 @@ def active_backend() -> StorageBackend:
         cached = _backends.get(name)
         if cached is not None:
             return cached
-        if name == "sqlite":
-            from .sqlite_backend import SqliteBackend
+        # The registry maps the validated name to its factory (the backend class),
+        # importing the backend module on demand so its @register_backend runs.
+        # No `if name==` ladder here — adding a backend touches only its own file.
+        from .registry import backend_factory_for
 
-            backend: StorageBackend = SqliteBackend()
-        elif name == "postgres":
-            from .postgres_backend import PostgresBackend
-
-            backend = PostgresBackend()
-        else:  # pragma: no cover - resolve_backend_name already validated
-            raise ValueError(f"unhandled backend {name!r}")
+        backend: StorageBackend = backend_factory_for(name)()
         _backends[name] = backend
         return backend
+
+
+def dialect() -> "Dialect":
+    """The SQL :class:`Dialect` for the ACTIVE backend (cached singleton).
+
+    Convenience over ``active_backend().dialect()`` — the form ~96 call sites
+    repeat. A per-CALL function, deliberately NOT a module-global bound at import:
+    the backend *kind* is fixed per process, but ``active_database()`` overrides
+    the DB *path* and ``_reset_for_tests()`` flips ``M3_DB_BACKEND`` in tests, so a
+    global captured at import would serve a stale dialect. Every call is cache-hits
+    only (memoized name -> cached backend -> frozen dialect singleton), so it is
+    the same ~1µs the old chained form cost.
+    """
+    return active_backend().dialect()
 
 
 def require_sqlite_backend(tool: str) -> None:
@@ -93,6 +123,9 @@ def require_sqlite_backend(tool: str) -> None:
 
 
 def _reset_for_tests() -> None:
-    """Clear the backend cache. Test-only — lets a test flip the env and re-resolve."""
+    """Clear the backend + resolved-name caches. Test-only — lets a test flip the
+    env (M3_DB_BACKEND) and re-resolve on the next call."""
+    global _resolved_name
     with _lock:
         _backends.clear()
+        _resolved_name = None

@@ -14,10 +14,78 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 
+from dataclasses import dataclass
+
 from .base import BackendName, Capabilities, KeywordHit, VectorHit
-from .dialect import SQLITE, Dialect
+from .dialect import Dialect, ParamStyle
+from .registry import register_backend
 
 
+# ── SQLite SQL dialect (co-located with the backend it belongs to) ───────────
+# Lives HERE, not in dialect.py, so that adding/altering a backend is one file
+# (DESIGN_PHILOSOPHIES §2). dialect.py holds only the base Dialect + validation
+# wrappers; the concrete subclass and its frozen singleton are the backend's own.
+@dataclass(frozen=True)
+class SqliteDialect(Dialect):
+    """SQLite SQL surface (separate-file chatlog, qmark binds)."""
+
+    backend: BackendName = "sqlite"
+    param_style: ParamStyle = "qmark"
+
+    def insert_or_ignore(self) -> str:
+        return "INSERT OR IGNORE INTO"
+
+    def on_conflict_ignore(
+        self, *, conflict_target: str = "", index_predicate: str = ""
+    ) -> str:
+        return ""  # the OR IGNORE prefix already handled it
+
+    def now(self) -> str:
+        return "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+
+    def now_minus_days(self, days_placeholder: str) -> str:
+        # `?` binds an int; build the '-N days' modifier string in SQL.
+        return f"datetime('now', '-' || {days_placeholder} || ' days')"
+
+    def empty_json_default(self) -> "str | None":
+        return ""  # metadata_json is TEXT on SQLite; '' is fine (historical value)
+
+    def returning_id_clause(self) -> str:
+        return ""  # id read afterward via last_insert_id (cur.lastrowid)
+
+    def last_insert_id(self, cursor: object) -> object:
+        return cursor.lastrowid  # type: ignore[attr-defined]
+
+    def _json_extract_text_expr(self, column: str, json_path: str) -> str:
+        return f"json_extract({column}, '$.{json_path}')"
+
+    def _json_extract_int_expr(self, column: str, json_path: str) -> str:
+        return f"CAST(json_extract({column}, '$.{json_path}') AS INTEGER)"
+
+    def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
+        return f"({column} IS NULL OR {column} = '' OR {column} {op} {p})"
+
+    def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
+        return f"COALESCE(NULLIF({column}, ''), {fill_placeholder})"
+
+    def _table_exists_query(self, table: str) -> "tuple[str, tuple]":
+        return (
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+            (table,),
+        )
+
+    def _columns_of_query(self, table: str) -> "tuple[str, tuple]":
+        # pragma_table_info('t') is a table-valued function (SQLite >= 3.16);
+        # its `name` column is the column name. Caller reads row[0].
+        return (f"SELECT name FROM pragma_table_info('{table}')", ())
+
+
+# The one shared frozen singleton for SQLite. Obtain via dialect_for / dialect(),
+# not by constructing per call site.
+SQLITE = SqliteDialect()
+
+
+@register_backend("sqlite", dialect=SQLITE)
 class SqliteBackend:
     """Adapter exposing the current SQLite path through the `StorageBackend` seam."""
 

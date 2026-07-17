@@ -30,8 +30,11 @@ from typing import TYPE_CHECKING, Iterator
 
 from m3_sdk import getenv_compat, resolve_primary_pg_dsn
 
+from dataclasses import dataclass
+
 from .base import BackendName, Capabilities, KeywordHit, VectorHit
-from .dialect import POSTGRES, Dialect
+from .dialect import Dialect, ParamStyle
+from .registry import register_backend
 
 if TYPE_CHECKING:  # avoid importing the driver at module load
     from psycopg2.pool import ThreadedConnectionPool
@@ -323,6 +326,76 @@ def _reject_same_as_warehouse(primary_url: str) -> None:
         )
 
 
+# ── PostgreSQL SQL dialect (co-located with the backend it belongs to) ───────
+# Lives HERE, not in dialect.py (DESIGN_PHILOSOPHIES §2: one file per backend).
+@dataclass(frozen=True)
+class PostgresDialect(Dialect):
+    """PostgreSQL SQL surface (one-schema chatlog, %s binds)."""
+
+    backend: BackendName = "postgres"
+    param_style: ParamStyle = "format"
+
+    def insert_or_ignore(self) -> str:
+        # postgres has no verb form — the arbiter goes in a trailing clause.
+        return "INSERT INTO"
+
+    def on_conflict_ignore(
+        self, *, conflict_target: str = "", index_predicate: str = ""
+    ) -> str:
+        if index_predicate and not conflict_target:
+            raise ValueError(
+                "index_predicate requires a conflict_target (partial-index arbiter)"
+            )
+        tgt = f" {conflict_target}" if conflict_target else ""
+        pred = f" WHERE {index_predicate}" if index_predicate else ""
+        return f"ON CONFLICT{tgt}{pred} DO NOTHING"
+
+    def now(self) -> str:
+        return "NOW()"
+
+    def now_minus_days(self, days_placeholder: str) -> str:
+        # %s binds an int number of days; multiply a 1-day interval.
+        return f"NOW() - ({days_placeholder} * INTERVAL '1 day')"
+
+    def empty_json_default(self) -> "str | None":
+        return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj
+
+    def returning_id_clause(self) -> str:
+        return " RETURNING id"  # no last_insert_rowid on PG; RETURNING is the way
+
+    def last_insert_id(self, cursor: object) -> object:
+        return cursor.fetchone()[0]  # type: ignore[attr-defined]
+
+    def _json_extract_text_expr(self, column: str, json_path: str) -> str:
+        return f"{column} ->> '{json_path}'"
+
+    def _json_extract_int_expr(self, column: str, json_path: str) -> str:
+        return f"({column} ->> '{json_path}')::int"
+
+    def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
+        return f"({column} IS NULL OR {column} {op} {p})"
+
+    def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
+        return f"COALESCE({column}, {fill_placeholder})"
+
+    def _table_exists_query(self, table: str) -> "tuple[str, tuple]":
+        # to_regclass returns NULL for a non-existent relation; the WHERE keeps the
+        # result shape (0 or 1 rows) identical to the sqlite probe.
+        return ("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (table,))
+
+    def _columns_of_query(self, table: str) -> "tuple[str, tuple]":
+        sql = (
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = %s ORDER BY ordinal_position"
+        )
+        return (sql, (table,))
+
+
+# The one shared frozen singleton for PostgreSQL.
+POSTGRES = PostgresDialect()
+
+
+@register_backend("postgres", dialect=POSTGRES)
 class PostgresBackend:
     """Pooled PostgreSQL adapter satisfying the `StorageBackend` seam."""
 

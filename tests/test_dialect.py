@@ -7,7 +7,9 @@ that let Tier-1/Tier-2 passes run without a live Postgres.
 from __future__ import annotations
 
 import pytest
-from memory.backends.dialect import POSTGRES, SQLITE, Dialect, dialect_for
+from memory.backends.dialect import Dialect, dialect_for
+from memory.backends.postgres_backend import POSTGRES
+from memory.backends.sqlite_backend import SQLITE
 
 
 def test_dialect_for_returns_shared_singletons():

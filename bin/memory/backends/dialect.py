@@ -348,144 +348,27 @@ class Dialect:
         raise NotImplementedError("subclass must implement _columns_of_query()")
 
 
-# ── Concrete per-backend dialects ────────────────────────────────────────────
-# Each subclass overrides ONLY the divergent methods/fragments, returning its
-# backend's SQL verbatim. Adding a third SQL backend (e.g. MariaDB) is a new
-# subclass here plus an entry in _BY_NAME — ZERO edits to the base method bodies.
-# Fields are set as frozen-dataclass defaults so ``SqliteDialect()`` is fully
-# specified and stays frozen (assignment raises FrozenInstanceError).
-
-
-@dataclass(frozen=True)
-class SqliteDialect(Dialect):
-    """SQLite SQL surface (separate-file chatlog, qmark binds)."""
-
-    backend: BackendName = "sqlite"
-    param_style: ParamStyle = "qmark"
-
-    def insert_or_ignore(self) -> str:
-        return "INSERT OR IGNORE INTO"
-
-    def on_conflict_ignore(
-        self, *, conflict_target: str = "", index_predicate: str = ""
-    ) -> str:
-        return ""  # the OR IGNORE prefix already handled it
-
-    def now(self) -> str:
-        return "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-
-    def now_minus_days(self, days_placeholder: str) -> str:
-        # `?` binds an int; build the '-N days' modifier string in SQL.
-        return f"datetime('now', '-' || {days_placeholder} || ' days')"
-
-    def empty_json_default(self) -> "str | None":
-        return ""  # metadata_json is TEXT on SQLite; '' is fine (historical value)
-
-    def returning_id_clause(self) -> str:
-        return ""  # id read afterward via last_insert_id (cur.lastrowid)
-
-    def last_insert_id(self, cursor: object) -> object:
-        return cursor.lastrowid  # type: ignore[attr-defined]
-
-    def _json_extract_text_expr(self, column: str, json_path: str) -> str:
-        return f"json_extract({column}, '$.{json_path}')"
-
-    def _json_extract_int_expr(self, column: str, json_path: str) -> str:
-        return f"CAST(json_extract({column}, '$.{json_path}') AS INTEGER)"
-
-    def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
-        return f"({column} IS NULL OR {column} = '' OR {column} {op} {p})"
-
-    def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
-        return f"COALESCE(NULLIF({column}, ''), {fill_placeholder})"
-
-    def _table_exists_query(self, table: str) -> tuple[str, tuple]:
-        return (
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
-            (table,),
-        )
-
-    def _columns_of_query(self, table: str) -> tuple[str, tuple]:
-        # pragma_table_info('t') is a table-valued function (SQLite >= 3.16);
-        # its `name` column is the column name. Caller reads row[0].
-        return (f"SELECT name FROM pragma_table_info('{table}')", ())
-
-
-@dataclass(frozen=True)
-class PostgresDialect(Dialect):
-    """PostgreSQL SQL surface (one-schema chatlog, %s binds)."""
-
-    backend: BackendName = "postgres"
-    param_style: ParamStyle = "format"
-
-    def insert_or_ignore(self) -> str:
-        # postgres has no verb form — the arbiter goes in a trailing clause.
-        return "INSERT INTO"
-
-    def on_conflict_ignore(
-        self, *, conflict_target: str = "", index_predicate: str = ""
-    ) -> str:
-        if index_predicate and not conflict_target:
-            raise ValueError(
-                "index_predicate requires a conflict_target (partial-index arbiter)"
-            )
-        tgt = f" {conflict_target}" if conflict_target else ""
-        pred = f" WHERE {index_predicate}" if index_predicate else ""
-        return f"ON CONFLICT{tgt}{pred} DO NOTHING"
-
-    def now(self) -> str:
-        return "NOW()"
-
-    def now_minus_days(self, days_placeholder: str) -> str:
-        # %s binds an int number of days; multiply a 1-day interval.
-        return f"NOW() - ({days_placeholder} * INTERVAL '1 day')"
-
-    def empty_json_default(self) -> "str | None":
-        return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj
-
-    def returning_id_clause(self) -> str:
-        return " RETURNING id"  # no last_insert_rowid on PG; RETURNING is the way
-
-    def last_insert_id(self, cursor: object) -> object:
-        return cursor.fetchone()[0]  # type: ignore[attr-defined]
-
-    def _json_extract_text_expr(self, column: str, json_path: str) -> str:
-        return f"{column} ->> '{json_path}'"
-
-    def _json_extract_int_expr(self, column: str, json_path: str) -> str:
-        return f"({column} ->> '{json_path}')::int"
-
-    def _temporal_open_clause_expr(self, column: str, op: str, p: str) -> str:
-        return f"({column} IS NULL OR {column} {op} {p})"
-
-    def coalesce_open_timestamp(self, column: str, fill_placeholder: str) -> str:
-        return f"COALESCE({column}, {fill_placeholder})"
-
-    def _table_exists_query(self, table: str) -> tuple[str, tuple]:
-        # to_regclass returns NULL for a non-existent relation; the WHERE keeps the
-        # result shape (0 or 1 rows) identical to the sqlite probe.
-        return ("SELECT 1 WHERE to_regclass(%s) IS NOT NULL", (table,))
-
-    def _columns_of_query(self, table: str) -> tuple[str, tuple]:
-        sql = (
-            "SELECT column_name FROM information_schema.columns "
-            "WHERE table_name = %s ORDER BY ordinal_position"
-        )
-        return (sql, (table,))
-
-
-SQLITE = SqliteDialect()
-POSTGRES = PostgresDialect()
-
-_BY_NAME = {"sqlite": SQLITE, "postgres": POSTGRES}
+# ── Concrete per-backend dialects live in their backend modules ──────────────
+# `SqliteDialect`/`SQLITE` are in `sqlite_backend.py`; `PostgresDialect`/`POSTGRES`
+# in `postgres_backend.py` — co-located so adding a backend is ONE file
+# (DESIGN_PHILOSOPHIES §2). This module holds ONLY the base `Dialect` above and
+# holds NO reference to any concrete dialect, which is what keeps the import graph
+# acyclic (RH1): `<name>_backend.py` imports the base `Dialect` from here and
+# registers its singleton with the registry; `dialect_for` reads it back from the
+# registry lazily. `dialect.py -> registry.py`, never `dialect.py -> *_backend.py`.
 
 
 def dialect_for(backend: BackendName) -> Dialect:
-    """Return the shared :class:`Dialect` singleton for a backend name."""
-    try:
-        return _BY_NAME[backend]
-    except KeyError:
-        raise ValueError(f"no dialect for backend {backend!r}") from None
+    """Return the shared :class:`Dialect` singleton for a backend name.
+
+    Delegates to the registry, which imports the backend module on demand so its
+    ``@register_backend`` runs. This function never imports a concrete dialect
+    class itself — that is the cycle-break (RH1). Raises ``ValueError`` for an
+    unregistered backend (fail loud, §3).
+    """
+    from .registry import dialect_singleton_for
+
+    return dialect_singleton_for(backend)
 
 
 # ── Chatlog table-name fork (one-schema, two-table PG format) ────────────────

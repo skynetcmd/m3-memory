@@ -123,6 +123,16 @@ class _Facade(_types.ModuleType):
         targets = _ROUTED.get(name)
         if targets is not None:
             return getattr(targets[0], name)
+        # Lazy facade re-export of the backend seam accessors. These are resolved
+        # on ACCESS, never at module load, because ``memory.backends`` is DOWNSTREAM
+        # of m3_sdk (selector.py / postgres_backend.py top-level-import m3_sdk) — a
+        # top-level ``from memory.backends import dialect`` here would close the
+        # cycle ``m3_sdk -> backends -> selector -> m3_sdk`` (RH1). Symmetry with
+        # ``active_database``: a facade-only pass-through, no logic.
+        if name in ("dialect", "active_backend"):
+            from memory.backends import active_backend, dialect
+
+            return {"dialect": dialect, "active_backend": active_backend}[name]
         raise AttributeError(name)
 
     def __setattr__(self, name, value):

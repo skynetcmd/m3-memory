@@ -34,8 +34,17 @@ from .dialect import (
     chatlog_table,
     chatlog_table_for,
 )
+# NOTE: this re-export binds the package attribute ``memory.backends.dialect`` to
+# the ACCESSOR FUNCTION, shadowing the same-named submodule as a PACKAGE ATTRIBUTE
+# only. The submodule stays fully reachable by its qualified name
+# (``from memory.backends.dialect import ...``), which is how all module-level
+# imports reach it — verified repo-wide. Do NOT write ``from memory.backends import
+# dialect`` expecting the MODULE; you get the function. Import the accessor as
+# ``from memory.backends import dialect`` (function) and the module symbols as
+# ``from memory.backends.dialect import dialect_for, chatlog_table, ...``.
 from .selector import (
     active_backend,
+    dialect,
     require_sqlite_backend,
     resolve_backend_name,
 )
@@ -49,6 +58,7 @@ __all__ = [
     "active_backend",
     "chatlog_table",
     "chatlog_table_for",
+    "dialect",
     "require_sqlite_backend",
     "resolve_backend_name",
 ]
