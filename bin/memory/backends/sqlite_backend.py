@@ -126,6 +126,7 @@ class SqliteBackend:
         limit: int,
         tenancy_sql: str = "",
         tenancy_params: tuple = (),
+        table: str = "memory_items",
     ) -> "list[KeywordHit]":
         """FTS5 keyword search — a faithful extraction of the existing query.
 
@@ -134,7 +135,15 @@ class SqliteBackend:
         returns ``KeywordHit(id, bm25)`` ordered by bm25 ascending (lower =
         better) — byte-for-byte the behavior of the inline block in search.py.
         An empty/no-token compile yields ``[]``.
+
+        ``table`` is accepted for seam parity but IGNORED on SQLite: the chatlog
+        store is a SEPARATE FILE whose tables reuse the core names
+        (``memory_items``/``memory_items_fts``), and ``conn`` already points at the
+        right file — so the SQL is the same regardless of core-vs-chatlog. (Only
+        PostgreSQL, where chatlog is ``chat_log_*`` in the shared database, uses the
+        ``table`` argument.)
         """
+        del table  # SQLite: same names, right file via conn — parameter unused
         from ..fts import _compile_fts_query
 
         fts_query, ok = _compile_fts_query(query, "fts5")

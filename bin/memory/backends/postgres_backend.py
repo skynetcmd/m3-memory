@@ -140,6 +140,18 @@ class _SqliteCompatConnection:
         cur.execute(sql, params)
         return cur
 
+    def executemany(self, sql: str, seq_of_params):  # noqa: ANN001
+        """sqlite3.Connection.executemany shortcut, which psycopg2 connections
+        lack (executemany is a cursor method there). The memory/chatlog write
+        paths call conn.executemany(sql, rows); mirror execute() so they work
+        unchanged on PG. psycopg2's cursor.executemany runs the statement per row.
+        """
+        cur = self._raw.cursor(  # type: ignore[attr-defined]
+            cursor_factory=_make_compat_cursor_factory()
+        )
+        cur.executemany(sql, seq_of_params)
+        return cur
+
     def cursor(self, *args, **kwargs):
         return self._raw.cursor(*args, **kwargs)  # type: ignore[attr-defined]
 
@@ -482,6 +494,7 @@ class PostgresBackend:
         limit: int,
         tenancy_sql: str = "",
         tenancy_params: tuple = (),
+        table: str = "memory_items",
     ) -> "list[KeywordHit]":
         """tsvector keyword search — the Postgres analogue of SQLite FTS5+bm25.
 
@@ -492,7 +505,14 @@ class PostgresBackend:
         callers sort ascending identically on both backends. Empty compile -> [].
 
         ``tenancy_sql`` must already be in this backend's ``%s`` placeholder style.
+        ``table`` is the items table to search — ``memory_items`` for core (the
+        default) or ``chat_log_items`` for the chatlog store (both carry the
+        generated ``search_vector`` column). It is a trusted internal identifier
+        (from ``chatlog_table()``), never end-user input; validated as a bare
+        identifier for defense-in-depth since it is interpolated, not bound.
         """
+        if not table.isidentifier():
+            raise ValueError(f"table must be a bare identifier: {table!r}")
         from ..fts import _compile_tsquery
 
         tsquery, ok = _compile_tsquery(query, "fts5")
@@ -505,7 +525,7 @@ class PostgresBackend:
             f"""
             SELECT mi.id AS id,
                    -ts_rank(mi.search_vector, to_tsquery('english', %s)) AS score
-            FROM memory_items mi
+            FROM {table} mi
             WHERE mi.search_vector @@ to_tsquery('english', %s)
               AND mi.is_deleted = 0{tenancy_sql}
             ORDER BY score ASC

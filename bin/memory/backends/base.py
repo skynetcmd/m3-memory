@@ -194,6 +194,7 @@ class StorageBackend(Protocol):
         limit: int,
         tenancy_sql: str = "",
         tenancy_params: "tuple[object, ...]" = (),
+        table: str = "memory_items",
     ) -> "list[KeywordHit]":
         """Native keyword search returning a backend-identical ranked list.
 

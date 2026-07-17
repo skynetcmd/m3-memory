@@ -104,6 +104,38 @@ def _content_hash(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
 
 
+def _meta_to_dict(value) -> dict:
+    """Coerce a metadata_json column value to a dict, backend-agnostic.
+
+    On SQLite metadata_json is TEXT -> a JSON string (parse it). On PostgreSQL
+    it is JSONB -> psycopg2 already returns a dict for a whole-column read (this
+    is the "JSONB whole-column returns dict" trap: json.loads(dict) raises
+    TypeError). This handles both, plus None/blank -> {} and malformed -> {}.
+    """
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value  # already parsed (PG JSONB)
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _ts_to_str(value):
+    """Coerce a timestamp column value to a JSON-serializable ISO string.
+
+    On SQLite timestamps are TEXT (already strings). On PostgreSQL a TIMESTAMPTZ
+    comes back from psycopg2 as a Python ``datetime`` — NOT JSON-serializable, so a
+    result dict carrying it straight into json.dumps raises TypeError. Stringify
+    datetimes to ISO-8601; pass strings/None through unchanged.
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
 def _redaction_dict(spec) -> dict:
     """Normalize a RedactionSpec dataclass into the dict shape chatlog_redaction.scrub expects."""
     return {
@@ -298,14 +330,19 @@ def _executemany_insert(batch: list[dict]) -> int:
     fall back to the live resolver.
     """
     from m3_sdk import M3Context, active_database
+    from memory.backends import active_backend, chatlog_table
 
+    # Backend-aware chatlog table + placeholders: memory_items/? on SQLite (separate
+    # file), chat_log_items/%s on PG (chat_log_* tables in the one core database).
+    _d = active_backend().dialect()
+    _T = chatlog_table("items")
     sql = (
-        "INSERT INTO memory_items ("
+        f"INSERT INTO {_T} ("
         "id, type, title, content, metadata_json, agent_id, model_id, "
         "change_agent, importance, source, origin_device, user_id, scope, expires_at, "
         "created_at, valid_from, valid_to, conversation_id, refresh_on, refresh_reason, "
         "content_hash, variant) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        f"VALUES ({_d.placeholder(22)})"
     )
 
     groups: dict[str, list[tuple]] = {}
@@ -638,36 +675,42 @@ async def _chatlog_search_separate(
     from m3_sdk import M3Context
     ctx = M3Context.for_db(None)
 
+    from memory.backends import active_backend, chatlog_table
+    _backend = active_backend()
+    _d = _backend.dialect()
+    _p = _d.param()
+    _T = chatlog_table("items")  # memory_items (sqlite) | chat_log_items (pg)
+
     def _run() -> dict:
         clauses = ["mi.type='chat_log'", "mi.is_deleted=0"]
         params: list[Any] = []
         if conversation_id:
-            clauses.append("mi.conversation_id=?")
+            clauses.append(f"mi.conversation_id={_p}")
             params.append(conversation_id)
         if host_agent:
-            clauses.append("json_extract(mi.metadata_json,'$.host_agent')=?")
+            clauses.append(f"{_d.json_extract_text('mi.metadata_json','host_agent')}={_p}")
             params.append(host_agent)
         if provider:
-            clauses.append("json_extract(mi.metadata_json,'$.provider')=?")
+            clauses.append(f"{_d.json_extract_text('mi.metadata_json','provider')}={_p}")
             params.append(provider)
         if model_id:
-            clauses.append("mi.model_id=?")
+            clauses.append(f"mi.model_id={_p}")
             params.append(model_id)
         if agent_id:
-            clauses.append("mi.agent_id=?")
+            clauses.append(f"mi.agent_id={_p}")
             params.append(agent_id)
         if since:
-            clauses.append("mi.created_at>=?")
+            clauses.append(f"mi.created_at>={_p}")
             params.append(since)
         if until:
-            clauses.append("mi.created_at<=?")
+            clauses.append(f"mi.created_at<={_p}")
             params.append(until)
 
         where = " AND ".join(clauses)
 
         # Distinguish three cases:
         #   - no query supplied (blank/whitespace) -> browse: latest rows by time
-        #   - query supplied, sanitizes to tokens   -> FTS MATCH search
+        #   - query supplied, sanitizes to tokens   -> keyword search
         #   - query supplied but ALL operator chars  -> zero results, NOT a browse
         # The third case matters: a user searching "---" or ":::" specified a
         # term; silently returning the latest rows (as the old `if fts_query`
@@ -675,7 +718,9 @@ async def _chatlog_search_separate(
         has_query = bool(query.strip())
         fts_query = _sanitize_fts(query) if has_query else ""
         with ctx.get_chatlog_conn() as conn:
-            if fts_query:
+            if fts_query and _backend.name == "sqlite":
+                # SQLite: FTS5 MATCH over the chatlog file's memory_items_fts
+                # (same table names, separate file) — unchanged.
                 sql = (
                     "SELECT mi.id, mi.title, mi.content, mi.metadata_json, mi.created_at, "
                     "       mi.conversation_id, mi.model_id "
@@ -685,6 +730,27 @@ async def _chatlog_search_separate(
                     "ORDER BY rank LIMIT ?"
                 )
                 rows = conn.execute(sql, [fts_query] + params + [k]).fetchall()
+            elif fts_query:
+                # Non-SQLite (PG): route keyword search through the seam's
+                # keyword_search against the chatlog items table (chat_log_items's
+                # tsvector search_vector), then hydrate the matched ids with the
+                # same metadata filters applied. Two steps because the seam returns
+                # ids+scores; the WHERE filters (conversation/provider/...) are
+                # applied on the hydrate to keep parity with the FTS5 branch.
+                hits = _backend.keyword_search(conn, query, limit=k, table=_T)
+                hit_ids = [h.memory_id for h in hits]
+                if not hit_ids:
+                    rows = []
+                else:
+                    id_ph = _d.placeholder(len(hit_ids))
+                    sql = (
+                        "SELECT mi.id, mi.title, mi.content, mi.metadata_json, mi.created_at, "
+                        "       mi.conversation_id, mi.model_id "
+                        f"FROM {_T} mi WHERE mi.id IN ({id_ph}) AND {where}"
+                    )
+                    fetched = {r["id"]: r for r in conn.execute(sql, hit_ids + params).fetchall()}
+                    # preserve keyword-rank order from the seam
+                    rows = [fetched[i] for i in hit_ids if i in fetched]
             elif has_query:
                 # Query given but no matchable tokens survived sanitization.
                 rows = []
@@ -692,22 +758,19 @@ async def _chatlog_search_separate(
                 sql = (
                     "SELECT id, title, content, metadata_json, created_at, "
                     "       conversation_id, model_id "
-                    f"FROM memory_items mi WHERE {where} "
-                    "ORDER BY created_at DESC LIMIT ?"
+                    f"FROM {_T} mi WHERE {where} "
+                    f"ORDER BY created_at DESC LIMIT {_p}"
                 )
                 rows = conn.execute(sql, params + [k]).fetchall()
 
             results = []
             for r in rows:
-                try:
-                    meta = json.loads(r["metadata_json"]) if r["metadata_json"] else {}
-                except json.JSONDecodeError:
-                    meta = {}
+                meta = _meta_to_dict(r["metadata_json"])
                 results.append({
                     "id": r["id"],
                     "title": r["title"],
                     "content": r["content"],
-                    "created_at": r["created_at"],
+                    "created_at": _ts_to_str(r["created_at"]),
                     "conversation_id": r["conversation_id"],
                     "model_id": r["model_id"],
                     "metadata": meta,
@@ -748,27 +811,66 @@ async def chatlog_promote_impl(
     main_path = os.path.abspath(resolve_db_path(None))
     unified = chatlog_path == main_path
 
+    from memory.backends import active_backend, chatlog_table
+    _backend = active_backend()
+
     def _run() -> dict:
         ctx = M3Context.for_db(main_path)
+        _d = _backend.dialect()
+        _p = _d.param()
 
         clauses = ["type='chat_log'", "is_deleted=0"]
         params: list[Any] = []
         if ids:
-            placeholders = ",".join("?" for _ in ids)
+            placeholders = _d.placeholder(len(ids))
             clauses.append(f"id IN ({placeholders})")
             params.extend(ids)
         if conversation_id:
-            clauses.append("conversation_id=?")
+            clauses.append(f"conversation_id={_p}")
             params.append(conversation_id)
         if since:
-            clauses.append("created_at>=?")
+            clauses.append(f"created_at>={_p}")
             params.append(since)
         if until:
-            clauses.append("created_at<=?")
+            clauses.append(f"created_at<={_p}")
             params.append(until)
         if not ids and not conversation_id and not since and not until:
             raise ValueError("promote requires ids, conversation_id, since, or until")
         where = " AND ".join(clauses)
+
+        if _backend.name != "sqlite":
+            # PostgreSQL (one-schema/two-table): chat_log_items and memory_items are
+            # SEPARATE TABLES in the SAME database — no ATTACH, no path-equality
+            # "unified" case. Promote = copy matching chat_log_items rows into
+            # memory_items with type=target_type (same-DB cross-table INSERT ...
+            # SELECT), then optionally delete from chat_log_items when copy=False.
+            _CL = chatlog_table("items")  # chat_log_items
+            col_names = [
+                "id", "type", "title", "content", "metadata_json", "agent_id", "model_id",
+                "change_agent", "importance", "source", "origin_device", "user_id", "scope",
+                "expires_at", "created_at", "valid_from", "valid_to", "conversation_id",
+                "refresh_on", "refresh_reason", "content_hash", "variant",
+            ]
+            cols_sql = ", ".join(col_names)
+            # SELECT list overrides type with the bound target_type, keeps the rest.
+            select_cols = ", ".join(_p if c == "type" else c for c in col_names)
+            with _backend.connection() as conn:
+                found = conn.execute(f"SELECT id FROM {_CL} WHERE {where}", params).fetchall()
+                row_ids = [r["id"] for r in found]
+                if not row_ids:
+                    return {"promoted": 0, "ids": [], "unified": False}
+                # INSERT ... SELECT: target_type first (the overridden type slot),
+                # then the WHERE params. ON CONFLICT DO NOTHING mirrors OR IGNORE.
+                conn.execute(
+                    f"INSERT INTO memory_items ({cols_sql}) "
+                    f"SELECT {select_cols} FROM {_CL} WHERE {where} "
+                    f"ON CONFLICT (id) DO NOTHING",
+                    [target_type, *params],
+                )
+                if not copy:
+                    conn.execute(f"DELETE FROM {_CL} WHERE {where}", params)
+                conn.commit()
+            return {"promoted": len(row_ids), "ids": row_ids, "unified": False}
 
         if unified:
             with ctx.get_sqlite_conn() as conn:
@@ -852,20 +954,26 @@ def chatlog_list_conversations_impl(
     from m3_sdk import M3Context
     ctx = M3Context.for_db(None)
 
+    from memory.backends import active_backend, chatlog_table
+    _d = active_backend().dialect()
+    _p = _d.param()
+    _T = chatlog_table("items")
+    _je_ha = _d.json_extract_text("metadata_json", "host_agent")
+    _je_mid = _d.json_extract_text("metadata_json", "model_id")
     clauses = ["type='chat_log'", "is_deleted=0", "conversation_id IS NOT NULL"]
     params: list[Any] = []
     if host_agent:
-        clauses.append("json_extract(metadata_json,'$.host_agent')=?")
+        clauses.append(f"{_je_ha}={_p}")
         params.append(host_agent)
     where = " AND ".join(clauses)
     sql = (
         "SELECT conversation_id, COUNT(*) AS turns, "
         "MIN(created_at) AS first_at, MAX(created_at) AS last_at, "
-        "json_extract(metadata_json,'$.host_agent') AS host_agent, "
-        "json_extract(metadata_json,'$.model_id') AS model_id "
-        f"FROM memory_items WHERE {where} "
+        f"{_je_ha} AS host_agent, "
+        f"{_je_mid} AS model_id "
+        f"FROM {_T} WHERE {where} "
         "GROUP BY conversation_id "
-        "ORDER BY last_at DESC LIMIT ? OFFSET ?"
+        f"ORDER BY last_at DESC LIMIT {_p} OFFSET {_p}"
     )
     with ctx.get_chatlog_conn() as conn:
         rows = conn.execute(sql, params + [limit, offset]).fetchall()
@@ -873,8 +981,8 @@ def chatlog_list_conversations_impl(
         {
             "conversation_id": r["conversation_id"],
             "turns":           r["turns"],
-            "first_at":        r["first_at"],
-            "last_at":         r["last_at"],
+            "first_at":        _ts_to_str(r["first_at"]),
+            "last_at":         _ts_to_str(r["last_at"]),
             "host_agent":      r["host_agent"],
             "model_id":        r["model_id"],
         }
@@ -905,6 +1013,17 @@ async def chatlog_cost_report_impl(
     from m3_sdk import M3Context
     ctx = M3Context.for_db(None)
 
+    from memory.backends import active_backend, chatlog_table
+    _d = active_backend().dialect()
+    _p = _d.param()
+    _T = chatlog_table("items")
+    # numeric JSON extracts (tokens = int, cost = real): json_extract_int gives
+    # CAST(json_extract(..) AS INTEGER) on SQLite / (col->>'k')::int on PG. For the
+    # REAL cost we reuse the text extract wrapped in CAST(... AS REAL/float): PG
+    # ->> yields text, ::float casts; SQLite json_extract text -> CAST AS REAL.
+    _je_ti = _d.json_extract_int("metadata_json", "tokens_in")
+    _je_to = _d.json_extract_int("metadata_json", "tokens_out")
+    _je_cost_txt = _d.json_extract_text("metadata_json", "cost_usd")
     if group_by == "day":
         gcol = "substr(created_at,1,10)"
     elif group_by == "conversation_id":
@@ -912,27 +1031,28 @@ async def chatlog_cost_report_impl(
     elif group_by == "model_id":
         gcol = "model_id"
     else:
-        gcol = f"json_extract(metadata_json,'$.{group_by}')"
+        # group_by is validated against _VALID_GROUPBY above (bare key).
+        gcol = _d.json_extract_text("metadata_json", group_by)
 
     clauses = ["type='chat_log'", "is_deleted=0"]
     params: list[Any] = []
     if since:
-        clauses.append("created_at>=?")
+        clauses.append(f"created_at>={_p}")
         params.append(since)
     if until:
-        clauses.append("created_at<=?")
+        clauses.append(f"created_at<={_p}")
         params.append(until)
     where = " AND ".join(clauses)
 
     sql = (
         f"SELECT {gcol} AS bucket, "
         "COUNT(*) AS rows, "
-        "SUM(CAST(json_extract(metadata_json,'$.tokens_in') AS INTEGER)) AS tokens_in, "
-        "SUM(CAST(json_extract(metadata_json,'$.tokens_out') AS INTEGER)) AS tokens_out, "
-        "SUM(CASE WHEN json_extract(metadata_json,'$.cost_usd') IS NOT NULL "
-        "         THEN CAST(json_extract(metadata_json,'$.cost_usd') AS REAL) END) AS cost_usd, "
-        "SUM(CASE WHEN json_extract(metadata_json,'$.cost_usd') IS NOT NULL THEN 1 END) AS priced_rows "
-        f"FROM memory_items WHERE {where} "
+        f"SUM({_je_ti}) AS tokens_in, "
+        f"SUM({_je_to}) AS tokens_out, "
+        f"SUM(CASE WHEN {_je_cost_txt} IS NOT NULL "
+        f"         THEN CAST({_je_cost_txt} AS REAL) END) AS cost_usd, "
+        f"SUM(CASE WHEN {_je_cost_txt} IS NOT NULL THEN 1 END) AS priced_rows "
+        f"FROM {_T} WHERE {where} "
         "GROUP BY bucket ORDER BY bucket"
     )
 
@@ -996,18 +1116,22 @@ async def chatlog_rescrub_impl(
     red_dict = _redaction_dict(cfg.redaction)
 
     from m3_sdk import M3Context
+    from memory.backends import active_backend, chatlog_table
     ctx = M3Context.for_db(None)
+    _d = active_backend().dialect()
+    _p = _d.param()
+    _T = chatlog_table("items")
 
     clauses = ["type='chat_log'", "is_deleted=0"]
     params: list[Any] = []
     if conversation_id:
-        clauses.append("conversation_id=?")
+        clauses.append(f"conversation_id={_p}")
         params.append(conversation_id)
     if since:
-        clauses.append("created_at>=?")
+        clauses.append(f"created_at>={_p}")
         params.append(since)
     if until:
-        clauses.append("created_at<=?")
+        clauses.append(f"created_at<={_p}")
         params.append(until)
     where = " AND ".join(clauses)
 
@@ -1016,7 +1140,7 @@ async def chatlog_rescrub_impl(
         matched_rows = 0
         with ctx.get_chatlog_conn() as conn:
             rows = conn.execute(
-                f"SELECT id, content, metadata_json FROM memory_items WHERE {where} LIMIT ?",
+                f"SELECT id, content, metadata_json FROM {_T} WHERE {where} LIMIT {_p}",
                 params + [limit],
             ).fetchall()
             for r in rows:
@@ -1026,10 +1150,7 @@ async def chatlog_rescrub_impl(
                 if count == 0:
                     continue
                 matched_rows += 1
-                try:
-                    meta = json.loads(r["metadata_json"]) if r["metadata_json"] else {}
-                except json.JSONDecodeError:
-                    meta = {}
+                meta = _meta_to_dict(r["metadata_json"])
                 if not meta.get("redacted"):
                     meta["original_content_sha256"] = _content_hash(r["content"])
                 meta["redacted"] = True
@@ -1038,7 +1159,7 @@ async def chatlog_rescrub_impl(
                     (meta.get("redaction_groups") or []) + groups
                 ))
                 conn.execute(
-                    "UPDATE memory_items SET content=?, metadata_json=?, updated_at=? WHERE id=?",
+                    f"UPDATE {_T} SET content={_p}, metadata_json={_p}, updated_at={_p} WHERE id={_p}",
                     (scrubbed, json.dumps(meta, ensure_ascii=False), _utcnow_iso(), r["id"]),
                 )
                 updated += 1
