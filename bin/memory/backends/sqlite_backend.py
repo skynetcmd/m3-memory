@@ -13,7 +13,6 @@ Cycle-break (§2): resolve `M3Context` lazily; do not top-level-import
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-
 from dataclasses import dataclass
 
 from .base import BackendName, Capabilities, KeywordHit, VectorHit
@@ -179,8 +178,8 @@ class SqliteBackend:
         caller uses ``with backend.open_readonly(db_path) as conn:`` and stays
         backend-blind instead of branching on the backend name.
         """
-        from contextlib import contextmanager
         import sqlite3
+        from contextlib import contextmanager
 
         @contextmanager
         def _ro():

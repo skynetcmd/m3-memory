@@ -96,6 +96,7 @@ def _load_entity_vectors(db, entity_ids: list[str]) -> dict[str, list[float]]:
     if not entity_ids:
         return {}
     from embedding_utils import unpack as _unpack
+
     from memory.backends import dialect
 
     _d = dialect()

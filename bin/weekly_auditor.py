@@ -14,7 +14,6 @@ Use --no-memory to skip the memory write step.
 import argparse
 import asyncio
 import os
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone

@@ -70,8 +70,8 @@ def _resolve_dsn(explicit: Optional[str] = None) -> str:
     result is checked against M3_PG_FORBIDDEN_HOSTS — so this runner cannot touch
     the warehouse hub. Reuses the exact guards from the backend."""
     sys.path.insert(0, os.path.join(_BASE_DIR, "bin"))
-    from memory.backends.postgres_backend import _reject_forbidden_host
     from m3_sdk import resolve_primary_pg_dsn
+    from memory.backends.postgres_backend import _reject_forbidden_host
 
     dsn = (explicit or resolve_primary_pg_dsn("") or "").strip()
     if not dsn:

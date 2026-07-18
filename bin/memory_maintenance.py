@@ -1020,7 +1020,6 @@ async def _distill_call_model(prompt: str) -> "str | None":
     # "slm" (default) or a named profile → the shared Profile loader + _call_model
     # (which already dispatches openai|anthropic, so cloud is config-only).
     import httpx
-
     from slm_intent import _call_model, load_profile
 
     prof_name = "procedure_local" if selector in ("", "slm") else selector

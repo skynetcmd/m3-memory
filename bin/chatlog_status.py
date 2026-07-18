@@ -39,8 +39,12 @@ def _load_state_file() -> dict[str, Any]:
         return {}
 
 
-def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
+def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, Any]:
     """Count chat_log rows plus unembedded rows on the chatlog DB.
+
+    Values are row counts (int), except ``main_chat_log_rows`` may be a display
+    string ("n/a (primary store is PostgreSQL)") when the primary store isn't
+    SQLite — hence ``Any`` rather than ``int`` (matching _load_state_file's dict).
 
     When the chatlog DB and the main DB are the same file, both counts reflect
     that single file. When they differ, the chatlog file is queried on its own
@@ -49,7 +53,7 @@ def _get_row_counts(config: chatlog_config.ChatlogConfig) -> dict[str, int]:
     """
     from m3_sdk import resolve_db_path
 
-    counts = {
+    counts: dict[str, Any] = {
         "main_chat_log_rows": 0,
         "chatlog_rows": 0,
         "chatlog_without_embed": 0,
@@ -246,7 +250,7 @@ def _minutes_since(iso_ts: str | None) -> float | None:
 def _compute_warnings(
     state: dict[str, Any],
     config: chatlog_config.ChatlogConfig,
-    row_counts: dict[str, int],
+    row_counts: dict[str, Any],
     recent_writes: int = -1,
     recent_window_min: int = 15,
 ) -> list[str]:
