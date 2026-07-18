@@ -185,6 +185,14 @@ class SetupPlan:
     # embedding) and a memory-multiplier if processes actually ran it. Tier 1 is
     # OPT-IN via `--install-gpu-embedder` / the interactive prompt. Never
     # auto-compiles from source (allow_native_source_build).
+    #
+    # DON'T lose why tier 1 still exists: it is ~10-85x faster than the pure-Python
+    # no-wheel fallback, which is immaterial per-call at these latencies BUT real
+    # for a HIGH-VOLUME embed burst (bulk directory/file ingestion embedding
+    # thousands of chunks, where per-call latency aggregates). A single dedicated
+    # ingestion process is exactly the case where a self-contained in-process
+    # tier-1 embedder beats round-tripping every chunk through the shared server —
+    # so it stays a supported opt-in, not a removed feature.
     install_gpu_embedder: bool = False
     # Allow the multi-minute from-source Rust build as the last resort. Default
     # OFF: a no-matching-wheel host gets the graceful pure-Python fallback +
