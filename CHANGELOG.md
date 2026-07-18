@@ -19,7 +19,48 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.18.0] — 2026-07-18 — Safe install/upgrade quiescing, RAM-aware governor, storage-backend seam
+
+### Added
+- **Cooperative install/upgrade quiescing (HALT_m3).** An install or upgrade that
+  runs a DB-exclusive step (schema migration, backup) no longer risks corrupting a
+  WAL-mode database that an autonomous m3 process (cognitive loop / embed server /
+  MCP) holds open. The installer raises a `HALT_m3` semaphore; writers checkpoint,
+  release their DB handle, and pause, resuming automatically when it clears. On an
+  **upgrade from an older version** whose writers predate the protocol (and so
+  neither register nor honor the halt), the installer detects them by
+  command-line signature — cross-platform (Windows / Linux / macOS) — and never
+  migrates blindly under a live writer.
+- **Elevated / stale-writer handling on upgrade.** An unprivileged installer that
+  can't stop an elevated m3 writer no longer falsely reports success: the kill
+  path detects the permission failure and, on an **interactive** run, auto-elevates
+  the cleanup — `sudo kill` on Linux/macOS (inline prompt), a PowerShell
+  `Start-Process -Verb RunAs` UAC elevation on Windows — or, failing that, prints
+  the exact elevated command for the OS and aborts so nothing migrates under a
+  live process.
+- **Self-healing Hermes memory-provider wiring.** `m3 setup` now updates an
+  out-of-date bundled Hermes plugin in place (backing up the old copy) and leaves
+  an up-to-date one untouched, instead of prompting — which previously aborted a
+  non-interactive setup with an `EOFError`.
+
 ### Changed
+- **The background governor gates RAM on ABSOLUTE free memory, not percent.**
+  Percent-of-RAM is the wrong unit — 90% of a 32 GiB host (~3 GiB free) is fine,
+  90% of an 8 GiB host (~0.8 GiB free) is critical. The governor now throttles
+  background work when free RAM drops below ~4 GiB (relaxing to ~2 GiB once the
+  user has been idle > 30 min — the host is then the agent's to use) and halts
+  below ~1 GiB, while CPU and GPU stay correctly percent-based. Thresholds are
+  env-overridable (`M3_GOVERNOR_RAM_{HALT,THROTTLE,THROTTLE_IDLE}_GB`). This fixes
+  a large-but-full host needlessly halting all background enrichment.
+
+### Fixed
+- Installer / test-harness hygiene: hermetic test isolation (per-test engine/config
+  roots + backup redirection so a test run can't leak pre-upgrade backups into the
+  real backup dir, and a developer's warehouse env can't bleed into assertions),
+  capability-gated integration tests, and a batch of pre-existing lint/type issues
+  including a cross-platform `winreg` type-checking false positive.
+
+### Changed (storage-backend seam — accumulated since 2026.7.17.0)
 - **`PG_URL` split by role (deprecation).** The PostgreSQL DSN env var was
   overloaded across two unrelated roles — the opt-in **primary** store
   (`M3_DB_BACKEND=postgres`) and the **data-warehouse** fan-in mirror
