@@ -21,7 +21,6 @@ set (a throwaway cluster) — the same gate the other live-PG tests use.
 """
 from __future__ import annotations
 
-import os
 import struct
 
 import pytest
@@ -229,10 +228,7 @@ def test_sqlite_floor_write_then_retrieve_both_ways():
     assert all(hasattr(h, "memory_id") and hasattr(h, "score") for h in khits + vhits)
 
 
-@pytest.mark.skipif(
-    not os.environ.get("M3_PRIMARY_PG_URL"),
-    reason="requires M3_PRIMARY_PG_URL (throwaway cluster)",
-)
+@pytest.mark.requires_pg  # auto-skips unless a Postgres cluster is REACHABLE
 def test_postgres_floor_write_then_retrieve_both_ways():
     """Same behavioral floor on live Postgres when a throwaway cluster is set.
 

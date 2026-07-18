@@ -69,7 +69,7 @@ def _run_cli_force_reexec(*argv: str) -> subprocess.CompletedProcess:
 
 # ── files_stats: happy path ──────────────────────────────────────────────────
 
-@pytest.mark.skipif(not _FILES_DB.is_file(), reason="shipped files_database.db absent")
+@pytest.mark.requires_files_db  # auto-skips when the shipped files_database.db is absent
 def test_files_stats_returns_json_with_file_nodes_total():
     """`m3 files files_stats --database <db>` exits 0 and emits parseable JSON
     carrying the corpus counter `file_nodes_total`."""
@@ -80,7 +80,7 @@ def test_files_stats_returns_json_with_file_nodes_total():
     assert isinstance(data["file_nodes_total"], int)
 
 
-@pytest.mark.skipif(not _FILES_DB.is_file(), reason="shipped files_database.db absent")
+@pytest.mark.requires_files_db  # auto-skips when the shipped files_database.db is absent
 def test_files_stats_roundtrip_parity_with_execute_tool_structured():
     """The `result` from the CLI surface must equal what the m3_call path
     (execute_tool_structured) returns for the same tool + args. Both surfaces

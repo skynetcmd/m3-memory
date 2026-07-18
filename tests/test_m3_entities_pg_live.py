@@ -9,7 +9,6 @@ DSN from M3_PRIMARY_PG_URL/M3_PG_URL (never PG_URL).
 """
 from __future__ import annotations
 
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -20,25 +19,14 @@ _BIN = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(_BIN))
 
 
-def _dsn():
-    return (os.environ.get("M3_PRIMARY_PG_URL") or os.environ.get("M3_PG_URL") or "").strip() or None
+# Gated by the requires_pg marker: conftest's collection hook auto-skips this
+# module when no Postgres is reachable. pg_dsn() centralizes the
+# M3_PRIMARY_PG_URL > M3_PG_URL precedence (replaces the former per-file
+# _dsn()/_reachable()/skipif triplet).
+from conftest import pg_dsn
 
-
-def _reachable(dsn):
-    try:
-        import psycopg2
-
-        psycopg2.connect(dsn, connect_timeout=3).close()
-        return True
-    except Exception:
-        return False
-
-
-_DSN = _dsn()
-pytestmark = pytest.mark.skipif(
-    _DSN is None or not _reachable(_DSN),
-    reason="no reachable PostgreSQL (set M3_PRIMARY_PG_URL to a throwaway cluster)",
-)
+pytestmark = pytest.mark.requires_pg
+_DSN = pg_dsn()
 
 
 @pytest.fixture()
@@ -86,8 +74,8 @@ def test_query_eligible_rows_on_pg(pg):
 def test_extraction_queue_upsert_on_pg(pg):
     """The queue UPSERT both writer closures share: table-qualified attempts must
     increment the EXISTING row (bare 'attempts' is ambiguous → errors on PG)."""
-    import memory_core as mc
     import m3_entities as me
+    import memory_core as mc
     from memory.backends import active_backend
 
     _d = active_backend().dialect()

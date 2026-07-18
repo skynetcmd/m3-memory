@@ -147,6 +147,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run Pytest
+    - name: Run Pytest (hermetic lane)
+      # The hermetic unit lane: everything that needs no external service.
+      # Integration tests (requires_pg / requires_embedder / requires_gguf /
+      # requires_files_db) are excluded here via the `integration` umbrella marker
+      # — GH runners provision no Postgres/embedder/GGUF, so those tests would only
+      # self-skip anyway. They are run on a dev box (or a future services job) with
+      # `pytest -m integration`. --strict-markers makes a typo'd marker a hard error.
+      # See docs/design/TEST_SUITE_DESIGN.md.
       run: |
-        pytest tests/
+        pytest tests/ -m "not integration"

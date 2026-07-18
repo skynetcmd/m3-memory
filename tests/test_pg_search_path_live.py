@@ -20,26 +20,12 @@ _FORBIDDEN = [
 ]
 
 
-def _dsn():
-    # Primary-store DSN only — NEVER PG_URL (deprecated warehouse var → production).
-    return (os.environ.get("M3_PRIMARY_PG_URL") or os.environ.get("M3_PG_URL") or "").strip() or None
+# Gated by the requires_pg marker (auto-skips when no Postgres reachable).
+# pg_dsn() centralizes the M3_PRIMARY_PG_URL > M3_PG_URL precedence — NEVER PG_URL.
+from conftest import pg_dsn
 
-
-def _reachable(dsn):
-    try:
-        import psycopg2
-
-        psycopg2.connect(dsn, connect_timeout=3).close()
-        return True
-    except Exception:
-        return False
-
-
-_DSN = _dsn()
-pytestmark = pytest.mark.skipif(
-    _DSN is None or not _reachable(_DSN),
-    reason="no reachable PostgreSQL (set M3_PG_URL to a throwaway cluster)",
-)
+pytestmark = pytest.mark.requires_pg
+_DSN = pg_dsn()
 
 
 def _blob(vec):
