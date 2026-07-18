@@ -1086,3 +1086,62 @@ def test_quiesce_registers_atexit_clear(monkeypatch):
     assert setup_wizard._quiesce_db_writers(_q_args()) is True
     # the fake's clear_halt bound method must be what got registered
     assert fake.clear_halt in registered, "atexit clear not registered on quiesce"
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Boot-task registration: inline UAC elevation offer (Windows), and the
+# no-elevation-needed path on Linux/macOS (user-level systemd/launchd).
+# ────────────────────────────────────────────────────────────────────────
+
+
+def test_offer_elevated_repair_noop_off_windows(monkeypatch):
+    """Linux/macOS register user-level services (no privilege) — so the elevation
+    offer is a no-op there; it must NEVER prompt or try to elevate."""
+    monkeypatch.setattr(setup_wizard.sys, "platform", "linux")
+    asked = []
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda *a, **k: asked.append(1) or True)
+    assert setup_wizard._offer_elevated_schedule_repair("x", non_interactive=False) is False
+    assert asked == []  # never even prompted on non-Windows
+
+
+def test_offer_elevated_repair_noop_non_interactive(monkeypatch):
+    """Non-interactive never elevates (UAC is a GUI prompt with no one to consent)."""
+    monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    ran = []
+    monkeypatch.setattr(setup_wizard, "_runas_schedule_repair_windows", lambda s: ran.append(s) or True)
+    assert setup_wizard._offer_elevated_schedule_repair("x", non_interactive=True) is False
+    assert ran == []
+
+
+def test_offer_elevated_repair_runs_on_yes(monkeypatch):
+    """Interactive Windows, user says yes -> UAC repair runs; success -> True."""
+    monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda *a, **k: True)
+    ran = []
+    monkeypatch.setattr(setup_wizard, "_runas_schedule_repair_windows",
+                        lambda s: ran.append(s) or True)
+    assert setup_wizard._offer_elevated_schedule_repair(r"C:\x\install_schedules.py",
+                                                        non_interactive=False) is True
+    assert ran == [r"C:\x\install_schedules.py"]
+
+
+def test_offer_elevated_repair_declined(monkeypatch):
+    """User declines the prompt -> no elevation, returns False (falls back to banner)."""
+    monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    monkeypatch.setattr(setup_wizard, "_ask_yes_no", lambda *a, **k: False)
+    ran = []
+    monkeypatch.setattr(setup_wizard, "_runas_schedule_repair_windows", lambda s: ran.append(s) or True)
+    assert setup_wizard._offer_elevated_schedule_repair("x", non_interactive=False) is False
+    assert ran == []  # never attempted after decline
+
+
+def test_runas_schedule_repair_reads_exit_code(monkeypatch):
+    """_runas_schedule_repair_windows returns True only on elevated exit 0."""
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=0))
+    assert setup_wizard._runas_schedule_repair_windows("s") is True
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=1))
+    assert setup_wizard._runas_schedule_repair_windows("s") is False
+    def boom(*a, **k):
+        raise OSError("UAC cancelled")
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert setup_wizard._runas_schedule_repair_windows("s") is False

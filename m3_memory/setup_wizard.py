@@ -173,12 +173,19 @@ def _find_m3_hermes_plugin_src() -> Optional[Path]:
 class SetupPlan:
     targets: AgentTargets = field(default_factory=AgentTargets)
     capture_mode: str = "both"      # both | stop | precompact | none
-    # Default ON: the native wheel (Project Oxidation) is a SAFE attempt — the
-    # 3-tier install cascade is non-fatal and m3 auto-falls-back to pure-Python
-    # if no wheel matches the platform/Python. We attempt the prebuilt wheel by
-    # default but NEVER auto-compile from source (see install_native_wheel /
-    # --no-native-wheel and allow_native_source_build below).
-    install_gpu_embedder: bool = True
+    # Default OFF: the SHARED tier-2 embedder (one localhost HTTP server on :8082,
+    # see use_shared_embedder below) is the preferred shipped configuration.
+    # The reason is architectural, NOT speed — an embed call is already low-µs to
+    # tens-of-µs, so tier 1 vs tier 2 latency is typically not discernible. The
+    # difference is that tier 1 (native in-process, Project Oxidation) CANNOT be
+    # shared: it lives inside the calling process, so every m3 process would load
+    # its own model copy / CUDA context (N × memory). Tier 2 is a single shared
+    # server that all processes reuse — one model, one context. So auto-installing
+    # the tier-1 wheel by default is both redundant (the shared server handles
+    # embedding) and a memory-multiplier if processes actually ran it. Tier 1 is
+    # OPT-IN via `--install-gpu-embedder` / the interactive prompt. Never
+    # auto-compiles from source (allow_native_source_build).
+    install_gpu_embedder: bool = False
     # Allow the multi-minute from-source Rust build as the last resort. Default
     # OFF: a no-matching-wheel host gets the graceful pure-Python fallback +
     # build-your-own guidance, never a surprise compile.
@@ -235,12 +242,13 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         else:
             plan.targets = detected
         plan.capture_mode = args.capture_mode or "both"
-        # Native wheel ON by default; --no-native-wheel opts out. The legacy
-        # --install-gpu-embedder flag still forces it on (back-compat) but is
-        # now redundant with the default.
+        # Tier-1 native wheel is OPT-IN now (shared tier-2 is the default, above):
+        # install it only when explicitly requested via --install-gpu-embedder.
+        # --no-native-wheel still forces it off (wins over the flag) for scripts
+        # that pass both / want to be explicit.
         plan.install_gpu_embedder = (
-            not bool(getattr(args, "no_native_wheel", False))
-            or bool(args.install_gpu_embedder)
+            bool(args.install_gpu_embedder)
+            and not bool(getattr(args, "no_native_wheel", False))
         )
         plan.allow_native_source_build = bool(getattr(args, "allow_native_source_build", False))
         plan.decouple_roots = bool(getattr(args, "decouple_roots", False))
@@ -334,23 +342,30 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         _embedder_already_native = False
 
     if _embedder_already_native:
+        # Upgrade of a host that already has the tier-1 native wheel: keep it
+        # (don't rip out a working embedder), but this is no longer what a FRESH
+        # install adds by default — the shared tier-2 server is.
         plan.install_gpu_embedder = True  # keep it; install step refreshes the wheel
         _ok("  Project Oxidation native embedder already installed — keeping it "
             "(skipping the embedder prompt; this is an upgrade).")
     else:
         print()
-        print("  Embedder — Project Oxidation native wheel (recommended):")
-        print("    The native in-process embedder (EmbeddedEmbedder) runs BGE-M3")
-        print("    inside the process. With NO GPU it uses a CPU build (still")
-        print("    in-process); with a GPU it auto-detects CUDA / Vulkan / Metal.")
-        print("    Either way it is ~10-85x faster on the embed hot path than the")
-        print("    pure-Python HTTP fallback.")
-        print("    Installing it is a SAFE attempt: if no prebuilt wheel matches")
-        print("    this platform/Python, m3 stays fully functional in pure-Python")
-        print("    (we never auto-compile from source) and prints how to build one.")
+        print("  Embedder — the default is the SHARED server (tier 2, on :8082);")
+        print("  the tier-1 native in-process wheel (Project Oxidation) is OPTIONAL:")
+        print("    The shared server is installed either way and is what every m3")
+        print("    process uses. Speed is not the reason to choose between them —")
+        print("    an embed call is already low-µs, so tier 1 vs tier 2 latency is")
+        print("    typically not noticeable. The difference is SHARING: tier 1 runs")
+        print("    IN-PROCESS and can't be shared, so each m3 process would load")
+        print("    its own model/GPU context. The shared server needs just one.")
+        print("    Only install tier 1 if you specifically want a self-contained,")
+        print("    no-server in-process embedder. Installing it is a SAFE attempt:")
+        print("    if no prebuilt wheel matches, m3 stays fully functional (we")
+        print("    never auto-compile from source) and prints how to build one.")
         plan.install_gpu_embedder = _ask_yes_no(
-            "  Install the Project Oxidation native wheel (auto-detects CPU/GPU)?",
-            default=True,
+            "  Also install the tier-1 native in-process wheel? (not needed for "
+            "the shared server)",
+            default=False,
         )
         if plan.install_gpu_embedder:
             # Default OFF — never surprise the user with a multi-minute Rust build.
@@ -641,6 +656,56 @@ def _runas_kill_windows(pid: int) -> bool:
         return out.returncode in (0, 128)
     except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
         return False
+
+
+def _runas_schedule_repair_windows(script: str) -> bool:
+    """UAC-elevate `install_schedules.py --repair` on interactive Windows.
+
+    Registering a boot-start (ONSTART) scheduled task — the cognitive loop, embed
+    server, secret rotator — requires admin, so an unelevated `m3 setup` (whether
+    a first install OR an upgrade) fails those with 'Access is denied'. Rather than
+    only printing a re-run-elevated hint, offer to do it inline: PowerShell
+    `Start-Process -Verb RunAs` pops the UAC consent dialog and runs --repair
+    elevated, which is idempotent (adds only the missing boot tasks). Returns True
+    iff the elevated repair exited 0; a cancelled UAC → False (caller falls back to
+    the printed banner). Interactive-only (UAC is a GUI prompt)."""
+    ps = (
+        "$p = Start-Process -FilePath "
+        f"'{sys.executable}' "
+        f"-ArgumentList '\"{script}\"','--repair' "
+        "-Verb RunAs -PassThru -Wait; "
+        "exit $p.ExitCode"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            timeout=300, check=False,
+        )
+        return out.returncode == 0
+    except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
+        return False
+
+
+def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> bool:
+    """On interactive Windows, OFFER to UAC-elevate the boot-task registration a
+    prior unelevated attempt was denied. Applies to first install AND upgrade —
+    every `m3 setup` re-runs schedule registration. Returns True if the elevated
+    repair succeeded (boot tasks now registered), False otherwise (caller keeps
+    the printed banner as the fallback). No-op off interactive Windows."""
+    if sys.platform != "win32" or non_interactive:
+        return False
+    if not _ask_yes_no(
+        "  Register the boot-start services now? (opens a Windows admin prompt)",
+        default=True,
+    ):
+        return False
+    _say("  Requesting administrator access (approve the Windows UAC dialog)...")
+    if _runas_schedule_repair_windows(script):
+        _ok("  boot-start services registered (elevated).")
+        return True
+    _warn("  elevated registration was cancelled or failed — see the command above "
+          "to run it yourself from an admin shell.")
+    return False
 
 
 def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
@@ -1202,7 +1267,7 @@ def _step_gpu_embedder(plan: "SetupPlan") -> bool:
         return True  # non-fatal
 
 
-def _step_shared_embedder(plan: "SetupPlan") -> bool:
+def _step_shared_embedder(plan: "SetupPlan", *, non_interactive: bool = False) -> bool:
     """Enable shared-embedder mode (the shipped default): write .embed_config.json
     so every m3 process defers to ONE shared embedder server (GPU-accelerated
     where available, CPU-only otherwise), AND register the self-healing
@@ -1224,11 +1289,11 @@ def _step_shared_embedder(plan: "SetupPlan") -> bool:
     # silent fleet-wide outage this mode must avoid). install_schedules is CLI-
     # only and prints its own elevation hint on Windows "Access is denied", so we
     # shell out and surface, but never fail setup, if it needs an admin shell.
-    _register_embed_server_task()
+    _register_embed_server_task(non_interactive=non_interactive)
     return True
 
 
-def _register_embed_server_task() -> None:
+def _register_embed_server_task(*, non_interactive: bool = False) -> None:
     """Ensure the shared :8082 server has a keep-alive, PREFERRING the Rust
     m3-embed-server OS service over the Python scheduled-task fallback.
 
@@ -1279,19 +1344,30 @@ def _register_embed_server_task() -> None:
         return
     print("    Registering the self-healing embed-server task (keeps :8082 up)...")
     try:
-        # Inherit stdout/stderr so the user sees the OK line or the elevation hint.
-        rc = subprocess.run(
+        # Capture output so we can (a) show it AND (b) detect the Windows
+        # 'Access is denied' boot-task case to offer inline UAC elevation.
+        proc = subprocess.run(
             [sys.executable, script, "--add", "embed-server"],
-            check=False,
-        ).returncode
-        if rc != 0:
-            # install_schedules already printed the elevation / failure detail.
+            check=False, capture_output=True, text=True,
+        )
+        if proc.stdout:
+            print(proc.stdout, end="")
+        if proc.stderr:
+            print(proc.stderr, end="")
+        if proc.returncode != 0:
+            denied = "access is denied" in (proc.stdout + proc.stderr).lower()
+            # Windows-only: a denied ONSTART registration can be UAC-elevated inline
+            # (Linux/macOS use USER-level systemd --user / LaunchAgents — no privilege
+            # needed, so they never reach this denied branch). Offer it; on success we
+            # skip the manual hint. Applies to install AND upgrade (both re-run this).
+            if denied and _offer_elevated_schedule_repair(script, non_interactive=non_interactive):
+                return  # registered elevated — done
             print("    [!] embed-server task not fully registered (see above). Shared mode")
             print("        still works once the server runs; re-run elevated to auto-start it:")
-            print("            python bin/install_schedules.py --repair   # from an admin shell")
+            print(f'            "{sys.executable}" "{script}" --repair   # from an admin shell')
     except Exception as e:  # noqa: BLE001 — never fail setup on the task step
         print(f"    [!] could not register the embed-server task ({e}); do it later with")
-        print("        `python bin/install_schedules.py --add embed-server`.")
+        print(f'        "{sys.executable}" "{script}" --add embed-server')
 
 
 def _step_install_wolfssl(plan: "SetupPlan") -> bool:
@@ -1741,7 +1817,7 @@ def run_setup(args: argparse.Namespace) -> int:
         if plan.install_gpu_embedder:
             _step_gpu_embedder(plan)
         if plan.use_shared_embedder:
-            _step_shared_embedder(plan)
+            _step_shared_embedder(plan, non_interactive=args.non_interactive)
         _step_wire_agents(plan, non_interactive=args.non_interactive)
         governor_result = _step_governor_migration(plan)
         _step_doctor()

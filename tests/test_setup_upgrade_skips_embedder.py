@@ -72,7 +72,14 @@ def _run_gather(monkeypatch, *, native: bool):
 
 
 def _embedder_asked(asked):
-    return any("native wheel" in q.lower() or "oxidation" in q.lower() for q in asked)
+    # The fresh-install embedder prompt offers the OPTIONAL tier-1 native wheel
+    # (shared tier-2 is the default and isn't prompted). Match its wording
+    # robustly — "tier-1", "native ... wheel", or "oxidation".
+    def _hit(q):
+        ql = q.lower()
+        return ("oxidation" in ql or "tier-1" in ql or "tier 1" in ql
+                or ("native" in ql and "wheel" in ql))
+    return any(_hit(q) for q in asked)
 
 
 def test_upgrade_skips_embedder_prompt(monkeypatch):
