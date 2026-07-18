@@ -584,10 +584,11 @@ def _surface_elevated_kill_help(halt, stuck) -> None:
 
 
 def _sudo_kill_posix(pid: int) -> bool:
-    """Try `sudo kill <pid>` on POSIX. Only for INTERACTIVE runs — sudo prompts
-    for the password on the console, so it must never be attempted headless (it
-    would hang or fail). Returns True if the process is stopped (or already gone).
-    A missing sudo, a declined password, or a still-refused kill → False."""
+    """Try `sudo kill <pid>` on POSIX (Linux + macOS). Only for INTERACTIVE runs —
+    sudo prompts for the password on the console, so it must never be attempted
+    headless (it would hang or fail). Returns True if the process is stopped (or
+    already gone). A missing sudo, a declined password, or a still-refused kill →
+    False."""
     if not shutil.which("sudo"):
         return False
     try:
@@ -603,6 +604,35 @@ def _sudo_kill_posix(pid: int) -> bool:
         return False
 
 
+def _runas_kill_windows(pid: int) -> bool:
+    """Elevate a taskkill via UAC on INTERACTIVE Windows using PowerShell
+    `Start-Process -Verb RunAs`. Windows has no inline sudo — RunAs pops the UAC
+    consent dialog and runs the kill in a short-lived elevated process, which we
+    -Wait on and read the exit code of.
+
+    Universal (built-in PowerShell, every Windows; no native-sudo/gsudo
+    dependency). Returns True only if the elevated taskkill actually exited 0.
+    A cancelled UAC prompt raises in Start-Process → caught → False. Must only be
+    called interactively (UAC is a GUI prompt; pointless headless)."""
+    # -PassThru + -Wait lets us read the elevated child's ExitCode. taskkill /F /T
+    # /PID <pid> is the same command the unprivileged path used, just elevated.
+    ps = (
+        "$p = Start-Process -FilePath taskkill "
+        f"-ArgumentList '/F','/T','/PID','{int(pid)}' "
+        "-Verb RunAs -PassThru -Wait -WindowStyle Hidden; "
+        "exit $p.ExitCode"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            timeout=120, check=False,
+        )
+        # taskkill exit 0 = killed; 128 = not found (already gone → goal met).
+        return out.returncode in (0, 128)
+    except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
+        return False
+
+
 def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
     """Kill every stuck writer; return True only if ALL were stopped (or already
     gone). A False means at least one kill was refused — cross-platform, almost
@@ -610,22 +640,25 @@ def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
     caller must NOT report success or migrate under it. Works on Windows / Linux /
     macOS (the POSIX path covers both via os.kill).
 
-    ``allow_sudo`` (INTERACTIVE POSIX runs only): if an unprivileged kill is
-    refused, retry once via ``sudo kill`` — sudo prompts the user for their
-    password on the console, so this auto-elevates the cleanup during an
-    interactive install/upgrade instead of making them copy a command and re-run.
-    Never set headless (sudo would hang with no console to prompt on)."""
+    ``allow_sudo`` (INTERACTIVE runs only): if an unprivileged kill is refused,
+    retry once with elevation, auto-clearing the stale writer during the install
+    instead of making the user copy a command and re-run. POSIX uses ``sudo kill``
+    (inline password prompt); Windows uses PowerShell ``Start-Process -Verb RunAs``
+    (UAC consent dialog) — Windows has no inline sudo. Never set headless (both
+    prompt the user; sudo would hang, UAC is pointless with no one to consent)."""
     is_win = sys.platform == "win32"
     killer = _kill_process_windows if is_win else _kill_process_posix
+    elevate = _runas_kill_windows if is_win else _sudo_kill_posix
+    how = "UAC" if is_win else "sudo"
     all_ok = True
     for p in stuck:
         if killer(p.pid):
             _ok(f"    stopped {p.role} (pid {p.pid})")
             continue
-        # Unprivileged kill refused. On an interactive POSIX run, try sudo (which
-        # prompts inline) before giving up.
-        if allow_sudo and not is_win and _sudo_kill_posix(p.pid):
-            _ok(f"    stopped {p.role} (pid {p.pid}) via sudo")
+        # Unprivileged kill refused (typically an elevated target). On an
+        # interactive run, retry with elevation before giving up.
+        if allow_sudo and elevate(p.pid):
+            _ok(f"    stopped {p.role} (pid {p.pid}) via {how}")
             continue
         all_ok = False
         _warn(f"    could NOT stop {p.role} (pid {p.pid}) — likely elevated / "

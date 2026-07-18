@@ -259,13 +259,19 @@ Fixes:
   the process and retry. This is the "run this elevated to clear stale processes"
   escape hatch, targeted at the actual stuck PIDs.
 
-  On an **interactive POSIX** run the installer goes one better: instead of only
-  printing `sudo kill …`, it *runs* it (`_kill_stuck_writers(allow_sudo=True)`),
-  so sudo prompts for the password inline and the stale elevated writer is cleared
-  during the install without a manual copy-paste + re-run. Guarded to interactive
-  runs only — a headless/non-interactive `--force-quiesce` never invokes sudo
-  (it would hang with no console to prompt on) and falls back to the printed
-  command + abort.
+  On an **interactive** run the installer goes one better: instead of only
+  printing the elevated command, it *runs* it, clearing the stale elevated writer
+  during the install without a manual copy-paste + re-run. The elevation
+  mechanism is per-OS:
+  - **POSIX (Linux/macOS):** `sudo kill` — prompts for the password inline.
+  - **Windows:** PowerShell `Start-Process -Verb RunAs` — Windows has no inline
+    sudo (even the Win11-native `sudo.exe` defaults to "force new window"), so the
+    UAC consent dialog is the elevation gate; the elevated `taskkill /F /T` runs
+    in a short-lived process we `-Wait` on and read the exit code of. Built-in on
+    every Windows — no native-sudo/gsudo dependency.
+  Guarded to interactive runs ONLY — a headless/non-interactive `--force-quiesce`
+  never elevates (sudo would hang; UAC is pointless with no one to consent) and
+  falls back to the printed command + abort.
 
 ## Module seam
 

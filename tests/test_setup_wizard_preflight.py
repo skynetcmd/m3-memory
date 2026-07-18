@@ -1028,3 +1028,45 @@ def test_noninteractive_force_does_not_use_sudo(monkeypatch):
 
     assert setup_wizard._quiesce_db_writers(_q_args(force_quiesce=True)) is False
     assert sudo_called == []  # sudo NEVER attempted headless
+
+
+def test_interactive_kill_retries_with_runas_on_windows(monkeypatch):
+    """Interactive 'kill' on Windows: a refused unprivileged kill retries via
+    _runas_kill_windows (UAC), symmetric to sudo on POSIX. If RunAs succeeds,
+    quiesce proceeds."""
+    stuck = [_FakeProc("mcp(elevated?)", 321)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck), _R(True)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda *a, **k: "kill")
+    monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: False)
+    runas_calls = []
+    monkeypatch.setattr(setup_wizard, "_runas_kill_windows",
+                        lambda pid: runas_calls.append(pid) or True)
+    # sudo path must NOT be used on Windows
+    sudo_calls = []
+    monkeypatch.setattr(setup_wizard, "_sudo_kill_posix",
+                        lambda pid: sudo_calls.append(pid) or True)
+
+    assert setup_wizard._quiesce_db_writers(_q_args(non_interactive=False)) is True
+    assert runas_calls == [321]   # RunAs (UAC) attempted
+    assert sudo_calls == []        # sudo NOT used on Windows
+
+
+def test_runas_kill_windows_reads_elevated_exit_code(monkeypatch):
+    """_runas_kill_windows returns True only when the elevated taskkill exits 0
+    (killed) or 128 (already gone); a cancelled-UAC exception → False."""
+    # exit 0 -> success
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=0))
+    assert setup_wizard._runas_kill_windows(123) is True
+    # exit 128 (not found / already gone) -> treated as success
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=128))
+    assert setup_wizard._runas_kill_windows(123) is True
+    # exit 1 (access denied / still there) -> False
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=1))
+    assert setup_wizard._runas_kill_windows(123) is False
+    # UAC cancelled -> subprocess raises -> False
+    def boom(*a, **k):
+        raise OSError("user cancelled UAC")
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert setup_wizard._runas_kill_windows(123) is False
