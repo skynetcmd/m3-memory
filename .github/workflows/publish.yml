@@ -3,20 +3,23 @@ name: Publish to PyPI
 # checkov:skip=CKV_GHA_7: dry_run is a constrained choice input used to route
 # between TestPyPI and PyPI; no value flows into build/publish commands beyond
 # an equality check.
-# checkov:skip=CKV2_GHA_1: publish.yml is triggered by a published release, a
-# version-tag push (`push: tags: v*`), or a manual `workflow_dispatch`. The
-# tag-push trigger is scoped to `v*` tags only (not arbitrary branch pushes).
+# checkov:skip=CKV2_GHA_1: publish.yml is triggered by a version-tag push
+# (`push: tags: v*`) or a manual `workflow_dispatch`. The tag-push trigger is
+# scoped to `v*` tags only (not arbitrary branch pushes).
 # The two publish jobs each declare `permissions: id-token: write` and nothing
 # else (trusted publishing to PyPI/TestPyPI); the build job runs with the
 # default `contents: read` set at the workflow level.
 
 on:
-  release:
-    types: [published]
-  # Also publish when a version tag is pushed, so `git push origin vX.Y.Z`
-  # ships to PyPI without a separate GitHub Release step. (Historically only
-  # `release: published` fired this, so tag-only pushes silently skipped PyPI —
-  # PyPI drifted several releases behind the tags.)
+  # A version-tag push is the SINGLE publish trigger. Cutting a release pushes
+  # `vX.Y.Z` and (usually) also creates a GitHub Release — if BOTH `push: tags`
+  # and `release: published` triggered this workflow, each release fired it twice,
+  # both runs uploaded the same files, and the loser failed with PyPI's
+  # `400 File already exists`, leaving a spurious red run on every release (and
+  # masking any genuine publish failure). Tag-push alone is sufficient and
+  # reliable (see the historical note: it was added because release-only skipped
+  # tag-only pushes). The publish step below ALSO sets skip-existing as a
+  # belt-and-suspenders guard against any future duplicate fire.
   push:
     tags:
       - "v*"
@@ -68,7 +71,7 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'false')
     environment:
       name: pypi
       url: https://pypi.org/project/m3-memory/
@@ -84,6 +87,12 @@ jobs:
 
       - name: Publish to PyPI (trusted publishing)
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          # Idempotent: if a file for this version is already on PyPI (e.g. a
+          # re-run, or a future duplicate trigger), skip it instead of failing
+          # with `400 File already exists`. A publish never goes red just because
+          # the artifact is already there.
+          skip-existing: true
 
   publish-testpypi:
     name: Publish to TestPyPI (dry run)
