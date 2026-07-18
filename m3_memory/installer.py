@@ -28,7 +28,7 @@ import tempfile
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from m3_memory._platform import os_name as _os_name
 from m3_memory.install.fs import (  # noqa: F401  (re-exported facade surface — see cli.py / test_installer.py importers)
@@ -1856,9 +1856,15 @@ def _migrate_registry_env_names(*, apply: bool = False) -> "list[str]":
     except Exception as e:  # noqa: BLE001
         actions.append(f"[X] winreg unavailable, cannot migrate registry env: {e}")
         return actions
+    # winreg is Windows-only stdlib; on a non-Windows type-checker (CI runs mypy
+    # on Linux) its stub exposes no attributes, so winreg.OpenKey/QueryValueEx/…
+    # raise attr-defined. This block only runs on Windows (the import is guarded
+    # above). Access the module through an Any-typed alias so the checker accepts
+    # the calls without a false positive. No runtime effect (same object).
+    _wr: Any = winreg
 
     for hit in hits:
-        old, new, scope = hit["old"], hit["new"], hit["scope"]
+        old, new = hit["old"], hit["new"]
         label = hit["label"]
         if not hit["writable"]:
             # HKLM — report the manual, admin-required command; never auto-write.
@@ -1868,13 +1874,13 @@ def _migrate_registry_env_names(*, apply: bool = False) -> "list[str]":
                 f"\"HKLM\\{hit['subkey']}\" /v {old} /f"
             )
             continue
-        hive = getattr(winreg, hit["hive_name"])
+        hive = getattr(_wr, hit["hive_name"])
         try:
-            with winreg.OpenKey(hive, hit["subkey"], 0, winreg.KEY_READ) as k:
-                old_val, old_type = winreg.QueryValueEx(k, old)
+            with _wr.OpenKey(hive, hit["subkey"], 0, _wr.KEY_READ) as k:
+                old_val, old_type = _wr.QueryValueEx(k, old)
                 new_exists = True
                 try:
-                    winreg.QueryValueEx(k, new)
+                    _wr.QueryValueEx(k, new)
                 except FileNotFoundError:
                     new_exists = False
         except OSError as e:
@@ -1889,8 +1895,8 @@ def _migrate_registry_env_names(*, apply: bool = False) -> "list[str]":
             )
             if apply:
                 try:
-                    with winreg.OpenKey(hive, hit["subkey"], 0, winreg.KEY_SET_VALUE) as k:
-                        winreg.DeleteValue(k, old)
+                    with _wr.OpenKey(hive, hit["subkey"], 0, _wr.KEY_SET_VALUE) as k:
+                        _wr.DeleteValue(k, old)
                     _broadcast_env_change()
                 except OSError as e:
                     actions.append(f"[X] {label}: could not delete {old}: {e}")
@@ -1901,9 +1907,9 @@ def _migrate_registry_env_names(*, apply: bool = False) -> "list[str]":
             )
             if apply:
                 try:
-                    with winreg.OpenKey(hive, hit["subkey"], 0, winreg.KEY_SET_VALUE) as k:
-                        winreg.SetValueEx(k, new, 0, old_type, old_val)
-                        winreg.DeleteValue(k, old)
+                    with _wr.OpenKey(hive, hit["subkey"], 0, _wr.KEY_SET_VALUE) as k:
+                        _wr.SetValueEx(k, new, 0, old_type, old_val)
+                        _wr.DeleteValue(k, old)
                     _broadcast_env_change()
                 except OSError as e:
                     actions.append(f"[X] {label}: could not rename {old}->{new}: {e}")
