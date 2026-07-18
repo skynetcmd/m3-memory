@@ -1070,3 +1070,19 @@ def test_runas_kill_windows_reads_elevated_exit_code(monkeypatch):
         raise OSError("user cancelled UAC")
     monkeypatch.setattr(subprocess, "run", boom)
     assert setup_wizard._runas_kill_windows(123) is False
+
+
+def test_quiesce_registers_atexit_clear(monkeypatch):
+    """Raising HALT_m3 also registers an atexit clear, so a sys.exit/re-exec/
+    subprocess handoff before run_setup's finally can't leak a raised halt.
+    (Regression: a FIPS/wolfSSL upgrade once exited without the finally firing.)"""
+    stuck = [_FakeProc("cognitive-loop", 111)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(True)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    registered = []
+    monkeypatch.setattr(setup_wizard.atexit, "register",
+                        lambda fn, *a, **k: registered.append(fn))
+
+    assert setup_wizard._quiesce_db_writers(_q_args()) is True
+    # the fake's clear_halt bound method must be what got registered
+    assert fake.clear_halt in registered, "atexit clear not registered on quiesce"

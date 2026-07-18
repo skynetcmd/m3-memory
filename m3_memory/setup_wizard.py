@@ -16,6 +16,7 @@ Non-interactive mode mirrors every prompt with a flag so `install.sh` and
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import shutil
@@ -507,6 +508,15 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     # migration, then resume). On ANY early return below we clear it ourselves,
     # because there is no install step to protect if we abort.
     halt.set_halt(owner="setup_wizard", reason="install/upgrade DB-exclusive step")
+    # Belt-and-suspenders: also clear on interpreter exit. The install path is not
+    # a single straight-line function — a step may sys.exit(), re-exec (Windows
+    # UTF-8 re-exec), or hand off to a subprocess before run_setup's finally runs,
+    # leaking a raised HALT_m3. (Observed once on a FIPS/wolfSSL upgrade: the
+    # installer PID exited without the finally firing; the self-void-on-dead-owner
+    # guard reaped it so no writer was actually wedged, but a leaked halt shouldn't
+    # depend on that net.) atexit fires on normal exit AND sys.exit, closing the
+    # window. Idempotent with the finally + the abort-path clears.
+    atexit.register(halt.clear_halt)
     result = halt.wait_for_quiesce(timeout=timeout)
     while not result.ok:
         stuck = ", ".join(f"{p.role}(pid {p.pid})" for p in result.stuck)
