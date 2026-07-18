@@ -489,7 +489,12 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
     if halt is None:
         return True  # can't coordinate; the mcp-memory.exe file-lock probe still guards Windows
 
-    live = halt.list_live_processes()
+    # Union of registered writers AND a cmdline scan — so an UPGRADE from an
+    # older m3 (whose loop/embed/MCP predate the PID registry + HALT protocol and
+    # thus don't register or poll) still detects the processes holding the DB.
+    # Without the scan, list_live_processes() would be empty on that path and we'd
+    # migrate right under the old writers.
+    live = halt.list_all_db_writers()
     if not live:
         _ok("  no autonomous m3 DB-writers running (nothing to quiesce)")
         return True
@@ -510,9 +515,13 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
         force = getattr(args, "force_quiesce", False) or getattr(args, "force_kill_mcp", False)
         if args.non_interactive:
             if force:
-                for p in result.stuck:
-                    (_kill_process_windows if sys.platform == "win32" else _kill_process_posix)(p.pid)
-                _ok(f"  force-quiesced {len(result.stuck)} stuck writer(s)")
+                if not _kill_stuck_writers(result.stuck):
+                    # A kill failed — almost always an ELEVATED writer an
+                    # unprivileged installer can't stop. Do NOT report success or
+                    # migrate under it; abort with the actionable fix.
+                    _surface_elevated_kill_help(halt, result.stuck)
+                    halt.clear_halt()
+                    return False
                 result = halt.wait_for_quiesce(timeout=5.0)
                 continue
             _err("  refusing to migrate with live DB-writers. Re-run with "
@@ -524,9 +533,12 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
             "  A writer hasn't paused — it may have a task finishing.",
             ["kill", "wait", "abort"], default="wait")
         if choice == "kill":
-            for p in result.stuck:
-                (_kill_process_windows if sys.platform == "win32" else _kill_process_posix)(p.pid)
-            _ok(f"  killed {len(result.stuck)} stuck writer(s)")
+            # Interactive → allow a sudo retry (sudo prompts inline) for an
+            # elevated writer, auto-elevating the cleanup during the install.
+            if not _kill_stuck_writers(result.stuck, allow_sudo=True):
+                _surface_elevated_kill_help(halt, result.stuck)
+                halt.clear_halt()
+                return False
             result = halt.wait_for_quiesce(timeout=5.0)
         elif choice == "abort":
             _warn("  install aborted by user (DB-writers still active)")
@@ -539,13 +551,86 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
 
 
 def _kill_process_posix(pid: int) -> bool:
-    """SIGTERM then SIGKILL a PID on POSIX. Returns True on success."""
+    """SIGTERM a PID on POSIX (Linux + macOS). Returns True on success, False on
+    PermissionError (an elevated target an unprivileged installer can't signal)
+    or if the process is already gone."""
     import signal as _signal
     try:
         os.kill(pid, _signal.SIGTERM)
         return True
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
+        return True  # already gone — the goal (not holding the DB) is met
+    except PermissionError:
+        return False  # elevated target — caller surfaces "re-run elevated"
+
+
+def _surface_elevated_kill_help(halt, stuck) -> None:
+    """Tell the user exactly how to clear a stale/elevated m3 writer the installer
+    couldn't stop, then retry — the ready-to-run elevated command(s) for THIS OS
+    (Windows / Linux / macOS), targeting the actual stuck PIDs."""
+    _err("  could not stop an elevated m3 writer. Run the command(s) below from "
+         "an ELEVATED shell (Windows: 'Run as administrator'; Linux/macOS: sudo), "
+         "then re-run the installer:")
+    try:
+        cmds = halt.elevated_kill_commands([p.pid for p in stuck])
+    except Exception:  # noqa: BLE001 — never let help-text generation abort
+        cmds = []
+    if not cmds:  # fallback if the helper is unavailable (older m3_halt)
+        pids = " ".join(str(p.pid) for p in stuck)
+        cmds = ([f"taskkill /F /T {pids}"] if sys.platform == "win32"
+                else [f"sudo kill {pids}"])
+    for c in cmds:
+        print(f"      {c}")
+
+
+def _sudo_kill_posix(pid: int) -> bool:
+    """Try `sudo kill <pid>` on POSIX. Only for INTERACTIVE runs — sudo prompts
+    for the password on the console, so it must never be attempted headless (it
+    would hang or fail). Returns True if the process is stopped (or already gone).
+    A missing sudo, a declined password, or a still-refused kill → False."""
+    if not shutil.which("sudo"):
         return False
+    try:
+        out = subprocess.run(["sudo", "kill", str(pid)],
+                             timeout=60, check=False)
+        if out.returncode == 0:
+            return True
+        # Escalate to SIGKILL once if TERM didn't take.
+        out = subprocess.run(["sudo", "kill", "-9", str(pid)],
+                             timeout=60, check=False)
+        return out.returncode == 0
+    except Exception:  # noqa: BLE001 — sudo unavailable / user aborted / timeout
+        return False
+
+
+def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
+    """Kill every stuck writer; return True only if ALL were stopped (or already
+    gone). A False means at least one kill was refused — cross-platform, almost
+    always an ELEVATED process an unprivileged installer can't stop — so the
+    caller must NOT report success or migrate under it. Works on Windows / Linux /
+    macOS (the POSIX path covers both via os.kill).
+
+    ``allow_sudo`` (INTERACTIVE POSIX runs only): if an unprivileged kill is
+    refused, retry once via ``sudo kill`` — sudo prompts the user for their
+    password on the console, so this auto-elevates the cleanup during an
+    interactive install/upgrade instead of making them copy a command and re-run.
+    Never set headless (sudo would hang with no console to prompt on)."""
+    is_win = sys.platform == "win32"
+    killer = _kill_process_windows if is_win else _kill_process_posix
+    all_ok = True
+    for p in stuck:
+        if killer(p.pid):
+            _ok(f"    stopped {p.role} (pid {p.pid})")
+            continue
+        # Unprivileged kill refused. On an interactive POSIX run, try sudo (which
+        # prompts inline) before giving up.
+        if allow_sudo and not is_win and _sudo_kill_posix(p.pid):
+            _ok(f"    stopped {p.role} (pid {p.pid}) via sudo")
+            continue
+        all_ok = False
+        _warn(f"    could NOT stop {p.role} (pid {p.pid}) — likely elevated / "
+              "owned by another user")
+    return all_ok
 
 
 def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
@@ -797,13 +882,24 @@ def _find_running_mcp_memory_processes() -> list[int]:
 
 
 def _kill_process_windows(pid: int) -> bool:
-    """Force-kill a process by PID. Returns True on success."""
+    """Force-kill a process by PID via taskkill. Returns True only if it actually
+    terminated (or was already gone) — False when taskkill is REFUSED, which for
+    an elevated process run from an unprivileged shell prints 'Access is denied'
+    and exits non-zero. The old version ignored the exit code and always returned
+    True, silently reporting success on a failed elevated kill."""
     try:
-        subprocess.run(
+        out = subprocess.run(
             ["taskkill", "/PID", str(pid), "/F"],
             capture_output=True, text=True, timeout=10, check=False,
         )
-        return True
+        if out.returncode == 0:
+            return True
+        # 128 = process not found (already gone → goal met). Any other non-zero
+        # (5/'Access is denied' on an elevated target) is a real failure.
+        combined = (out.stdout + out.stderr).lower()
+        if "not found" in combined or "no running instance" in combined:
+            return True
+        return False
     except Exception:
         return False
 

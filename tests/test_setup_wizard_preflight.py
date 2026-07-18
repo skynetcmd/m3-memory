@@ -885,6 +885,13 @@ class _FakeHalt:
     def list_live_processes(self):
         return self._live
 
+    def list_all_db_writers(self):
+        # In these tests the registry + cmdline-scan union is simulated by _live.
+        return self._live
+
+    def elevated_kill_commands(self, pids):
+        return [f"sudo kill {' '.join(str(p) for p in pids)}"]
+
     def set_halt(self, owner, reason):
         self.set_called += 1
 
@@ -968,3 +975,56 @@ def test_quiesce_halt_unavailable_proceeds(monkeypatch):
     # If m3_halt can't be imported, don't block install (file-lock probe still guards).
     monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: None)
     assert setup_wizard._quiesce_db_writers(_q_args()) is True
+
+
+def test_quiesce_elevated_kill_failure_aborts_with_help(monkeypatch, capsys):
+    """When a stuck writer can't be killed (elevated), quiesce must NOT report
+    success or proceed — it aborts, clears HALT, and surfaces the elevated
+    command to run. (--force-quiesce, non-interactive.)"""
+    stuck = [_FakeProc("mcp(elevated?)", 555)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    # kill refused (elevated target) on both platforms
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: False)
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: False)
+
+    assert setup_wizard._quiesce_db_writers(_q_args(force_quiesce=True)) is False
+    assert fake.cleared == 1  # HALT cleared on abort (writers not left wedged)
+    out = capsys.readouterr().out
+    assert "elevated" in out.lower()
+    assert "sudo kill 555" in out  # the ready-to-run command was surfaced
+
+
+def test_interactive_kill_retries_with_sudo(monkeypatch, capsys):
+    """Interactive 'kill': an unprivileged kill that's refused is retried via sudo
+    (which prompts inline). If sudo succeeds, quiesce proceeds — no abort."""
+    stuck = [_FakeProc("cognitive-loop(elevated?)", 777)]
+    # first wait -> stuck; after sudo kill -> quiesced
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck), _R(True)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda *a, **k: "kill")
+    # unprivileged kill refused, sudo kill succeeds
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: False)
+    sudo_calls = []
+    monkeypatch.setattr(setup_wizard, "_sudo_kill_posix",
+                        lambda pid: sudo_calls.append(pid) or True)
+    monkeypatch.setattr(setup_wizard.sys, "platform", "linux")
+
+    assert setup_wizard._quiesce_db_writers(_q_args(non_interactive=False)) is True
+    assert sudo_calls == [777]  # sudo was attempted for the refused pid
+
+
+def test_noninteractive_force_does_not_use_sudo(monkeypatch):
+    """Non-interactive --force-quiesce must NOT attempt sudo (it would hang with no
+    console to prompt on); a refused kill aborts with the elevated-command help."""
+    stuck = [_FakeProc("mcp(elevated?)", 888)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: False)
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: False)
+    sudo_called = []
+    monkeypatch.setattr(setup_wizard, "_sudo_kill_posix",
+                        lambda pid: sudo_called.append(pid) or True)
+
+    assert setup_wizard._quiesce_db_writers(_q_args(force_quiesce=True)) is False
+    assert sudo_called == []  # sudo NEVER attempted headless

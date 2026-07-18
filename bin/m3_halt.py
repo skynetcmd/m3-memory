@@ -221,6 +221,138 @@ def _reap(path: Path) -> None:
         pass
 
 
+# Command-line signatures of the autonomous m3 DB-writers, matched substring-wise
+# against a process's cmdline. This is the REGISTRY-INDEPENDENT discovery floor:
+# a writer from an OLDER m3 version (before the PID registry / HALT protocol
+# existed) never wrote a PID/ entry and never polls HALT_m3, so list_live_processes
+# can't see it — yet on an UPGRADE it is exactly the process holding the DB open.
+# Matching by what the process RUNS (not by a registry it didn't populate) closes
+# that bootstrap gap. Keyed by role so the caller can report/-handle uniformly.
+# cmdline substrings that identify each writer (the precise, preferred match).
+_WRITER_CMDLINE_SIGNATURES = {
+    "cognitive-loop": ("m3_cognitive_loop.py",),
+    "embed-server": ("embed_server_inproc.py",),
+    "mcp": ("mcp-memory", "mcp_proxy.py"),
+}
+# Fallback process-NAME substrings, used when a process's cmdline is unreadable —
+# which happens for an ELEVATED process when the installer runs unprivileged
+# (psutil returns an empty cmdline / raises AccessDenied). The name alone can't
+# distinguish which python script is running, so a bare-interpreter match is
+# reported as the ambiguous "m3?(elevated)" role: enough to STOP and prompt,
+# never enough to silently proceed. mcp-memory(.exe) is unambiguous by name.
+_WRITER_NAME_SIGNATURES = {
+    "mcp": ("mcp-memory",),
+}
+_INTERPRETER_NAMES = ("python", "pythonw", "python3")
+
+
+def scan_db_writer_processes(engine_root: Optional[str] = None) -> list[ProcInfo]:
+    """Find running m3 DB-writers by COMMAND-LINE signature (with a process-NAME
+    fallback for privilege-denied cmdlines), independent of the PID registry.
+    Cross-platform via psutil (Windows / Linux / macOS).
+
+    This complements ``list_live_processes`` (which only sees writers of THIS
+    protocol version that registered themselves). Use both — union'd by pid — so
+    an exclusive op also detects pre-HALT writers on an upgrade.
+
+    Elevated processes: when the installer runs unprivileged, an elevated writer's
+    cmdline is not readable (empty / AccessDenied). We do NOT silently skip it —
+    a bare interpreter (python/pythonw) whose cmdline we can't read is reported as
+    role ``m3?`` with ``elevated=True`` in engine_root marker, so the caller
+    surfaces "a process may be a stale elevated m3 writer — can't confirm, can't
+    kill without elevation" and prompts/aborts rather than migrating blind. An
+    mcp-memory process is name-identifiable even elevated.
+
+    Best-effort: no psutil, or a process vanishing mid-scan → skip that item
+    rather than fail (registry + Windows file-lock probe remain as nets).
+    """
+    try:
+        import psutil
+    except Exception:  # noqa: BLE001 — no psutil → rely on registry + file-lock probe
+        return []
+    root = str(_engine_root(engine_root))
+    self_pid = os.getpid()
+    found: list[ProcInfo] = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            pid = proc.info["pid"]
+            if pid == self_pid:
+                continue
+            cmdline = " ".join(proc.info.get("cmdline") or [])
+            name = (proc.info.get("name") or "").lower()
+
+            # 1. Precise cmdline match (the normal, unprivileged-readable case).
+            matched = None
+            if cmdline:
+                for role, sigs in _WRITER_CMDLINE_SIGNATURES.items():
+                    if any(sig in cmdline for sig in sigs):
+                        matched = role
+                        break
+            if matched:
+                found.append(ProcInfo(pid=pid, role=matched, started_at="",
+                                      engine_root=root, path=Path()))
+                continue
+
+            # 2. Name-only fallback for unreadable (typically ELEVATED) cmdlines.
+            # Only for NAME-UNAMBIGUOUS writers (mcp-memory): a bare python whose
+            # cmdline is denied is NOT reported — most such processes aren't m3,
+            # and flooding the prompt with false positives would make it useless.
+            # An unprivileged installer fundamentally cannot inspect an elevated
+            # process's cmdline OR open files (both hit AccessDenied), so a stale
+            # elevated LOOP/EMBED (script name unknowable) may be undetectable
+            # here. That residual case is handled at the KILL boundary: attempting
+            # to stop any writer that turns out to be elevated fails with a
+            # permission error, which the installer surfaces as "re-run elevated"
+            # rather than a false success (see _kill_process_* callers).
+            if not cmdline:
+                for role, sigs in _WRITER_NAME_SIGNATURES.items():
+                    if any(sig in name for sig in sigs):
+                        found.append(ProcInfo(pid=pid, role=f"{role}(elevated?)",
+                                              started_at="", engine_root=root,
+                                              path=Path()))
+                        break
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        except Exception:  # noqa: BLE001 — one odd row must not abort the whole scan
+            continue
+    return found
+
+
+def elevated_kill_commands(pids: "list[int]") -> "list[str]":
+    """The exact command(s) to stop the given PIDs from an ELEVATED shell, for the
+    CURRENT OS. Surfaced to the user when the unprivileged installer can't stop an
+    elevated/stale m3 writer, so they can clear it and retry — Windows / Linux /
+    macOS. Empty list for an empty pid list.
+
+    Windows: an elevated PowerShell/cmd. Linux & macOS: sudo kill (SIGTERM), with
+    a SIGKILL escalation line as a fallback."""
+    pids = [int(p) for p in pids if int(p) > 0]
+    if not pids:
+        return []
+    joined = " ".join(str(p) for p in pids)
+    if os.name == "nt":
+        # /T also stops child processes; run from an elevated (Run as administrator) shell.
+        return [f"taskkill /F /T {' '.join(f'/PID {p}' for p in pids)}"]
+    # POSIX (Linux + macOS): polite TERM first, then KILL if still alive.
+    return [
+        f"sudo kill {joined}",
+        f"sudo kill -9 {joined}   # only if the above didn't stop them",
+    ]
+
+
+def list_all_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:
+    """Union of registered writers (list_live_processes) and cmdline-discovered
+    writers (scan_db_writer_processes), deduplicated by pid. This is the complete
+    set an exclusive op must quiesce — covering both current-protocol writers and
+    pre-HALT writers from an older version being upgraded over."""
+    by_pid: dict[int, ProcInfo] = {}
+    for p in list_live_processes(engine_root):
+        by_pid[p.pid] = p
+    for p in scan_db_writer_processes(engine_root):
+        by_pid.setdefault(p.pid, p)  # registry entry wins (richer metadata)
+    return list(by_pid.values())
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # HALT semaphore
 # ──────────────────────────────────────────────────────────────────────────
@@ -307,9 +439,16 @@ def wait_for_quiesce(engine_root: Optional[str] = None, timeout: float = 30.0,
     Invariant (see the writer contract in HALT_PROTOCOL.md): a writer that honors
     HALT ``deregister``s while paused and re-``register``s on resume, so the
     registry means "who is holding the DB right now". An empty registry therefore
-    means every writer has released its DB handle → quiesced. A writer still
-    listed after the timeout is either not honoring HALT (crashed/wedged/an old
-    version predating the protocol) or genuinely mid-task.
+    means every registered writer has released its DB handle → quiesced.
+
+    CRUCIALLY, this waits on ``list_all_db_writers`` — the UNION of the registry
+    and a cmdline scan — NOT the registry alone. A writer from an older m3 version
+    (pre-HALT) never registers and never polls HALT_m3, so it would be invisible
+    to a registry-only wait, which would then falsely report ok=True while that
+    process keeps writing straight through the migration. The cmdline scan makes
+    such a writer visible: it will never "deregister" (it can't), so it stays in
+    ``stuck`` past the timeout and the caller's kill/abort path handles it — the
+    only safe outcome for a process that doesn't speak the protocol.
 
     NOTE: the caller must have already called ``set_halt``. This only waits and
     reports; it never kills. The kill decision (prompt a human / --force-quiesce)
@@ -317,7 +456,7 @@ def wait_for_quiesce(engine_root: Optional[str] = None, timeout: float = 30.0,
     """
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        live = list_live_processes(engine_root)
+        live = list_all_db_writers(engine_root)
         if not live:
             return QuiesceResult(ok=True, stuck=[])
         if time.monotonic() >= deadline:

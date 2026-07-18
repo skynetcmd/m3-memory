@@ -226,6 +226,47 @@ protocol. If that need arises, the extension is a fan-out (raise HALT in each
 box's `.internal/`) or DB-level advisory locks — deliberately **out of scope
 here**, noted so a future author doesn't mistake the per-box boundary for a bug.
 
+## Upgrade-from-old & elevated processes (registry-independent detection)
+
+The cooperative protocol assumes both sides speak it. On an **upgrade from a
+pre-HALT version**, they don't: the old cognitive loop / embed / MCP never wrote
+a `PID/` entry and never poll `HALT_m3`. A registry-only quiesce would then see
+an empty registry, falsely report "quiesced", and migrate straight under the old
+writers — silent corruption on the exact path (upgrade) that matters most.
+
+Fixes:
+
+- **`scan_db_writer_processes`** — a registry-INDEPENDENT discovery floor: match
+  running processes by **command-line signature** (`m3_cognitive_loop.py`,
+  `embed_server_inproc.py`, `mcp-memory`/`mcp_proxy.py`) via psutil, cross-platform
+  (Windows / Linux / macOS). `list_all_db_writers` unions this with the registry
+  (dedup by pid), and `wait_for_quiesce` waits on the **union** — so an old
+  unregistered writer is visible, never "deregisters" (it can't), stays `stuck`
+  past the timeout, and falls to the caller's kill/abort path (the only safe
+  outcome for a process that doesn't speak the protocol).
+
+- **Elevated processes.** An unprivileged installer cannot read an elevated
+  process's cmdline (AccessDenied / empty). Name-identifiable writers
+  (`mcp-memory`) are still reported (flagged `elevated?`); a bare interpreter with
+  no readable cmdline is NOT reported (avoids false-positive flooding). The
+  residual case — a stale elevated loop/embed whose script name is unknowable — is
+  caught at the **kill boundary**: `_kill_process_windows`/`_kill_process_posix`
+  now return False on a permission-refused kill (the old Windows path ignored
+  taskkill's exit code and always claimed success), and the installer surfaces
+  the ready-to-run elevated command(s) for the current OS
+  (`elevated_kill_commands`: `taskkill /F /T /PID …` on Windows, `sudo kill …`
+  on Linux/macOS) rather than a false success — then aborts so the user can clear
+  the process and retry. This is the "run this elevated to clear stale processes"
+  escape hatch, targeted at the actual stuck PIDs.
+
+  On an **interactive POSIX** run the installer goes one better: instead of only
+  printing `sudo kill …`, it *runs* it (`_kill_stuck_writers(allow_sudo=True)`),
+  so sudo prompts for the password inline and the stale elevated writer is cleared
+  during the install without a manual copy-paste + re-run. Guarded to interactive
+  runs only — a headless/non-interactive `--force-quiesce` never invokes sudo
+  (it would hang with no console to prompt on) and falls back to the printed
+  command + abort.
+
 ## Module seam
 
 New module `bin/m3_halt.py` (or `m3_sdk` submodule if writers import it without
