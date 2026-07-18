@@ -38,10 +38,16 @@ if str(_BIN) not in sys.path:
 import chatlog_config
 import m3_enrich
 import m3_entities
+import m3_halt
 from m3_sdk import M3Context, ensure_governor_config, get_governor_pacing, resolve_db_path
 
-# PID file path for single-instance locking
+# PID file path for single-instance locking (distinct from m3_halt's PID/
+# registry: this enforces one-loop-at-a-time; the registry tracks DB-holders so
+# an exclusive op can quiesce them — see docs/design/HALT_PROTOCOL.md).
 PID_FILE = REPO_ROOT / "memory" / "cognitive_loop.pid"
+
+# Role name this process registers under in the m3_halt PID registry.
+_HALT_ROLE = "cognitive-loop"
 
 def daemonize_windows(args):
     """Restart this process using pythonw.exe to detach from console."""
@@ -769,6 +775,12 @@ async def main_loop(args):
         except NotImplementedError:
             pass
 
+    # Register as a live DB-holder so an exclusive op (migration/backup) can
+    # discover us and wait for us to quiesce. Deregistered on clean exit; also
+    # deregistered/re-registered around a HALT pause below (see HALT_PROTOCOL.md).
+    m3_halt.register_process(_HALT_ROLE)
+    atexit.register(m3_halt.deregister, _HALT_ROLE)
+
     # The configured per-pass batch ceiling. Under load we shrink the EFFECTIVE
     # limit below this so each pass is small and the loop re-evaluates the
     # governor (incl. live GPU/LLM load) between tiny batches instead of charging
@@ -781,6 +793,32 @@ async def main_loop(args):
     # ever get a turn under contention. Each pass takes the lead 1-in-N cycles.
     _cycle = 0
     while not _STOP_EVENT.is_set():
+        # ── Cooperative quiesce (HALT_m3) ──────────────────────────────────────
+        # An exclusive op (migration/backup/repair) raised the halt: flush our WAL
+        # to disk (§10), drop out of the PID registry so we no longer count as a
+        # DB-holder, and spin-wait WITHOUT opening any connection until it clears.
+        # Because we open DBs per-pass (not held across the wait), checkpointing +
+        # not-reopening fully releases the DB for the exclusive op. We pause the
+        # process, never exit — nothing needs to restart us. See HALT_PROTOCOL.md.
+        # Backend-blind: halt/registry are file+PID ops; _checkpoint_wal self-no-ops
+        # on PostgreSQL (PG manages its own WAL), so this runs on both backends.
+        if m3_halt.halt_is_active(role=_HALT_ROLE):
+            logger.info("HALT_m3 active — checkpointing and pausing cognitive loop "
+                        "for a DB-exclusive operation.")
+            _checkpoint_wal(args.database)
+            m3_halt.deregister(_HALT_ROLE)
+            try:
+                while m3_halt.halt_is_active(role=_HALT_ROLE) and not _STOP_EVENT.is_set():
+                    await asyncio.sleep(2.0)
+            finally:
+                # Re-register on resume (or on stop, so a clean exit still
+                # deregisters via atexit rather than leaking).
+                m3_halt.register_process(_HALT_ROLE)
+            if _STOP_EVENT.is_set():
+                break
+            logger.info("HALT_m3 cleared — resuming cognitive loop.")
+            continue
+
         # ── Adaptive Governor Gating (per-resource, per-pass) ──────────────────
         # Each resource gates the work that consumes it: CPU/RAM pressure gates
         # EVERY background pass; GPU pressure gates only passes that run on the
