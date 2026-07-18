@@ -582,6 +582,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
 
     success = True
     denied_any = False
+    denied_tasks: list[str] = []
     for task in tasks:
         subprocess.run(["schtasks", "/Delete", "/TN", task["name"], "/F"], capture_output=True)
         # Register from a full Task Scheduler XML definition. Unlike the CLI
@@ -624,6 +625,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
             _safe_print(f"{FAIL} Failed to create task {task['name']}: {err}")
             if "access is denied" in err.lower():
                 denied_any = True
+                denied_tasks.append(task["name"])
             success = False
 
     if success:
@@ -633,17 +635,37 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
         _safe_print(f"{WARN} One or more Windows tasks failed to install (see above).")
         if denied_any:
             # "Access is denied" on /Create means the shell isn't elevated. The
-            # ONSTART tasks (CognitiveLoop, EmbedServer, SecretRotator) register
-            # a boot trigger, which Task Scheduler gates behind admin — the
+            # ONSTART tasks (CognitiveLoop, EmbedServer, SecretRotator) register a
+            # boot trigger, which Task Scheduler gates behind admin — the
             # MINUTE/DAILY tasks register fine unelevated, so a partial failure
-            # here is almost always this. Tell the user exactly how to fix it.
-            _safe_print(
-                f"{WARN} 'Access is denied' = this shell is not elevated. Boot-start "
-                "(ONSTART) tasks need an Administrator shell to register. Re-run from "
-                "an elevated terminal:")
-            _safe_print("   python bin/install_schedules.py --repair")
-            _safe_print("   (the already-created non-boot tasks are fine; --repair is "
-                        "idempotent and just adds the missing ones.)")
+            # here is almost always this. This is easy to miss in a wall of [OK]s,
+            # and it means the user's BACKGROUND SERVICES WON'T START AT BOOT — so
+            # surface it as a loud, unmissable banner with the EXACT command to run
+            # (resolved from sys.executable + this script's real path, so it is
+            # copy-pasteable for a pipx/site-packages install, not a fictional
+            # `bin/` on cwd).
+            names = ", ".join(denied_tasks) if denied_tasks else \
+                "CognitiveLoop, EmbedServer, SecretRotator"
+            script = os.path.abspath(__file__)
+            py = sys.executable
+            bar = "=" * 74
+            _safe_print("")
+            _safe_print(bar)
+            _safe_print("  ACTION REQUIRED — boot-start services NOT installed (needs admin)")
+            _safe_print(bar)
+            _safe_print(f"  These background tasks could not be registered: {names}")
+            _safe_print("  They start m3 at boot; until registered, they will NOT run after a")
+            _safe_print("  restart. Registering a boot (ONSTART) task requires an elevated shell.")
+            _safe_print("")
+            _safe_print("  FIX — open an ADMIN terminal (Windows: right-click > 'Run as")
+            _safe_print("  administrator'), then run this one command:")
+            _safe_print("")
+            _safe_print(f'      "{py}" "{script}" --repair')
+            _safe_print("")
+            _safe_print("  (--repair is idempotent — it only adds the missing tasks; the ones")
+            _safe_print("  already created above are untouched.)")
+            _safe_print(bar)
+            _safe_print("")
 
 
 def remove_windows_tasks(selector: str | None, m3_memory_root: str):
