@@ -299,9 +299,23 @@ ignore_errors = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# --strict-markers: an unregistered/typo'd marker is now a COLLECTION ERROR, not
+# a silent no-op. Every marker a test uses must be declared below.
+addopts = "--strict-markers"
 markers = [
     "slow: long-running tests (>1s); use -m 'not slow' to skip",
     "real_is_current: opt out of the rust_core_install is_rust_core_current autouse stub",
+    # ── capability gates (see docs/design/TEST_SUITE_DESIGN.md) ────────────────
+    # A test that needs an external service/resource carries ONE requires_* marker;
+    # conftest's pytest_collection_modifyitems auto-skips it when the probe says the
+    # resource is absent (no per-file skipif/pytestmark needed). All requires_*
+    # imply `integration`, so CI's hermetic lane is `-m "not integration"`.
+    "integration: needs some external service/resource (umbrella; implied by every requires_*)",
+    "requires_pg: needs a reachable PostgreSQL (M3_PRIMARY_PG_URL or M3_PG_URL; never PG_URL)",
+    "requires_embedder: needs the local embedder endpoint (M3_EMBED_FALLBACK_URL, default :8082)",
+    "requires_native: needs the m3_core_rs native wheel (not the pure-Python fallback)",
+    "requires_gguf: needs a GGUF model file (M3_TEST_GGUF)",
+    "requires_files_db: needs the shipped files_database.db present",
 ]
 # Warnings are ERRORS by default: a NEW, un-reviewed warning fails the suite, so it
 # can't slip in unnoticed. Every `ignore` below is a REVIEWED exception with its
