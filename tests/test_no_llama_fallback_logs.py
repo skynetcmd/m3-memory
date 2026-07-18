@@ -68,7 +68,7 @@ def _child_program() -> str:
     )
 
 
-@pytest.mark.skipif(not GGUF, reason="M3_TEST_GGUF unset")
+@pytest.mark.requires_gguf  # auto-skips when M3_TEST_GGUF is unset (canonical var)
 def test_no_llama_fallback_warnings_in_stderr() -> None:
     """Run a 10-call concurrent workload in a subprocess; assert clean stderr."""
     env = os.environ.copy()

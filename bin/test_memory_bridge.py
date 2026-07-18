@@ -137,7 +137,6 @@ async def run(lm_online: bool, jina_loaded: bool) -> bool:
         VALID_MEMORY_TYPES,
         _content_hash,
         _ensure_sync_tables,
-        _pack,
         agent_get,
         agent_heartbeat,
         agent_list,

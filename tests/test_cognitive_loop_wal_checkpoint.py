@@ -67,3 +67,36 @@ def test_checkpoint_noop_when_no_db(monkeypatch):
     # When neither an explicit path nor M3_DATABASE resolves, it's a clean no-op.
     monkeypatch.delenv("M3_DATABASE", raising=False)
     L._checkpoint_wal(None)  # must not raise
+
+
+def test_checkpoint_noop_on_non_sqlite_backend(monkeypatch, tmp_path):
+    """Cross-backend guarantee (HALT_PROTOCOL / §1): on a non-SQLite backend
+    _checkpoint_wal returns immediately without touching any file — PG manages
+    its own WAL. We fake active_backend().name='postgres' and assert that even a
+    real bloated WAL is left untouched (proving the early return fired).
+
+    Patches the ``active_backend`` ATTRIBUTE on the real, already-imported
+    ``memory.backends`` module (monkeypatch restores it on teardown) — NOT the
+    whole sys.modules entry, which would leak a stub to later tests that import
+    consolidate_beliefs / memory.backends fresh (that hermeticity bug, §3, made
+    test_cognitive_loop_consolidate fail when run in the same batch)."""
+    import types
+
+    import memory.backends as real_backends  # the real module; restored on teardown
+
+    db = str(tmp_path / "agent_memory.db")
+    holder = _make_wal_db(db, rows=200)
+    try:
+        wal = db + "-wal"
+        before = os.path.getsize(wal)
+        assert before > 0
+
+        fake_backend = types.SimpleNamespace(name="postgres")
+        monkeypatch.setattr(real_backends, "active_backend", lambda: fake_backend)
+
+        L._checkpoint_wal(db)  # must early-return on non-sqlite
+
+        # WAL untouched → the PG path did NOT run the SQLite checkpoint.
+        assert os.path.getsize(wal) == before, "non-sqlite backend must not checkpoint"
+    finally:
+        holder.close()

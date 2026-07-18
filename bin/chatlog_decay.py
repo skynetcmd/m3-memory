@@ -248,6 +248,9 @@ def run_sweep(db_path: str, *, apply: bool, batch_size: int = 1000) -> dict:
     backend = active_backend()
     _d = backend.dialect()
     _p = _d.param()
+    # Either a closing(sqlite3.Connection) or the backend's connection() CM — both
+    # are context managers yielding a DB-API connection; Any avoids a false union.
+    _conn_cm: "Any"
     if backend.name == "sqlite":
         _tbl = "memory_items"
         _conn_cm = closing(sqlite3.connect(db_path, timeout=30))

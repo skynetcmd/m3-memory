@@ -28,7 +28,7 @@ import subprocess
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, Optional, Sequence
+from typing import Iterable, Optional, Sequence, cast
 
 # ── Tunables ───────────────────────────────────────────────────────────────
 DEFAULT_MAX_ATTEMPTS = 3
@@ -307,7 +307,7 @@ def enroll_group(
             profile, model, enrich_run_id,
         ),
     )
-    new_id = _d.last_insert_id(cur)
+    new_id = cast(int, _d.last_insert_id(cur))  # dialect returns object; the id is an int
     return (new_id, "inserted")
 
 

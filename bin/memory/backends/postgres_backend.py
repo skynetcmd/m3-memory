@@ -26,11 +26,10 @@ from __future__ import annotations
 import os
 import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Iterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Iterator
 
 from m3_sdk import getenv_compat, resolve_primary_pg_dsn
-
-from dataclasses import dataclass
 
 from .base import BackendName, Capabilities, KeywordHit, VectorHit
 from .dialect import Dialect, ParamStyle
@@ -509,7 +508,7 @@ class PostgresBackend:
         return POSTGRES
 
     @contextmanager
-    def connection(self) -> Iterator["object"]:
+    def connection(self) -> Iterator[Any]:
         """Yield a pooled psycopg2 connection with SQLite-identical discipline.
 
         Commit on clean exit, rollback on exception, return to the pool always.
@@ -529,7 +528,7 @@ class PostgresBackend:
             pool.putconn(conn)
 
     @contextmanager
-    def open_readonly(self, db_path: str) -> Iterator["object"]:
+    def open_readonly(self, db_path: str) -> Iterator[Any]:
         """Read-only-intent connection. On PG there is ONE pooled store, so the
         ``db_path`` argument is meaningless and IGNORED (it names a SQLite file);
         this yields a normal pooled connection. Callers pass db_path for the

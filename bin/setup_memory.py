@@ -11,8 +11,6 @@ import sqlite3
 import subprocess
 import sys
 
-from m3_sdk import getenv_compat
-
 BASE   = pathlib.Path(__file__).parent.parent.resolve()
 IS_WIN = sys.platform == "win32"
 VENV   = BASE / ".venv"

@@ -458,6 +458,214 @@ def _run(cmd: list[str], *, check: bool = True, env: "dict | None" = None) -> su
     return subprocess.run(cmd, check=check, env=env)
 
 
+def _import_m3_halt():
+    """Import the bin/m3_halt module (adds bin/ to path like other bin imports).
+    Returns None if unavailable (e.g. payload not yet installed) so the caller
+    degrades gracefully rather than crashing setup."""
+    try:
+        from m3_memory.installer import bin_dir
+        bd = bin_dir()
+        if bd and str(bd) not in sys.path:
+            sys.path.insert(0, str(bd))
+        import m3_halt  # type: ignore
+        return m3_halt
+    except Exception as e:  # noqa: BLE001 — coordination is best-effort
+        _warn(f"  quiesce: m3_halt unavailable ({type(e).__name__}) — "
+              "skipping cooperative DB-writer quiesce")
+        return None
+
+
+def _quiesce_db_writers(args: argparse.Namespace) -> bool:
+    """Cooperatively quiesce autonomous m3 DB-writers before a DB-exclusive
+    install/upgrade step, via the HALT_m3 protocol (docs/design/HALT_PROTOCOL.md).
+
+    Sets HALT_m3, waits for the PID registry to empty, and — if a writer is still
+    holding on after the timeout — asks the human (interactive) or honors the
+    --force-quiesce/--force-kill-mcp opt-in (non-interactive), never killing
+    silently. Returns True to proceed with install, False to abort. Always clears
+    HALT_m3 before returning so writers are never left wedged.
+    """
+    halt = _import_m3_halt()
+    if halt is None:
+        return True  # can't coordinate; the mcp-memory.exe file-lock probe still guards Windows
+
+    # Union of registered writers AND a cmdline scan — so an UPGRADE from an
+    # older m3 (whose loop/embed/MCP predate the PID registry + HALT protocol and
+    # thus don't register or poll) still detects the processes holding the DB.
+    # Without the scan, list_live_processes() would be empty on that path and we'd
+    # migrate right under the old writers.
+    live = halt.list_all_db_writers()
+    if not live:
+        _ok("  no autonomous m3 DB-writers running (nothing to quiesce)")
+        return True
+
+    roles = ", ".join(f"{p.role}(pid {p.pid})" for p in live)
+    _say(f"  quiescing {len(live)} m3 DB-writer(s) before install: {roles}")
+    timeout = float(getattr(args, "quiesce_timeout", 30.0) or 30.0)
+    # Raise the halt. It stays up through the exclusive install step and is
+    # cleared by run_setup's finally (so writers stay paused for the whole
+    # migration, then resume). On ANY early return below we clear it ourselves,
+    # because there is no install step to protect if we abort.
+    halt.set_halt(owner="setup_wizard", reason="install/upgrade DB-exclusive step")
+    result = halt.wait_for_quiesce(timeout=timeout)
+    while not result.ok:
+        stuck = ", ".join(f"{p.role}(pid {p.pid})" for p in result.stuck)
+        _warn(f"  {len(result.stuck)} writer(s) still holding the DB after "
+              f"{timeout:.0f}s: {stuck}")
+        force = getattr(args, "force_quiesce", False) or getattr(args, "force_kill_mcp", False)
+        if args.non_interactive:
+            if force:
+                if not _kill_stuck_writers(result.stuck):
+                    # A kill failed — almost always an ELEVATED writer an
+                    # unprivileged installer can't stop. Do NOT report success or
+                    # migrate under it; abort with the actionable fix.
+                    _surface_elevated_kill_help(halt, result.stuck)
+                    halt.clear_halt()
+                    return False
+                result = halt.wait_for_quiesce(timeout=5.0)
+                continue
+            _err("  refusing to migrate with live DB-writers. Re-run with "
+                 "--force-quiesce (kills stuck writers) or stop them first.")
+            halt.clear_halt()  # abort: no exclusive step to protect
+            return False
+        # Interactive: the human has context we don't (a task finishing).
+        choice = _ask_choice(
+            "  A writer hasn't paused — it may have a task finishing.",
+            ["kill", "wait", "abort"], default="wait")
+        if choice == "kill":
+            # Interactive → allow a sudo retry (sudo prompts inline) for an
+            # elevated writer, auto-elevating the cleanup during the install.
+            if not _kill_stuck_writers(result.stuck, allow_sudo=True):
+                _surface_elevated_kill_help(halt, result.stuck)
+                halt.clear_halt()
+                return False
+            result = halt.wait_for_quiesce(timeout=5.0)
+        elif choice == "abort":
+            _warn("  install aborted by user (DB-writers still active)")
+            halt.clear_halt()  # abort: no exclusive step to protect
+            return False
+        else:  # wait
+            result = halt.wait_for_quiesce(timeout=timeout)
+    _ok("  all m3 DB-writers quiesced (HALT_m3 held through install)")
+    return True
+
+
+def _kill_process_posix(pid: int) -> bool:
+    """SIGTERM a PID on POSIX (Linux + macOS). Returns True on success, False on
+    PermissionError (an elevated target an unprivileged installer can't signal)
+    or if the process is already gone."""
+    import signal as _signal
+    try:
+        os.kill(pid, _signal.SIGTERM)
+        return True
+    except ProcessLookupError:
+        return True  # already gone — the goal (not holding the DB) is met
+    except PermissionError:
+        return False  # elevated target — caller surfaces "re-run elevated"
+
+
+def _surface_elevated_kill_help(halt, stuck) -> None:
+    """Tell the user exactly how to clear a stale/elevated m3 writer the installer
+    couldn't stop, then retry — the ready-to-run elevated command(s) for THIS OS
+    (Windows / Linux / macOS), targeting the actual stuck PIDs."""
+    _err("  could not stop an elevated m3 writer. Run the command(s) below from "
+         "an ELEVATED shell (Windows: 'Run as administrator'; Linux/macOS: sudo), "
+         "then re-run the installer:")
+    try:
+        cmds = halt.elevated_kill_commands([p.pid for p in stuck])
+    except Exception:  # noqa: BLE001 — never let help-text generation abort
+        cmds = []
+    if not cmds:  # fallback if the helper is unavailable (older m3_halt)
+        pids = " ".join(str(p.pid) for p in stuck)
+        cmds = ([f"taskkill /F /T {pids}"] if sys.platform == "win32"
+                else [f"sudo kill {pids}"])
+    for c in cmds:
+        print(f"      {c}")
+
+
+def _sudo_kill_posix(pid: int) -> bool:
+    """Try `sudo kill <pid>` on POSIX (Linux + macOS). Only for INTERACTIVE runs —
+    sudo prompts for the password on the console, so it must never be attempted
+    headless (it would hang or fail). Returns True if the process is stopped (or
+    already gone). A missing sudo, a declined password, or a still-refused kill →
+    False."""
+    if not shutil.which("sudo"):
+        return False
+    try:
+        out = subprocess.run(["sudo", "kill", str(pid)],
+                             timeout=60, check=False)
+        if out.returncode == 0:
+            return True
+        # Escalate to SIGKILL once if TERM didn't take.
+        out = subprocess.run(["sudo", "kill", "-9", str(pid)],
+                             timeout=60, check=False)
+        return out.returncode == 0
+    except Exception:  # noqa: BLE001 — sudo unavailable / user aborted / timeout
+        return False
+
+
+def _runas_kill_windows(pid: int) -> bool:
+    """Elevate a taskkill via UAC on INTERACTIVE Windows using PowerShell
+    `Start-Process -Verb RunAs`. Windows has no inline sudo — RunAs pops the UAC
+    consent dialog and runs the kill in a short-lived elevated process, which we
+    -Wait on and read the exit code of.
+
+    Universal (built-in PowerShell, every Windows; no native-sudo/gsudo
+    dependency). Returns True only if the elevated taskkill actually exited 0.
+    A cancelled UAC prompt raises in Start-Process → caught → False. Must only be
+    called interactively (UAC is a GUI prompt; pointless headless)."""
+    # -PassThru + -Wait lets us read the elevated child's ExitCode. taskkill /F /T
+    # /PID <pid> is the same command the unprivileged path used, just elevated.
+    ps = (
+        "$p = Start-Process -FilePath taskkill "
+        f"-ArgumentList '/F','/T','/PID','{int(pid)}' "
+        "-Verb RunAs -PassThru -Wait -WindowStyle Hidden; "
+        "exit $p.ExitCode"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            timeout=120, check=False,
+        )
+        # taskkill exit 0 = killed; 128 = not found (already gone → goal met).
+        return out.returncode in (0, 128)
+    except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
+        return False
+
+
+def _kill_stuck_writers(stuck, *, allow_sudo: bool = False) -> bool:
+    """Kill every stuck writer; return True only if ALL were stopped (or already
+    gone). A False means at least one kill was refused — cross-platform, almost
+    always an ELEVATED process an unprivileged installer can't stop — so the
+    caller must NOT report success or migrate under it. Works on Windows / Linux /
+    macOS (the POSIX path covers both via os.kill).
+
+    ``allow_sudo`` (INTERACTIVE runs only): if an unprivileged kill is refused,
+    retry once with elevation, auto-clearing the stale writer during the install
+    instead of making the user copy a command and re-run. POSIX uses ``sudo kill``
+    (inline password prompt); Windows uses PowerShell ``Start-Process -Verb RunAs``
+    (UAC consent dialog) — Windows has no inline sudo. Never set headless (both
+    prompt the user; sudo would hang, UAC is pointless with no one to consent)."""
+    is_win = sys.platform == "win32"
+    killer = _kill_process_windows if is_win else _kill_process_posix
+    elevate = _runas_kill_windows if is_win else _sudo_kill_posix
+    how = "UAC" if is_win else "sudo"
+    all_ok = True
+    for p in stuck:
+        if killer(p.pid):
+            _ok(f"    stopped {p.role} (pid {p.pid})")
+            continue
+        # Unprivileged kill refused (typically an elevated target). On an
+        # interactive run, retry with elevation before giving up.
+        if allow_sudo and elevate(p.pid):
+            _ok(f"    stopped {p.role} (pid {p.pid}) via {how}")
+            continue
+        all_ok = False
+        _warn(f"    could NOT stop {p.role} (pid {p.pid}) — likely elevated / "
+              "owned by another user")
+    return all_ok
+
+
 def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
     """B15: pre-install probes that catch the failure modes seen during the
     2026-05-27 wizard-hardening session.
@@ -528,6 +736,16 @@ def _step_preflight(plan: SetupPlan, args: argparse.Namespace) -> bool:
         # doesn't block reinstall the way Windows file-locking does. Probe
         # is best-effort informational only.
         _ok("  Unix: running mcp-memory does not block reinstall (rename-in-place)")
+
+    # ── Probe 2.5: cooperatively quiesce autonomous DB-writers (all OSes) ──
+    # The mcp-memory.exe probe above guards the Windows *file-lock*. This guards
+    # the cross-platform *DB-open* hazard: the cognitive loop / embed / MCP hold
+    # WAL-mode DBs open, and migrating under them risks a torn WAL. We raise
+    # HALT_m3 and wait for them to pause+release (docs/design/HALT_PROTOCOL.md).
+    # A False return is fatal (mirrors the mcp-memory lock gate).
+    if not _quiesce_db_writers(args):
+        ok = False
+        return ok  # abort now; HALT already cleared by the helper on abort
 
     # ── Probe 3: stale __pycache__ in the repo (developer pip-install -e) ──
     # When the install is editable and pycache contains .pyc files newer
@@ -697,13 +915,24 @@ def _find_running_mcp_memory_processes() -> list[int]:
 
 
 def _kill_process_windows(pid: int) -> bool:
-    """Force-kill a process by PID. Returns True on success."""
+    """Force-kill a process by PID via taskkill. Returns True only if it actually
+    terminated (or was already gone) — False when taskkill is REFUSED, which for
+    an elevated process run from an unprivileged shell prints 'Access is denied'
+    and exits non-zero. The old version ignored the exit code and always returned
+    True, silently reporting success on a failed elevated kill."""
     try:
-        subprocess.run(
+        out = subprocess.run(
             ["taskkill", "/PID", str(pid), "/F"],
             capture_output=True, text=True, timeout=10, check=False,
         )
-        return True
+        if out.returncode == 0:
+            return True
+        # 128 = process not found (already gone → goal met). Any other non-zero
+        # (5/'Access is denied' on an elevated target) is a real failure.
+        combined = (out.stdout + out.stderr).lower()
+        if "not found" in combined or "no running instance" in combined:
+            return True
+        return False
     except Exception:
         return False
 
@@ -1220,14 +1449,39 @@ def _wire_openclaw_note() -> bool:
 _HERMES_PLUGIN_FILES = ("__init__.py", "m3client.py", "plugin.yaml")
 
 
-def _wire_hermes() -> bool:
+def _hermes_plugin_is_current(src: Path, dst: Path) -> bool:
+    """True if the installed Hermes plugin already matches the vendored source.
+
+    "Current" means every shipped plugin file exists in ``dst`` with byte-identical
+    content. A missing or differing file (a partial copy, or an older plugin from a
+    prior m3 version) is stale → the caller re-installs. Mirrors OpenCode's
+    _opencode_entry_is_stale check: don't touch an up-to-date install, heal a stale
+    one, rather than prompt.
+    """
+    for fname in _HERMES_PLUGIN_FILES:
+        s, d = src / fname, dst / fname
+        if not d.is_file():
+            return False
+        try:
+            if s.read_bytes() != d.read_bytes():
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def _wire_hermes(*, non_interactive: bool = False) -> bool:
     """Copy the m3 memory-provider plugin into the user's hermes-agent checkout.
 
     Hermes Agent loads memory providers from `plugins/memory/<name>/`. We locate
     the vendored source (m3_memory/integrations/hermes/) and the user's hermes
     plugins dir, then copy the plugin files into `plugins/memory/m3/`.
-    Non-destructive: if a prior m3 plugin is already there, we ask before
-    overwriting.
+
+    Self-healing (mirrors _wire_opencode): an up-to-date plugin is left untouched;
+    a present-but-stale one (older m3 version, partial copy) is backed up to
+    ``m3.m3bak`` and rewritten — so an UPGRADE actually refreshes the plugin files
+    instead of skipping them. Runs unattended: no interactive overwrite prompt
+    (which would raise EOFError under --non-interactive and abort setup).
     """
     import shutil as _shutil
 
@@ -1242,11 +1496,22 @@ def _wire_hermes() -> bool:
         return False
 
     dst = dst_parent / "m3"
-    if dst.exists():
-        if not _ask_yes_no(f"  · Hermes: {dst} exists — overwrite?", default=False):
-            _say("  · Hermes: left existing m3 plugin untouched")
+    existed = dst.exists()
+    if existed:
+        # Already up to date -> leave it, exactly like OpenCode's "already wired".
+        if _hermes_plugin_is_current(src, dst):
+            _say(f"  · Hermes: m3 plugin already current ({dst})")
             return True
-        _shutil.rmtree(dst)
+        # Present but stale -> back up the old plugin before overwriting so a bad
+        # upgrade is recoverable (mirrors OpenCode's .m3bak on rewrite).
+        bak = dst.with_name("m3.m3bak")
+        try:
+            if bak.exists():
+                _shutil.rmtree(bak)
+            _shutil.move(str(dst), str(bak))
+        except OSError as e:
+            _warn(f"  · Hermes: could not back up existing plugin ({e}) — skipping")
+            return False
     try:
         dst.mkdir(parents=True, exist_ok=True)
         for fname in _HERMES_PLUGIN_FILES:
@@ -1255,7 +1520,9 @@ def _wire_hermes() -> bool:
         _warn(f"  · Hermes: copy failed ({e}) — skipping")
         return False
 
-    _say(f"  · Hermes: m3 SOTA provider installed at {dst}")
+    verb = "updated" if existed else "installed"
+    _say(f"  · Hermes: m3 SOTA provider {verb} at {dst}"
+         + (" (previous backed up to m3.m3bak)" if existed else ""))
     print("    To complete configuration:")
     print("    1. Add m3-memory's bin/ to PYTHONPATH in Hermes' launch environment.")
     print("    2. Enable and select 'm3' inside `hermes plugins` to replace/run alongside default memory.")
@@ -1270,7 +1537,7 @@ def _wire_hermes() -> bool:
     return True
 
 
-def _step_wire_agents(plan: SetupPlan) -> bool:
+def _step_wire_agents(plan: SetupPlan, *, non_interactive: bool = False) -> bool:
     """Wire MCP entries for every selected agent."""
     if not plan.targets.any():
         _say("Step 4/5: no agents selected — skipping wiring")
@@ -1287,7 +1554,7 @@ def _step_wire_agents(plan: SetupPlan) -> bool:
     if plan.targets.openclaw:
         _wire_openclaw_note()
     if plan.targets.hermes:
-        _wire_hermes()
+        _wire_hermes(non_interactive=non_interactive)
     return True
 
 
@@ -1450,22 +1717,36 @@ def run_setup(args: argparse.Namespace) -> int:
             plan.fips_mode = plan.fips_strict = False
 
     # Execute. Step 0 (preflight) and Step 1 (install-m3) can hard-abort.
+    # Preflight may raise HALT_m3 to quiesce DB-writers; that halt stays up
+    # through the exclusive install/migrate steps and is cleared here in a
+    # finally so paused writers ALWAYS resume — success, failure, or exception.
     if not _step_preflight(plan, args):
         _err("setup aborted by preflight")
-        return 2
-    if not _step_install_m3(plan):
-        _err("setup aborted")
-        return 2
-    _step_cpu_sovereign_embedder()
-    if plan.install_gpu_embedder:
-        _step_gpu_embedder(plan)
-    if plan.use_shared_embedder:
-        _step_shared_embedder(plan)
-    _step_wire_agents(plan)
-    governor_result = _step_governor_migration(plan)
-    _step_doctor()
-    _summary(plan, governor_result)
-    return 0
+        return 2  # preflight cleared its own HALT on any abort path
+    try:
+        if not _step_install_m3(plan):
+            _err("setup aborted")
+            return 2
+        _step_cpu_sovereign_embedder()
+        if plan.install_gpu_embedder:
+            _step_gpu_embedder(plan)
+        if plan.use_shared_embedder:
+            _step_shared_embedder(plan)
+        _step_wire_agents(plan, non_interactive=args.non_interactive)
+        governor_result = _step_governor_migration(plan)
+        _step_doctor()
+        _summary(plan, governor_result)
+        return 0
+    finally:
+        # Lower HALT_m3 (idempotent — a no-op if preflight never raised it) so
+        # the cognitive loop / embed / MCP resume. Best-effort; never mask the
+        # real return/exception with a cleanup error.
+        try:
+            _halt = _import_m3_halt()
+            if _halt is not None:
+                _halt.clear_halt()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -1507,6 +1788,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Kill any running mcp-memory.exe before install (Windows only; "
              "required if MCP is currently in use and you're running "
              "non-interactively).",
+    )
+    parser.add_argument(
+        "--force-quiesce", action="store_true",
+        help="In non-interactive mode, force-kill any autonomous m3 DB-writer "
+             "(cognitive loop / embed / MCP) that hasn't paused within "
+             "--quiesce-timeout, instead of aborting. Cross-platform superset of "
+             "--force-kill-mcp for the HALT_m3 quiesce step.",
+    )
+    parser.add_argument(
+        "--quiesce-timeout", type=float, default=30.0,
+        help="Seconds to wait for autonomous m3 DB-writers to pause before "
+             "install (HALT_m3 protocol). Default: 30.",
     )
 
     parser.add_argument(

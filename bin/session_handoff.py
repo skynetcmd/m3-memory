@@ -1,6 +1,5 @@
 import logging
 import os
-import sqlite3
 import sys
 
 # Dynamically resolve project root

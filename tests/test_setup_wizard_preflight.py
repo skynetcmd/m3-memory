@@ -18,6 +18,7 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -771,3 +772,301 @@ def test_probe_no_op_when_only_lmstudio_reachable(monkeypatch):
                         lambda n, v, **k: persisted.__setitem__(n, v))
     setup_wizard._probe_llm_endpoints(object(), _probe_args(non_interactive=True))
     assert persisted == {}
+
+
+# ────────────────────────────────────────────────────────────────────────
+# _wire_hermes — non-interactive must NOT prompt (regression: EOFError when
+# an existing Hermes plugin triggered an overwrite input() under
+# --non-interactive, aborting the whole `m3 setup`).
+# ────────────────────────────────────────────────────────────────────────
+
+
+def _hermes_dirs(tmp_path, plugin_content="SRC"):
+    """Build a vendored src/ (with all plugin files) + an empty hermes plugins/
+    dir. Returns (src, plugins)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    for fname in setup_wizard._HERMES_PLUGIN_FILES:
+        (src / fname).write_text(plugin_content)
+    plugins = tmp_path / "hermes" / "plugins" / "memory"
+    plugins.mkdir(parents=True)
+    return src, plugins
+
+
+def _no_input(monkeypatch):
+    def _boom(*a, **k):
+        raise AssertionError("input() called in non-interactive mode")
+    monkeypatch.setattr("builtins.input", _boom)
+
+
+def test_wire_hermes_fresh_install(monkeypatch, tmp_path):
+    """No existing plugin → files copied in; no prompt."""
+    src, plugins = _hermes_dirs(tmp_path)
+    monkeypatch.setattr(setup_wizard, "_find_m3_hermes_plugin_src", lambda: src)
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: plugins)
+    _no_input(monkeypatch)
+
+    assert setup_wizard._wire_hermes(non_interactive=True) is True
+    assert (plugins / "m3" / "__init__.py").read_text() == "SRC"
+
+
+def test_wire_hermes_current_plugin_left_untouched(monkeypatch, tmp_path):
+    """An up-to-date plugin (files match source) is not rewritten — mirrors
+    OpenCode 'already wired'. No prompt, no backup created."""
+    src, plugins = _hermes_dirs(tmp_path)
+    dst = plugins / "m3"
+    dst.mkdir()
+    for fname in setup_wizard._HERMES_PLUGIN_FILES:
+        (dst / fname).write_text("SRC")  # identical to source
+    monkeypatch.setattr(setup_wizard, "_find_m3_hermes_plugin_src", lambda: src)
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: plugins)
+    _no_input(monkeypatch)
+
+    assert setup_wizard._wire_hermes(non_interactive=True) is True
+    assert not (plugins / "m3.m3bak").exists()  # nothing backed up
+
+
+def test_wire_hermes_stale_plugin_backed_up_and_updated(monkeypatch, tmp_path):
+    """A stale plugin (older content) is backed up to m3.m3bak and refreshed with
+    the new source files — the self-healing upgrade path. No prompt."""
+    src, plugins = _hermes_dirs(tmp_path, plugin_content="NEW")
+    dst = plugins / "m3"
+    dst.mkdir()
+    for fname in setup_wizard._HERMES_PLUGIN_FILES:
+        (dst / fname).write_text("OLD")  # differs from source -> stale
+    monkeypatch.setattr(setup_wizard, "_find_m3_hermes_plugin_src", lambda: src)
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: plugins)
+    _no_input(monkeypatch)
+
+    assert setup_wizard._wire_hermes(non_interactive=True) is True
+    # new files installed
+    assert (dst / "__init__.py").read_text() == "NEW"
+    # old files preserved in backup
+    assert (plugins / "m3.m3bak" / "__init__.py").read_text() == "OLD"
+
+
+def test_wire_hermes_partial_plugin_is_stale(monkeypatch, tmp_path):
+    """A plugin dir missing one of the shipped files counts as stale and is
+    healed (guards _hermes_plugin_is_current's missing-file branch)."""
+    src, plugins = _hermes_dirs(tmp_path, plugin_content="NEW")
+    dst = plugins / "m3"
+    dst.mkdir()
+    # only the first file present -> incomplete
+    (dst / setup_wizard._HERMES_PLUGIN_FILES[0]).write_text("NEW")
+    monkeypatch.setattr(setup_wizard, "_find_m3_hermes_plugin_src", lambda: src)
+    monkeypatch.setattr(setup_wizard, "_find_hermes_plugins_dir", lambda: plugins)
+    _no_input(monkeypatch)
+
+    assert setup_wizard._wire_hermes(non_interactive=True) is True
+    for fname in setup_wizard._HERMES_PLUGIN_FILES:
+        assert (dst / fname).read_text() == "NEW"
+
+
+# ────────────────────────────────────────────────────────────────────────
+# _quiesce_db_writers — cooperative HALT flow decision logic (HALT_PROTOCOL).
+# A fake halt module injected via _import_m3_halt exercises the branches
+# without real processes.
+# ────────────────────────────────────────────────────────────────────────
+
+
+class _FakeProc:
+    def __init__(self, role, pid):
+        self.role, self.pid = role, pid
+
+
+class _FakeHalt:
+    """Records set/clear/kill and returns scripted quiesce results."""
+    def __init__(self, live, quiesce_results):
+        self._live = live
+        self._results = list(quiesce_results)  # popped per wait_for_quiesce call
+        self.set_called = 0
+        self.cleared = 0
+
+    def list_live_processes(self):
+        return self._live
+
+    def list_all_db_writers(self):
+        # In these tests the registry + cmdline-scan union is simulated by _live.
+        return self._live
+
+    def elevated_kill_commands(self, pids):
+        return [f"sudo kill {' '.join(str(p) for p in pids)}"]
+
+    def set_halt(self, owner, reason):
+        self.set_called += 1
+
+    def clear_halt(self):
+        self.cleared += 1
+
+    def wait_for_quiesce(self, timeout):
+        return self._results.pop(0)
+
+
+def _R(ok, stuck=()):
+    return SimpleNamespace(ok=ok, stuck=list(stuck))
+
+
+def _q_args(**kw):
+    base = dict(non_interactive=True, force_quiesce=False, force_kill_mcp=False,
+                quiesce_timeout=1.0)
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def test_quiesce_no_writers_proceeds(monkeypatch):
+    fake = _FakeHalt(live=[], quiesce_results=[])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    assert setup_wizard._quiesce_db_writers(_q_args()) is True
+    assert fake.set_called == 0  # nothing to quiesce → never raised HALT
+
+
+def test_quiesce_writers_pause_in_time(monkeypatch):
+    fake = _FakeHalt(live=[_FakeProc("cognitive-loop", 111)],
+                     quiesce_results=[_R(True)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    assert setup_wizard._quiesce_db_writers(_q_args()) is True
+    assert fake.set_called == 1
+    # HALT stays raised through install (cleared by run_setup, not the helper).
+    assert fake.cleared == 0
+
+
+def test_quiesce_stuck_non_interactive_no_force_aborts(monkeypatch):
+    fake = _FakeHalt(live=[_FakeProc("cognitive-loop", 111)],
+                     quiesce_results=[_R(False, [_FakeProc("cognitive-loop", 111)])])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    assert setup_wizard._quiesce_db_writers(_q_args(force_quiesce=False)) is False
+    assert fake.cleared == 1  # abort path clears its own HALT
+
+
+def test_quiesce_stuck_non_interactive_force_kills_then_proceeds(monkeypatch):
+    stuck = [_FakeProc("cognitive-loop", 111)]
+    fake = _FakeHalt(live=list(stuck),
+                     quiesce_results=[_R(False, stuck), _R(True)])
+    killed = []
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: killed.append(pid) or True)
+    assert setup_wizard._quiesce_db_writers(_q_args(force_quiesce=True)) is True
+    assert killed == [111]
+
+
+def test_quiesce_interactive_abort(monkeypatch):
+    stuck = [_FakeProc("cognitive-loop", 111)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda *a, **k: "abort")
+    assert setup_wizard._quiesce_db_writers(_q_args(non_interactive=False)) is False
+    assert fake.cleared == 1
+
+
+def test_quiesce_interactive_kill(monkeypatch):
+    stuck = [_FakeProc("cognitive-loop", 111)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck), _R(True)])
+    killed = []
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda *a, **k: "kill")
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: killed.append(pid) or True)
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: killed.append(pid) or True)
+    assert setup_wizard._quiesce_db_writers(_q_args(non_interactive=False)) is True
+    assert killed == [111]
+
+
+def test_quiesce_halt_unavailable_proceeds(monkeypatch):
+    # If m3_halt can't be imported, don't block install (file-lock probe still guards).
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: None)
+    assert setup_wizard._quiesce_db_writers(_q_args()) is True
+
+
+def test_quiesce_elevated_kill_failure_aborts_with_help(monkeypatch, capsys):
+    """When a stuck writer can't be killed (elevated), quiesce must NOT report
+    success or proceed — it aborts, clears HALT, and surfaces the elevated
+    command to run. (--force-quiesce, non-interactive.)"""
+    stuck = [_FakeProc("mcp(elevated?)", 555)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    # kill refused (elevated target) on both platforms
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: False)
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: False)
+
+    assert setup_wizard._quiesce_db_writers(_q_args(force_quiesce=True)) is False
+    assert fake.cleared == 1  # HALT cleared on abort (writers not left wedged)
+    out = capsys.readouterr().out
+    assert "elevated" in out.lower()
+    assert "sudo kill 555" in out  # the ready-to-run command was surfaced
+
+
+def test_interactive_kill_retries_with_sudo(monkeypatch, capsys):
+    """Interactive 'kill': an unprivileged kill that's refused is retried via sudo
+    (which prompts inline). If sudo succeeds, quiesce proceeds — no abort."""
+    stuck = [_FakeProc("cognitive-loop(elevated?)", 777)]
+    # first wait -> stuck; after sudo kill -> quiesced
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck), _R(True)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda *a, **k: "kill")
+    # unprivileged kill refused, sudo kill succeeds
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: False)
+    sudo_calls = []
+    monkeypatch.setattr(setup_wizard, "_sudo_kill_posix",
+                        lambda pid: sudo_calls.append(pid) or True)
+    monkeypatch.setattr(setup_wizard.sys, "platform", "linux")
+
+    assert setup_wizard._quiesce_db_writers(_q_args(non_interactive=False)) is True
+    assert sudo_calls == [777]  # sudo was attempted for the refused pid
+
+
+def test_noninteractive_force_does_not_use_sudo(monkeypatch):
+    """Non-interactive --force-quiesce must NOT attempt sudo (it would hang with no
+    console to prompt on); a refused kill aborts with the elevated-command help."""
+    stuck = [_FakeProc("mcp(elevated?)", 888)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: False)
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: False)
+    sudo_called = []
+    monkeypatch.setattr(setup_wizard, "_sudo_kill_posix",
+                        lambda pid: sudo_called.append(pid) or True)
+
+    assert setup_wizard._quiesce_db_writers(_q_args(force_quiesce=True)) is False
+    assert sudo_called == []  # sudo NEVER attempted headless
+
+
+def test_interactive_kill_retries_with_runas_on_windows(monkeypatch):
+    """Interactive 'kill' on Windows: a refused unprivileged kill retries via
+    _runas_kill_windows (UAC), symmetric to sudo on POSIX. If RunAs succeeds,
+    quiesce proceeds."""
+    stuck = [_FakeProc("mcp(elevated?)", 321)]
+    fake = _FakeHalt(live=list(stuck), quiesce_results=[_R(False, stuck), _R(True)])
+    monkeypatch.setattr(setup_wizard, "_import_m3_halt", lambda: fake)
+    monkeypatch.setattr(setup_wizard, "_ask_choice", lambda *a, **k: "kill")
+    monkeypatch.setattr(setup_wizard.sys, "platform", "win32")
+    monkeypatch.setattr(setup_wizard, "_kill_process_windows", lambda pid: False)
+    runas_calls = []
+    monkeypatch.setattr(setup_wizard, "_runas_kill_windows",
+                        lambda pid: runas_calls.append(pid) or True)
+    # sudo path must NOT be used on Windows
+    sudo_calls = []
+    monkeypatch.setattr(setup_wizard, "_sudo_kill_posix",
+                        lambda pid: sudo_calls.append(pid) or True)
+
+    assert setup_wizard._quiesce_db_writers(_q_args(non_interactive=False)) is True
+    assert runas_calls == [321]   # RunAs (UAC) attempted
+    assert sudo_calls == []        # sudo NOT used on Windows
+
+
+def test_runas_kill_windows_reads_elevated_exit_code(monkeypatch):
+    """_runas_kill_windows returns True only when the elevated taskkill exits 0
+    (killed) or 128 (already gone); a cancelled-UAC exception → False."""
+    # exit 0 -> success
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=0))
+    assert setup_wizard._runas_kill_windows(123) is True
+    # exit 128 (not found / already gone) -> treated as success
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=128))
+    assert setup_wizard._runas_kill_windows(123) is True
+    # exit 1 (access denied / still there) -> False
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: mock.Mock(returncode=1))
+    assert setup_wizard._runas_kill_windows(123) is False
+    # UAC cancelled -> subprocess raises -> False
+    def boom(*a, **k):
+        raise OSError("user cancelled UAC")
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert setup_wizard._runas_kill_windows(123) is False

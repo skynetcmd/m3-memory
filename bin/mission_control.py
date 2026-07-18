@@ -10,7 +10,6 @@ import os
 import pathlib
 import platform
 import re
-import sqlite3
 import subprocess
 import sys
 import time

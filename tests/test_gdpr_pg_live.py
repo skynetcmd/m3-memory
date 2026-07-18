@@ -12,7 +12,6 @@ Skips cleanly without a reachable cluster. DSN from M3_PRIMARY_PG_URL/M3_PG_URL
 from __future__ import annotations
 
 import json
-import os
 import sys
 import uuid
 from pathlib import Path
@@ -23,29 +22,16 @@ _BIN = Path(__file__).resolve().parents[1] / "bin"
 sys.path.insert(0, str(_BIN))
 
 
-def _dsn():
-    return (os.environ.get("M3_PRIMARY_PG_URL") or os.environ.get("M3_PG_URL") or "").strip() or None
-
-
-def _reachable(dsn):
-    try:
-        import psycopg2
-
-        psycopg2.connect(dsn, connect_timeout=3).close()
-        return True
-    except Exception:
-        return False
-
-
-_DSN = _dsn()
-pytestmark = pytest.mark.skipif(
-    _DSN is None or not _reachable(_DSN),
-    reason="no reachable PostgreSQL (set M3_PRIMARY_PG_URL to a throwaway cluster)",
-)
+# Gated by the requires_pg marker: conftest's collection hook auto-skips this
+# module when no Postgres is reachable, and the pg_dsn() helper centralizes the
+# M3_PRIMARY_PG_URL > M3_PG_URL precedence. (Replaces the former per-file
+# _dsn()/_reachable()/skipif triplet.)
+pytestmark = pytest.mark.requires_pg
 
 
 @pytest.fixture()
-def pg(monkeypatch):
+def pg(monkeypatch, pg_url):
+    _DSN = pg_url
     monkeypatch.setenv("M3_DB_BACKEND", "postgres")
     monkeypatch.setenv("M3_PG_URL", _DSN)
     monkeypatch.setenv("M3_PRIMARY_PG_URL", _DSN)

@@ -64,6 +64,117 @@ def embed_backend_reachable() -> bool:
         return False
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Capability probes + gating (docs/design/TEST_SUITE_DESIGN.md)
+# ──────────────────────────────────────────────────────────────────────────────
+# ONE probe per external capability, and ONE marker per capability. A test that
+# needs a resource carries the `requires_*` marker; pytest_collection_modifyitems
+# auto-skips it when the probe reports the resource absent — so no test file
+# re-derives DSNs, reachability checks, or skipif conditions. This replaces the
+# five hand-rolled gating idioms catalogued in the design doc and fixes their
+# latent inconsistencies (a typo'd PG skip reason, presence-vs-reachability drift,
+# two GGUF env vars, three native-wheel idioms).
+
+
+def pg_dsn() -> "str | None":
+    """The Postgres DSN for live tests — the SINGLE source of the precedence rule.
+
+    M3_PRIMARY_PG_URL > M3_PG_URL, and NEVER PG_URL (PG_URL points at PROD; see
+    CLAUDE.md and the pg-url-split memory). Centralizing it here means the 12
+    former copies can't drift (one had already diverged to name M3_PG_URL in its
+    skip reason).
+    """
+    return (_os.environ.get("M3_PRIMARY_PG_URL")
+            or _os.environ.get("M3_PG_URL") or "").strip() or None
+
+
+def _pg_reachable() -> bool:
+    """True iff a Postgres cluster answers within a short connect timeout.
+    Reachability, not mere presence — the presence-only gate in the old
+    test_backend_conformance was an inconsistency this unifies away."""
+    dsn = pg_dsn()
+    if not dsn:
+        return False
+    try:
+        import psycopg2
+        psycopg2.connect(dsn, connect_timeout=3).close()
+        return True
+    except Exception:  # noqa: BLE001 — any failure = not reachable
+        return False
+
+
+def _native_wheel_present() -> bool:
+    """True iff the m3_core_rs native extension is importable (not the
+    pure-Python fallback). Unifies the three former idioms (importorskip /
+    in-body skip / _has_native_governor)."""
+    import importlib.util
+    return importlib.util.find_spec("m3_core_rs") is not None
+
+
+def gguf_path() -> "str | None":
+    """The GGUF model path for tests that need a real model — via the SINGLE
+    canonical env var M3_TEST_GGUF (the old suite split between M3_TEST_GGUF and
+    M3_EMBED_GGUF for the same purpose)."""
+    return (_os.environ.get("M3_TEST_GGUF") or "").strip() or None
+
+
+_FILES_DB = Path(__file__).resolve().parent.parent / "memory" / "files_database.db"
+
+
+def _files_db_present() -> bool:
+    return _FILES_DB.is_file()
+
+
+# Marker -> probe. A marked test is skipped (with the given reason) when its
+# probe returns False. One place; adding a capability is one row.
+_CAPABILITY_PROBES = {
+    "requires_pg": (_pg_reachable,
+                    "no reachable PostgreSQL (set M3_PRIMARY_PG_URL to a throwaway cluster)"),
+    "requires_embedder": (embed_backend_reachable,
+                          "no reachable embedder (M3_EMBED_FALLBACK_URL, default :8082)"),
+    "requires_native": (_native_wheel_present,
+                        "m3_core_rs native wheel not installed"),
+    "requires_gguf": (lambda: gguf_path() is not None,
+                      "no GGUF model (set M3_TEST_GGUF)"),
+    "requires_files_db": (_files_db_present,
+                          "shipped files_database.db absent"),
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip capability-marked tests whose resource is absent, and give every
+    requires_* test the `integration` umbrella marker so `-m "not integration"`
+    selects the hermetic lane in one expression. Probes are memoized per session
+    so a marker used by 50 tests probes the cluster once, not 50 times."""
+    cache: "dict[str, bool]" = {}
+
+    def _ok(marker: str) -> bool:
+        if marker not in cache:
+            cache[marker] = bool(_CAPABILITY_PROBES[marker][0]())
+        return cache[marker]
+
+    for item in items:
+        marks = set(item.keywords)
+        capability_marks = [m for m in _CAPABILITY_PROBES if m in marks]
+        if capability_marks:
+            item.add_marker(pytest.mark.integration)
+        for m in capability_marks:
+            if not _ok(m):
+                item.add_marker(pytest.mark.skip(reason=_CAPABILITY_PROBES[m][1]))
+
+
+@pytest.fixture
+def pg_url() -> str:
+    """DSN for a reachable Postgres. Requesting this fixture in a `requires_pg`
+    test guarantees (via the collection hook) the cluster is up, so this just
+    returns it. Kept as a fixture so test bodies get the value without importing
+    the probe."""
+    dsn = pg_dsn()
+    if not dsn or not _pg_reachable():
+        pytest.skip("no reachable PostgreSQL (set M3_PRIMARY_PG_URL to a throwaway cluster)")
+    return dsn
+
+
 @pytest.fixture(autouse=True)
 def _restore_memory_modules():
     """Heal `sys.modules` pollution of the memory.* namespace after each test.
@@ -206,8 +317,8 @@ def _close_db_pools():
 
 
 @pytest.fixture(autouse=True)
-def _reset_storage_backend_cache(monkeypatch):
-    """Reset the storage-backend selector cache + backend env around every test.
+def _reset_storage_backend_cache():
+    """Reset the storage-backend selector cache around every test.
 
     `memory.backends.selector` caches the resolved StorageBackend per name in a
     process-global dict (so pools/capability probes aren't rebuilt every call).
@@ -216,10 +327,10 @@ def _reset_storage_backend_cache(monkeypatch):
     a LATER test on a different file that expects the sqlite default then gets the
     stale cached postgres backend and fails — an order-dependent cross-file leak.
 
-    Clearing the cache before AND after each test, plus forcing the env back to
-    the sqlite default, makes every test start from a clean, deterministic
-    backend regardless of run order. Best-effort: the selector must import, but a
-    funny state must never break an unrelated test.
+    This resets the CACHE only. The backend-selecting ENV (M3_DB_BACKEND, PG
+    URLs, CDW target) is cleared by the `m3_sandbox` fixture, which owns all
+    environment isolation in one place. Best-effort: the selector must import,
+    but a funny state must never break an unrelated test.
     """
     def _clear():
         # IMPORTANT: only clear if the selector is ALREADY imported — do NOT
@@ -239,17 +350,6 @@ def _reset_storage_backend_cache(monkeypatch):
             except Exception:  # noqa: BLE001 — hygiene must never fail a test
                 pass
 
-    # Force the default backend + a clean DB env unless a test explicitly opts
-    # in. Clearing M3_PG_URL/PG_URL too keeps an ambient dev DSN (a developer
-    # running the suite with M3_PG_URL exported to a throwaway cluster) from
-    # leaking into tests that read it — e.g. test_backup_reminder's
-    # _detect_cdw_target, which sets the lower-precedence PG_URL but is overridden
-    # by a leaked higher-precedence M3_PG_URL. A test that needs these sets them
-    # via monkeypatch, which runs after this fixture and wins.
-    monkeypatch.delenv("M3_DB_BACKEND", raising=False)
-    monkeypatch.delenv("DB_BACKEND", raising=False)
-    monkeypatch.delenv("M3_PG_URL", raising=False)
-    monkeypatch.delenv("PG_URL", raising=False)
     _clear()
     yield
     _clear()
@@ -294,6 +394,95 @@ def _reset_embed_global_cache():
                 cache.clear()
             except (AttributeError, TypeError):
                 pass
+
+
+# Environment variables that must NOT leak from the developer's shell into a
+# test. Grouped by concern so the single source of truth is legible. A test that
+# genuinely needs one sets it via monkeypatch, which runs AFTER this autouse
+# fixture and therefore wins.
+_SANDBOX_CLEAR_ENV = (
+    # Backend selector — a leaked M3_DB_BACKEND=postgres makes sqlite-default
+    # tests resolve the wrong backend.
+    "M3_DB_BACKEND", "DB_BACKEND",
+    # Primary-store DSNs — an ambient dev DSN to a throwaway cluster leaks into
+    # tests that read PG_URL (higher-precedence M3_PG_URL overrides an injected
+    # PG_URL otherwise).
+    "M3_PG_URL", "PG_URL",
+    # CDW / warehouse-sync target — a real M3_SYNC_TARGET_IP=10.x / M3_CDW_PG_URL
+    # overrides a test's injected target via getenv_compat precedence (that made
+    # test_backup_reminder assert on 192.0.2.50 but read the real host).
+    "M3_SYNC_TARGET_IP", "SYNC_TARGET_IP",
+    "M3_CDW_PG_URL", "M3_CDW_URL",
+    "M3_POSTGRES_SERVER", "POSTGRES_SERVER",
+)
+
+
+@pytest.fixture(autouse=True)
+def m3_sandbox(monkeypatch, tmp_path):
+    """The single source of truth for a hermetic test environment.
+
+    Every test runs inside a filesystem + environment sandbox so it neither
+    reads the developer's real config/warehouse nor writes into their real
+    engine/backup dirs. This ONE fixture replaces the previously scattered
+    env-isolation (a dedicated engine-root fixture + the env half of the
+    backend-cache fixture + ~130 lines of per-file `monkeypatch.setenv` for
+    M3_*_ROOT / PG_URL / M3_DATABASE). Consolidating it here is what closes the
+    "gap between fixtures" leak class — the backup-dir leak and the CDW-env leak
+    both existed because isolation was piecemeal and each covered only part of
+    the surface.
+
+    Two halves, both backend-agnostic (SQLite / PostgreSQL / future backends):
+
+    1. **Roots → tmp.** Pin all three M3 roots to per-test tmp dirs at their
+       HIGHEST-precedence env vars:
+         * ``M3_ENGINE_ROOT``  — DBs, engine state, and (crucially) the migrator's
+           ``get_m3_engine_root()/backups`` pre-upgrade backups. A test that ran a
+           migration previously leaked ``*.pre-up.*.db`` into the real backup dir
+           (GBs of ``test_agent_chatlog`` backups over time).
+         * ``M3_CONFIG_ROOT``  — load-bearing for the SUBPROCESS leak path:
+           ``memory.db._ensure_sync_tables`` shells out to ``migrate_memory.py``
+           with ``os.environ.copy()``; that subprocess's ``prompt_backup_dir``
+           prefers the SAVED ``backup_dir`` in ``.migrate_config.json``. On a dev
+           box that saved value points at the real dir, and a bare
+           ``M3_MEMORY_ROOT`` does not override an already-exported real
+           ``M3_CONFIG_ROOT`` — so only pinning the config root at top precedence
+           makes both in-process and subprocess read a clean, empty config.
+         * ``M3_MEMORY_ROOT``  — the master root others derive from when unset.
+       Also re-points ``migrate_memory``'s import-time module constants
+       (``_M3_ENGINE_ROOT`` / ``CONFIG_PATH``) if it's already imported, so a
+       pre-imported module doesn't retain real-root values.
+       tmp_path is unique per test and reaped by pytest, so anything written under
+       it is cleaned up automatically — tests clean up after themselves.
+
+    2. **Leaky env → cleared.** Remove the backend / PG / CDW-sync vars listed in
+       ``_SANDBOX_CLEAR_ENV`` so a developer running the suite with a real
+       warehouse exported can't have that host bleed into assertions.
+    """
+    # 1. Roots → tmp (highest-precedence env vars).
+    monkeypatch.setenv("M3_ENGINE_ROOT", str(tmp_path / "engine"))
+    monkeypatch.setenv("M3_CONFIG_ROOT", str(tmp_path / "config"))
+    monkeypatch.setenv("M3_MEMORY_ROOT", str(tmp_path))
+    # Pinning M3_MEMORY_ROOT to tmp also blinds discovery of SHIPPED read-only
+    # payload that derives from <M3_MEMORY_ROOT>/config/ — notably the SLM profiles
+    # (bin/slm_intent._profile_search_dirs → <root>/config/slm). Those are part of
+    # the repo, not per-test state, so point M3_SLM_PROFILES_DIR at the real repo
+    # profiles dir; tests that manage their own profiles (test_slm_intent) set this
+    # var themselves and override us (monkeypatch runs after this autouse fixture).
+    _repo_slm = Path(__file__).resolve().parent.parent / "config" / "slm"
+    if _repo_slm.is_dir():
+        monkeypatch.setenv("M3_SLM_PROFILES_DIR", str(_repo_slm))
+    _mm = sys.modules.get("migrate_memory")
+    if _mm is not None:
+        if hasattr(_mm, "_M3_ENGINE_ROOT"):
+            monkeypatch.setattr(_mm, "_M3_ENGINE_ROOT", str(tmp_path / "engine"))
+        if hasattr(_mm, "CONFIG_PATH"):
+            monkeypatch.setattr(
+                _mm, "CONFIG_PATH", str(tmp_path / "config" / ".migrate_config.json"))
+
+    # 2. Leaky env → cleared.
+    for _var in _SANDBOX_CLEAR_ENV:
+        monkeypatch.delenv(_var, raising=False)
+    yield
 
 
 # Minimal memory_items schema sufficient for chatlog writes. Embeddings and
@@ -423,9 +612,13 @@ def _build_template_db() -> Path:
 
     env = _os.environ.copy()
     env["M3_DATABASE"] = str(template_db)
-    # The migrator's backup step writes to ~/.m3-memory/backups by default;
-    # redirect to tmp so we don't pollute the real backup directory.
-    env["M3_BACKUP_DIR"] = str(tmp_root / "backups")
+    # The migrator's backup step writes to get_m3_engine_root()/backups. It does
+    # NOT honor M3_BACKUP_DIR (prompt_backup_dir reads only the engine root + the
+    # saved config value), so the previous M3_BACKUP_DIR override here was a
+    # no-op and the template build leaked its backup to the real dir. Pin the
+    # ENGINE ROOT (the knob that IS honored) into tmp so the backup lands here.
+    env["M3_ENGINE_ROOT"] = str(tmp_root / "engine")
+    env["M3_MEMORY_ROOT"] = str(tmp_root)
 
     result = subprocess.run(
         [sys.executable, str(migrate_script), "up", "--yes", "--target", "main"],

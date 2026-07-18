@@ -36,6 +36,7 @@ from .dialect import (
     chatlog_table,
     chatlog_table_for,
 )
+
 # NOTE: this re-export binds the package attribute ``memory.backends.dialect`` to
 # the ACCESSOR FUNCTION, shadowing the same-named submodule as a PACKAGE ATTRIBUTE
 # only. The submodule stays fully reachable by its qualified name
