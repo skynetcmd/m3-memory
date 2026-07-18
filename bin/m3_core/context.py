@@ -205,12 +205,19 @@ class M3Context:
         except Exception:
             cpu_total = 0.0
 
-        # RAM Total Usage
+        # RAM usage. ram_total is the PERCENT used (kept for back-compat and for
+        # any percent-based consumer). ram_available_gb is ABSOLUTE free memory in
+        # GiB — the correct metric for gating background work, since headroom
+        # before the next allocation OOMs depends on absolute free bytes, not the
+        # percentage (90% of 32 GiB ≈ 3 GiB free is fine; 90% of 8 GiB ≈ 0.8 GiB
+        # is critical). The governor gates RAM on this, not on the percent.
         try:
             ram = psutil.virtual_memory()
             ram_total = ram.percent
+            ram_available_gb = ram.available / (1024 ** 3)
         except Exception:
             ram_total = 0.0
+            ram_available_gb = 0.0
 
         # GPU Total Usage — real probe via nvidia-smi (was hardcoded 0.0, which
         # left the governor blind to a GPU-pinned local LLM / embed server).
@@ -226,6 +233,7 @@ class M3Context:
         return {
             "cpu_total": cpu_total,
             "ram_total": ram_total,
+            "ram_available_gb": ram_available_gb,
             "gpu_total": gpu_total,
             "thermal": thermal
         }
