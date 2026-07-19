@@ -18,28 +18,28 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 ## 🚀 Quick Links & Badges
 
 <p align="center">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white">
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white">
-  <img alt="Linux" src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black">
+  <img alt="macOS" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/os-macos.svg">
+  <img alt="Windows" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/os-windows.svg">
+  <img alt="Linux" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/os-linux.svg">
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI downloads (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-downloads.json&style=flat-square&logo=pypi&logoColor=white"></a>
-  <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub unique clones (estimated total)" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-clones.json&style=flat-square&logo=github&logoColor=white"></a>
-  <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history — click to view" src="https://img.shields.io/badge/%E2%AD%90%20star%20history-181717?style=flat-square&logo=github&logoColor=white"></a>
+  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI downloads" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-downloads.svg"></a>
+  <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub stars" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-stars.svg"></a>
+  <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/star-history.svg"></a>
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://img.shields.io/pypi/v/m3-memory?style=flat-square&color=blue"></a>
-  <a href="https://www.python.org"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11+-blue?style=flat-square"></a>
-  <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square"></a>
-  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://img.shields.io/badge/MCP-100+_tools-orange?style=flat-square"></a>
+  <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-version.svg"></a>
+  <a href="https://www.python.org"><img alt="Python 3.11+" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/python.svg"></a>
+  <a href="https://github.com/skynetcmd/m3-memory/blob/main/LICENSE"><img alt="Apache 2.0" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/license.svg"></a>
+  <a href="https://modelcontextprotocol.io"><img alt="MCP" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/mcp.svg"></a>
 </p>
 
 <p align="center">
-  <a href="docs/integrations/LANGCHAIN.md"><img alt="LangChain" src="https://img.shields.io/badge/LangChain-1C3C3A?style=flat-square&logo=langchain&logoColor=white"></a>
-  <a href="docs/claude_code_plugin.md"><img alt="Claude" src="https://img.shields.io/badge/Claude-D97753?style=flat-square&logo=claude&logoColor=white"></a>
-  <a href="docs/antigravity_plugin.md"><img alt="Antigravity" src="https://img.shields.io/badge/Antigravity-4285F4?style=flat-square&logo=google&logoColor=white"></a>
+  <a href="docs/integrations/LANGCHAIN.md"><img alt="LangChain" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/langchain.svg"></a>
+  <a href="docs/claude_code_plugin.md"><img alt="Claude" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/claude.svg"></a>
+  <a href="docs/antigravity_plugin.md"><img alt="Antigravity" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/antigravity.svg"></a>
   <a href="docs/HERMES.md"><img alt="Hermes" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/hermes.svg"></a>
   <img alt="OpenClaw" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/openclaw.svg">
   <img alt="OpenCode" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/opencode.svg">
@@ -377,9 +377,9 @@ The agent executes `bin/chatlog_init.py` and configures execution triggers (see 
 
 ## 💬 Community
 
-[![Discord Badge](https://img.shields.io/badge/Discord-M3_Memory-5865F2?logo=discord&logoColor=white&style=flat-square)](https://discord.gg/ZcJ3EGC99B)
+[![Discord Badge](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/discord.svg)](https://discord.gg/ZcJ3EGC99B)
 &nbsp;
-[![GitHub Issues Badge](https://img.shields.io/badge/GitHub-Issues-181717?logo=github&style=flat-square)](https://github.com/skynetcmd/m3-memory/issues)
+[![GitHub Issues Badge](https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-issues.svg)](https://github.com/skynetcmd/m3-memory/issues)
 
 [How to Contribute](docs/CONTRIBUTING.md) · [Good First Issues](docs/GOOD_FIRST_ISSUES.md)
 
@@ -397,7 +397,7 @@ The provider badges under [`docs/badges/`](docs/badges/) embed small logo glyphs
 See [NOTICE](NOTICE) for the full third-party attribution list.
 
 <br>
-<p align="center"><sub>Download counts are estimates — PyPI total excludes mirror bots; GitHub is unique clones. Auto-refreshed by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
+<p align="center"><sub>PyPI downloads are the pepy.tech total. Badges are regenerated on a schedule by <a href="https://github.com/skynetcmd/m3-memory/blob/main/.github/workflows/star-history.yml">star-history.yml</a>.</sub></p>
 <p align="center"><sub><b>Python:</b> m3 core runs on 3.11+ (including 3.14). The optional framework extras follow their own caps — <b>PydanticAI</b> is 3.14-native (plain <code>pip install</code>); <b>CrewAI</b> requires 3.10–3.13 (a 3.14 escape hatch is <a href="https://github.com/skynetcmd/m3-memory/blob/main/m3_memory/integrations/crewai/README.md">documented</a>).</sub></p>
 </br><p></p>
 ---
