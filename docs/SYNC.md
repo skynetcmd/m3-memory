@@ -102,6 +102,12 @@ the newer one wins. This means:
 - Soft-deletes (rows with `is_deleted=1`) propagate cleanly. The deleted
   state replicates; the row stays in both DBs marked deleted.
 
+> **PostgreSQL primary?** If your primary store is PostgreSQL (not the default
+> SQLite) *and* you sync to a PostgreSQL warehouse, m3 can use a faster native
+> PostgreSQL-to-PostgreSQL path (`postgres_fdw`, set-based upserts) instead of
+> this row-by-row bridge. Same conflict rules; extra one-time setup. See
+> [SYNC_PG_TO_PG.md](SYNC_PG_TO_PG.md).
+
 ---
 
 ## What does NOT sync by default
