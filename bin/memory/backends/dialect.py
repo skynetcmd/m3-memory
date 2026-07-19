@@ -135,6 +135,15 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement now_minus_days()")
 
+    def now_minus_minutes(self, minutes_placeholder: str) -> str:
+        """A "current time minus N minutes" expression; ``minutes_placeholder``
+        binds an INTEGER number of minutes (positive). The minutes analog of
+        ``now_minus_days`` — used for short throughput windows (dashboard queue
+        stats). SQLite: ``datetime('now', '-' || ? || ' minutes')``; Postgres:
+        ``NOW() - (%s * INTERVAL '1 minute')``.
+        """
+        raise NotImplementedError("subclass must implement now_minus_minutes()")
+
     # -- generated ids -------------------------------------------------------
     def returning_id_clause(self) -> str:
         """Trailing INSERT clause to make the statement return its generated id.

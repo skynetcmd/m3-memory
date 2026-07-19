@@ -84,14 +84,73 @@ def install_unix_crontab(m3_memory_root):
         os.unlink(tmp_path)
 
 
-def _render_template(template_path: str, m3_memory_root: str, python_exe: str) -> str:
+def _render_template(template_path: str, m3_memory_root: str, python_exe: str,
+                     port: "int | None" = None) -> str:
     """Read a template file and substitute the [M3_MEMORY_ROOT] / [M3_PYTHON]
-    placeholders. Used for the launchd plist and systemd unit."""
+    (and optional [M3_DASHBOARD_PORT]) placeholders. Used for the launchd plist
+    and systemd unit templates."""
     with open(template_path, "r", encoding="utf-8") as f:
         content = f.read()
-    return (content
-            .replace("[M3_MEMORY_ROOT]", m3_memory_root)
-            .replace("[M3_PYTHON]", python_exe))
+    content = (content
+               .replace("[M3_MEMORY_ROOT]", m3_memory_root)
+               .replace("[M3_PYTHON]", python_exe))
+    if port is not None:
+        content = content.replace("[M3_DASHBOARD_PORT]", str(port))
+    return content
+
+
+def install_unix_dashboard(m3_memory_root, port: int = 8088):
+    """Install the web dashboard as a native user service (launchd on macOS,
+    systemd --user on Linux) so it auto-starts at login on the given ``port``.
+
+    Mirrors install_unix_cognitive_loop: the server runs in the FOREGROUND
+    (``--foreground``) under the service manager's supervision (its own
+    _already_serving pre-flight makes a redundant launch a quiet no-op, so this
+    is safe to re-run). Cross-platform (Windows uses the ONSTART schtasks path
+    instead — see install_windows_tasks)."""
+    os_name = _os_name()
+    python_exe = _venv_python(m3_memory_root)
+    bin_dir = os.path.join(m3_memory_root, "bin")
+    os.makedirs(os.path.join(m3_memory_root, "logs"), exist_ok=True)
+
+    if os_name == "Darwin":
+        template = os.path.join(bin_dir, "com.m3memory.dashboard.plist")
+        if not os.path.exists(template):
+            _safe_print(f"{FAIL} Missing template: {template}")
+            return
+        dest_dir = os.path.expanduser("~/Library/LaunchAgents")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, "com.m3memory.dashboard.plist")
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(_render_template(template, m3_memory_root, python_exe, port))
+        subprocess.run(["launchctl", "unload", dest], capture_output=True)
+        r = subprocess.run(["launchctl", "load", dest], capture_output=True, text=True)
+        if r.returncode == 0:
+            _safe_print(f"{OK} Installed + loaded launchd agent (dashboard :{port}): {dest}")
+        else:
+            _safe_print(f"{FAIL} launchctl load failed: {r.stderr.strip()}")
+
+    elif os_name == "Linux":
+        template = os.path.join(bin_dir, "m3-dashboard.service")
+        if not os.path.exists(template):
+            _safe_print(f"{FAIL} Missing template: {template}")
+            return
+        dest_dir = os.path.expanduser("~/.config/systemd/user")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, "m3-dashboard.service")
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(_render_template(template, m3_memory_root, python_exe, port))
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        r = subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "m3-dashboard.service"],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            _safe_print(f"{OK} Installed + started systemd --user unit (dashboard :{port}): {dest}")
+        else:
+            _safe_print(f"{FAIL} systemctl enable --now failed: {r.stderr.strip()}")
+    else:
+        _safe_print(f"{WARN} install_unix_dashboard: unsupported OS {os_name}")
 
 
 def install_unix_cognitive_loop(m3_memory_root):
@@ -204,8 +263,11 @@ def _venv_python(m3_memory_root: str, windowless: bool = False) -> str:
         return candidate if os.path.exists(candidate) else sys.executable
 
 
-def get_schedule_specs(m3_memory_root):
+def get_schedule_specs(m3_memory_root, dashboard_port: int = 8088):
     """Return list of schedule specifications (normalized for Windows & Unix).
+
+    ``dashboard_port`` sets the port in the AgentOS_Dashboard task's args
+    (default 8088). Only the dashboard spec uses it.
 
     Each spec carries an ``args`` list — the python script path plus its CLI
     flags, including ``--log-file``. The Windows task action is ``python.exe``
@@ -343,7 +405,7 @@ def get_schedule_specs(m3_memory_root):
             # Optional feature — this task is only registered when the user opts
             # into the dashboard (setup wizard / `install_schedules --add dashboard`).
             "args": [_script("dashboard_server.py"),
-                     "--foreground", "--port", "8088",
+                     "--foreground", "--port", str(dashboard_port),
                      "--log-file", _log("dashboard.log")],
             "schedule": "ONSTART",
             "modifier": "",
@@ -577,7 +639,7 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
     )
 
 
-def install_windows_tasks(m3_memory_root, selector: str | None = None):
+def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard_port: int = 8088):
     # pythonw.exe (GUI subsystem) — Task Scheduler draws NO console window for
     # it. python.exe (console subsystem) flashes a window every fire even
     # without a cmd.exe wrapper. Entrypoints self-log via _task_runtime, so
@@ -589,7 +651,7 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None):
     log_dir = os.path.join(m3_memory_root, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
-    tasks = _filter_tasks(get_schedule_specs(m3_memory_root), selector)
+    tasks = _filter_tasks(get_schedule_specs(m3_memory_root, dashboard_port), selector)
     if not tasks:
         _safe_print(f"{FAIL} No schedule matches selector={selector!r}. Try --list to see all.")
         return
@@ -839,6 +901,8 @@ def main():
                        help="Verify the registered job(s) match the spec (Windows task / "
                             "macOS launchd / Linux systemd). NAME or 'all' (default). "
                             "Exit code is non-zero if verification fails.")
+    parser.add_argument("--port", type=int, default=8088,
+                        help="Port for the dashboard service (with --add dashboard). Default 8088.")
     args = parser.parse_args()
 
     if args.list:
@@ -878,19 +942,22 @@ def main():
 
     if args.add:
         if os_name == "Windows":
-            install_windows_tasks(m3_memory_root, selector)
+            install_windows_tasks(m3_memory_root, selector, dashboard_port=getattr(args, "port", 8088) or 8088)
         elif os_name in ("Darwin", "Linux"):
             if selector:
-                if selector.lower().replace("-", "").replace("_", "") in (
-                    "cognitiveloop", "agentoscognitiveloop"
-                ):
+                _sel = selector.lower().replace("-", "").replace("_", "")
+                if _sel in ("cognitiveloop", "agentoscognitiveloop"):
                     # The cognitive loop is a service, not a cron entry —
                     # support installing it on its own.
                     install_unix_cognitive_loop(m3_memory_root)
+                elif _sel in ("dashboard", "agentosdashboard"):
+                    # The dashboard is a launchd/systemd user service (like the
+                    # cognitive loop), not a cron entry — install it on its own.
+                    install_unix_dashboard(m3_memory_root, port=getattr(args, "port", 8088) or 8088)
                 else:
                     _safe_print(f"{WARN} Unix crontab installer currently rewrites all entries. "
                                 "Single-task add on Unix is not supported yet — use --add all or edit "
-                                "crontab directly. (cognitive-loop can be added on its own.)")
+                                "crontab directly. (cognitive-loop and dashboard can be added on their own.)")
             else:
                 install_unix_crontab(m3_memory_root)
                 # The cognitive loop runs as a launchd/systemd service, not a

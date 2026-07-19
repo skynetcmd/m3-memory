@@ -14,7 +14,6 @@ not a guess. Drain ETA = queue_len / recent_rate (assumes the recent rate holds
 """
 from __future__ import annotations
 
-import sqlite3
 from typing import Optional
 
 # Time windows (minutes) the dashboard reports throughput over.
@@ -45,10 +44,25 @@ _PIPELINES = (
         # Entity extraction: pull named entities out of memories. This is the
         # queue the Graph Explorer's "Queue Pending" card counts — surfaced here
         # so System Health and the Explorer agree on the same number.
+        # queue_where counts only GENUINELY-pending rows. Two exclusions:
+        #  1. Completed rows: the table KEEPS processed rows as status='done'
+        #     (not purged), so a plain COUNT(*) grows forever and falsely reads as
+        #     a growing backlog. Not-done rows (NULL/failed) are still eligible.
+        #  2. Orphaned rows: a row whose memory was DELETED (soft-delete, or the
+        #     row is gone) will NEVER be picked up — the extraction worker only
+        #     selects live memories (is_deleted=0). Such rows would otherwise
+        #     count as "pending" forever (they can't clear). The correlated EXISTS
+        #     keeps only rows pointing at a live memory. (This mirrors the worker's
+        #     own eligibility filter, so the count matches reality.)
         "key": "entities",
         "label": "Entity extraction",
         "queue_table": "entity_extraction_queue",
         "queue_ts": "enqueued_at",
+        "queue_where": (
+            "COALESCE(status,'') != 'done' AND EXISTS ("
+            "SELECT 1 FROM memory_items mi WHERE mi.id = entity_extraction_queue.memory_id "
+            "AND COALESCE(mi.is_deleted,0) = 0)"
+        ),
         "produced_table": "entities",
         "produced_ts": "created_at",
         "produced_where": "",
@@ -71,6 +85,9 @@ _ALLOWED_TS_COLS: frozenset[str] = frozenset(
 _ALLOWED_WHERE: frozenset[str] = frozenset(
     p["produced_where"] for p in _PIPELINES if p["produced_where"]
 )
+_ALLOWED_QUEUE_WHERE: frozenset[str] = frozenset(
+    p["queue_where"] for p in _PIPELINES if p.get("queue_where")
+)
 
 
 def _safe_ident(value: str, allowed: frozenset[str], kind: str) -> str:
@@ -81,33 +98,114 @@ def _safe_ident(value: str, allowed: frozenset[str], kind: str) -> str:
     return value
 
 
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (name,)
-    ).fetchone() is not None
+def _dialect():
+    """The active backend's SQL dialect (placeholder/table_exists/time math).
+    Backend-agnostic: SQLite, PostgreSQL, and any future SQL backend."""
+    from memory.backends import dialect
+    return dialect()
 
 
-def _count(conn: sqlite3.Connection, table: str) -> int:
+def _ph(n: int = 1) -> str:
+    """`n` positional placeholders in the active backend's style (?, or %s)."""
+    return _dialect().placeholder(n)
+
+
+def _table_exists(conn, name: str) -> bool:
+    """Backend-agnostic table-existence probe (dialect().table_exists → sqlite_master
+    / to_regclass / information_schema per backend)."""
+    try:
+        sql, params = _dialect().table_exists(name)
+        return conn.execute(sql, params).fetchone() is not None
+    except Exception:  # noqa: BLE001 — treat a probe failure as "absent"
+        return False
+
+
+def _entity_backlog_count(conn) -> int:
+    """The REAL entity-extraction backlog: memories that still need entities.
+
+    Entity extraction is NOT queue-driven — the worker scans memory_items
+    directly for LIVE memories of an extractable type that lack a
+    memory_item_entities row and aren't marked done in entity_extraction_queue.
+    Counting entity_extraction_queue rows measures nothing — it's a DONE-MARKER
+    LOG, not a work queue, so it reads ~0 while a big backlog grinds. Mirrors the
+    worker's eligibility (bin/m3_entities). Backend-agnostic (dialect placeholders);
+    best-effort → 0 if tables/columns are absent.
+    """
+    # Extractable types + always-skip, kept in sync with bin/m3_entities.
+    DEFAULT_TYPES = (
+        "message", "conversation", "chat_log", "note", "decision", "knowledge",
+        "reference", "fact", "plan", "document", "observation", "project",
+        "config", "infrastructure", "network_config", "local_device",
+        "home_automation", "log", "preference",
+    )
+    SKIP = ("auto", "scratchpad", "summary")
+    try:
+        if not (_table_exists(conn, "memory_items") and _table_exists(conn, "memory_item_entities")):
+            return 0
+        has_queue = _table_exists(conn, "entity_extraction_queue")
+        type_ph = _ph(len(DEFAULT_TYPES))
+        skip_ph = _ph(len(SKIP))
+        done_clause = (
+            " AND mi.id NOT IN (SELECT memory_id FROM entity_extraction_queue WHERE status='done')"
+            if has_queue else ""
+        )
+        sql = (
+            "SELECT COUNT(*) FROM memory_items mi "
+            "WHERE COALESCE(mi.is_deleted,0)=0 "
+            f"AND mi.type IN ({type_ph}) AND mi.type NOT IN ({skip_ph}) "
+            "AND mi.id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)"
+            + done_clause
+        )
+        return conn.execute(sql, (*DEFAULT_TYPES, *SKIP)).fetchone()[0]
+    except Exception:  # noqa: BLE001 — best-effort
+        return 0
+
+
+def _count(conn, table: str, where: str = "") -> int:
+    """COUNT(*) of a queue table, optionally filtered by a validated WHERE
+    fragment (e.g. exclude status='done' rows that are kept but not pending)."""
     table = _safe_ident(table, _ALLOWED_TABLES, "table")
+    if where:
+        where = _safe_ident(where, _ALLOWED_QUEUE_WHERE, "queue-where")
+        return conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}").fetchone()[0]
     return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
 
 
-def _produced_in_window(
-    conn: sqlite3.Connection, table: str, ts_col: str, where: str, minutes: int
-) -> int:
-    """Rows produced in the last `minutes`, using SQLite datetime math on the
-    ISO-8601 created_at. SQL does the filtering (no Python-side row scan).
-    `table`, `ts_col`, and `where` are validated against _PIPELINES-derived
+def _produced_in_window(conn, table: str, ts_col: str, where: str, minutes: int) -> int:
+    """Rows produced in the last `minutes`. Backend-agnostic time math via
+    dialect().now_minus_minutes (SQLite datetime vs PG NOW()-interval). SQL does
+    the filtering. `table`/`ts_col`/`where` are validated against _PIPELINES
     allowlists — no unvalidated identifier reaches the query string."""
     table = _safe_ident(table, _ALLOWED_TABLES, "table")
     ts_col = _safe_ident(ts_col, _ALLOWED_TS_COLS, "timestamp column")
-    clause = f"{ts_col} > datetime('now', ?)"
+    _d = _dialect()
+    clause = f"{ts_col} > {_d.now_minus_minutes(_d.placeholder())}"
     if where:
-        # `where` fragments come only from _PIPELINES' produced_where constants
-        # (fixed literals like "type = 'fact_enriched'"); validated below.
         clause += f" AND {_safe_ident(where, _ALLOWED_WHERE, 'where-clause')}"
     sql = f"SELECT COUNT(*) FROM {table} WHERE {clause}"
-    return conn.execute(sql, (f"-{int(minutes)} minutes",)).fetchone()[0]
+    return conn.execute(sql, (int(minutes),)).fetchone()[0]
+
+
+def _entity_memories_processed(conn, minutes: int) -> int:
+    """DISTINCT memories that gained entities in the last `minutes` — the correct
+    throughput unit for the entity backlog (which is measured in MEMORIES).
+
+    The old rate counted rows in `entities` (many per memory → wildly inflated
+    rate → absurdly short ETA, e.g. '~54s' for thousands of items). This counts
+    distinct memory_ids processed, so rate and backlog share the same unit.
+    Backend-agnostic; best-effort → 0 if tables absent."""
+    try:
+        if not (_table_exists(conn, "memory_item_entities") and _table_exists(conn, "entities")):
+            return 0
+        _d = _dialect()
+        sql = (
+            "SELECT COUNT(DISTINCT me.memory_id) FROM memory_item_entities me "
+            "JOIN entities e ON e.id = me.entity_id "
+            f"WHERE e.created_at > {_d.now_minus_minutes(_d.placeholder())}"
+        )
+        return conn.execute(sql, (int(minutes),)).fetchone()[0]
+    except Exception:  # noqa: BLE001 — best-effort
+        return 0
 
 
 def _eta_seconds(queue_len: int, rate_per_min: float) -> Optional[float]:
@@ -132,20 +230,36 @@ def collect_pipeline_stats(db_path: str) -> dict:
           ...
         ],
       }
-    Missing tables degrade to zeros rather than raising (a fresh DB has no
-    queues yet). Read-only.
+    Backend-agnostic: reads through the active storage backend's seam
+    (SQLite/PostgreSQL/…), dialect placeholders, and dialect time math — NOT a
+    raw sqlite3 connection. Uses ``open_readonly(db_path)`` which HONORS the
+    specific ``db_path`` on file backends (SQLite) and ignores it on pooled
+    backends (PostgreSQL: one store, db_path is meaningless). Missing tables
+    degrade to zeros rather than raising. Read-only.
     """
     out: list[dict] = []
-    conn = sqlite3.connect(db_path, timeout=5)
     try:
-        conn.row_factory = sqlite3.Row
+        from memory.backends import active_backend
+        _cm = active_backend().open_readonly(db_path)
+    except Exception:  # noqa: BLE001 — seam unavailable → empty (never crash)
+        return {"pipelines": []}
+    with _cm as conn:
         for p in _PIPELINES:
-            if not _table_exists(conn, p["queue_table"]):
+            if p["key"] == "entities":
+                # Entity extraction is scan-driven, not queue-driven — count the
+                # REAL backlog (memories lacking entities), not the done-marker log.
+                queue_len = _entity_backlog_count(conn)
+            elif not _table_exists(conn, p["queue_table"]):
                 queue_len = 0
             else:
-                queue_len = _count(conn, p["queue_table"])
+                queue_len = _count(conn, p["queue_table"], p.get("queue_where", ""))
             rates: dict[int, float] = {}
-            if _table_exists(conn, p["produced_table"]):
+            if p["key"] == "entities":
+                # Entity throughput is measured in MEMORIES processed (not entity
+                # rows — many per memory), so rate and backlog share one unit.
+                for w in WINDOWS_MIN:
+                    rates[w] = _entity_memories_processed(conn, w) / w
+            elif _table_exists(conn, p["produced_table"]):
                 for w in WINDOWS_MIN:
                     produced = _produced_in_window(
                         conn, p["produced_table"], p["produced_ts"],
@@ -154,9 +268,10 @@ def collect_pipeline_stats(db_path: str) -> dict:
                     rates[w] = produced / w  # items per minute over the window
             else:
                 rates = {w: 0.0 for w in WINDOWS_MIN}
-            # Use the shortest window with signal for the freshest ETA, else the
-            # longest window (smoother) — prefer recent but fall back if idle now.
-            recent_rate = rates.get(1) or rates.get(10) or rates.get(30) or rates.get(60) or 0.0
+            # Prefer a STABLE window for the ETA: the 1-min window is jumpy (a
+            # burst reads as a huge rate → absurdly short ETA). Use the longest
+            # window with signal (smoother, honest), falling back to shorter ones.
+            recent_rate = rates.get(60) or rates.get(30) or rates.get(10) or rates.get(1) or 0.0
             eta = _eta_seconds(queue_len, recent_rate)
             out.append({
                 "key": p["key"],
@@ -166,8 +281,6 @@ def collect_pipeline_stats(db_path: str) -> dict:
                 "eta_seconds": eta,
                 "eta_human": _human_eta(eta),
             })
-    finally:
-        conn.close()
     return {"pipelines": out}
 
 

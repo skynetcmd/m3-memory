@@ -25,7 +25,7 @@ def _ns(**kw):
 def test_empty_values_are_minimal():
     # With NO values set (nothing observed), _build_flags emits only the base
     # flag — the mapping itself adds nothing speculative.
-    assert _build_flags({}) == ["--non-interactive"]
+    assert _build_flags({}) == ["--non-interactive", "--gui-child"]
 
 
 def test_gui_default_state_flags():
@@ -57,35 +57,53 @@ def test_gui_default_state_flags():
 
 
 def test_capture_both_is_omitted_but_others_emit():
-    assert _build_flags({"capture_mode": "both"}) == ["--non-interactive"]
+    assert _build_flags({"capture_mode": "both"}) == ["--non-interactive", "--gui-child"]
     assert _build_flags({"capture_mode": "stop"}) == [
-        "--non-interactive", "--capture-mode", "stop"]
+        "--non-interactive", "--gui-child", "--capture-mode", "stop"]
 
 
 def test_agents_subset_is_comma_joined():
     flags = _build_flags({"agent_claude": True, "agent_gemini": True,
                           "agent_opencode": False})
-    assert flags == ["--non-interactive", "--agents", "claude,gemini"]
+    assert flags == ["--non-interactive", "--gui-child", "--agents", "claude,gemini"]
 
 
 def test_fips_strict_excludes_mode_and_gates_wolfssl():
     # strict implies mode (the child enforces) — don't emit both; wolfssl rides.
     assert _build_flags({"fips_strict": True, "install_wolfssl": True}) == [
-        "--non-interactive", "--fips-strict", "--install-wolfssl"]
+        "--non-interactive", "--gui-child", "--fips-strict", "--install-wolfssl"]
     # wolfssl without any FIPS must NOT be emitted (meaningless there).
-    assert _build_flags({"install_wolfssl": True}) == ["--non-interactive"]
+    assert _build_flags({"install_wolfssl": True}) == ["--non-interactive", "--gui-child"]
 
 
 def test_decouple_roots_with_paths():
     flags = _build_flags({"decouple_roots": True,
                           "config_root": "D:/cfg", "engine_root": "D:/eng"})
-    assert flags == ["--non-interactive", "--decouple-roots",
+    assert flags == ["--non-interactive", "--gui-child", "--decouple-roots",
                      "--config-root", "D:/cfg", "--engine-root", "D:/eng"]
 
 
 def test_endpoint_is_stripped():
     assert _build_flags({"endpoint": "  http://x:1234  "}) == [
-        "--non-interactive", "--endpoint", "http://x:1234"]
+        "--non-interactive", "--gui-child", "--endpoint", "http://x:1234"]
+
+
+def test_dashboard_default_on_emits_no_flag():
+    # Dashboard defaults ON (matches the wizard); when left on with the default
+    # port, _build_flags emits neither --no-dashboard nor --dashboard-port.
+    assert _build_flags({"install_dashboard": True}) == ["--non-interactive", "--gui-child"]
+    assert _build_flags({"install_dashboard": True, "dashboard_port": "8088"}) == [
+        "--non-interactive", "--gui-child"]
+
+
+def test_dashboard_unchecked_emits_no_dashboard():
+    assert _build_flags({"install_dashboard": False}) == [
+        "--non-interactive", "--gui-child", "--no-dashboard"]
+
+
+def test_dashboard_custom_port_emits_flag():
+    assert _build_flags({"install_dashboard": True, "dashboard_port": "9090"}) == [
+        "--non-interactive", "--gui-child", "--dashboard-port", "9090"]
 
 
 def test_selector_never_loops_in_non_interactive():

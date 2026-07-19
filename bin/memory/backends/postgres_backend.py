@@ -356,6 +356,10 @@ class PostgresDialect(Dialect):
         # %s binds an int number of days; multiply a 1-day interval.
         return f"NOW() - ({days_placeholder} * INTERVAL '1 day')"
 
+    def now_minus_minutes(self, minutes_placeholder: str) -> str:
+        # %s binds an int number of minutes; multiply a 1-minute interval.
+        return f"NOW() - ({minutes_placeholder} * INTERVAL '1 minute')"
+
     def empty_json_default(self) -> "str | None":
         return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj
 

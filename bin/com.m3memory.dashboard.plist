@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  m3-memory Web Dashboard — macOS launchd agent template.
+
+  Installed by bin/install_schedules.py (install_unix_dashboard), which
+  substitutes [M3_MEMORY_ROOT], [M3_PYTHON], and [M3_DASHBOARD_PORT] and writes
+  the result to ~/Library/LaunchAgents/com.m3memory.dashboard.plist.
+
+  NOTE: ProgramArguments runs the server with --foreground so launchd manages
+  the real process directly (the detached/pythonw path is Windows-only). The
+  server binds 127.0.0.1 only (loopback) and self-registers in the m3 PID
+  registry.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.m3memory.dashboard</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>[M3_PYTHON]</string>
+        <string>[M3_MEMORY_ROOT]/bin/dashboard_server.py</string>
+        <string>--foreground</string>
+        <string>--port</string>
+        <string>[M3_DASHBOARD_PORT]</string>
+        <string>--log-file</string>
+        <string>[M3_MEMORY_ROOT]/logs/dashboard.log</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/dashboard.log</string>
+    <key>StandardErrorPath</key>
+    <string>[M3_MEMORY_ROOT]/logs/dashboard.log</string>
+</dict>
+</plist>

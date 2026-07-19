@@ -221,6 +221,12 @@ def _reinforce_confidence(db):
 
     reaggregated = 0
     decayed = 0
+    # Bind BEFORE the try: if the ledger query below fails with a missing-schema
+    # error, the except swallows it (pre-036 DB has no ledger) and execution falls
+    # through to the decay block, which reads active_ids — so it must always be
+    # defined, or that path raises UnboundLocalError (observed in the cognitive
+    # loop's maintenance pass).
+    active_ids: set = set()
     try:
         # (1) Re-aggregate the memories with ledger activity.
         active = db.execute(
@@ -435,7 +441,7 @@ def _enforce_retention_policies(db):
     return purged
 
 def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddings=True,
-                            reinforce=True):
+                            reinforce=True, prune_orphan_queues=True):
     import time
 
     from m3_sdk import _LAST_USER_INTERACTION
@@ -494,6 +500,27 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         if prune_orphan_embeddings:
             res = db.execute("DELETE FROM memory_embeddings WHERE memory_id NOT IN (SELECT id FROM memory_items)")
             report.append(f"Pruned {res.rowcount} orphans")
+        if prune_orphan_queues:
+            # Reap entity_extraction_queue rows whose target memory is GONE or
+            # SOFT-DELETED. The extraction worker only processes LIVE memories
+            # (is_deleted=0), so a row pointing at a deleted memory can NEVER be
+            # processed — it lingers forever, inflating the "pending" count. A row
+            # is orphaned if its memory_id has no LIVE row in memory_items.
+            #
+            # Scoped to entity_extraction_queue only: it is the memory-keyed queue.
+            # observation_queue / reflector_queue are CONVERSATION-keyed (no
+            # memory_id column) — a different shape, out of scope here. Best-effort:
+            # a missing table/column on an older schema is skipped, never fatal.
+            try:
+                res = db.execute(
+                    "DELETE FROM entity_extraction_queue WHERE memory_id NOT IN "
+                    "(SELECT id FROM memory_items WHERE COALESCE(is_deleted,0)=0)"
+                )
+                if res.rowcount:
+                    report.append(f"Reaped {res.rowcount} orphaned entity-queue row(s)")
+            except Exception as e:  # noqa: BLE001 — missing table/column on old schema
+                if not _is_missing_schema(e):
+                    raise
 
         # Auto-archive low-importance memories older than 30 days
         archivable = db.execute(

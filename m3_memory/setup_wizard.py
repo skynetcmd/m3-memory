@@ -233,6 +233,8 @@ class SetupPlan:
     # gated by --no-dashboard / --dashboard for headless runs. Backend-agnostic
     # (works on SQLite/PostgreSQL/…); loopback-only, no auth.
     install_dashboard: bool = True
+    # Port the dashboard binds / its boot service registers (default 8088).
+    dashboard_port: int = 8088
 
 
 # ── prompt phase ──────────────────────────────────────────────────────────────
@@ -297,6 +299,8 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
             plan.install_dashboard = False
         elif bool(getattr(args, "dashboard", False)):
             plan.install_dashboard = True
+        if getattr(args, "dashboard_port", None):
+            plan.dashboard_port = int(args.dashboard_port)
         return plan
 
     # ── interactive prompts ───────────────────────────────────────────────────
@@ -501,6 +505,23 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     plan.install_dashboard = _ask_yes_no(
         "  Install the web dashboard (auto-start on boot)?", default=True,
     )
+    if plan.install_dashboard:
+        # Guard the raw input(): a non-readable stdin (piped/headless run, or a
+        # test with captured stdin) must degrade to the default port, not crash
+        # or hang. EOFError/OSError → keep the default.
+        try:
+            ans = input(f"    Dashboard port [{plan.dashboard_port}]: ").strip()
+        except (EOFError, OSError):
+            ans = ""
+        if ans:
+            try:
+                p = int(ans)
+                if 1 <= p <= 65535:
+                    plan.dashboard_port = p
+                else:
+                    print(f"    (port out of range; keeping {plan.dashboard_port})")
+            except ValueError:
+                print(f"    (not a number; keeping {plan.dashboard_port})")
 
     return plan
 
@@ -1774,7 +1795,7 @@ def _step_install_dashboard(plan: "SetupPlan") -> bool:
         return True
 
     if have:
-        _register_dashboard_task()
+        _register_dashboard_task(plan.dashboard_port)
         return True
 
     print("  Installing web dashboard deps (fastapi + uvicorn)...")
@@ -1788,7 +1809,7 @@ def _step_install_dashboard(plan: "SetupPlan") -> bool:
         )
         if proc.returncode == 0:
             print("    [OK] web dashboard installed.")
-            _register_dashboard_task()
+            _register_dashboard_task(plan.dashboard_port)
             return True
         # Degrade to a clear manual hint; never fail setup on an optional extra.
         if proc.stderr:
@@ -1803,8 +1824,9 @@ def _step_install_dashboard(plan: "SetupPlan") -> bool:
     return True
 
 
-def _register_dashboard_task() -> None:
-    """Register the boot-start dashboard task (windowless, survives reboot).
+def _register_dashboard_task(port: int = 8088) -> None:
+    """Register the boot-start dashboard task on ``port`` (windowless; 3-OS:
+    schtasks on Windows, launchd/systemd on macOS/Linux via install_schedules).
 
     Best-effort: a task-registration failure never aborts setup — the dashboard
     still runs on demand via `m3 dashboard`. On Windows an ONSTART task may need
@@ -1813,22 +1835,22 @@ def _register_dashboard_task() -> None:
     script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
     if not os.path.exists(script):
         print("    [!] boot task not registered (install_schedules.py not found);")
-        print('        add it later with `python bin/install_schedules.py --add dashboard`.')
+        print(f'        add it later with `python bin/install_schedules.py --add dashboard --port {port}`.')
         return
-    print("    Registering the dashboard to auto-start on boot (windowless)...")
+    print(f"    Registering the dashboard to auto-start on boot (windowless, :{port})...")
     try:
         proc = subprocess.run(
-            [sys.executable, script, "--add", "dashboard"],
+            [sys.executable, script, "--add", "dashboard", "--port", str(port)],
             check=False, capture_output=True, text=True,
         )
         if proc.stdout:
             print(proc.stdout, end="")
         if proc.returncode == 0:
-            print("    [OK] dashboard will start on boot → http://127.0.0.1:8088")
+            print(f"    [OK] dashboard will start on boot → http://127.0.0.1:{port}")
             print("         (running now: `m3 dashboard`; stop: `m3 dashboard --stop`)")
         else:
             print("    [!] boot task not registered (see above). The dashboard still")
-            print('        runs on demand: `m3 dashboard`. Retry: `python bin/install_schedules.py --add dashboard`')
+            print(f'        runs on demand: `m3 dashboard`. Retry: `python bin/install_schedules.py --add dashboard --port {port}`')
     except Exception as e:  # noqa: BLE001 — never fail setup on the task step
         print(f"    [!] could not register the boot task ({e}); the dashboard still")
         print("        runs on demand via `m3 dashboard`.")
@@ -2209,5 +2231,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--no-dashboard", action="store_true",
         help="Do NOT install the web dashboard deps. By default the wizard offers "
              "the dashboard (fastapi + uvicorn) with a yes default.",
+    )
+    parser.add_argument(
+        "--dashboard-port", type=int, default=None, metavar="PORT",
+        help="Port for the web dashboard + its boot service (default 8088).",
     )
     parser.set_defaults(func=run_setup)

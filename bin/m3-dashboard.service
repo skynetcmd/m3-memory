@@ -1,0 +1,29 @@
+# m3-memory Web Dashboard — Linux systemd --user unit template.
+#
+# Installed by bin/install_schedules.py (install_unix_dashboard), which
+# substitutes [M3_MEMORY_ROOT], [M3_PYTHON], and [M3_DASHBOARD_PORT] and writes
+# the result to ~/.config/systemd/user/m3-dashboard.service, then runs
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now m3-dashboard.service
+#
+# NOTE: ExecStart runs the server with --foreground so systemd supervises the
+# real process directly (Type=simple); the detached/pythonw path is Windows-only.
+# The server binds 127.0.0.1 only (loopback) and self-registers in the m3 PID
+# registry.
+#
+# Headless / server boxes where the user is not always logged in may want
+#   loginctl enable-linger <user>
+# so the dashboard runs without an active login session.
+
+[Unit]
+Description=m3-memory Web Dashboard (local control panel)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/dashboard_server.py --foreground --port [M3_DASHBOARD_PORT] --log-file [M3_MEMORY_ROOT]/logs/dashboard.log
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

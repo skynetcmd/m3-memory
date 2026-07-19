@@ -154,13 +154,23 @@ def section_decisions(pdf, summary):
     from memory.backends import dialect
     _d = dialect()
     with _db() as conn:
-        total_all = conn.execute("SELECT COUNT(*) FROM project_decisions").fetchone()[0]
-        rows = conn.execute(
-            "SELECT timestamp, project, decision, rationale FROM project_decisions "
-            f"WHERE timestamp > {_d.now_minus_days(_d.param())} "
-            "ORDER BY timestamp DESC",
-            (7,),
-        ).fetchall()
+        # project_decisions is a legacy/optional table (001_initial_schema, but a
+        # store that hasn't run that migration — or a fresh/alternate backend —
+        # won't have it). Guard with the backend-agnostic table_exists probe so a
+        # missing table degrades to "0 decisions" instead of erroring the WHOLE
+        # audit pass (observed: cognitive-loop audit crashed on "no such table:
+        # project_decisions"). Report-and-continue, never crash the report.
+        _te_sql, _te_params = _d.table_exists("project_decisions")
+        if conn.execute(_te_sql, _te_params).fetchone() is None:
+            total_all, rows = 0, []
+        else:
+            total_all = conn.execute("SELECT COUNT(*) FROM project_decisions").fetchone()[0]
+            rows = conn.execute(
+                "SELECT timestamp, project, decision, rationale FROM project_decisions "
+                f"WHERE timestamp > {_d.now_minus_days(_d.param())} "
+                "ORDER BY timestamp DESC",
+                (7,),
+            ).fetchall()
 
     pdf.mc(6, sanitize(
         f"Total decisions (all time): {total_all}  |  This week: {len(rows)}", 500
@@ -197,12 +207,18 @@ def section_activity(pdf, summary):
     from memory.backends import dialect
     _d = dialect()
     with _db() as conn:
-        rows = conn.execute(
-            "SELECT timestamp, query, response FROM activity_logs "
-            f"WHERE timestamp > {_d.now_minus_days(_d.param())} "
-            "ORDER BY timestamp DESC LIMIT 50",
-            (7,),
-        ).fetchall()
+        # activity_logs is legacy/optional (same guard as project_decisions
+        # above) — a store without it must degrade to "no entries", not crash.
+        _te_sql, _te_params = _d.table_exists("activity_logs")
+        if conn.execute(_te_sql, _te_params).fetchone() is None:
+            rows = []
+        else:
+            rows = conn.execute(
+                "SELECT timestamp, query, response FROM activity_logs "
+                f"WHERE timestamp > {_d.now_minus_days(_d.param())} "
+                "ORDER BY timestamp DESC LIMIT 50",
+                (7,),
+            ).fetchall()
 
     if not rows:
         pdf.mc(6, "No activity log entries this week.")
@@ -348,7 +364,10 @@ def write_summary_to_memory(summary_text, week_label):
     from memory_bridge import memory_write
 
     result = asyncio.run(memory_write(
-        type="document",
+        # 'document' is NOT a valid memory type (the write rejected it, so the
+        # audit summary was silently never stored). 'summary' is the correct
+        # type for an audit report — matches the title and the valid-types set.
+        type="summary",
         title=f"Weekly Audit Summary -- {week_label}",
         content=summary_text,
         metadata=f'{{"source_type": "weekly_audit", "week": "{week_label}"}}',

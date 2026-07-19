@@ -542,6 +542,76 @@ def _prompt_cognitive_loop(interactive: bool, cognitive_loop_flag: bool) -> bool
     return cognitive_loop_flag
 
 
+def _dashboard_deps_present() -> bool:
+    """True if the [dashboard] extra's deps (fastapi + uvicorn) are importable."""
+    for mod in ("fastapi", "uvicorn"):
+        try:
+            __import__(mod)
+        except ModuleNotFoundError:
+            return False
+    return True
+
+
+def _prompt_and_install_dashboard(interactive: bool) -> None:
+    """Offer the web dashboard at install/UPGRADE time (default yes).
+
+    Closes the gap where existing users running ``m3 update`` / ``install-m3``
+    were never offered the dashboard (only the first-time ``m3 setup`` wizard
+    asked). Skips silently if the deps are already installed (nothing to do) or
+    on a non-interactive run. Best-effort: a failed pip/task step never aborts
+    the install — the dashboard is optional.
+    """
+    if not interactive or _dashboard_deps_present():
+        # Already installed, or headless: don't prompt. (A headless upgrade keeps
+        # whatever the user already has; they can add it with `m3 setup` later.)
+        if _dashboard_deps_present():
+            _register_dashboard_task()  # keep the boot task fresh on upgrade
+        return
+
+    print()
+    print("  Web dashboard (optional): a local control panel — browse memory,")
+    print("  explore the knowledge graph, watch system health. Runs on")
+    print("  http://127.0.0.1:8088 as a windowless background service, auto-starting")
+    print("  on boot. Loopback-only (not authenticated). Installs fastapi + uvicorn.")
+    try:
+        ans = input("  Install the web dashboard (auto-start on boot)? [Y/n] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if ans in ("n", "no"):
+        print('  Skipped. Add it later with:  pip install "m3-memory[dashboard]"')
+        return
+
+    print("  Installing web dashboard deps (fastapi + uvicorn)...")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "m3-memory[dashboard]"],
+            check=False, capture_output=True, text=True,
+        )
+        if proc.returncode == 0:
+            print("    [OK] web dashboard installed.")
+            _register_dashboard_task()
+        else:
+            if proc.stderr:
+                for line in proc.stderr.strip().splitlines()[-3:]:
+                    print(f"      {line}")
+            print('    [!] could not install automatically. Finish with:  pip install "m3-memory[dashboard]"')
+    except Exception as e:  # noqa: BLE001 — optional step, never abort install
+        print(f'    [!] dashboard install skipped ({e}); add later:  pip install "m3-memory[dashboard]"')
+
+
+def _register_dashboard_task() -> None:
+    """Register the boot-start dashboard task (windowless). Best-effort."""
+    try:
+        script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
+        if not os.path.exists(script):
+            return
+        subprocess.run([sys.executable, script, "--add", "dashboard"],
+                       check=False, capture_output=True, text=True)
+    except Exception:  # noqa: BLE001 — never fail install on the task step
+        pass
+
+
 def _mask_dsn(dsn: str) -> str:
     """Redact the password in a PostgreSQL DSN for safe logging.
 
@@ -1258,6 +1328,9 @@ def install_m3(
     cognitive_loop_choice = _prompt_cognitive_loop(interactive, cognitive_loop)
     del cognitive_loop_choice  # placeholder: wired downstream once the cognitive-loop install path lands
     db_backend_choice = _prompt_db_backend(interactive, db_backend)  # None=sqlite, or ("postgres", dsn)
+    # Offer the web dashboard at install/upgrade time (default yes) — so existing
+    # users who run `m3 update` are offered it too, not just first-time `m3 setup`.
+    _prompt_and_install_dashboard(interactive)
 
     # Preserve user data across --force / update. The repo tree under
     # repo_path/memory/ holds chatlog DBs, the chatlog config, and the

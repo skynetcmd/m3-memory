@@ -953,8 +953,15 @@ async def get_stats(request: Request):
             if table_exists(conn, "entity_relationships"):
                 total_rels = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0]
 
-            if table_exists(conn, "entity_extraction_queue"):
-                queue_len = conn.execute("SELECT COUNT(*) FROM entity_extraction_queue").fetchone()[0]
+            # Entity-extraction backlog = memories still needing entities (the
+            # worker is SCAN-driven, not queue-driven; the entity_extraction_queue
+            # table is a done-marker log, not a work queue). Use the shared
+            # queue_stats helper so this card and System Health agree.
+            try:
+                from dashboard.queue_stats import _entity_backlog_count
+                queue_len = _entity_backlog_count(conn)
+            except Exception:  # noqa: BLE001
+                queue_len = 0
     except Exception as e:
         print(f"Failed to query Main DB stats: {e}", flush=True)
 

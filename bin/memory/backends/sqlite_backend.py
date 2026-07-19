@@ -46,6 +46,9 @@ class SqliteDialect(Dialect):
         # `?` binds an int; build the '-N days' modifier string in SQL.
         return f"datetime('now', '-' || {days_placeholder} || ' days')"
 
+    def now_minus_minutes(self, minutes_placeholder: str) -> str:
+        return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
+
     def empty_json_default(self) -> "str | None":
         return ""  # metadata_json is TEXT on SQLite; '' is fine (historical value)
 

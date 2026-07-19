@@ -1121,14 +1121,16 @@ def main():
                         help="Append logging to this file (scheduled-task / service mode). "
                              "Survives the Windows pythonw re-exec.")
     parser.add_argument("--concurrency", type=int, default=2, help="SLM concurrency (default: 2)")
-    parser.add_argument("--limit-per-pass", type=int, default=2,
+    parser.add_argument("--limit-per-pass", type=int,
+                        default=max(1, int(os.environ.get("M3_LIMIT_PER_PASS", "4"))),
                         help="Max groups/rows per heavy-LLM pass (entity extraction, "
-                             "enrichment, observation drain). Default 2: small enough that "
-                             "one pass is a few-second GPU burst (the governor is only "
-                             "re-checked BETWEEN passes, not within a batch — a 50-item pass "
-                             "once pinned the GPU for ~17 min), large enough that an idle "
-                             "host drains the backlog at a useful rate instead of one item "
-                             "per cycle. Under THROTTLED load this is shrunk to "
+                             "enrichment, observation drain). Default 4 (override with the "
+                             "M3_LIMIT_PER_PASS env var — e.g. set it higher to drain a large "
+                             "catch-up backlog faster on an idle box, WITHOUT editing the flag "
+                             "in a scheduled task). Small enough that one pass is a few-second "
+                             "GPU burst (the governor is only re-checked BETWEEN passes, not "
+                             "within a batch — a 50-item pass once pinned the GPU for ~17 min, "
+                             "so 4 stays ~10x under that). Under THROTTLED load this is shrunk to "
                              "M3_GOVERNOR_THROTTLED_LIMIT (default 1); when idle the loop "
                              "also re-ticks immediately if a backlog remains (see the "
                              "backlog-aware wait below) rather than sleeping the full "

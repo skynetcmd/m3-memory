@@ -129,6 +129,16 @@ def _build_flags(values: dict) -> list[str]:
     if values.get("no_governor_migration"):
         flags.append("--no-governor-migration")
 
+    # Web dashboard: default ON (matches the wizard). Emit --no-dashboard only
+    # when the user unchecked it; the child install step handles the pip extra +
+    # boot-task registration (windowless, per-OS) — see setup_wizard.
+    if not values.get("install_dashboard", True):
+        flags.append("--no-dashboard")
+    else:
+        dp = (values.get("dashboard_port") or "").strip()
+        if dp and dp != "8088":
+            flags += ["--dashboard-port", dp]
+
     if values.get("clean_cache"):
         flags.append("--clean-cache")
     if values.get("force_kill_mcp"):
@@ -160,6 +170,10 @@ _TOOLTIPS = {
                                  "Rust + a C++ toolchain and takes several minutes.",
     "cognitive_loop": "Run a background worker that periodically consolidates and "
                       "enriches memory. Useful, but uses some CPU/LLM time when idle.",
+    "install_dashboard": "Install the local web dashboard (fastapi + uvicorn) and "
+                         "start it on boot as a windowless background service on "
+                         "http://127.0.0.1:8088 — browse memory, explore the knowledge "
+                         "graph, watch system health. Loopback-only (not authenticated).",
     "decouple_roots": "Store config and databases in separate roots "
                       "(~/.m3/config, ~/.m3/engine) instead of one combined dir. "
                       "Recommended: lets you secure/back-up the engine independently.",
@@ -403,6 +417,13 @@ def run_gui() -> int:
     state["cognitive_loop"] = tk.BooleanVar(value=True)  # default ON
     _check_with_info(misc_box, "Enable background cognitive loop",
                      "cognitive_loop", state["cognitive_loop"])
+    state["install_dashboard"] = tk.BooleanVar(value=True)  # default ON
+    _check_with_info(misc_box, "Install the web dashboard (auto-start on boot)",
+                     "install_dashboard", state["install_dashboard"])
+    dash_row = ttk.Frame(misc_box); dash_row.pack(fill="x", pady=2)
+    ttk.Label(dash_row, text="Dashboard port:", width=16).pack(side="left")
+    state["dashboard_port"] = tk.StringVar(value="8088")
+    ttk.Entry(dash_row, textvariable=state["dashboard_port"], width=8).pack(side="left")
     state["no_governor_migration"] = tk.BooleanVar(value=False)  # default: DO migrate
     _check_with_info(misc_box, "Do NOT migrate legacy scheduled tasks to the governor",
                      "no_governor_migration", state["no_governor_migration"])
