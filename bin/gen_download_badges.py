@@ -75,6 +75,42 @@ def _shields_endpoint(label: str, message: str, color: str) -> dict:
     }
 
 
+def _write_badge_svg(path: Path, label: str, message: str, color: str,
+                     logo: str | None) -> bool:
+    """Fetch the RENDERED badge SVG from shields.io and commit it under
+    docs/badges/. We self-host the SVG (not a live shields `endpoint?url=` link)
+    because GitHub's Camo image proxy intermittently fails to fetch shields,
+    showing a broken image; a committed SVG served from raw.githubusercontent is
+    Camo-reliable. Same pattern as the other committed badges. Returns True if the
+    file changed. On any fetch failure, leaves the existing SVG untouched (never
+    overwrite a good badge with an error page)."""
+    import urllib.parse
+    def _enc(s: str) -> str:
+        # shields path-encoding: '-' -> '--', ' ' -> '_', then URL-quote.
+        return urllib.parse.quote(s.replace("-", "--").replace(" ", "_"), safe="")
+    url = (f"https://img.shields.io/badge/{_enc(label)}-{_enc(message)}-{color}"
+           f"?style=flat-square")
+    if logo:
+        url += f"&logo={urllib.parse.quote(logo)}&logoColor=white"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
+            svg = resp.read()
+        if b"<svg" not in svg[:200]:
+            print(f"[svg] {path.name}: unexpected response, not overwriting",
+                  file=sys.stderr)
+            return False
+        old = path.read_bytes() if path.exists() else b""
+        if old != svg:
+            path.write_bytes(svg)
+            return True
+        return False
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        print(f"[svg] {path.name}: fetch failed ({type(e).__name__}) — keeping existing",
+              file=sys.stderr)
+        return False
+
+
 # ── PyPI ─────────────────────────────────────────────────────────────────────
 
 def pypi_total_without_mirrors(package: str) -> int:
@@ -168,8 +204,12 @@ def main() -> int:
         pypi_total = pypi_total_without_mirrors(args.package)
         if _write_json(
             badges / "pypi-downloads.json",
-            _shields_endpoint("pypi downloads", f"{_fmt(pypi_total)}", "blue"),
+            _shields_endpoint("PyPI downloads", f"{_fmt(pypi_total)}", "blue"),
         ):
+            changed = True
+        # Self-hosted SVG (Camo-reliable) — the README points at this, not the JSON.
+        if _write_badge_svg(badges / "pypi-downloads.svg", "PyPI downloads",
+                            _fmt(pypi_total), "blue", logo="pypi"):
             changed = True
         print(f"[pypi] total (without mirrors): {pypi_total:,} -> {_fmt(pypi_total)}")
     except (urllib.error.URLError, urllib.error.HTTPError, ValueError, KeyError) as e:
@@ -187,8 +227,12 @@ def main() -> int:
             total = accumulate_clone_total(badges / "clone-history.json", days)
             if _write_json(
                 badges / "github-clones.json",
-                _shields_endpoint("github clones", f"{_fmt(total)}", "24292e"),
+                _shields_endpoint("GitHub clones", f"{_fmt(total)}", "24292e"),
             ):
+                changed = True
+            # Self-hosted SVG with the GitHub icon (Camo-reliable).
+            if _write_badge_svg(badges / "github-clones.svg", "GitHub clones",
+                                _fmt(total), "24292e", logo="github"):
                 changed = True
             print(f"[github] running unique-clone total: {total:,} -> {_fmt(total)}")
         except (urllib.error.URLError, urllib.error.HTTPError, ValueError, KeyError) as e:

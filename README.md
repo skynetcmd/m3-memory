@@ -10,8 +10,14 @@ M3 treats agent memory as a **distributed-systems infrastructure problem**, not 
 
 Instead of every tool keeping its own throwaway context, M3 is a **shared, evolving, bitemporal knowledge base** that multiple heterogeneous agents and machines read and write. It is designed to solve a fundamental challenge: *How do agents maintain a consistent, evolving, and temporal knowledge base over months and years?*
 
-> 🦜 **Core Release Feature: Drop-in LangChain & LangGraph Support**
-> M3 now functions as a drop-in **Mem0 replacement** (one-line import swap) and is fully **LangMem-compatible** (`store=M3Store()`). Gain automatic contradiction supersession, bitemporal historical queries, local sovereign embedding, and the full 100+ MCP tool set inside your LangChain apps via `pip install m3-memory[langchain]`. (See [LangChain Integration Guide](docs/integrations/LANGCHAIN.md)).
+> **Plugs into your stack — framework and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
+>
+> - 🐘 **PostgreSQL** — run M3 on a first-class PostgreSQL primary backend (`M3_DB_BACKEND=postgres`) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See [Architecture](docs/ARCHITECTURE.md) · [Sync](docs/SYNC.md))
+> - 🦜 **LangChain & LangGraph** — drop-in **Mem0 replacement** (one-line import swap) and fully **LangMem-compatible** (`store=M3Store()`): `pip install m3-memory[langchain]`. (See [LangChain Guide](docs/integrations/LANGCHAIN.md))
+> - 👥 **CrewAI** — a drop-in `StorageBackend` for CrewAI's unified memory: `pip install m3-memory[crewai]`. (See [CrewAI Guide](m3_memory/integrations/crewai/README.md))
+> - 🧩 **PydanticAI** — wire M3 in as the agent's memory layer: `pip install m3-memory[pydantic-ai]`. (See [PydanticAI Guide](m3_memory/integrations/pydantic_ai/README.md))
+>
+> All four gain automatic contradiction supersession, bitemporal historical queries, local sovereign embedding, and the full 100+ MCP tool set.
 
 ---
 
@@ -25,7 +31,7 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 
 <p align="center">
   <a href="https://pypi.org/project/m3-memory/"><img alt="PyPI downloads" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/pypi-downloads.svg"></a>
-  <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub stars" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-stars.svg"></a>
+  <a href="https://github.com/skynetcmd/m3-memory"><img alt="GitHub clones" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/github-clones.svg"></a>
   <a href="https://star-history.com/#skynetcmd/m3-memory&Date"><img alt="Star history" src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/star-history.svg"></a>
 </p>
 
