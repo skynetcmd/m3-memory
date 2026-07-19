@@ -19,6 +19,38 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.19.0] — 2026-07-19 — Warehouse sync restore, PG→PG fast-path, governor-paced sync
+### Fixed
+- **Warehouse sync restored.** Several independent issues could each stop memory/chatlog
+  from reaching the PostgreSQL warehouse: a lock check that treated a missing lock table as
+  "held" (every sync silently skipped); sync writing to the wrong schema when the warehouse
+  keeps memory under `m3_warehouse`; and strict-timestamp rejections when source rows carried
+  empty or out-of-range date values. Sync now self-heals the lock, detects and targets the
+  warehouse schema, and coerces unparseable timestamps to NULL so one bad row can't abort a
+  batch.
+- **Oversized rows now embed on the HTTP embedder tiers.** Content over the model's context
+  window is subdivided and mean-pooled on tier-2/tier-3, matching tier-1, instead of being
+  dropped.
+- **`governor migrate` no longer deletes tasks the governor can't run.** Warehouse sync stays
+  scheduled as a load-independent floor, and unrecognized/third-party scheduled tasks are
+  never removed.
+- A crashed sync's lock is reclaimed immediately via process-liveness instead of blocking the
+  next sync for up to an hour.
+### Added
+- **PostgreSQL→PostgreSQL warehouse fast-path** (`postgres_fdw`): set-based, server-side
+  delta upserts with last-writer-wins, used automatically when both the primary store and the
+  warehouse are PostgreSQL; falls back to the generic bridge otherwise (SQLite/MariaDB). See
+  `docs/SYNC_PG_TO_PG.md`.
+- **Warehouse consolidation tool** (`bin/migrate_warehouse_to_schema.py`) to move an existing
+  `public`-layout warehouse into the canonical `m3_warehouse` schema — dry-run by default,
+  verify-before-drop, idempotent.
+- Warehouse sync and memory maintenance now also run as governor-paced passes in the
+  background loop, in addition to their scheduled tasks, on all supported platforms.
+### Changed
+- Ship the `config/` tree (SLM classifier profiles + entity vocab) in the wheel so the
+  cognitive loop's enrichment/entity passes work on a clean install.
+- Self-host status/badge images in the README (more reliable than proxied shields).
+
 ## [2026.7.18.1] — 2026-07-18 — Shared tier-2 embedder default, installer polish, single-fire publish
 
 ### Changed
