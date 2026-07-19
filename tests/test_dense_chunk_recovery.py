@@ -165,5 +165,102 @@ class MeanPoolTests(unittest.TestCase):
         self.assertEqual(self.me._mean_pool([[1.0, 0.0], [-1.0, 0.0]]), [0.0, 0.0])
 
 
+class HttpBulkSubdivideTests(unittest.IsolatedAsyncioTestCase):
+    """_http_bulk_with_subdivide — tier-2 (HTTP) analogue of the in-process
+    subdivide path. On the shared-embedder default (tier 1 off, everything
+    defers to the :8082 server) an oversized row 500s the whole HTTP batch;
+    this helper detects the "N tokens > n_ctx" body and subdivides+mean-pools
+    over HTTP so the row still gets embedded instead of being dropped."""
+
+    def setUp(self):
+        import memory.embed as me
+        self.me = me
+
+    async def test_normal_rows_pass_through(self):
+        async def post_one(texts):
+            return [[1.0, 0.0] for _ in texts]
+        out = await self.me._http_bulk_with_subdivide(post_one, ["a", "b"])
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out, [[1.0, 0.0], [1.0, 0.0]])
+
+    async def test_oversized_row_is_subdivided_and_pooled(self):
+        # First call (whole row) raises n_ctx overflow with a llama.cpp-style
+        # body; the retry over sub-chunks succeeds. Result must be one pooled,
+        # unit-length vector — not None.
+        big = "x" * 40000
+        calls = {"n": 0}
+
+        async def post_one(texts):
+            calls["n"] += 1
+            if len(texts) == 1 and len(texts[0]) > 30000:
+                raise RuntimeError(
+                    "CPU embedder HTTP 500: embed failed: backend error: "
+                    "input too long: 24064 tokens > n_ctx 8192"
+                )
+            # sub-chunks (or normal rows) embed fine
+            return [[1.0, 0.0] for _ in texts]
+
+        out = await self.me._http_bulk_with_subdivide(post_one, [big])
+        self.assertEqual(len(out), 1)
+        self.assertIsNotNone(out[0], "oversized row should be recovered via subdivide")
+        # pooled + normalized -> unit length
+        import math
+        norm = math.sqrt(sum(x * x for x in out[0]))
+        self.assertAlmostEqual(norm, 1.0, places=5)
+        # subdivide actually happened (more than the single failing call)
+        self.assertGreaterEqual(calls["n"], 2)
+
+    async def test_non_overflow_error_yields_none(self):
+        # An error that is NOT an n_ctx overflow must not trigger subdivision;
+        # the row is left unembedded (None) to cascade to the next tier.
+        async def post_one(texts):
+            raise RuntimeError("connection refused")
+        out = await self.me._http_bulk_with_subdivide(post_one, ["a"])
+        self.assertEqual(out, [None])
+
+
+class RecoverOversizedSingleTests(unittest.IsolatedAsyncioTestCase):
+    """_recover_oversized_single — the shared lone-oversized-row recovery used
+    by BOTH tier 2 (CPU HTTP) and tier 3 (primary/LM-Studio HTTP). A bisecting
+    batch path isolates the big row but can't shrink it; this subdivides within
+    the row (char-based, no token count) and mean-pools, so a single oversized
+    row is never silently dropped on any remote tier."""
+
+    def setUp(self):
+        import memory.embed as me
+        self.me = me
+
+    async def test_non_oversized_row_returns_none(self):
+        # A row at/under one window is not this helper's job — caller drops it.
+        async def post_batch(texts):
+            return [[1.0, 0.0] for _ in texts]
+        out = await self.me._recover_oversized_single(post_batch, "short text")
+        self.assertIsNone(out)
+
+    async def test_oversized_row_subdivided_and_pooled(self):
+        big = "x" * (self.me.MAX_CHARS_PER_CHUNK * 3)
+        seen = {"batches": 0, "max_texts": 0}
+
+        async def post_batch(texts):
+            seen["batches"] += 1
+            seen["max_texts"] = max(seen["max_texts"], len(texts))
+            return [[1.0, 0.0] for _ in texts]
+
+        out = await self.me._recover_oversized_single(post_batch, big)
+        self.assertIsNotNone(out, "oversized row should be recovered")
+        import math
+        self.assertAlmostEqual(math.sqrt(sum(x * x for x in out)), 1.0, places=5)
+        # It subdivided into >1 sub-chunk (single post of multiple texts).
+        self.assertGreater(seen["max_texts"], 1)
+
+    async def test_sub_embed_failure_returns_none(self):
+        big = "y" * (self.me.MAX_CHARS_PER_CHUNK * 3)
+
+        async def post_batch(texts):
+            return "TRANSIENT-SENTINEL"  # not a list -> failure
+        out = await self.me._recover_oversized_single(post_batch, big)
+        self.assertIsNone(out)
+
+
 if __name__ == "__main__":
     unittest.main()

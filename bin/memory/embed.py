@@ -651,6 +651,66 @@ async def _embedded_bulk_with_subdivide(
     return results
 
 
+async def _recover_oversized_single(post_batch, text: str) -> list[float] | None:
+    """Recover a lone row that a bulk/bisect path could not embed as a whole,
+    when the likely cause is n_ctx overflow. Bisecting a BATCH can isolate an
+    oversized row but never shrinks the row itself — only subdividing WITHIN it
+    does. Char-based sliding-window split (no token count needed), embed each
+    sub-chunk via ``post_batch`` (async ``list[str] -> list | sentinel``), and
+    mean-pool. Returns None if the row isn't oversized or the sub-embeds fail —
+    the caller then drops it exactly as before. Shared by tiers 2 and 3 so the
+    "a single oversized row is subdivided, never silently dropped" invariant
+    holds on every remote embed path, not just tier 1 in-process."""
+    if not text or len(text) <= MAX_CHARS_PER_CHUNK:
+        return None
+    subs = _chunk_for_sliding_window(text)
+    sub_texts = [s for s, _ in subs]
+    if len(sub_texts) <= 1:
+        return None
+    sub_res = await post_batch(sub_texts)
+    if not isinstance(sub_res, list):
+        return None
+    return _mean_pool([v for v in sub_res if v is not None])
+
+
+async def _http_bulk_with_subdivide(
+    post_one, texts: list[str]
+) -> list[list[float] | None]:
+    """Tier-2 (HTTP) analogue of ``_embedded_bulk_with_subdivide``. Embeds each
+    text via ``post_one`` (an async callable ``list[str] -> list[list[float]]``
+    that hits the CPU HTTP embedder), subdividing any row that overflows the
+    server's n_ctx and mean-pooling its sub-chunk vectors.
+
+    When tier 1 (in-process) is NOT configured — the shared-embedder default,
+    where every process defers to the :8082 server — a single oversized row
+    would otherwise fail the whole HTTP bulk request with a 500 ("N tokens >
+    n_ctx") and never get embedded. The server echoes the token count in its
+    error body, so the SAME ``_DENSE_ERR_RE`` / ``_subdivide_dense_chunk``
+    recipe tier 1 uses applies verbatim here. Returns one vector per input
+    (None for a row the HTTP tier still can't embed)."""
+    results: list[list[float] | None] = []
+    for text in texts:
+        try:
+            vecs = await post_one([text])
+            results.append(vecs[0] if vecs else None)
+            continue
+        except Exception as e:
+            m = _DENSE_ERR_RE.search(str(e))
+            if not m:
+                results.append(None)
+                continue
+            observed = int(m.group(1))
+        # Overflow: split into sub-chunks, embed each over HTTP, mean-pool.
+        try:
+            subs = _subdivide_dense_chunk(text, observed)
+            sub_vecs = await post_one(subs)
+            results.append(_mean_pool([v for v in sub_vecs if v is not None]))
+        except Exception as e2:
+            logger.warning("HTTP subdivide-embed failed for oversized row: %s", e2)
+            results.append(None)
+    return results
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Anchor augmentation + content hashing are pure (no module-global state) and
 # now live in .textprep — _augment_embed_text_with_anchors and _content_hash
@@ -1274,26 +1334,40 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
 
     # Tier 2 (bulk): same architecture as single-_embed — always try the
     # always-on 8082 service regardless of tier-1 GGUF configuration.
-    try:
-        _track_cost_lazy("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
-        client = _get_embed_client()
-        resp = await client.post(
+    # Post a batch to the :8082 embedder and return one vector per input. On a
+    # server error, surface the RESPONSE BODY into the exception text so an
+    # n_ctx overflow ("N tokens > n_ctx") is detectable by _DENSE_ERR_RE — the
+    # default HTTPStatusError message omits the body, which is why an oversized
+    # row previously died as an opaque 500 with the token count discarded.
+    async def _fallback_post(chunk_texts: list[str]) -> list[list[float]]:
+        client_ = _get_embed_client()
+        resp_ = await client_.post(
             f"{_EMBED_FALLBACK_URL}/embedding",
-            json={"input": miss_texts},
-            # Bulk ingestion — mark explicitly so a SMALL final chunk (<= the
-            # server's interactive threshold) isn't misrouted into the reserved
-            # interactive fast-lane. The lane is for latency-sensitive queries.
+            json={"input": chunk_texts},
             headers={"X-M3-Embed-Priority": "bulk"},
             timeout=_httpx.Timeout(config.EMBED_TIMEOUT_CONNECT, read=config.EMBED_TIMEOUT_READ * 4),
         )
-        resp.raise_for_status()
-        data = resp.json()["data"]
-        vecs = _order_embeddings(data, len(miss_texts))
-        if vecs is None:
+        if resp_.status_code >= 400:
+            body = ""
+            try:
+                body = resp_.text
+            except Exception:
+                pass
             raise RuntimeError(
-                f"CPU fallback response for {len(miss_texts)} inputs could not be "
+                f"CPU embedder HTTP {resp_.status_code}: {body[:200]}"
+            )
+        data_ = resp_.json()["data"]
+        v_ = _order_embeddings(data_, len(chunk_texts))
+        if v_ is None:
+            raise RuntimeError(
+                f"CPU fallback response for {len(chunk_texts)} inputs could not be "
                 f"aligned (bad/missing index or count)"
             )
+        return v_
+
+    try:
+        _track_cost_lazy("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
+        vecs = await _fallback_post(miss_texts)
         # Retag to the proper-identity fallback tag (not the tier-1 GGUF name)
         # and gate: rows failing identity stay in the miss set and cascade.
         kept_local = _accept_bulk(out, miss_indices, vecs,
@@ -1304,9 +1378,33 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
         miss_indices = [miss_indices[j] for j in kept_local]
         miss_texts = [miss_texts[j] for j in kept_local]
     except Exception as e:
-        logger.warning(
-            f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) bulk failed ({e}) — using primary HTTP"
-        )
+        # An n_ctx overflow fails the WHOLE HTTP batch even though only one row
+        # is too long. Mirror tier 1: subdivide the oversized row(s) over HTTP
+        # and mean-pool, so a single huge row doesn't sink the batch. Only rows
+        # the HTTP tier still can't embed fall through to the primary path.
+        if _DENSE_ERR_RE.search(str(e)):
+            resolved = await _http_bulk_with_subdivide(_fallback_post, miss_texts)
+            # _accept_bulk assigns proper vectors into `out` and returns the
+            # LOCAL indices still missing (None or failed identity). Feed the
+            # whole resolved batch through it so the identity gate runs once.
+            still_local = _accept_bulk(
+                out, miss_indices, resolved,
+                config.EMBED_FALLBACK_MODEL_TAG, "tier2-cpu-http-subdivide",
+            )
+            still_missing_local = list(still_local)
+            if not still_missing_local:
+                _record_embed_backend("cpu-http-fallback", len(miss_texts))
+                return out  # type: ignore[return-value]
+            miss_indices = [miss_indices[j] for j in still_missing_local]
+            miss_texts = [miss_texts[j] for j in still_missing_local]
+            logger.warning(
+                "CPU HTTP fallback: %d oversized row(s) embedded via subdivide; "
+                "%d still unresolved — using primary HTTP for those.",
+                len(resolved) - len(still_missing_local), len(still_missing_local))
+        else:
+            logger.warning(
+                f"CPU HTTP fallback ({_EMBED_FALLBACK_URL}) bulk failed ({e}) — using primary HTTP"
+            )
 
     _track_cost_lazy("embed_calls", sum(len(t.split()) * 2 for t in miss_texts))
     token = _ctx().get_secret("LM_API_TOKEN") or "lm-studio"
@@ -1378,9 +1476,20 @@ async def _embed_many(texts: list[str]) -> list[tuple[list[float] | None, str]]:
                     await asyncio.sleep(2 * (2 ** attempt))
 
         if len(chunk_texts) == 1:
+            # Last resort before dropping a lone row: bisecting batches can't
+            # help a SINGLE oversized row — only subdividing WITHIN it does.
+            # Same invariant tiers 1/2 enforce; the transient error text is lost
+            # here, so _recover_oversized_single size-gates on chars.
+            lone = chunk_texts[0]
+            pooled = await _recover_oversized_single(_post_once, lone)
+            if pooled is not None:
+                logger.info(
+                    "Bulk embed: recovered oversized single row (len=%d) via "
+                    "subdivide + mean-pool.", len(lone))
+                return [pooled]
             logger.warning(
                 "Bulk embed: dropping single input of len=%d after 3 transient "
-                "attempts.", len(chunk_texts[0]))
+                "attempts.", len(lone))
             return [None]
         # Only transient/size failures reach here — bisecting can help (smaller
         # batch, or isolate one oversized item). Permanent failures returned above.
