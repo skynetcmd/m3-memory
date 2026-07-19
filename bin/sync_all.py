@@ -144,8 +144,71 @@ def run_pg_sync_for_db(db_path: pathlib.Path, dry_run: bool) -> bool:
         return False
 
 
+def _try_pg_fdw_fastpath(dry_run: bool) -> "bool | None":
+    """When the PRIMARY store is PostgreSQL, try the postgres_fdw fast-path
+    (set-based server-side upserts) instead of the row-by-row SQLite<->PG bridge.
+
+    Returns True/False on a completed fast-path run, or None to signal "not
+    applicable / unavailable — fall back to the generic bridge" (SQLite/MariaDB
+    primary, missing extension, unreachable warehouse). Never raises."""
+    try:
+        from memory.backends import active_backend
+        if active_backend().name != "postgres":
+            return None  # SQLite/MariaDB primary -> generic bridge
+    except Exception:
+        return None
+    try:
+        import pg_fdw_sync
+        from m3_sdk import M3Context
+        ctx = M3Context.for_db(None)
+        warehouse_dsn = ctx.get_secret("PG_URL") or os.environ.get("M3_CDW_PG_URL")
+        if not warehouse_dsn:
+            log.info("PG-primary but no warehouse DSN — nothing to sync.")
+            return True
+        # Watermarks stay LOCAL to this machine (per-peer cursors): a Mac, Linux
+        # box, and PC each track their own push/pull against the shared CDW. On a
+        # PG primary they live in the primary's own sync_watermarks table.
+        with ctx.pg_connection() as primary_conn:
+            primary_conn.autocommit = False
+            with primary_conn.cursor() as wc:
+                wc.execute("CREATE TABLE IF NOT EXISTS sync_watermarks "
+                           "(direction TEXT PRIMARY KEY, last_synced_at TEXT)")
+
+            def get_wm(direction: str):
+                with primary_conn.cursor() as c:
+                    c.execute("SELECT last_synced_at FROM sync_watermarks WHERE direction=%s",
+                              (direction,))
+                    row = c.fetchone()
+                    return row[0] if row else None
+
+            def set_wm(direction: str, ts: str):
+                with primary_conn.cursor() as c:
+                    c.execute(
+                        "INSERT INTO sync_watermarks (direction, last_synced_at) "
+                        "VALUES (%s, %s) ON CONFLICT (direction) DO UPDATE "
+                        "SET last_synced_at = EXCLUDED.last_synced_at", (direction, ts))
+
+            res = pg_fdw_sync.sync_pg_to_pg(primary_conn, warehouse_dsn,
+                                            get_wm, set_wm, dry_run=dry_run)
+            primary_conn.commit()
+            log.info(f"PG->PG FDW fast-path completed: {res}")
+            return True
+    except pg_fdw_sync.FdwUnavailable as e:
+        log.info(f"FDW fast-path unavailable ({e}) — falling back to generic bridge.")
+        return None
+    except Exception as e:
+        log.warning(f"FDW fast-path errored ({type(e).__name__}: {e}) — "
+                    f"falling back to generic bridge.")
+        return None
+
+
 def run_pg_sync(dry_run: bool) -> bool:
-    """Run pg_sync.py for each configured database. Returns True if all succeed."""
+    """Run the warehouse sync. On a PostgreSQL primary, prefer the postgres_fdw
+    fast-path; otherwise (or if it's unavailable) run the generic pg_sync.py
+    bridge for each configured database. Returns True if all succeed."""
+    fast = _try_pg_fdw_fastpath(dry_run)
+    if fast is not None:
+        return fast
     dbs = _resolve_dbs()
     log.info(f"pg_sync target DBs: {[str(d) for d in dbs]}")
     results = []
