@@ -37,18 +37,42 @@ def _summary(plan, governor_result: Optional[dict] = None) -> None:
         print("No agents were wired. Run `m3 setup` again or wire one by hand.")
     print()
     if plan.decouple_roots or plan.fips_mode:
+        import os as _os
+        import sys as _sys
+        _is_win = _sys.platform == "win32"
+        # Emit COPY-PASTE-USABLE commands for the actual shell: `setx` (persists
+        # to the user environment) on Windows, `export` on POSIX. And show NATIVE
+        # paths — normpath so Windows gets all-backslash (not the mixed
+        # "<HOME>\.m3/config" mixed-separator form that expanduser leaves).
+        def _p(path: str) -> str:
+            return _os.path.normpath(path) if path else path
+
         print("Security & Path Configuration:")
-        print("  To ensure these settings persist across shell sessions and are visible to your agents,")
-        print("  please add the following environment variables to your shell profile (.bashrc, .zshrc, or Windows Env):")
-        if plan.decouple_roots:
-            print(f"    export M3_CONFIG_ROOT=\"{plan.config_root}\"")
-            print(f"    export M3_ENGINE_ROOT=\"{plan.engine_root}\"")
-        if plan.fips_mode:
-            print("    export M3_FIPS_MODE=1")
-            if plan.fips_strict:
-                print("    export M3_FIPS_STRICT=1   # requires the CMVP-validated wolfCrypt")
-            print("    # FIPS needs wolfSSL present (build: m3 fips install-wolfssl).")
-            print("    # Verify + get the SHA-256 to pin: m3 doctor  (crypto section)")
+        if _is_win:
+            print("  To persist these across sessions (visible to your agents), run in a")
+            print("  Command Prompt or PowerShell (setx writes them to your user environment;")
+            print("  open a NEW terminal afterwards for them to take effect):")
+            if plan.decouple_roots:
+                print(f'    setx M3_CONFIG_ROOT "{_p(plan.config_root)}"')
+                print(f'    setx M3_ENGINE_ROOT "{_p(plan.engine_root)}"')
+            if plan.fips_mode:
+                print('    setx M3_FIPS_MODE 1')
+                if plan.fips_strict:
+                    print('    setx M3_FIPS_STRICT 1   & REM requires the CMVP-validated wolfCrypt')
+                print("    REM FIPS needs wolfSSL present (build: m3 fips install-wolfssl).")
+                print("    REM Verify + get the SHA-256 to pin: m3 doctor  (crypto section)")
+        else:
+            print("  To persist these across sessions (visible to your agents), add to your")
+            print("  shell profile (~/.bashrc, ~/.zshrc, or ~/.profile), then open a new shell:")
+            if plan.decouple_roots:
+                print(f'    export M3_CONFIG_ROOT="{_p(plan.config_root)}"')
+                print(f'    export M3_ENGINE_ROOT="{_p(plan.engine_root)}"')
+            if plan.fips_mode:
+                print('    export M3_FIPS_MODE=1')
+                if plan.fips_strict:
+                    print('    export M3_FIPS_STRICT=1   # requires the CMVP-validated wolfCrypt')
+                print("    # FIPS needs wolfSSL present (build: m3 fips install-wolfssl).")
+                print("    # Verify + get the SHA-256 to pin: m3 doctor  (crypto section)")
         print()
 
     # ── governor migration results ─────────────────────────────────────────

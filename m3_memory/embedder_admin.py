@@ -182,10 +182,15 @@ def _locate_gguf_or_explain() -> Optional[Path]:
         )
         return None
     print(
-        f"Error: bundled GGUF not found ({BGE_M3_FILENAME}).\n"
-        "  Expected location: <payload>/_assets/models/" + BGE_M3_FILENAME + "\n"
-        "  If you installed via `pip install m3-memory`, run `m3 install-m3` first.\n"
-        "  If you installed from source, run `git lfs install; git lfs pull`.",
+        f"Note: the optional CPU-embedder GGUF ({BGE_M3_FILENAME}) isn't present, so\n"
+        "  the always-on :8082 server can't be installed. This is expected on a\n"
+        "  `pip install m3-memory` (the ~300MB model isn't bundled in the wheel) and\n"
+        "  is NOT a failure — m3 embeds via its in-process / HTTP tiers regardless.\n"
+        "  To add the shared CPU server, first fetch the model:\n"
+        "    • pip install:  m3 install-m3            (downloads the GGUF)\n"
+        "    • from source:  git lfs install; git lfs pull\n"
+        "  or point M3_EMBED_GGUF at a hand-downloaded bge-m3 GGUF, then re-run\n"
+        "  `m3 embedder install`.",
         file=sys.stderr,
     )
     return None

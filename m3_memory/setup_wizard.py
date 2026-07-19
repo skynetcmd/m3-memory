@@ -267,6 +267,14 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
                 plan.config_root = os.path.expanduser("~/.m3/config")
             if not plan.engine_root:
                 plan.engine_root = os.path.expanduser("~/.m3/engine")
+        # Normalize to native separators. os.path.expanduser("~/.m3/config") on
+        # Windows yields "<HOME>\.m3/config" (backslash home) mixed with
+        # the literal forward slashes, which is NOT copy-paste-usable as a Windows
+        # path. normpath makes it all-backslash on Windows, all-slash on POSIX.
+        if plan.config_root:
+            plan.config_root = os.path.normpath(plan.config_root)
+        if plan.engine_root:
+            plan.engine_root = os.path.normpath(plan.engine_root)
         # FIPS: --fips-strict implies --fips-mode. --install-wolfssl opts into
         # building the open-source lib unattended.
         plan.fips_strict = bool(getattr(args, "fips_strict", False))
@@ -406,21 +414,31 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         default=True,
     )
     if plan.decouple_roots:
-        plan.config_root = os.path.expanduser("~/.m3/config")
-        plan.engine_root = os.path.expanduser("~/.m3/engine")
+        # normpath -> native separators (see the plan-init note); otherwise
+        # Windows shows "<HOME>\.m3/config" mixed-separator, not copy-paste-usable.
+        plan.config_root = os.path.normpath(os.path.expanduser("~/.m3/config"))
+        plan.engine_root = os.path.normpath(os.path.expanduser("~/.m3/engine"))
         _say(f"    Config root: {plan.config_root}")
         _say(f"    Engine root: {plan.engine_root}")
 
     print()
-    print("  FIPS 140-3 crypto mode (compliance feature — most users: leave OFF):")
-    print("    Only needed if your org requires FIPS-validated cryptography.")
-    print("    off    = default crypto (still uses FIPS-approved algorithms).")
-    print("    mode   = M3_FIPS_MODE: hardened wolfCrypt, fail-closed if absent.")
-    print("             Works with the FREE open-source wolfSSL build.")
-    print("    strict = + M3_FIPS_STRICT: additionally REQUIRE the CMVP-validated")
-    print("             wolfCrypt FIPS module (commercial wolfSSL license).")
-    print("    NOTE: 'mode'/'strict' need the wolfSSL library present, or M3")
-    print("    fails closed on next start. The wizard can build it for you.")
+    print("  FIPS 140-3 crypto mode (compliance feature — MOST USERS: leave OFF):")
+    print("    WHY you'd turn this ON: only if a policy or contract requires")
+    print("    FIPS-validated cryptography (e.g. US federal / regulated environments).")
+    print("    If that doesn't apply to you, choose 'off' — the default crypto already")
+    print("    uses FIPS-approved algorithms; 'off' is not 'insecure'.")
+    print()
+    print("    off    = default crypto. No extra setup. Recommended for everyone else.")
+    print("    mode   = hardened wolfCrypt (M3_FIPS_MODE). Needs the open-source wolfSSL")
+    print("             library BUILT FROM SOURCE on this machine — so you MUST have a C")
+    print("             build toolchain installed (a C compiler + CMake; on Windows,")
+    print("             Visual Studio Build Tools). If wolfSSL is absent at startup, M3")
+    print("             fails closed (won't start). The wizard can build it for you below.")
+    print("    strict = mode + REQUIRE the CMVP-validated wolfCrypt FIPS module")
+    print("             (M3_FIPS_STRICT). That module is COMMERCIAL (paid wolfSSL FIPS")
+    print("             license); the open-source build the wizard makes will NOT satisfy")
+    print("             strict — it's for testing the plumbing until you swap in the")
+    print("             validated module. Choose this only if you specifically need CMVP.")
     fips_choice = _ask_choice(
         "  FIPS mode?", choices=["off", "mode", "strict"], default="off",
     )
@@ -546,9 +564,23 @@ def _quiesce_db_writers(args: argparse.Namespace) -> bool:
         _warn(f"  {len(result.stuck)} writer(s) still holding the DB after "
               f"{timeout:.0f}s: {stuck}")
         force = getattr(args, "force_quiesce", False) or getattr(args, "force_kill_mcp", False)
+        gui = getattr(args, "gui_child", False)
+        # GUI-triggered elevation is WINDOWS-ONLY: UAC is a GUI dialog that works
+        # from a windowless subprocess. macOS/Linux elevation here is `sudo kill`,
+        # which prompts for a password ON THE CONSOLE — a GUI child has no console,
+        # so it would HANG. So only enable the elevated retry under --gui-child on
+        # Windows; on a POSIX GUI child we stay unelevated and fall through to the
+        # "run this elevated yourself" help (a native macOS GUI-auth path via
+        # osascript is a separate future addition).
+        gui_can_elevate = gui and sys.platform == "win32"
         if args.non_interactive:
             if force:
-                if not _kill_stuck_writers(result.stuck):
+                # GUI runs are non-interactive-with-a-human: on Windows, allow the
+                # UAC-elevated retry (the UAC dialog IS the consent) so an ELEVATED
+                # stuck writer can be killed instead of failing "insufficient
+                # privilege". A truly headless run (or a POSIX GUI child, no
+                # console for sudo) stays unelevated.
+                if not _kill_stuck_writers(result.stuck, allow_sudo=gui_can_elevate):
                     # A kill failed — almost always an ELEVATED writer an
                     # unprivileged installer can't stop. Do NOT report success or
                     # migrate under it; abort with the actionable fix.
@@ -692,6 +724,62 @@ def _runas_schedule_repair_windows(script: str) -> bool:
         return out.returncode == 0
     except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
         return False
+
+
+def _runas_delete_tasks_windows(task_names: list[str]) -> bool:
+    """UAC-elevate `schtasks /Delete` for governor-migrated tasks on interactive
+    Windows. Deleting a scheduled task needs admin, so an unelevated `m3 setup`
+    can't remove the legacy governor-eligible tasks and falls back to printing
+    the commands. This offers to do it inline via `Start-Process -Verb RunAs`.
+    Returns True iff every delete exited 0. Interactive-only (UAC is a GUI
+    prompt)."""
+    # Build one elevated command that deletes each task; /F force, ignore a
+    # not-found (already gone) as success.
+    deletes = "; ".join(
+        f"schtasks /Delete /TN '{n}' /F" for n in task_names
+    )
+    ps = (
+        "$p = Start-Process -FilePath 'powershell' "
+        f"-ArgumentList '-NoProfile','-Command',\"{deletes}\" "
+        "-Verb RunAs -PassThru -Wait; exit $p.ExitCode"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            timeout=120, check=False,
+        )
+        return out.returncode == 0
+    except Exception:  # noqa: BLE001 — UAC cancelled / powershell missing / timeout
+        return False
+
+
+def _offer_elevated_task_delete(task_names: list[str], *, non_interactive: bool,
+                                gui: bool = False) -> bool:
+    """On Windows with a HUMAN PRESENT, elevate deleting the governor-eligible
+    scheduled tasks that an unelevated remove was denied — the UAC dialog itself
+    is the user's consent. Returns True if the elevated delete succeeded.
+
+    Human-present = a terminal interactive run (ask yes/no first) OR a GUI run
+    (`gui=True`: prompts are pre-answered, but someone is watching the GUI, so we
+    still fire the UAC prompt rather than skip it). A plain headless
+    --non-interactive run (no GUI) skips — nobody could consent to the dialog."""
+    if sys.platform != "win32" or not task_names:
+        return False
+    if non_interactive and not gui:
+        return False  # truly headless — no one to approve UAC
+    if not gui:
+        # Terminal interactive: ask before popping UAC.
+        if not _ask_yes_no(
+            "  Remove them now? (opens a Windows admin prompt)", default=True,
+        ):
+            return False
+    _say("  Requesting administrator access (approve the Windows UAC dialog)...")
+    if _runas_delete_tasks_windows(task_names):
+        _ok("  legacy scheduled task(s) removed (elevated).")
+        return True
+    _warn("  elevated removal was cancelled or failed — see the commands above "
+          "to run them yourself from an admin shell.")
+    return False
 
 
 def _offer_elevated_schedule_repair(script: str, *, non_interactive: bool) -> bool:
@@ -1191,12 +1279,18 @@ def _step_cpu_sovereign_embedder() -> bool:
         _ok("sovereign CPU embedder registered and running on port 8082")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        _warn(f"CPU embedder install did not complete: {e}")
-        # m3 still works without it (the embed cascade falls through to the
-        # Python/HTTP tier) — so this is non-fatal. Print clear, per-OS
-        # instructions for getting the always-on embedder.
+        # NOT a failure — this OPTIONAL always-on CPU embedder was skipped (its
+        # GGUF/binary or admin rights aren't present). m3 embeds fine WITHOUT it:
+        # the cascade uses the in-process Tier-1 (GPU/CPU) or an HTTP tier. Frame
+        # it as "skipped, here's how to add it if you want it", not an error, so
+        # the user doesn't think setup broke. (Any scary "Error:" line above came
+        # from the sub-step and is superseded by this.)
+        _say("Optional CPU embedder (:8082) — SKIPPED (not installed). This is fine:")
+        _say("  m3 already embeds via the in-process Tier-1 / HTTP fallback tier;")
+        _say("  setup did NOT fail. Add the always-on shared server later only if")
+        _say(f"  you want it. (reason: {e})")
         print()
-        print("  To get the always-on CPU embedder, follow the steps for your OS:")
+        print("  To add the always-on CPU embedder later, follow the steps for your OS:")
         if sys.platform == "win32":
             print("    Windows — the embedder registers as a Windows Service, which")
             print("    needs Administrator rights. Open an *Administrator* terminal and run:")
@@ -1652,7 +1746,8 @@ def _step_wire_agents(plan: SetupPlan, *, non_interactive: bool = False) -> bool
     return True
 
 
-def _step_governor_migration(plan: SetupPlan) -> dict:
+def _step_governor_migration(plan: SetupPlan, *, non_interactive: bool = False,
+                             gui: bool = False) -> dict:
     """Replace governor-eligible scheduled tasks with the governor.
 
     Returns a dict the summary uses to surface results / privileged commands:
@@ -1686,8 +1781,19 @@ def _step_governor_migration(plan: SetupPlan) -> dict:
         _ok(f"  removed {name}")
     if failed:
         for name in failed:
-            _warn(f"  could not remove {name} (insufficient privilege?) — see end-of-run commands")
-        result["privileged_cmds"] = gm.privileged_removal_commands(failed)
+            _warn(f"  could not remove {name} (insufficient privilege?)")
+        # On interactive Windows, OFFER inline UAC to delete them now — consistent
+        # with how setup already elevates process-kills and boot-task registration,
+        # instead of only printing commands the user must run in an admin shell.
+        if _offer_elevated_task_delete(failed, non_interactive=non_interactive, gui=gui):
+            # verify each is actually gone before claiming success
+            still = [n for n in failed if n in gm.detect_scheduled_tasks().get("eligible", [])]
+            result["removed"] = removed + [n for n in failed if n not in still]
+            result["failed"] = still
+            if still:
+                result["privileged_cmds"] = gm.privileged_removal_commands(still)
+        else:
+            result["privileged_cmds"] = gm.privileged_removal_commands(failed)
     return result
 
 
@@ -1827,7 +1933,8 @@ def run_setup(args: argparse.Namespace) -> int:
         if plan.use_shared_embedder:
             _step_shared_embedder(plan, non_interactive=args.non_interactive)
         _step_wire_agents(plan, non_interactive=args.non_interactive)
-        governor_result = _step_governor_migration(plan)
+        governor_result = _step_governor_migration(
+            plan, non_interactive=args.non_interactive, gui=getattr(args, "gui_child", False))
         _step_doctor()
         _summary(plan, governor_result)
         return 0
@@ -1894,6 +2001,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--quiesce-timeout", type=float, default=30.0,
         help="Seconds to wait for autonomous m3 DB-writers to pause before "
              "install (HALT_m3 protocol). Default: 30.",
+    )
+    parser.add_argument(
+        "--gui-child", action="store_true",
+        help="Internal: setup was launched by the graphical front-end "
+             "(setup_gui.py) as its non-interactive worker. Prompts are "
+             "pre-answered via flags, but a HUMAN IS WATCHING the GUI — so Windows "
+             "elevation steps (UAC) for killing a stuck process or deleting a "
+             "scheduled task are still OFFERED/attempted rather than skipped. "
+             "Without this, the GUI's non-interactive child would silently skip "
+             "every UAC prompt (nothing to consent to on a headless run), leaving "
+             "those steps 'insufficient privilege'. NOT the same as --gui (which "
+             "LAUNCHES the graphical window).",
     )
 
     parser.add_argument(

@@ -15,6 +15,7 @@ a monkey-patched subprocess.run.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -409,8 +410,11 @@ def test_gather_plan_non_interactive_decouple_and_fips(monkeypatch):
     plan = setup_wizard._gather_plan(detected, args)
 
     assert plan.decouple_roots is True
-    assert plan.config_root == "/tmp/config"
-    assert plan.engine_root == "/tmp/engine"
+    # Roots are normalized to native separators (normpath) so Windows gets a
+    # copy-paste-usable path, not the mixed-separator "<HOME>\.m3/config" form
+    # expanduser leaves. On POSIX normpath is a no-op for these.
+    assert plan.config_root == os.path.normpath("/tmp/config")
+    assert plan.engine_root == os.path.normpath("/tmp/engine")
     assert plan.fips_mode is True
 
 
@@ -1155,3 +1159,98 @@ def test_runas_schedule_repair_reads_exit_code(monkeypatch):
         raise OSError("UAC cancelled")
     monkeypatch.setattr(subprocess, "run", boom)
     assert setup_wizard._runas_schedule_repair_windows("s") is False
+
+
+# ────────────────────────────────────────────────────────────────────────
+# GUI-child elevation (UAC offered when a human watches the GUI)
+# ────────────────────────────────────────────────────────────────────────
+class TestGuiChildElevation:
+    """The GUI runs `m3 setup --non-interactive --gui-child`. A plain headless
+    non-interactive run must SKIP UAC (no one to consent); a gui-child run must
+    still ATTEMPT the UAC-elevated delete (the UAC dialog is the human's consent),
+    without a terminal yes/no prompt."""
+
+    def test_headless_noninteractive_skips_uac(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        called = {"runas": False}
+        monkeypatch.setattr(setup_wizard, "_runas_delete_tasks_windows",
+                            lambda names: called.__setitem__("runas", True) or True)
+        out = setup_wizard._offer_elevated_task_delete(
+            ["AgentOS_Maintenance"], non_interactive=True, gui=False)
+        assert out is False
+        assert called["runas"] is False  # never attempted headless
+
+    def test_gui_child_attempts_uac_without_prompt(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        called = {"runas": False, "asked": False}
+        monkeypatch.setattr(setup_wizard, "_runas_delete_tasks_windows",
+                            lambda names: called.__setitem__("runas", True) or True)
+        monkeypatch.setattr(setup_wizard, "_ask_yes_no",
+                            lambda *a, **k: called.__setitem__("asked", True) or True)
+        out = setup_wizard._offer_elevated_task_delete(
+            ["AgentOS_Maintenance"], non_interactive=True, gui=True)
+        assert out is True
+        assert called["runas"] is True   # UAC attempted
+        assert called["asked"] is False  # no terminal prompt (can't, in a GUI child)
+
+    def test_terminal_interactive_asks_first(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        called = {"runas": False, "asked": False}
+        monkeypatch.setattr(setup_wizard, "_runas_delete_tasks_windows",
+                            lambda names: called.__setitem__("runas", True) or True)
+        monkeypatch.setattr(setup_wizard, "_ask_yes_no",
+                            lambda *a, **k: called.__setitem__("asked", True) or True)
+        out = setup_wizard._offer_elevated_task_delete(
+            ["AgentOS_Maintenance"], non_interactive=False, gui=False)
+        assert out is True
+        assert called["asked"] is True   # prompted first in a terminal
+        assert called["runas"] is True
+
+    def test_non_windows_never_elevates(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        out = setup_wizard._offer_elevated_task_delete(
+            ["AgentOS_Maintenance"], non_interactive=True, gui=True)
+        assert out is False
+
+    def test_gui_child_flag_is_distinct_from_gui(self):
+        # --gui LAUNCHES the window; --gui-child is the human-present UAC signal.
+        # They must not collide, and gui-child must not trigger _should_use_gui.
+        import argparse
+        p = argparse.ArgumentParser()
+        setup_wizard.add_arguments(p)
+        a = p.parse_args(["--non-interactive", "--gui-child"])
+        assert a.gui_child is True
+        assert a.gui is False
+        assert setup_wizard._should_use_gui(a) is False
+
+    def test_gui_emits_gui_child_not_gui(self):
+        from m3_memory.setup_gui import _build_flags
+        flags = _build_flags({"agent_claude": True})
+        assert "--gui-child" in flags
+        assert "--gui" not in flags  # would recursively re-launch the window
+
+
+class TestGuiChildElevationMacOS:
+    """GUI-triggered elevation is Windows-only. On macOS/Linux the elevation path
+    is `sudo kill` (console password prompt) — a GUI child has no console, so it
+    must NOT attempt sudo (it would hang). It stays unelevated."""
+
+    def test_task_delete_is_noop_on_macos_even_with_gui(self, monkeypatch):
+        # _offer_elevated_task_delete is Windows-only by construction.
+        monkeypatch.setattr(sys, "platform", "darwin")
+        assert setup_wizard._offer_elevated_task_delete(
+            ["AgentOS_Maintenance"], non_interactive=True, gui=True) is False
+
+    def test_kill_stuck_writers_does_not_sudo_when_allow_sudo_false(self, monkeypatch):
+        # The GUI path passes allow_sudo = (gui and win32); on macOS that's False,
+        # so a refused kill must NOT escalate to _sudo_kill_posix (would prompt).
+        monkeypatch.setattr(sys, "platform", "darwin")
+        sudo_called = {"n": 0}
+        monkeypatch.setattr(setup_wizard, "_kill_process_posix", lambda pid: False)
+        monkeypatch.setattr(setup_wizard, "_sudo_kill_posix",
+                            lambda pid: sudo_called.__setitem__("n", sudo_called["n"] + 1) or True)
+        from types import SimpleNamespace
+        stuck = [SimpleNamespace(pid=4242, role="cognitive-loop")]
+        ok = setup_wizard._kill_stuck_writers(stuck, allow_sudo=False)
+        assert ok is False               # kill refused, not escalated
+        assert sudo_called["n"] == 0     # sudo NEVER attempted (no console hang)

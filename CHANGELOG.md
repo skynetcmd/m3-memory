@@ -19,6 +19,23 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.19.2] — 2026-07-19 — Installer UX polish
+### Fixed
+- **Native, copy-paste-usable paths.** On Windows the config/engine roots and the
+  end-of-run "persist these" block now show all-backslash paths and use `setx`
+  (was Unix `export` with a mixed-separator path that wasn't usable in cmd/PowerShell).
+- **The optional CPU-embedder skip no longer reads as a failure.** When its model
+  isn't bundled (normal on a pip/pipx install), setup says the embedder was
+  SKIPPED and that m3 embeds fine via its other tiers — not "Error / did not complete".
+- **Clearer FIPS prompt** — states why you'd enable it (a compliance requirement),
+  that `mode` needs a C build toolchain on the machine, and that `strict` needs the
+  commercial CMVP module the open-source build won't satisfy.
+- **GUI installer can elevate (Windows).** The graphical setup now triggers the UAC
+  prompt for killing a stuck process or removing a scheduled task, instead of
+  silently skipping those with "insufficient privilege". GUI-triggered elevation is
+  correctly scoped to Windows (macOS `sudo` needs a console a GUI child lacks; its
+  user-level tasks don't need elevation anyway).
+
 ## [2026.7.19.1] — 2026-07-19 — Sync interpreter fix
 ### Fixed
 - The hourly warehouse-sync task ran its `pg_sync` subprocess with a hardcoded

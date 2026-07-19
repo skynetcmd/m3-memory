@@ -81,7 +81,10 @@ def _build_flags(values: dict) -> list[str]:
     it differs from the wizard's own default so the command stays minimal and the
     non-interactive plan-construction path (args.non_interactive branch in
     _gather_plan) interprets it identically to a hand-run install.ps1."""
-    flags: list[str] = ["--non-interactive"]
+    # --gui: prompts are pre-answered (--non-interactive), but a human is watching
+    # the GUI, so Windows elevation steps (UAC) for killing a stuck process or
+    # deleting a scheduled task are still offered/attempted rather than skipped.
+    flags: list[str] = ["--non-interactive", "--gui-child"]
 
     # Agents: comma-separated; omit to let the child wire all detected agents.
     agents = [a for a in ("claude", "gemini", "antigravity", "opencode", "openclaw")
