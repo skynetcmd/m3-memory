@@ -28,6 +28,11 @@ def _print_not_migratable() -> None:
         print("\nLeft on their schedule (the governor cannot take these over):")
         for line in lines:
             print(line)
+    floor = gm.keep_scheduled_floor_lines()
+    if floor:
+        print("\nKept as a scheduled floor (also governor-paced in the loop):")
+        for line in floor:
+            print(line)
 
 
 def cmd_status() -> int:

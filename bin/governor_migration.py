@@ -36,17 +36,32 @@ import os
 import subprocess
 import sys
 
-# Task names that the governor can take over. Keep in sync with
-# install_schedules.get_schedule_specs().
+# Task names that the governor can take over — ONLY tasks the cognitive loop
+# actually runs as a pass. Removing a task here deletes its scheduler entry, so a
+# task must NOT be listed unless the loop genuinely executes its work; otherwise
+# `governor migrate` silently stops that work (the governor only PACES passes, it
+# has no execution loop of its own). Keep in sync with m3_cognitive_loop's pass
+# registry and install_schedules.get_schedule_specs().
 GOVERNOR_ELIGIBLE = (
-    "AgentOS_HourlySync",
-    "AgentOS_ChatlogEmbedSweep",
-    "AgentOS_ObservationDrain",
-    "AgentOS_Maintenance",
-    "AgentOS_WeeklyAuditor",
+    "AgentOS_ChatlogEmbedSweep",   # -> loop 'embed' pass
+    "AgentOS_ObservationDrain",    # -> loop 'enrich' pass (Observer/Reflector)
+    "AgentOS_Maintenance",         # -> loop 'maintenance' pass
+    "AgentOS_WeeklyAuditor",       # -> loop 'audit' pass
+)
+
+# Tasks the loop runs AS A PASS but whose scheduled entry must ALSO be KEPT as a
+# load-independent floor. The governor HALTs background passes under sustained
+# CPU/RAM pressure; for these, indefinite deferral is unacceptable, so a rigid
+# scheduled run guarantees a floor. `governor migrate` must NOT remove them.
+# (name, reason)
+KEEP_SCHEDULED_FLOOR = (
+    ("AgentOS_HourlySync",
+     "governor-paced in-loop AND kept as an hourly floor — the governor HALTs "
+     "under load, and the warehouse must not drift stale indefinitely"),
 )
 
 # (name, reason) — surfaced to the user so they know WHY these stay scheduled.
+# These are NOT run by the loop at all; they must stay on their own schedule.
 NOT_MIGRATABLE = (
     ("AgentOS_SecretRotator",
      "security/compliance-anchored — rotation must run on a fixed cadence, "
@@ -78,21 +93,18 @@ def detect_scheduled_tasks() -> dict[str, list[str]]:
     """
     installed = _list_installed_task_names()
     not_migratable = [name for name, _ in NOT_MIGRATABLE if name in installed]
+    keep_floor = [name for name, _ in KEEP_SCHEDULED_FLOOR if name in installed]
     eligible = [t for t in GOVERNOR_ELIGIBLE if t in installed]
-    # Legacy / hand-named tasks (Windows, detected by action) are neither in
-    # GOVERNOR_ELIGIBLE nor NOT_MIGRATABLE — they carry their real task name. They
-    # ARE governor-eligible (an old sync task IS the thing the governor owns), so
-    # fold them into `eligible` so the CLI removes them by their actual name.
-    # Guard against a hand-named task colliding with a canonical name (already
-    # counted) or a not-migratable name (don't reclassify it for removal).
-    extra = [
-        n for n in sorted(installed)
-        if n not in GOVERNOR_ELIGIBLE
-        and n not in {nm for nm, _ in NOT_MIGRATABLE}
-        and n not in not_migratable
-    ]
-    eligible.extend(extra)
-    return {"eligible": eligible, "not_migratable_present": not_migratable}
+    # NOTE: we deliberately do NOT fold unrecognized installed tasks into
+    # `eligible`. An earlier version removed any task not in the known lists,
+    # which would delete a user's hand-named or third-party scheduled tasks. Only
+    # tasks EXPLICITLY listed in GOVERNOR_ELIGIBLE (and confirmed loop-covered)
+    # are ever removed. Unknown tasks are left strictly alone.
+    return {
+        "eligible": eligible,
+        "not_migratable_present": not_migratable,
+        "keep_scheduled_floor": keep_floor,
+    }
 
 
 def _list_installed_task_names() -> set[str]:
@@ -387,3 +399,8 @@ def privileged_removal_commands(names: list[str]) -> list[str]:
 def not_migratable_lines() -> list[str]:
     """Human-readable 'these stay scheduled, and why' lines for the summary."""
     return [f"  • {name} — {reason}" for name, reason in NOT_MIGRATABLE]
+
+
+def keep_scheduled_floor_lines() -> list[str]:
+    """Human-readable 'these run in the loop AND stay scheduled as a floor' lines."""
+    return [f"  • {name} — {reason}" for name, reason in KEEP_SCHEDULED_FLOOR]
