@@ -19,6 +19,36 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.19.4] — 2026-07-19 — Background loop reliability & dashboard fixes
+
+### Fixed
+- **Cognitive loop no longer dies silently in the background on Windows.** The
+  detached `pythonw` worker had an invalid stdout, so the first `print()` inside
+  the entity/enrichment pass raised and killed the loop right after it started —
+  it ran one burst then got respawned by the scheduler. Its stdout/stderr are now
+  redirected to the log (matching the POSIX daemonize path).
+- **Local-LLM/embedder requests no longer hang on stale keep-alive sockets.** The
+  extractor and embed HTTP clients reused pooled connections that the local
+  server had already closed, so a request could block until its full timeout. The
+  extractor client no longer pools; the embed client expires idle connections
+  after 5s (was 60s). Override via `M3_EMBED_HTTP_KEEPALIVE_EXPIRY`.
+- **Entity-extraction bookkeeping no longer serializes on the write lock.** The
+  per-row "processed" marker opened its own write transaction back-to-back with
+  the entity write; under concurrency with another writer on the same store this
+  could burn the busy-timeout per row and stall a pass for minutes. Markers are
+  now flushed in a single batched transaction at the end of the pass.
+- **SLM profiles are model-agnostic.** The entity/enrich profiles pinned a
+  specific model id, which stalled requests whenever a different model was loaded
+  locally; they now let the local server serve whatever model is loaded.
+- **Interactive Knowledge Graph respects the DB selector.** `/api/graph` sent no
+  cache headers, so the browser re-served the first store's graph after a DB
+  switch; the graph data endpoints now send `no-store`.
+
+### Changed
+- Background-loop single-instance lock hardened (atomic create + liveness check)
+  and pass selection is queue-aware under load, so an empty pass can't take the
+  turn a backlogged pass needs.
+
 ## [2026.7.19.3] — 2026-07-19 — Web dashboard for everyone
 WebUI Dashboard (default http://127.0.0.1:8088) now exposed for all users not
 just developers. Documentation refreshed.
