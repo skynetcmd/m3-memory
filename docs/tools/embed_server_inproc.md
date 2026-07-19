@@ -1,6 +1,6 @@
 ---
 tool: bin/embed_server_inproc.py
-sha1: b11349ac478b
+sha1: 54c6baccd1e6
 mtime_utc: 2026-07-14T02:42:16.065253+00:00
 generated_utc: 2026-07-17T02:18:40.548694+00:00
 private: false
@@ -16,12 +16,12 @@ WHY: `m3_core_rs.EmbeddedEmbedder` runs the GGUF embedder in-process. Every
 process that embeds in-process opens its OWN CUDA context (multi-GB host
 reservation) — CUDA contexts do not cross process boundaries, so the MCP memory
 server and the cognitive loop each loaded a full copy (~4 GB + ~12 GB ≈ 18 GB on
-SkyPC) for one embedder's worth of work. This server loads the embedder ONCE and
+the reference host) for one embedder's worth of work. This server loads the embedder ONCE and
 serves it over localhost HTTP; clients disable their own tier-1 (M3_EMBED_GGUF
 unset + M3_EMBED_GGUF_AUTODETECT=0) and defer to it via M3_EMBED_FALLBACK_URL.
 
 The win is HOST RAM, not latency: one CUDA context instead of one-per-process.
-Measured on SkyPC (RTX 5080): a SINGLE small embed is P50 ~33 ms / P95 ~48 ms
+Measured on the reference host (RTX 5080): a SINGLE small embed is P50 ~33 ms / P95 ~48 ms
 via this server vs ~28 ms in-process — the localhost HTTP round-trip adds a few
 ms (~10-15% on a single small request), not a rounding error. That per-call cost
 AMORTISES across a batch (one round-trip for N vectors), so bulk paths — the

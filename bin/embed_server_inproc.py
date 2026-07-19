@@ -6,12 +6,12 @@ WHY: `m3_core_rs.EmbeddedEmbedder` runs the GGUF embedder in-process. Every
 process that embeds in-process opens its OWN CUDA context (multi-GB host
 reservation) — CUDA contexts do not cross process boundaries, so the MCP memory
 server and the cognitive loop each loaded a full copy (~4 GB + ~12 GB ≈ 18 GB on
-SkyPC) for one embedder's worth of work. This server loads the embedder ONCE and
+the reference host) for one embedder's worth of work. This server loads the embedder ONCE and
 serves it over localhost HTTP; clients disable their own tier-1 (M3_EMBED_GGUF
 unset + M3_EMBED_GGUF_AUTODETECT=0) and defer to it via M3_EMBED_FALLBACK_URL.
 
 The win is HOST RAM, not latency: one CUDA context instead of one-per-process.
-Measured on SkyPC (RTX 5080): a SINGLE small embed is P50 ~33 ms / P95 ~48 ms
+Measured on the reference host (RTX 5080): a SINGLE small embed is P50 ~33 ms / P95 ~48 ms
 via this server vs ~28 ms in-process — the localhost HTTP round-trip adds a few
 ms (~10-15% on a single small request), not a rounding error. That per-call cost
 AMORTISES across a batch (one round-trip for N vectors), so bulk paths — the
@@ -78,7 +78,7 @@ _MAX_BATCH = int(os.environ.get("M3_EMBED_SERVER_MAX_BATCH", "2048"))
 # limit, is what made an interactive query queue behind a bulk ingestion batch
 # and wedge the single-event-loop MCP server.)
 #
-# POLICY: strict reservation (chosen 2026-07-14, user bhaba). Bulk is capped at
+# POLICY: strict reservation (chosen 2026-07-14). Bulk is capped at
 # `bulk_max = total - reserved` and NEVER exceeds it — even when the reserved
 # slots are idle. `reserved` (default 1) slots are held for interactive
 # single-query embeds so a search ALWAYS finds a free slot and never waits

@@ -1,6 +1,6 @@
 # Handoff: Windows cognitive-loop + console-flash fixes → macOS UX parity
 
-**Date:** 2026-07-01 · **From:** Claude on SkyPC (Windows) · **For:** the macOS session building UX parity
+**Date:** 2026-07-01 · **From:** Claude on the Windows host · **For:** the macOS session building UX parity
 
 All changes below are **merged to `main`** (PRs #64–#69) — you have them via `git pull`.
 This file exists because m3 memories may not be synced to a store you can reach; the
@@ -71,9 +71,9 @@ or the Metal branch of `probe_gpu_util`.
 ---
 
 ## Open / unresolved (for awareness)
-- **One flash remains** on SkyPC when an item is fed to the LLM — ruled out the entity
+- **One flash remains** on the Windows host when an item is fed to the LLM — ruled out the entity
   path (no subprocess), the HTTP LLM call, and the statusline. Hypothesis: a cached
   old statusline in the running session (reboot clears it) or LM Studio's own helper.
-  Being retested after a SkyPC reboot. Not a macOS concern.
-- On SkyPC only 2 of 7 m3 scheduled tasks were actually registered (`--verify` found
+  Being retested after a the Windows host reboot. Not a macOS concern.
+- On the Windows host only 2 of 7 m3 scheduled tasks were actually registered (`--verify` found
   this). Not relevant to macOS beyond: run `--verify all` after install to catch drift.
