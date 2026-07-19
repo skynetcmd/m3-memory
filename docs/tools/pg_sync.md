@@ -1,12 +1,12 @@
 ---
-tool: bin/pg_sync.sh
-sha1: 2cdf8938d190
-mtime_utc: 2026-07-02T01:21:24.714175+00:00
-generated_utc: 2026-07-03T20:00:03.812145+00:00
+tool: bin/pg_sync.py
+sha1: 8c29cfe2f228
+mtime_utc: 2026-07-19T06:18:23.186355+00:00
+generated_utc: 2026-07-19T20:02:06.274392+00:00
 private: false
 ---
 
-# bin/pg_sync.sh
+# bin/pg_sync.py
 
 ## Purpose
 
@@ -16,45 +16,58 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- Bash execution
+- `def main()` (line 1231)
+- `if __name__ == "__main__"` guard
 
 ---
 
 ## CLI flags / arguments
 
-_(no argparse arguments detected)_
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--db` | Path to the SQLite database to sync. Default: the SDK-resolved canonical path (M3_DATABASE env / engine root / populated legacy store) — never a hardcoded repo-relative guess. | None |  | str |  |
+| `--manifest` | Path to sync manifest YAML. Inferred from --db basename if omitted. | None |  | str |  |
+| `--dry-run` | Print what would sync without touching either database. | `False` |  | store_true |  |
 
 ---
 
 ## Environment variables read
 
-- `LOG_FILE`
-- `PYTHON`
-- `WORKSPACE`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_halt (_pid_is_alive)`
+- `m3_sdk (M3Context, resolve_db_path)`
+- `m3_sdk (resolve_cdw_pg_dsn, resolve_venv_python)`
+- `migrate_memory`
 
 ---
 
 ## Calls OUT (external side-channels)
 
-_(no subprocess / http / sqlite calls detected)_
+**sqlite**
+
+- `sqlite3.connect()  → `db_path`` (line 1358)
+- `sqlite3.connect()  → `db_path`` (line 1374)
+- `sqlite3.connect()  → `target.db_path`` (line 1310)
+
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `psycopg2 (Binary)`
+- `psycopg2.extras (execute_values)`
+- `yaml`
 
 ---
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `Infer manifest path from db basename: config/sync_manifests/<stem>.yaml`
 
 ---
 

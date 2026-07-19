@@ -1,8 +1,8 @@
 ---
 tool: bin/run_observer.py
-sha1: 35285974a4d6
-mtime_utc: 2026-07-02T21:51:11.656462+00:00
-generated_utc: 2026-07-03T20:00:03.849906+00:00
+sha1: 27dcf9e2a836
+mtime_utc: 2026-07-19T03:04:59.630082+00:00
+generated_utc: 2026-07-19T19:29:22.840878+00:00
 private: false
 ---
 
@@ -39,7 +39,7 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Entry points
 
-- `def main()` (line 828)
+- `def main()` (line 844)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -61,7 +61,6 @@ Status: Phase D Task 3. Pairs with config/slm/observer_local.yaml.
 
 ## Environment variables read
 
-- `M3_DATABASE`
 - `M3_OBSERVER_PRECISE_PROVENANCE`
 - `OBSERVER_PROFILE`
 
@@ -86,6 +85,7 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `httpx`
+- `memory.backends (dialect)`
 
 ---
 

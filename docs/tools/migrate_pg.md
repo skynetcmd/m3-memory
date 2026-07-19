@@ -1,8 +1,8 @@
 ---
 tool: bin/migrate_pg.py
-sha1: c56fd675eefd
-mtime_utc: 2026-07-16T22:01:33.964871+00:00
-generated_utc: 2026-07-17T02:18:40.790620+00:00
+sha1: 1c51e7891355
+mtime_utc: 2026-07-19T03:04:59.626078+00:00
+generated_utc: 2026-07-19T19:29:22.725265+00:00
 private: false
 ---
 

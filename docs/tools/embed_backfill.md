@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_backfill.py
-sha1: 49929326f7ea
-mtime_utc: 2026-05-30T18:38:21.553829+00:00
-generated_utc: 2026-05-31T18:42:52.704915+00:00
+sha1: 012363f25eba
+mtime_utc: 2026-07-19T03:04:59.559782+00:00
+generated_utc: 2026-07-19T19:29:22.187235+00:00
 private: false
 ---
 
@@ -59,7 +59,7 @@ an active enricher in WAL mode (SQLite handles concurrent reads fine).
 
 ## Entry points
 
-- `def main()` (line 453)
+- `def main()` (line 448)
 - `if __name__ == "__main__"` guard
 
 ---

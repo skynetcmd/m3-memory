@@ -1,8 +1,8 @@
 ---
 tool: validate_env.py
-sha1: 49544ecaa611
-mtime_utc: 2026-06-28T12:28:55.249264+00:00
-generated_utc: 2026-06-30T22:19:18.651959+00:00
+sha1: 6cd0aa35d893
+mtime_utc: 2026-07-19T03:04:59.950145+00:00
+generated_utc: 2026-07-19T19:29:23.088102+00:00
 private: false
 ---
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `def main()` (line 65)
+- `def main()` (line 64)
 - `if __name__ == "__main__"` guard
 
 ---

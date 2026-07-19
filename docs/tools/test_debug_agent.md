@@ -1,8 +1,8 @@
 ---
 tool: bin/test_debug_agent.py
-sha1: 6e8ae17d93cb
-mtime_utc: 2026-05-07T03:32:14.564827+00:00
-generated_utc: 2026-05-09T13:54:34.966058+00:00
+sha1: bd2739ff3971
+mtime_utc: 2026-07-19T03:04:59.637297+00:00
+generated_utc: 2026-07-19T19:29:22.951544+00:00
 private: false
 ---
 
@@ -19,8 +19,8 @@ gracefully skipped when LM Studio is offline.
 
 ## Entry points
 
-- `async def run()` (line 130)
-- `async def main()` (line 279)
+- `async def run()` (line 128)
+- `async def main()` (line 277)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -57,8 +57,8 @@ _(no argparse arguments detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `DB_PATH`` (line 109)
-- `sqlite3.connect()  → `DB_PATH`` (line 94)
+- `sqlite3.connect()  → `DB_PATH`` (line 108)
+- `sqlite3.connect()  → `DB_PATH`` (line 93)
 
 
 ---

@@ -1,8 +1,8 @@
 ---
 tool: bin/generate_configs.py
-sha1: c08fd6db1bac
-mtime_utc: 2026-07-02T21:51:11.643462+00:00
-generated_utc: 2026-07-03T20:00:03.394787+00:00
+sha1: e94b7351cf9d
+mtime_utc: 2026-07-19T03:04:59.579307+00:00
+generated_utc: 2026-07-19T19:29:22.277242+00:00
 private: false
 ---
 
@@ -40,7 +40,7 @@ _(no module docstring — update the source file.)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_memory.embedder_admin (seed_shared_config)`
 
 ---
 

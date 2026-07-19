@@ -1,8 +1,8 @@
 ---
 tool: bin/embed_agent_instructions.py
-sha1: 5b7a93840637
-mtime_utc: 2026-06-28T12:28:55.191643+00:00
-generated_utc: 2026-06-30T22:19:18.224620+00:00
+sha1: f427f18ea7aa
+mtime_utc: 2026-07-19T03:04:59.558781+00:00
+generated_utc: 2026-07-19T19:29:22.179855+00:00
 private: false
 ---
 
@@ -20,7 +20,7 @@ with embed=True. Idempotent: soft-deletes any prior architecture items
 
 ## Entry points
 
-- `async def main()` (line 242)
+- `async def main()` (line 237)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -48,8 +48,8 @@ _(no argparse arguments detected)_
 
 **sqlite**
 
-- `sqlite3.connect()  → `_db_path()`` (line 249)
-- `sqlite3.connect()  → `_db_path()`` (line 290)
+- `sqlite3.connect()  → `_db_path()`` (line 244)
+- `sqlite3.connect()  → `_db_path()`` (line 285)
 
 
 ---

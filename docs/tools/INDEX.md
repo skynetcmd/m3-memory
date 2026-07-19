@@ -1,6 +1,6 @@
 # Tool inventory index
 
-_Generated 2026-07-17T02:40:09.352087+00:00._
+_Generated 2026-07-19T20:02:06.442817+00:00._
 
 Re-run `python bin/gen_tool_inventory.py` after changing any tool.
 Entries whose `sha1` no longer matches the live file need re-validation.
@@ -9,7 +9,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 |---|---|---|
 | bin/_task_runtime.py | _task_runtime — shared runtime setup for m3-memory scheduled-task entrypoints. | yes |
 | [bin/agent_protocol.py](agent_protocol.md) | (no docstring) |  |
-| [bin/ai-audit.sh](ai-audit.sh.md) | (no docstring) |  |
+| [bin/ai-audit.sh](ai-audit_sh.md) | (no docstring) |  |
 | [bin/ai_mechanic.py](ai_mechanic.md) | (no docstring) |  |
 | [bin/augment_memory.py](augment_memory.md) | Offline post-ingest augmentation utilities for memory_items. |  |
 | [bin/auth_utils.py](auth_utils.md) | (no docstring) |  |
@@ -31,7 +31,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/chatlog_status_line.py](chatlog_status_line.md) | chatlog_status_line.py — anomaly-only status line generator. |  |
 | [bin/chatlog_strip_framing_backfill.py](chatlog_strip_framing_backfill.md) | chatlog_strip_framing_backfill.py — one-off backfill that removes harness |  |
 | [bin/check_tool_catalog_drift.py](check_tool_catalog_drift.md) | Single source of truth for the tool-catalog pre-push drift gate. |  |
-| [bin/cleanup_logs.sh](cleanup_logs.sh.md) | (no docstring) |  |
+| [bin/cleanup_logs.sh](cleanup_logs_sh.md) | (no docstring) |  |
 | [bin/cli_kb_browse.py](cli_kb_browse.md) | cli_kb_browse.py — Browse knowledge base entries in rank (importance) order. |  |
 | [bin/cli_knowledge.py](cli_knowledge.md) | (no docstring) |  |
 | [bin/consolidate_beliefs.py](consolidate_beliefs.md) | Autonomous episodic->semantic belief consolidation (knowledge-maintenance P4). |  |
@@ -40,6 +40,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/dashboard_server.py](dashboard_server.md) | M3 Cognitive & Observability Portal. |  |
 | [bin/debug_agent_bridge.py](debug_agent_bridge.md) | Debug Agent MCP Bridge — Autonomous debugging tools. |  |
 | [bin/deep_sync.py](deep_sync.md) | (no docstring) |  |
+| [bin/distill_procedures.py](distill_procedures.md) | Autonomous procedural distillation (tasks → reusable `procedure` memories). |  |
 | [bin/embed_agent_instructions.py](embed_agent_instructions.md) | One-shot script: embed AGENT_INSTRUCTIONS.md sections as searchable memory items. |  |
 | [bin/embed_backfill.py](embed_backfill.md) | embed_backfill.py — fill in missing embeddings for memory_items rows. |  |
 | [bin/embed_server.py](embed_server.md) | Local embedding server — OpenAI-compatible /v1/embeddings endpoint. |  |
@@ -50,6 +51,7 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/enrichment_state.py](enrichment_state.md) | Durable per-group enrichment state for m3_enrich. |  |
 | [bin/fetch_sovereign_assets.py](fetch_sovereign_assets.md) | fetch_sovereign_assets.py — Hydrate the _assets/embedder directory for sovereign setup. |  |
 | [bin/gen_capability_matrix.py](gen_capability_matrix.md) | gen_capability_matrix.py — generate docs/CAPABILITY_MATRIX.md from the MCP catalog. |  |
+| [bin/gen_download_badges.py](gen_download_badges.md) | Generate download-count badge data (PyPI + GitHub) for the README. |  |
 | [bin/gen_features_json.py](gen_features_json.md) | gen_features_json.py — generate docs/features.json (machine-readable capabilities). |  |
 | [bin/gen_mcp_inventory.py](gen_mcp_inventory.md) | gen_mcp_inventory.py — Generates docs/MCP_TOOLS.md from mcp_tool_catalog and mcp_proxy. |  |
 | [bin/gen_star_history.py](gen_star_history.md) | Generate docs/star-history.svg from the GitHub stargazers API. |  |
@@ -88,11 +90,12 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/migrate_flat_memory.py](migrate_flat_memory.md) | migrate_flat_memory.py — one-way ETL from flat-file / SQLite agent memory |  |
 | [bin/migrate_memory.py](migrate_memory.md) | Migration runner for the m3-memory SQLite databases. |  |
 | [bin/migrate_pg.py](migrate_pg.md) | PostgreSQL PRIMARY-store migration runner — the PG analogue of migrate_memory.py. |  |
+| [bin/migrate_warehouse_to_schema.py](migrate_warehouse_to_schema.md) | migrate_warehouse_to_schema.py — consolidate a PostgreSQL warehouse's tables |  |
 | bin/mission_control.py | mission_control.py — Cross-platform pulse dashboard (macOS / Windows / Linux). | yes |
 | [bin/news_fetcher.py](news_fetcher.md) | (no docstring) |  |
 | [bin/pg_setup.py](pg_setup.md) | (no docstring) |  |
 | [bin/pg_sync.py](pg_sync.md) | (no docstring) |  |
-| [bin/pg_sync.sh](pg_sync.sh.md) | (no docstring) |  |
+| [bin/pg_sync.sh](pg_sync_sh.md) | (no docstring) |  |
 | [bin/promote_pipeline.py](promote_pipeline.md) | LLM-judged promotion pipeline: tightened candidate selection + SLM judge. |  |
 | [bin/re_embed_all.py](re_embed_all.md) | (no docstring) |  |
 | [bin/release_orphan_claims.py](release_orphan_claims.md) | release_orphan_claims — safely release stuck in_progress enrichment_groups rows. |  |
@@ -105,8 +108,8 @@ Entries whose `sha1` no longer matches the live file need re-validation.
 | [bin/setup_test_db.py](setup_test_db.md) | Seed a fresh SQLite DB with the full m3-memory schema for test isolation. |  |
 | [bin/slm_intent.py](slm_intent.md) | Small-Language-Model intent classifier with named-profile configs. |  |
 | [bin/split_chatlog_from_core.py](split_chatlog_from_core.md) | split_chatlog_from_core — move chat_log rows out of the CORE memory DB into |  |
-| [bin/start_mcp_proxy.sh](start_mcp_proxy.sh.md) | start_mcp_proxy.sh — Launch the MCP Tool Execution Proxy on localhost:9000 |  |
-| [bin/statusline-command.sh](statusline-command.sh.md) | (no docstring) |  |
+| [bin/start_mcp_proxy.sh](start_mcp_proxy_sh.md) | start_mcp_proxy.sh — Launch the MCP Tool Execution Proxy on localhost:9000 |  |
+| [bin/statusline-command.sh](statusline-command_sh.md) | (no docstring) |  |
 | [bin/sync_all.py](sync_all.md) | sync_all.py — Hourly sync runner (SQLite <-> PostgreSQL). |  |
 | [bin/temporal_utils.py](temporal_utils.md) | Enhanced temporal resolution utility for m3-memory. |  |
 | [bin/test_bulk_parity.py](test_bulk_parity.md) | Real integration tests for memory_write_bulk_impl. |  |

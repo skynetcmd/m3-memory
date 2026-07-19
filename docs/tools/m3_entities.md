@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_entities.py
-sha1: 2c8df28439ae
-mtime_utc: 2026-07-02T21:51:11.647462+00:00
-generated_utc: 2026-07-03T20:00:03.590168+00:00
+sha1: 4b7d6382b7a6
+mtime_utc: 2026-07-19T03:04:59.598969+00:00
+generated_utc: 2026-07-19T19:29:22.505135+00:00
 private: false
 ---
 
@@ -51,7 +51,7 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 ## Entry points
 
-- `def main()` (line 896)
+- `def main()` (line 903)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -104,12 +104,8 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 
 **http**
 
-- `httpx.AsyncClient()` (line 467)
-- `httpx.AsyncClient()` (line 590)
-
-**sqlite**
-
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 398)
+- `httpx.AsyncClient()` (line 479)
+- `httpx.AsyncClient()` (line 591)
 
 
 ---
@@ -117,6 +113,8 @@ Override via --entity-vocab-yaml or M3_ENTITY_VOCAB_YAML.
 ## Notable external imports
 
 - `httpx`
+- `memory.backends (active_backend)`
+- `memory.backends (dialect)`
 
 ---
 

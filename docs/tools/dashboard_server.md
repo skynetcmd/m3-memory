@@ -1,8 +1,8 @@
 ---
 tool: bin/dashboard_server.py
-sha1: 4f3afb2ee8ac
-mtime_utc: 2026-07-02T21:51:11.638834+00:00
-generated_utc: 2026-07-03T20:00:03.253887+00:00
+sha1: 87713558dd6c
+mtime_utc: 2026-07-19T18:30:29.306717+00:00
+generated_utc: 2026-07-19T19:29:22.162352+00:00
 private: false
 ---
 
@@ -63,7 +63,14 @@ you intend to launch the server with (typically ``.venv``).
 
 ## CLI flags / arguments
 
-_(no argparse arguments detected)_
+| Flag(s) | Help | Default | Default behavior | Type/Action | Impact when set |
+|---|---|---|---|---|---|
+| `--host` | Bind address (default 127.0.0.1). | None |  | str |  |
+| `--port` | TCP port (default 8088). | None |  | int |  |
+| `--foreground` | Run the server in THIS process (used by the detached child and the boot task). Default launches detached. | `False` |  | store_true |  |
+| `--stop` | Stop a running dashboard. | `False` |  | store_true |  |
+| `--status` | Report dashboard status. | `False` |  | store_true |  |
+| `--log-file` | argparse.SUPPRESS | None |  | str |  |
 
 ---
 
@@ -77,8 +84,11 @@ _(no argparse arguments detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
+- `_task_runtime`
+- `_task_runtime (no_window_kwargs)`
 - `chatlog_config (DEFAULT_DB_PATH)`
 - `chatlog_config (resolve_config)`
+- `m3_halt`
 - `m3_sdk (active_database)`
 - `m3_sdk (resolve_db_path)`
 - `memory_core (memory_delete_impl)`
@@ -91,28 +101,27 @@ _(no argparse arguments detected)_
 
 **subprocess**
 
-- `subprocess.Popen()  → `cmd`` (line 1318)
-
-**sqlite**
-
-- `sqlite3.connect()  → `chatlog_db`` (line 287)
-- `sqlite3.connect()  → `files_db`` (line 296)
-- `sqlite3.connect()  → `main_db`` (line 260)
-- `sqlite3.connect()  → `main_db`` (line 282)
-- `sqlite3.connect()  → `selected_db_path`` (line 487)
-- `sqlite3.connect()  → `selected_db_path`` (line 660)
+- `subprocess.Popen()  → `[exe, script, '--foreground']`` (line 2305)
+- `subprocess.Popen()  → `[sys.executable, script, '--foreground']`` (line 2315)
+- `subprocess.Popen()  → `cmd`` (line 2028)
+- `subprocess.run()  → `['powershell', '-NoProfile', '-Command', ps]`` (line 2185)
+- `subprocess.run()  → `['taskkill', '/F', '/PID', str(pid)]`` (line 2220)
 
 
 ---
 
 ## Notable external imports
 
-- `dashboard.queue_stats (collect_pipeline_stats, collect_governor)`
-- `dashboard.templates (HEADER_HTML, STYLE_CSS, INDEX_HTML, BROWSE_HTML, AUDIT_HTML)`
+- `dashboard.health (_backend_display)`
+- `dashboard.health (collect_health)`
+- `dashboard.queue_stats (_entity_backlog_count)`
+- `dashboard.queue_stats (collect_governor, collect_pipeline_stats)`
+- `dashboard.templates (AUDIT_HTML, BROWSE_HTML, HEADER_HTML, INDEX_HTML, STYLE_CSS)`
 - `difflib`
 - `fastapi (FastAPI, Form, HTTPException, Request)`
 - `fastapi.responses (HTMLResponse, JSONResponse, StreamingResponse)`
 - `files_memory.search (files_search)`
+- `memory.backends (active_backend)`
 - `memory.config (FILES_DB_PATH)`
 - `memory.db (_db)`
 - `memory.db (_record_history)`

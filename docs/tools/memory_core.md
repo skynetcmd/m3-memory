@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_core.py
-sha1: 7abb6619b66c
-mtime_utc: 2026-07-17T02:08:18.835123+00:00
-generated_utc: 2026-07-17T02:18:40.746457+00:00
+sha1: 7f79b0bbaed4
+mtime_utc: 2026-07-19T03:04:59.623712+00:00
+generated_utc: 2026-07-19T19:29:22.621980+00:00
 private: false
 ---
 
@@ -98,7 +98,7 @@ _(no subprocess / http / sqlite calls detected)_
 ## Notable external imports
 
 - `importlib`
-- `memory.backends (active_backend)`
+- `memory.backends (dialect)`
 - `memory.config (FACT_ENRICH_CONCURRENCY)`
 - `memory.db (ensure_pinned_column)`
 - `memory.orchestration (TASK_STATE_TRANSITIONS, TERMINAL_TASK_STATES, VALID_AGENT_STATUSES, VALID_TASK_STATES, _agent_exists, _validate_task_transition, agent_get_impl, agent_heartbeat_impl, agent_list_impl, agent_offline_impl, agent_register_impl, agent_set_trust_impl, notifications_ack_all_impl, notifications_ack_impl, notifications_poll_impl, notify_impl, task_assign_impl, task_create_impl, task_delete_impl, task_get_impl, task_list_impl, task_set_result_impl, task_tree_impl, task_update_impl)`

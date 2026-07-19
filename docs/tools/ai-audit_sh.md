@@ -1,12 +1,12 @@
 ---
-tool: bin/memory_bridge.py
-sha1: 0782f1676729
-mtime_utc: 2026-07-19T03:04:59.622394+00:00
-generated_utc: 2026-07-19T19:29:22.593740+00:00
+tool: bin/ai-audit.sh
+sha1: b74f049e93d8
+mtime_utc: 2026-07-19T03:04:59.531110+00:00
+generated_utc: 2026-07-19T20:02:05.715964+00:00
 private: false
 ---
 
-# bin/memory_bridge.py
+# bin/ai-audit.sh
 
 ## Purpose
 
@@ -16,7 +16,7 @@ _(no module docstring — update the source file.)_
 
 ## Entry points
 
-- `if __name__ == "__main__"` guard
+- Bash execution
 
 ---
 
@@ -28,24 +28,13 @@ _(no argparse arguments detected)_
 
 ## Environment variables read
 
-- `M3_HTTP_HOST`
-- `M3_HTTP_PATH`
-- `M3_HTTP_PORT`
-- `M3_PATH_BIN`
-- `M3_TOOLS_LAZY`
-- `M3_TRANSPORT`
+_(none detected)_
 
 ---
 
 ## Calls INTO this repo (intra-repo imports)
 
-- `m3_memory.installer (load_config)`
-- `m3_sdk (active_database)`
-- `mcp_tool_catalog`
-- `memory_core`
-- `tool_domains`
-- `tool_loader`
-- `version_drift (check_and_record)`
+_(none detected)_
 
 ---
 
@@ -57,7 +46,7 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `mcp.server.fastmcp (FastMCP)`
+_(only stdlib)_
 
 ---
 

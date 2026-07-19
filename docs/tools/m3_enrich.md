@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_enrich.py
-sha1: cc8a31586ba3
-mtime_utc: 2026-07-02T21:51:11.646462+00:00
-generated_utc: 2026-07-03T20:00:03.522212+00:00
+sha1: f643a9c8215b
+mtime_utc: 2026-07-19T03:04:59.595902+00:00
+generated_utc: 2026-07-19T19:29:22.432565+00:00
 private: false
 ---
 
@@ -45,7 +45,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 ## Entry points
 
-- `def main()` (line 916)
+- `def main()` (line 976)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -119,12 +119,10 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `auth_utils (get_api_key)`
 - `enrichment_state`
-- `m3_sdk (get_m3_root)`
 - `memory_core`
 - `run_observer`
 - `run_reflector`
-- `slm_intent (Profile, _parse_profile, load_profile)`
-- `slm_intent (invalidate_cache)`
+- `slm_intent (Profile)`
 - `sqlite_pragmas (apply_pragmas)`
 - `unified_ai (async_client_for_profile)`
 
@@ -134,9 +132,7 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 
 **sqlite**
 
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 497)
-- `sqlite3.connect()  → `f'file:{db_path}?mode=ro'`` (line 615)
-- `sqlite3.connect()  → `str(db_path)`` (line 231)
+- `sqlite3.connect()  → `str(db_path)`` (line 182)
 
 
 ---
@@ -144,10 +140,12 @@ Status: Phase D user-facing CLI. Pairs with bin/run_observer.py + bin/run_reflec
 ## Notable external imports
 
 - `enrich (ALWAYS_SKIP_TYPES)`
-- `enrich.eligibility (_query_eligible_groups, _load_conv_list)`
-- `enrich.prep (_today, _resolve_db, _load_profile_with_path, _ensure_migration_025, _backup_db)`
-- `enrich.rate_limit (_estimate_cost_wall, _classify_observer_error, _is_rate_limit_failure, _RateLimitCascade)`
-- `enrich.report (_print_plan_body, _print_dry_run, _print_run_summary)`
+- `enrich.eligibility (_load_conv_list, _query_eligible_groups)`
+- `enrich.prep (_backup_db, _ensure_migration_025, _load_profile_with_path, _resolve_db, _today)`
+- `enrich.rate_limit (_classify_observer_error, _estimate_cost_wall, _RateLimitCascade)`
+- `enrich.report (_print_dry_run, _print_run_summary)`
+- `memory.backends (active_backend)`
+- `memory.backends.postgres_backend (_make_compat_cursor_factory)`
 
 ---
 

@@ -1,8 +1,8 @@
 ---
 tool: bin/weekly_auditor.py
-sha1: 5dbde5d0a8d3
-mtime_utc: 2026-07-17T02:13:20.398105+00:00
-generated_utc: 2026-07-17T02:18:40.947012+00:00
+sha1: f0a3730740da
+mtime_utc: 2026-07-19T17:58:00.537587+00:00
+generated_utc: 2026-07-19T19:29:23.041651+00:00
 private: false
 ---
 
@@ -25,7 +25,7 @@ Use --no-memory to skip the memory write step.
 
 ## Entry points
 
-- `def main()` (line 356)
+- `def main()` (line 425)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -51,6 +51,7 @@ Use --no-memory to skip the memory write step.
 - `_task_runtime (no_window_kwargs)`
 - `m3_sdk (add_database_arg, resolve_db_path)`
 - `memory_bridge (memory_write)`
+- `memory_core`
 
 ---
 
@@ -58,13 +59,9 @@ Use --no-memory to skip the memory write step.
 
 **subprocess**
 
-- `subprocess.check_call()  → `[sys.executable, gen_script]`` (line 276)
-- `subprocess.check_call()  → `[sys.executable, graph_script]`` (line 293)
-- `subprocess.check_output()  → `cmd`` (line 226)
-
-**sqlite**
-
-- `sqlite3.connect()  → `resolve_db_path(None)`` (line 69)
+- `subprocess.check_call()  → `[sys.executable, gen_script]`` (line 300)
+- `subprocess.check_call()  → `[sys.executable, graph_script]`` (line 317)
+- `subprocess.check_output()  → `cmd`` (line 250)
 
 
 ---
@@ -73,6 +70,7 @@ Use --no-memory to skip the memory write step.
 
 - `fpdf (FPDF)`
 - `fpdf.enums (XPos, YPos)`
+- `memory.backends (dialect)`
 
 ---
 

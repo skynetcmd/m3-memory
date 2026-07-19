@@ -1,8 +1,8 @@
 ---
 tool: bin/m3_cognitive_loop.py
-sha1: a58a527bedba
-mtime_utc: 2026-07-03T15:14:29.121741+00:00
-generated_utc: 2026-07-03T20:00:03.508085+00:00
+sha1: 06d6ef9c07fd
+mtime_utc: 2026-07-19T18:05:57.566327+00:00
+generated_utc: 2026-07-19T19:29:22.401601+00:00
 private: false
 ---
 
@@ -30,7 +30,7 @@ for m3_enrich and m3_entities.
 
 ## Entry points
 
-- `def main()` (line 786)
+- `def main()` (line 1115)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -43,7 +43,7 @@ for m3_enrich and m3_entities.
 | `--background` | Run in background (fire and forget) | `False` |  | store_true |  |
 | `--log-file` | Append logging to this file (scheduled-task / service mode). Survives the Windows pythonw re-exec. | None |  | str |  |
 | `--concurrency` | SLM concurrency (default: 2) | `2` |  | int |  |
-| `--limit-per-pass` | Max groups/rows per heavy-LLM pass (entity extraction, enrichment, observation drain). Default 2: small enough that one pass is a few-second GPU burst (the governor is only re-checked BETWEEN passes, not within a batch — a 50-item pass once pinned the GPU for ~17 min), large enough that an idle host drains the backlog at a useful rate instead of one item per cycle. Under THROTTLED load this is shrunk to M3_GOVERNOR_THROTTLED_LIMIT (default 1); when idle the loop also re-ticks immediately if a backlog remains (see the backlog-aware wait below) rather than sleeping the full --interval. Embedding is a separate scheduled task (ChatlogEmbedSweep) and is unaffected. | `2` |  | int |  |
+| `--limit-per-pass` | Max groups/rows per heavy-LLM pass (entity extraction, enrichment, observation drain). Default 4 (override with the M3_LIMIT_PER_PASS env var — e.g. set it higher to drain a large catch-up backlog faster on an idle box, WITHOUT editing the flag in a scheduled task). Small enough that one pass is a few-second GPU burst (the governor is only re-checked BETWEEN passes, not within a batch — a 50-item pass once pinned the GPU for ~17 min, so 4 stays ~10x under that). Under THROTTLED load this is shrunk to M3_GOVERNOR_THROTTLED_LIMIT (default 1); when idle the loop also re-ticks immediately if a backlog remains (see the backlog-aware wait below) rather than sleeping the full --interval. Embedding is a separate scheduled task (ChatlogEmbedSweep) and is unaffected. | `max(1, int(os.environ.get('M3_LIMIT_PER_PASS', '4')))` |  | int |  |
 | `--database` | Core Memory DB path (Env: M3_DATABASE) | None |  | str |  |
 | `--chatlog-db` | Chatlog DB path (Env: CHATLOG_DB_PATH) | None |  | str |  |
 | `--profile-entities` | Profile for entities | `entities_local_qwen` |  | str |  |
@@ -58,11 +58,21 @@ for m3_enrich and m3_entities.
 | `--consolidate-threshold` | Min same-type group size before consolidating (default: 50) | `50` |  | int |  |
 | `--consolidate-stale-days` | Only consolidate items older than N days (default: 7) | `7` |  | int |  |
 | `--consolidate-source-type` | Episodic source memory type to roll up (default: observation) | `observation` |  | str |  |
+| `--skip-distill` | Skip the procedural-distillation pass | `False` |  | store_true |  |
+| `--distill-threshold` | Min completed tasks before distilling (default: 1) | `1` |  | int |  |
+| `--distill-stale-days` | Only distill tasks completed > N days ago (default: 3) | `3` |  | int |  |
+| `--distill-max-procedures` | Max procedures written per distillation run (default: 20) | `20` |  | int |  |
 | `--skip-chatlog-prune` | Skip the chatlog noise-prune pass | `False` |  | store_true |  |
 | `--chatlog-prune-threshold` | Min aged prune-eligible chat_log rows before a sweep (default: 2000) | `2000` |  | int |  |
 | `--chatlog-prune-fresh-days` | Keep noise newer than N days untouched (default: 14) | `14.0` |  | float |  |
 | `--chatlog-prune-days` | Soft-delete aged noise older than N days (default: 45) | `45.0` |  | float |  |
 | `--chatlog-prune-max-actions` | Max decay+prune writes per cycle (default: 5000; 0 = no cap). Caps one pass so a backlog drains across cycles instead of blocking the heartbeat. | `5000` |  | int |  |
+| `--skip-sync` | Skip the warehouse-sync pass | `False` |  | store_true |  |
+| `--sync-min-interval-s` | Min seconds between warehouse syncs in-loop (default: 3600) | `3600.0` |  | float |  |
+| `--skip-maintenance` | Skip the memory-maintenance (decay/prune) pass | `False` |  | store_true |  |
+| `--maintenance-min-interval-s` | Min seconds between maintenance passes (default: 3600) | `3600.0` |  | float |  |
+| `--skip-audit` | Skip the weekly-audit pass | `False` |  | store_true |  |
+| `--audit-min-interval-s` | Min seconds between audit passes (default: 604800 = 7d) | `7 * 86400.0` |  | float |  |
 
 ---
 
@@ -75,6 +85,7 @@ for m3_enrich and m3_entities.
 - `M3_EMBED_MODEL`
 - `M3_EMBED_URL`
 - `M3_GOVERNOR_THROTTLED_LIMIT`
+- `M3_LIMIT_PER_PASS`
 
 ---
 
@@ -83,12 +94,18 @@ for m3_enrich and m3_entities.
 - `chatlog_config`
 - `chatlog_prune`
 - `consolidate_beliefs`
+- `distill_procedures`
 - `embed_backfill`
 - `m3_enrich`
 - `m3_entities`
-- `m3_sdk (M3Context, ensure_governor_config, get_governor_pacing, resolve_db_path)`
+- `m3_halt`
+- `m3_sdk (M3Context, ensure_governor_config, get_governor_pacing, get_m3_config_root, resolve_db_path)`
+- `memory_core`
+- `memory_maintenance`
 - `slm_intent (load_profile)`
 - `sqlite_pragmas (apply_pragmas, profile_for_db)`
+- `sync_all`
+- `weekly_auditor`
 
 ---
 
@@ -96,14 +113,11 @@ for m3_enrich and m3_entities.
 
 **subprocess**
 
-- `subprocess.Popen()  → `argv`` (line 60)
+- `subprocess.Popen()  → `argv`` (line 73)
 
 **sqlite**
 
-- `sqlite3.connect()  → `db_path`` (line 472)
-- `sqlite3.connect()  → `db_path`` (line 511)
-- `sqlite3.connect()  → `db_path`` (line 536)
-- `sqlite3.connect()  → `path`` (line 419)
+- `sqlite3.connect()  → `path`` (line 556)
 
 
 ---
@@ -112,6 +126,11 @@ for m3_enrich and m3_entities.
 
 - `atexit`
 - `ctypes`
+- `memory.backends (active_backend)`
+- `memory.backends (active_backend, chatlog_table)`
+- `memory.backends (chatlog_table, dialect)`
+- `memory.backends (dialect)`
+- `memory.embed (recover_if_fallback_healthy)`
 - `memory.enrich (_auto_classify)`
 - `types (SimpleNamespace)`
 
@@ -119,7 +138,7 @@ for m3_enrich and m3_entities.
 
 ## File dependencies (repo paths referenced)
 
-_(none detected)_
+- `.loop_pass_runs.json`
 
 ---
 

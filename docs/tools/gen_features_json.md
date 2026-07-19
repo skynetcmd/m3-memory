@@ -1,8 +1,8 @@
 ---
 tool: bin/gen_features_json.py
-sha1: e1cdcd87128a
-mtime_utc: 2026-07-02T21:51:11.642462+00:00
-generated_utc: 2026-07-03T20:00:03.365750+00:00
+sha1: 13693a80b2ba
+mtime_utc: 2026-07-19T03:04:59.576969+00:00
+generated_utc: 2026-07-19T19:29:22.247087+00:00
 private: false
 ---
 
@@ -68,8 +68,11 @@ _(only stdlib)_
 - `MCP_CATALOG.json`
 - `benchmarks/longmemeval/LME-S_Benchmarking_Report.md`
 - `docs/CAPABILITY_MATRIX.md`
+- `docs/integrations/LANGCHAIN.md`
 - `docs/tools/MCP_CATALOG.json`
 - `features.json`
+- `m3_memory/integrations/crewai/README.md`
+- `m3_memory/integrations/pydantic_ai/README.md`
 
 ---
 

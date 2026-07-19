@@ -804,7 +804,16 @@ def main() -> None:
             src.name in PRIVATE
             or any(rel.startswith(p) for p in PRIVATE_PATH_PREFIXES)
         )
-        out_path = OUT_DIR / (src.stem + ".md")
+        # Doc filename from the stem. A .py and a non-.py source that share a
+        # stem (e.g. pg_sync.py + pg_sync.sh) would BOTH map to <stem>.md — they
+        # then clobber each other every run and the survivor's generated_utc
+        # churns forever (a non-reproducible-output footgun). Disambiguate: .py
+        # keeps <stem>.md (the common case, no existing docs renamed); any other
+        # extension gets <stem>_<ext>.md so each source has its own stable doc.
+        if src.suffix == ".py":
+            out_path = OUT_DIR / (src.stem + ".md")
+        else:
+            out_path = OUT_DIR / f"{src.stem}_{src.suffix.lstrip('.')}.md"
 
         # Preserve hand-curated flag columns from the prior file.
         flag_overrides = parse_existing_flag_overrides(out_path)
@@ -882,8 +891,14 @@ def main() -> None:
         index_entries.append((rel, doc.split("\n", 1)[0] or "(no docstring)", private))
         print(f"wrote {out_path.relative_to(BASE_DIR)}")
 
+    # The "_Generated <ts>._" stamp is a PLACEHOLDER while we build the body,
+    # then resolved below: if the body is otherwise unchanged from the committed
+    # INDEX.md, we KEEP the prior timestamp so a no-op regen produces NO diff
+    # (the timestamp otherwise churned every run — a non-reproducible-output
+    # footgun). Mirrors the per-tool docs' preserve-when-unchanged behavior.
+    _GEN_STAMP = "__M3_INDEX_GENERATED_STAMP__"
     idx_lines = ["# Tool inventory index", ""]
-    idx_lines.append(f"_Generated {datetime.now(timezone.utc).isoformat()}._")
+    idx_lines.append(f"_Generated {_GEN_STAMP}._")
     idx_lines.append("")
     idx_lines.append("Re-run `python bin/gen_tool_inventory.py` after changing any tool.")
     idx_lines.append("Entries whose `sha1` no longer matches the live file need re-validation.")
@@ -891,14 +906,33 @@ def main() -> None:
     idx_lines.append("| Tool | Summary | Private |")
     idx_lines.append("|---|---|---|")
     for rel, summary, private in sorted(index_entries):
-        name = rel.split("/")[-1].replace(".py", "")
+        # Doc-name derivation MUST mirror out_path above: .py → <stem>, any other
+        # extension → <stem>_<ext> (so a colliding .sh links to <stem>_sh.md).
+        fname = rel.split("/")[-1]
+        stem, _, ext = fname.rpartition(".")
+        name = stem if ext == "py" else f"{stem}_{ext}"
         summary_clean = summary.replace("|", "\\|")[:120]
         # Private tools have no per-tool doc (skipped above), so don't emit a
         # link that would 404 — list the path as plain text, still flagged.
         cell = rel if private else f"[{rel}]({name}.md)"
         idx_lines.append(f"| {cell} | {summary_clean} | {'yes' if private else ''} |")
-    (OUT_DIR / "INDEX.md").write_text("\n".join(idx_lines) + "\n", encoding="utf-8")
-    print(f"wrote {(OUT_DIR / 'INDEX.md').relative_to(BASE_DIR)}")
+    new_body = "\n".join(idx_lines) + "\n"
+
+    idx_path = OUT_DIR / "INDEX.md"
+    now_stamp = datetime.now(timezone.utc).isoformat()
+    stamp = now_stamp
+    if idx_path.exists():
+        # Compare the committed INDEX against the new body with BOTH timestamps
+        # normalized to the placeholder — if they match, the only change would be
+        # the stamp, so reuse the prior one (a true no-op regen).
+        prior = idx_path.read_text(encoding="utf-8")
+        prior_norm = re.sub(r"_Generated .*?\._", f"_Generated {_GEN_STAMP}._", prior, count=1)
+        if prior_norm == new_body:
+            m = re.search(r"_Generated (.*?)\._", prior)
+            if m:
+                stamp = m.group(1)
+    idx_path.write_text(new_body.replace(_GEN_STAMP, stamp), encoding="utf-8")
+    print(f"wrote {idx_path.relative_to(BASE_DIR)}")
 
     if untracked_skipped:
         print(f"skipped {len(untracked_skipped)} untracked file(s) "

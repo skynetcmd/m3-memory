@@ -1,8 +1,8 @@
 ---
 tool: bin/memory_doctor.py
-sha1: b238f6a7abc6
-mtime_utc: 2026-07-02T01:21:24.711174+00:00
-generated_utc: 2026-07-03T20:00:03.697874+00:00
+sha1: 9c0149b72926
+mtime_utc: 2026-07-19T15:07:24.085774+00:00
+generated_utc: 2026-07-19T19:29:22.636880+00:00
 private: false
 ---
 
@@ -46,6 +46,10 @@ tested in isolation.
 | `--skip-oxidation` | Skip the m3_core_rs native-extension status report. | `False` |  | store_true |  |
 | `--skip-governor` | Skip the governor scheduled-task migration check. | `False` |  | store_true |  |
 | `--skip-schedule` | Skip the dangling scheduled-task interpreter check. | `False` |  | store_true |  |
+| `--skip-shared-embedder` | Skip the shared-embedder-mode check (config + server + keep-alive task). | `False` |  | store_true |  |
+| `--skip-plugin` | Skip the Claude Code plugin version/enabled check. | `False` |  | store_true |  |
+| `--skip-agent-paths` | Skip the cross-agent dead-path check (Gemini/OpenCode/Hermes/...). | `False` |  | store_true |  |
+| `--skip-dashboard` | Skip the web-dashboard liveness check (registry + port probe). | `False` |  | store_true |  |
 | `--verbose` | Show the full detail (DB-repair steps + each probe's expanded report + model-load logs). Default is a compact one-line-per-check summary of high-yield verdicts. | `False` |  | store_true |  |
 | `--fix` | Run quick-repair mode to auto-fix common deployment issues. | `False` |  | store_true |  |
 | `--dry-run` | Use with --fix to simulate repair steps without making changes. | `False` |  | store_true |  |
@@ -73,12 +77,16 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
+- `doctor (agent_paths_probe)`
 - `doctor (cascade_probe)`
+- `doctor (dashboard_probe)`
 - `doctor (db_repair)`
 - `doctor (embed_server_probe)`
 - `doctor (governor_probe)`
 - `doctor (oxidation_probe)`
+- `doctor (plugin_version_probe)`
 - `doctor (schedule_probe)`
+- `doctor (shared_embedder_probe)`
 - `memory.doctor (memory_doctor_fix_impl)`
 
 ---

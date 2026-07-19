@@ -1,8 +1,8 @@
 ---
 tool: bin/release_orphan_claims.py
-sha1: 0c4ed0a000a6
-mtime_utc: 2026-05-04T21:54:08.368425+00:00
-generated_utc: 2026-05-04T22:24:29.571008+00:00
+sha1: c740f32763df
+mtime_utc: 2026-07-19T03:04:59.630082+00:00
+generated_utc: 2026-07-19T19:29:22.824704+00:00
 private: false
 ---
 
@@ -47,7 +47,7 @@ Usage:
 
 ## Entry points
 
-- `def main()` (line 48)
+- `def main()` (line 47)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -74,22 +74,20 @@ _(none detected)_
 
 ## Calls INTO this repo (intra-repo imports)
 
-_(none detected)_
+- `m3_sdk (active_database)`
+- `memory_core`
 
 ---
 
 ## Calls OUT (external side-channels)
 
-**sqlite**
-
-- `sqlite3.connect()  → `db`` (line 78)
-
+_(no subprocess / http / sqlite calls detected)_
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `memory.backends (dialect)`
 
 ---
 

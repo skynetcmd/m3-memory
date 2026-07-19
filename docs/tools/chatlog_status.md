@@ -1,8 +1,8 @@
 ---
 tool: bin/chatlog_status.py
-sha1: 7c7c484086e9
-mtime_utc: 2026-06-13T11:52:16.549729+00:00
-generated_utc: 2026-06-19T20:00:03.798500+00:00
+sha1: ebce6767fd62
+mtime_utc: 2026-07-19T03:04:59.546388+00:00
+generated_utc: 2026-07-19T19:29:22.055812+00:00
 private: false
 ---
 
@@ -23,7 +23,7 @@ Cold call <50ms (no full table scans).
 
 ## Entry points
 
-- `def main()` (line 746)
+- `def main()` (line 830)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -56,16 +56,15 @@ Cold call <50ms (no full table scans).
 
 **subprocess**
 
-- `subprocess.run()  → `cmd`` (line 482)
+- `subprocess.run()  → `cmd`` (line 568)
 
 **sqlite**
 
-- `sqlite3.connect()  → `chatlog_db`` (line 80)
-- `sqlite3.connect()  → `db`` (line 150)
-- `sqlite3.connect()  → `files_db`` (line 112)
-- `sqlite3.connect()  → `main_db`` (line 309)
-- `sqlite3.connect()  → `main_db`` (line 326)
-- `sqlite3.connect()  → `main_db`` (line 66)
+- `sqlite3.connect()  → `chatlog_db`` (line 93)
+- `sqlite3.connect()  → `files_db`` (line 125)
+- `sqlite3.connect()  → `main_db`` (line 412)
+- `sqlite3.connect()  → `main_db`` (line 79)
+- `sqlite3.connect()  → `uri`` (line 201)
 
 
 ---
@@ -73,6 +72,7 @@ Cold call <50ms (no full table scans).
 ## Notable external imports
 
 - `memory (doctor)`
+- `memory.backends (resolve_backend_name)`
 - `memory.config (FILES_DB_PATH)`
 - `msvcrt`
 - `select`

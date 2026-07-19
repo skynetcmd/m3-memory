@@ -1,8 +1,8 @@
 ---
 tool: bin/sync_all.py
-sha1: aa3d8ff829bf
-mtime_utc: 2026-07-17T02:12:31.907673+00:00
-generated_utc: 2026-07-17T02:18:40.874545+00:00
+sha1: 5b90e0107b3a
+mtime_utc: 2026-07-19T06:36:07.540590+00:00
+generated_utc: 2026-07-19T19:29:22.929632+00:00
 private: false
 ---
 
@@ -31,7 +31,7 @@ DB list:
 
 ## Entry points
 
-- `def main()` (line 160)
+- `def main()` (line 240)
 - `if __name__ == "__main__"` guard
 
 ---
@@ -47,6 +47,7 @@ DB list:
 
 ## Environment variables read
 
+- `M3_CDW_PG_URL`
 - `M3_DATABASE`
 - `M3_PG_SYNC_TIMEOUT`
 - `M3_SYNC_DBS`
@@ -57,9 +58,11 @@ DB list:
 
 - `_task_runtime (add_log_file_arg, setup_task_runtime)`
 - `_task_runtime (no_window_kwargs)`
+- `m3_sdk (M3Context)`
 - `m3_sdk (add_database_arg)`
 - `m3_sdk (getenv_compat)`
 - `m3_sdk (resolve_db_path)`
+- `pg_fdw_sync`
 
 ---
 
@@ -67,14 +70,14 @@ DB list:
 
 **subprocess**
 
-- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 125)
+- `subprocess.run()  → `[str(PY), str(BASE / 'bin' / 'pg_sync.py'), '--db', str(db_path)]`` (line 142)
 
 
 ---
 
 ## Notable external imports
 
-_(only stdlib)_
+- `memory.backends (active_backend)`
 
 ---
 

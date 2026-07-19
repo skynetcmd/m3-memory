@@ -1,8 +1,8 @@
 ---
 tool: bin/mcp_tool_catalog.py
-sha1: cd2dda692a35
-mtime_utc: 2026-07-03T02:12:39.375742+00:00
-generated_utc: 2026-07-03T20:00:03.649040+00:00
+sha1: 8ad93772d245
+mtime_utc: 2026-07-19T03:04:59.603522+00:00
+generated_utc: 2026-07-19T19:29:22.557899+00:00
 private: false
 ---
 
@@ -86,9 +86,9 @@ _(no subprocess / http / sqlite calls detected)_
 
 ## Notable external imports
 
-- `catalog.dispatch (get_tool, default_allowlist, _pop_database, validate_args, _DEFAULT_TOOL_TIMEOUT, _resolve_tool_timeout, ToolTimeout, _run_impl_bounded, execute_tool, execute_tool_structured, _DESTRUCTIVE_ALLOWED, _DISPATCH_EXCLUDE, _spec_by_name, _did_you_mean, _dispatch_one, m3_call_impl, _tool_arg_rows, m3_index_impl, _conversation_search_impl, _memory_verify_impl)`
+- `catalog.dispatch (_DEFAULT_TOOL_TIMEOUT, _DESTRUCTIVE_ALLOWED, _DISPATCH_EXCLUDE, ToolTimeout, _conversation_search_impl, _did_you_mean, _dispatch_one, _memory_verify_impl, _pop_database, _resolve_tool_timeout, _run_impl_bounded, _spec_by_name, _tool_arg_rows, default_allowlist, execute_tool, execute_tool_structured, get_tool, m3_call_impl, m3_index_impl, validate_args)`
 - `catalog.lazy (LazyImpl, LazyModuleProxy)`
-- `catalog.spec (ToolSpec, MAX_CONTENT_SIZE, MAX_QUERY_LENGTH, MAX_K, VALID_MEMORY_TYPES, VALID_ENTITY_TYPES, VALID_ENTITY_PREDICATES, _UUID_RE, _is_full_uuid)`
+- `catalog.spec (_UUID_RE, MAX_CONTENT_SIZE, MAX_K, MAX_QUERY_LENGTH, VALID_ENTITY_PREDICATES, VALID_ENTITY_TYPES, VALID_MEMORY_TYPES, ToolSpec, _is_full_uuid)`
 - `catalog.tools_admin`
 - `catalog.tools_agent`
 - `catalog.tools_chatlog`
@@ -98,7 +98,7 @@ _(no subprocess / http / sqlite calls detected)_
 - `catalog.tools_files`
 - `catalog.tools_memory`
 - `catalog.tools_tasks`
-- `catalog.validators (_memory_write_validator, _memory_delete_validator, _memory_supersede_validator, _memory_search_validator, _variant_gate, _memory_search_gated_validator, _memory_suggest_validator, _memory_search_scored_validator, _memory_update_validator, _memory_set_retention_validator, _gdpr_user_id_validator)`
+- `catalog.validators (_gdpr_user_id_validator, _memory_delete_validator, _memory_search_gated_validator, _memory_search_scored_validator, _memory_search_validator, _memory_set_retention_validator, _memory_suggest_validator, _memory_supersede_validator, _memory_update_validator, _memory_write_validator, _variant_gate)`
 
 ---
 
