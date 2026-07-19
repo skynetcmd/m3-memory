@@ -37,7 +37,24 @@ BASE    = pathlib.Path(__file__).parent.parent.resolve()
 LOG_DIR = BASE / "logs"
 LOG_DIR.mkdir(exist_ok=True)
 LOG_FILE = LOG_DIR / "sync_all.log"
-PY      = BASE / ".venv" / ("Scripts/python.exe" if IS_WIN else "bin/python")
+
+
+def _resolve_python() -> str:
+    """The interpreter to run the pg_sync.py subprocess with. Use the CURRENT
+    interpreter (sys.executable) — it is correct for every install layout: a
+    pipx venv (no in-tree .venv), an editable/dev tree, or a system install.
+    The old hardcoded BASE/.venv guess only existed in a dev checkout and 404'd
+    for pipx users (FileNotFoundError [WinError 2] -> the scheduled sync task
+    failed silently). Fall back to the .venv guess only if sys.executable is
+    somehow unavailable."""
+    exe = sys.executable
+    if exe and pathlib.Path(exe).exists():
+        return exe
+    guess = BASE / ".venv" / ("Scripts/python.exe" if IS_WIN else "bin/python")
+    return str(guess)
+
+
+PY = _resolve_python()
 TARGET_IP = getenv_compat("M3_POSTGRES_SERVER", "POSTGRES_SERVER", getenv_compat("M3_SYNC_TARGET_IP", "SYNC_TARGET_IP", ""))
 
 # Logging is configured in main() via setup_task_runtime so scheduled-task

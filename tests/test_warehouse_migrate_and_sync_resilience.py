@@ -208,3 +208,28 @@ class TestStaleLockRecovery:
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# ── sync_all interpreter resolution (pipx layout regression) ──────────────────
+class TestSyncAllInterpreter:
+    """sync_all runs pg_sync.py as a subprocess; the interpreter must be the
+    CURRENT one (sys.executable), correct for a pipx venv (no in-tree .venv),
+    a dev tree, or a system install. The old hardcoded BASE/.venv guess 404'd
+    for every pipx user -> the scheduled sync task failed with FileNotFoundError."""
+
+    def test_resolved_python_exists_and_is_current(self):
+        import sys as _sys
+        import pathlib
+        import sync_all
+        assert pathlib.Path(sync_all.PY).exists(), \
+            f"sync_all.PY does not exist: {sync_all.PY}"
+        # In any normal run PY is the current interpreter.
+        assert sync_all.PY == _sys.executable
+
+    def test_no_hardcoded_dot_venv_guess_as_primary(self):
+        # Guard against a regression to the BASE/.venv hardcode: PY must not be a
+        # path under an in-tree '.venv' unless that's genuinely where sys.executable
+        # lives (dev tree). The resolver prefers sys.executable.
+        import sys as _sys
+        import sync_all
+        assert sync_all.PY == _sys.executable
