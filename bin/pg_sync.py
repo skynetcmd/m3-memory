@@ -894,12 +894,62 @@ def _ensure_sync_state_table(sl_cur) -> None:
     )
 
 
+# Staleness ceiling for a lock whose owner PID we can't evaluate (e.g. a legacy
+# row with no PID, or a PID from a since-recycled process on another host). PID
+# liveness handles the common same-host crash immediately; this bounds the rest.
+_SYNC_LOCK_STALE_SECONDS = 3600
+
+
+def _lock_value(now_iso: str) -> str:
+    """The value stored in the lock row: '<iso_timestamp>|<pid>'. The PID lets a
+    crashed sync's lock be reclaimed IMMEDIATELY (the process is gone) instead of
+    waiting out the staleness window. Backward-compatible: a legacy value with no
+    '|pid' just falls back to the timestamp check."""
+    return f"{now_iso}|{os.getpid()}"
+
+
+def _parse_lock_value(raw: str) -> "tuple[str, int | None]":
+    """Split a lock value into (iso_timestamp, pid|None). Tolerates the legacy
+    no-PID form."""
+    ts, _, pid_s = raw.partition("|")
+    try:
+        return ts, (int(pid_s) if pid_s else None)
+    except ValueError:
+        return ts, None
+
+
+def _sync_lock_is_stale(raw: str) -> bool:
+    """True if a held lock can be stolen: its owner PID is dead (immediate
+    recovery from a crashed sync), or — when the PID is unknown/unevaluable — it
+    is older than the staleness ceiling."""
+    ts, pid = _parse_lock_value(raw)
+    if pid is not None:
+        # Same-host crash recovery: if the recorded process is gone, the lock is
+        # abandoned. (A live PID means a sync really is in progress -> not stale.)
+        # NOTE: on a multi-host layout a PID is only meaningful on its own host;
+        # a foreign live PID that happens to match a local process is the rare
+        # case the timestamp ceiling still covers.
+        try:
+            from m3_halt import _pid_is_alive
+            if not _pid_is_alive(pid):
+                return True
+        except Exception:
+            pass  # fall through to the timestamp check
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds()
+        return age >= _SYNC_LOCK_STALE_SECONDS
+    except ValueError:
+        return True  # unparseable timestamp -> treat as stale, don't wedge forever
+
+
 def _acquire_sync_lock(sl_cur) -> bool:
     """Attempts to acquire a global sync lock. Returns True if successful.
 
     A MISSING lock table is "not locked" (create + acquire), NOT "locked" — the
     latter was a footgun that silently skipped every sync on any DB whose
-    sync_state table was never created."""
+    sync_state table was never created. A HELD lock whose owner process has died
+    is reclaimed immediately (PID liveness) rather than blocking for the full
+    staleness window."""
     # Self-heal: a missing table must never read as "held". Create-if-absent
     # BEFORE the lock check so the SELECT can't fail with 'no such table'.
     try:
@@ -911,17 +961,14 @@ def _acquire_sync_lock(sl_cur) -> bool:
         logger.warning(f"Could not ensure sync_state table ({e}); proceeding without lock.")
         return True
     try:
-        # Check if lock exists and is not stale (stale after 1 hour)
         sl_cur.execute("SELECT last_pull_at FROM sync_state WHERE collection_name = 'pg_sync_lock'")
         row = sl_cur.fetchone()
-        if row:
-            last_lock = datetime.fromisoformat(row[0])
-            if (datetime.now(timezone.utc) - last_lock).total_seconds() < 3600:
-                return False
+        if row and row[0] and not _sync_lock_is_stale(row[0]):
+            return False  # a live sync holds it
 
         sl_cur.execute(
             "INSERT OR REPLACE INTO sync_state (collection_name, last_pull_at) VALUES ('pg_sync_lock', ?)",
-            (datetime.now(timezone.utc).isoformat(),)
+            (_lock_value(datetime.now(timezone.utc).isoformat()),)
         )
         return True
     except Exception as e:

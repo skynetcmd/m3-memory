@@ -132,6 +132,79 @@ class TestMigrationPlanner:
         assert "sync_watermarks" in mw._DROP_IF_PRESENT
 
 
+# ── pg_sync stale-lock recovery (PID liveness) ────────────────────────────────
+class TestStaleLockRecovery:
+    """A crashed sync leaves its lock row; the next sync must reclaim it
+    IMMEDIATELY (the owner PID is dead) instead of blocking for the full
+    staleness window."""
+
+    def setup_method(self):
+        import os
+        from datetime import datetime, timedelta, timezone
+        import pg_sync
+        self.P = pg_sync
+        self.os = os
+        self.now = datetime.now(timezone.utc)
+        self._td = timedelta
+
+    def test_live_pid_recent_lock_is_held(self):
+        v = self.P._lock_value(self.now.isoformat())  # this live process
+        assert self.P._sync_lock_is_stale(v) is False
+
+    def test_dead_pid_recent_lock_is_stale_immediately(self):
+        # A recent lock owned by a dead process is reclaimable NOW — no waiting.
+        v = f"{self.now.isoformat()}|999999999"  # implausible PID
+        assert self.P._sync_lock_is_stale(v) is True
+
+    def test_legacy_no_pid_recent_lock_honours_window(self):
+        # Backward-compat: an old-format value without a PID stays held until the
+        # staleness ceiling (can't do liveness without a PID).
+        assert self.P._sync_lock_is_stale(self.now.isoformat()) is False
+
+    def test_legacy_no_pid_old_lock_is_stale(self):
+        old = (self.now - self._td(seconds=self.P._SYNC_LOCK_STALE_SECONDS + 60))
+        assert self.P._sync_lock_is_stale(old.isoformat()) is True
+
+    def test_garbage_timestamp_is_stale_never_wedges(self):
+        assert self.P._sync_lock_is_stale("not-a-date|123") is True
+        assert self.P._sync_lock_is_stale("garbage") is True
+
+    def test_lock_value_roundtrips(self):
+        v = self.P._lock_value("2026-07-19T00:00:00+00:00")
+        ts, pid = self.P._parse_lock_value(v)
+        assert ts == "2026-07-19T00:00:00+00:00"
+        assert pid == self.os.getpid()
+
+    def test_acquire_reclaims_dead_pid_lock(self):
+        # End-to-end against an in-memory sqlite: a dead-PID lock is reclaimed.
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        cur = conn.cursor()
+        self.P._ensure_sync_state_table(cur)
+        # plant a crashed sync's lock (recent, dead PID)
+        cur.execute(
+            "INSERT INTO sync_state (collection_name, last_pull_at) VALUES "
+            "('pg_sync_lock', ?)", (f"{self.now.isoformat()}|999999999",))
+        assert self.P._acquire_sync_lock(cur) is True  # reclaimed
+        # and the row is now stamped with OUR live pid
+        cur.execute("SELECT last_pull_at FROM sync_state WHERE collection_name='pg_sync_lock'")
+        _, pid = self.P._parse_lock_value(cur.fetchone()[0])
+        assert pid == self.os.getpid()
+        conn.close()
+
+    def test_acquire_blocks_on_live_pid_lock(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        cur = conn.cursor()
+        self.P._ensure_sync_state_table(cur)
+        # a lock owned by THIS (live) process, recent -> a second acquire is blocked
+        cur.execute(
+            "INSERT INTO sync_state (collection_name, last_pull_at) VALUES "
+            "('pg_sync_lock', ?)", (self.P._lock_value(self.now.isoformat()),))
+        assert self.P._acquire_sync_lock(cur) is False
+        conn.close()
+
+
 if __name__ == "__main__":
     import pytest
     raise SystemExit(pytest.main([__file__, "-q"]))
