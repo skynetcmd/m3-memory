@@ -20,6 +20,7 @@ for m3_enrich and m3_entities.
 import argparse
 import asyncio
 import atexit
+import json
 import logging
 import os
 import signal
@@ -39,7 +40,13 @@ import chatlog_config
 import m3_enrich
 import m3_entities
 import m3_halt
-from m3_sdk import M3Context, ensure_governor_config, get_governor_pacing, resolve_db_path
+from m3_sdk import (
+    M3Context,
+    ensure_governor_config,
+    get_governor_pacing,
+    get_m3_config_root,
+    resolve_db_path,
+)
 
 # PID file path for single-instance locking (distinct from m3_halt's PID/
 # registry: this enforces one-loop-at-a-time; the registry tracks DB-holders so
@@ -275,6 +282,62 @@ def _entity_work_sql(items_tbl: str, link_tbl: str) -> str:
           AND mie.memory_id IS NULL
         LIMIT 1
     """
+
+
+# ── Per-pass min-interval gate ────────────────────────────────────────────────
+# Some passes are TIME-driven, not backlog-driven: warehouse sync and the weekly
+# audit have no queryable "work queue" — "is there work?" is purely "has enough
+# time elapsed?". These run in the same governor-paced round-robin as the other
+# passes (so they're deferred under load, never a rigid clock), but a min-interval
+# gate keeps them from firing every tick. Run timestamps live in a small JSON file
+# beside .governor_config.json (file-based, like the rest of the loop's state — no
+# DB migration). Cheap-when-not-due is the whole point: a sync that ran 5 min ago
+# is skipped without a network round-trip; an audit that ran yesterday is a no-op.
+def _loop_pass_runs_path() -> str:
+    return os.path.join(get_m3_config_root(), ".loop_pass_runs.json")
+
+
+def _read_pass_runs() -> dict:
+    """Read the {pass_name: iso_timestamp} map. Never raises — a missing/corrupt
+    file means "nothing has run", so every pass reads as due (fail-open, correct
+    for a first run)."""
+    try:
+        with open(_loop_pass_runs_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _record_pass_run(pass_name: str) -> None:
+    """Stamp `pass_name` as having run now. Atomic replace; best-effort (a failed
+    stamp just means the pass may re-run sooner than intended — harmless)."""
+    try:
+        runs = _read_pass_runs()
+        runs[pass_name] = datetime.now(timezone.utc).isoformat()
+        path = _loop_pass_runs_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(runs, f)
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.debug("Could not record pass-run for %s: %s", pass_name, e)
+
+
+def _due(pass_name: str, min_interval_s: float) -> bool:
+    """True if `pass_name` has never run or last ran >= min_interval_s ago.
+    Fail-open: an unparseable timestamp reads as due."""
+    last = _read_pass_runs().get(pass_name)
+    if not last:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last)
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return (datetime.now(timezone.utc) - last_dt).total_seconds() >= min_interval_s
 
 
 def has_entity_work(core_db: Optional[str], chatlog_db: Optional[str]) -> bool:
@@ -756,6 +819,92 @@ async def run_chatlog_prune_pass(args):
         logger.error(f"Chatlog-prune pass error: {type(e).__name__}: {e}")
 
 
+async def run_sync_pass(args):
+    """Warehouse sync (SQLite -> CDW PostgreSQL) — governor-paced, time-gated.
+
+    Delegates to sync_all.run_pg_sync so the loop and the standalone
+    AgentOS_HourlySync task share ONE implementation. Time-driven (delta sync has
+    no queryable backlog), so gated by _due("sync", interval) — a sync that ran
+    recently is skipped without a network round-trip. NOTE: the OS HourlySync task
+    is DELIBERATELY KEPT as a load-independent floor — when the governor HALTs
+    background passes under sustained CPU/RAM pressure this pass is deferred, so a
+    rigid hourly task guarantees the warehouse can't drift stale indefinitely
+    (same reasoning as SecretRotator staying scheduled)."""
+    # sync_all/pg_sync is the SQLite -> CDW warehouse bridge (it opens the local
+    # side as sqlite3). On a PostgreSQL-PRIMARY deployment there is no local
+    # SQLite store to fan out, so this pass is a no-op — skip cleanly (the PG
+    # primary is its own shared store; CDW fan-in doesn't apply). Backend-agnostic
+    # via the same active_backend() seam the other passes use.
+    try:
+        from memory.backends import active_backend
+        if active_backend().name != "sqlite":
+            logger.debug("Sync pass: primary backend is %s (not sqlite) — no local "
+                         "store to sync to CDW. Skipping.", active_backend().name)
+            return
+    except Exception as e:
+        logger.debug("Sync pass: backend probe failed (%s); assuming sqlite.", e)
+    if not _due("sync", args.sync_min_interval_s):
+        logger.debug("Sync not due (ran < %ss ago). Skipping.", args.sync_min_interval_s)
+        return
+    try:
+        import sync_all
+        # Cheap pre-flight: if the warehouse isn't reachable, skip fast (don't
+        # stamp — so we retry next cycle rather than waiting a full interval).
+        if not sync_all.TARGET_IP:
+            logger.debug("Sync pass: no warehouse target configured. Skipping.")
+            return
+        if not sync_all.is_reachable(sync_all.TARGET_IP):
+            logger.info("Sync pass: warehouse %s unreachable — skipping (retry next cycle).",
+                        sync_all.TARGET_IP)
+            return
+        logger.info("Starting warehouse-sync pass...")
+        ok = await asyncio.to_thread(sync_all.run_pg_sync, False)
+        # Stamp only on a completed attempt (reachable + ran) so the interval
+        # gate paces real syncs, not skipped ones.
+        _record_pass_run("sync")
+        logger.info("Warehouse-sync pass complete (ok=%s).", ok)
+    except Exception as e:
+        logger.error(f"Sync pass error: {type(e).__name__}: {e}")
+
+
+async def run_maintenance_pass(args):
+    """Memory maintenance (importance/confidence decay, orphan prune, retention)
+    — governor-paced, time-gated. Delegates to memory_maintenance_impl so the loop
+    and the standalone AgentOS_Maintenance task share ONE implementation. The impl
+    is a no-op when nothing is decay/prune-eligible, so the _due gate is a coarse
+    cadence limiter (avoid rewriting decay every tick), not the work-probe."""
+    if not _due("maintenance", args.maintenance_min_interval_s):
+        logger.debug("Maintenance not due (ran < %ss ago). Skipping.",
+                     args.maintenance_min_interval_s)
+        return
+    try:
+        import memory_maintenance
+        logger.info("Starting memory-maintenance pass...")
+        summary = await asyncio.to_thread(memory_maintenance.memory_maintenance_impl)
+        _record_pass_run("maintenance")
+        logger.info("Memory-maintenance pass complete: %s", summary)
+    except Exception as e:
+        logger.error(f"Maintenance pass error: {type(e).__name__}: {e}")
+
+
+async def run_audit_pass(args):
+    """Weekly audit report — governor-paced, time-gated (~7d). Delegates to
+    weekly_auditor.run_audit so the loop and the standalone AgentOS_WeeklyAuditor
+    task share ONE implementation. Purely time-driven (no backlog), so _due("audit",
+    ~7d) IS the work-probe: a no-op until a week has elapsed."""
+    if not _due("audit", args.audit_min_interval_s):
+        logger.debug("Audit not due (ran < %ss ago). Skipping.", args.audit_min_interval_s)
+        return
+    try:
+        import weekly_auditor
+        logger.info("Starting weekly-audit pass...")
+        result = await asyncio.to_thread(weekly_auditor.run_audit)
+        _record_pass_run("audit")
+        logger.info("Weekly-audit pass complete: %s", result)
+    except Exception as e:
+        logger.error(f"Audit pass error: {type(e).__name__}: {e}")
+
+
 async def main_loop(args):
     """Main execution loop with adaptive backoff and signal awareness."""
     # This daemon is a thin orchestrator: every pass delegates to an in-process
@@ -887,6 +1036,13 @@ async def main_loop(args):
             {"name": "consolidate","skip": args.skip_consolidate,   "gpu": consolidate_local, "sets_limit": False, "run": run_consolidate_pass},
             {"name": "distill",    "skip": args.skip_distill,       "gpu": distill_local,     "sets_limit": False, "run": run_distill_pass},
             {"name": "prune",      "skip": args.skip_chatlog_prune, "gpu": None,              "sets_limit": False, "run": run_chatlog_prune_pass},
+            # Time-driven, non-GPU passes (CPU/RAM-gated like prune). Each is
+            # cheap when not due (interval gate + delta-sync / no-op impl), so
+            # they ride the round-robin without adding steady load. Sync also has
+            # a kept OS-task floor (see run_sync_pass) for when the governor HALTs.
+            {"name": "sync",       "skip": args.skip_sync,          "gpu": None,              "sets_limit": False, "run": run_sync_pass},
+            {"name": "maintenance","skip": args.skip_maintenance,   "gpu": None,              "sets_limit": False, "run": run_maintenance_pass},
+            {"name": "audit",      "skip": args.skip_audit,         "gpu": None,              "sets_limit": False, "run": run_audit_pass},
         ]
         # Round-robin order + idle-aware intensity (see _select_pass_order). When
         # the governor is THROTTLED we treat the host as user-active and run only
@@ -1031,6 +1187,23 @@ def main():
                         help="Max decay+prune writes per cycle (default: 5000; 0 = "
                              "no cap). Caps one pass so a backlog drains across "
                              "cycles instead of blocking the heartbeat.")
+
+    # Time-driven passes (governor-paced, interval-gated). These replace the
+    # standalone AgentOS_HourlySync / _Maintenance / _WeeklyAuditor scheduled
+    # tasks by running them in the round-robin under governor pacing. The OS
+    # HourlySync task is kept as a load-independent floor (see run_sync_pass).
+    parser.add_argument("--skip-sync", action="store_true",
+                        help="Skip the warehouse-sync pass")
+    parser.add_argument("--sync-min-interval-s", type=float, default=3600.0,
+                        help="Min seconds between warehouse syncs in-loop (default: 3600)")
+    parser.add_argument("--skip-maintenance", action="store_true",
+                        help="Skip the memory-maintenance (decay/prune) pass")
+    parser.add_argument("--maintenance-min-interval-s", type=float, default=3600.0,
+                        help="Min seconds between maintenance passes (default: 3600)")
+    parser.add_argument("--skip-audit", action="store_true",
+                        help="Skip the weekly-audit pass")
+    parser.add_argument("--audit-min-interval-s", type=float, default=7 * 86400.0,
+                        help="Min seconds between audit passes (default: 604800 = 7d)")
 
     args = parser.parse_args()
 

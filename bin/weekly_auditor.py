@@ -361,6 +361,48 @@ def write_summary_to_memory(summary_text, week_label):
 
 
 # -- Main ---------------------------------------------------------------------
+def run_audit(write_memory: bool = True) -> dict:
+    """Generate the weekly audit PDF and (optionally) write its summary to memory.
+
+    The audit body, callable in-process so the cognitive loop's audit pass and the
+    standalone AgentOS_WeeklyAuditor task share ONE implementation. Returns a dict
+    with the output path and the section summary. Caller is responsible for any
+    task-runtime setup (lock, log file) — this is the pure work."""
+    week_label = _week_label()
+    pdf = AI_Report()
+    pdf.add_page()
+
+    summary: dict = {}
+
+    section_memory_health(pdf, summary)
+    section_decisions(pdf, summary)
+    section_activity(pdf, summary)
+    section_git(pdf, summary)
+    section_tool_inventory(pdf, summary)
+
+    output_path = os.path.join(
+        REPORTS_DIR, f"Audit_{datetime.now().strftime('%Y_W%V')}.pdf"
+    )
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    pdf.output(output_path)
+    print(f"Weekly Audit saved to: {output_path}")
+
+    if write_memory:
+        summary_text = (
+            f"Weekly Audit Summary -- {week_label}\n\n"
+            f"MEMORY HEALTH:\n{summary.get('memory_health', 'N/A')}\n\n"
+            f"DECISIONS:\n{summary.get('decisions', 'N/A')}\n\n"
+            f"ACTIVITY:\n{summary.get('activity', 'N/A')}\n\n"
+            f"GIT:\n{summary.get('git', 'N/A')}\n\n"
+            f"TOOL INVENTORY:\n{summary.get('tool_inventory', 'N/A')}"
+        )
+        write_summary_to_memory(summary_text, week_label)
+    else:
+        print("--no-memory: skipping memory write.")
+
+    return {"output_path": output_path, "summary": summary, "week_label": week_label}
+
+
 def main():
     parser = argparse.ArgumentParser(description="M3 Max Weekly Audit Report")
     parser.add_argument(
@@ -377,37 +419,7 @@ def main():
     if args.database:
         os.environ["M3_DATABASE"] = args.database
 
-    week_label = _week_label()
-    pdf = AI_Report()
-    pdf.add_page()
-
-    summary = {}
-
-    section_memory_health(pdf, summary)
-    section_decisions(pdf, summary)
-    section_activity(pdf, summary)
-    section_git(pdf, summary)
-    section_tool_inventory(pdf, summary)
-
-    output_path = os.path.join(
-        REPORTS_DIR, f"Audit_{datetime.now().strftime('%Y_W%V')}.pdf"
-    )
-    os.makedirs(REPORTS_DIR, exist_ok=True)
-    pdf.output(output_path)
-    print(f"Weekly Audit saved to: {output_path}")
-
-    if not args.no_memory:
-        summary_text = (
-            f"Weekly Audit Summary -- {week_label}\n\n"
-            f"MEMORY HEALTH:\n{summary.get('memory_health', 'N/A')}\n\n"
-            f"DECISIONS:\n{summary.get('decisions', 'N/A')}\n\n"
-            f"ACTIVITY:\n{summary.get('activity', 'N/A')}\n\n"
-            f"GIT:\n{summary.get('git', 'N/A')}\n\n"
-            f"TOOL INVENTORY:\n{summary.get('tool_inventory', 'N/A')}"
-        )
-        write_summary_to_memory(summary_text, week_label)
-    else:
-        print("--no-memory: skipping memory write.")
+    run_audit(write_memory=not args.no_memory)
 
 
 if __name__ == "__main__":
