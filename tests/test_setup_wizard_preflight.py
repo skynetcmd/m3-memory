@@ -319,6 +319,14 @@ def test_gather_plan_interactive_defaults(monkeypatch):
 
     monkeypatch.setattr(setup_wizard, "_ask_yes_no", mock_ask_yes_no)
     monkeypatch.setattr(setup_wizard, "_ask_choice", mock_ask_choice)
+    # Force the FRESH-install path deterministically: gather takes the upgrade
+    # branch (keep existing native) iff active_embedder_tier reports native, which
+    # is env-dependent (the test host may or may not have the wheel). Mock it to
+    # "no native" so this test asserts the fresh-install default on EVERY host —
+    # otherwise install_gpu_embedder flips between hosts (that env-dependence was a
+    # latent bug the tier-2-default change exposed).
+    import m3_memory.rust_core_install as _rci
+    monkeypatch.setattr(_rci, "active_embedder_tier", lambda: {"native": False})
 
     plan = setup_wizard._gather_plan(detected, args)
 
@@ -329,10 +337,12 @@ def test_gather_plan_interactive_defaults(monkeypatch):
     assert plan.targets.openclaw is True
     assert plan.targets.hermes is True
     assert plan.capture_mode == "both"
-    # F1: the Project Oxidation native wheel is a SAFE attempt (non-fatal,
-    # auto-falls-back to pure-Python), so the interactive default is now ON —
-    # but the source-build last resort stays opt-in (default False).
-    assert plan.install_gpu_embedder is True
+    # The shared tier-2 embedder is the default; the tier-1 native wheel is now
+    # OPT-IN, so a FRESH interactive install defaults the wheel prompt to OFF
+    # (the mock returns each prompt's default). The source-build last resort was
+    # already opt-in. NOTE: this asserts the fresh-install path — on a host that
+    # already has the native wheel, gather keeps it (upgrade branch) instead.
+    assert plan.install_gpu_embedder is False
     assert plan.allow_native_source_build is False
 
 
