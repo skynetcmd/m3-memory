@@ -19,6 +19,34 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.18.1] — 2026-07-18 — Shared tier-2 embedder default, installer polish, single-fire publish
+
+### Changed
+- **Default embedder is now the shared tier-2 server, not the tier-1 native wheel.**
+  `m3 setup` no longer auto-installs the in-process native (Project Oxidation) wheel;
+  `SetupPlan.install_gpu_embedder` defaults to `False` and tier 1 is opt-in via
+  `--install-gpu-embedder` or the interactive prompt. The reason is architectural
+  shareability, not per-call speed: tier 1 lives inside the calling process and can't
+  be shared, so N m3 processes mean N model copies + N GPU contexts, whereas the tier-2
+  server is one model every process reuses. Tier 1 remains supported and still runs
+  ~10–85× faster than the pure-Python fallback for high-volume embed bursts (e.g. bulk
+  directory ingestion) — kept as a documented opt-in.
+
+### Fixed
+- **Installer no longer double-publishes a release to PyPI.** `publish.yml` fired on
+  both `release: published` and the pushed `vX.Y.Z` tag; the loser hit
+  `400 File already exists`. The redundant release trigger is dropped and the publish
+  step uses `skip-existing`, so a release is a single clean run.
+- **`HALT_m3` is cleared on interpreter exit, not only in `run_setup`'s `finally`.**
+  An installer that exits before reaching the `finally` (e.g. a sub-step re-exec) could
+  leave the semaphore raised; an `atexit` handler now guarantees it clears.
+- **The "boot tasks need admin" failure is loud and copy-pasteable.** When scheduled-task
+  registration is denied for lack of privilege, the installer prints a prominent banner
+  with the exact elevated command to finish the repair, instead of failing quietly.
+- **Interactive installs can finish boot-task registration inline via UAC.** On Windows,
+  the wizard offers a `Start-Process -Verb RunAs` elevation to register the on-start tasks
+  without a separate manual step.
+
 ## [2026.7.18.0] — 2026-07-18 — Safe install/upgrade quiescing, RAM-aware governor, storage-backend seam
 
 ### Added
