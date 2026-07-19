@@ -674,7 +674,12 @@ async def get_graph_node(node_id: str, request: Request):
                                 {"dir": "←", "predicate": r["predicate"], "name": r["from_name"] or r["from_entity"]})
     except Exception as e:  # noqa: BLE001
         out["error"] = str(e)
-    return JSONResponse(content=out)
+    # Same no-store rationale as /api/graph: the payload varies by selected_db but
+    # the URL is fixed, so without this the browser could serve a stale node detail
+    # after a DB switch.
+    return JSONResponse(content=out, headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache", "Expires": "0"})
 
 
 @app.get("/health", response_class=HTMLResponse)
@@ -1161,6 +1166,15 @@ async def get_graph(request: Request):
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
 
+    # The graph JSON VARIES by the selected_db cookie, but the URL ("/api/graph")
+    # is constant. Without an explicit no-store, the browser caches the first
+    # response and serves it again after a DB switch + reload — so switching the
+    # DB selector appeared to "do nothing" to the graph even though the backend
+    # returned different data. The /graph WINDOW handler already sets no-store for
+    # this reason; the data endpoint that actually differs was the one missing it.
+    _no_cache = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                 "Pragma": "no-cache", "Expires": "0"}
+
     nodes = []
     links = []
 
@@ -1190,7 +1204,7 @@ async def get_graph(request: Request):
                     })
         except Exception as e:
             print(f"Failed to query files graph: {e}", flush=True)
-        return {"nodes": nodes, "links": links}
+        return JSONResponse({"nodes": nodes, "links": links}, headers=_no_cache)
 
     try:
         from m3_sdk import active_database
@@ -1216,7 +1230,7 @@ async def get_graph(request: Request):
     except Exception as e:
         print(f"Failed to load graph database items: {e}", flush=True)
 
-    return {"nodes": nodes, "links": links}
+    return JSONResponse({"nodes": nodes, "links": links}, headers=_no_cache)
 
 
 @app.get("/api/search", response_class=HTMLResponse)

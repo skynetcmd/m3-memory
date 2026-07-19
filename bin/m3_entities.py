@@ -546,22 +546,41 @@ async def _run_db(
         except Exception:
             pass  # never let queue bookkeeping break the run
 
+    # Batched 'done' bookkeeping. Previously _mark_extracted opened its OWN
+    # mc._db() write transaction PER ROW, back-to-back with the entity write —
+    # two separate write-lock acquisitions per row. Under concurrency, with a
+    # co-reader/writer on the same SQLite file (the MCP server, the dashboard, the
+    # WAL checkpoint), each of those tiny writes could burn the full 30s
+    # busy_timeout waiting for the lock. Across a batch this compounded to
+    # 199-248s per pass (py-spy caught the loop parked in _mark_extracted), so the
+    # loop appeared to "do one burst then go quiet". Fix: collect the processed
+    # ids in memory and flush them in ONE transaction after the gather — N lock
+    # acquisitions become 1. Still best-effort and idempotent (ON CONFLICT).
+    _marks: "list[str]" = []
+
     def _mark_extracted(memory_id: str) -> None:
-        """Record that a turn was PROCESSED (entities emitted OR legitimately
-        empty) so the selection query stops re-feeding it. Without this, a turn
-        that extracts to zero entities leaves no trace (no memory_item_entities
-        row, no failure row) and — because eligibility is "has no entity row" —
-        is re-selected and re-sent to the LLM on EVERY run, burning tokens
-        indefinitely (worst-first, since selection is ORDER BY LENGTH DESC).
-        Marks status='done' in the queue; the selection then skips done rows.
-        Best-effort, backend-aware (mc._db()), same as _enqueue_failure."""
+        """Queue `memory_id` to be marked status='done' at the end of the pass.
+
+        A turn that extracts to zero entities otherwise leaves no durable trace
+        (no memory_item_entities row) and — because eligibility is "has no entity
+        row" — would be re-selected and re-sent to the LLM on every run. Marking
+        it 'done' makes the selection skip it. Deferred to a single batched write
+        (see _flush_marks) to avoid per-row write-lock contention."""
+        _marks.append(memory_id)
+
+    def _flush_marks() -> None:
+        """Write all queued 'done' markers in ONE transaction. Best-effort; a
+        failure here just means some rows may be re-processed next pass (harmless,
+        idempotent) — never break the run over bookkeeping."""
+        if not _marks:
+            return
         try:
             from memory.backends import dialect
             _d = dialect()
             _p = _d.param()
             with mc._db() as qc:
                 _ensure_extraction_status_column(qc)
-                qc.execute(
+                qc.executemany(
                     f"""INSERT INTO entity_extraction_queue
                            (memory_id, attempts, last_error, last_attempt_at, status)
                        VALUES ({_p}, 1, NULL, {_d.now()}, 'done')
@@ -570,7 +589,7 @@ async def _run_db(
                            last_error      = NULL,
                            last_attempt_at = excluded.last_attempt_at,
                            status          = 'done'""",
-                    (memory_id,),
+                    [(mid,) for mid in _marks],
                 )
                 qc.commit()
         except Exception:
@@ -664,6 +683,11 @@ async def _run_db(
                     print(f"[m3-entities] WRITE-FAIL {memory_id[:8]}: {type(e).__name__}: {e} (queued)", flush=True)
 
         await asyncio.gather(*(gated(mid, txt) for mid, txt in rows))
+
+    # Flush all 'done' markers in a single write now that every row's entity write
+    # has committed and the httpx client is closed — one lock acquisition for the
+    # whole batch instead of one per row (see _flush_marks).
+    _flush_marks()
 
     elapsed = time.monotonic() - started
     print(
