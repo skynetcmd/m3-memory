@@ -44,6 +44,12 @@ def _payload_mapping():
         ("m3_memory.docs", "docs"),
         ("m3_memory._assets", "_assets"),
         ("m3_memory.examples", "examples"),
+        # config/ carries the SLM classifier profiles (config/slm/*.yaml) that
+        # the cognitive loop's entity-extraction/enrichment passes load by path
+        # via slm_intent._profile_search_dirs (<root>/config/slm). Without this
+        # graft they never ship in the wheel and every pass logs "SLM profile
+        # not found" and no-ops.
+        ("m3_memory.config", "config"),
         ("m3_memory.memory.migrations", os.path.join("memory", "migrations")),
         ("m3_memory.memory.chatlog_migrations", os.path.join("memory", "chatlog_migrations")),
     ]
