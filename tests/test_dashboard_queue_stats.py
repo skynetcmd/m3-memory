@@ -89,5 +89,6 @@ def test_missing_tables_degrade_to_zero(tmp_path):
     db = str(tmp_path / "empty.db")
     sqlite3.connect(db).close()
     stats = qs.collect_pipeline_stats(db)
-    assert len(stats["pipelines"]) == 2
+    # One entry per _PIPELINES pipeline (enrich, reflect, entities).
+    assert len(stats["pipelines"]) == len(qs._PIPELINES)
     assert all(p["queue_len"] == 0 for p in stats["pipelines"])

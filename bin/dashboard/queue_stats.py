@@ -41,6 +41,18 @@ _PIPELINES = (
         "produced_ts": "created_at",
         "produced_where": "type = 'belief'",
     },
+    {
+        # Entity extraction: pull named entities out of memories. This is the
+        # queue the Graph Explorer's "Queue Pending" card counts — surfaced here
+        # so System Health and the Explorer agree on the same number.
+        "key": "entities",
+        "label": "Entity extraction",
+        "queue_table": "entity_extraction_queue",
+        "queue_ts": "enqueued_at",
+        "produced_table": "entities",
+        "produced_ts": "created_at",
+        "produced_where": "",
+    },
 )
 
 

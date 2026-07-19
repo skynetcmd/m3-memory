@@ -15,7 +15,15 @@ import struct
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
+
+# fastapi/uvicorn are the OPTIONAL [web]/[dashboard]/[embed-server] deps — a bare
+# `pip install m3-memory` (or a minimal CI matrix) legitimately lacks them. Guard
+# the import so this suite SKIPS rather than erroring during collection and
+# aborting the whole run (a hard collection error here masks every other test).
+pytest.importorskip("fastapi", reason="requires the optional web deps (fastapi)")
 
 import embed_server_inproc as S  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

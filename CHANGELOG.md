@@ -19,6 +19,37 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.19.3] — 2026-07-19 — Web dashboard for everyone
+WebUI Dashboard (default http://127.0.0.1:8088) now exposed for all users not
+just developers. Documentation refreshed.
+
+### Added
+- **Web dashboard, first-class.** `pip install "m3-memory[dashboard]"` then
+  `m3 dashboard` — a detached, windowless background service (no console window
+  or flashing; survives closing the terminal) on `http://127.0.0.1:8088`, with
+  `--stop` / `--status` and optional auto-start on boot. `m3 setup` offers it
+  (default yes). Backend-agnostic (SQLite / PostgreSQL / future backends).
+- **System Health page** — overall status with plain-language reasons, governor
+  system-load meters (CPU/RAM/GPU, colored per resource), per-store paths + row
+  counts + last-updated, CDW sync watermarks, and pipeline queue depths; local
+  time with UTC in parentheses; live auto-refresh.
+- **Interactive knowledge-graph window** — open the graph in its own resizable
+  window, with cursor-anchored zoom, fit-to-view, node-type filters, a text
+  filter, and a node-detail sidebar.
+- **Advanced search grammar** in the Memory Browser and graph filter:
+  space-separated words are AND filters, `-term` excludes, `"quoted"` matches an
+  exact phrase; case-insensitive by default with a toggle and an inline help box.
+
+### Fixed
+- **Short keyword searches no longer come back empty when the fast embedder is
+  unavailable.** Keyword (FTS) results are returned instead of dropping to an
+  empty list, so short queries resolve. Benefits the core search path used by
+  agents, not just the dashboard.
+
+### Documentation
+- New dashboard guide (`docs/DASHBOARD.md`); the README hero now lists the web
+  dashboard first.
+
 ## [2026.7.19.2] — 2026-07-19 — Installer UX polish
 ### Fixed
 - **Native, copy-paste-usable paths.** On Windows the config/engine roots and the

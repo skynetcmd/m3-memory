@@ -83,6 +83,10 @@ def main() -> int:
         help="Skip the cross-agent dead-path check (Gemini/OpenCode/Hermes/...).",
     )
     parser.add_argument(
+        "--skip-dashboard", action="store_true",
+        help="Skip the web-dashboard liveness check (registry + port probe).",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Show the full detail (DB-repair steps + each probe's expanded "
              "report + model-load logs). Default is a compact one-line-per-check "
@@ -123,6 +127,12 @@ def main() -> int:
         if not args.skip_shared_embedder:
             from doctor import shared_embedder_probe
             shared_rc = shared_embedder_probe.run(brief=False, fix=not args.dry_run)
+
+        # Dashboard self-heal: kill a wedged instance, reap its stale registry
+        # entry, and restart it on its recorded host/port. Dry-run only reports.
+        if not args.skip_dashboard:
+            from doctor import dashboard_probe
+            dashboard_probe.run(brief=False, fix=not args.dry_run)
 
         if res["summary"] == "failed" or shared_rc != 0:
             return 1
@@ -191,6 +201,14 @@ def main() -> int:
         # not load in that host (Gemini/OpenCode/Hermes/... after a relocation).
         # `m3 setup` self-heals it (installer owns the canonical write path).
         exit_code = max(exit_code, agent_paths_probe.run(brief=brief))
+
+    if not args.skip_dashboard:
+        from doctor import dashboard_probe
+        # Report-only and exit-code-neutral: a stopped dashboard is a supported
+        # state (the user simply hasn't launched it), not a degraded fleet. It
+        # prints the URL when healthy, and on a wedged/dead entry nags with
+        # `m3 doctor --fix`. The kill/restart happens only in the --fix branch.
+        dashboard_probe.run(brief=brief, fix=False)
 
     # On a failure in brief mode, point the user at the full detail (§3: an
     # error should tell you how to see more, not dead-end).

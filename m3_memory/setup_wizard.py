@@ -228,6 +228,11 @@ class SetupPlan:
     # Replace governor-eligible cron/schtasks entries with the Adaptive
     # Background Workload Governor. Default on; gated by --no-governor-migration.
     migrate_to_governor: bool = True
+    # Install the local web dashboard's deps (the [dashboard] pip extra:
+    # fastapi + uvicorn) so `m3 dashboard` works. Default ON in interactive mode;
+    # gated by --no-dashboard / --dashboard for headless runs. Backend-agnostic
+    # (works on SQLite/PostgreSQL/…); loopback-only, no auth.
+    install_dashboard: bool = True
 
 
 # ── prompt phase ──────────────────────────────────────────────────────────────
@@ -286,6 +291,12 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         # whole fleet, GPU or CPU); --no-shared-embedder is a debug escape hatch.
         # Applies on a CPU-only host too, so it is NOT gated on install_gpu_embedder.
         plan.use_shared_embedder = not bool(getattr(args, "no_shared_embedder", False))
+        # Dashboard: default ON, headless-overridable. --no-dashboard opts out;
+        # --dashboard forces it (both default to unset → the True default holds).
+        if bool(getattr(args, "no_dashboard", False)):
+            plan.install_dashboard = False
+        elif bool(getattr(args, "dashboard", False)):
+            plan.install_dashboard = True
         return plan
 
     # ── interactive prompts ───────────────────────────────────────────────────
@@ -475,6 +486,21 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         plan.migrate_to_governor = _ask_yes_no(
             "  Replace these scheduled tasks with the governor?", default=True,
         )
+
+    # Offer the local web dashboard. Default YES — it's a lightweight, useful
+    # local control panel and installing its deps (fastapi+uvicorn) is cheap.
+    print()
+    print("  Web dashboard (optional):")
+    print("    A local control panel — browse memory, explore the knowledge graph,")
+    print("    watch the pipeline, see system health. Runs on http://127.0.0.1:8088.")
+    print("    Starts automatically on boot as a WINDOWLESS background service (no")
+    print("    console window, no flashes) and keeps running after you close your")
+    print("    terminal. Control it with `m3 dashboard` / `--stop` / `--status`.")
+    print("    Loopback-only (localhost); it is NOT authenticated, so don't expose it.")
+    print("    Installs two small deps (fastapi + uvicorn).")
+    plan.install_dashboard = _ask_yes_no(
+        "  Install the web dashboard (auto-start on boot)?", default=True,
+    )
 
     return plan
 
@@ -1725,6 +1751,89 @@ def _wire_hermes(*, non_interactive: bool = False) -> bool:
     return True
 
 
+def _step_install_dashboard(plan: "SetupPlan") -> bool:
+    """Install the [dashboard] pip extra (fastapi + uvicorn) so `m3 dashboard` runs.
+
+    Non-fatal by design: a failed dep install must never abort setup — the core
+    MCP server needs neither dep, so we print how to finish it by hand and move
+    on. Idempotent: pip is a no-op if the deps are already satisfied. Backend-
+    agnostic — the dashboard itself works on any registered store backend.
+    """
+    if not plan.install_dashboard:
+        return True
+    # Already present? Then this is a no-op — skip the pip round-trip.
+    have = True
+    for mod in ("fastapi", "uvicorn"):
+        try:
+            __import__(mod)
+        except ModuleNotFoundError:
+            have = False
+            break
+    if have:
+        print("  Web dashboard deps already present — `m3 dashboard` is ready.")
+        return True
+
+    if have:
+        _register_dashboard_task()
+        return True
+
+    print("  Installing web dashboard deps (fastapi + uvicorn)...")
+    # Install the extra against THIS interpreter (the one running setup), so the
+    # deps land where `m3 dashboard` will import them. Match the payload's own
+    # distribution name so the extra resolves regardless of how m3 was installed.
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "m3-memory[dashboard]"],
+            check=False, capture_output=True, text=True,
+        )
+        if proc.returncode == 0:
+            print("    [OK] web dashboard installed.")
+            _register_dashboard_task()
+            return True
+        # Degrade to a clear manual hint; never fail setup on an optional extra.
+        if proc.stderr:
+            tail = proc.stderr.strip().splitlines()[-3:]
+            for line in tail:
+                print(f"      {line}")
+        print("    [!] could not install the dashboard deps automatically. Finish with:")
+        print('            pip install "m3-memory[dashboard]"')
+    except Exception as e:  # noqa: BLE001 — optional step, never abort setup
+        print(f"    [!] dashboard install skipped ({e}); add it later with:")
+        print('            pip install "m3-memory[dashboard]"')
+    return True
+
+
+def _register_dashboard_task() -> None:
+    """Register the boot-start dashboard task (windowless, survives reboot).
+
+    Best-effort: a task-registration failure never aborts setup — the dashboard
+    still runs on demand via `m3 dashboard`. On Windows an ONSTART task may need
+    an admin shell; we surface the manual command rather than fail.
+    """
+    script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
+    if not os.path.exists(script):
+        print("    [!] boot task not registered (install_schedules.py not found);")
+        print('        add it later with `python bin/install_schedules.py --add dashboard`.')
+        return
+    print("    Registering the dashboard to auto-start on boot (windowless)...")
+    try:
+        proc = subprocess.run(
+            [sys.executable, script, "--add", "dashboard"],
+            check=False, capture_output=True, text=True,
+        )
+        if proc.stdout:
+            print(proc.stdout, end="")
+        if proc.returncode == 0:
+            print("    [OK] dashboard will start on boot → http://127.0.0.1:8088")
+            print("         (running now: `m3 dashboard`; stop: `m3 dashboard --stop`)")
+        else:
+            print("    [!] boot task not registered (see above). The dashboard still")
+            print('        runs on demand: `m3 dashboard`. Retry: `python bin/install_schedules.py --add dashboard`')
+    except Exception as e:  # noqa: BLE001 — never fail setup on the task step
+        print(f"    [!] could not register the boot task ({e}); the dashboard still")
+        print("        runs on demand via `m3 dashboard`.")
+
+
 def _step_wire_agents(plan: SetupPlan, *, non_interactive: bool = False) -> bool:
     """Wire MCP entries for every selected agent."""
     if not plan.targets.any():
@@ -1933,6 +2042,7 @@ def run_setup(args: argparse.Namespace) -> int:
         if plan.use_shared_embedder:
             _step_shared_embedder(plan, non_interactive=args.non_interactive)
         _step_wire_agents(plan, non_interactive=args.non_interactive)
+        _step_install_dashboard(plan)
         governor_result = _step_governor_migration(
             plan, non_interactive=args.non_interactive, gui=getattr(args, "gui_child", False))
         _step_doctor()
@@ -2088,5 +2198,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
              "(one shared embedder server for all m3 processes, GPU or CPU, kept up "
              "by a self-healing task) is the shipped default; disabling it means "
              "each process loads its own embedder. Not recommended.",
+    )
+    parser.add_argument(
+        "--dashboard", action="store_true",
+        help="Install the local web dashboard's deps ([dashboard] extra) "
+             "unattended. Interactive setup offers this by default; use this flag "
+             "for headless runs to force it on.",
+    )
+    parser.add_argument(
+        "--no-dashboard", action="store_true",
+        help="Do NOT install the web dashboard deps. By default the wizard offers "
+             "the dashboard (fastapi + uvicorn) with a yes default.",
     )
     parser.set_defaults(func=run_setup)

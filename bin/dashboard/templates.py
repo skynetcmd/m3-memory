@@ -16,6 +16,7 @@ HEADER_HTML = """
             <a href="/" class="nav-link {explorer_active}">Graph Explorer</a>
             <a href="/browse" class="nav-link {browse_active}">KB Browser</a>
             <a href="/audit" class="nav-link {audit_active}">Conflict & Audit Log</a>
+            <a href="/health" class="nav-link {health_active}">System Health</a>
         </div>
 
         {db_selector_html}
@@ -759,13 +760,9 @@ INDEX_HTML = """
                 <!-- Swapped in dynamically by HTMX -->
             </div>
 
-            <!-- Pipeline / Governor Grid: governor state + per-queue length,
-                 throughput (1/10/30/60 min) and estimated drain time. Polls
-                 faster than the stats grid since queues change quickly. -->
-            <div class="metrics-grid" hx-get="/api/pipeline" hx-trigger="load, every 4s"
-                 style="margin-top: 1rem;">
-                <!-- Swapped in dynamically by HTMX -->
-            </div>
+            <!-- Pipeline / Governor telemetry lives on the System Health tab
+                 (governor load + per-queue drain), not here — the Graph Explorer
+                 is for exploring the knowledge graph, not process monitoring. -->
 
             <!-- Graph Canvas Explorer -->
             <div class="m3-card">
@@ -799,6 +796,12 @@ INDEX_HTML = """
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <span id="physicsStatus" style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: var(--m3-neon-cyan);">Status: Active</span>
                     </div>
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: auto;">
+                        <button type="button" onclick="openGraphWindow()" title="Open the interactive graph in its own resizable browser window"
+                                style="background: var(--m3-bg-surface); border: 1px solid var(--m3-border-glass); color: var(--m3-neon-cyan); border-radius: 4px; padding: 3px 10px; font-size: 0.75rem; cursor: pointer;">
+                            ⇱ Open in window
+                        </button>
+                    </div>
                 </div>
 
                 <div class="graph-panel">
@@ -810,8 +813,29 @@ INDEX_HTML = """
             <div class="m3-card">
                 <div class="m3-card-title">Memory Browser & Explain Engine</div>
                 <div class="search-group">
-                    <input type="text" name="q" class="m3-input" placeholder="Type query to scan cognitive layer (e.g. UniFi VLAN)..."
-                           hx-get="/api/search" hx-target="#searchResults" hx-trigger="keyup changed delay:350ms, search">
+                    <input id="memQ" type="text" name="q" class="m3-input" placeholder="e.g.  UAC +window   -&quot;malformed string&quot;"
+                           hx-get="/api/search" hx-target="#searchResults" hx-trigger="keyup changed delay:350ms, search"
+                           hx-include="#igcase" autocomplete="off">
+                </div>
+                <div style="display:flex; align-items:center; gap:.75rem; margin:.4rem 0 .2rem; font-size:.78rem; color:hsl(210,15%,70%);">
+                    <label style="display:flex; align-items:center; gap:.35rem; cursor:pointer; user-select:none;">
+                        <input id="igcase" type="checkbox" name="ignore_case" value="1" checked
+                               hx-get="/api/search" hx-target="#searchResults" hx-trigger="change" hx-include="#memQ">
+                        ignore case
+                    </label>
+                    <span onclick="var b=document.getElementById('qhelp'); b.style.display = b.style.display==='block'?'none':'block';"
+                          style="cursor:pointer; color:var(--m3-neon-cyan);">&#9432; search syntax</span>
+                </div>
+                <div id="qhelp" style="display:none; font-size:.75rem; color:hsl(210,15%,72%); background:hsla(222,22%,6%,.6);
+                     border:1px solid var(--m3-border-glass); border-radius:8px; padding:.6rem .8rem; margin-bottom:.6rem; line-height:1.55;">
+                    <strong style="color:#fff;">Search syntax</strong> — words are filters, all must match (AND):
+                    <ul style="margin:.35rem 0 0 1.1rem; padding:0;">
+                        <li><code style="color:var(--m3-neon-cyan);">UAC window</code> — memories with <em>both</em> UAC and window (same as <code>+UAC +window</code>).</li>
+                        <li><code style="color:var(--m3-neon-cyan);">-window</code> — must <em>not</em> contain window.</li>
+                        <li><code style="color:var(--m3-neon-cyan);">"malformed string"</code> — the exact phrase (not the words separately).</li>
+                        <li><code style="color:var(--m3-neon-cyan);">UAC -"malformed string"</code> — has UAC, but <em>not</em> that phrase.</li>
+                        <li><em>ignore case</em> on = <code>UAC</code> matches <code>uac</code>; uncheck for exact case.</li>
+                    </ul>
                 </div>
                 <div id="searchResults">
                     <p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">Type in search bar to explore FTS5 & Vector similarity explain graphs.</p>
@@ -957,6 +981,18 @@ INDEX_HTML = """
                 document.getElementById("physicsStatus").innerText = "Status: Frozen";
                 document.getElementById("physicsStatus").style.color = "var(--m3-neon-amber)";
             }
+        }
+
+        // Open the interactive graph in its own dedicated browser window. The
+        // standalone /graph page renders the same canvas full-window (same data
+        // source /api/graph). Sized to a comfortable default; resizable.
+        function openGraphWindow() {
+            const w = Math.min(1400, Math.round(screen.availWidth * 0.8));
+            const h = Math.min(900, Math.round(screen.availHeight * 0.85));
+            const left = Math.round((screen.availWidth - w) / 2);
+            const top = Math.round((screen.availHeight - h) / 2);
+            window.open("/graph", "m3GraphWindow",
+                `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=no`);
         }
 
         function wakePhysics() {

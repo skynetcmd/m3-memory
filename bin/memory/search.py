@@ -423,6 +423,74 @@ def _mc_callable(mc, name: str, default):
     return val if callable(val) else default
 
 
+def _fts_only_results(query, search_mode, k, user_id, scope, extra_columns):
+    """Bm25-ranked FTS keyword results, in the memory_search_scored_impl row shape.
+
+    The degrade path used when NO query vector is available (embedder down/slow):
+    a lexical query still deserves its keyword matches rather than []. Returns a
+    list of ``[(score, item_dict), ...]``-shaped hits (score 1.0, best-bm25
+    first), capped at k, tenancy-filtered identically to the main branch. SQLite
+    FTS5 only — other backends return [] here (their callers run their own
+    keyword cascade). Best-effort: any failure yields [] (never raises).
+
+    Unlike the exact-substring short-circuit above, this returns bm25 matches
+    WITHOUT the substring gate — so token-boundary/short queries (e.g. "UAC")
+    that FTS matches but that don't appear as a literal substring in the best row
+    are still returned.
+    """
+    try:
+        # Pure-semantic mode asked for vector similarity specifically; returning
+        # keyword matches there would be misleading, so only fall back for the
+        # keyword-inclusive modes (hybrid — the default — and fts5).
+        if search_mode not in ("hybrid", "fts5"):
+            return []
+        from memory.backends import active_backend as _ab
+        from memory.fts import _compile_fts_query
+        if _ab().name != "sqlite":
+            return []
+        fts_query, ok = _compile_fts_query(query, search_mode)
+        if not ok:
+            return []
+        _BASE_COLS = ["id", "content", "title", "type", "importance"]
+        _allowed_extra = {
+            "metadata_json", "conversation_id", "valid_from", "valid_to",
+            "user_id", "scope", "agent_id", "created_at", "source",
+            "confidence", "corroboration_count", "contradiction_count",
+        }
+        safe_extra = [c for c in (extra_columns or [])
+                      if c in _allowed_extra and c not in _BASE_COLS]
+        extra_cols_sql = (", " + ", ".join(f"mi.{c}" for c in safe_extra)) if safe_extra else ""
+        tenancy_sql, tenancy_params = "", []
+        if user_id:
+            tenancy_sql += " AND mi.user_id = ?"
+            tenancy_params.append(user_id)
+        if scope:
+            tenancy_sql += " AND mi.scope = ?"
+            tenancy_params.append(scope)
+        with _db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT mi.id, mi.content, mi.title, mi.type, mi.importance{extra_cols_sql},
+                       bm25(memory_items_fts) AS _bm25
+                FROM memory_items_fts fts
+                JOIN memory_items mi ON fts.rowid = mi.rowid
+                WHERE memory_items_fts MATCH ? AND mi.is_deleted = 0{tenancy_sql}
+                ORDER BY _bm25 ASC
+                LIMIT ?
+                """,
+                (fts_query, *tenancy_params, k),
+            ).fetchall()
+        out = []
+        for row in rows:
+            hit = dict(row)
+            hit.pop("_bm25", None)
+            out.append((1.0, hit))
+        return out
+    except Exception as exc:  # noqa: BLE001 — fallback must never raise
+        logger.debug("FTS-only fallback failed (non-fatal): %s", exc)
+        return []
+
+
 async def memory_search_scored_impl(
     query,
     mmr=True,
@@ -656,13 +724,20 @@ async def memory_search_scored_impl(
         query, embed_fn=_embed, gate=_embed_is_real
     )
     if not q_vec:
-        # No query vector (embedder degraded, skipped, or timed out) — return
-        # empty rather than hang. This preserves the pre-existing contract: the
-        # FTS short-circuit above already handles exact-substring queries, and
-        # higher-level callers (memory_search_routed_impl) run their own keyword/
-        # FTS cascade. The win here is that we reach this return in <=8s instead
-        # of after a multi-minute cascade that wedged the whole MCP server.
-        return []
+        # No query vector (embedder degraded, skipped, or timed out). Do NOT
+        # return [] — that silently DISCARDS valid keyword matches. Instead fall
+        # back to FTS keyword results (bm25-ranked), so a lexical query like a
+        # short acronym ("UAC") still returns its matches even with no embedder.
+        # The short-circuit above only fires for >3-char, exact-SUBSTRING hits, so
+        # short/token-boundary queries fell through to here and vanished. This
+        # keeps the <=8s degrade contract (one bounded FTS query, no cascade).
+        fts_fallback = _fts_only_results(
+            query, search_mode, k, user_id, scope, extra_columns
+        )
+        if fts_fallback:
+            logger.info("FTS-only fallback (no query vector) for %r: %d match(es)",
+                        query, len(fts_fallback))
+        return fts_fallback
     # The embeddings join is dim-filtered (me.dim = ? below) and the query is
     # packed at its own length, so a wrong-dim query simply matches no stored
     # rows rather than crashing. Log it for visibility (a mismatch means a

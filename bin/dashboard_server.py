@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import sys
 from contextlib import asynccontextmanager
 from typing import Any
@@ -68,6 +67,109 @@ from memory_maintenance import gdpr_export_impl, gdpr_forget_impl
 PORT = 8088
 HOST = "127.0.0.1"
 
+
+# ── Backend-agnostic data access ──────────────────────────────────────────────
+# The dashboard must work on EVERY registered storage backend (SQLite today,
+# PostgreSQL now, MariaDB later) with no per-engine code here. It NEVER names an
+# engine or opens sqlite3 directly; it goes through the storage-backend seam
+# (memory.backends: active_backend / dialect), so a future backend that registers
+# itself is picked up with zero dashboard changes.
+#
+#   * db_readonly(db_path) — a read-only-intent connection to a specific store.
+#     On file backends it honors db_path (that .db file, read-only); on pooled
+#     backends (PostgreSQL) there is one store, so db_path is ignored. Replaces
+#     every raw ``sqlite3.connect(path)`` block.
+#   * table_exists(conn, table) — backend-blind "does this table exist?".
+#     Replaces the SQLite-only ``sqlite_master`` probe (to_regclass on PG, etc.).
+#
+# NOTE: os.path.exists(db_file) guards are dropped when porting a block — a file
+# check is meaningless on a pooled backend; table_exists() + an empty result set
+# already express "no such data" backend-blind.
+def _active_backend():
+    from memory.backends import active_backend
+    return active_backend()
+
+
+def db_readonly(db_path: str):
+    """Read-only connection to a specific store, backend-blind (see module note)."""
+    return _active_backend().open_readonly(db_path)
+
+
+def table_exists(conn, table: str) -> bool:
+    """True iff ``table`` exists, via the active backend's dialect (no sqlite_master)."""
+    try:
+        sql, params = _active_backend().dialect().table_exists(table)
+        return conn.execute(sql, params).fetchone() is not None
+    except Exception:  # noqa: BLE001 — a probe failure means "treat as absent", never crash a stats view
+        return False
+
+
+# --- Advanced search-query grammar (Memory Browser + Knowledge Graph) ---------
+# Mirrors the JS parser in the graph window so both behave identically. Grammar:
+#   unquoted word / +word  → must-have (AND)      "UAC window" == "+UAC +window"
+#   -word                  → must-NOT-have
+#   "phrase"               → exact-phrase must-have
+#   -"phrase"              → exact-phrase must-NOT-have
+# Case-insensitive by default (ignore_case=True). See parse_query_grammar.
+import re as _re
+
+
+def parse_query_grammar(raw: str) -> dict:
+    """Split a query into include/exclude terms and phrases.
+
+    Returns {includes, excludes, phrases, exclude_phrases, positive_text}.
+    ``positive_text`` is the space-joined include terms + phrases, handed to the
+    underlying ranked search so results are still relevance-ordered; the
+    include/exclude sets are then applied as hard filters over content+title.
+    """
+    includes: list[str] = []
+    excludes: list[str] = []
+    phrases: list[str] = []
+    exclude_phrases: list[str] = []
+    # Tokens: optional leading -, then either "quoted phrase" or a bare word.
+    for m in _re.finditer(r'(-?)"([^"]*)"|(-?)(\S+)', raw or ""):
+        neg_q, phrase, neg_w, word = m.groups()
+        if phrase is not None and (neg_q or phrase):
+            (exclude_phrases if neg_q == "-" else phrases).append(phrase)
+        elif word:
+            if neg_w == "-":
+                excludes.append(word.lstrip("+"))
+            else:
+                includes.append(word.lstrip("+"))
+    positive_text = " ".join(includes + phrases).strip()
+    return {
+        "includes": includes, "excludes": excludes,
+        "phrases": phrases, "exclude_phrases": exclude_phrases,
+        "positive_text": positive_text,
+    }
+
+
+def matches_query_grammar(text: str, g: dict, ignore_case: bool = True) -> bool:
+    """True iff ``text`` satisfies the parsed grammar ``g`` (from parse_query_grammar).
+
+    All includes AND all phrases must be present; no excludes/exclude_phrases may
+    be present. A phrase is matched literally; a word is a plain substring (the
+    ranked search already handled tokenization/relevance — this is the hard
+    include/exclude gate)."""
+    hay = text or ""
+    if ignore_case:
+        hay = hay.lower()
+
+    def present(term: str) -> bool:
+        t = term.lower() if ignore_case else term
+        return t in hay
+
+    if any(not present(w) for w in g["includes"]):
+        return False
+    if any(not present(p) for p in g["phrases"]):
+        return False
+    if any(present(w) for w in g["excludes"]):
+        return False
+    if any(present(p) for p in g["exclude_phrases"]):
+        return False
+    return True
+
+
 # --- Common HTML Parts (Styling, Header, Nav) ---
 # HTML/CSS templates extracted to bin/dashboard/templates.py (behavior-preserving).
 from dashboard.templates import (  # noqa: E402
@@ -77,6 +179,280 @@ from dashboard.templates import (  # noqa: E402
     INDEX_HTML,
     STYLE_CSS,
 )
+
+# Standalone full-window Interactive Knowledge Graph (served at /graph, opened in
+# its own browser window). Self-contained: a compact copy of the force-graph
+# renderer (fetch /api/graph → physics → draw → drag/zoom), full-viewport, dark.
+_GRAPH_WINDOW_HTML = r"""<!doctype html>
+<html><head><meta charset="utf-8"><title>M3 · Interactive Knowledge Graph</title>
+<style>
+  html,body{margin:0;height:100%;background:#0a0e17;overflow:hidden;font-family:'Outfit',system-ui,sans-serif}
+  #c{display:block;width:100vw;height:100vh;cursor:grab}
+  #c:active{cursor:grabbing}
+  #bar{position:fixed;top:10px;left:12px;display:flex;gap:.6rem;align-items:center;
+       background:rgba(10,14,23,.7);border:1px solid rgba(120,140,160,.25);border-radius:8px;
+       padding:.4rem .7rem;color:#cbd5e1;font-size:.78rem;backdrop-filter:blur(4px);z-index:10}
+  #bar button{background:#131a26;border:1px solid rgba(120,140,160,.3);color:#22d3ee;border-radius:4px;
+       padding:3px 10px;font-size:.75rem;cursor:pointer}
+  #bar .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:3px}
+  #status{color:#22d3ee;font-family:'Fira Code',monospace}
+  #legend{position:fixed;bottom:10px;left:12px;display:flex;gap:.5rem;color:#94a3b8;font-size:.72rem;
+       background:rgba(10,14,23,.6);border:1px solid rgba(120,140,160,.2);border-radius:8px;padding:.3rem .5rem;z-index:10}
+  #legend .lg{display:flex;align-items:center;cursor:pointer;padding:.15rem .4rem;border-radius:5px;user-select:none;transition:opacity .15s}
+  #legend .lg:hover{background:rgba(120,140,160,.15)}
+  #legend .lg.off{opacity:.35;text-decoration:line-through}
+  #hint{position:fixed;bottom:10px;right:12px;color:#64748b;font-size:.68rem;z-index:10;
+       background:rgba(10,14,23,.6);border:1px solid rgba(120,140,160,.2);border-radius:8px;padding:.3rem .6rem}
+  #search{background:#0d1420;border:1px solid rgba(120,140,160,.3);color:#e2e8f0;border-radius:5px;
+       padding:3px 8px;font-size:.75rem;width:150px;outline:none}
+  #search:focus{border-color:#22d3ee}
+  #side{position:fixed;top:0;right:0;width:320px;max-width:80vw;height:100vh;z-index:20;
+       background:rgba(9,13,22,.96);border-left:1px solid rgba(120,140,160,.25);backdrop-filter:blur(6px);
+       transform:translateX(100%);transition:transform .2s ease;overflow-y:auto;padding:3.2rem 1rem 1rem;box-sizing:border-box}
+  #side.open{transform:translateX(0)}
+  #side h2{font-size:1.05rem;color:#fff;margin:0 0 .2rem}
+  #side .type{font-size:.72rem;color:#22d3ee;font-family:'Fira Code',monospace;margin-bottom:.8rem}
+  #side .rel{font-size:.8rem;color:#cbd5e1;font-family:'Fira Code',monospace;margin:.25rem 0;padding:.2rem .4rem;
+       border-left:2px solid rgba(120,140,160,.25)}
+  #side .rel .p{color:#94a3b8}
+  #side .close{position:absolute;top:.7rem;right:.9rem;cursor:pointer;color:#94a3b8;font-size:1.1rem}
+  #side .sec{color:#64748b;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;margin:1rem 0 .3rem}
+</style></head>
+<body>
+<div id="bar">
+  <strong style="color:#fff">Knowledge Graph</strong>
+  <span style="color:#f59e0b;font-size:.68rem;border:1px solid rgba(245,158,11,.4);border-radius:4px;padding:1px 6px;">ENTITIES &amp; LINKS — not raw memories</span>
+  <input id="search" type="text" placeholder='filter entity names…' oninput="onSearch(this.value)" autocomplete="off">
+  <label style="display:flex;align-items:center;gap:.25rem;font-size:.7rem;cursor:pointer;user-select:none;" title="Ignore case in the node filter">
+    <input id="igcase" type="checkbox" checked onchange="updateEmpty();wake()">Aa</label>
+  <span onclick="toggleHelp()" style="cursor:pointer;color:#22d3ee;font-size:.9rem;" title="Filter syntax">&#9432;</span>
+  <span id="status">Status: Active</span>
+  <button onclick="zoomBy(1.25)" title="Zoom in">+</button>
+  <button onclick="zoomBy(0.8)" title="Zoom out">&minus;</button>
+  <button onclick="fitToView()" title="Fit all nodes to the window">Fit</button>
+  <button onclick="resetView()">Reset</button>
+  <button onclick="loadGraph()">Reload</button>
+</div>
+<div id="banner" style="position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:12;
+     background:rgba(9,13,22,.9);border:1px solid rgba(245,158,11,.35);border-radius:8px;
+     padding:.35rem .8rem;color:#cbd5e1;font-size:.72rem;max-width:90vw;text-align:center">
+  This is the <strong style="color:#f59e0b">knowledge-graph layer</strong> — extracted
+  <em>entities</em> (files, functions, models, hosts…) and how they link, <strong>not</strong> a memory search.
+  The filter matches <strong>entity names</strong>. To search memory text, use the
+  Memory Browser on the main dashboard. <span onclick="this.parentElement.style.display='none'" style="cursor:pointer;color:#64748b;margin-left:.4rem">dismiss ✕</span>
+</div>
+<div id="legend"></div>
+<div id="empty" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:11;
+     color:#94a3b8;font-size:.85rem;text-align:center;max-width:420px;line-height:1.6">
+  <div style="font-size:1.4rem;margin-bottom:.4rem">◍</div>
+  No <strong>entities</strong> match this filter.<br>
+  <span style="font-size:.78rem;color:#64748b">The graph holds extracted entities (not memory text), so a term like a
+  memory keyword may simply not be an entity name. Try a file, function, model, or host name — or clear the filter.</span>
+</div>
+<div id="hint">scroll = zoom · drag = pan · click node = details · click a type to filter</div>
+<div id="qhelp" style="display:none;position:fixed;top:52px;left:12px;z-index:15;max-width:360px;
+     background:rgba(9,13,22,.96);border:1px solid rgba(120,140,160,.3);border-radius:8px;padding:.7rem .9rem;
+     color:#cbd5e1;font-size:.74rem;line-height:1.55">
+  <strong style="color:#fff">Filter syntax</strong> — words are filters, all must match (AND):
+  <ul style="margin:.35rem 0 0 1.1rem;padding:0">
+    <li><code style="color:#22d3ee">UAC window</code> — nodes with both (same as <code>+UAC +window</code>)</li>
+    <li><code style="color:#22d3ee">-window</code> — must not contain window</li>
+    <li><code style="color:#22d3ee">"malformed string"</code> — the exact phrase</li>
+    <li><code style="color:#22d3ee">UAC -"malformed string"</code> — has UAC, not that phrase</li>
+    <li><code style="color:#22d3ee">Aa</code> checkbox = ignore case (on) / exact case (off)</li>
+  </ul>
+</div>
+<div id="side"><span class="close" onclick="closeSide()">✕</span><div id="sideBody"></div></div>
+<canvas id="c"></canvas>
+<script>
+const canvas=document.getElementById("c"), ctx=canvas.getContext("2d");
+let nodes=[],links=[],selectedNode=null,scale=1,offsetX=0,offsetY=0;
+let fpsLimit=30,lastFrame=0,sleeping=false;
+// Node-type visibility filter (legend toggles). A type mapped to false is hidden.
+const typeVisible={};
+let queryG=null;  // parsed grammar of the current filter
+function nodeClass(t){return (t==="person"||t==="place"||t==="topic")?t:"other";}
+// Parse the search grammar (same rules as the Memory Browser):
+//  word/+word = must-have (AND), -word = must-not, "phrase" = exact, -"phrase" = exclude phrase.
+function parseGrammar(raw){
+  const inc=[],exc=[],ph=[],exph=[];
+  const re=/(-?)"([^"]*)"|(-?)(\S+)/g; let m;
+  while((m=re.exec(raw||""))!==null){
+    if(m[2]!==undefined && (m[1]||m[2])){ (m[1]==="-"?exph:ph).push(m[2]); }
+    else if(m[4]){ const w=m[4].replace(/^\+/,""); (m[3]==="-"?exc:inc).push(w); }
+  }
+  return (inc.length||exc.length||ph.length||exph.length)?{inc,exc,ph,exph}:null;
+}
+function matchesSearch(n){
+  if(!queryG)return true;
+  const ic=document.getElementById("igcase").checked;
+  let hay=(n.name||""); if(ic)hay=hay.toLowerCase();
+  const has=t=>hay.includes(ic?t.toLowerCase():t);
+  if(queryG.inc.some(w=>!has(w)))return false;
+  if(queryG.ph.some(p=>!has(p)))return false;
+  if(queryG.exc.some(w=>has(w)))return false;
+  if(queryG.exph.some(p=>has(p)))return false;
+  return true;
+}
+function isVisible(n){return typeVisible[nodeClass(n.type)]!==false && matchesSearch(n);}
+// Show the "no entities match" empty-state when a filter hides everything.
+function updateEmpty(){
+  const anyVisible=nodes.some(isVisible);
+  const filtering=!!queryG || Object.values(typeVisible).some(v=>v===false);
+  document.getElementById("empty").style.display=(filtering && !anyVisible && nodes.length)?"block":"none";
+}
+function onSearch(v){queryG=parseGrammar((v||"").trim());updateEmpty();wake();}
+function toggleHelp(){const b=document.getElementById("qhelp");b.style.display=b.style.display==="block"?"none":"block";}
+function fit(){canvas.width=window.innerWidth;canvas.height=window.innerHeight;}
+// Re-fit AND wake on resize: a resizable window means the canvas buffer must
+// track the viewport, and the draw loop must re-run even if physics had slept
+// (otherwise the resized canvas stays blank until the next interaction).
+window.addEventListener("resize",()=>{fit();wake();});fit();
+function setStatus(t,c){const s=document.getElementById("status");s.innerText="Status: "+t;s.style.color=c||"#22d3ee";}
+// wake() (re)starts the draw loop. `running` guards against stacking multiple
+// rAF loops; it flips false when draw() sleeps. Works on FIRST load (sleeping is
+// false initially) AND on wake-from-sleep — the old `if(sleeping)` guard started
+// the loop ONLY when waking from sleep, so on first load nothing ever drew.
+let running=false;
+// `alpha` is a simulation "temperature" that DECAYS toward 0 as the layout
+// settles — like d3-force's alpha cooling. Motion is scaled by alpha, so nodes
+// glide to rest and then hold (a static feel) instead of jittering forever. A
+// full wake (load/reload) reheats to 1; a light nudge (drag, filter) only warms
+// a little so the graph doesn't explode back into motion on every interaction.
+let alpha=1;
+function wake(full){alpha=Math.min(1, full?1:Math.max(alpha,0.35));
+  sleeping=false;if(!running){running=true;requestAnimationFrame(draw);}}
+function color(t){return t==="person"?"hsl(270,100%,75%)":t==="place"?"hsl(180,100%,50%)":t==="topic"?"hsl(38,100%,55%)":"hsl(145,100%,45%)";}
+async function loadGraph(){
+  try{
+    const d=await (await fetch("/api/graph")).json();
+    const old=new Map(nodes.map(n=>[n.id,n]));
+    nodes=d.nodes.map(n=>{const e=old.get(n.id);return {...n,x:e?e.x:canvas.width/2+(Math.random()-.5)*300,y:e?e.y:canvas.height/2+(Math.random()-.5)*300,vx:0,vy:0};});
+    links=d.links.map(l=>({...l,source:nodes.find(n=>n.id===l.source),target:nodes.find(n=>n.id===l.target)})).filter(l=>l.source&&l.target);
+    wake(true);  // full reheat: lay out the fresh graph, then settle
+  }catch(e){console.error("graph load failed",e);setStatus("Load failed","#f59e0b");}
+}
+function physics(){
+  // Spread scales with node count so 150 nodes don't collapse into a blob.
+  // fr=.78 (heavier damping) + motion scaled by `alpha` (temperature) → nodes
+  // glide to rest and HOLD, instead of buzzing. CAP=6 keeps steps small/smooth.
+  const LD=160, kR=.14, kL=.045, fr=.78, RANGE=520, CAP=6;
+  for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
+    const a=nodes[i],b=nodes[j],dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy+.1;
+    if(d2<RANGE*RANGE){const d=Math.sqrt(d2),f=kR*(LD-d)/d;a.vx-=f*dx;a.vy-=f*dy;b.vx+=f*dx;b.vy+=f*dy;}
+  }
+  links.forEach(l=>{const dx=l.target.x-l.source.x,dy=l.target.y-l.source.y,d=Math.sqrt(dx*dx+dy*dy)||.1,f=kL*(d-LD)/d;
+    l.source.vx+=f*dx;l.source.vy+=f*dy;l.target.vx-=f*dx;l.target.vy-=f*dy;});
+  nodes.forEach(n=>{if(n===selectedNode)return;n.vx*=fr;n.vy*=fr;
+    // Displacement scaled by alpha: as the sim cools, steps shrink toward 0.
+    n.x+=Math.max(-CAP,Math.min(CAP,n.vx))*alpha;
+    n.y+=Math.max(-CAP,Math.min(CAP,n.vy))*alpha;});
+}
+function draw(ts){
+  if(sleeping){running=false;return;}
+  if(!lastFrame)lastFrame=ts;
+  if(ts-lastFrame<1000/fpsLimit){requestAnimationFrame(draw);return;}
+  lastFrame=ts;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();ctx.translate(offsetX,offsetY);ctx.scale(scale,scale);
+  ctx.lineWidth=1;
+  links.forEach(l=>{if(!isVisible(l.source)||!isVisible(l.target))return;
+    ctx.strokeStyle="rgba(6,182,212,.25)";ctx.beginPath();ctx.moveTo(l.source.x,l.source.y);ctx.lineTo(l.target.x,l.target.y);ctx.stroke();
+    const mx=(l.source.x+l.target.x)/2,my=(l.source.y+l.target.y)/2;ctx.fillStyle="rgba(210,210,220,.4)";ctx.font="8px 'Fira Code'";ctx.textAlign="center";ctx.fillText(l.predicate||"",mx,my-2);});
+  nodes.forEach(n=>{if(!isVisible(n))return;const c=color(n.type);ctx.beginPath();ctx.arc(n.x,n.y,8,0,2*Math.PI);ctx.fillStyle=c;ctx.shadowColor=c;ctx.shadowBlur=8;ctx.fill();ctx.shadowBlur=0;
+    ctx.fillStyle="#fff";ctx.font="10px 'Outfit',sans-serif";ctx.textAlign="center";ctx.fillText(n.name,n.x,n.y-12);});
+  ctx.restore();
+  physics();
+  // Cool the simulation every frame so it converges to a stable, STATIC layout
+  // and then stops (no perpetual jitter). ~0.985/frame ≈ settles in a few
+  // seconds; once cold, freeze. A drag/filter/reheat warms it just enough to
+  // re-settle. status shows "Settled" (not "Asleep") once at rest.
+  alpha*=0.985;
+  if(alpha<0.02){alpha=0;sleeping=true;running=false;setStatus("Settled","#10b981");}
+  else{setStatus("Settling…");requestAnimationFrame(draw);}
+}
+let dragCanvas=false,dsm={x:0,y:0},dso={x:0,y:0},downXY=null,downNode=null;
+canvas.addEventListener("mousedown",e=>{const r=canvas.getBoundingClientRect(),mx=(e.clientX-r.left-offsetX)/scale,my=(e.clientY-r.top-offsetY)/scale;
+  // Hit-test only VISIBLE nodes so a hidden/filtered node can't be grabbed.
+  selectedNode=nodes.find(n=>{if(!isVisible(n))return false;const dx=n.x-mx,dy=n.y-my;return dx*dx+dy*dy<144;});
+  downNode=selectedNode;downXY={x:e.clientX,y:e.clientY};wake();
+  if(!selectedNode){dragCanvas=true;dsm={x:e.clientX,y:e.clientY};dso={x:offsetX,y:offsetY};}});
+canvas.addEventListener("mousemove",e=>{const r=canvas.getBoundingClientRect();
+  if(selectedNode){selectedNode.x=(e.clientX-r.left-offsetX)/scale;selectedNode.y=(e.clientY-r.top-offsetY)/scale;wake();}
+  else if(dragCanvas){offsetX=dso.x+(e.clientX-dsm.x);offsetY=dso.y+(e.clientY-dsm.y);wake();}});
+window.addEventListener("mouseup",e=>{
+  // A click (node pressed, negligible movement) opens its detail sidebar.
+  if(downNode&&downXY){const moved=Math.abs(e.clientX-downXY.x)+Math.abs(e.clientY-downXY.y);
+    if(moved<5)openNode(downNode);}
+  selectedNode=null;dragCanvas=false;downNode=null;downXY=null;wake();});
+// Zoom toward a screen point (keeps that point fixed while scaling).
+function zoomAt(sx,sy,factor){
+  const ns=Math.max(.15,Math.min(6,scale*factor));
+  // world point under (sx,sy) must stay put: offset' = s - ns*((s-offset)/scale)
+  offsetX=sx-(sx-offsetX)*(ns/scale);
+  offsetY=sy-(sy-offsetY)*(ns/scale);
+  scale=ns;wake();
+}
+canvas.addEventListener("wheel",e=>{e.preventDefault();
+  const r=canvas.getBoundingClientRect();
+  zoomAt(e.clientX-r.left,e.clientY-r.top, e.deltaY<0?1.12:1/1.12);
+},{passive:false});
+// Toolbar +/- zoom around the viewport center.
+function zoomBy(f){zoomAt(canvas.width/2,canvas.height/2,f);}
+function resetView(){scale=1;offsetX=0;offsetY=0;wake();}
+// Auto-frame: fit all VISIBLE nodes into the window with padding.
+function fitToView(){
+  const vis=nodes.filter(isVisible);
+  if(!vis.length)return;
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  vis.forEach(n=>{minX=Math.min(minX,n.x);minY=Math.min(minY,n.y);maxX=Math.max(maxX,n.x);maxY=Math.max(maxY,n.y);});
+  const w=Math.max(1,maxX-minX),h=Math.max(1,maxY-minY),pad=80;
+  const s=Math.min((canvas.width-2*pad)/w,(canvas.height-2*pad)/h);
+  scale=Math.max(.15,Math.min(3,s));
+  offsetX=canvas.width/2-scale*(minX+maxX)/2;
+  offsetY=canvas.height/2-scale*(minY+maxY)/2;
+  wake();
+}
+// Clickable legend: toggles each node type's visibility.
+const TYPES=[["person","hsl(270,100%,75%)"],["place","hsl(180,100%,50%)"],
+             ["topic","hsl(38,100%,55%)"],["other","hsl(145,100%,45%)"]];
+function renderLegend(){
+  const el=document.getElementById("legend");
+  el.innerHTML="";
+  TYPES.forEach(([t,c])=>{
+    const on=typeVisible[t]!==false;
+    const span=document.createElement("span");
+    span.className="lg"+(on?"":" off");
+    span.innerHTML='<span class="dot" style="background:'+c+'"></span>'+t;
+    span.onclick=()=>{typeVisible[t]=!(typeVisible[t]!==false);renderLegend();updateEmpty();wake();};
+    el.appendChild(span);
+  });
+}
+renderLegend();
+// Node detail sidebar: fetch the entity + its relationships, render, slide in.
+function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+async function openNode(n){
+  const side=document.getElementById("side"), body=document.getElementById("sideBody");
+  body.innerHTML='<h2>'+esc(n.name)+'</h2><div class="type">'+esc(n.type)+'</div><div class="sec">loading…</div>';
+  side.classList.add("open");
+  try{
+    const d=await (await fetch("/api/graph/node/"+encodeURIComponent(n.id))).json();
+    let html='<h2>'+esc(d.name||n.name)+'</h2><div class="type">'+esc(d.type||n.type)+'</div>';
+    html+='<div class="sec">id</div><div class="rel" style="border:none;color:#64748b;font-size:.7rem">'+esc(n.id)+'</div>';
+    const nb=d.neighbors||[];
+    html+='<div class="sec">relationships ('+nb.length+')</div>';
+    if(nb.length){nb.forEach(r=>{html+='<div class="rel">'+esc(r.dir)+' <span class="p">'+esc(r.predicate)+'</span> '+esc(r.name)+'</div>';});}
+    else{html+='<div class="rel" style="border:none;color:#64748b">no connections</div>';}
+    body.innerHTML=html;
+  }catch(e){body.innerHTML+='<div class="sec" style="color:#f59e0b">could not load details</div>';}
+}
+function closeSide(){document.getElementById("side").classList.remove("open");}
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeSide();});
+// Fit once the first layout has had a moment to spread.
+loadGraph().then(()=>{setTimeout(fitToView,1200);updateEmpty();});
+</script>
+</body></html>
+"""
 
 
 # --- FastAPI Setup ---
@@ -204,7 +580,7 @@ async def get_index(request: Request):
     set_active_db_env(selected_db)
 
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="active", browse_active="", audit_active="", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="active", browse_active="", audit_active="", health_active="", db_selector_html=db_selector_html)
     content = INDEX_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
@@ -216,7 +592,7 @@ async def get_browse(request: Request):
     set_active_db_env(selected_db)
 
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="", browse_active="active", audit_active="", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="", browse_active="active", audit_active="", health_active="", db_selector_html=db_selector_html)
     content = BROWSE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
@@ -228,9 +604,317 @@ async def get_audit(request: Request):
     set_active_db_env(selected_db)
 
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="active", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="active", health_active="", db_selector_html=db_selector_html)
     content = AUDIT_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+@app.get("/graph", response_class=HTMLResponse)
+async def get_graph_window(request: Request):
+    """Standalone full-window Interactive Knowledge Graph.
+
+    Opened via the 'Open in window' button on the Graph Explorer. Renders the
+    same canvas force-graph, full-viewport, from the same /api/graph data — so it
+    lives in its own resizable browser window with no surrounding dashboard chrome.
+    Self-contained (its own compact renderer) so it doesn't couple to the busy
+    index page's script.
+    """
+    selected_db = request.cookies.get("selected_db", "main")
+    set_active_db_env(selected_db)
+    return HTMLResponse(content=_GRAPH_WINDOW_HTML, status_code=200,
+                        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+@app.get("/api/graph/node/{node_id}", response_class=JSONResponse)
+async def get_graph_node(node_id: str, request: Request):
+    """Detail for one graph node (entity): its fields + connected relationships.
+
+    Powers the standalone graph window's sidebar. Backend-agnostic (dialect
+    placeholder + _db). Returns {found, id, name, type, mentions, neighbors:[...]}.
+    Best-effort — missing tables/rows yield a minimal payload, never an error.
+    """
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    out: dict = {"found": False, "id": node_id, "name": "", "type": "", "neighbors": []}
+    try:
+        ph = _active_backend().dialect().placeholder
+        from m3_sdk import active_database
+        with active_database(selected_db_path):
+            with _db() as db:
+                if table_exists(db, "entities"):
+                    row = db.execute(
+                        f"SELECT canonical_name, entity_type FROM entities WHERE id = {ph()}",
+                        (node_id,),
+                    ).fetchone()
+                    if row:
+                        out["found"] = True
+                        out["name"] = row["canonical_name"]
+                        out["type"] = row["entity_type"]
+                if table_exists(db, "entity_relationships"):
+                    # Outgoing + incoming edges, with the other end's name.
+                    rels = db.execute(
+                        f"""
+                        SELECT er.predicate, er.from_entity, er.to_entity,
+                               ef.canonical_name AS from_name, et.canonical_name AS to_name
+                        FROM entity_relationships er
+                        LEFT JOIN entities ef ON ef.id = er.from_entity
+                        LEFT JOIN entities et ON et.id = er.to_entity
+                        WHERE er.from_entity = {ph()} OR er.to_entity = {ph()}
+                        LIMIT 50
+                        """,
+                        (node_id, node_id),
+                    ).fetchall()
+                    for r in rels:
+                        if r["from_entity"] == node_id:
+                            out["neighbors"].append(
+                                {"dir": "→", "predicate": r["predicate"], "name": r["to_name"] or r["to_entity"]})
+                        else:
+                            out["neighbors"].append(
+                                {"dir": "←", "predicate": r["predicate"], "name": r["from_name"] or r["from_entity"]})
+    except Exception as e:  # noqa: BLE001
+        out["error"] = str(e)
+    return JSONResponse(content=out)
+
+
+@app.get("/health", response_class=HTMLResponse)
+async def get_health(request: Request):
+    """System Health page — backend identity, stores, CDW sync, pipeline, verdict.
+
+    Renders a self-contained page (same header/CSS as the other tabs) whose body
+    is the health panel. Kept dependency-light: the panel HTML is built inline
+    from the structured collect_health() snapshot so a new backend needs no change.
+    """
+    selected_db = request.cookies.get("selected_db", "main")
+    set_active_db_env(selected_db)
+    db_selector_html = build_db_selector_html(selected_db)
+    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="", health_active="active", db_selector_html=db_selector_html)
+    panel = _render_health_panel()
+    content = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>M3 System Health</title>"
+        f"<style>{STYLE_CSS}</style></head><body>"
+        f"{header}"
+        "<div style='max-width: 1100px; margin: 0 auto; padding: 1.5rem;'>"
+        f"<div id='healthPanel'>{panel}</div>"
+        "</div>"
+        # Live auto-refresh: governor load (CPU/RAM/GPU) is volatile, so re-fetch
+        # the panel every 5s (vanilla JS — the health page loads no HTMX). Pauses
+        # while the tab is hidden so a backgrounded tab doesn't poll.
+        "<script>"
+        "(function(){"
+        " async function refresh(){"
+        "  if(document.hidden)return;"
+        "  try{var r=await fetch('/api/health',{cache:'no-store'});"
+        "   if(r.ok)document.getElementById('healthPanel').innerHTML=await r.text();}catch(e){}"
+        " }"
+        " setInterval(refresh,5000);"
+        "})();"
+        "</script>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+@app.get("/api/health", response_class=HTMLResponse)
+async def get_health_partial(request: Request):
+    """HTMX partial: just the health panel (for in-place refresh)."""
+    return HTMLResponse(content=_render_health_panel(), status_code=200,
+                        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+def _render_health_panel() -> str:
+    """Build the digestible System Health HTML from collect_health().
+
+    Presentation only — all data comes from dashboard.health.collect_health(),
+    the single source shared with the doctor's stats. Color-coded status pills,
+    store cards, CDW watermarks, and the overall verdict; never raises.
+    """
+    try:
+        from dashboard.health import collect_health
+        h = collect_health()
+    except Exception as e:  # noqa: BLE001 — the panel must render even if a probe dies
+        return (f'<div class="memory-card"><h3 style="color: var(--m3-neon-amber);">'
+                f'Health data unavailable</h3><p>{e}</p></div>')
+
+    def esc(s: object) -> str:
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    def ts(s: object) -> str:
+        """Escape a dual-time string and render the trailing '(…Z)' Zulu portion
+        in muted light-grey so the local time reads primary and the UTC is a quiet
+        secondary."""
+        raw = esc(s)
+        i = raw.rfind(" (")
+        if i != -1 and raw.endswith(")"):
+            local, zulu = raw[:i], raw[i + 1:]
+            return f'{local} <span style="color:hsl(210,12%,55%);">{zulu}</span>'
+        return raw
+
+    # Report time (current time of this snapshot) — noted up top, dual local/Zulu.
+    generated = ts(h.get("generated_at", "—"))
+
+    # Overall status pill. Use the USER-FACING label/tone (never the scary word
+    # "DEGRADED" for a mere throttle/perf state), WITH the specific reasons.
+    v = h.get("verdict", {})
+    label = v.get("label", (v.get("verdict", "unknown") or "unknown").upper())
+    tone = v.get("tone", "warn")
+    color = {"ok": "var(--m3-neon-emerald)", "warn": "var(--m3-neon-amber)",
+             "bad": "#ff5c6c"}.get(tone, "hsl(210,15%,55%)")
+    icon = {"ok": "●", "warn": "▲", "bad": "✕"}.get(tone, "?")
+    reasons = v.get("reasons") or []
+    reasons_html = ""
+    if tone != "ok" and reasons:
+        items = "".join(f'<li style="margin:0.15rem 0;">{esc(r)}</li>' for r in reasons)
+        reasons_html = (
+            f'<div style="margin-top:0.6rem;color:hsl(210,15%,75%);font-size:0.85rem;">'
+            f'<strong style="color:{color};">Why:</strong>'
+            f'<ul style="margin:0.3rem 0 0 1.1rem;padding:0;">{items}</ul></div>')
+    elif tone == "ok":
+        reasons_html = ('<div style="margin-top:0.4rem;color:var(--m3-neon-emerald);'
+                        'font-size:0.85rem;">All subsystems nominal.</div>')
+
+    parts = [
+        '<div class="m3-card-title" style="font-size:1.4rem;margin-bottom:0.35rem;">System Health</div>',
+        f'<div style="color:hsl(210,15%,55%);font-size:0.75rem;margin-bottom:0.9rem;">'
+        f'report time: {generated}</div>',
+        f'<div class="memory-card" style="border-left:4px solid {color};">'
+        f'<span style="color:{color};font-weight:700;font-size:1.1rem;">{icon} {esc(label)}</span>'
+        f'<span style="margin-left:0.75rem;color:hsl(210,15%,70%);">{esc(v.get("headline",""))}</span>'
+        f'{reasons_html}</div>',
+    ]
+
+    # System load (Governor) — placed RIGHT AFTER the verdict, before the backend
+    # section: it's the load context that explains a THROTTLED/HALTED verdict.
+    pl = h.get("pipeline", {})
+    gov = pl.get("governor")
+    if gov and gov.get("available"):
+        init = gov.get("initial_threshold", 80)
+        limit = gov.get("limit_threshold", 90)
+        mode = str(gov.get("mode", "?")).upper()
+        # Pacing-mode label keeps the governor-state color (grey non-blocking /
+        # amber throttling / red halting) so the overall status is still obvious.
+        mode_color = {"THROTTLED": "var(--m3-neon-amber)",
+                      "HALTED": "#ff5c6c"}.get(mode, "hsl(210,15%,60%)")
+
+        def _meter(label, val):
+            """Each meter is colored INDEPENDENTLY by its OWN value vs the
+            governor thresholds: green while free (< throttle), amber while in the
+            throttle band, red at/above the halt band. So you see at a glance
+            WHICH resource is free / throttling / halting."""
+            try:
+                v = float(val or 0)
+            except (TypeError, ValueError):
+                v = 0.0
+            if v >= limit:
+                c = "#ff5c6c"                 # halting
+            elif v >= init:
+                c = "var(--m3-neon-amber)"    # throttling
+            else:
+                c = "var(--m3-neon-emerald)"  # free
+            return (
+                f'<div style="margin:0.3rem 0;font-family:\'Fira Code\',monospace;font-size:0.8rem;">'
+                f'<div style="display:flex;justify-content:space-between;">'
+                f'<span style="color:hsl(210,15%,70%);">{label}</span>'
+                f'<span style="color:{c};">{v:.0f}%</span></div>'
+                f'<div style="height:5px;background:hsla(222,22%,12%,0.9);border-radius:3px;overflow:hidden;margin-top:2px;">'
+                f'<div style="height:100%;width:{min(v,100):.0f}%;background:{c};"></div></div></div>')
+
+        parts.append(
+            '<div class="memory-card"><h3 style="color:var(--m3-neon-cyan);margin-bottom:0.5rem;">'
+            'System load (Governor)</h3>'
+            f'<div style="margin-bottom:0.4rem;font-size:0.82rem;">pacing mode: '
+            f'<strong style="color:{mode_color};">{esc(mode)}</strong> '
+            f'<span style="color:hsl(210,15%,50%);">(throttle ≥ {init}%, halt ≥ {limit}%)</span> · '
+            f'thermal: {esc(gov.get("thermal","?"))}</div>'
+            + _meter("CPU", gov.get("cpu")) + _meter("RAM", gov.get("ram")) + _meter("GPU", gov.get("gpu"))
+            + '<div style="color:hsl(210,15%,50%);font-size:0.72rem;margin-top:0.4rem;">'
+            'The governor paces background work by host load so it never competes with you.</div></div>')
+
+    # Backend + stores. Tall-man / correct casing for the engine name.
+    b = h.get("backend", {})
+    try:
+        from dashboard.health import _backend_display
+        backend_name = _backend_display(b.get("backend", "?"))
+    except Exception:  # noqa: BLE001
+        backend_name = str(b.get("backend", "?"))
+    parts.append(f'<div class="memory-card"><h3 style="color:var(--m3-neon-cyan);margin-bottom:0.5rem;">'
+                 f'Database backend: {esc(backend_name)}</h3>')
+    if b.get("note"):
+        parts.append(f'<p style="color:var(--m3-neon-amber);">{esc(b["note"])}</p>')
+    for st in b.get("stores", []):
+        present = st.get("present")
+        pill = ('<span style="color:var(--m3-neon-emerald);">present</span>' if present
+                else '<span style="color:hsl(210,15%,55%);">absent</span>')
+        rows = st.get("rows")
+        rows_txt = f"{rows:,} rows" if isinstance(rows, int) else "—"
+        shared = " (shared with core)" if st.get("shared") else ""
+        parts.append(
+            f'<div style="margin:0.4rem 0;font-family:\'Fira Code\',monospace;font-size:0.82rem;">'
+            f'<strong style="color:#fff;">{esc(st.get("label"))}</strong> · {pill}{shared}<br>'
+            f'<span style="color:hsl(210,15%,60%);">{esc(st.get("path"))}</span><br>'
+            f'<span style="color:var(--m3-neon-cyan);">{rows_txt}</span> · '
+            f'last updated: {ts(st.get("last_updated","—"))}</div>')
+    parts.append("</div>")
+
+    # CDW sync — TABLE format (direction | last sync), easier to scan.
+    cdw = h.get("cdw")
+    if cdw:
+        parts.append('<div class="memory-card"><h3 style="color:var(--m3-neon-cyan);margin-bottom:0.5rem;">'
+                     'Data warehouse (CDW) sync</h3>'
+                     f'<div style="font-family:\'Fira Code\',monospace;font-size:0.78rem;color:hsl(210,15%,60%);margin-bottom:0.25rem;">'
+                     f'{esc(cdw.get("dsn"))}</div>'
+                     f'<div style="font-size:0.72rem;color:hsl(210,15%,50%);margin-bottom:0.5rem;">'
+                     f'as of report time: {generated}</div>')
+        wm = cdw.get("watermarks") or []
+        if wm:
+            th = ('padding:0.3rem 0.6rem;text-align:left;border-bottom:1px solid '
+                  'var(--m3-border-glass);color:hsl(210,15%,60%);font-weight:600;')
+            td = ("padding:0.28rem 0.6rem;border-bottom:1px solid rgba(120,140,160,0.12);"
+                  "font-family:'Fira Code',monospace;font-size:0.8rem;")
+            body = "".join(
+                f'<tr><td style="{td}color:#fff;">{esc(w.get("direction"))}</td>'
+                f'<td style="{td}color:var(--m3-neon-cyan);">{ts(w.get("last_sync"))}</td></tr>'
+                for w in wm)
+            parts.append(
+                '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;">'
+                f'<thead><tr><th style="{th}">Direction</th>'
+                f'<th style="{th}">Last sync (local <span style="color:hsl(210,12%,55%);">/ UTC</span>)</th></tr></thead>'
+                f'<tbody>{body}</tbody></table>')
+        else:
+            parts.append('<div style="color:hsl(210,15%,55%);">no sync recorded yet</div>')
+        parts.append("</div>")
+
+    # (System load / Governor card is rendered above, right after the verdict.)
+
+    # Processing pipeline — queue depth + plain-language status (is 'pending' ok?).
+    pipes = pl.get("pipelines") or []
+    if pipes:
+        parts.append('<div class="memory-card"><h3 style="color:var(--m3-neon-cyan);margin-bottom:0.5rem;">'
+                     'Processing pipeline</h3>'
+                     '<div style="color:hsl(210,15%,55%);font-size:0.75rem;margin-bottom:0.5rem;">'
+                     'A queue at 0 is <em>drained</em> (normal). Items queued while the worker is '
+                     'producing is normal under load; a backlog with an idle worker wants attention.</div>')
+        tone_color = {"ok": "var(--m3-neon-emerald)", "warn": "var(--m3-neon-amber)"}
+        for p in pipes:
+            label = esc(p.get("label", "queue"))
+            qlen = p.get("queue_len", 0)
+            status = esc(p.get("status", ""))
+            c = tone_color.get(p.get("tone"), "hsl(210,15%,70%)")
+            eta = esc(p.get("eta_human", ""))
+            eta_txt = f' · drain ETA: {eta}' if eta and qlen else ""
+            parts.append(
+                f'<div style="font-family:\'Fira Code\',monospace;font-size:0.82rem;margin:0.25rem 0;">'
+                f'<strong style="color:#fff;">{label}</strong>: '
+                f'<span style="color:var(--m3-neon-cyan);">{esc(qlen)} queued</span> · '
+                f'<span style="color:{c};">{status}</span>{eta_txt}</div>')
+        parts.append("</div>")
+
+    parts.append('<div style="text-align:center;color:hsl(210,15%,45%);font-size:0.72rem;margin-top:1rem;">'
+                 f'report time: {generated} · '
+                 '<a href="/api/health" hx-get="/api/health" hx-target="closest div" '
+                 'style="color:var(--m3-neon-cyan);">refresh</a></div>')
+    return "\n".join(parts)
 
 
 @app.get("/api/stats", response_class=HTMLResponse)
@@ -258,55 +942,41 @@ async def get_stats(request: Request):
     chatlog_db = DEFAULT_DB_PATH
     files_db = FILES_DB_PATH
 
-    # Query Main DB
+    # Query Main DB (backend-blind; no file-existence guard — see module note)
     try:
-        if os.path.exists(main_db):
-            with sqlite3.connect(main_db, timeout=5.0) as conn:
-                conn.row_factory = sqlite3.Row
-                total_mems = conn.execute("SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted, 0) = 0 AND type != 'chat_log'").fetchone()[0]
+        with db_readonly(main_db) as conn:
+            total_mems = conn.execute("SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted, 0) = 0 AND type != 'chat_log'").fetchone()[0]
 
-                ent_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entities'").fetchone()
-                if ent_exists:
-                    total_ents = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            if table_exists(conn, "entities"):
+                total_ents = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
 
-                rel_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entity_relationships'").fetchone()
-                if rel_exists:
-                    total_rels = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0]
+            if table_exists(conn, "entity_relationships"):
+                total_rels = conn.execute("SELECT COUNT(*) FROM entity_relationships").fetchone()[0]
 
-                queue_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entity_extraction_queue'").fetchone()
-                if queue_exists:
-                    queue_len = conn.execute("SELECT COUNT(*) FROM entity_extraction_queue").fetchone()[0]
+            if table_exists(conn, "entity_extraction_queue"):
+                queue_len = conn.execute("SELECT COUNT(*) FROM entity_extraction_queue").fetchone()[0]
     except Exception as e:
         print(f"Failed to query Main DB stats: {e}", flush=True)
 
-    # Query Chatlog DB
+    # Query Chatlog DB (may be the same store as main, or a separate one)
     try:
-        if chatlog_db == main_db:
-            if os.path.exists(main_db):
-                with sqlite3.connect(main_db, timeout=5.0) as conn:
-                    chatlog_turns = conn.execute("SELECT COUNT(*) FROM memory_items WHERE type='chat_log'").fetchone()[0]
-                    chatlog_sessions = conn.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(conversation_id, ''), 'legacy')) FROM memory_items WHERE type='chat_log'").fetchone()[0]
-        else:
-            if os.path.exists(chatlog_db):
-                with sqlite3.connect(chatlog_db, timeout=5.0) as conn:
-                    chatlog_turns = conn.execute("SELECT COUNT(*) FROM memory_items WHERE type='chat_log'").fetchone()[0]
-                    chatlog_sessions = conn.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(conversation_id, ''), 'legacy')) FROM memory_items WHERE type='chat_log'").fetchone()[0]
+        chatlog_target = main_db if chatlog_db == main_db else chatlog_db
+        with db_readonly(chatlog_target) as conn:
+            chatlog_turns = conn.execute("SELECT COUNT(*) FROM memory_items WHERE type='chat_log'").fetchone()[0]
+            chatlog_sessions = conn.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(conversation_id, ''), 'legacy')) FROM memory_items WHERE type='chat_log'").fetchone()[0]
     except Exception as e:
         print(f"Failed to query Chatlog DB stats: {e}", flush=True)
 
-    # Query Files DB
+    # Query Files DB (backend-blind)
     try:
-        if os.path.exists(files_db):
-            with sqlite3.connect(files_db, timeout=5.0) as conn:
-                leaves_exist = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='leaves'").fetchone()
-                if leaves_exist:
-                    file_chunks = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()[0]
-                    # Count deduplicated non-blank lines in active leaves
-                    dedup_leaves = conn.execute("SELECT text FROM leaves WHERE superseded_by IS NULL GROUP BY text_sha256").fetchall()
-                    file_lines = sum(sum(1 for line in (leaf[0] or "").splitlines() if line.strip()) for leaf in dedup_leaves)
-                nodes_exist = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='file_nodes'").fetchone()
-                if nodes_exist:
-                    files_count = conn.execute("SELECT COUNT(*) FROM file_nodes").fetchone()[0]
+        with db_readonly(files_db) as conn:
+            if table_exists(conn, "leaves"):
+                file_chunks = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()[0]
+                # Count deduplicated non-blank lines in active leaves
+                dedup_leaves = conn.execute("SELECT text FROM leaves WHERE superseded_by IS NULL GROUP BY text_sha256").fetchall()
+                file_lines = sum(sum(1 for line in (leaf[0] or "").splitlines() if line.strip()) for leaf in dedup_leaves)
+            if table_exists(conn, "file_nodes"):
+                files_count = conn.execute("SELECT COUNT(*) FROM file_nodes").fetchone()[0]
     except Exception as e:
         print(f"Failed to query Files DB stats: {e}", flush=True)
 
@@ -388,9 +1058,10 @@ async def get_stats(request: Request):
         <div class="metric-label">Relationships</div>
         <div style="margin-top: 0.35rem; font-weight: 500;">{sub_main}</div>
     </div>
-    <div class="metric-card {highlight_main}" style="{style_main}">
+    <div class="metric-card {highlight_main}" style="{style_main} cursor: pointer;"
+         onclick="window.location.href='/health'" title="View queue drain + system load on System Health">
         <div class="metric-value" style="color: var(--m3-neon-amber);">{queue_len}</div>
-        <div class="metric-label">Queue Pending</div>
+        <div class="metric-label">Queue Pending&nbsp;<span style="font-size:0.7rem;color:var(--m3-neon-cyan);">→ Health</span></div>
         <div style="margin-top: 0.35rem; font-weight: 500;">{sub_main}</div>
     </div>
     <div class="metric-card {highlight_chatlog}" style="{style_chatlog}">
@@ -488,27 +1159,26 @@ async def get_graph(request: Request):
 
     if selected_db == "files":
         try:
-            with sqlite3.connect(selected_db_path, timeout=5.0) as conn:
-                conn.row_factory = sqlite3.Row
-                # Draw File Ingest Nodes
+            with db_readonly(selected_db_path) as conn:
+                # Draw File Ingest Nodes (index by position — backend-blind, no row_factory)
                 files = conn.execute("SELECT uuid, filename, filetype FROM file_nodes LIMIT 40").fetchall()
                 for f in files:
                     nodes.append({
-                        "id": f["uuid"],
-                        "name": f["filename"],
+                        "id": f[0],
+                        "name": f[1],
                         "type": "file"
                     })
                 # Draw Chunk Leaf Nodes and link them to Files
                 leaves = conn.execute("SELECT uuid, file_node, division_id FROM leaves LIMIT 100").fetchall()
                 for l in leaves:
                     nodes.append({
-                        "id": l["uuid"],
-                        "name": f"Chunk {l['division_id']}",
+                        "id": l[0],
+                        "name": f"Chunk {l[2]}",
                         "type": "chunk"
                     })
                     links.append({
-                        "source": l["file_node"],
-                        "target": l["uuid"],
+                        "source": l[1],
+                        "target": l[0],
                         "predicate": "contains"
                     })
         except Exception as e:
@@ -519,8 +1189,7 @@ async def get_graph(request: Request):
         from m3_sdk import active_database
         with active_database(selected_db_path):
             with _db() as db:
-                ent_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entities'").fetchone()
-                if ent_exists:
+                if table_exists(db, "entities"):
                     rows = db.execute("SELECT id, canonical_name, entity_type FROM entities LIMIT 150").fetchall()
                     for r in rows:
                         nodes.append({
@@ -529,8 +1198,7 @@ async def get_graph(request: Request):
                             "type": r["entity_type"]
                         })
 
-                rel_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='entity_relationships'").fetchone()
-                if rel_exists:
+                if table_exists(db, "entity_relationships"):
                     rows = db.execute("SELECT from_entity, to_entity, predicate FROM entity_relationships LIMIT 250").fetchall()
                     for r in rows:
                         links.append({
@@ -545,18 +1213,31 @@ async def get_graph(request: Request):
 
 
 @app.get("/api/search", response_class=HTMLResponse)
-async def search_memories(request: Request, q: str = ""):
-    """Uses core memory_search_scored_impl or files_search based on selected core."""
+async def search_memories(request: Request, q: str = "", ignore_case: int = 1):
+    """Search with the advanced grammar (+/-/"phrase"), Memory Browser or files.
+
+    The ranked search runs on the POSITIVE terms/phrases (so results stay
+    relevance-ordered); the full include/exclude grammar is then applied as a
+    hard filter. ``ignore_case`` (default 1) toggles case-insensitivity.
+    """
     selected_db = request.cookies.get("selected_db", "main")
     selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
+    ic = bool(ignore_case)
+    grammar = parse_query_grammar(q)
+    # The text handed to the ranked search: positive terms/phrases (falls back to
+    # the raw query if the grammar produced no positives, e.g. a pure exclusion).
+    search_text = grammar["positive_text"] or q
 
     if selected_db == "files":
         if not q.strip():
             return '<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">Type in search bar to scan files and chunk indexes.</p>'
         try:
             from files_memory.search import files_search
-            hits = files_search(q, limit=15, db_path=selected_db_path)
+            hits = files_search(search_text, limit=40, db_path=selected_db_path)
+            # Apply the include/exclude grammar over chunk text + filename.
+            hits = [h for h in hits
+                    if matches_query_grammar(f"{getattr(h,'text','')} {getattr(h,'filename','')}", grammar, ic)][:15]
             if not hits:
                 return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed file chunks found for "{q}".</p>'
 
@@ -590,10 +1271,14 @@ async def search_memories(request: Request, q: str = ""):
         from m3_sdk import active_database
         with active_database(selected_db_path):
             results = await memory_search_scored_impl(
-                query=q,
+                query=search_text,
+                k=40,
                 explain=True,
                 extra_columns=["metadata_json", "conversation_id", "valid_from", "valid_to", "user_id"]
             )
+            # Apply the include/exclude grammar over title + content as a hard gate.
+            results = [(s, it) for (s, it) in results
+                       if matches_query_grammar(f"{it.get('title','')} {it.get('content','')}", grammar, ic)][:15]
 
             if not results:
                 return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed memories found for "{q}".</p>'
@@ -653,16 +1338,19 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
 
     if selected_db == "files":
         try:
+            # Positional columns (backend-blind: open_readonly yields tuple rows,
+            # no row_factory) — order matches the SELECT below.
+            # 0=uuid 1=filename 2=path 3=filetype 4=size_bytes 5=corpus_id 6=created_at
+            ph = _active_backend().dialect().placeholder
             query = "SELECT uuid, filename, path, filetype, size_bytes, corpus_id, created_at FROM file_nodes"
             params = []
             if q.strip():
-                query += " WHERE filename LIKE ? OR path LIKE ?"
+                query += f" WHERE filename LIKE {ph()} OR path LIKE {ph()}"
                 params += [f"%{q}%", f"%{q}%"]
-            query += " ORDER BY created_at DESC LIMIT ?"
+            query += f" ORDER BY created_at DESC LIMIT {ph()}"
             params.append(str(int(limit)))
 
-            with sqlite3.connect(selected_db_path, timeout=5.0) as conn:
-                conn.row_factory = sqlite3.Row
+            with db_readonly(selected_db_path) as conn:
                 rows = conn.execute(query, params).fetchall()
 
             total = len(rows)
@@ -671,21 +1359,21 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
 
             cards = []
             for idx, row in enumerate(rows, 1):
-                size_kb = round(row["size_bytes"] / 1024, 1)
+                size_kb = round((row[4] or 0) / 1024, 1)
                 cards.append(f"""
                 <div class="memory-card">
                     <div class="memory-header">
                         <div>
                             <span style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.85rem; color: var(--m3-neon-emerald);">#{idx:03d}/{total}</span>
-                            <span class="m3-badge badge-sys" style="margin-left: 0.5rem;">{row['filetype'] or 'file'}</span>
-                            <span style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 15%, 50%); margin-left: 0.75rem;">size: {size_kb} KB &middot; corpus: {row['corpus_id'] or 'default'}</span>
+                            <span class="m3-badge badge-sys" style="margin-left: 0.5rem;">{row[3] or 'file'}</span>
+                            <span style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 15%, 50%); margin-left: 0.75rem;">size: {size_kb} KB &middot; corpus: {row[5] or 'default'}</span>
                         </div>
                     </div>
-                    <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.5rem;">{row['filename']}</h3>
+                    <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.5rem;">{row[1]}</h3>
                     <div style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: hsl(210, 15%, 55%); margin-bottom: 0.75rem;">
-                        uuid: {row['uuid']} &middot; created: {row['created_at']}
+                        uuid: {row[0]} &middot; created: {row[6]}
                     </div>
-                    <div class="memory-content" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--m3-neon-cyan);">path: {row['path']}</div>
+                    <div class="memory-content" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--m3-neon-cyan);">path: {row[2]}</div>
                 </div>
                 """)
             return "\n".join(cards)
@@ -700,13 +1388,14 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
             WHERE is_deleted = 0
         """
         params = []
+        ph = _active_backend().dialect().placeholder  # ?/%s, backend-agnostic
 
         if type:
-            query += " AND type = ?"
+            query += f" AND type = {ph()}"
             params.append(type)
 
         if q.strip():
-            query += " AND (LOWER(title) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?))"
+            query += f" AND (LOWER(title) LIKE LOWER({ph()}) OR LOWER(content) LIKE LOWER({ph()}))"
             params += [f"%{q}%", f"%{q}%"]
 
         query += " ORDER BY importance DESC, updated_at DESC"
@@ -792,8 +1481,7 @@ async def get_history_feed(request: Request):
         from m3_sdk import active_database
         with active_database(selected_db_path):
             with _db() as db:
-                hist_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_history'").fetchone()
-                if hist_exists:
+                if table_exists(db, "memory_history"):
                     rows = db.execute(
                         "SELECT event, memory_id, prev_value, new_value, created_at FROM memory_history ORDER BY created_at DESC LIMIT 5"
                     ).fetchall()
@@ -867,10 +1555,14 @@ def make_html_diff(prev_val: str, new_val: str) -> str:
 
 
 def render_audit_card(memory_id: str, db: Any) -> str:
-    # 1. Fetch current memory state from memory_items if it exists
+    # Backend-agnostic: dialect placeholder (?/%s) + POSITIONAL row indexing
+    # (psycopg rows aren't dict-like; SQLite Row supports positional too).
+    ph = _active_backend().dialect().placeholder
+    # 1. Fetch current memory state from memory_items if it exists.
+    #    cols: 0=title 1=content 2=type 3=user_id 4=importance 5=is_deleted 6=updated_at
     row = db.execute(
         "SELECT title, content, type, user_id, importance, is_deleted, updated_at "
-        "FROM memory_items WHERE id = ?", (memory_id,)
+        f"FROM memory_items WHERE id = {ph()}", (memory_id,)
     ).fetchone()
 
     current_title = "None (Deleted)"
@@ -881,23 +1573,23 @@ def render_audit_card(memory_id: str, db: Any) -> str:
     importance = 0.0
 
     if row:
+        # Name access works on both backends: SQLite Row + PG _DualRow (compat).
         current_title = row["title"] or "(Untitled)"
         current_content = row["content"] or ""
         current_type = row["type"] or "note"
         is_deleted = bool(row["is_deleted"])
         user_id = row["user_id"] or ""
         importance = row["importance"] or 0.0
-        row["updated_at"] or ""
 
-    # 2. Fetch history records sorted by created_at DESC
+    # 2. Fetch history records sorted by created_at DESC.
     hist_rows = db.execute(
         "SELECT event, field, prev_value, new_value, actor_id, created_at "
-        "FROM memory_history WHERE memory_id = ? "
+        f"FROM memory_history WHERE memory_id = {ph()} "
         "ORDER BY created_at DESC", (memory_id,)
     ).fetchall()
 
     # Check if there's any active conflict/contradiction
-    has_contradiction = any(r["event"].upper() == "CONTRADICTION" for r in hist_rows)
+    has_contradiction = any((r["event"] or "").upper() == "CONTRADICTION" for r in hist_rows)
 
     status_label = "Active"
     status_style = "background: hsla(145, 100%, 45%, 0.1); color: var(--m3-neon-emerald); border: 1px solid rgba(16, 185, 129, 0.25);"
@@ -912,12 +1604,12 @@ def render_audit_card(memory_id: str, db: Any) -> str:
     # 3. Generate timeline HTML
     nodes_html = []
     for r in hist_rows:
-        event = r["event"].upper()
+        event = (r["event"] or "").upper()
         field = r["field"] or "content"
         prev_v = r["prev_value"] or ""
         new_v = r["new_value"] or ""
         actor = r["actor_id"] or "system"
-        ts = r["created_at"].replace("T", " ")[:16]
+        ts = (r["created_at"] or "").replace("T", " ")[:16]
 
         badge_cls = f"badge-{event.lower()}"
         icon = event[0] if event else "U"
@@ -1070,8 +1762,7 @@ async def get_audit_timeline(request: Request, q: str = "", limit: int = 25):
         from m3_sdk import active_database
         with active_database(selected_db_path):
             with _db() as db:
-                hist_exists = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_history'").fetchone()
-                if not hist_exists:
+                if not table_exists(db, "memory_history"):
                     return '<p style="color: hsl(210, 15%, 55%); text-align: center; font-size: 0.85rem; padding: 2rem 0;">History table memory_history does not exist in this database.</p>'
 
                 # Fetch distinct memory IDs that have history, sorted by their latest activity
@@ -1089,7 +1780,8 @@ async def get_audit_timeline(request: Request, q: str = "", limit: int = 25):
 
                     # Look up item details to support keyword/title/content filtering
                     item = db.execute(
-                        "SELECT title, content, type FROM memory_items WHERE id = ?", (mem_id,)
+                        f"SELECT title, content, type FROM memory_items WHERE id = {_active_backend().dialect().placeholder()}",
+                        (mem_id,),
                     ).fetchone()
 
                     # If query is specified, check matches
@@ -1156,14 +1848,19 @@ async def audit_resolve(memory_id: str, request: Request):
 
     from m3_sdk import active_database
     from memory.db import _record_history
+    # Backend-agnostic placeholder: ? on SQLite, %s on PostgreSQL/others. _db()
+    # yields the raw driver connection (no auto ?→%s translation), so inline SQL
+    # MUST use the active backend's placeholder to work on every backend.
+    ph = _active_backend().dialect().placeholder
     with active_database(selected_db_path):
         with _db() as db:
-            # 1. Update is_deleted = 0
-            db.execute("UPDATE memory_items SET is_deleted = 0, updated_at = ? WHERE id = ?",
+            # 1. Undelete (is_deleted = 0)
+            db.execute(f"UPDATE memory_items SET is_deleted = 0, updated_at = {ph()} WHERE id = {ph()}",
                        (datetime.now(timezone.utc).isoformat(), memory_id))
-            # 2. Record "resolve" event in history
-            row = db.execute("SELECT content FROM memory_items WHERE id = ?", (memory_id,)).fetchone()
-            content = row["content"] if row else "Restored and active."
+            # 2. Record "resolve" event in history. Name access works on both
+            #    backends (SQLite Row + PG _DualRow compat cursor).
+            row = db.execute(f"SELECT content FROM memory_items WHERE id = {ph()}", (memory_id,)).fetchone()
+            content = (row["content"] if row else None) or "Restored and active."
             _record_history(memory_id, "resolve", "Conflict state or soft-deleted", content, "is_deleted", actor_id="dashboard", db=db)
 
             return render_audit_card(memory_id, db)
@@ -1318,13 +2015,16 @@ async def trigger_maintenance_task(action: str):
         env["PYTHONPATH"] = bin_dir
 
     try:
-        # Spawn child process in the background
+        # Spawn child process in the background. no_window_kwargs() suppresses a
+        # console window on Windows (the maintenance task would otherwise flash one).
+        from _task_runtime import no_window_kwargs
         proc = subprocess.Popen(
             cmd,
             env=env,
             stdout=log_file_handle,
             stderr=subprocess.STDOUT, # redirect stderr to stdout
-            shell=False
+            shell=False,
+            **no_window_kwargs(),
         )
 
         active_task["process"] = proc
@@ -1388,9 +2088,338 @@ async def get_maintenance_status():
     )
 
 
+_HALT_ROLE = "dashboard"
+
+
+def _ensure_std_streams() -> None:
+    """Give the process real stdout/stderr when launched via pythonw.exe.
+
+    Under ``pythonw`` (no console) sys.stdout/sys.stderr are None; a stray write
+    from any dependency then raises and can take the process down. Bind the
+    missing streams to devnull so such writes are harmless. Idempotent; a no-op
+    under normal python.exe. (Mirror of embed_server_inproc._ensure_std_streams.)
+    """
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name, None) is None:
+            try:
+                setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))  # noqa: SIM115
+            except OSError:
+                pass
+
+
+def _resolve_host_port(host: "str | None", port: "int | None") -> "tuple[str, int]":
+    resolved_host = host or os.environ.get("M3_DASHBOARD_HOST", HOST)
+    resolved_port = int(port or os.environ.get("M3_DASHBOARD_PORT", PORT))
+    return resolved_host, resolved_port
+
+
+def _port_already_serving(host: str, port: int, timeout: float = 1.0) -> bool:
+    """True if something already accepts TCP on host:port (a live dashboard).
+
+    Used as a single-instance pre-flight so a self-heal re-fire or an accidental
+    double-launch exits cleanly instead of crashing on an in-use port. 0.0.0.0 is
+    probed via loopback (you connect TO a concrete address, not the wildcard).
+    """
+    import socket
+    probe = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    try:
+        with socket.create_connection((probe, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _live_dashboards() -> list:
+    """Registered, alive dashboard processes (reaps stale entries as a side effect)."""
+    try:
+        import m3_halt
+        return [p for p in m3_halt.list_live_processes() if p.role == _HALT_ROLE]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+# Command-line signature of a running dashboard SERVER. The registry can MISS a
+# process (killed externally, crashed mid-register, a stale duplicate that lost
+# the bind race) — so stop/status also sweep by what the process RUNS, a
+# registry-independent floor mirroring m3_halt._WRITER_CMDLINE_SIGNATURES.
+#
+# The signature requires BOTH "dashboard_server.py" AND "--foreground": only the
+# actual long-lived server (the detached child + the ONSTART task) runs with
+# --foreground. The transient LAUNCHER (the `m3 dashboard` CLI process, the
+# UTF-8 re-exec parent, a bare `python dashboard_server.py` about to background)
+# does NOT carry --foreground, so it is correctly NOT matched — that avoids the
+# false-positive where a launcher sees its own re-exec'd child as "already
+# running" and refuses to start.
+_DASHBOARD_CMDLINE_SIG = "dashboard_server.py"
+_DASHBOARD_FOREGROUND_SIG = "--foreground"
+
+
+def _dashboard_pids_by_cmdline() -> "set[int]":
+    """PIDs of live dashboard SERVER processes, found by cmdline — independent of
+    the PID registry. Cross-platform, best-effort (empty on error).
+
+    Matches a python interpreter running ``dashboard_server.py --foreground``;
+    EXCLUDES this process and non-python matches. Never raises."""
+    me = os.getpid()
+    pids: set[int] = set()
+    try:
+        if sys.platform == "win32":
+            import subprocess
+
+            from _task_runtime import no_window_kwargs
+            # PowerShell CIM: python* whose cmdline has BOTH the script and --foreground.
+            ps = (
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.Name -match 'python' -and "
+                f"$_.CommandLine -match '{_DASHBOARD_CMDLINE_SIG}' -and "
+                "$_.CommandLine -match '--foreground' } | "
+                "ForEach-Object { $_.ProcessId }"
+            )
+            out = subprocess.run(  # noqa: S603
+                ["powershell", "-NoProfile", "-Command", ps],
+                capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+            ).stdout
+            for line in out.splitlines():
+                line = line.strip()
+                if line.isdigit() and int(line) != me:
+                    pids.add(int(line))
+        else:
+            # POSIX: scan /proc for a python cmdline with both signatures.
+            import glob
+            for cmdpath in glob.glob("/proc/[0-9]*/cmdline"):
+                try:
+                    pid = int(cmdpath.split("/")[2])
+                    if pid == me:
+                        continue
+                    with open(cmdpath, "rb") as f:
+                        parts = f.read().split(b"\x00")
+                    joined = b" ".join(parts).decode("utf-8", "replace")
+                    if ("python" in joined and _DASHBOARD_CMDLINE_SIG in joined
+                            and _DASHBOARD_FOREGROUND_SIG in joined):
+                        pids.add(pid)
+                except (OSError, ValueError, IndexError):
+                    continue
+    except Exception:  # noqa: BLE001 — discovery is best-effort; registry still covers the common case
+        pass
+    return pids
+
+
+def _kill_pid(pid: int) -> bool:
+    """Terminate a pid cross-platform (taskkill /F on Windows, SIGTERM on POSIX)."""
+    import subprocess
+    try:
+        if sys.platform == "win32":
+            from _task_runtime import no_window_kwargs
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)],  # noqa: S603,S607
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           check=False, **no_window_kwargs())
+        else:
+            import signal
+            os.kill(pid, signal.SIGTERM)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def dashboard_status(host: "str | None" = None, port: "int | None" = None) -> int:
+    """Print whether a dashboard is running and where. Returns 0 if running, 1 if not.
+
+    Reports registry-known instances (with URL) AND flags any unregistered
+    process found by cmdline (so a zombie the registry missed is still surfaced).
+    """
+    live = _live_dashboards()
+    registered_pids = {p.pid for p in live}
+    for p in live:
+        h = str(p.extra.get("host") or HOST)
+        pt = p.extra.get("port") or PORT
+        print(f"dashboard: running (pid {p.pid}) → http://{h}:{pt}")
+    # Unregistered survivors (not in the registry) — surface them honestly.
+    orphans = _dashboard_pids_by_cmdline() - registered_pids
+    for pid in sorted(orphans):
+        print(f"dashboard: running but UNREGISTERED (pid {pid}) — "
+              "`m3 dashboard --stop` will clean it up.")
+    if not live and not orphans:
+        print("dashboard: not running  (start with `m3 dashboard`)")
+        return 1
+    return 0
+
+
+def dashboard_stop() -> int:
+    """Terminate ALL running dashboard(s) and reap their registry entries.
+
+    Uses the UNION of (a) the PID registry and (b) a cmdline sweep, so a process
+    the registry missed — killed externally, crashed mid-register, or a stale
+    duplicate — is still stopped. Registry-only stop was blind to those.
+    """
+    live = _live_dashboards()
+    reg_pids = {p.pid for p in live}
+    cmdline_pids = _dashboard_pids_by_cmdline()
+    all_pids = reg_pids | cmdline_pids
+    if not all_pids:
+        print("dashboard: not running — nothing to stop.")
+        return 0
+
+    for pid in sorted(all_pids):
+        if _kill_pid(pid):
+            tag = "" if pid in reg_pids else " (unregistered)"
+            print(f"dashboard: stopped (pid {pid}){tag}.")
+        else:
+            print(f"dashboard: could not stop pid {pid}.")
+    # Reap registry entries for the ones we knew about.
+    for p in live:
+        try:
+            p.path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return 0
+
+
+def _spawn_detached(host: str, port: int) -> int:
+    """Relaunch this server DETACHED + WINDOWLESS, then return to the caller.
+
+    Windows: re-exec under pythonw.exe (GUI subsystem — the OS never allocates a
+    console, so there is NO window and NO flash, ever) with CREATE_NO_WINDOW |
+    DETACHED_PROCESS so the child outlives this process and the terminal. POSIX:
+    start_new_session=True detaches from the controlling terminal. Mirrors the
+    m3_cognitive_loop `--background` daemonize. The child runs `--foreground`
+    (the actual blocking server) and self-registers in the PID registry.
+    """
+    import subprocess
+    env = dict(os.environ)
+    env["M3_DASHBOARD_HOST"] = host
+    env["M3_DASHBOARD_PORT"] = str(port)
+    script = os.path.abspath(__file__)
+    if sys.platform == "win32":
+        # pythonw.exe (GUI subsystem) = the OS never allocates a console → no
+        # window, no flash. CREATE_NO_WINDOW belts-and-braces the no-console
+        # guarantee; DETACHED_PROCESS lets the child outlive this process/terminal.
+        pyw = sys.executable.replace("python.exe", "pythonw.exe")
+        exe = pyw if os.path.exists(pyw) else sys.executable
+        subprocess.Popen(  # noqa: S603
+            [exe, script, "--foreground"], env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+        )
+    else:
+        # POSIX has no console window; start_new_session detaches from the
+        # controlling terminal. no_window_kwargs() is an empty dict here (marks
+        # the no-window intent for the regression guard; a no-op off Windows).
+        from _task_runtime import no_window_kwargs
+        subprocess.Popen(  # noqa: S603
+            [sys.executable, script, "--foreground"], env=env,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            start_new_session=True, **no_window_kwargs(),
+        )
+    print(f"m3 dashboard started in background → http://{host}:{port}", flush=True)
+    print("  (keeps running after you close this window; stop with `m3 dashboard --stop`)", flush=True)
+    return 0
+
+
+def run_dashboard(host: "str | None" = None, port: "int | None" = None,
+                  *, background: bool = True) -> int:
+    """Start the dashboard.
+
+    DEFAULT (``background=True``): detach a WINDOWLESS server that SURVIVES the
+    terminal closing (no startup window, no flash, no periodic flashes — it runs
+    under pythonw/detached), then RETURN to the prompt. Single-instance: if one
+    is already running, report its URL instead of spawning a duplicate.
+
+    ``background=False`` (the ``--foreground`` child, or an explicit foreground
+    run): run the uvicorn server IN THIS PROCESS until stopped. This is the code
+    the detached child and the ONSTART scheduled task both execute.
+    """
+    resolved_host, resolved_port = _resolve_host_port(host, port)
+
+    if background:
+        # Single-instance guard — don't spawn a second server. Check THREE signals
+        # (registry may be momentarily empty during a race; the port is the
+        # ground truth for "already serving"): registry, then a live cmdline
+        # sweep, then the port itself.
+        live = _live_dashboards()
+        if live:
+            p = live[0]
+            h = str(p.extra.get("host") or resolved_host)
+            pt = p.extra.get("port") or resolved_port
+            print(f"m3 dashboard already running (pid {p.pid}) → http://{h}:{pt}")
+            return 0
+        if _dashboard_pids_by_cmdline():
+            print(f"m3 dashboard already running → http://{resolved_host}:{resolved_port}")
+            return 0
+        if _port_already_serving(resolved_host, resolved_port):
+            print(f"m3 dashboard already serving → http://{resolved_host}:{resolved_port}")
+            return 0
+        return _spawn_detached(resolved_host, resolved_port)
+
+    # ── Foreground server body (runs in the detached child / scheduled task) ──
+    _ensure_std_streams()  # pythonw has no console → bind devnull so writes are safe
+
+    # Single-instance pre-flight: if the port is already served (a live dashboard,
+    # or a self-heal task re-firing), exit cleanly WITHOUT binding — never stack a
+    # second server or crash on an in-use port. Mirrors embed_server's _already_serving.
+    if _port_already_serving(resolved_host, resolved_port):
+        print(f"dashboard already serving on {resolved_host}:{resolved_port}; exiting.", flush=True)
+        return 0
+
+    registered = False
+    try:
+        import m3_halt
+        m3_halt.register_process(
+            _HALT_ROLE, extra={"host": resolved_host, "port": resolved_port})
+        registered = True
+    except Exception as e:  # noqa: BLE001 — registration is advisory, not fatal
+        print(f"[warn] could not register dashboard in PID registry: {e}", flush=True)
+
+    config = uvicorn.Config(app, host=resolved_host, port=resolved_port,
+                            log_level="warning", use_colors=False)
+
+    class _NoSignalServer(uvicorn.Server):
+        # Under pythonw there is NO console to deliver SIGINT/SIGTERM, and
+        # uvicorn's default handler install can make a no-console server exit
+        # early. The process is stopped by taskkill/SIGTERM (dashboard_stop) or
+        # the OS, not by Ctrl-C — so don't install console signal handlers.
+        def install_signal_handlers(self) -> None:
+            return None
+
+    server = _NoSignalServer(config)
+    try:
+        server.run()  # blocks until the process is terminated
+        return 0
+    finally:
+        if registered:
+            try:
+                import m3_halt
+                m3_halt.deregister(_HALT_ROLE)
+            except Exception:  # noqa: BLE001 — best-effort cleanup
+                pass
+
+
 # --- Execution Hook ---
 if __name__ == "__main__":
-    port_override = int(os.environ.get("M3_DASHBOARD_PORT", PORT))
-    host_override = os.environ.get("M3_DASHBOARD_HOST", HOST)
+    import argparse
 
-    uvicorn.run("dashboard_server:app", host=host_override, port=port_override, reload=False)
+    _p = argparse.ArgumentParser(description="M3 local web dashboard.")
+    _p.add_argument("--host", default=None, help="Bind address (default 127.0.0.1).")
+    _p.add_argument("--port", type=int, default=None, help="TCP port (default 8088).")
+    _p.add_argument("--foreground", action="store_true",
+                    help="Run the server in THIS process (used by the detached "
+                         "child and the boot task). Default launches detached.")
+    _p.add_argument("--stop", action="store_true", help="Stop a running dashboard.")
+    _p.add_argument("--status", action="store_true", help="Report dashboard status.")
+    # --log-file is accepted for scheduled-task parity (self-logging); the task
+    # runtime consumes it, so we just tolerate it here.
+    _p.add_argument("--log-file", default=None, help=argparse.SUPPRESS)
+    _a = _p.parse_args()
+
+    if _a.log_file:
+        try:
+            import _task_runtime
+            _task_runtime.setup_task_runtime(log_file=_a.log_file, lock_name=None,
+                                             logger_name="dashboard")
+        except Exception:  # noqa: BLE001 — logging setup must never block startup
+            pass
+
+    if _a.stop:
+        sys.exit(dashboard_stop())
+    if _a.status:
+        sys.exit(dashboard_status(_a.host, _a.port))
+    sys.exit(run_dashboard(_a.host, _a.port, background=not _a.foreground))

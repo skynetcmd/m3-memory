@@ -432,6 +432,147 @@ def _roots_section() -> None:
         print("      See CLAUDE.md → 'Split-brain hazard'.")
 
 
+def _fmt_dual_time(value: "object") -> str:
+    """Render a timestamp as 'LOCAL (ZULU)', per house convention.
+
+    ``value`` may be an ISO-8601 string (SQLite TEXT timestamp), an epoch number,
+    or a datetime. Returns e.g. ``2026-07-19 14:32:01 EDT (2026-07-19T18:32:01Z)``.
+    Best-effort: an unparseable value is returned stringified, never raised — a
+    doctor line must not crash on a weird timestamp.
+    """
+    import datetime as _dt
+
+    if value is None or value == "":
+        return "—"
+    dt: "_dt.datetime | None" = None
+    try:
+        if isinstance(value, _dt.datetime):
+            dt = value
+        elif isinstance(value, (int, float)):
+            dt = _dt.datetime.fromtimestamp(float(value))
+        else:
+            s = str(value).strip().replace("Z", "+00:00")
+            dt = _dt.datetime.fromisoformat(s)
+    except (ValueError, OSError, OverflowError):
+        return str(value)
+    if dt is None:
+        return str(value)
+    # Interpret a naive timestamp as UTC (SQLite stores wall-clock UTC), then
+    # show it in local time with the UTC value in parens.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    local = dt.astimezone()
+    # Prefer a compact tz abbreviation. On Windows %Z yields a verbose name
+    # ("Eastern Daylight Time"); abbreviate to its initials (→ "EDT"). Fall back
+    # to the numeric offset if %Z is empty.
+    raw_tz = local.strftime("%Z")
+    if raw_tz and " " in raw_tz:
+        tzname = "".join(w[0] for w in raw_tz.split() if w).upper()
+    else:
+        tzname = raw_tz or local.strftime("%z")
+    utc = dt.astimezone(_dt.timezone.utc)
+    return (f"{local.strftime('%Y-%m-%d %H:%M:%S')} {tzname} "
+            f"({utc.strftime('%Y-%m-%dT%H:%M:%SZ')})")
+
+
+def _sqlite_store_stats(db_path: str) -> "dict | None":
+    """(rows, last_updated) for a SQLite store file, or None if absent/unreadable.
+
+    Read-only, best-effort. ``rows`` counts live memory_items; ``last_updated`` is
+    the max of updated_at/created_at seen. A store that lacks memory_items (e.g. a
+    files DB) reports rows via its own primary table when recognizable, else 0.
+    """
+    if not db_path or not os.path.exists(db_path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error:
+        return None
+    try:
+        def _has(t: str) -> bool:
+            return conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)
+            ).fetchone() is not None
+
+        rows = 0
+        last = None
+        if _has("memory_items"):
+            rows = conn.execute(
+                "SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted,0)=0"
+            ).fetchone()[0]
+            last = conn.execute(
+                "SELECT MAX(COALESCE(updated_at, created_at)) FROM memory_items"
+            ).fetchone()[0]
+        elif _has("leaves"):  # files DB
+            rows = conn.execute("SELECT COUNT(*) FROM leaves").fetchone()[0]
+        return {"rows": rows, "last_updated": last}
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def _cdw_sync_section() -> None:
+    """If a CDW (data warehouse) DSN is defined, report last sync watermarks.
+
+    The warehouse DSN is resolve_cdw_pg_dsn (M3_CDW_PG_URL > PG_URL deprecated).
+    Sync watermarks live on the SQLite side in ``sync_watermarks(direction TEXT
+    PK, last_synced_at TEXT)`` (pg_sync.py). Report each direction's last sync in
+    LOCAL (ZULU) time. Silent when no CDW is configured (the common case).
+    """
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "bin"))
+        from m3_sdk import resolve_cdw_pg_dsn, resolve_db_path  # type: ignore
+    except Exception:  # noqa: BLE001 — informational only
+        return
+    try:
+        cdw = (resolve_cdw_pg_dsn("") or "").strip()
+    except Exception:  # noqa: BLE001
+        cdw = ""
+    if not cdw:
+        return  # no warehouse configured — nothing to report
+
+    import re as _re
+    masked = _re.sub(r"(://[^:/@]+:)[^@/]+(@)", r"\1***\2", cdw)
+    print()
+    print("data warehouse (CDW) sync:")
+    print(f"  warehouse DSN:            {masked}")
+
+    core_db = ""
+    try:
+        core_db = resolve_db_path(None)
+    except Exception:  # noqa: BLE001
+        pass
+    if not core_db or not os.path.exists(core_db):
+        print("  [!] no local store to read sync watermarks from.")
+        return
+    try:
+        conn = sqlite3.connect(f"file:{core_db}?mode=ro", uri=True, timeout=5.0)
+    except sqlite3.Error:
+        print("  [!] could not open the local store to read watermarks.")
+        return
+    try:
+        have = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_watermarks'"
+        ).fetchone()
+        if not have:
+            print("  last sync:                never (no sync_watermarks yet)")
+            return
+        rows = conn.execute(
+            "SELECT direction, last_synced_at FROM sync_watermarks ORDER BY direction"
+        ).fetchall()
+        if not rows:
+            print("  last sync:                never (no watermarks recorded)")
+            return
+        for direction, ts in rows:
+            print(f"  {direction:<24} {_fmt_dual_time(ts)}")
+    except sqlite3.Error as e:
+        print(f"  [!] could not read watermarks: {e}")
+    finally:
+        conn.close()
+
+
 def _backend_section(cfg: dict) -> None:
     """Report the active PRIMARY database backend and, on PostgreSQL, its health.
 
@@ -476,7 +617,53 @@ def _backend_section(cfg: dict) -> None:
         print("      `env` block and any process that imports m3 — or re-run install.")
 
     if live == "sqlite":
-        return  # nothing more to probe — SQLite is a local file, always present
+        # Report the three local stores (core / chat / files) with full paths,
+        # row counts, and last-updated time. Chat and core may be the SAME file
+        # (chatlog_db == main_db) — dedupe the display. "If present and
+        # discernible": a store that doesn't exist is shown as absent, not an error.
+        try:
+            import sys as _sys
+            _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "bin"))
+            from m3_sdk import resolve_db_path  # type: ignore
+            core_db = resolve_db_path(None)
+            try:
+                from chatlog_config import DEFAULT_DB_PATH as chat_db  # type: ignore
+            except Exception:  # noqa: BLE001
+                chat_db = ""
+            try:
+                from memory.config import FILES_DB_PATH as files_db  # type: ignore
+            except Exception:  # noqa: BLE001
+                files_db = ""
+        except Exception:  # noqa: BLE001 — informational only
+            return
+
+        stores = [("core", core_db)]
+        if chat_db and os.path.abspath(chat_db) != os.path.abspath(core_db or ""):
+            stores.append(("chat", chat_db))
+        else:
+            stores.append(("chat", core_db))  # same file as core
+        if files_db:
+            stores.append(("files", files_db))
+
+        print("  stores (SQLite):")
+        seen_paths: set = set()
+        for label, path in stores:
+            if not path:
+                print(f"    {label:<6} —  (path not discernible)")
+                continue
+            ap = os.path.abspath(path)
+            shared = "  (shared with core)" if ap in seen_paths else ""
+            seen_paths.add(ap)
+            stats = _sqlite_store_stats(path)
+            if stats is None:
+                print(f"    {label:<6} {path}  (absent){shared}")
+            else:
+                last = _fmt_dual_time(stats["last_updated"]) if stats["last_updated"] else "—"
+                print(f"    {label:<6} {path}")
+                print(f"           rows: {stats['rows']}   last updated: {last}{shared}")
+
+        _cdw_sync_section()
+        return
 
     # PostgreSQL: report the (masked) DSN and probe reachability.
     try:
@@ -498,15 +685,33 @@ def _backend_section(cfg: dict) -> None:
 
         conn = psycopg2.connect(dsn, connect_timeout=5)
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM memory_items")
+        # Identity (host/db) for the panel — prepared as the same shape other
+        # SQL backends (MariaDB, …) would report.
+        try:
+            cur.execute("SELECT current_database(), inet_server_addr()::text, current_schema()")
+            dbname, host, schema = cur.fetchone()
+        except Exception:  # noqa: BLE001 — older PG / restricted role
+            dbname = host = schema = None
+        cur.execute("SELECT COUNT(*) FROM memory_items WHERE COALESCE(is_deleted,0)=0")
         n = cur.fetchone()[0]
+        try:
+            cur.execute("SELECT MAX(COALESCE(updated_at, created_at)) FROM memory_items")
+            last = cur.fetchone()[0]
+        except Exception:  # noqa: BLE001
+            last = None
         conn.close()
-        print(f"  reachable:                yes ({n} memory_items in the live store)")
+        if dbname:
+            print(f"  identity:                 db={dbname} host={host or 'local'} schema={schema or 'public'}")
+        print("  reachable:                yes")
+        print(f"  memory_items:             {n}   last updated: "
+              f"{_fmt_dual_time(last) if last else '—'}")
     except Exception as e:  # noqa: BLE001 — connection / auth / undefined-table
         detail = _re.sub(r"(://[^:/@]+:)[^@/]+(@)", r"\1***\2", str(e).strip())
         print(f"  reachable:                NO — {detail}")
         print("      Start/reach the PostgreSQL server. The schema builds")
         print("      automatically on the first successful connect.")
+
+    _cdw_sync_section()
 
 
 def _deprecated_env_section() -> None:
@@ -525,8 +730,8 @@ def _deprecated_env_section() -> None:
         import os as _os
         import sys as _sys
         _sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "bin"))
-        from m3_sdk import deprecated_env_in_use  # type: ignore
         from m3_core.paths import ROLE_SPLIT_ENV_RENAMES  # type: ignore
+        from m3_sdk import deprecated_env_in_use  # type: ignore
     except Exception:  # noqa: BLE001 — informational only
         return
     in_use = dict(deprecated_env_in_use())
@@ -544,8 +749,9 @@ def _deprecated_env_section() -> None:
     # is complete on Windows. `m3 doctor --fix` rewrites the User-scope ones.
     reg_lines: "list[str]" = []
     try:
-        from m3_memory import installer as _I  # type: ignore
         from m3_core.paths import all_env_renames  # type: ignore
+
+        from m3_memory import installer as _I  # type: ignore
 
         for hit in _I._scan_registry_env_deprecations(all_env_renames()):
             reg_lines.append(f"        {hit['old']}  ->  {hit['new']}   [{hit['label']}]")

@@ -331,6 +331,24 @@ def get_schedule_specs(m3_memory_root):
             "modifier": "",
             "time": "00:00",
             "description": "Shared in-process GPU embedder server (one CUDA context, localhost HTTP)"
+        },
+        {
+            "name": "AgentOS_Dashboard",
+            # Local web dashboard (bin/dashboard_server.py). --foreground runs the
+            # uvicorn server IN the task process (the task IS the long-lived
+            # server); the Windows action binds pythonw.exe (windowless — no
+            # console, so no startup flash and no periodic flashes) with NO
+            # cmd.exe wrapper. ONSTART so the dashboard is up from boot; it
+            # self-registers in the PID registry and binds 127.0.0.1 only.
+            # Optional feature — this task is only registered when the user opts
+            # into the dashboard (setup wizard / `install_schedules --add dashboard`).
+            "args": [_script("dashboard_server.py"),
+                     "--foreground", "--port", "8088",
+                     "--log-file", _log("dashboard.log")],
+            "schedule": "ONSTART",
+            "modifier": "",
+            "time": "00:00",
+            "description": "Local web dashboard (windowless, localhost HTTP :8088)"
         }
     ]
 
@@ -390,6 +408,11 @@ def _xml_escape(text: str) -> str:
 _SELF_HEAL_TASKS = {
     "AgentOS_CognitiveLoop": "PT30M",
     "AgentOS_EmbedServer": "PT1M",
+    # Re-fire every 5 min: if the dashboard dies it comes back within ~5 min.
+    # Safe to re-fire — MultipleInstances=IgnoreNew makes a re-fire a no-op while
+    # it's alive, and dashboard_server's _already_serving() pre-flight exits
+    # WITHOUT binding if :8088 is already served, so a re-fire never double-binds.
+    "AgentOS_Dashboard": "PT5M",
 }
 
 

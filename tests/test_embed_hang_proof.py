@@ -482,9 +482,15 @@ async def test_search_scored_degrades_when_no_fast_tier(monkeypatch):
         monkeypatch.setattr(search, "_two_stage_observations_gate", lambda: False)
 
         # A non-exact query so the FTS short-circuit does not early-return.
+        # search_mode="semantic" specifically: with no fast tier, PURE-semantic
+        # search must degrade to empty (it can't do vector similarity, and it must
+        # NOT return the stubbed vector row — proving the embed path was skipped).
+        # NOTE: hybrid/fts5 modes now fall back to FTS keyword results in this
+        # no-vector case (see _fts_only_results); semantic mode deliberately does
+        # not, so this assertion — embed-skipped, no vec rows — still holds.
         results = await search.memory_search_scored_impl(
             "some semantic query that is not an exact substring", search_mode="semantic", k=5
         )
-        assert results == [], "no fast tier -> semantic search must degrade to empty, not hang or return vec rows"
+        assert results == [], "no fast tier -> SEMANTIC search must degrade to empty, not hang or return vec rows"
     finally:
         conn.close()

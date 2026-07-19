@@ -12,6 +12,7 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 
 > **Plugs into your stack — framework and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
 >
+> - 🖥️ **Web dashboard** — a built-in, backend-agnostic control panel (default `http://127.0.0.1:8088`): browse memory, explore the interactive knowledge graph, and watch system health / load. `pip install m3-memory[dashboard]` then `m3 dashboard`. (See [Dashboard Guide](docs/DASHBOARD.md))
 > - 🐘 **PostgreSQL** — run M3 on a first-class PostgreSQL primary backend (`M3_DB_BACKEND=postgres`) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See [Architecture](docs/ARCHITECTURE.md) · [Sync](docs/SYNC.md))
 > - 🦜 **LangChain & LangGraph** — drop-in **Mem0 replacement** (one-line import swap) and fully **LangMem-compatible** (`store=M3Store()`): `pip install m3-memory[langchain]`. (See [LangChain Guide](docs/integrations/LANGCHAIN.md))
 > - 👥 **CrewAI** — a drop-in `StorageBackend` for CrewAI's unified memory: `pip install m3-memory[crewai]`. (See [CrewAI Guide](m3_memory/integrations/crewai/README.md))

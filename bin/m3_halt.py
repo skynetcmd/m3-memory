@@ -35,7 +35,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -133,6 +133,10 @@ class ProcInfo:
     started_at: str
     engine_root: str
     path: Path
+    # Optional per-role metadata (e.g. a server's listen host/port). Absent for
+    # roles that don't record it; readers must tolerate None. Kept out of the
+    # required fields so older registry files (no ``extra`` key) still parse.
+    extra: dict = field(default_factory=dict)
 
 
 def _now_iso() -> str:
@@ -140,13 +144,23 @@ def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
 
 
-def register_process(role: str, engine_root: Optional[str] = None) -> Path:
+def register_process(
+    role: str,
+    engine_root: Optional[str] = None,
+    extra: Optional[dict] = None,
+) -> Path:
     """Register the current process as a live writer of role ``role``.
 
     Writes ``PID/<role>.<pid>``. Call once on startup AFTER the process has
     opened its DB connections. Idempotent per (role, pid). Best-effort: a
     registry write failure is logged, never fatal (the process should run even
     if coordination is degraded — fail safe, not loud-fatal, per §3).
+
+    ``extra`` is optional per-role metadata (e.g. a server's ``{"host": ...,
+    "port": ...}``) stored under an ``extra`` key so readers can recover it —
+    doctor uses the recorded host/port to probe liveness and to restart a dead
+    dashboard on its original address. Reserved keys (pid/role/started_at/
+    engine_root/protocol) can't be shadowed; ``extra`` is namespaced.
     """
     role = _safe_role(role)
     pid = os.getpid()
@@ -161,6 +175,8 @@ def register_process(role: str, engine_root: Optional[str] = None) -> Path:
             "engine_root": str(_engine_root(engine_root)),
             "protocol": PROTOCOL_VERSION,
         }
+        if extra:
+            payload["extra"] = dict(extra)
         entry.write_text(json.dumps(payload), encoding="utf-8")
         return entry
     except OSError as e:
@@ -202,12 +218,14 @@ def list_live_processes(engine_root: Optional[str] = None) -> list[ProcInfo]:
             _reap(entry)
             continue
         if _pid_is_alive(pid):
+            raw_extra = data.get("extra")
             live.append(ProcInfo(
                 pid=pid,
                 role=str(data.get("role", entry.stem.rsplit(".", 1)[0])),
                 started_at=str(data.get("started_at", "")),
                 engine_root=str(data.get("engine_root", "")),
                 path=entry,
+                extra=dict(raw_extra) if isinstance(raw_extra, dict) else {},
             ))
         else:
             _reap(entry)  # dead PID → stale → reap; never counts as a holder

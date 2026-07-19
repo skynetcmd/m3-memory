@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "m3-memory"
-version = "2026.7.19.2"
+version = "2026.7.19.3"
 description = "Local-first Memory Framework for AI Agents · 99.2% LongMemEval-S retrieval @ k=10 · Supports Claude · Gemini · Antigravity · OpenCode · OpenClaw · Hermes · MCP-native and plugins · Hybrid search (FTS5 + vector + MMR) · GDPR · FIPS 140-3 deployment-ready · 100% local (fully offline) or cloud capable"
 
 readme = "README.md"
@@ -116,6 +116,16 @@ postgres = ["psycopg[binary]>=3.2.0,<4"]
 # pyproject entirely, so `pip install m3-memory` never provided them and the
 # dashboard/proxy failed to import.
 web = [
+    "fastapi>=0.136.1,<1",
+    "uvicorn>=0.46.0,<1",
+]
+# The local web dashboard (bin/dashboard_server.py), launched by `m3 dashboard`.
+# Same FastAPI+uvicorn stack as [web], exposed under a discoverable name so the
+# install flow can offer it and users install exactly what the dashboard needs:
+#   pip install "m3-memory[dashboard]"  &&  m3 dashboard
+# Kept as its OWN extra (not folded into [web]) so [web] stays back-compatible
+# and still scopes the mcp_proxy surface; dashboard/web share deps by design.
+dashboard = [
     "fastapi>=0.136.1,<1",
     "uvicorn>=0.46.0,<1",
 ]
@@ -354,6 +364,14 @@ filterwarnings = [
     # category module to resolve the filter, and the drift-check CI job runs without
     # langchain installed (that import would fail the whole run under `error`).
     "ignore:.*RunnableWithMessageHistory is deprecated.*:PendingDeprecationWarning",
+    # starlette >=1.3 deprecates driving its TestClient with httpx (favoring the
+    # httpx2 rewrite); fastapi pulls that starlette in the [web]/[dashboard]/
+    # [embed-server] extras. The warning fires from starlette.testclient at import
+    # of the TestClient — third-party, resolved only when we (or fastapi) move to
+    # httpx2. Our test client usage is otherwise correct. Category is
+    # StarletteDeprecationWarning; match by message to avoid importing starlette to
+    # resolve the class path (the drift-check CI job runs without the web deps).
+    "ignore:.*Using .httpx. with .starlette.testclient. is deprecated.*",
     # ── (B) our own process-lifetime singletons (by design; not per-test leaks) ─
     # M3Client's shared daemon asyncio loop-thread (§8) is alive at test end by
     # design (torn down at interpreter exit). See tests/test_langchain_*.py comments.

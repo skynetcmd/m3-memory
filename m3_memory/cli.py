@@ -331,6 +331,64 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_dashboard(args: argparse.Namespace) -> int:
+    """`m3 dashboard` — start the local web dashboard as a DETACHED background service.
+
+    By default the server is launched WINDOWLESS and DETACHED (via pythonw on
+    Windows / a new session on POSIX): no startup window, no flash, no periodic
+    flashes, and it KEEPS RUNNING after you close the terminal. The command
+    prints the URL and returns. Control it with:
+      m3 dashboard            start (or report an already-running instance)
+      m3 dashboard --stop     stop the running dashboard
+      m3 dashboard --status   report URL + pid
+      m3 dashboard --foreground   run in THIS process (debugging; blocks)
+
+    Loopback-only by design (no authentication) — do not expose without auth.
+    """
+    # --stop / --status don't need the web deps (they only read the PID registry
+    # / kill a pid), so handle them before the fastapi preflight.
+    passthrough: list = []
+    if getattr(args, "stop", False):
+        passthrough = ["--stop"]
+    elif getattr(args, "status", False):
+        passthrough = ["--status"]
+    else:
+        # Starting a server DOES need the web deps — preflight for a clear message.
+        missing = []
+        for mod in ("fastapi", "uvicorn"):
+            try:
+                __import__(mod)
+            except ModuleNotFoundError:
+                missing.append(mod)
+        if missing:
+            print(
+                "m3 dashboard needs the web dependencies "
+                f"({', '.join(missing)} not installed).\n"
+                "Install them with:\n"
+                "    pip install \"m3-memory[dashboard]\"",
+                file=sys.stderr,
+            )
+            return 1
+        if getattr(args, "foreground", False):
+            passthrough = ["--foreground"]
+
+    if not _resolve_bin_script("dashboard_server.py"):
+        print(
+            "dashboard requires the project payload (run `m3 install`).",
+            file=sys.stderr,
+        )
+        return 1
+
+    if getattr(args, "host", None):
+        passthrough += ["--host", args.host]
+    if getattr(args, "port", None):
+        passthrough += ["--port", str(args.port)]
+
+    # runpy dashboard_server.py as __main__; its argparse handles the flags. The
+    # default (no --foreground) detaches a windowless server and returns.
+    return _run_bin_script("dashboard_server.py", passthrough)
+
+
 def _resolve_bin_script(name: str) -> "Path | None":
     """Find bin/<name> relative to the resolved bridge (installed or dev).
 
@@ -992,6 +1050,32 @@ Examples:
     p_serve.add_argument("--path", default="/mcp",
                          help="HTTP mount path for the streamable-http endpoint (default: /mcp).")
     p_serve.set_defaults(func=_cmd_serve)
+
+    p_dashboard = subparsers.add_parser(
+        "dashboard",
+        help="Start the local web dashboard as a detached background service (localhost only).",
+    )
+    p_dashboard.add_argument(
+        "--host", default=None,
+        help="Bind address (default: 127.0.0.1 — localhost only; do not expose without auth).",
+    )
+    p_dashboard.add_argument(
+        "--port", type=int, default=None,
+        help="TCP port (default: 8088, or $M3_DASHBOARD_PORT).",
+    )
+    p_dashboard.add_argument(
+        "--stop", action="store_true",
+        help="Stop the running dashboard (kills the detached server, frees the port).",
+    )
+    p_dashboard.add_argument(
+        "--status", action="store_true",
+        help="Report whether the dashboard is running and its URL.",
+    )
+    p_dashboard.add_argument(
+        "--foreground", action="store_true",
+        help="Run the server in THIS process (blocks; for debugging). Default detaches.",
+    )
+    p_dashboard.set_defaults(func=_cmd_dashboard)
 
     p_enrich = subparsers.add_parser(
         "enrich-pending",
