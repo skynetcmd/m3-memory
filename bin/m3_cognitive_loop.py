@@ -65,12 +65,44 @@ def daemonize_windows(args):
         if arg != "--background":
             argv.append(arg)
 
+    # CRITICAL: the detached child runs under pythonw.exe, which has NO console
+    # and therefore an INVALID stdout/stderr (sys.stdout is None / a broken
+    # handle). The entity/enrich passes shell into m3_entities / m3_enrich, which
+    # emit dozens of print() lines (dry-run banner, [m3-entities] progress). The
+    # first such print() in the detached child raises OSError writing to the dead
+    # handle and — with no console to surface it — the loop dies SILENTLY, right
+    # after "Starting Entity Extraction pass...". That is the "loop starts, logs
+    # one line, then goes quiet and gets respawned by the scheduler" bug: every
+    # background instance died on the first entity/enrich pass, so extraction only
+    # ran in the brief window before that pass. The Unix daemonize already dup2's
+    # the std streams to /dev/null (see daemonize_unix); Windows never did.
+    #
+    # Redirect the child's stdout+stderr to the --log-file if given (so those
+    # print() lines are captured alongside the logger output), else to devnull.
+    # Both must be REAL OS handles Popen can inherit — os.devnull or an opened
+    # file, never None.
+    if args.log_file:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(args.log_file)), exist_ok=True)
+            child_out = open(args.log_file, "a", encoding="utf-8")
+        except OSError:
+            child_out = open(os.devnull, "a")
+    else:
+        child_out = open(os.devnull, "a")
+
     # Spawn the detached child, then HARD-exit the parent. os._exit(0) — not
     # sys.exit(0) — because sys.exit raises SystemExit, which an outer try/except
     # (or the asyncio runner if we got here late) can swallow, leaving the parent
     # ALIVE alongside the child. Two live loops each dispatch their own
     # Semaphore(2) of SLM calls = over-dispatch that storms the local LLM.
-    subprocess.Popen(argv, creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+    with child_out:
+        subprocess.Popen(
+            argv,
+            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+            stdin=subprocess.DEVNULL,
+            stdout=child_out,
+            stderr=subprocess.STDOUT,
+        )
     print("Cognitive Loop started in background (Windows pythonw).")
     sys.stdout.flush()
     os._exit(0)
@@ -104,31 +136,84 @@ def daemonize_unix():
         os.dup2(f.fileno(), sys.stdout.fileno())
         os.dup2(f.fileno(), sys.stderr.fileno())
 
+def _pid_is_live_loop(pid: int) -> bool:
+    """True iff `pid` is alive AND is actually a cognitive-loop process (not a
+    reused PID now owned by something unrelated). Liveness alone is not enough: a
+    reused PID would make acquire_lock refuse to start forever (false positive).
+    On error, err toward "live" (conservative — refuse to start a possible second
+    instance rather than risk two loops double-dispatching to the local LLM)."""
+    if pid <= 0:
+        return False
+    # 1. Liveness.
+    if sys.platform == "win32":
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False  # no such process (or truly inaccessible) -> stale
+        ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False  # definitely gone -> stale
+        except PermissionError:
+            return True   # exists but not ours to signal -> treat as live
+        except OSError:
+            return True   # unknown -> conservative
+    # 2. Identity: is the live PID actually a cognitive_loop? Best-effort via
+    # psutil; if psutil is absent or the check fails, fall back to "live == ours"
+    # (the old behaviour) so we never START a duplicate on an inconclusive probe.
+    try:
+        import psutil
+        cmdline = " ".join(psutil.Process(pid).cmdline())
+        return "cognitive_loop" in cmdline
+    except Exception:
+        return True  # can't confirm identity -> assume it IS the loop (safe)
+
+
 def acquire_lock():
-    """Ensure only one instance of the loop is running."""
-    if PID_FILE.exists():
+    """Ensure only one instance of the loop is running.
+
+    Uses an ATOMIC exclusive-create (O_CREAT|O_EXCL) as the actual mutex so two
+    near-simultaneous launches can't both pass a check-then-write window — exactly
+    the race that produced two live loops (double LLM dispatch). If the create
+    fails because the file already exists, we inspect the recorded PID: a genuinely
+    stale lock (dead PID, or a reused PID now owned by a non-loop process) is
+    reclaimed; a live loop makes us exit."""
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    my_pid = os.getpid()
+
+    def _write_pid_atomic() -> bool:
+        """Try to create the lock file exclusively. True if we won it."""
+        try:
+            fd = os.open(str(PID_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
+        try:
+            os.write(fd, str(my_pid).encode())
+        finally:
+            os.close(fd)
+        return True
+
+    if not _write_pid_atomic():
+        # Lock file exists — decide whether the holder is live or stale.
         try:
             old_pid = int(PID_FILE.read_text().strip())
-            # Check if process is still alive
-            if sys.platform == "win32":
-                import ctypes
-                PROCESS_QUERY_INFORMATION = 0x0400
-                handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, old_pid)
-                if handle:
-                    ctypes.windll.kernel32.CloseHandle(handle)
-                    # Use print here as logger might not be fully ready
-                    print(f"ERROR: Cognitive Loop is already running (PID {old_pid}). Exiting.")
-                    sys.exit(0)
-            else:
-                os.kill(old_pid, 0)
-                print(f"ERROR: Cognitive Loop is already running (PID {old_pid}). Exiting.")
-                sys.exit(0)
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
-            # Stale PID file or can't check
-            pass
+        except (ValueError, OSError):
+            old_pid = -1  # unreadable/garbage -> treat as stale, reclaim
+        if old_pid != my_pid and _pid_is_live_loop(old_pid):
+            print(f"ERROR: Cognitive Loop is already running (PID {old_pid}). Exiting.")
+            sys.exit(0)
+        # Stale (dead PID / reused-by-other / garbage): reclaim by overwriting.
+        # There is no second racer here — a real concurrent launch would have been
+        # caught by the O_EXCL create above — so a plain overwrite is safe.
+        try:
+            PID_FILE.write_text(str(my_pid))
+        except OSError as e:
+            print(f"WARNING: could not reclaim stale lock {PID_FILE}: {e}")
 
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PID_FILE.write_text(str(os.getpid()))
     atexit.register(release_lock)
 
 def release_lock():
@@ -188,26 +273,49 @@ def _pace_for_pass(pacing_cpu_ram: dict, pacing_full: dict, uses_local_gpu: bool
     return pacing_cpu_ram
 
 
-def _select_pass_order(passes: list, cycle: int, active: bool) -> list:
-    """Round-robin + idle-aware pass selection for one cycle. Pure function so the
-    fairness policy is unit-testable in isolation from the async loop.
+def _select_pass_order(passes: list, cycle: int, active: bool,
+                       has_work: "dict[str, bool] | None" = None) -> list:
+    """Round-robin + idle-aware + queue-aware pass selection for one cycle. Pure
+    function so the fairness policy is unit-testable in isolation from the async
+    loop.
 
-    - ROUND-ROBIN (fairness): rotate the list by `cycle` so a different pass leads
-      each cycle. No pass is permanently first, so an always-backlogged upstream
-      pass (entity extraction) can't perpetually grab the local GPU before the
-      downstream passes get a turn.
+    - QUEUE-AWARE (no wasted slot): `has_work` maps a pass name -> whether its
+      queue has pending work RIGHT NOW. A pass whose name is present and maps to
+      False is dropped from this cycle's rotation. This matters most under
+      THROTTLED load, where only ONE pass runs: without this, the rotation could
+      hand the single slot to an EMPTY pass (e.g. enrich/reflect with a 0-depth
+      queue) while a backlogged pass (entity extraction with thousands of rows)
+      waits another full cycle — the "no entity-extraction requests while the
+      backlog is huge" symptom. Passes NOT present in `has_work` (the time-driven
+      sync/maintenance/audit, which have no queryable queue — their gate is "is it
+      due?", checked inside the pass) are always kept: absence means "eligibility
+      unknown, let the pass decide", never "no work". `has_work=None` disables the
+      filter entirely (back-compat: rotate all passes).
+    - ROUND-ROBIN (fairness): rotate the *eligible* list by `cycle` so a different
+      pass leads each cycle. No pass is permanently first, so an always-backlogged
+      upstream pass (entity extraction) can't perpetually grab the local GPU before
+      the downstream passes get a turn.
     - IDLE-AWARE INTENSITY (interactive UX): when `active` (governor THROTTLED — a
       proxy for the user being busy, since this separate process can't read the
       MCP interaction stamp), return only the rotated LEADER so exactly one pass
-      runs this cycle, minimising GPU contention. When idle, return every pass to
-      drain the backlog.
+      runs this cycle, minimising GPU contention. When idle, return every eligible
+      pass to drain the backlog.
+
+    Order of operations: filter-empty FIRST, then rotate, then (if active) take the
+    leader — so the leader is always drawn from passes that actually have work.
 
     `cycle` may grow unbounded; the modulo keeps rotation stable. Empty `passes`
-    returns empty (no crash)."""
-    n = len(passes)
+    (or all-filtered) returns empty (no crash)."""
+    if has_work is not None:
+        # Keep a pass unless it is explicitly known to have no work. A name absent
+        # from the map is kept (unknown eligibility -> the pass's own gate decides).
+        eligible = [p for p in passes if has_work.get(p["name"], True)]
+    else:
+        eligible = list(passes)
+    n = len(eligible)
     if n == 0:
         return []
-    order = [passes[(i + cycle) % n] for i in range(n)]
+    order = [eligible[(i + cycle) % n] for i in range(n)]
     return order[:1] if active else order
 
 
@@ -1044,12 +1152,37 @@ async def main_loop(args):
             {"name": "maintenance","skip": args.skip_maintenance,   "gpu": None,              "sets_limit": False, "run": run_maintenance_pass},
             {"name": "audit",      "skip": args.skip_audit,         "gpu": None,              "sets_limit": False, "run": run_audit_pass},
         ]
-        # Round-robin order + idle-aware intensity (see _select_pass_order). When
-        # the governor is THROTTLED we treat the host as user-active and run only
-        # the rotated leader this cycle; otherwise every pass runs. Rotation makes
-        # sure the leader differs each cycle so no pass is starved.
+        # Round-robin order + idle-aware intensity + queue-awareness (see
+        # _select_pass_order). When the governor is THROTTLED we treat the host as
+        # user-active and run only the rotated leader this cycle; otherwise every
+        # pass runs. Rotation makes sure the leader differs each cycle so no pass is
+        # starved.
         active = pacing_full.get("background") == "THROTTLED"
-        order = _select_pass_order(passes, _cycle, active)
+        # QUEUE-AWARE LEADER (throttled only): under throttle exactly one pass runs,
+        # so we must not spend that single slot on a pass whose queue is empty while
+        # a backlogged pass waits another full cycle. Probe the cheap queue-gates
+        # for the queue-backed passes ONLY when throttled (idle mode runs every pass
+        # and each pass's own gate skips empties — no extra probing needed there).
+        # The time-driven passes (sync/maintenance/audit) are intentionally OMITTED
+        # from this map so _select_pass_order keeps them (their gate is "is it
+        # due?", checked inside the pass, not a queue depth). A probe error is
+        # fail-open (treated as "has work") via the has_* helpers' own except paths.
+        work_map: "dict[str, bool] | None" = None
+        if active:
+            work_map = {
+                "entities":    not args.skip_entities and has_entity_work(args.database, args.chatlog_db),
+                "enrich":      not args.skip_enrich and has_enrich_work(args.database),
+                "embed":       not args.skip_embed and has_embed_work(args.database),
+                "classify":    not args.skip_classify and has_classify_work(args.database),
+                "consolidate": not args.skip_consolidate and has_consolidate_work(
+                    args.database, args.consolidate_source_type,
+                    args.consolidate_threshold, args.consolidate_stale_days),
+                "distill":     not args.skip_distill and has_distill_work(
+                    args.database, args.distill_threshold, args.distill_stale_days),
+                "prune":       not args.skip_chatlog_prune and has_chatlog_prune_work(
+                    args.chatlog_db, args.chatlog_prune_days, args.chatlog_prune_threshold),
+            }
+        order = _select_pass_order(passes, _cycle, active, work_map)
         _cycle += 1
 
         for p in order:

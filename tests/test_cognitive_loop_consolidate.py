@@ -158,3 +158,47 @@ def test_pass_order_preserves_relative_sequence():
 def test_pass_order_empty_is_safe():
     assert cl._select_pass_order([], cycle=5, active=False) == []
     assert cl._select_pass_order([], cycle=5, active=True) == []
+
+
+# ── Queue-aware selection (has_work filter) ───────────────────────────────────
+
+def test_pass_order_none_work_map_is_backcompat():
+    # has_work=None (or omitted) must behave exactly like before — rotate all.
+    assert _names(cl._select_pass_order(_PASSES, cycle=0, active=False, has_work=None)) == \
+        ["entities", "enrich", "consolidate", "prune"]
+
+
+def test_pass_order_throttled_skips_empty_leader_for_backlogged_pass():
+    # THE BUG THIS FIXES: throttled runs one pass. Cycle 1's positional leader is
+    # 'enrich', but enrich's queue is empty and entities has a backlog. The empty
+    # pass must be filtered out so the single slot goes to a pass with real work —
+    # not wasted on a no-op while the entity backlog waits another cycle.
+    work = {"entities": True, "enrich": False, "consolidate": False, "prune": False}
+    # Only 'entities' is eligible, so it leads regardless of cycle.
+    for c in range(4):
+        assert _names(cl._select_pass_order(_PASSES, cycle=c, active=True, has_work=work)) == ["entities"]
+
+
+def test_pass_order_absent_pass_is_kept():
+    # Passes NOT in the map (time-driven sync/maintenance/audit) are always kept —
+    # absence means "unknown eligibility, let the pass's own due-gate decide",
+    # never "no work". Here 'prune' is absent from the map and must survive.
+    work = {"entities": False, "enrich": False, "consolidate": False}  # 'prune' absent
+    assert _names(cl._select_pass_order(_PASSES, cycle=0, active=False, has_work=work)) == ["prune"]
+
+
+def test_pass_order_all_empty_returns_nothing():
+    # If every pass is explicitly empty, no work runs this cycle (no crash, no
+    # wasted no-op dispatch).
+    work = {"entities": False, "enrich": False, "consolidate": False, "prune": False}
+    assert cl._select_pass_order(_PASSES, cycle=0, active=True, has_work=work) == []
+    assert cl._select_pass_order(_PASSES, cycle=0, active=False, has_work=work) == []
+
+
+def test_pass_order_queue_aware_still_rotates_among_eligible():
+    # Fairness preserved within the eligible set: with two backlogged passes,
+    # the leader still rotates between them across cycles (idle mode).
+    work = {"entities": True, "enrich": True, "consolidate": False, "prune": False}
+    assert _names(cl._select_pass_order(_PASSES, cycle=0, active=True, has_work=work)) == ["entities"]
+    assert _names(cl._select_pass_order(_PASSES, cycle=1, active=True, has_work=work)) == ["enrich"]
+    assert _names(cl._select_pass_order(_PASSES, cycle=2, active=True, has_work=work)) == ["entities"]

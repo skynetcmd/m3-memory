@@ -24,7 +24,11 @@
 #   convs but slightly higher quality + no LM Studio dependency)
 
 url: http://127.0.0.1:1234/v1/messages
-model: qwen/qwen3.5-9b
+# Empty model => LM Studio serves whatever model is currently loaded (JIT).
+# Pinning a specific id (was qwen/qwen3.5-9b) breaks the moment the loaded
+# model is swapped: LM Studio can't match the id, so requests stall/back off
+# even with the host idle. Model-agnostic serving survives model swaps.
+model: ""
 api_key_service: LM_API_TOKEN
 backend: anthropic
 anthropic_version: "2023-06-01"

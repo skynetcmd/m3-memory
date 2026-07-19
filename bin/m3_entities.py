@@ -588,7 +588,19 @@ async def _run_db(
     sem = asyncio.Semaphore(concurrency)
     started = time.monotonic()
 
-    async with httpx.AsyncClient() as client:
+    # max_keepalive_connections=0 DISABLES connection pooling: every request opens
+    # a fresh connection and closes it. LM Studio (the local server) closes idle
+    # keep-alive connections on ITS side between the cognitive-loop's cycles; the
+    # default-pooled httpx client then reuses that half-dead socket (observed as
+    # CLOSE_WAIT on :1234) and the next POST HANGS until profile.timeout_s (240s).
+    # With concurrency=2 both slots wedge and the whole entity pass stalls for
+    # minutes — the "one extraction burst, then the loop goes quiet with the system
+    # green" symptom. For a loopback server pooling saves nothing meaningful, so a
+    # fresh connection per request is the correct trade. A tight connect timeout
+    # also fails fast instead of inheriting the 240s read timeout on connect.
+    _limits = httpx.Limits(max_keepalive_connections=0)
+    _timeout = httpx.Timeout(profile.timeout_s, connect=10.0)
+    async with httpx.AsyncClient(limits=_limits, timeout=_timeout) as client:
         extractor = _build_extractor(profile, token, valid_types, valid_predicates, client)
 
         async def gated(memory_id: str, text: str) -> None:

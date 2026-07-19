@@ -721,8 +721,19 @@ async def _http_bulk_with_subdivide(
 # ──────────────────────────────────────────────────────────────────────────────
 _EMBED_HTTP_MAX_CONNS = int(os.environ.get("M3_EMBED_HTTP_MAX_CONNS", "32"))
 _EMBED_HTTP_MAX_KEEPALIVE = int(os.environ.get("M3_EMBED_HTTP_MAX_KEEPALIVE", "16"))
+# Default lowered 60.0 -> 5.0: the embed server (local :8082 / LM Studio) closes
+# idle keep-alive connections on ITS side within a few seconds. At the old 60s
+# expiry httpx kept handing out those now-dead pooled sockets for up to a minute;
+# each reuse hung until EMBED_TIMEOUT_READ (30s) before failing. During an entity
+# pass (which fires hundreds of embeds per batch, one per extracted entity) enough
+# slots hit stale connections that the whole concurrency-gated batch serialized
+# into ~1 embed / 15s and the pass NEVER COMPLETED — the loop wedged mid-pass, no
+# cycle ever finished, extraction to :1234 went quiet while :8082 trickled. A 5s
+# expiry discards a connection before the server can silently drop it, so pooling
+# still helps within a burst but stale-socket reuse can't happen across the idle
+# gaps between the loop's cycles. Override via M3_EMBED_HTTP_KEEPALIVE_EXPIRY.
 _EMBED_HTTP_KEEPALIVE_EXPIRY = float(
-    os.environ.get("M3_EMBED_HTTP_KEEPALIVE_EXPIRY", "60.0")
+    os.environ.get("M3_EMBED_HTTP_KEEPALIVE_EXPIRY", "5.0")
 )
 
 _EMBED_CLIENT: _httpx.AsyncClient | None = None

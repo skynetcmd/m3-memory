@@ -20,7 +20,12 @@ url: http://127.0.0.1:1234/v1/messages
 # on a single-GPU LM Studio host because the embed model + 2x 8B SLMs
 # competed for VRAM. One-instance + queue is faster than two-instance +
 # eviction.
-model: qwen/qwen3.5-9b
+# Empty model => LM Studio serves whatever model is currently loaded (JIT).
+# Pinning a specific id (was qwen/qwen3.5-9b) breaks the moment the loaded
+# model is swapped: LM Studio can't match the id, so requests stall/back off
+# even with the host idle. Model-agnostic serving survives model swaps with
+# zero reconfig. Prompt tuning below stays qwen-oriented but works on any model.
+model: ""
 api_key_service: LM_API_TOKEN
 timeout_s: 240.0
 temperature: 0
