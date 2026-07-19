@@ -112,10 +112,15 @@ CREATE TABLE IF NOT EXISTS m3_warehouse.schema_versions (
   applied_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS m3_warehouse.sync_watermarks (
-  direction TEXT PRIMARY KEY,
-  last_synced_at TIMESTAMPTZ
-);
+-- NOTE: sync_watermarks is intentionally NOT created in the warehouse.
+-- Watermarks are PER-MACHINE (each peer — a Mac, Linux box, PC — tracks its own
+-- push/pull cursors against the shared warehouse, stored in that peer's LOCAL
+-- store: local SQLite, or the local PostgreSQL primary). A warehouse-side
+-- sync_watermarks table would wrongly imply shared cursors and is a footgun
+-- (a stray write there would cross-contaminate peers' delta state). No m3 code
+-- reads or writes warehouse watermarks. (Legacy warehouses may have an empty
+-- m3_warehouse.sync_watermarks from an earlier version of this file — safe to
+-- DROP; the consolidation/migration tool removes it.)
 
 CREATE TABLE IF NOT EXISTS m3_warehouse.synchronized_secrets (
   service_name TEXT PRIMARY KEY,
