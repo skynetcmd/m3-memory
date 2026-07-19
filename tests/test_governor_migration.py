@@ -22,6 +22,77 @@ def test_eligible_and_not_migratable_are_disjoint():
     assert "AgentOS_CognitiveLoop" in not_mig
 
 
+def test_all_three_categories_are_mutually_disjoint():
+    """A task must be in AT MOST one category — eligible / floor / not-migratable.
+    An overlap would either delete a task that should stay or vice-versa."""
+    eligible = set(gm.GOVERNOR_ELIGIBLE)
+    floor = {n for n, _ in gm.KEEP_SCHEDULED_FLOOR}
+    not_mig = {n for n, _ in gm.NOT_MIGRATABLE}
+    assert eligible.isdisjoint(floor)
+    assert eligible.isdisjoint(not_mig)
+    assert floor.isdisjoint(not_mig)
+
+
+def test_hourlysync_is_a_kept_floor_not_eligible():
+    """Regression guard: warehouse sync (AgentOS_HourlySync) must NEVER be in the
+    removal set. It was deleted by `governor migrate` on the false premise the
+    governor runs it, silently stopping sync. It is a scheduled floor."""
+    floor = {n for n, _ in gm.KEEP_SCHEDULED_FLOOR}
+    assert "AgentOS_HourlySync" in floor
+    assert "AgentOS_HourlySync" not in gm.GOVERNOR_ELIGIBLE
+
+
+def test_sync_runs_via_both_governor_and_scheduled_task_all_oses():
+    """Requirement: sync runs via BOTH the governor loop pass AND the hourly
+    scheduled task, by default, on every supported OS.
+    - Governor path: the cognitive loop registers a 'sync' pass, default-on.
+    - Scheduled floor: Windows schtasks + Unix crontab both invoke sync hourly.
+    This test locks the dual-path default so neither half can silently regress."""
+    import pathlib
+    import re
+    repo = pathlib.Path(__file__).resolve().parents[1]
+
+    loop_src = (repo / "bin" / "m3_cognitive_loop.py").read_text(encoding="utf-8")
+    # Governor path: a 'sync' pass exists in the registry and defaults ON
+    # (gated by --skip-sync, which is a store_true flag => default False).
+    assert '"name": "sync"' in loop_src
+    assert 'run_sync_pass' in loop_src
+    assert re.search(r'--skip-sync["\'],\s*action=["\']store_true', loop_src)
+
+    # Scheduled floor — Unix: crontab.template runs sync hourly via pg_sync.sh.
+    cron = (repo / "bin" / "crontab.template").read_text(encoding="utf-8")
+    assert "pg_sync.sh" in cron
+    assert re.search(r'^\s*0\s+\*\s+\*\s+\*\s+\*.*pg_sync\.sh', cron, re.MULTILINE)
+
+    # Scheduled floor — Windows: install_schedules emits an AgentOS_HourlySync
+    # task running sync_all.py, and it is the KEEP_SCHEDULED_FLOOR entry.
+    sched = (repo / "bin" / "install_schedules.py").read_text(encoding="utf-8")
+    assert "AgentOS_HourlySync" in sched
+    assert "sync_all.py" in sched
+    assert "AgentOS_HourlySync" in {n for n, _ in gm.KEEP_SCHEDULED_FLOOR}
+
+
+def test_floor_and_not_migratable_excluded_from_eligible(monkeypatch):
+    """When all canonical tasks are installed, the floor (HourlySync) and the
+    not-migratable tasks (SecretRotator/CognitiveLoop) must be EXCLUDED from the
+    removal set, and only the genuinely loop-covered tasks remain eligible."""
+    monkeypatch.setattr(
+        gm, "_list_installed_task_names",
+        lambda: {
+            "AgentOS_HourlySync", "AgentOS_ChatlogEmbedSweep",
+            "AgentOS_ObservationDrain", "AgentOS_Maintenance",
+            "AgentOS_WeeklyAuditor", "AgentOS_SecretRotator",
+            "AgentOS_CognitiveLoop",
+        })
+    out = gm.detect_scheduled_tasks()
+    assert set(out["eligible"]) == set(gm.GOVERNOR_ELIGIBLE)
+    assert out["keep_scheduled_floor"] == ["AgentOS_HourlySync"]
+    assert "AgentOS_HourlySync" not in out["eligible"]
+    for nm in ("AgentOS_SecretRotator", "AgentOS_CognitiveLoop"):
+        assert nm not in out["eligible"]
+        assert nm in out["not_migratable_present"]
+
+
 def test_privileged_commands_windows(monkeypatch):
     monkeypatch.setattr(gm, "_os_name", lambda: "Windows")
     cmds = gm.privileged_removal_commands(["AgentOS_HourlySync", "AgentOS_Maintenance"])
@@ -101,7 +172,10 @@ def test_detect_windows(monkeypatch):
 
     monkeypatch.setattr(gm.subprocess, "run", fake_run)
     out = gm.detect_scheduled_tasks()
-    assert out["eligible"] == ["AgentOS_HourlySync"]
+    # HourlySync is a scheduled FLOOR (governor-paced in-loop AND kept scheduled),
+    # not eligible for removal — deleting it silently stopped warehouse sync.
+    assert out["eligible"] == []
+    assert out["keep_scheduled_floor"] == ["AgentOS_HourlySync"]
     assert out["not_migratable_present"] == ["AgentOS_SecretRotator"]
 
 
@@ -137,7 +211,7 @@ def test_detect_never_raises_without_scheduler(monkeypatch):
 
     monkeypatch.setattr(gm.subprocess, "run", boom)
     out = gm.detect_scheduled_tasks()
-    assert out == {"eligible": [], "not_migratable_present": []}
+    assert out == {"eligible": [], "not_migratable_present": [], "keep_scheduled_floor": []}
 
 
 def test_not_migratable_lines_have_reasons():
@@ -210,8 +284,11 @@ def test_windows_action_scan_skips_canonical_names(monkeypatch):
         _win_run_factory(blob, {"AgentOS_HourlySync"}),
     )
     out = gm.detect_scheduled_tasks()
-    # Exactly one occurrence — found by name, not duplicated by action.
-    assert out["eligible"] == ["AgentOS_HourlySync"]
+    # Canonical AgentOS_HourlySync is classified as the scheduled floor, not
+    # eligible — and it appears EXACTLY once (found by name, not double-listed by
+    # the action scan folding it into eligible under its reserved name).
+    assert out["eligible"] == []
+    assert out["keep_scheduled_floor"] == ["AgentOS_HourlySync"]
 
 
 def test_windows_action_match_is_path_anchored_not_bare_substring(monkeypatch):
@@ -260,7 +337,7 @@ def test_windows_legacy_detection_never_raises_without_schtasks(monkeypatch):
     monkeypatch.setattr(gm.subprocess, "run", boom)
     # Whole detect path must swallow it and return empty, not raise.
     assert gm.detect_windows_legacy_action_tasks() == set()
-    assert gm.detect_scheduled_tasks() == {"eligible": [], "not_migratable_present": []}
+    assert gm.detect_scheduled_tasks() == {"eligible": [], "not_migratable_present": [], "keep_scheduled_floor": []}
 
 
 def test_windows_legacy_does_not_reclassify_not_migratable(monkeypatch):

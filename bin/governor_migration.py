@@ -95,11 +95,25 @@ def detect_scheduled_tasks() -> dict[str, list[str]]:
     not_migratable = [name for name, _ in NOT_MIGRATABLE if name in installed]
     keep_floor = [name for name, _ in KEEP_SCHEDULED_FLOOR if name in installed]
     eligible = [t for t in GOVERNOR_ELIGIBLE if t in installed]
-    # NOTE: we deliberately do NOT fold unrecognized installed tasks into
-    # `eligible`. An earlier version removed any task not in the known lists,
-    # which would delete a user's hand-named or third-party scheduled tasks. Only
-    # tasks EXPLICITLY listed in GOVERNOR_ELIGIBLE (and confirmed loop-covered)
-    # are ever removed. Unknown tasks are left strictly alone.
+
+    # Also surface hand-named / legacy tasks whose ACTION invokes an m3
+    # entrypoint (e.g. a pre-canonical `m3-memory-sync` running sync_all.py).
+    # These are genuinely migratable — they carry their real task name so the
+    # removal command targets the right task. We fold in ONLY tasks that are
+    # NEITHER a canonical name (already classified above) NOR a name that must be
+    # kept (floor / not-migratable). Crucially we do NOT fold arbitrary installed
+    # names: `installed` already contains only canonical names PLUS
+    # action-detected m3 tasks (see _list_installed_task_names ->
+    # detect_windows_legacy_action_tasks), so a user's unrelated third-party
+    # scheduled task never appears here and is never removed.
+    reserved = (
+        set(GOVERNOR_ELIGIBLE)
+        | {n for n, _ in KEEP_SCHEDULED_FLOOR}
+        | {n for n, _ in NOT_MIGRATABLE}
+    )
+    legacy_action = [n for n in sorted(installed) if n not in reserved]
+    eligible.extend(legacy_action)
+
     return {
         "eligible": eligible,
         "not_migratable_present": not_migratable,
@@ -111,7 +125,11 @@ def _list_installed_task_names() -> set[str]:
     """Best-effort set of installed AgentOS_* scheduler entries on this host."""
     os_name = _os_name()
     names: set[str] = set()
-    candidates = [n for n in GOVERNOR_ELIGIBLE] + [n for n, _ in NOT_MIGRATABLE]
+    candidates = (
+        [n for n in GOVERNOR_ELIGIBLE]
+        + [n for n, _ in KEEP_SCHEDULED_FLOOR]
+        + [n for n, _ in NOT_MIGRATABLE]
+    )
 
     if os_name == "Windows":
         try:
@@ -143,7 +161,11 @@ def _list_installed_task_names() -> set[str]:
 
 def _canonical_task_names() -> set[str]:
     """Every task name the current installer emits — canonical AgentOS_* set."""
-    return set(GOVERNOR_ELIGIBLE) | {name for name, _ in NOT_MIGRATABLE}
+    return (
+        set(GOVERNOR_ELIGIBLE)
+        | {name for name, _ in KEEP_SCHEDULED_FLOOR}
+        | {name for name, _ in NOT_MIGRATABLE}
+    )
 
 
 def _leaf_task_name(task_name: str) -> str:
