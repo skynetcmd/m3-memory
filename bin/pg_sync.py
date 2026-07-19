@@ -279,7 +279,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
                    change_agent, importance, source, origin_device, is_deleted,
                    expires_at, decay_rate, created_at, updated_at,
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
-                   COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
+                   valid_from, valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
             WHERE updated_at > ? OR (updated_at IS NULL AND created_at > ?)
         """, (watermark, watermark))
@@ -290,7 +290,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
                    change_agent, importance, source, origin_device, is_deleted,
                    expires_at, decay_rate, created_at, updated_at,
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
-                   COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
+                   valid_from, valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
         """)
         logger.info(f"[{target_name}] Full push: no watermark found (first sync)")
@@ -298,6 +298,42 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
     local_rows = sl_cur.fetchall()
     push_count = 0
     push_errors = 0
+
+    # SQLite stores timestamps as TEXT with NO validation; PostgreSQL timestamptz
+    # is strict. Two failure modes seen in real data that abort an entire batch
+    # (and, uncaught, all subsequent batches via the aborted transaction):
+    #   - empty-string ''            -> "invalid input syntax for timestamptz"
+    #   - out-of-range like 2024-07-37 -> "date/time field value out of range"
+    # Coerce any non-parseable timestamp value to None (SQL NULL) on push so one
+    # corrupt cell can't block the whole sync. Positions match the SELECT column
+    # order above: expires_at(12), created_at(14), updated_at(15), valid_from(18),
+    # valid_to(19). A dropped bad timestamp is the least-bad outcome — the row
+    # still syncs; the garbage value was never a usable date anyway.
+    _TS_POS = (12, 14, 15, 18, 19)
+
+    def _valid_ts(v):
+        """True if v parses as a real date/time PG will accept. Cheap: validate
+        the leading YYYY-MM-DD[ HH:MM:SS] via datetime; anything else -> False."""
+        if v is None:
+            return True  # NULL is fine
+        if v == "" or not isinstance(v, str):
+            return v != ""  # '' invalid; non-str (already a datetime) assume ok
+        try:
+            datetime.fromisoformat(v.replace("Z", "+00:00"))
+            return True
+        except ValueError:
+            # Fall back to a lenient date-only parse for 'YYYY-MM-DD ...' forms;
+            # fromisoformat already covers most, so a failure here means the
+            # value is genuinely malformed (bad month/day, junk) -> NULL it.
+            return False
+
+    def _norm_ts(row):
+        r = list(row)
+        for p in _TS_POS:
+            if p < len(r) and not _valid_ts(r[p]):
+                r[p] = None
+        return tuple(r)
+    local_rows = [_norm_ts(r) for r in local_rows]
 
     # Batch UPSERT using execute_values or manual batching for PostgreSQL
     from psycopg2.extras import execute_values
@@ -351,7 +387,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
                    change_agent, importance, source, origin_device, is_deleted,
                    expires_at, decay_rate, created_at, updated_at,
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
-                   COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
+                   valid_from, valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
             WHERE updated_at > %s OR (updated_at IS NULL AND created_at > %s)
         """, (watermark, watermark))
@@ -362,7 +398,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
                    change_agent, importance, source, origin_device, is_deleted,
                    expires_at, decay_rate, created_at, updated_at,
                    COALESCE(user_id, '') as user_id, COALESCE(scope, 'agent') as scope,
-                   COALESCE(valid_from, '') as valid_from, COALESCE(valid_to, '') as valid_to, COALESCE(content_hash, '') as content_hash
+                   valid_from, valid_to, COALESCE(content_hash, '') as content_hash
             FROM memory_items
         """)
         logger.info(f"[{target_name}] Full pull: no watermark found (first sync)")
@@ -806,8 +842,74 @@ def sync_memory_embeddings(sl_cur, pg_cur, sl_conn, target_name: str):
 
 # ── Sync lock ─────────────────────────────────────────────────────────────────
 
+def _set_warehouse_search_path(pg_conn) -> str:
+    """If the target PG holds the warehouse schema `m3_warehouse`, prepend it to
+    the connection's search_path so the sync's UNQUALIFIED table names
+    (memory_items, memory_embeddings, ...) resolve there instead of `public`.
+
+    The CDW warehouse stores memory under `m3_warehouse` (pg_warehouse_chatlog_v1.sql:
+    unified core+chat, type='chat_log' index), but pg_sync was written for the old
+    public-schema primary layout and writes unqualified names — so without this the
+    memory/embedding sync hits `public` and fails "relation memory_items does not
+    exist" (2026-07-19 root cause) while tasks/secrets (still in public) succeed.
+
+    Probes to_regclass so it's a no-op on a public-only/primary target (search_path
+    unchanged). Returns the schema in effect ('m3_warehouse' or 'public'). Never
+    raises — a probe failure leaves the default search_path (fail-safe to old
+    behavior)."""
+    try:
+        with pg_conn.cursor() as cur:
+            # Visible to this role? to_regclass returns NULL if the table is absent
+            # OR the role lacks schema USAGE — either way we must not switch. A
+            # permission-denied here raises and would poison the transaction for
+            # the sync work that follows, so roll back on ANY failure to leave a
+            # clean transaction on the default (public) search_path.
+            cur.execute("SELECT to_regclass('m3_warehouse.memory_items')")
+            if cur.fetchone()[0] is not None:
+                cur.execute("SET search_path TO m3_warehouse, public")
+                logger.info("PG search_path set to m3_warehouse (warehouse layout detected).")
+                return "m3_warehouse"
+    except Exception as e:
+        logger.warning(f"Could not probe/set warehouse search_path ({e}); using default.")
+        try:
+            pg_conn.rollback()  # clear the aborted-transaction state
+        except Exception:
+            pass
+    return "public"
+
+
+def _ensure_sync_state_table(sl_cur) -> None:
+    """Guarantee the sync_state table (the lock holder) exists on the SQLite side.
+
+    Like sync_watermarks, this table is NOT created by every target DB's migration
+    set — and it is created by NO migration at all for the lock's use here. Without
+    it, the lock SELECT below raised 'no such table', which the old bare-except
+    swallowed into "lock acquisition failed" -> treated as "another sync in
+    progress" -> EVERY sync silently skipped forever (root cause of stale
+    warehouse sync, 2026-07-19). Ensuring the table makes a fresh DB acquire the
+    lock cleanly on first run. Idempotent."""
+    sl_cur.execute(
+        "CREATE TABLE IF NOT EXISTS sync_state "
+        "(collection_name TEXT PRIMARY KEY, last_pull_at TEXT)"
+    )
+
+
 def _acquire_sync_lock(sl_cur) -> bool:
-    """Attempts to acquire a global sync lock. Returns True if successful."""
+    """Attempts to acquire a global sync lock. Returns True if successful.
+
+    A MISSING lock table is "not locked" (create + acquire), NOT "locked" — the
+    latter was a footgun that silently skipped every sync on any DB whose
+    sync_state table was never created."""
+    # Self-heal: a missing table must never read as "held". Create-if-absent
+    # BEFORE the lock check so the SELECT can't fail with 'no such table'.
+    try:
+        _ensure_sync_state_table(sl_cur)
+    except Exception as e:
+        # If we can't even create the table, we cannot coordinate — proceed
+        # UNLOCKED (fail-open) rather than block all syncs forever. A rare
+        # concurrent double-sync is far less harmful than a permanent no-sync.
+        logger.warning(f"Could not ensure sync_state table ({e}); proceeding without lock.")
+        return True
     try:
         # Check if lock exists and is not stale (stale after 1 hour)
         sl_cur.execute("SELECT last_pull_at FROM sync_state WHERE collection_name = 'pg_sync_lock'")
@@ -1153,6 +1255,7 @@ def main():
 
             with ctx.pg_connection() as pg_conn:
                 pg_conn.autocommit = False
+                _set_warehouse_search_path(pg_conn)
 
                 for target in targets:
                     logger.info(f"--- Synchronizing target: {target.name} ({target.db_path}) ---")
@@ -1232,6 +1335,7 @@ def main():
                 _ensure_watermark_table(sl_cur)
                 with ctx.pg_connection() as pg_conn:
                     pg_conn.autocommit = False
+                    _set_warehouse_search_path(pg_conn)
                     with pg_conn.cursor() as pg_cur:
                         _sync_generic_db(sl_cur, pg_cur, sl_conn, manifest, target_name, dry_run=False)
                     pg_conn.commit()
