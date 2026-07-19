@@ -19,6 +19,13 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+## [2026.7.19.1] — 2026-07-19 — Sync interpreter fix
+### Fixed
+- The hourly warehouse-sync task ran its `pg_sync` subprocess with a hardcoded
+  in-tree `.venv` interpreter path that doesn't exist on a pip/pipx install, so
+  the scheduled sync failed with a FileNotFoundError. It now uses the current
+  interpreter, correct on every install layout.
+
 ## [2026.7.19.0] — 2026-07-19 — Warehouse sync restore, PG→PG fast-path, governor-paced sync
 ### Fixed
 - **Warehouse sync restored.** Several independent issues could each stop memory/chatlog
