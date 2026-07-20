@@ -863,21 +863,30 @@ def _render_health_panel() -> str:
     parts.append("</div>")
 
     # Inference backend (LLM/SLM) — the cognitive loop / entity extraction /
-    # enrichment all call an LLM at the configured endpoint. Report WHERE m3
-    # expects it and whether it's reachable + has a chat model loaded, so a
-    # stalled pipeline (queue backs up, never drains) has a named cause instead of
-    # a silent "HEALTHY". Endpoints come from llm_failover (LM Studio / Ollama /
-    # custom) — provider-agnostic, no hardcoded port.
+    # enrichment all call an LLM selected by m3's failover chain. We verify the
+    # SAME way m3 does: walk llm_failover.LLM_ENDPOINTS in order and confirm the
+    # landing endpoint can actually TAKE AN INFERENCE REQUEST (cached real
+    # completion, not just a /v1/models listing). Report the whole chain + which
+    # hops failed, so a stall or an active failover has a named cause instead of a
+    # silent "HEALTHY". Provider-agnostic, no hardcoded port.
     inf = h.get("inference") or {}
     inf_status = inf.get("status", "none_configured")
     inf_map = {
-        "ok":              ("var(--m3-neon-emerald)", "●", "MODEL LOADED"),
+        "ok":              ("var(--m3-neon-emerald)", "●", "SERVING INFERENCE"),
+        "failover_active": ("var(--m3-neon-amber)",   "▲", "FAILOVER ACTIVE"),
         "no_model":        ("#ff5c6c",                "✕", "NO MODEL LOADED"),
+        "auth_failed":     ("#ff5c6c",                "✕", "AUTH REJECTED"),
         "down":            ("#ff5c6c",                "✕", "DOWN"),
-        "unknown":         ("var(--m3-neon-amber)",   "▲", "REACHABLE (MODEL UNVERIFIED)"),
+        "unknown":         ("var(--m3-neon-amber)",   "▲", "REACHABLE (UNVERIFIED)"),
         "none_configured": ("var(--m3-neon-amber)",   "▲", "NOT CONFIGURED"),
     }
     inf_color, inf_icon, inf_label = inf_map.get(inf_status, ("hsl(210,15%,55%)", "?", inf_status.upper()))
+    # Cloud landed-endpoint reads "REACHABLE" (a ping), not "SERVING INFERENCE".
+    _landed_cloud = any(hp.get("cloud") and hp.get("ok") for hp in (inf.get("chain") or []))
+    if inf_status == "ok" and _landed_cloud:
+        inf_label = "REACHABLE"
+    cached_note = (' <span style="color:hsl(210,15%,45%);font-size:0.72rem;">(cached)</span>'
+                   if inf.get("cached") else "")
     parts.append(
         '<div class="memory-card"><h3 style="color:var(--m3-neon-cyan);margin-bottom:0.5rem;">'
         'Inference backend (LLM/SLM)</h3>'
@@ -885,32 +894,43 @@ def _render_health_panel() -> str:
         f'<span style="color:{inf_color};font-weight:700;">{inf_icon} {esc(inf_label)}</span>'
         + (f' <span style="color:hsl(210,15%,70%);">· {esc(inf.get("backend"))}</span>'
            if inf.get("backend") else "")
+        + cached_note
         + '</div>')
     if inf.get("expected_url"):
         model_txt = ""
-        if inf_status == "ok" and (inf.get("primary") or {}):
-            served = next((e for e in inf.get("endpoints", []) if e.get("model_loaded")), None)
-            if served and served.get("model_id"):
-                model_txt = (f' · model: <span style="color:var(--m3-neon-cyan);">'
-                             f'{esc(served["model_id"])}</span>')
+        if inf.get("model_id"):
+            model_txt = (f' · model: <span style="color:var(--m3-neon-cyan);">'
+                         f'{esc(inf["model_id"])}</span>')
+        verb = "serving at" if inf_status in ("ok", "failover_active") else "expected at"
         parts.append(
             f'<div style="font-family:\'Fira Code\',monospace;font-size:0.8rem;color:hsl(210,15%,60%);">'
-            f'expected at <span style="color:#fff;">{esc(inf.get("expected_url"))}</span>{model_txt}</div>')
-    # Show every probed endpoint (failover order) so multi-backend setups are legible.
-    eps = inf.get("endpoints") or []
-    if len(eps) > 1:
-        for e in eps:
-            if e.get("model_loaded"):
-                ec, etxt = "var(--m3-neon-emerald)", f'model loaded ({esc(e.get("model_id"))})'
-            elif e.get("reachable"):
-                ec, etxt = "var(--m3-neon-amber)", "reachable, no model"
+            f'{verb} <span style="color:#fff;">{esc(inf.get("expected_url"))}</span>{model_txt}</div>')
+    # Failover chain — every hop in order, with serve/fail + the real reason. Shown
+    # whenever there's more than one endpoint OR failover is active, so the operator
+    # sees exactly which preferred backend failed and why.
+    chain = inf.get("chain") or []
+    if len(chain) > 1 or inf_status == "failover_active":
+        parts.append('<div style="margin-top:0.4rem;font-size:0.73rem;color:hsl(210,15%,50%);">'
+                     'failover chain (tried in order):</div>')
+        for idx, hop in enumerate(chain):
+            is_cloud = hop.get("cloud")
+            if hop.get("ok"):
+                # Cloud is verified by a ping (reachable + key accepted), not a
+                # local 'serving inference' state — word it honestly per kind.
+                ok_txt = "✓ reachable (ping OK)" if is_cloud else "✓ serving inference"
+                hc, htxt = "var(--m3-neon-emerald)", ok_txt + (
+                    f" ({esc(hop.get('model_id'))})" if hop.get("model_id") else "")
             else:
-                ec, etxt = "hsl(210,15%,50%)", f'down ({esc(e.get("detail","unreachable"))})'
+                hstat = hop.get("status", "down")
+                hc = "#ff5c6c" if hstat in ("down", "no_model", "auth_failed") else "var(--m3-neon-amber)"
+                # For cloud, "no_model" is impossible; auth_failed reads as a key issue.
+                htxt = f"✕ {esc(hstat)}" + (f" — {esc(hop.get('detail'))}" if hop.get("detail") else "")
+            arrow = "" if idx == 0 else '<span style="color:hsl(210,15%,40%);">↳ </span>'
             parts.append(
-                f'<div style="font-family:\'Fira Code\',monospace;font-size:0.76rem;margin:0.15rem 0;">'
-                f'<span style="color:hsl(210,15%,65%);">{esc(e.get("backend"))} {esc(e.get("url"))}</span> · '
-                f'<span style="color:{ec};">{etxt}</span></div>')
-    if inf.get("remedy") and inf_status != "ok":
+                f'<div style="font-family:\'Fira Code\',monospace;font-size:0.76rem;margin:0.15rem 0 0.15rem {0 if idx==0 else 0.8}rem;">'
+                f'{arrow}<span style="color:hsl(210,15%,65%);">{esc(hop.get("backend"))} {esc(hop.get("url"))}</span> · '
+                f'<span style="color:{hc};">{htxt}</span></div>')
+    if inf.get("remedy") and inf_status not in ("ok",):
         parts.append(
             f'<div style="margin-top:0.45rem;color:hsl(35,90%,72%);font-size:0.8rem;">'
             f'{esc(inf.get("remedy"))}</div>')
