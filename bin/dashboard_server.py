@@ -1131,7 +1131,7 @@ async def get_stats(request: Request):
     {banner_html}
     <div class="metric-card {highlight_main}" style="{style_main}">
         <div class="metric-value">{total_mems}</div>
-        <div class="metric-label">Memories</div>
+        <div class="metric-label">Structured/Core Memories</div>
         <div style="margin-top: 0.35rem; font-weight: 500;">{sub_main}</div>
     </div>
     <div class="metric-card {highlight_main}" style="{style_main}">
