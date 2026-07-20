@@ -2428,10 +2428,12 @@ def run_dashboard(host: "str | None" = None, port: "int | None" = None,
     resolved_host, resolved_port = _resolve_host_port(host, port)
 
     if background:
-        # Single-instance guard — don't spawn a second server. Check THREE signals
-        # (registry may be momentarily empty during a race; the port is the
-        # ground truth for "already serving"): registry, then a live cmdline
-        # sweep, then the port itself.
+        # INTERACTIVE launch path (`m3 dashboard`): don't spawn a second detached
+        # server. These probes are an informational "already up → here's the URL"
+        # pre-check — the spawned child's FOREGROUND path holds the real atomic
+        # lock (above). Returns 0 here on purpose: for a human/script running
+        # `m3 dashboard`, "it's already up" is SUCCESS (they wanted it available),
+        # not the "lost a race" failure the supervisor-run foreground path reports.
         live = _live_dashboards()
         if live:
             p = live[0]
@@ -2450,12 +2452,25 @@ def run_dashboard(host: "str | None" = None, port: "int | None" = None,
     # ── Foreground server body (runs in the detached child / scheduled task) ──
     _ensure_std_streams()  # pythonw has no console → bind devnull so writes are safe
 
-    # Single-instance pre-flight: if the port is already served (a live dashboard,
-    # or a self-heal task re-firing), exit cleanly WITHOUT binding — never stack a
-    # second server or crash on an in-use port. Mirrors embed_server's _already_serving.
-    if _port_already_serving(resolved_host, resolved_port):
-        print(f"dashboard already serving on {resolved_host}:{resolved_port}; exiting.", flush=True)
-        return 0
+    # Single-instance pre-flight — an OS ADVISORY lock (fcntl/msvcrt), race-free
+    # by construction (the old port-probe was check-then-act TOCTOU; two launches
+    # both bound and piled up, observed 2026-07-20). The OS releases the lock on
+    # death, so there is no stale lock / dead-PID case. acquire_or_exit: a LIVE
+    # peer → sys.exit(EXIT_ALREADY_RUNNING=4) (supervisors treat 4 as a clean
+    # no-op, no respawn); a config/lock error → a degraded handle so we still run
+    # (fail-safe §3). Held for the process lifetime (released via atexit+SIGTERM).
+    from m3_sdk import acquire_or_exit
+    _lock = acquire_or_exit(
+        _HALT_ROLE,
+        extra={"host": resolved_host, "port": resolved_port},
+        on_already_running=lambda o: print(
+            f"dashboard already running (pid {o.pid if o else '?'}) on "
+            f"{resolved_host}:{resolved_port}; exiting.", flush=True),
+    )
+    run_dashboard._instance_lock = _lock  # type: ignore[attr-defined]  # keep alive
+    if not _lock.acquired:
+        print(f"[warn] dashboard single-instance lock DEGRADED "
+              f"({_lock.status.value}) — running without enforcement", flush=True)
 
     registered = False
     try:

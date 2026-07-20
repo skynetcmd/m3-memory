@@ -1,17 +1,22 @@
-"""Tests for the single-instance lock (acquire_lock) in the cognitive loop.
+"""Tests for the cognitive loop's single-instance locking (integration).
 
-Two live loops double-dispatch to the local LLM (observed 2026-07-19: PIDs
-6460 + 37096 both running). The lock must:
-  - use an ATOMIC exclusive-create so a check-then-write race can't let two
-    launches both proceed;
-  - reclaim a genuinely STALE lock (dead PID, or a reused PID now owned by a
-    non-loop process);
-  - REFUSE to start when a live loop already holds the lock.
+Two live loops double-dispatch to the local LLM (observed 2026-07-19). The loop
+delegates to the shared system-wide OS-advisory lock via m3_halt.acquire_or_exit.
+These pin the INTEGRATION: cl.acquire_lock()
+  - acquires and holds the engine-root lock on a clean slate;
+  - runs (degraded) rather than crashing if the lock subsystem can't function.
+The lock's own guarantees (cross-process mutual exclusion, exit codes, event log)
+are pinned in test_m3_halt.py.
 
-_pid_is_live_loop is monkeypatched so these are hermetic (no real processes).
+Cross-process HELD_BY_PEER can't be exercised in-process (a re-acquire by the
+same process is REENTRANT), so that path is covered by the primitive's suite.
+
+Filesystem-isolated via M3_ENGINE_ROOT → tmp.
 """
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -21,52 +26,42 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import m3_cognitive_loop as cl  # noqa: E402
+import m3_halt  # noqa: E402
+
+_ROLE = "cognitive-loop"
 
 
 @pytest.fixture
-def lockfile(tmp_path, monkeypatch):
-    """Point the module's PID_FILE at a tmp path and reset atexit noise."""
-    p = tmp_path / "cognitive_loop.pid"
-    monkeypatch.setattr(cl, "PID_FILE", p)
-    # release_lock reads PID_FILE; keep atexit registration harmless in tests.
-    monkeypatch.setattr(cl, "atexit", type("A", (), {"register": staticmethod(lambda *a, **k: None)})())
-    return p
+def engine_root(tmp_path, monkeypatch):
+    """Redirect the shared lock to an isolated tmp engine root."""
+    root = tmp_path / "engine"
+    monkeypatch.setenv("M3_ENGINE_ROOT", str(root))
+    monkeypatch.setattr(cl, "_INSTANCE_LOCK", None, raising=False)
+    yield root
+    lk = getattr(cl, "_INSTANCE_LOCK", None)
+    if lk is not None:
+        lk.release()
 
 
-def test_acquire_on_clean_slate_writes_our_pid(lockfile):
+def _owner_file(root):
+    return Path(root) / ".internal" / f"{_ROLE}.lock.owner"
+
+
+def test_acquire_on_clean_slate_holds_lock(engine_root):
     cl.acquire_lock()
-    assert lockfile.read_text().strip() == str(cl.os.getpid())
+    assert cl._INSTANCE_LOCK is not None and cl._INSTANCE_LOCK.acquired
+    op = _owner_file(engine_root)
+    assert op.exists()
+    assert json.loads(op.read_text())["pid"] == os.getpid()
 
 
-def test_acquire_refuses_when_live_loop_holds_lock(lockfile, monkeypatch):
-    lockfile.write_text("99999")  # some other PID holds it
-    monkeypatch.setattr(cl, "_pid_is_live_loop", lambda pid: True)
-    with pytest.raises(SystemExit) as exc:
-        cl.acquire_lock()
-    assert exc.value.code == 0
-    # Lock file is left untouched (still the live holder's PID).
-    assert lockfile.read_text().strip() == "99999"
-
-
-def test_acquire_reclaims_dead_pid(lockfile, monkeypatch):
-    lockfile.write_text("99999")  # stale: PID is dead / not a loop
-    monkeypatch.setattr(cl, "_pid_is_live_loop", lambda pid: False)
-    cl.acquire_lock()
-    assert lockfile.read_text().strip() == str(cl.os.getpid())
-
-
-def test_acquire_reclaims_garbage_lockfile(lockfile, monkeypatch):
-    lockfile.write_text("not-a-pid")  # corrupt content -> treat as stale
-    # _pid_is_live_loop shouldn't even be consulted for garbage, but stub it safe.
-    monkeypatch.setattr(cl, "_pid_is_live_loop", lambda pid: False)
-    cl.acquire_lock()
-    assert lockfile.read_text().strip() == str(cl.os.getpid())
-
-
-def test_acquire_is_idempotent_for_our_own_pid(lockfile, monkeypatch):
-    # If the lock already records OUR pid (e.g. a re-entrant call), don't refuse.
-    lockfile.write_text(str(cl.os.getpid()))
-    # Even if the liveness probe would say "live", old_pid == my_pid short-circuits.
-    monkeypatch.setattr(cl, "_pid_is_live_loop", lambda pid: True)
-    cl.acquire_lock()  # must not SystemExit
-    assert lockfile.read_text().strip() == str(cl.os.getpid())
+def test_acquire_runs_degraded_on_lock_subsystem_failure(engine_root, monkeypatch):
+    # Fail-safe: if the lock file can't be created, the loop must still RUN
+    # (degraded), not crash or refuse — a coordination glitch must not take the
+    # loop down.
+    def _boom(*a, **k):
+        raise OSError("no dir")
+    monkeypatch.setattr(m3_halt.Path, "mkdir", _boom)
+    cl.acquire_lock()  # must not raise SystemExit
+    assert cl._INSTANCE_LOCK is not None and not cl._INSTANCE_LOCK.acquired
+    assert cl._INSTANCE_LOCK.status is m3_halt.LockStatus.CONFIG_ERROR

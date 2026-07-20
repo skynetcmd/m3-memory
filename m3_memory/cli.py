@@ -434,7 +434,15 @@ def _run_bin_script(script_name: str, argv: list) -> int:
             runpy.run_path(str(script), run_name="__main__")
             return 0
         except SystemExit as e:
-            # argparse / main() calls sys.exit — propagate the code.
+            # argparse / main() calls sys.exit — propagate the code VERBATIM.
+            # NOTE (single-instance contract): a service run via `m3 <svc>
+            # --foreground` may exit m3_halt.EXIT_ALREADY_RUNNING (4) meaning
+            # "another instance already holds the lock". That is a real, honest
+            # non-zero signal — do NOT translate it to 0 here. Callers/supervisors
+            # that must tolerate it handle it at their layer (systemd
+            # SuccessExitStatus=4, launchd KeepAlive:Crashed-only, doctor probes
+            # confirm by port not by exit code). The interactive `m3 <svc>`
+            # (background) path already returns 0 for "already up" itself.
             code = e.code
             return int(code) if isinstance(code, int) else (0 if code is None else 1)
     finally:

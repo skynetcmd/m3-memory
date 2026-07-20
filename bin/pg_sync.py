@@ -930,8 +930,8 @@ def _sync_lock_is_stale(raw: str) -> bool:
         # a foreign live PID that happens to match a local process is the rare
         # case the timestamp ceiling still covers.
         try:
-            from m3_halt import _pid_is_alive
-            if not _pid_is_alive(pid):
+            from m3_halt import pid_is_alive
+            if not pid_is_alive(pid):
                 return True
         except Exception:
             pass  # fall through to the timestamp check

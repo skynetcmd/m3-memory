@@ -84,6 +84,19 @@ from m3_core.paths import (  # noqa: F401
     resolve_primary_pg_dsn,
     resolve_venv_python,
 )
+
+# Coordination-file payload SCHEMA (the shared contract for PID-registry + lock
+# files) — ProcInfo, the pure build/parse, reserved keys, protocol version. A
+# consumer (e.g. a dashboard lock-management/review panel) reads/validates any
+# coordination file via `from m3_sdk import parse_payload, ProcInfo` without
+# reaching into m3_halt internals.
+from m3_core.registry_payload import (  # noqa: F401
+    PROTOCOL_VERSION,
+    RESERVED_PAYLOAD_KEYS,
+    ProcInfo,
+    build_payload,
+    parse_payload,
+)
 from m3_core.runtime import (  # noqa: F401
     LM_READ_TIMEOUT,
     LM_STUDIO_BASE,
@@ -91,7 +104,31 @@ from m3_core.runtime import (  # noqa: F401
     StructuredLogger,
     ensure_utf8,
     format_log,
+    iso_local_timestamp,
+    iso_utc_timestamp,
     logger,
+)
+
+# Single-instance lock + PID registry ACTIONS (race-free "only one of this role
+# runs"; register/deregister/list live writers), re-exported so every SDK
+# consumer reaches them as `from m3_sdk import acquire_single_instance` — the
+# same convention as migration_lock above. Implementation lives in m3_halt
+# (the runtime actions on top of the schema above). m3_halt imports m3_sdk only
+# LAZILY (inside _engine_root), so this top-level import is cycle-free (verified).
+from m3_halt import (  # noqa: E402,F401
+    EXIT_ALREADY_RUNNING,
+    EXIT_LOCK_CONFIG_ERROR,
+    EXIT_LOCK_ERROR,
+    InstanceLock,
+    LockResult,
+    LockStatus,
+    acquire_or_exit,
+    acquire_single_instance,
+    deregister,
+    list_live_processes,
+    pid_is_alive,
+    read_lock_events,
+    register_process,
 )
 
 # name -> submodules whose namespace must observe a rebind of that name. The

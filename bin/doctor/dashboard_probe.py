@@ -5,7 +5,7 @@ The dashboard (bin/dashboard_server.py) registers itself in the engine root's
 it bound. This probe reads that registry and does a TWO-STAGE liveness check per
 entry:
 
-  1. PROCESS alive?  — m3_halt._pid_is_alive(pid)  (cross-platform, no deps)
+  1. PROCESS alive?  — m3_halt.pid_is_alive(pid)  (cross-platform, no deps)
   2. PORT serving?   — a TCP connect to the recorded host:port
 
 and classifies each dashboard entry:

@@ -331,8 +331,9 @@ def _fix_start_server() -> bool:
     if not os.path.exists(script):
         print("  [fix] embed_server_inproc.py not found; cannot start the server.")
         return False
-    # The server's own _already_serving pre-flight makes a redundant start a no-op,
-    # so starting is always safe. Detached so it outlives the doctor process.
+    # The server acquires the shared atomic single-instance lock on startup and
+    # exits EXIT_ALREADY_RUNNING if a peer already holds it, so a redundant start
+    # is always safe (never a second CUDA context). Detached so it outlives doctor.
     try:
         kwargs: dict[str, Any] = {}
         if sys.platform == "win32":

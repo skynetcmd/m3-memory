@@ -1044,6 +1044,24 @@ async def chat_completions(request: Request) -> JSONResponse:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # Single-instance: the proxy binds a FIXED port (PROXY_PORT), so a second
+    # instance would fail to bind anyway — take the shared OS-advisory lock so the
+    # loser exits cleanly (EXIT_ALREADY_RUNNING=4) instead of crashing on the bind,
+    # and gets the same race-free/observable guarantees as the other services.
+    # (Previously the only guard was a POSIX-only .pid in start_mcp_proxy.sh —
+    # racy and Windows-blind.) A degraded handle still lets it run (fail-safe §3).
+    from m3_sdk import acquire_or_exit
+    _instance_lock = acquire_or_exit(
+        "mcp-proxy",
+        extra={"host": PROXY_HOST, "port": PROXY_PORT},
+        on_already_running=lambda o: log.info(
+            "MCP proxy already running (pid %s) on %s:%s — exiting.",
+            o.pid if o else "?", PROXY_HOST, PROXY_PORT),
+    )
+    if not _instance_lock.acquired:
+        log.warning("mcp-proxy: single-instance lock DEGRADED (%s) — running "
+                    "without enforcement", _instance_lock.status.value)
+
     catalog_schemas, _ = _build_catalog_tools()
     total_tools = len(PROTOCOL_TOOLS) + len(DEBUG_TOOLS) + len(catalog_schemas)
     log.info("=" * 60)

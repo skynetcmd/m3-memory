@@ -463,19 +463,21 @@ def _xml_escape(text: str) -> str:
 #     (Was PT1M; widened 2026-07-19 — a 1-min re-fire is needless process churn now
 #     that the re-fire is an invisible no-op. The re-fire is safe because (a)
 #     MultipleInstances=IgnoreNew makes a re-fire of the task a no-op while the
-#     server is alive, and (b) the server itself does a /health pre-flight
-#     (embed_server_inproc._already_serving) and exits WITHOUT loading a second GPU
-#     embedder if :8082 is already serving — so a re-fire can never stack a second
-#     CUDA context even if launched out-of-band. Without the heal, one crash
-#     silently kills write-embedding AND semantic/vector retrieval across every m3
-#     process until the next reboot (observed 2026-07-03).
+#     server is alive, and (b) the server acquires the shared ATOMIC
+#     single-instance lock (m3_halt.acquire_single_instance) on startup and, if a
+#     peer already holds it, exits EXIT_ALREADY_RUNNING WITHOUT loading a second
+#     GPU embedder — so a re-fire can never stack a second CUDA context even if
+#     launched out-of-band (the atomic lock closed a TOCTOU race the old /health
+#     probe had). Without the heal, one crash silently kills write-embedding AND
+#     semantic/vector retrieval across every m3 process until reboot (2026-07-03).
 _SELF_HEAL_TASKS = {
     "AgentOS_CognitiveLoop": "PT30M",
     "AgentOS_EmbedServer": "PT5M",
     # Re-fire every 5 min: if the dashboard dies it comes back within ~5 min.
     # Safe to re-fire — MultipleInstances=IgnoreNew makes a re-fire a no-op while
-    # it's alive, and dashboard_server's _already_serving() pre-flight exits
-    # WITHOUT binding if :8088 is already served, so a re-fire never double-binds.
+    # it's alive, and the dashboard's atomic single-instance lock makes a re-fire
+    # that DOES launch exit EXIT_ALREADY_RUNNING without binding, so it never
+    # double-binds (supervisors treat that exit as clean, not a crash).
     "AgentOS_Dashboard": "PT5M",
 }
 

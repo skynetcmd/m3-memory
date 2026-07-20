@@ -24,6 +24,10 @@ Type=simple
 ExecStart=[M3_PYTHON] [M3_MEMORY_ROOT]/bin/dashboard_server.py --foreground --port [M3_DASHBOARD_PORT] --log-file [M3_MEMORY_ROOT]/logs/dashboard.log
 Restart=always
 RestartSec=10
+# Exit code 4 = EXIT_ALREADY_RUNNING (another instance already holds the
+# single-instance lock). Treat it as a CLEAN exit so systemd does NOT restart
+# (Restart=always would otherwise respawn-loop on it).
+SuccessExitStatus=4
 
 [Install]
 WantedBy=default.target

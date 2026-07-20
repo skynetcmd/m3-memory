@@ -1,6 +1,8 @@
 import logging
 import os
 import sys
+import time
+from datetime import datetime, timezone
 from os import PathLike
 from typing import IO, Optional, Union
 
@@ -37,6 +39,33 @@ except ImportError:
         return " | ".join(parts)
 
 logger = logging.getLogger("M3_SDK")
+
+
+# ── Timestamp helpers (public, format-explicit) ────────────────────────────
+# Shared so callers don't each redefine a private `_now_iso`. Three modules had
+# drifted into TWO different formats (local vs UTC) under that one private name;
+# these public, format-named functions replace them. A rename here is a normal
+# public-API change with real call sites — not a silent break of `_`-private
+# cross-module reach (the reason we don't expose `_`-prefixed helpers).
+
+def iso_local_timestamp() -> str:
+    """Local wall-clock ISO-8601 to the second, no timezone suffix
+    (e.g. '2026-07-20T14:31:05'). Human-readable stamp for non-ordering-critical
+    metadata — coordination/registry files, the HALT semaphore. NOT for
+    cross-host ordering; use iso_utc_timestamp for that."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+
+
+def iso_utc_timestamp() -> str:
+    """UTC ISO-8601 with microseconds and a trailing 'Z'
+    (e.g. '2026-07-20T18:31:05.123456Z'). Use when the value is compared or
+    ordered across hosts (audit / db-repair timestamps). Emits a single clean
+    'Z' — an aware ``isoformat()`` already yields '+00:00', so we strip that
+    before appending 'Z' rather than producing the '+00:00Z' double-suffix the
+    old per-module ``_now_iso`` did."""
+    return (
+        datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+    )
 
 
 def ensure_utf8() -> None:

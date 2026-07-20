@@ -7,7 +7,7 @@
   and [M3_PYTHON] and writes the result to
   ~/Library/LaunchAgents/com.m3memory.cognitiveloop.plist.
 
-  NOTE: ProgramArguments deliberately does NOT pass --background. launchd
+  NOTE: ProgramArguments deliberately does NOT pass the background flag. launchd
   manages the process directly; the loop must run in the foreground or
   KeepAlive would lose track of the real worker after the double-fork.
 -->
@@ -26,8 +26,16 @@
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <!-- KeepAlive restarts only on an ABNORMAL (crash/signal) exit, NOT on a
+         clean exit. A clean exit 4 = EXIT_ALREADY_RUNNING (another instance
+         holds the single-instance lock); unconditional KeepAlive=true would
+         respawn-loop on it. Crashed-only is the launchd idiom for "restart if it
+         died, leave it alone if it chose to exit". -->
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+    </dict>
     <key>StandardOutPath</key>
     <string>[M3_MEMORY_ROOT]/logs/cognitive_loop.log</string>
     <key>StandardErrorPath</key>

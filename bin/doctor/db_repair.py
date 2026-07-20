@@ -14,21 +14,17 @@ import logging
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
 
 logger = logging.getLogger("memory.doctor.db_repair")
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat() + "Z"
-
-
 def fix_missing_timestamps(conn: sqlite3.Connection) -> int:
     """Backfill NULL created_at on memory_items. Returns rows touched."""
+    from m3_core.runtime import iso_utc_timestamp
     logger.info("Checking for missing timestamps...")
     res = conn.execute(
         "UPDATE memory_items SET created_at = ? WHERE created_at IS NULL",
-        (_now_iso(),),
+        (iso_utc_timestamp(),),
     )
     if res.rowcount:
         logger.info(f"Fixed {res.rowcount} items with missing created_at.")

@@ -293,3 +293,252 @@ def test_scan_name_fallback_finds_elevated_mcp(root, monkeypatch):
     roles = {p.pid: p.role for p in found}
     assert 500 in roles and "mcp" in roles[500]
     assert 501 not in roles  # bare python with no cmdline is not flagged
+
+
+# ── Single-instance lock ────────────────────────────────────────────────────
+import json as _json  # noqa: E402
+
+
+def _lock_file(root, role):
+    return Path(root) / ".internal" / f"{role}.lock"
+
+
+def _owner_file(root, role):
+    return Path(root) / ".internal" / f"{role}.lock.owner"
+
+
+def test_lock_acquire_returns_result_and_writes_owner(root):
+    res = m3_halt.acquire_single_instance("dashboard", engine_root=root,
+                                          extra={"host": "127.0.0.1", "port": 8088})
+    assert res.status is m3_halt.LockStatus.ACQUIRED
+    assert res.runnable and res.lock.acquired and res.lock.fd >= 0
+    # Owner identity is written to the SEPARATE readable owner file.
+    op = _owner_file(root, "dashboard")
+    assert op.exists()
+    data = _json.loads(op.read_text())
+    assert data["pid"] == os.getpid() and data["role"] == "dashboard"
+    assert data["extra"]["port"] == 8088
+    assert data["create_time"] is not None
+    res.lock.release()
+    assert not op.exists()  # release removes the owner file
+
+
+def test_lock_reentrant_returns_same_handle(root):
+    first = m3_halt.acquire_single_instance("dashboard", engine_root=root,
+                                            extra={"port": 9})
+    assert first.status is m3_halt.LockStatus.ACQUIRED
+    # Same process re-acquiring must NOT lose (that would make it exit on itself);
+    # it gets REENTRANT with the SAME handle.
+    second = m3_halt.acquire_single_instance("dashboard", engine_root=root)
+    assert second.status is m3_halt.LockStatus.REENTRANT
+    assert second.lock is first.lock
+    assert second.runnable and not second.should_exit_already_running
+    first.lock.release()
+
+
+def test_lock_context_manager_releases(root):
+    op = _owner_file(root, "mcp-proxy")
+    res = m3_halt.acquire_single_instance("mcp-proxy", engine_root=root)
+    with res.lock:
+        assert op.exists()
+    assert not op.exists()  # __exit__ released
+
+
+def test_lock_degraded_config_error_when_dir_unwritable(root, monkeypatch):
+    # Fail-safe (§3): if the lock file can't be opened, acquire must NOT crash —
+    # it returns a CONFIG_ERROR result with a degraded handle so the service runs.
+    def _boom(*a, **k):
+        raise OSError("no dir for you")
+    monkeypatch.setattr(m3_halt.Path, "mkdir", _boom)
+    res = m3_halt.acquire_single_instance("dashboard", engine_root=root)
+    assert res.status is m3_halt.LockStatus.CONFIG_ERROR
+    assert res.runnable  # run anyway
+    assert res.lock is not None and not res.lock.acquired and res.lock.fd == -1
+    assert res.status.exit_code == m3_halt.EXIT_LOCK_CONFIG_ERROR  # 5
+
+
+def test_lock_not_in_pid_registry(root):
+    # A held lock file lives in .internal/ but is NOT a PID/ registry entry, so
+    # list_live_processes (which reads PID/) does not see it — separate surfaces.
+    res = m3_halt.acquire_single_instance("dashboard", engine_root=root)
+    assert m3_halt.list_live_processes(engine_root=root) == []
+    res.lock.release()
+
+
+def test_exit_codes_are_distinct_and_high_fidelity():
+    # A high-fidelity loser signal: each category has its own code so $? tells the
+    # operator WHY. 4/5/6 avoid collisions (argparse=2, embed GGUF-mismatch=3).
+    assert m3_halt.EXIT_ALREADY_RUNNING == 4
+    assert m3_halt.EXIT_LOCK_CONFIG_ERROR == 5
+    assert m3_halt.EXIT_LOCK_ERROR == 6
+    assert m3_halt.LockStatus.HELD_BY_PEER.exit_code == 4
+    assert m3_halt.LockStatus.CONFIG_ERROR.exit_code == 5
+    assert m3_halt.LockStatus.LOCK_ERROR.exit_code == 6
+    assert m3_halt.LockStatus.ACQUIRED.exit_code == 0
+    assert m3_halt.LockStatus.REENTRANT.exit_code == 0
+
+
+def test_lock_events_logged(root):
+    # The append-only audit trail records ownership changes.
+    res = m3_halt.acquire_single_instance("dashboard", engine_root=root,
+                                          extra={"port": 8088})
+    res.lock.release()
+    evs = m3_halt.read_lock_events(engine_root=root, role="dashboard")
+    kinds = [e["event"] for e in evs]
+    assert "acquired" in kinds and "released" in kinds
+    acq = next(e for e in evs if e["event"] == "acquired")
+    assert acq["pid"] == os.getpid() and acq.get("port") == 8088
+
+
+# ── Registry reuse-safe reaping (FG6) ───────────────────────────────────────
+def test_list_reaps_reused_pid_entry(root):
+    # A registry entry for OUR (live) pid but a wrong create_time = the pid was
+    # reused; list_live_processes must reap it, not report it as a live writer.
+    pdir = Path(root) / ".internal" / "PID"
+    pdir.mkdir(parents=True)
+    entry = pdir / f"embed-server.{os.getpid()}"
+    entry.write_text(_json.dumps({
+        "pid": os.getpid(), "role": "embed-server", "started_at": "x",
+        "create_time": 1.0,  # bogus
+        "engine_root": root, "protocol": 1}))
+    live = m3_halt.list_live_processes(engine_root=root)
+    assert live == [], "a reused-pid entry must be reaped, not counted live"
+    assert not entry.exists()
+
+
+# ── Cross-process mutual exclusion (the CORE guarantee — real subprocesses) ──
+import subprocess as _subprocess  # noqa: E402
+import textwrap as _textwrap  # noqa: E402
+import time as _time  # noqa: E402
+
+
+# A tiny holder program: acquire the lock for `role` under `engine_root`, print a
+# ready line, then hold for `hold_s` seconds. Run as a real separate process so
+# the OS advisory lock is genuinely tested across process boundaries (an
+# in-process second acquire is REENTRANT and would not exercise the mutex).
+_HOLDER_SRC = _textwrap.dedent(
+    """
+    import sys, os, time
+    sys.path.insert(0, sys.argv[4])          # bin dir
+    os.environ["M3_ENGINE_ROOT"] = sys.argv[1]
+    import m3_halt
+    r = m3_halt.acquire_single_instance(sys.argv[2], extra={"port": 8088})
+    assert r.status is m3_halt.LockStatus.ACQUIRED, r.status
+    print("READY " + str(os.getpid()), flush=True)
+    time.sleep(float(sys.argv[3]))
+    """
+)
+
+
+def _spawn_holder(root, role, hold_s, bin_dir):
+    p = _subprocess.Popen(
+        [sys.executable, "-c", _HOLDER_SRC, str(root), role, str(hold_s), str(bin_dir)],
+        stdout=_subprocess.PIPE, stderr=_subprocess.PIPE, text=True,
+    )
+    # Wait for the READY line so we know it holds the lock before we contend.
+    line = p.stdout.readline()
+    assert line.startswith("READY "), f"holder failed to start: {line!r} / {p.stderr.read()!r}"
+    return p, int(line.split()[1])
+
+
+def _cleanup_holder(p):
+    """Reap the holder and CLOSE its pipes so no FileIO is left to be finalized
+    by the GC (which pytest flags as an unraisable-exception warning)."""
+    try:
+        if p.poll() is None:
+            p.kill()
+        p.wait(timeout=10)
+    finally:
+        for stream in (p.stdout, p.stderr, p.stdin):
+            try:
+                if stream is not None:
+                    stream.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def test_cross_process_mutual_exclusion(tmp_path):
+    """THE core guarantee: while a real OTHER process holds the lock, this process
+    gets HELD_BY_PEER (never a second ACQUIRED); after it exits, this process
+    wins. Untested elsewhere — an in-process re-acquire is REENTRANT."""
+    root = str(tmp_path / "engine")
+    bin_dir = str(_BIN)
+    holder, holder_pid = _spawn_holder(root, "embed-server", 4.0, bin_dir)
+    try:
+        # Contend while the holder is alive → must LOSE, and identify the holder.
+        res = m3_halt.acquire_single_instance("embed-server", engine_root=root)
+        assert res.status is m3_halt.LockStatus.HELD_BY_PEER, res.status
+        assert res.lock is None
+        assert res.owner is not None and res.owner.pid == holder_pid
+    finally:
+        _cleanup_holder(holder)
+    # Holder gone → we must now WIN.
+    res2 = m3_halt.acquire_single_instance("embed-server", engine_root=root)
+    assert res2.status is m3_halt.LockStatus.ACQUIRED, res2.status
+    res2.lock.release()
+
+
+def test_cross_process_lock_released_on_holder_death(tmp_path):
+    """OS-advisory-lock property that PID files lack: when the holder is KILLED
+    (no clean release), the OS drops the lock, so the next acquirer wins — no
+    stale lock, no reclaim needed."""
+    root = str(tmp_path / "engine")
+    holder, holder_pid = _spawn_holder(root, "dashboard", 30.0, str(_BIN))
+    try:
+        # Confirm it's held.
+        assert m3_halt.acquire_single_instance("dashboard", engine_root=root).status \
+            is m3_halt.LockStatus.HELD_BY_PEER
+        # HARD KILL (no atexit / SIGTERM cleanup runs) — the OS must still free it.
+        holder.kill()
+        holder.wait(timeout=10)
+        # Small settle for the OS to reclaim the handle.
+        for _ in range(20):
+            res = m3_halt.acquire_single_instance("dashboard", engine_root=root)
+            if res.status is m3_halt.LockStatus.ACQUIRED:
+                res.lock.release()
+                break
+            _time.sleep(0.1)
+        else:
+            raise AssertionError("lock not released after holder was killed")
+    finally:
+        _cleanup_holder(holder)
+
+
+# ── Thread-safety + timeout (concurrency correctness) ────────────────────────
+def test_lock_thread_safe_single_winner(tmp_path):
+    """Many threads acquiring the same role in ONE process must yield exactly one
+    ACQUIRED and the rest REENTRANT — never two ACQUIRED. Without per-process
+    serialization, fcntl.flock (per-process on Linux) would let multiple threads
+    both satisfy the lock."""
+    import threading as _t
+    root = str(tmp_path / "engine")
+    outcomes = []
+    barrier = _t.Barrier(12)
+
+    def worker():
+        barrier.wait()  # release all threads at once → max contention
+        r = m3_halt.acquire_single_instance("svc", engine_root=root)
+        outcomes.append(r.status)
+
+    threads = [_t.Thread(target=worker) for _ in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    acquired = sum(1 for s in outcomes if s is m3_halt.LockStatus.ACQUIRED)
+    reentrant = sum(1 for s in outcomes if s is m3_halt.LockStatus.REENTRANT)
+    assert acquired == 1, f"exactly one ACQUIRED expected, got {acquired}"
+    assert acquired + reentrant == 12, "all others must be REENTRANT (no lost/errored)"
+    # cleanup
+    lk = m3_halt._HELD_LOCKS.get(("svc", str(m3_halt._engine_root(root))))
+    if lk:
+        lk.release()
+
+
+def test_lock_timeout_param_accepted_and_acquires(tmp_path):
+    # timeout>0 must still ACQUIRE a free lock (and not hang). Cross-process
+    # waiting is covered by the subprocess tests; here we pin the param + no-hang.
+    root = str(tmp_path / "engine")
+    res = m3_halt.acquire_single_instance("svc", engine_root=root, timeout=1.0)
+    assert res.status is m3_halt.LockStatus.ACQUIRED
+    res.lock.release()

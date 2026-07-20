@@ -435,18 +435,25 @@ def main() -> int:
     # scheduled task re-fires every minute; MultipleInstancesPolicy=IgnoreNew
     # covers a re-fire of the SAME task, but a manually-started server (or any
     # process not owned by the task) would otherwise let this instance load a
-    # SECOND GPU embedder — a second multi-GB CUDA context, the exact waste this
-    # shared-server design exists to avoid — and only THEN fail to bind the port.
-    # So probe /health first: if the port is already serving, exit 0 cleanly
-    # BEFORE touching the GPU. Any probe error (nothing there / half-up) falls
-    # through and we start normally.
-    if _already_serving(args.host, args.port):
-        logger.info(
-            "an embed server is already serving %s:%d — exiting without loading "
-            "a second GPU embedder (§8: one CUDA context, not two).",
-            args.host, args.port,
-        )
-        return 0
+    # Single-instance BEFORE touching the GPU — an OS advisory lock (fcntl/msvcrt),
+    # race-free (the old _already_serving /health probe was check-then-act; two
+    # launches could both pass and both load a multi-GB CUDA context). A LIVE peer
+    # → sys.exit(EXIT_ALREADY_RUNNING=4) WITHOUT loading the embedder (supervisors
+    # treat 4 as a clean no-op). A config/lock error → degraded handle, run anyway
+    # (fail-safe §8: better a possibly-second embedder than no embedder at all).
+    from m3_sdk import acquire_or_exit
+    _lock = acquire_or_exit(
+        "embed-server",
+        extra={"host": args.host, "port": args.port},
+        on_already_running=lambda o: logger.info(
+            "an embed server is already running (pid %s) on %s:%d — exiting "
+            "without loading a second GPU embedder (§8: one CUDA context, not two).",
+            o.pid if o else "?", args.host, args.port),
+    )
+    main._instance_lock = _lock  # type: ignore[attr-defined]  # hold for lifetime
+    if not _lock.acquired:
+        logger.warning("embed-server: single-instance lock DEGRADED (%s) — "
+                       "running without enforcement", _lock.status.value)
 
     _load_embedder()  # fail-loud: exits non-zero if the embedder can't load
     logger.info("listening on http://%s:%d (loopback=%s)",

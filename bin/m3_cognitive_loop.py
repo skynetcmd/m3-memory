@@ -42,19 +42,23 @@ import m3_entities
 import m3_halt
 from m3_sdk import (
     M3Context,
+    acquire_or_exit,
     ensure_governor_config,
     get_governor_pacing,
     get_m3_config_root,
     resolve_db_path,
 )
 
-# PID file path for single-instance locking (distinct from m3_halt's PID/
-# registry: this enforces one-loop-at-a-time; the registry tracks DB-holders so
-# an exclusive op can quiesce them — see docs/design/HALT_PROTOCOL.md).
-PID_FILE = REPO_ROOT / "memory" / "cognitive_loop.pid"
-
-# Role name this process registers under in the m3_halt PID registry.
+# Role name this process uses for BOTH the single-instance lock (one-loop-at-a-
+# time) and the m3_halt PID registry (DB-holder tracking for quiesce — see
+# docs/design/HALT_PROTOCOL.md). The lock lives at the ENGINE root
+# (~/.m3/engine/.internal/cognitive-loop.lock), NOT the code dir — so a pipx
+# upgrade that replaces the payload can't wipe a running loop's lock.
 _HALT_ROLE = "cognitive-loop"
+
+# Holds the acquired single-instance lock for the loop's lifetime (released on
+# exit via the lock's own atexit + SIGTERM cleanup). Module-level so it isn't GC'd.
+_INSTANCE_LOCK = None
 
 def daemonize_windows(args):
     """Restart this process using pythonw.exe to detach from console."""
@@ -148,95 +152,28 @@ def daemonize_unix():
         os.dup2(f.fileno(), sys.stdout.fileno())
         os.dup2(f.fileno(), sys.stderr.fileno())
 
-def _pid_is_live_loop(pid: int) -> bool:
-    """True iff `pid` is alive AND is actually a cognitive-loop process (not a
-    reused PID now owned by something unrelated). Liveness alone is not enough: a
-    reused PID would make acquire_lock refuse to start forever (false positive).
-    On error, err toward "live" (conservative — refuse to start a possible second
-    instance rather than risk two loops double-dispatching to the local LLM)."""
-    if pid <= 0:
-        return False
-    # 1. Liveness.
-    if sys.platform == "win32":
-        import ctypes
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return False  # no such process (or truly inaccessible) -> stale
-        ctypes.windll.kernel32.CloseHandle(handle)
-    else:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False  # definitely gone -> stale
-        except PermissionError:
-            return True   # exists but not ours to signal -> treat as live
-        except OSError:
-            return True   # unknown -> conservative
-    # 2. Identity: is the live PID actually a cognitive_loop? Best-effort via
-    # psutil; if psutil is absent or the check fails, fall back to "live == ours"
-    # (the old behaviour) so we never START a duplicate on an inconclusive probe.
-    try:
-        import psutil
-        cmdline = " ".join(psutil.Process(pid).cmdline())
-        return "cognitive_loop" in cmdline
-    except Exception:
-        return True  # can't confirm identity -> assume it IS the loop (safe)
-
-
 def acquire_lock():
-    """Ensure only one instance of the loop is running.
+    """Ensure only one loop runs, via the shared system-wide single-instance lock.
 
-    Uses an ATOMIC exclusive-create (O_CREAT|O_EXCL) as the actual mutex so two
-    near-simultaneous launches can't both pass a check-then-write window — exactly
-    the race that produced two live loops (double LLM dispatch). If the create
-    fails because the file already exists, we inspect the recorded PID: a genuinely
-    stale lock (dead PID, or a reused PID now owned by a non-loop process) is
-    reclaimed; a live loop makes us exit."""
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    my_pid = os.getpid()
-
-    def _write_pid_atomic() -> bool:
-        """Try to create the lock file exclusively. True if we won it."""
-        try:
-            fd = os.open(str(PID_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            return False
-        try:
-            os.write(fd, str(my_pid).encode())
-        finally:
-            os.close(fd)
-        return True
-
-    if not _write_pid_atomic():
-        # Lock file exists — decide whether the holder is live or stale.
-        try:
-            old_pid = int(PID_FILE.read_text().strip())
-        except (ValueError, OSError):
-            old_pid = -1  # unreadable/garbage -> treat as stale, reclaim
-        if old_pid != my_pid and _pid_is_live_loop(old_pid):
-            print(f"ERROR: Cognitive Loop is already running (PID {old_pid}). Exiting.")
-            sys.exit(0)
-        # Stale (dead PID / reused-by-other / garbage): reclaim by overwriting.
-        # There is no second racer here — a real concurrent launch would have been
-        # caught by the O_EXCL create above — so a plain overwrite is safe.
-        try:
-            PID_FILE.write_text(str(my_pid))
-        except OSError as e:
-            print(f"WARNING: could not reclaim stale lock {PID_FILE}: {e}")
-
-    atexit.register(release_lock)
-
-def release_lock():
-    """Remove the PID file on exit."""
-    if PID_FILE.exists():
-        try:
-            current_pid = int(PID_FILE.read_text().strip())
-            if current_pid == os.getpid():
-                PID_FILE.unlink()
-        except Exception:
-            pass
+    Delegates to m3_halt.acquire_or_exit, which holds an OS ADVISORY lock (fcntl/
+    msvcrt) at the ENGINE root — the OS releases it automatically on death, so
+    there are no stale locks or dead-PID ambiguity. If a LIVE peer holds it we
+    exit EXIT_ALREADY_RUNNING (4) — a non-zero 'you lost' signal the supervisors
+    treat as a clean no-op (they do NOT respawn on it). A degraded handle (config/
+    lock error) still lets us run best-effort per §3 fail-safe. This replaced the
+    old bespoke PID-file lock that lived under the CODE dir (wiped on pipx
+    upgrade)."""
+    global _INSTANCE_LOCK
+    _INSTANCE_LOCK = acquire_or_exit(
+        _HALT_ROLE,
+        on_already_running=lambda o: print(
+            f"Cognitive Loop already running (PID {o.pid if o else '?'}). Exiting.",
+            flush=True),
+    )
+    if not _INSTANCE_LOCK.acquired:
+        logger.warning("cognitive-loop: single-instance lock DEGRADED "
+                       "(%s) — running without single-instance enforcement",
+                       _INSTANCE_LOCK.status.value)
 
 # Configure logging for structured and greppable output
 logging.basicConfig(

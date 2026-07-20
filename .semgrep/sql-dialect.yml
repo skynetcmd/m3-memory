@@ -1,0 +1,68 @@
+# Custom semgrep rules — cross-dialect SQL portability footguns.
+#
+# m3 runs on SQLite AND PostgreSQL (MariaDB planned). SQL is embedded in Python
+# strings and dialected through bin/memory/backends/dialect.py (param(),
+# placeholder(), now_minus_days(), json_extract_text(), coalesce_open_timestamp(),
+# columns_of(), ...). A raw SQL string that hardcodes a SQLite-ism (or a PG-ism)
+# instead of going through that seam is a portability bug — it works on one
+# backend and silently breaks on the other. The stock semgrep p/ci ruleset
+# covers SQL *injection*; these cover cross-DIALECT correctness, the class we hit
+# repeatedly (valid_to IS NULL OR = '', now_minus_days, placeholder ?/%s).
+#
+# Scope: bin/ Python. Guidance in DESIGN_PHILOSOPHIES §1 (storage seam) + §3.
+# These are WARNING (not error) — some are intentional in SQLite-only code paths
+# (guarded by active_backend().name == 'sqlite'); a reviewer confirms. Suppress a
+# verified-intentional hit with a trailing `# nosemgrep: <rule-id>`.
+rules:
+  - id: m3-sql-sqlite-only-strftime
+    languages: [python]
+    severity: WARNING
+    message: >
+      SQLite-only date function in a SQL string (strftime/julianday/date('now')).
+      PostgreSQL has no strftime; use the dialect seam (now()/now_minus_days) or
+      guard this path with active_backend().name == 'sqlite'.
+    patterns:
+      - pattern-regex: "(?i)\\b(strftime|julianday)\\s*\\(|date\\s*\\(\\s*'now'"
+      - pattern-regex: "(?i)(select|where|update|insert|from|order by|group by)"
+
+  - id: m3-sql-sqlite-only-operators
+    languages: [python]
+    severity: WARNING
+    message: >
+      SQLite-specific operator/pragma in a SQL string (GLOB, PRAGMA, AUTOINCREMENT,
+      `|| ''` empty-string coalescing, sqlite_master). Not portable to PostgreSQL/
+      MariaDB — route through the dialect seam or guard by backend.
+    patterns:
+      - pattern-regex: "(?i)\\b(GLOB|PRAGMA\\s|AUTOINCREMENT|sqlite_master)\\b"
+      - pattern-regex: "(?i)(select|where|update|insert|create table|from)"
+
+  # NOTE: two placeholder rules were tried and REMOVED as unfixable-by-regex:
+  #  - "hardcoded ? vs %s": 259 findings, ~all FPs — a bare '?' is CORRECT in the
+  #    many SQLite-scoped paths; distinguishing needs the connection backend,
+  #    which semgrep can't see.
+  #  - "mixed ? and %s in one query": semgrep pattern-regex matches the WHOLE
+  #    file, so a '?' and a '%s' in DIFFERENT queries (or a docstring) false-match.
+  #    Scoping to a single string literal isn't reliably expressible in regex.
+  # The real placeholder-mixing bug is rare and caught by the cross-backend tests
+  # + code review. The rules kept below are the ones regex CAN pin precisely.
+
+  - id: m3-sql-pg-only-in-shared-path
+    languages: [python]
+    severity: INFO
+    message: >
+      PostgreSQL-specific syntax in a SQL string (ON CONFLICT ... DO, RETURNING,
+      ILIKE, ::type cast, to_regclass, jsonb). Fine in a PG-only path, but if this
+      runs on SQLite too it will fail — confirm the path is PG-guarded or dialected.
+    patterns:
+      - pattern-regex: "(?i)\\b(ILIKE|to_regclass|::\\w+|jsonb_|ON CONFLICT[^)]*DO\\s+(UPDATE|NOTHING))\\b"
+      - pattern-regex: "(?i)(select|where|update|insert|from)"
+
+  - id: m3-sql-select-star
+    languages: [python]
+    severity: INFO
+    message: >
+      SELECT * in a query string. DESIGN §4 (efficiency): project only needed
+      columns — wider rows cost bytes through the VDBE and break if a column is
+      added/reordered. Use an explicit column list.
+    patterns:
+      - pattern-regex: "(?i)SELECT\\s+\\*\\s+FROM\\s+\\w"

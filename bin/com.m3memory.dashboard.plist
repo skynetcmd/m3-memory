@@ -7,7 +7,7 @@
   substitutes [M3_MEMORY_ROOT], [M3_PYTHON], and [M3_DASHBOARD_PORT] and writes
   the result to ~/Library/LaunchAgents/com.m3memory.dashboard.plist.
 
-  NOTE: ProgramArguments runs the server with --foreground so launchd manages
+  NOTE: ProgramArguments runs the server with the foreground flag so launchd manages
   the real process directly (the detached/pythonw path is Windows-only). The
   server binds 127.0.0.1 only (loopback) and self-registers in the m3 PID
   registry.
@@ -28,8 +28,16 @@
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <!-- KeepAlive restarts only on an ABNORMAL (crash/signal) exit, NOT on a
+         clean exit. A clean exit 4 = EXIT_ALREADY_RUNNING (another instance
+         holds the single-instance lock); unconditional KeepAlive=true would
+         respawn-loop on it. Crashed-only is the launchd idiom for "restart if it
+         died, leave it alone if it chose to exit". -->
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>Crashed</key>
+        <true/>
+    </dict>
     <key>StandardOutPath</key>
     <string>[M3_MEMORY_ROOT]/logs/dashboard.log</string>
     <key>StandardErrorPath</key>

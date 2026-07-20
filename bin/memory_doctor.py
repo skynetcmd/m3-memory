@@ -67,6 +67,10 @@ def main() -> int:
         help="Skip the governor scheduled-task migration check.",
     )
     parser.add_argument(
+        "--skip-locks", action="store_true",
+        help="Skip the single-instance lock health check.",
+    )
+    parser.add_argument(
         "--skip-schedule", action="store_true",
         help="Skip the dangling scheduled-task interpreter check.",
     )
@@ -172,6 +176,14 @@ def main() -> int:
         # supported state, so this never bumps the exit code — it nags and
         # prints the fix command when the governor should own scheduled work.
         governor_probe.run(brief=brief)
+
+    if not getattr(args, "skip_locks", False):
+        from doctor import lock_probe
+        # Report-only: a degraded lock (running without single-instance
+        # enforcement) or a flapping one (duplicate launchers) is a warning, not a
+        # hard failure — the services still run (fail-safe). Surfaces the state
+        # from the lock event log that is otherwise invisible.
+        lock_probe.run(brief=brief)
 
     if not args.skip_schedule:
         from doctor import schedule_probe
