@@ -65,12 +65,13 @@ def test_processed_empty_turn_not_reselected(tmp_path):
     assert after == set(), "nothing should remain eligible"
 
 
-def test_failed_turn_stays_eligible_for_retry(tmp_path):
+def test_failed_turn_under_cap_stays_eligible_for_retry(tmp_path):
     db = str(tmp_path / "ent.db")
     _seed(db)
     conn = sqlite3.connect(db)
     E._ensure_extraction_status_column(conn)
-    # A failed row (status='failed') must remain eligible — retryable.
+    # A failed row still under MAX_ENTITY_ATTEMPTS must remain eligible —
+    # transient failures (LM Studio OOM-reload 500s) should retry.
     conn.execute(
         "INSERT INTO entity_extraction_queue(memory_id,attempts,last_attempt_at,status)"
         " VALUES('empty-turn',1,'now','failed')"
@@ -78,7 +79,47 @@ def test_failed_turn_stays_eligible_for_retry(tmp_path):
     conn.commit()
     conn.close()
     eligible = {r[0] for r in E._query_eligible_rows(Path(db), ("note",), None, None, True)}
-    assert "empty-turn" in eligible, "failed turn should stay eligible for retry"
+    assert "empty-turn" in eligible, "failed turn under the retry cap should stay eligible"
+
+
+def test_failed_turn_past_cap_not_reselected(tmp_path):
+    # A row that has failed MAX_ENTITY_ATTEMPTS times is terminal — it must NOT
+    # be re-selected, or it loops forever (the "same item over and over" bug: a
+    # deterministically-failing row at the top of the worst-first ORDER BY gets
+    # re-sent to the LLM every pass).
+    db = str(tmp_path / "ent.db")
+    _seed(db)
+    conn = sqlite3.connect(db)
+    E._ensure_extraction_status_column(conn)
+    conn.execute(
+        "INSERT INTO entity_extraction_queue(memory_id,attempts,last_attempt_at,status)"
+        " VALUES('empty-turn',?,'now','failed')",
+        (E.MAX_ENTITY_ATTEMPTS,),
+    )
+    conn.commit()
+    conn.close()
+    eligible = {r[0] for r in E._query_eligible_rows(Path(db), ("note",), None, None, True)}
+    assert "empty-turn" not in eligible, "failed turn past the retry cap was re-selected (loop bug)"
+
+
+def test_ctx_error_turn_not_reselected(tmp_path):
+    # A row marked 'ctx_error' (server returned 'Context size has been
+    # exceeded' — usually a too-small per-sequence KV slot, not oversized
+    # content) is terminal on the FIRST hit — excluded regardless of attempt
+    # count, so it never burns the retry budget re-sending a payload the server
+    # will keep rejecting while loaded that way.
+    db = str(tmp_path / "ent.db")
+    _seed(db)
+    conn = sqlite3.connect(db)
+    E._ensure_extraction_status_column(conn)
+    conn.execute(
+        "INSERT INTO entity_extraction_queue(memory_id,attempts,last_attempt_at,status)"
+        " VALUES('empty-turn',1,'now','ctx_error')"
+    )
+    conn.commit()
+    conn.close()
+    eligible = {r[0] for r in E._query_eligible_rows(Path(db), ("note",), None, None, True)}
+    assert "empty-turn" not in eligible, "ctx_error turn was re-selected (loop bug)"
 
 
 def test_ensure_status_column_idempotent(tmp_path):

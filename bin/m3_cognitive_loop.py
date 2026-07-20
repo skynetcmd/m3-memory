@@ -103,8 +103,20 @@ def daemonize_windows(args):
             stdout=child_out,
             stderr=subprocess.STDOUT,
         )
-    print("Cognitive Loop started in background (Windows pythonw).")
-    sys.stdout.flush()
+    # CRITICAL: the parent MUST hard-exit now, or we get TWO live loops (the
+    # detached child worker + this parent). The status print() is best-effort and
+    # MUST NOT be able to prevent the exit: under pythonw.exe there is NO console,
+    # so sys.stdout is None / a dead handle and BOTH print() and flush() raise
+    # (AttributeError/OSError/ValueError). If that exception propagates before
+    # os._exit(0), the parent survives, falls through to acquire_lock()+main_loop,
+    # and double-dispatches to the local LLM — the observed "parent+child both
+    # looping" bug that survived the scheduled-task single-instance fix. Wrap the
+    # I/O so nothing stands between the Popen and the exit.
+    try:
+        print("Cognitive Loop started in background (Windows pythonw).")
+        sys.stdout.flush()
+    except Exception:  # noqa: BLE001 — no console under pythonw; never block the exit
+        pass
     os._exit(0)
 
 def daemonize_unix():
@@ -869,20 +881,49 @@ def has_chatlog_prune_work(chatlog_db: Optional[str], prune_days: float,
     Event-driven gate (mirrors has_consolidate_work) so the loop only does a
     sweep when a real backlog of prune-eligible noise has accumulated."""
     try:
-        from memory.backends import chatlog_table, dialect
+        from memory.backends import active_backend, chatlog_table, dialect
         _d = dialect()
         _p = _d.param()
+        _is_sqlite = active_backend().name == "sqlite"
         _T = chatlog_table("items")  # memory_items (sqlite) | chat_log_items (pg)
-        sql = (
-            f"SELECT 1 FROM {_T} "
-            f"WHERE type='chat_log' AND is_deleted=0 AND importance <= 0.3 "
-            f"AND created_at < {_d.now_minus_days(_p)} "
-            f"GROUP BY type HAVING COUNT(*) > {_p} LIMIT 1"
-        )
-        # Route through the chatlog connection (PG: core pool + chat_log_* tables;
-        # SQLite: the chatlog file). now_minus_days binds an INT (portable).
+        # CONVERGENCE: the sweep decays a noise row ONCE (lowers importance to
+        # ~0.06, sets valid_to). A decayed row keeps importance<=0.3, so a gate
+        # keyed only on that stays True forever after the backlog drains —
+        # re-firing the pass every cycle to do nothing (part of the "same rows
+        # over and over" loop). Count only rows the sweep can still ACT on:
+        # not-yet-decayed (valid_to open). Cross-backend "open" test — SQLite
+        # stores an unset bound as NULL OR '' (loose TEXT typing); Postgres/
+        # MariaDB use NULL only — so a bare `valid_to IS NULL` would miss SQLite's
+        # '' and undercount. Guard on the column existing (older schema/backend
+        # without valid_to falls back to the importance-only gate, matching that
+        # schema's sweep behaviour).
         ctx = M3Context.for_db(None)
         with ctx.get_chatlog_conn() as conn:
+            _has_valid_to = False
+            try:
+                _cs, _cp = _d.columns_of(_T)
+                _has_valid_to = any(r[0] == "valid_to" for r in conn.execute(_cs, _cp).fetchall())
+            except Exception:  # noqa: BLE001 — introspection failure degrades to importance-only
+                _has_valid_to = False
+            # "not-yet-decayed" = valid_to is open. No extra bind params: the
+            # clause is a literal comparison the backend evaluates directly.
+            #   SQLite : valid_to open == NULL OR '' (loose TEXT typing)
+            #   PG/MDB : valid_to open == NULL only (TIMESTAMPTZ; '' is illegal,
+            #            so referencing = '' there would error — hence the branch)
+            _open_clause = ""
+            if _has_valid_to:
+                if _is_sqlite:
+                    _open_clause = " AND (valid_to IS NULL OR valid_to = '')"
+                else:
+                    _open_clause = " AND valid_to IS NULL"
+            sql = (
+                f"SELECT 1 FROM {_T} "
+                f"WHERE type='chat_log' AND is_deleted=0 AND importance <= 0.3 "
+                f"AND created_at < {_d.now_minus_days(_p)} "
+                f"{_open_clause} "
+                f"GROUP BY type HAVING COUNT(*) > {_p} LIMIT 1"
+            )
+            # now_minus_days binds an INT; only prune_days + min_rows are params.
             return len(conn.execute(sql, (int(prune_days), min_rows)).fetchall()) > 0
     except Exception as e:
         logger.debug(f"Chatlog-prune work check failed (non-fatal): {e}")

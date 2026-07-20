@@ -189,6 +189,7 @@ def run(db_path: str, args) -> dict:
     S: dict[str, Any] = {
         "db": db_path, "apply": args.apply, "scanned": 0,
         "fresh_kept": 0, "decay": {}, "prune": {}, "kept_noise_recent": 0,
+        "kept_already_decayed": 0,
         "writes_decay": 0, "writes_prune": 0,
         "prune_rows": 0, "prune_content_mb": 0.0, "errors": [],
         "params": {"fresh_days": args.fresh_days, "prune_days": args.prune_days,
@@ -251,7 +252,14 @@ def _run_sweep(conn, db_path, args, now_ts, S, _d, _p, _tbl, _is_sqlite) -> dict
         fresh_cutoff = datetime.fromtimestamp(
             now_ts - args.fresh_days * 86400.0, timezone.utc
         ).isoformat()
-        rows = conn.execute(f"""SELECT id, {role_sql} AS role, content, importance, created_at
+        # Select aged candidates. We DO still pull already-decayed rows (valid_to
+        # set) here, because a row decayed while it was in the DECAY tier must
+        # still be re-examined once it ages past prune_days so it can be
+        # soft-deleted (the PRUNE tier). The convergence guard that stops the
+        # infinite re-decay loop is applied per-row in PASS 2 (see `already_decayed`
+        # below), NOT by excluding decayed rows from the scan — excluding them
+        # here would strand them from ever being pruned.
+        rows = conn.execute(f"""SELECT id, {role_sql} AS role, content, importance, created_at{', valid_to' if has_valid_to else ''}
                                 FROM {_tbl}
                                 WHERE type='chat_log' AND is_deleted=0
                                   AND created_at < {_p}
@@ -297,7 +305,30 @@ def _run_sweep(conn, db_path, args, now_ts, S, _d, _p, _tbl, _is_sqlite) -> dict
                 _is_protected(content, args.generic_protect_len)
                 or (cat == "generic_low" and len(content) >= args.generic_delete_maxlen))
             if age < args.prune_days or protected:
-                # DECAY/SUPPRESS tier
+                # DECAY/SUPPRESS tier.
+                # CONVERGENCE GUARD: if this row was already decayed on a prior
+                # run (valid_to set), do NOT decay it again. Without this the same
+                # aged-but-not-yet-prunable rows are re-decayed every run
+                # (0.06 -> 0.012 -> ...), the pass reports an identical
+                # `suppress=N capped=True` forever, and — because decayed rows
+                # keep importance<=0.3 — has_chatlog_prune_work stays True so the
+                # loop re-fires every cycle. This was the ~11s "same 5000 rows
+                # over and over" loop. A decayed row still reaches the PRUNE tier
+                # once it ages past prune_days (the branch below), so suppression
+                # remains a way-station to deletion, not a dead end.
+                # Cross-backend "decayed" test: valid_to is set to a real
+                # timestamp. SQLite TEXT columns represent "open"/unset as EITHER
+                # NULL OR the empty string '' (loose typing; see dialect
+                # coalesce_open_timestamp / valid_from filter notes), while
+                # Postgres/MariaDB use NULL only. Treat BOTH None and '' (after
+                # strip) as not-yet-decayed so a never-touched row is not wrongly
+                # skipped on SQLite, and a genuinely decayed row is skipped on all
+                # backends.
+                _vt = r["valid_to"] if has_valid_to else None
+                already_decayed = bool(_vt is not None and str(_vt).strip() != "")
+                if already_decayed:
+                    S["kept_already_decayed"] += 1
+                    continue
                 tag = cat if age < args.prune_days else f"{cat}!protected"
                 S["decay"][tag] = S["decay"].get(tag, 0) + 1
                 new_imp = round(min(imp, 0.3) * 0.2, 4)
