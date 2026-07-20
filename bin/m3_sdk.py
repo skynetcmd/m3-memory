@@ -125,6 +125,8 @@ from m3_halt import (  # noqa: E402,F401
     acquire_or_exit,
     acquire_single_instance,
     deregister,
+    kill_stale_daemons,
+    list_all_db_writers,
     list_live_processes,
     pid_is_alive,
     read_lock_events,

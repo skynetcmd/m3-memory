@@ -436,6 +436,85 @@ def list_all_db_writers(engine_root: Optional[str] = None) -> list[ProcInfo]:
     return list(by_pid.values())
 
 
+def kill_stale_daemons(
+    engine_root: Optional[str] = None,
+    *,
+    timeout: float = 8.0,
+) -> "list[dict]":
+    """Terminate every running m3 DB-writer for this engine root. Call this at the
+    START of an install/upgrade so no OLD-version daemon survives across the swap:
+    a leftover writer runs the pre-upgrade code against the just-upgraded DB/payload
+    (schema drift, two generations racing the same tables, the "duplicate loop that
+    won't die on reinstall" footgun). The single-instance lock stops a NEW dup from
+    a fresh start; it does NOT reach back and kill a daemon that was already running
+    — that is this function's job.
+
+    Discovery is the full union (registry + cmdline scan via list_all_db_writers),
+    so it catches BOTH current-protocol writers and pre-HALT writers from the
+    version being replaced. Kill is by PRECISE PID only — never a name/substring
+    sweep (the 2026-06-30 substring-kill incident) — the pid comes from a matched
+    m3 writer signature, and we never target our own pid or our parent chain.
+
+    Returns one result dict per targeted pid: {pid, role, killed: bool, error}.
+    Empty list when nothing was running (§3 — a list, never None). Best-effort and
+    idempotent: a pid that vanishes mid-kill counts as killed; an AccessDenied
+    (elevated writer, unprivileged installer) is reported killed=False with the
+    error so the caller can surface "re-run elevated", never a false success."""
+    self_pid = os.getpid()
+    # Never kill our own ancestry — an installer launched BY the loop (unusual, but
+    # possible in a self-update) must not saw off the branch it is sitting on.
+    protected = {self_pid}
+    try:
+        protected.add(os.getppid())
+    except Exception:  # noqa: BLE001 — getppid missing/odd → just protect self
+        pass
+
+    results: list[dict] = []
+    for w in list_all_db_writers(engine_root):
+        if w.pid in protected:
+            continue
+        entry: dict = {"pid": w.pid, "role": w.role, "killed": False, "error": None}
+        try:
+            if not _pid_is_alive(w.pid):
+                entry["killed"] = True  # already gone → the desired end state
+                results.append(entry)
+                continue
+            if os.name == "nt":
+                import subprocess
+                cp = subprocess.run(["taskkill", "/F", "/T", "/PID", str(w.pid)],
+                                    capture_output=True, text=True)
+                # /T also kills the child tree — a pythonw launcher stub + its real
+                # worker die together, so no orphaned half-generation is left.
+                if cp.returncode != 0 and _pid_is_alive(w.pid):
+                    entry["error"] = (cp.stderr or cp.stdout or "taskkill failed").strip()
+            else:
+                import signal as _signal
+                os.kill(w.pid, _signal.SIGTERM)
+                for _ in range(int(timeout * 10)):
+                    if not _pid_is_alive(w.pid):
+                        break
+                    time.sleep(0.1)
+                if _pid_is_alive(w.pid):
+                    os.kill(w.pid, _signal.SIGKILL)  # type: ignore[attr-defined]  # POSIX-only; this branch is os.name != "nt"
+            # Confirm death (bounded) and reap its registry entry so a later
+            # list_live_processes doesn't resurrect a ghost.
+            for _ in range(int(timeout * 10)):
+                if not _pid_is_alive(w.pid):
+                    break
+                time.sleep(0.1)
+            entry["killed"] = not _pid_is_alive(w.pid)
+            if not entry["killed"] and not entry["error"]:
+                entry["error"] = "still alive after kill+timeout"
+        except PermissionError as e:
+            entry["error"] = f"access denied (elevated writer?): {e}"
+        except Exception as e:  # noqa: BLE001 — one bad pid must not abort the sweep
+            entry["error"] = str(e)
+        _log_lock_event("killed_stale" if entry["killed"] else "kill_failed",
+                        w.role, None, victim_pid=w.pid, by_pid=self_pid)
+        results.append(entry)
+    return results
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # HALT semaphore
 # ──────────────────────────────────────────────────────────────────────────

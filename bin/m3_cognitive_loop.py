@@ -102,7 +102,18 @@ def daemonize_windows(args):
     with child_out:
         subprocess.Popen(
             argv,
-            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+            # close_fds=True is REQUIRED here: without it the DETACHED_PROCESS
+            # child inherits EVERY other handle the parent held open by the time
+            # daemonize runs (SQLite/WAL fds, asyncio self-pipe, the logging
+            # FileHandler). Those duplicated handles kept the parent's final
+            # teardown blocked in a native wait (1 thread, UserRequest) so it
+            # never reached os._exit(0) — leaving a second live pythonw alongside
+            # the real worker. Only stdin/stdout/stderr below cross the boundary.
+            # CREATE_NEW_PROCESS_GROUP fully untethers the child's process group.
+            close_fds=True,
+            creationflags=(subprocess.CREATE_NO_WINDOW
+                           | subprocess.DETACHED_PROCESS
+                           | subprocess.CREATE_NEW_PROCESS_GROUP),
             stdin=subprocess.DEVNULL,
             stdout=child_out,
             stderr=subprocess.STDOUT,

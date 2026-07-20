@@ -960,6 +960,32 @@ def main():
 
     selector = None if (args.add == "all" or args.remove == "all") else (args.add or args.remove)
 
+    # Kill any OLD-version daemons BEFORE (re)registering tasks. On an upgrade the
+    # payload/DB are swapped underneath a still-running loop/dashboard/embed
+    # server; that stale process then runs pre-upgrade code against post-upgrade
+    # state (schema drift, two generations racing the same tables) and — because
+    # it predates the just-installed single-instance lock, or simply started
+    # first — the fresh task's lock loser exits while the ghost keeps running.
+    # The lock stops a NEW duplicate; only an explicit reap clears an ALREADY
+    # RUNNING one. Precise-PID kill (never a name sweep); reports elevated writers
+    # it couldn't stop so we can warn instead of silently leaving a duplicate.
+    if args.add:
+        try:
+            sys.path.insert(0, str(script_dir))
+            from m3_sdk import kill_stale_daemons
+            reaped = kill_stale_daemons()
+            killed = [r for r in reaped if r["killed"]]
+            stuck = [r for r in reaped if not r["killed"]]
+            if killed:
+                _safe_print(f"  Stopped {len(killed)} running m3 daemon(s) before "
+                            f"install: {', '.join(sorted({r['role'] for r in killed}))}")
+            for r in stuck:
+                _safe_print(f"{WARN} Could not stop {r['role']} (pid {r['pid']}): "
+                            f"{r['error']} — re-run elevated or stop it manually, "
+                            f"else a duplicate may linger.")
+        except Exception as e:  # noqa: BLE001 — reap is best-effort; never block install
+            _safe_print(f"{WARN} Pre-install daemon reap skipped: {e}")
+
     if args.add:
         if os_name == "Windows":
             install_windows_tasks(m3_memory_root, selector, dashboard_port=getattr(args, "port", 8088) or 8088)

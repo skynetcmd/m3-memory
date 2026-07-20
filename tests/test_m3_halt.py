@@ -249,6 +249,94 @@ def test_list_all_db_writers_unions_registry_and_scan(root, monkeypatch):
     assert os.getpid() in pids and 4242 in pids and len(pids) == 2
 
 
+# ── kill_stale_daemons (reap on install/upgrade) ───────────────────────────────
+def test_kill_stale_daemons_skips_self_and_parent(root, monkeypatch):
+    """Never kill our own pid or our parent — an installer must not saw off the
+    branch it sits on. Both are 'discovered' yet neither is targeted."""
+    my, parent = os.getpid(), os.getppid()
+    monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
+        m3_halt.ProcInfo(pid=my, role="cognitive-loop", started_at="",
+                         engine_root=root, path=Path()),
+        m3_halt.ProcInfo(pid=parent, role="dashboard", started_at="",
+                         engine_root=root, path=Path()),
+    ])
+    # If either were targeted, _pid_is_alive/os.kill would run; assert none did.
+    monkeypatch.setattr(m3_halt, "_pid_is_alive",
+                        lambda pid: pytest.fail(f"must not touch protected pid {pid}"))
+    assert m3_halt.kill_stale_daemons(engine_root=root) == []
+
+
+def test_kill_stale_daemons_dead_pid_counts_killed(root, monkeypatch):
+    """A discovered writer whose pid is already dead is the desired end state —
+    reported killed=True without any kill attempt."""
+    monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
+        m3_halt.ProcInfo(pid=_DEAD_PID, role="cognitive-loop", started_at="",
+                         engine_root=root, path=Path())])
+    monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: False)
+    res = m3_halt.kill_stale_daemons(engine_root=root)
+    assert res == [{"pid": _DEAD_PID, "role": "cognitive-loop",
+                    "killed": True, "error": None}]
+
+
+def test_kill_stale_daemons_kills_live_writer_windows(root, monkeypatch):
+    """A live discovered writer is killed via taskkill /F /T on Windows; success
+    is confirmed by the pid going dead."""
+    victim = 4242
+    calls = {}
+    monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
+        m3_halt.ProcInfo(pid=victim, role="cognitive-loop", started_at="",
+                         engine_root=root, path=Path())])
+    monkeypatch.setattr(m3_halt.os, "name", "nt")
+    # alive on the first probe, dead after the kill runs
+    state = {"alive": True}
+    monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: state["alive"])
+
+    class _CP:
+        returncode = 0
+        stderr = stdout = ""
+
+    def _fake_run(cmd, **kw):
+        calls["cmd"] = cmd
+        state["alive"] = False  # taskkill took effect
+        return _CP()
+
+    import subprocess as _sp
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    res = m3_halt.kill_stale_daemons(engine_root=root)
+    assert calls["cmd"][:3] == ["taskkill", "/F", "/T"]
+    assert str(victim) in calls["cmd"]
+    assert res == [{"pid": victim, "role": "cognitive-loop",
+                    "killed": True, "error": None}]
+
+
+def test_kill_stale_daemons_reports_stuck_writer(root, monkeypatch):
+    """A writer that survives the kill (e.g. elevated, unprivileged installer) is
+    reported killed=False with an error — never a false success."""
+    victim = 4243
+    monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
+        m3_halt.ProcInfo(pid=victim, role="dashboard", started_at="",
+                         engine_root=root, path=Path())])
+    monkeypatch.setattr(m3_halt.os, "name", "nt")
+    monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: True)  # never dies
+
+    class _CP:
+        returncode = 1
+        stderr = "ERROR: Access is denied."
+        stdout = ""
+
+    import subprocess as _sp
+    monkeypatch.setattr(_sp, "run", lambda cmd, **kw: _CP())
+    res = m3_halt.kill_stale_daemons(engine_root=root, timeout=0.1)
+    assert len(res) == 1
+    assert res[0]["killed"] is False
+    assert "denied" in res[0]["error"].lower()
+
+
+def test_kill_stale_daemons_empty_when_nothing_running(root, monkeypatch):
+    monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [])
+    assert m3_halt.kill_stale_daemons(engine_root=root) == []
+
+
 # ── elevated-kill help commands (cross-OS) ─────────────────────────────────────
 def test_elevated_kill_commands_windows(monkeypatch):
     monkeypatch.setattr(m3_halt.os, "name", "nt")
