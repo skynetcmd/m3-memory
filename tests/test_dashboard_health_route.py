@@ -36,7 +36,10 @@ def test_collect_health_shape():
     from dashboard.health import collect_health
 
     h = collect_health()
-    assert set(h) >= {"verdict", "backend", "cdw", "pipeline", "generated_at"}
+    assert set(h) >= {"verdict", "backend", "inference", "cdw", "pipeline", "generated_at"}
+    # inference block always present with a known status.
+    assert h["inference"]["status"] in (
+        "ok", "no_model", "down", "unknown", "none_configured")
     v = h["verdict"]
     # verdict carries the raw contract value AND a user-facing label + tone.
     assert "verdict" in v
@@ -91,3 +94,130 @@ def test_existing_tabs_still_render_with_health_nav():
         r = client.get(path)
         assert r.status_code == 200, f"{path} → {r.status_code}"
         assert "System Health" in r.text  # the new nav link appears on every page
+
+
+# ── Inference backend (LLM/SLM) health ────────────────────────────────────────
+
+def _probe(url, backend, *, reachable, queryable, model_loaded, model_id="", detail=""):
+    return {"url": url, "backend": backend, "reachable": reachable,
+            "queryable": queryable, "model_loaded": model_loaded,
+            "model_id": model_id, "detail": detail}
+
+
+def test_inference_block_reports_where_llm_is_expected(monkeypatch):
+    """The block names the resolved endpoint + backend, never a hardcoded port —
+    it reads llm_failover.LLM_ENDPOINTS (LM Studio / Ollama / custom)."""
+    import dashboard.health as H
+
+    # A served LM Studio endpoint.
+    monkeypatch.setattr(H, "_probe_llm_endpoint", lambda ep, *a: _probe(
+        ep, "LM Studio", reachable=True, queryable=True, model_loaded=True,
+        model_id="qwen/qwen3-8b"))
+    import llm_failover as lf
+    monkeypatch.setattr(lf, "LLM_ENDPOINTS", ["http://localhost:1234/v1"])
+    inf = H._inference_block()
+    assert inf["status"] == "ok"
+    assert inf["backend"] == "LM Studio"
+    assert inf["expected_url"] == "http://localhost:1234/v1"
+    assert any(e["model_id"] == "qwen/qwen3-8b" for e in inf["endpoints"])
+
+
+def test_inference_block_no_model_loaded(monkeypatch):
+    """A reachable + queryable server with an empty chat-model list → no_model,
+    with a remedy — the exact stall cause the user hit."""
+    import dashboard.health as H
+    import llm_failover as lf
+
+    monkeypatch.setattr(lf, "LLM_ENDPOINTS", ["http://localhost:1234/v1"])
+    monkeypatch.setattr(H, "_probe_llm_endpoint", lambda ep, *a: _probe(
+        ep, "LM Studio", reachable=True, queryable=True, model_loaded=False))
+    inf = H._inference_block()
+    assert inf["status"] == "no_model"
+    assert "no chat model is loaded" in inf["remedy"]
+
+
+def test_inference_block_down(monkeypatch):
+    """No endpoint reachable → down, with a start-it remedy."""
+    import dashboard.health as H
+    import llm_failover as lf
+
+    monkeypatch.setattr(lf, "LLM_ENDPOINTS", ["http://localhost:1234/v1"])
+    monkeypatch.setattr(H, "_probe_llm_endpoint", lambda ep, *a: _probe(
+        ep, "LM Studio", reachable=False, queryable=False, model_loaded=False,
+        detail="ConnectError"))
+    inf = H._inference_block()
+    assert inf["status"] == "down"
+    assert "not reachable" in inf["remedy"].lower() or "no llm backend" in inf["remedy"].lower()
+
+
+def test_inference_block_reachable_but_unverifiable_is_unknown(monkeypatch):
+    """Reachable but /models un-queryable (401) → unknown, NOT a false no_model."""
+    import dashboard.health as H
+    import llm_failover as lf
+
+    monkeypatch.setattr(lf, "LLM_ENDPOINTS", ["http://localhost:1234/v1"])
+    monkeypatch.setattr(H, "_probe_llm_endpoint", lambda ep, *a: _probe(
+        ep, "LM Studio", reachable=True, queryable=False, model_loaded=False,
+        detail="HTTP 401"))
+    inf = H._inference_block()
+    assert inf["status"] == "unknown"
+
+
+def test_inference_block_none_configured(monkeypatch):
+    """Empty endpoint list → none_configured with a how-to-configure remedy."""
+    import dashboard.health as H
+    import llm_failover as lf
+
+    monkeypatch.setattr(lf, "LLM_ENDPOINTS", [])
+    inf = H._inference_block()
+    assert inf["status"] == "none_configured"
+    assert "M3_LLM_URL" in inf["remedy"]
+
+
+def test_verdict_downgrades_on_inference_stall():
+    """no_model backend + a real backlog → red 'INFERENCE BACKEND DOWN'."""
+    import dashboard.health as H
+
+    inf = {"status": "no_model", "backend": "LM Studio",
+           "expected_url": "http://localhost:1234/v1", "remedy": "load a model"}
+    pipe = {"pipelines": [{"label": "Entity extraction", "queue_len": 2215,
+                           "eta_human": "stalled"}]}
+    v = H._verdict(inference=inf, pipeline=pipe)
+    assert v["label"] == "INFERENCE BACKEND DOWN"
+    assert v["tone"] == "bad"
+    assert any("no model" in r.lower() or "load a model" in r.lower() for r in v["reasons"])
+
+
+def test_verdict_no_false_alarm_when_backend_dead_but_no_backlog():
+    """A dead/empty backend with a DRAINED queue is not a stall — nothing is stuck,
+    so the verdict must NOT go red on it."""
+    import dashboard.health as H
+
+    inf = {"status": "no_model", "backend": "LM Studio",
+           "expected_url": "http://x", "remedy": "load a model"}
+    pipe = {"pipelines": [{"label": "Entity extraction", "queue_len": 0,
+                           "eta_human": "drained"}]}
+    v = H._verdict(inference=inf, pipeline=pipe)
+    assert v["label"] != "INFERENCE BACKEND DOWN"
+    assert v["tone"] != "bad"
+
+
+def test_verdict_unknown_inference_is_warn_not_red():
+    """Reachable-but-unverifiable + backlog → warn (advisory), never red — we don't
+    KNOW the model is missing, so we don't cry wolf."""
+    import dashboard.health as H
+
+    inf = {"status": "unknown", "backend": "LM Studio",
+           "expected_url": "http://x", "remedy": "confirm a model is loaded"}
+    pipe = {"pipelines": [{"label": "E", "queue_len": 500, "eta_human": "stalled"}]}
+    v = H._verdict(inference=inf, pipeline=pipe)
+    assert v["tone"] != "bad"
+    assert v["label"] != "INFERENCE BACKEND DOWN"
+
+
+def test_health_panel_renders_inference_row():
+    """The rendered panel includes the Inference backend section."""
+    import dashboard_server as D
+
+    body = D._render_health_panel()
+    assert "Inference backend (LLM/SLM)" in body

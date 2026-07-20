@@ -48,7 +48,7 @@ def _fmt_dual_time(value: "object") -> str:
             f"({utc.strftime('%Y-%m-%dT%H:%M:%SZ')})")
 
 
-def _verdict() -> dict:
+def _verdict(inference: "dict | None" = None, pipeline: "dict | None" = None) -> dict:
     """Overall health verdict + the SPECIFIC reasons it isn't healthy.
 
     Returns {verdict, label, tone, headline, reasons}. ``verdict`` is the raw
@@ -57,11 +57,17 @@ def _verdict() -> dict:
     "DEGRADED" for a mere performance/throttle state ("degraded" wrongly implies
     data-integrity loss). Mapping:
       * genuinely not installed / broken → "NEEDS SETUP" (tone=bad)
+      * inference backend down/empty WHILE a pipeline is backlogged → "INFERENCE
+        BACKEND DOWN" (tone=bad — real work is stuck, not just slow)
       * load-throttled (governor CPU/RAM/GPU over threshold) → "THROTTLED (<res>)"
       * slower embedder tier only → "REDUCED PERFORMANCE"
       * otherwise healthy → "HEALTHY"
     ``tone`` ∈ {ok, warn, bad} drives the color; a throttle/perf state is warn
-    (amber), never bad (red) — nothing is wrong with the data.
+    (amber), never bad (red) — nothing is wrong with the data. An inference-backend
+    stall IS bad (red): the LLM the loop needs is unreachable, so a backlog cannot
+    drain until the user acts — that is worth alarming on, unlike a slow tier.
+    ``inference``/``pipeline`` are the already-collected blocks (passed in to avoid
+    re-probing); when omitted the inference-stall check is skipped.
     """
     try:
         from m3_memory.installer import status_summary
@@ -125,8 +131,41 @@ def _verdict() -> dict:
         reasons.append("Chatlog DB is unreadable — capture may be failing; "
                        "check `m3 chatlog status`.")
 
+    # Inference-backend stall: the cognitive loop / entity extraction / enrichment
+    # need an LLM at the configured endpoint. If that backend is DOWN or has NO
+    # model loaded WHILE a pipeline is genuinely backlogged, queued work cannot
+    # drain until the user acts — a real, actionable problem (red), not mere
+    # slowness. A dead backend with no backlog is not worth alarming on (nothing is
+    # stuck), so we gate on an actual backlog.
+    inference_stall = False
+    inf_status = (inference or {}).get("status")
+    if inf_status in ("down", "no_model", "unknown"):
+        backlogged = False
+        for pl in (pipeline or {}).get("pipelines", []):
+            try:
+                if int(pl.get("queue_len", 0) or 0) > 0 and "drained" not in str(pl.get("eta_human", "")).lower():
+                    backlogged = True
+                    break
+            except (TypeError, ValueError):
+                continue
+        if backlogged:
+            remedy = inference.get("remedy", "")
+            if inf_status == "down":
+                inference_stall = True  # red — definitely stuck
+                why = "unreachable"
+            elif inf_status == "no_model":
+                inference_stall = True  # red — definitely stuck
+                why = "up but has no model loaded"
+            else:  # unknown — model state unverifiable; warn, don't alarm red
+                why = "reachable but its model state could not be verified"
+            reasons.insert(0, f"Inference backend (LLM/SLM) is {why} — background "
+                           f"pipelines are backlogged and cannot drain. {remedy}")
+
     # Choose the least-alarming accurate label from the real cause.
-    if throttled_res:
+    if inference_stall:
+        label = "INFERENCE BACKEND DOWN"
+        tone = "bad"
+    elif throttled_res:
         label = f"THROTTLED ({'/'.join(throttled_res)})"
         tone = "warn"
     elif reasons:
@@ -176,6 +215,135 @@ def _unembedded_count() -> int:
             return int(row[0]) if row else 0
     except Exception:  # noqa: BLE001
         return 0
+
+
+def _backend_label_for_endpoint(url: str) -> str:
+    """Human name for an LLM endpoint URL, provider-agnostic. m3 talks to several
+    OpenAI/Anthropic-compatible local servers; name the well-known ones and fall
+    back to host:port for anything custom/remote (M3_LLM_URL, LAN vLLM, …)."""
+    u = (url or "").lower()
+    if ":1234" in u:
+        return "LM Studio"
+    if ":11434" in u:
+        return "Ollama"
+    # Strip scheme + trailing /v1 for a compact "host:port" custom label.
+    host = re.sub(r"^https?://", "", url or "").rstrip("/")
+    host = re.sub(r"/v1$", "", host)
+    return host or "custom endpoint"
+
+
+def _probe_llm_endpoint(endpoint: str, connect_timeout: float, read_timeout: float) -> dict:
+    """Probe one LLM endpoint's GET /v1/models (sync, read-only). Classifies into
+    reachable? / has a usable (non-embedding) chat model loaded?  Never raises."""
+    import httpx
+    from llm_failover import EMBED_EXCLUSIONS
+
+    out = {"url": endpoint, "backend": _backend_label_for_endpoint(endpoint),
+           "reachable": False, "model_loaded": False, "model_id": "",
+           "queryable": False, "detail": ""}
+    token = os.environ.get("M3_LLM_API_KEY") or os.environ.get("LM_STUDIO_API_KEY") or "not-needed"
+    try:
+        r = httpx.get(f"{endpoint}/models",
+                      headers={"Authorization": f"Bearer {token}"},
+                      timeout=httpx.Timeout(connect_timeout, read=read_timeout))
+    except Exception as e:  # noqa: BLE001 — connection refused/timeout = backend down
+        out["detail"] = type(e).__name__
+        return out
+    out["reachable"] = True
+    if r.status_code >= 400:
+        # Reachable but the /models call itself errored (some builds 401 on auth,
+        # or need an API key). We can assert the server is UP but NOT whether a
+        # model is loaded — report that honestly rather than claiming "no model".
+        out["detail"] = f"HTTP {r.status_code} on /models (set M3_LLM_API_KEY?)"
+        return out
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        out["detail"] = "unparseable /models response"
+        return out
+    out["queryable"] = True
+    models = data.get("data", data.get("models", []))
+    for m in models:
+        mid = (m.get("id") or m.get("model", "")) if isinstance(m, dict) else str(m)
+        low = mid.lower()
+        if any(x in low for x in EMBED_EXCLUSIONS):
+            continue  # embedding model — not usable as the chat/extraction LLM
+        out["model_loaded"] = True
+        out["model_id"] = mid
+        break
+    if not out["model_loaded"]:
+        out["detail"] = "no chat model loaded (only embedding models, or none)"
+    return out
+
+
+def _inference_block() -> dict:
+    """LLM/SLM inference-backend health for the dashboard. Reuses llm_failover's
+    RESOLVED endpoint list (respects M3_LLM_URL, LM Studio on-by-default, Ollama
+    opt-in, LLM_ENDPOINTS_CSV) so we report exactly where m3 expects its LLM — no
+    hardcoded port. Reports, per endpoint, whether it is reachable and has a usable
+    chat model loaded. The cognitive loop / entity extraction / enrichment all call
+    this backend; if it is down or empty, those pipelines stall (queue backs up but
+    never drains). status ∈ {ok, no_model, down, none_configured}."""
+    out: dict = {"status": "none_configured", "endpoints": [], "primary": None,
+                 "expected_url": "", "backend": "", "remedy": ""}
+    try:
+        import llm_failover as lf
+        endpoints = list(lf.LLM_ENDPOINTS)
+        connect_to = getattr(lf, "CONNECT_TIMEOUT", 0.3)
+    except Exception as e:  # noqa: BLE001
+        out["detail"] = f"llm_failover unavailable: {e}"
+        return out
+
+    if not endpoints:
+        out["remedy"] = ("No LLM endpoint is configured. Set M3_LLM_URL to your "
+                         "OpenAI-compatible server, or enable LM Studio "
+                         "(M3_ENABLE_LMSTUDIO_FAILOVER=1) / Ollama "
+                         "(M3_ENABLE_OLLAMA_FAILOVER=1).")
+        return out
+
+    probes = [_probe_llm_endpoint(ep, connect_to, 4.0) for ep in endpoints]
+    out["endpoints"] = probes
+    # Primary = the first endpoint in failover order (what discovery would pick).
+    primary = probes[0]
+    out["primary"] = primary
+    out["expected_url"] = primary["url"]
+    out["backend"] = primary["backend"]
+
+    serving = next((p for p in probes if p["model_loaded"]), None)
+    # "empty" = we could query the model list and it had no usable chat model —
+    # a DEFINITE no-model. "reachable-but-not-queryable" (e.g. 401 on /models) is
+    # only a MAYBE, reported as unknown, never a false "no model loaded".
+    empty = next((p for p in probes if p["queryable"] and not p["model_loaded"]), None)
+    reachable = next((p for p in probes if p["reachable"]), None)
+    if serving:
+        out["status"] = "ok"
+        out["backend"] = serving["backend"]
+        out["expected_url"] = serving["url"]
+    elif empty:
+        # A server is up and its model list is empty of chat models — the exact
+        # stall cause.
+        out["status"] = "no_model"
+        out["backend"] = empty["backend"]
+        out["expected_url"] = empty["url"]
+        out["remedy"] = (f"{empty['backend']} is running at {empty['url']} "
+                         f"but no chat model is loaded. Load one (e.g. `lms load "
+                         f"<model>` for LM Studio, or `ollama run <model>`); the "
+                         f"pipeline drains automatically once a model is serving.")
+    elif reachable:
+        # Reachable but we couldn't read the model list (auth/format). Server is
+        # up; model state unknown. Don't cry wolf — surface it as an advisory.
+        out["status"] = "unknown"
+        out["backend"] = reachable["backend"]
+        out["expected_url"] = reachable["url"]
+        out["remedy"] = (f"{reachable['backend']} is reachable at {reachable['url']} "
+                         f"but its model list could not be read ({reachable.get('detail','')}). "
+                         f"If the pipeline is stalled, confirm a chat model is loaded.")
+    else:
+        out["status"] = "down"
+        out["remedy"] = (f"No LLM backend is reachable. Expected {primary['backend']} "
+                         f"at {primary['url']} — start it (LM Studio: `lms server "
+                         f"start` + load a model; Ollama: `ollama serve`).")
+    return out
 
 
 def _active_backend():
@@ -382,11 +550,14 @@ def collect_health() -> dict:
         core_db = resolve_db_path(None)
     except Exception:  # noqa: BLE001
         pass
+    inference = _inference_block()
+    pipeline = _pipeline_block(core_db)
     return {
-        "verdict": _verdict(),
+        "verdict": _verdict(inference=inference, pipeline=pipeline),
         "backend": _backend_block(),
+        "inference": inference,
         "cdw": _cdw_block(),
-        "pipeline": _pipeline_block(core_db),
+        "pipeline": pipeline,
         "generated_at": _fmt_dual_time(__import__("datetime").datetime.now(
             __import__("datetime").timezone.utc)),
     }

@@ -862,6 +862,60 @@ def _render_health_panel() -> str:
             f'last updated: {ts(st.get("last_updated","—"))}</div>')
     parts.append("</div>")
 
+    # Inference backend (LLM/SLM) — the cognitive loop / entity extraction /
+    # enrichment all call an LLM at the configured endpoint. Report WHERE m3
+    # expects it and whether it's reachable + has a chat model loaded, so a
+    # stalled pipeline (queue backs up, never drains) has a named cause instead of
+    # a silent "HEALTHY". Endpoints come from llm_failover (LM Studio / Ollama /
+    # custom) — provider-agnostic, no hardcoded port.
+    inf = h.get("inference") or {}
+    inf_status = inf.get("status", "none_configured")
+    inf_map = {
+        "ok":              ("var(--m3-neon-emerald)", "●", "MODEL LOADED"),
+        "no_model":        ("#ff5c6c",                "✕", "NO MODEL LOADED"),
+        "down":            ("#ff5c6c",                "✕", "DOWN"),
+        "unknown":         ("var(--m3-neon-amber)",   "▲", "REACHABLE (MODEL UNVERIFIED)"),
+        "none_configured": ("var(--m3-neon-amber)",   "▲", "NOT CONFIGURED"),
+    }
+    inf_color, inf_icon, inf_label = inf_map.get(inf_status, ("hsl(210,15%,55%)", "?", inf_status.upper()))
+    parts.append(
+        '<div class="memory-card"><h3 style="color:var(--m3-neon-cyan);margin-bottom:0.5rem;">'
+        'Inference backend (LLM/SLM)</h3>'
+        f'<div style="font-size:0.9rem;margin-bottom:0.35rem;">'
+        f'<span style="color:{inf_color};font-weight:700;">{inf_icon} {esc(inf_label)}</span>'
+        + (f' <span style="color:hsl(210,15%,70%);">· {esc(inf.get("backend"))}</span>'
+           if inf.get("backend") else "")
+        + '</div>')
+    if inf.get("expected_url"):
+        model_txt = ""
+        if inf_status == "ok" and (inf.get("primary") or {}):
+            served = next((e for e in inf.get("endpoints", []) if e.get("model_loaded")), None)
+            if served and served.get("model_id"):
+                model_txt = (f' · model: <span style="color:var(--m3-neon-cyan);">'
+                             f'{esc(served["model_id"])}</span>')
+        parts.append(
+            f'<div style="font-family:\'Fira Code\',monospace;font-size:0.8rem;color:hsl(210,15%,60%);">'
+            f'expected at <span style="color:#fff;">{esc(inf.get("expected_url"))}</span>{model_txt}</div>')
+    # Show every probed endpoint (failover order) so multi-backend setups are legible.
+    eps = inf.get("endpoints") or []
+    if len(eps) > 1:
+        for e in eps:
+            if e.get("model_loaded"):
+                ec, etxt = "var(--m3-neon-emerald)", f'model loaded ({esc(e.get("model_id"))})'
+            elif e.get("reachable"):
+                ec, etxt = "var(--m3-neon-amber)", "reachable, no model"
+            else:
+                ec, etxt = "hsl(210,15%,50%)", f'down ({esc(e.get("detail","unreachable"))})'
+            parts.append(
+                f'<div style="font-family:\'Fira Code\',monospace;font-size:0.76rem;margin:0.15rem 0;">'
+                f'<span style="color:hsl(210,15%,65%);">{esc(e.get("backend"))} {esc(e.get("url"))}</span> · '
+                f'<span style="color:{ec};">{etxt}</span></div>')
+    if inf.get("remedy") and inf_status != "ok":
+        parts.append(
+            f'<div style="margin-top:0.45rem;color:hsl(35,90%,72%);font-size:0.8rem;">'
+            f'{esc(inf.get("remedy"))}</div>')
+    parts.append("</div>")
+
     # CDW sync — TABLE format (direction | last sync), easier to scan.
     cdw = h.get("cdw")
     if cdw:
