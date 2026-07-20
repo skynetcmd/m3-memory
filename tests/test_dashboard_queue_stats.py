@@ -92,3 +92,54 @@ def test_missing_tables_degrade_to_zero(tmp_path):
     # One entry per _PIPELINES pipeline (enrich, reflect, entities).
     assert len(stats["pipelines"]) == len(qs._PIPELINES)
     assert all(p["queue_len"] == 0 for p in stats["pipelines"])
+
+
+def _make_entity_db(tmp_path) -> str:
+    """DB with the tables + variant column _entity_backlog_count needs."""
+    db = str(tmp_path / "ent.db")
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE memory_items (id TEXT PRIMARY KEY, type TEXT, variant TEXT,
+            is_deleted INTEGER DEFAULT 0, created_at TEXT);
+        CREATE TABLE memory_item_entities (memory_id TEXT, entity_id TEXT);
+        CREATE TABLE entity_extraction_queue (memory_id TEXT, status TEXT);
+        """
+    )
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_entity_backlog_excludes_variant_tagged_rows(tmp_path):
+    # The worker runs --source-variant __none__, so it only processes
+    # variant-NULL (production) memories. _entity_backlog_count must mirror that:
+    # a variant-tagged row (e.g. a bench corpus) is NOT backlog — counting it made
+    # the dashboard read a permanently-stuck number.
+    db = _make_entity_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.executemany(
+        "INSERT INTO memory_items (id,type,variant,is_deleted) VALUES (?,?,?,0)",
+        [
+            ("prod1", "note", None),          # eligible: production, no entity, not done
+            ("prod2", "observation", None),   # eligible
+            ("tagged1", "message", "some_variant"),  # NOT eligible: variant-tagged
+            ("tagged2", "message", "some_variant"),  # NOT eligible
+            ("deleted", "note", None),        # NOT eligible: soft-deleted
+        ],
+    )
+    conn.execute("UPDATE memory_items SET is_deleted=1 WHERE id='deleted'")
+    conn.commit()
+
+    assert qs._entity_backlog_count(conn) == 2, "only the 2 variant-NULL live rows are backlog"
+
+    # Marking one done drops it; the variant-tagged rows still never count.
+    conn.execute("INSERT INTO entity_extraction_queue (memory_id,status) VALUES ('prod1','done')")
+    conn.commit()
+    assert qs._entity_backlog_count(conn) == 1
+
+    # A terminal ctx_error also excludes (mirrors the worker), not just 'done'.
+    conn.execute("INSERT INTO entity_extraction_queue (memory_id,status) VALUES ('prod2','ctx_error')")
+    conn.commit()
+    assert qs._entity_backlog_count(conn) == 0
+    conn.close()

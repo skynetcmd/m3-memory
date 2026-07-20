@@ -124,12 +124,15 @@ def _entity_backlog_count(conn) -> int:
     """The REAL entity-extraction backlog: memories that still need entities.
 
     Entity extraction is NOT queue-driven — the worker scans memory_items
-    directly for LIVE memories of an extractable type that lack a
-    memory_item_entities row and aren't marked done in entity_extraction_queue.
-    Counting entity_extraction_queue rows measures nothing — it's a DONE-MARKER
-    LOG, not a work queue, so it reads ~0 while a big backlog grinds. Mirrors the
-    worker's eligibility (bin/m3_entities). Backend-agnostic (dialect placeholders);
-    best-effort → 0 if tables/columns are absent.
+    directly for LIVE, PRODUCTION (variant IS NULL) memories of an extractable
+    type that lack a memory_item_entities row and aren't in a terminal queue
+    state. Counting entity_extraction_queue rows measures nothing — it's a
+    DONE-MARKER LOG, not a work queue, so it reads ~0 while a big backlog grinds.
+    Mirrors the worker's eligibility (bin/m3_entities, which runs
+    --source-variant __none__), INCLUDING the variant IS NULL scope — without it
+    the count includes variant-tagged rows (bench corpora) the worker never
+    processes, so the number sits stuck forever. Backend-agnostic (dialect
+    placeholders); best-effort → 0 if tables/columns are absent.
     """
     # Extractable types + always-skip, kept in sync with bin/m3_entities.
     DEFAULT_TYPES = (
@@ -145,13 +148,24 @@ def _entity_backlog_count(conn) -> int:
         has_queue = _table_exists(conn, "entity_extraction_queue")
         type_ph = _ph(len(DEFAULT_TYPES))
         skip_ph = _ph(len(SKIP))
+        # Mirror the worker's TERMINAL statuses, not just 'done': the worker
+        # (bin/m3_entities._query_eligible_rows) also excludes 'ctx_error' and
+        # 'failed' rows past the retry cap. Counting only 'done' would leave those
+        # terminal rows reading as "pending" forever.
         done_clause = (
-            " AND mi.id NOT IN (SELECT memory_id FROM entity_extraction_queue WHERE status='done')"
+            " AND mi.id NOT IN (SELECT memory_id FROM entity_extraction_queue"
+            "                   WHERE status IN ('done', 'ctx_error'))"
             if has_queue else ""
         )
         sql = (
             "SELECT COUNT(*) FROM memory_items mi "
             "WHERE COALESCE(mi.is_deleted,0)=0 "
+            # variant IS NULL: the loop's entity pass runs --source-variant __none__,
+            # so it ONLY processes production (variant-NULL) memories. Variant-tagged
+            # rows (e.g. bench corpora) are never eligible — WITHOUT this filter the
+            # backlog counts rows the worker will never touch, so the number sits
+            # "stuck" forever regardless of how long the worker runs.
+            "AND mi.variant IS NULL "
             f"AND mi.type IN ({type_ph}) AND mi.type NOT IN ({skip_ph}) "
             "AND mi.id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)"
             + done_clause
