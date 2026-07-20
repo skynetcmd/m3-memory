@@ -457,19 +457,21 @@ def _xml_escape(text: str) -> str:
 # =IgnoreNew makes a re-fire while the process is still alive a harmless no-op, so
 # the net effect is "restart it if and only if it has died."
 #   - AgentOS_CognitiveLoop: PT30M — a stalled heartbeat is tolerable for ~30 min.
-#   - AgentOS_EmbedServer:    PT1M  — this is the SOLE embedder for the whole fleet
+#   - AgentOS_EmbedServer:    PT5M  — this is the SOLE embedder for the whole fleet
 #     (clients disable their own tier-1 via .embed_config.json), so its death is a
-#     fleet-wide embedding outage. A tight 1-min heal bounds that outage to ~1 min.
-#     Safe at this cadence because (a) MultipleInstances=IgnoreNew makes a re-fire
-#     of the task a no-op while the server is alive, and (b) the server itself does
-#     a /health pre-flight (embed_server_inproc._already_serving) and exits WITHOUT
-#     loading a second GPU embedder if :8082 is already serving — so a re-fire can
-#     never stack a second CUDA context even if launched out-of-band. Without the
-#     heal, one crash silently kills write-embedding AND semantic/vector retrieval
-#     across every m3 process until the next reboot (observed 2026-07-03).
+#     fleet-wide embedding outage. A 5-min heal bounds that outage to ~5 min.
+#     (Was PT1M; widened 2026-07-19 — a 1-min re-fire is needless process churn now
+#     that the re-fire is an invisible no-op. The re-fire is safe because (a)
+#     MultipleInstances=IgnoreNew makes a re-fire of the task a no-op while the
+#     server is alive, and (b) the server itself does a /health pre-flight
+#     (embed_server_inproc._already_serving) and exits WITHOUT loading a second GPU
+#     embedder if :8082 is already serving — so a re-fire can never stack a second
+#     CUDA context even if launched out-of-band. Without the heal, one crash
+#     silently kills write-embedding AND semantic/vector retrieval across every m3
+#     process until the next reboot (observed 2026-07-03).
 _SELF_HEAL_TASKS = {
     "AgentOS_CognitiveLoop": "PT30M",
-    "AgentOS_EmbedServer": "PT1M",
+    "AgentOS_EmbedServer": "PT5M",
     # Re-fire every 5 min: if the dashboard dies it comes back within ~5 min.
     # Safe to re-fire — MultipleInstances=IgnoreNew makes a re-fire a no-op while
     # it's alive, and dashboard_server's _already_serving() pre-flight exits
@@ -616,6 +618,14 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
         "</Principal>"
         "</Principals>"
         "<Settings>"
+        # Hidden: keep the task off the interactive desktop. pythonw.exe (GUI
+        # subsystem) alone does NOT suppress the window — a non-Hidden task run
+        # under InteractiveToken still FLASHES a console every fire (observed
+        # 2026-07-19: the PT1M/PT5M/PT30M self-heal re-fires each flashed). Hidden
+        # makes the (usually no-op) self-heal re-fires invisible. This is the
+        # anti-flash guarantee the pythonw comment in install_windows_tasks() only
+        # half-delivered.
+        "<Hidden>true</Hidden>"
         # IgnoreNew: never stack a second copy while one runs — a slow/stuck run
         # must not over-dispatch the local LLM, and it makes the self-heal
         # repetition a no-op when the task is already alive.
@@ -640,10 +650,12 @@ def _render_task_xml(task: dict, python_exe: str, user_id: str) -> str:
 
 
 def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard_port: int = 8088):
-    # pythonw.exe (GUI subsystem) — Task Scheduler draws NO console window for
-    # it. python.exe (console subsystem) flashes a window every fire even
-    # without a cmd.exe wrapper. Entrypoints self-log via _task_runtime, so
-    # pythonw.exe having no stdout is fine.
+    # pythonw.exe (GUI subsystem) — avoids the console window python.exe
+    # (console subsystem) flashes every fire, even without a cmd.exe wrapper.
+    # Entrypoints self-log via _task_runtime, so pythonw.exe having no stdout is
+    # fine. NOTE: pythonw alone is NOT sufficient to guarantee no flash — a task
+    # run under InteractiveToken still flashes unless <Hidden>true</Hidden> is set
+    # in <Settings> (see _build_task_xml). Both are required.
     python_exe = _venv_python(m3_memory_root, windowless=True)
     if python_exe == sys.executable and not os.path.exists(os.path.join(m3_memory_root, ".venv")):
         _safe_print(f"{WARN} Using system Python {python_exe} because .venv was not found.")
@@ -787,6 +799,12 @@ def _verify_windows_task(name: str) -> bool:
     # MultipleInstances=IgnoreNew — guards against the loop stacking copies.
     if "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" not in xml:
         _safe_print(f"{WARN} {name}: MultipleInstancesPolicy is not IgnoreNew")
+        ok = False
+    # Hidden=true — without it a self-heal re-fire flashes a console window
+    # (observed 2026-07-19). Catch a task that was created before this fix or
+    # that lost the bit to an out-of-band Set-ScheduledTask.
+    if "<Hidden>true</Hidden>" not in xml:
+        _safe_print(f"{WARN} {name}: Hidden is not true (task will flash a window on each fire)")
         ok = False
     # Self-heal Repetition — only the tasks in _SELF_HEAL_TASKS must have it.
     expected_rep = _SELF_HEAL_TASKS.get(name)

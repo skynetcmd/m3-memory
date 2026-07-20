@@ -143,19 +143,33 @@ def test_other_onstart_task_has_no_repetition():
         )
 
 
-def test_embed_server_has_1min_self_heal_repetition():
+def test_embed_server_has_5min_self_heal_repetition():
     # The shared embed server is the SOLE embedder for the fleet; its death is a
-    # fleet-wide outage, so it must carry a tight (PT1M) self-heal repetition on
-    # BOTH the boot and logon triggers. Safe at 1 min because IgnoreNew + the
-    # server's own /health pre-flight guarantee a re-fire never stacks a second
-    # GPU embedder.
+    # fleet-wide outage, so it must carry a self-heal repetition on BOTH the boot
+    # and logon triggers. Widened from PT1M to PT5M on 2026-07-19 — a 1-min
+    # re-fire was needless process churn now that Hidden makes the re-fire an
+    # invisible no-op. Safe because IgnoreNew + the server's own /health
+    # pre-flight guarantee a re-fire never stacks a second GPU embedder.
     root = _render(_spec("AgentOS_EmbedServer", "ONSTART"))
     for trig in ("BootTrigger", "LogonTrigger"):
         node = root.find(f".//t:{trig}", _NS)
         assert node is not None, f"EmbedServer must emit a {trig}"
         interval = node.find("./t:Repetition/t:Interval", _NS)
-        assert interval is not None and interval.text == "PT1M", (
-            f"EmbedServer {trig} must carry the 1-min self-heal repetition"
+        assert interval is not None and interval.text == "PT5M", (
+            f"EmbedServer {trig} must carry the 5-min self-heal repetition"
+        )
+
+
+def test_all_tasks_are_hidden():
+    # Anti-flash guarantee: every task must carry <Hidden>true</Hidden> in
+    # <Settings>. pythonw.exe alone does NOT suppress the window — a non-Hidden
+    # task under InteractiveToken flashes a console on every (self-heal) fire
+    # (observed 2026-07-19). Regression guard so a future edit can't drop it.
+    for sched in ("ONSTART", "MINUTE", "HOURLY"):
+        root = _render(_spec("AgentOS_EmbedServer", sched))
+        hidden = root.find(".//t:Settings/t:Hidden", _NS)
+        assert hidden is not None and hidden.text == "true", (
+            f"{sched} task must set <Hidden>true</Hidden> (else it flashes a window)"
         )
 
 
@@ -229,14 +243,15 @@ class _FakeProc:
         self.stderr = stderr
 
 
-def _query_xml(*, ignore_new=True, repetition="PT30M"):
+def _query_xml(*, ignore_new=True, repetition="PT30M", hidden=True):
     """Minimal registered-task XML as schtasks /Query /XML ONE would emit."""
     rep = f"<Repetition><Interval>{repetition}</Interval></Repetition>" if repetition else ""
     multi = "IgnoreNew" if ignore_new else "Parallel"
+    hid = "<Hidden>true</Hidden>" if hidden else ""
     return (
         f'<?xml version="1.0"?><Task xmlns="{isch._TASK_NS}">'
         f"<Triggers><BootTrigger>{rep}</BootTrigger></Triggers>"
-        f"<Settings><MultipleInstancesPolicy>{multi}</MultipleInstancesPolicy></Settings>"
+        f"<Settings>{hid}<MultipleInstancesPolicy>{multi}</MultipleInstancesPolicy></Settings>"
         "</Task>"
     )
 
@@ -250,6 +265,17 @@ def test_verify_windows_pass(monkeypatch):
         lambda *a, **k: _FakeProc(0, _query_xml(ignore_new=True, repetition="PT30M")),
     )
     assert isch._verify_windows_task("AgentOS_CognitiveLoop") is True
+
+
+def test_verify_windows_not_hidden_fails(monkeypatch):
+    # A registered task missing <Hidden>true</Hidden> must fail verify — it would
+    # flash a console window on every self-heal fire (the 2026-07-19 regression).
+    monkeypatch.setattr(isch, "_os_name", lambda: "Windows")
+    monkeypatch.setattr(
+        isch.subprocess, "run",
+        lambda *a, **k: _FakeProc(0, _query_xml(ignore_new=True, repetition="PT30M", hidden=False)),
+    )
+    assert isch._verify_windows_task("AgentOS_CognitiveLoop") is False
 
 
 def test_verify_windows_missing_repetition_fails(monkeypatch):
