@@ -859,7 +859,12 @@ def main() -> None:
                     help="Column the --qids-file ids filter on: user_id (default) or "
                          "conversation_id (for corpora where the scoping id lives there).")
     ap.add_argument("--target-variant", default="",
-                    help="Variant tag for emitted observation rows. Empty = production default (NULL).")
+                    help="Variant tag for emitted observation rows. REQUIRED in "
+                         "variant/bench mode (when --source-variant is set) — the run "
+                         "aborts if empty, so a bench corpus can't silently write "
+                         "NULL-variant rows into production memory. In queue mode "
+                         "(no --source-variant) empty is allowed and means the "
+                         "production default (NULL).")
     ap.add_argument("--limit", type=int, default=None,
                     help="Cap source rows in variant mode (for smokes).")
     ap.add_argument("--concurrency", type=int, default=4,
