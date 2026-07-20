@@ -19,6 +19,8 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
+_Nothing pending — all changes below have shipped in a tagged release._
+
 ## [2026.7.19.4] — 2026-07-19 — Background loop reliability & dashboard fixes
 
 ### Fixed
