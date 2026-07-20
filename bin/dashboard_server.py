@@ -2216,7 +2216,9 @@ def _port_already_serving(host: str, port: int, timeout: float = 1.0) -> bool:
     probed via loopback (you connect TO a concrete address, not the wildcard).
     """
     import socket
-    probe = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    # B104 false positive: "0.0.0.0" here is a string comparison that remaps the
+    # wildcard to loopback for an outbound connect probe; this is not a bind-to-all.
+    probe = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host  # nosec B104
     try:
         with socket.create_connection((probe, port), timeout=timeout):
             return True
