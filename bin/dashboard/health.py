@@ -232,16 +232,32 @@ def _backend_label_for_endpoint(url: str) -> str:
     return host or "custom endpoint"
 
 
+def _llm_token() -> str:
+    """The SAME token m3 itself sends to the local LLM, so the health probe sees
+    exactly what the real call path sees (auth mismatch = false 401s otherwise).
+    Mirrors memory_core / custom_tool_bridge: `ctx.get_secret("LM_API_TOKEN")`
+    (→ auth_utils.get_api_key: env → keyring → macOS Keychain → encrypted vault)
+    with LM Studio's conventional "lm-studio" placeholder as the fallback."""
+    try:
+        from auth_utils import get_api_key
+        return get_api_key("LM_API_TOKEN") or "lm-studio"
+    except Exception:  # noqa: BLE001 — never let key resolution break the panel
+        # Last-ditch: honor the raw env var directly, else the LM Studio default.
+        return (os.environ.get("LM_API_TOKEN", "").strip() or "lm-studio")
+
+
 def _probe_llm_endpoint(endpoint: str, connect_timeout: float, read_timeout: float) -> dict:
     """Probe one LLM endpoint's GET /v1/models (sync, read-only). Classifies into
-    reachable? / has a usable (non-embedding) chat model loaded?  Never raises."""
+    reachable? / has a usable (non-embedding) chat model loaded?  Never raises.
+    Authenticates with m3's OWN token (_llm_token) — same key + fallback the real
+    LLM call path uses — so a working backend is never mis-reported as 401/down."""
     import httpx
     from llm_failover import EMBED_EXCLUSIONS
 
     out = {"url": endpoint, "backend": _backend_label_for_endpoint(endpoint),
            "reachable": False, "model_loaded": False, "model_id": "",
            "queryable": False, "detail": ""}
-    token = os.environ.get("M3_LLM_API_KEY") or os.environ.get("LM_STUDIO_API_KEY") or "not-needed"
+    token = _llm_token()
     try:
         r = httpx.get(f"{endpoint}/models",
                       headers={"Authorization": f"Bearer {token}"},
@@ -251,10 +267,10 @@ def _probe_llm_endpoint(endpoint: str, connect_timeout: float, read_timeout: flo
         return out
     out["reachable"] = True
     if r.status_code >= 400:
-        # Reachable but the /models call itself errored (some builds 401 on auth,
-        # or need an API key). We can assert the server is UP but NOT whether a
-        # model is loaded — report that honestly rather than claiming "no model".
-        out["detail"] = f"HTTP {r.status_code} on /models (set M3_LLM_API_KEY?)"
+        # Reachable but the /models call itself errored even with m3's own token.
+        # Server is UP but we can't read its model list — report honestly, don't
+        # claim "no model". (A 401 here means m3's real calls would fail too.)
+        out["detail"] = f"HTTP {r.status_code} on /models (auth rejected — check LM_API_TOKEN)"
         return out
     try:
         data = r.json()
@@ -336,8 +352,10 @@ def _inference_block() -> dict:
         out["backend"] = reachable["backend"]
         out["expected_url"] = reachable["url"]
         out["remedy"] = (f"{reachable['backend']} is reachable at {reachable['url']} "
-                         f"but its model list could not be read ({reachable.get('detail','')}). "
-                         f"If the pipeline is stalled, confirm a chat model is loaded.")
+                         f"but its model list could not be read with m3's own token "
+                         f"({reachable.get('detail','')}). If auth was rejected, m3's real "
+                         f"LLM calls will fail too — set the LM_API_TOKEN secret to the "
+                         f"server's API key. Otherwise confirm a chat model is loaded.")
     else:
         out["status"] = "down"
         out["remedy"] = (f"No LLM backend is reachable. Expected {primary['backend']} "

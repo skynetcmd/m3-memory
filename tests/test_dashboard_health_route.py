@@ -221,3 +221,67 @@ def test_health_panel_renders_inference_row():
 
     body = D._render_health_panel()
     assert "Inference backend (LLM/SLM)" in body
+
+
+def test_llm_token_reuses_m3_key_resolution(monkeypatch):
+    """The probe must authenticate with m3's OWN token (auth_utils.get_api_key on
+    the LM_API_TOKEN service, LM Studio's 'lm-studio' fallback) — NOT an invented
+    env var — so it sees exactly what m3's real LLM calls see."""
+    import dashboard.health as H
+    import auth_utils
+
+    # When the secret resolves, that value is used verbatim.
+    monkeypatch.setattr(auth_utils, "get_api_key",
+                        lambda service: "sk-lm-secret" if service == "LM_API_TOKEN" else None)
+    assert H._llm_token() == "sk-lm-secret"
+
+    # When it doesn't resolve, fall back to LM Studio's conventional placeholder
+    # (the same 'lm-studio' default memory_core/custom_tool_bridge use).
+    monkeypatch.setattr(auth_utils, "get_api_key", lambda service: None)
+    assert H._llm_token() == "lm-studio"
+
+
+def test_probe_sends_m3_token(monkeypatch):
+    """The probe's GET /v1/models carries the m3 token as a Bearer header, so an
+    auth'd backend (LM Studio, or latest Ollama with auth) is not falsely 401'd."""
+    import dashboard.health as H
+
+    monkeypatch.setattr(H, "_llm_token", lambda: "sk-m3-token")
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"data": [{"id": "qwen/qwen3-8b"}]}
+
+    def _fake_get(url, headers=None, timeout=None):
+        captured["url"] = url
+        captured["auth"] = (headers or {}).get("Authorization")
+        return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "get", _fake_get)
+    out = H._probe_llm_endpoint("http://localhost:11434/v1", 0.3, 4.0)
+    assert captured["auth"] == "Bearer sk-m3-token"
+    assert captured["url"].endswith("/models")
+    assert out["backend"] == "Ollama"        # provider-agnostic labeling
+    assert out["model_loaded"] and out["model_id"] == "qwen/qwen3-8b"
+
+
+def test_probe_parses_ollama_native_models_shape(monkeypatch):
+    """Latest Ollama's /v1/models may return {'models': [...]} rather than the
+    OpenAI {'data': [...]}. The probe (like m3's own parser) handles both."""
+    import dashboard.health as H
+
+    monkeypatch.setattr(H, "_llm_token", lambda: "x")
+
+    class _Resp:
+        status_code = 200
+        def json(self):
+            return {"models": [{"model": "llama3.2:3b"}]}  # Ollama-native shape
+
+    import httpx
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+    out = H._probe_llm_endpoint("http://localhost:11434/v1", 0.3, 4.0)
+    assert out["queryable"] and out["model_loaded"]
+    assert out["model_id"] == "llama3.2:3b"
