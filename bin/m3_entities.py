@@ -85,6 +85,30 @@ ALWAYS_SKIP_TYPES = ("auto", "scratchpad", "summary")  # summary excluded; delet
 
 JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
+# Max times a row may fail HTTP/write before it stops being re-selected. A
+# deterministically-failing row (e.g. content that always overflows the loaded
+# model's context) would otherwise sit at the top of the worst-first ORDER BY
+# and be re-sent to the LLM every pass forever. Mirrors
+# enrichment_state.DEFAULT_MAX_ATTEMPTS. Transient failures (LM Studio
+# OOM-reload 500s) still get retried up to this bound.
+MAX_ENTITY_ATTEMPTS = 3
+
+
+class ContextOverflowError(RuntimeError):
+    """The server rejected the request with 'Context size has been exceeded'.
+
+    NOTE ON CAUSE: this is NOT necessarily oversized content. Observed on rows
+    as small as ~124 input tokens with a 16384 nominal CTX — far under the
+    window. The real cause is server-side: when LM Studio is loaded with N
+    parallel sequences the KV cache is split into N slots of ~n_ctx/N tokens
+    each, so a request can overflow its *slot* (e.g. 2048) while the nominal
+    context (16384) is untouched. Retrying with the same or halved input cannot
+    succeed while the model is loaded that way, so the caller marks the row
+    terminally 'ctx_error' (a cause-neutral status — the content is usually
+    fine; re-enable these rows once the server's per-slot context is fixed)
+    instead of burning the retry budget. Detected via the 500 body containing
+    'Context size has been exceeded' from LM Studio's /v1/messages."""
+
 # Names the model habitually emits with a misclassified type. Filtered
 # regardless of etype; one entry is the spec, expand only on recurrence.
 ANTI_EXTRACTION_NAMES: frozenset[str] = frozenset({
@@ -218,6 +242,14 @@ def _build_extractor(
         except (httpx.HTTPError, TimeoutError) as e:
             raise RuntimeError(f"http error: {type(e).__name__}: {e}")
         if r.status_code != 200:
+            # A context-overflow 500 is terminal for this row, not transient:
+            # the prompt+max_tokens exceed the loaded model's n_ctx, and halving
+            # the input on retry doesn't help when the prompt is already small
+            # (the overflow is prompt+generation vs a small loaded window).
+            # Surface it as a distinct type so gated() can skip the retry and
+            # mark the row 'ctx_error' instead of looping.
+            if "context size has been exceeded" in r.text.lower():
+                raise ContextOverflowError(f"http {r.status_code}: {r.text[:300]}")
             raise RuntimeError(f"http {r.status_code}: {r.text[:300]}")
 
         data = r.json()
@@ -437,15 +469,31 @@ def _query_eligible_rows(
             # every run (worst-first under ORDER BY LENGTH DESC), re-sending it to
             # the LLM forever. The `status='done'` marker (written by
             # _mark_extracted on empty OR success) is what makes an empty
-            # extraction terminal. Failed rows (status='failed' or NULL) stay
-            # eligible for retry. Tolerant of a DB lacking the status column.
+            # extraction terminal.
+            #
+            # Terminal statuses excluded from re-selection:
+            #   - 'done'      : processed (empty OR success).
+            #   - 'ctx_error' : a 'Context size has been exceeded' 500 (usually a
+            #                   too-small per-sequence KV slot, NOT oversized
+            #                   content); retrying can't succeed while the model
+            #                   is loaded that way. Re-enable in bulk once the
+            #                   server's per-slot context is fixed.
+            #   - 'failed' with attempts >= MAX_ENTITY_ATTEMPTS : exhausted the
+            #                   retry budget. WITHOUT this cap a deterministically
+            #                   failing row sits atop the worst-first ORDER BY and
+            #                   is re-sent to the LLM every pass forever — the
+            #                   "same item over and over" loop.
+            # Failed rows still under the cap (attempts < N) stay eligible so
+            # genuinely transient failures (LM Studio OOM-reload 500s) retry.
+            # Tolerant of a DB lacking the status column.
             extracted_clause = (
                 " AND id NOT IN (SELECT DISTINCT memory_id FROM memory_item_entities)"
             )
             if _has_status:
                 extracted_clause += (
                     " AND id NOT IN (SELECT memory_id FROM entity_extraction_queue"
-                    "                WHERE status = 'done')"
+                    "                WHERE status IN ('done', 'ctx_error')"
+                    f"                   OR (status = 'failed' AND attempts >= {int(MAX_ENTITY_ATTEMPTS)}))"
                 )
 
         sql = f"""
@@ -546,6 +594,38 @@ async def _run_db(
         except Exception:
             pass  # never let queue bookkeeping break the run
 
+    def _enqueue_ctx_error(memory_id: str, err: Exception) -> None:
+        """Mark a row terminally 'ctx_error': the server returned 'Context size
+        has been exceeded'. Usually a too-small per-sequence KV slot rather than
+        oversized content (seen on ~124-token rows under a 16384 CTX), so no
+        retry can succeed while the model is loaded that way. Excluded from
+        re-selection immediately (see _query_eligible_rows), so — unlike
+        'failed' — it does not consume the MAX_ENTITY_ATTEMPTS retry budget
+        before it stops looping. Once the server's per-slot context is fixed,
+        clear these rows' status (UPDATE ... SET status=NULL WHERE
+        status='ctx_error') to make them eligible again. Best-effort, same UPSERT
+        shape as _enqueue_failure."""
+        try:
+            from memory.backends import dialect
+            _d = dialect()
+            _p = _d.param()
+            with mc._db() as qc:
+                _ensure_extraction_status_column(qc)
+                qc.execute(
+                    f"""INSERT INTO entity_extraction_queue
+                           (memory_id, attempts, last_error, last_attempt_at, status)
+                       VALUES ({_p}, 1, {_p}, {_d.now()}, 'ctx_error')
+                       ON CONFLICT(memory_id) DO UPDATE SET
+                           attempts        = entity_extraction_queue.attempts + 1,
+                           last_error      = excluded.last_error,
+                           last_attempt_at = excluded.last_attempt_at,
+                           status          = 'ctx_error'""",
+                    (memory_id, f"{type(err).__name__}: {err}"[:500]),
+                )
+                qc.commit()
+        except Exception:
+            pass  # never let queue bookkeeping break the run
+
     # Batched 'done' bookkeeping. Previously _mark_extracted opened its OWN
     # mc._db() write transaction PER ROW, back-to-back with the entity write —
     # two separate write-lock acquisitions per row. Under concurrency, with a
@@ -639,6 +719,18 @@ async def _run_db(
                         body = text[: int(profile.input_max_chars * slice_ratio)] if profile.input_max_chars else text
                         out = await extractor(body)
                         break
+                    except ContextOverflowError as e:
+                        # Terminal, not transient: a 'Context size has been
+                        # exceeded' 500 — usually a too-small per-sequence KV
+                        # slot, not oversized content (seen on tiny rows under a
+                        # 16384 CTX). Halving the input can't help; mark
+                        # 'ctx_error' and stop — do NOT loop. Fix is server-side
+                        # (per-slot context), after which these rows can be
+                        # re-enabled in bulk.
+                        counters["ctx_error"] += 1
+                        _enqueue_ctx_error(memory_id, e)
+                        print(f"[m3-entities] CTX-ERROR {memory_id[:8]}: context exceeded (marked, no retry)", flush=True)
+                        return
                     except Exception as e:
                         last_err = e
                         if attempt == 1:
@@ -696,6 +788,7 @@ async def _run_db(
         f"{counters['entities_emitted']} entities, "
         f"{counters['relationships_emitted']} relationships, "
         f"{counters['empty']} empty, "
+        f"{counters['ctx_error']} ctx-error, "
         f"{counters['failed']} HTTP-fail, "
         f"{counters['write_failed']} write-fail",
         flush=True,
@@ -865,6 +958,7 @@ async def _main_async(args: argparse.Namespace) -> int:
     print(f"  entities emitted:      {counters_total.get('entities_emitted', 0)}")
     print(f"  relationships emitted: {counters_total.get('relationships_emitted', 0)}")
     print(f"  empty (no entities):   {counters_total.get('empty', 0)}")
+    print(f"  ctx-error (ctx exceed):{counters_total.get('ctx_error', 0)}")
     print(f"  HTTP failures:         {counters_total.get('failed', 0)}")
     print(f"  write failures:        {counters_total.get('write_failed', 0)}")
     print()
