@@ -381,6 +381,15 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
 
     # 2. PULL: Remote to Local (delta — only changed rows since last pull)
     watermark = _get_watermark(sl_cur, "pg_pull", target_name)
+    # Watermark from the PG server clock (captured before the pull), not local
+    # `now`: the delta compares against PG-side updated_at from other peers'
+    # clocks, so a skewed local clock can silently skip rows.
+    try:
+        pg_cur.execute("SELECT NOW()")
+        _pn = pg_cur.fetchone()
+        pull_watermark = _pn[0].isoformat() if _pn else now
+    except Exception:
+        pull_watermark = now
     if watermark:
         pg_cur.execute("""
             SELECT id, type, title, content, metadata_json, agent_id, model_id,
@@ -451,7 +460,7 @@ def sync_memory_items(sl_cur, pg_cur, sl_conn, target_name: str):
             logger.error(f"[{target_name}] Batch pull failed: {type(exc).__name__}: {exc}")
             pull_errors = len(remote_rows)
 
-    _set_watermark(sl_cur, "pg_pull", now, target_name)
+    _set_watermark(sl_cur, "pg_pull", pull_watermark, target_name)
     logger.info(f"[{target_name}] Pulled {pull_count} remote memory items ({pull_errors} errors).")
 
 
@@ -483,6 +492,13 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn, target_name: str):
 
     # 2. PULL: Remote to Local
     watermark = _get_watermark(sl_cur, "rel_pull", target_name)
+    # PG-server-clock watermark (see sync_memory_items) — avoids clock-skew drops.
+    try:
+        pg_cur.execute("SELECT NOW()")
+        _pn = pg_cur.fetchone()
+        pull_watermark = _pn[0].isoformat() if _pn else now
+    except Exception:
+        pull_watermark = now
     if watermark:
         pg_cur.execute("SELECT id, from_id, to_id, relationship_type, created_at FROM memory_relationships WHERE created_at > %s", (watermark,))
     else:
@@ -498,7 +514,7 @@ def sync_memory_relationships(sl_cur, pg_cur, sl_conn, target_name: str):
         except Exception as exc:
             logger.warning(f"[{target_name}] Batch Relationship pull failed: {type(exc).__name__}")
 
-    _set_watermark(sl_cur, "rel_pull", now, target_name)
+    _set_watermark(sl_cur, "rel_pull", pull_watermark, target_name)
     sl_conn.commit()
     logger.info(f"[{target_name}] Pulled {pull_count} relationships from warehouse.")
 
@@ -1027,8 +1043,13 @@ def _sync_table_generic(
 
     try:
         if ts_col and watermark:
+            # Retain rows whose ts_col is NULL: they never exceed a watermark and
+            # would be dropped forever after the first full push. The upsert guard
+            # below makes a re-push idempotent, so the only cost is a little
+            # redundant traffic — far better than permanent row loss.
             sl_cur.execute(
-                f"SELECT * FROM {name} WHERE {ts_col} > ?", (watermark,)
+                f"SELECT * FROM {name} WHERE {ts_col} > ? OR {ts_col} IS NULL",
+                (watermark,),
             )
             logger.info(f"[{target_name}] [{name}] Delta push: rows changed since {watermark}")
         else:
@@ -1083,9 +1104,24 @@ def _sync_table_generic(
         logger.info(f"[{target_name}] [{name}] [DRY-RUN] Would pull rows from PG (watermark={watermark})")
     else:
         try:
+            # Capture the PG SERVER clock BEFORE the pull, and use it (not the
+            # local host clock) as the new pull watermark. The delta compares the
+            # watermark against PG-side timestamps written by other peers' clocks;
+            # a local `now` under clock skew can advance past rows PG hasn't caught
+            # up to and silently drop them. Capturing NOW() *before* the pull also
+            # avoids missing rows committed during the pull window.
+            try:
+                pg_cur.execute("SELECT NOW()")
+                _pg_now_row = pg_cur.fetchone()
+                pull_watermark = _pg_now_row[0].isoformat() if _pg_now_row else now
+            except Exception:
+                pull_watermark = now  # fall back to local clock if SELECT NOW() fails
             if ts_col and watermark:
+                # Retain NULL-ts rows (see push side): otherwise they're never
+                # pulled after the first full pull. Idempotent via the upsert guard.
                 pg_cur.execute(
-                    f"SELECT * FROM {name} WHERE {ts_col} > %s", (watermark,)
+                    f"SELECT * FROM {name} WHERE {ts_col} > %s OR {ts_col} IS NULL",
+                    (watermark,),
                 )
                 logger.info(f"[{target_name}] [{name}] Delta pull: rows changed since {watermark}")
             else:
@@ -1119,7 +1155,7 @@ def _sync_table_generic(
                     sl_conn.commit()
 
             logger.info(f"[{target_name}] [{name}] Pulled {pull_count} rows from PG")
-            _set_watermark(sl_cur, pull_key, now, target_name)
+            _set_watermark(sl_cur, pull_key, pull_watermark, target_name)
             sl_conn.commit()
 
         except Exception as exc:

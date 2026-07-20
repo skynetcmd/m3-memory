@@ -314,33 +314,46 @@ async def _conversation_search_impl(query, k=8):
         items.append(item)
         seen_ids.add(item["id"])
 
-    # Adjacent-turn pairing: pull the next turn for user messages
+    # Adjacent-turn pairing: pull the next turn for each user message. Batched
+    # into ONE query over all affected conversation_ids (was N+1: one query per
+    # user hit inside the loop). We fetch candidate next-turns for those convs and
+    # match the exact (cid, turn_index) pairs in Python. (§4 efficiency)
     extras = []
+    wanted: dict[tuple[str, int], float] = {}  # (cid, next_idx) -> parent score
     for item in items:
         m = item.get("_meta", {})
         cid = item.get("conversation_id")
         if m.get("role") == "user" and "turn_index" in m and cid:
-            next_idx = m["turn_index"] + 1
-            with memory_core._db() as db:
-                row = db.execute(
-                    "SELECT id, content, title, metadata_json, conversation_id "
-                    "FROM memory_items "
-                    "WHERE conversation_id = ? AND is_deleted = 0 "
-                    "  AND json_extract(metadata_json, '$.turn_index') = ?",
-                    (cid, next_idx),
-                ).fetchone()
-                if row and row["id"] not in seen_ids:
-                    seen_ids.add(row["id"])
-                    rm = json.loads(row["metadata_json"] or "{}")
-                    extras.append({
-                        "id": row["id"],
-                        "content": row["content"],
-                        "title": row["title"],
-                        "type": "message",
-                        "conversation_id": row["conversation_id"],
-                        "score": item["score"] * 0.85,
-                        "_meta": rm,
-                    })
+            key = (cid, m["turn_index"] + 1)
+            wanted.setdefault(key, item["score"])  # first (higher-ranked) wins
+    if wanted:
+        cids = {c for c, _ in wanted}
+        from memory.backends import dialect
+        _jx = dialect().json_extract_int("metadata_json", "turn_index")
+        with memory_core._db() as db:
+            placeholders = ",".join("?" * len(cids))
+            rows = db.execute(
+                f"SELECT id, content, title, metadata_json, conversation_id, "
+                f"  {_jx} AS turn_index "
+                f"FROM memory_items "
+                f"WHERE conversation_id IN ({placeholders}) AND is_deleted = 0",
+                tuple(cids),
+            ).fetchall()
+        for row in rows:
+            key = (row["conversation_id"], row["turn_index"])
+            if key not in wanted or row["id"] in seen_ids:
+                continue
+            seen_ids.add(row["id"])
+            rm = json.loads(row["metadata_json"] or "{}")
+            extras.append({
+                "id": row["id"],
+                "content": row["content"],
+                "title": row["title"],
+                "type": "message",
+                "conversation_id": row["conversation_id"],
+                "score": wanted[key] * 0.85,
+                "_meta": rm,
+            })
     items.extend(extras)
     items.sort(key=lambda x: x.get("score", 0), reverse=True)
 

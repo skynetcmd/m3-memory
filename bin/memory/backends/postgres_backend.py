@@ -360,6 +360,11 @@ class PostgresDialect(Dialect):
         # %s binds an int number of minutes; multiply a 1-minute interval.
         return f"NOW() - ({minutes_placeholder} * INTERVAL '1 minute')"
 
+    def day_bucket(self, column: str) -> str:
+        # to_char keeps the TEXT 'YYYY-MM-DD' shape identical to SQLite's substr;
+        # ::date would return a PG date type and change the bucket value shape.
+        return f"to_char({column}, 'YYYY-MM-DD')"
+
     def empty_json_default(self) -> "str | None":
         return "{}"  # metadata_json is JSONB; '' is rejected, '{}' is the empty obj
 

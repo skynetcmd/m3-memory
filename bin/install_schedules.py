@@ -63,9 +63,43 @@ def install_unix_crontab(m3_memory_root):
         print("Error: 'crontab' command not found. Ensure cron is installed.")
         sys.exit(1)
 
-    # Filter out old agent_os entries to prevent duplicates
-    # This filters any line containing the current m3_memory_root
-    filtered_cron = "\n".join([line for line in current_cron.splitlines() if m3_memory_root not in line])
+    # Remove ONLY our previously-installed managed block, delimited by the
+    # >>> m3-managed >>> / <<< m3-managed <<< sentinels (see crontab.template).
+    # The old filter dropped every line merely CONTAINING m3_memory_root, which
+    # could silently delete unrelated user cron entries that happened to mention
+    # the path (§6: a destructive filter must be precise, never a substring
+    # sweep). Lines outside the sentinels are left untouched.
+    _BEGIN = "# >>> m3-managed"
+    _END = "# <<< m3-managed"
+    kept_lines: list[str] = []
+    in_block = False
+    for line in current_cron.splitlines():
+        if line.startswith(_BEGIN):
+            in_block = True
+            continue
+        if line.startswith(_END):
+            in_block = False
+            continue
+        if not in_block:
+            kept_lines.append(line)
+    filtered_cron = "\n".join(kept_lines)
+
+    # Back up the current crontab BEFORE writing, so an unexpected removal is
+    # recoverable (fail-safe, §3). Best-effort: a backup failure must not block
+    # install, but we print where it landed.
+    try:
+        from m3_sdk import get_m3_engine_root
+        _bak_dir = get_m3_engine_root()
+    except Exception:
+        _bak_dir = os.path.expanduser(os.path.join("~", ".m3", "engine"))
+    try:
+        os.makedirs(_bak_dir, exist_ok=True)
+        _bak_path = os.path.join(_bak_dir, "crontab.bak")
+        with open(_bak_path, "w") as _bf:
+            _bf.write(current_cron)
+        _safe_print(f"   Backed up existing crontab to: {_bak_path}")
+    except OSError as _be:
+        _safe_print(f"{WARN} Could not back up crontab before rewrite: {_be}")
 
     # Append the new content
     new_cron = filtered_cron.strip() + "\n\n" + cron_content.strip() + "\n"
@@ -768,10 +802,28 @@ def install_windows_tasks(m3_memory_root, selector: str | None = None, dashboard
 
 
 def remove_windows_tasks(selector: str | None, m3_memory_root: str):
-    tasks = _filter_tasks(get_schedule_specs(m3_memory_root), selector)
+    all_specs = get_schedule_specs(m3_memory_root)
+    tasks = _filter_tasks(all_specs, selector)
     if not tasks:
         _safe_print(f"{FAIL} No schedule matches selector={selector!r}.")
         return
+    # Guard against a short/ambiguous selector deleting MORE tasks than intended
+    # (§6: a destructive op must be precise). A non-"all" selector that resolves
+    # to >1 task via the substring-alias path is refused; require an exact
+    # single-task name or the explicit `all` selector. An exact normalized-name
+    # match (one task) is always allowed.
+    if selector and selector.lower() != "all" and len(tasks) > 1:
+        sel_norm = selector.lower().replace("-", "").replace("_", "")
+        exact = [t for t in tasks if t["name"].lower().replace("_", "") == sel_norm]
+        if len(exact) == 1:
+            tasks = exact
+        else:
+            names = ", ".join(t["name"] for t in tasks)
+            _safe_print(f"{FAIL} Selector {selector!r} matches {len(tasks)} tasks "
+                        f"({names}). Refusing to remove multiple tasks from an "
+                        f"ambiguous selector — pass an exact task name, or "
+                        f"`--remove all` to remove them all.")
+            return
     for task in tasks:
         r = subprocess.run(
             ["schtasks", "/Delete", "/TN", task["name"], "/F"],

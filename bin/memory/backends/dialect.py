@@ -135,6 +135,20 @@ class Dialect:
         """
         raise NotImplementedError("subclass must implement now_minus_days()")
 
+    def day_bucket(self, column: str) -> str:
+        """A 'YYYY-MM-DD' day-bucket expression over a timestamp ``column``, for
+        GROUP BY day. ``column`` is a trusted identifier (never user input).
+
+        Replaces the SQLite-only ``substr(created_at,1,10)`` idiom: PG's column is
+        TIMESTAMPTZ with no substr(timestamptz,...) overload and no implicit
+        text cast, so that raw form raised at query time. Both backends return the
+        same TEXT 'YYYY-MM-DD' shape so the bucket value is identical across them.
+
+        SQLite:   ``substr(<column>,1,10)``
+        Postgres: ``to_char(<column>, 'YYYY-MM-DD')``
+        """
+        raise NotImplementedError("subclass must implement day_bucket()")
+
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
         """A "current time minus N minutes" expression; ``minutes_placeholder``
         binds an INTEGER number of minutes (positive). The minutes analog of

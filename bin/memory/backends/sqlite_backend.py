@@ -49,6 +49,9 @@ class SqliteDialect(Dialect):
     def now_minus_minutes(self, minutes_placeholder: str) -> str:
         return f"datetime('now', '-' || {minutes_placeholder} || ' minutes')"
 
+    def day_bucket(self, column: str) -> str:
+        return f"substr({column},1,10)"
+
     def empty_json_default(self) -> "str | None":
         return ""  # metadata_json is TEXT on SQLite; '' is fine (historical value)
 

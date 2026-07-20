@@ -6,6 +6,8 @@ assignment per tool_domains.domain_of_tool().
 """
 from __future__ import annotations
 
+import asyncio
+
 from .lazy import LazyModuleProxy
 from .spec import ToolSpec
 
@@ -69,8 +71,14 @@ TOOLS: list[ToolSpec] = [
             },
             "required": ["query"],
         },
-        impl=_files_tools.files_search_impl,
-        is_async=False,
+        # Run off-loop and bounded: files_search does FTS5 + vector cosine +
+        # embedding and previously ran on the sync path with NO timeout, so the
+        # documented 2026-07-01 hang could block the MCP event loop indefinitely
+        # despite the "every call is bounded" contract. to_thread + a generous
+        # timeout_s routes it through the already-bounded async branch. (§6)
+        impl=lambda **kw: asyncio.to_thread(_files_tools.files_search_impl, **kw),
+        is_async=True,
+        timeout_s=120.0,
         validators=(),
         default_allowed=True,
         inject_agent_id=False,
@@ -544,7 +552,11 @@ TOOLS: list[ToolSpec] = [
         impl=_files_tools.files_corpus_delete_impl,
         is_async=False,
         validators=(),
-        default_allowed=True,
+        # DESTRUCTIVE (cascade deletes every file_node/leaf/fact/embedding in the
+        # corpus). Gate behind MCP_PROXY_ALLOW_DESTRUCTIVE like memory_delete /
+        # gdpr_forget rather than leaving it default-allowed (§6). Also corrects
+        # the m3_index advertisement to destructive:True.
+        default_allowed=False,
         inject_agent_id=False,
     ),
     ToolSpec(

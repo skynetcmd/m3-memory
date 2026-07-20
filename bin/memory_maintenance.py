@@ -449,6 +449,20 @@ def memory_maintenance_impl(decay=True, purge_expired=True, prune_orphan_embeddi
         logger.info("Active query session detected. Suspending curation pass to yield resources.")
         time.sleep(5.0)
 
+    # The decay/retention/archive SQL below uses SQLite-only idioms
+    # (julianday('now'), ? placeholders) in destructive UPDATE/DELETE statements.
+    # On a non-SQLite backend those raise, and the per-statement excepts would
+    # swallow them — a whole maintenance pass silently no-opping on PG. Fail LOUD
+    # and skip intentionally instead (§3), mirroring the VACUUM-skip precedent
+    # below, until this path is fully routed through the dialect seam.
+    from memory.backends import resolve_backend_name
+    _backend = resolve_backend_name()
+    if _backend != "sqlite":
+        msg = (f"Maintenance skipped: decay/purge/retention not yet dialected "
+               f"for backend '{_backend}'.")
+        logger.warning(msg)
+        return msg
+
     now = datetime.now(timezone.utc).isoformat()
     report = []
     with _db() as db:

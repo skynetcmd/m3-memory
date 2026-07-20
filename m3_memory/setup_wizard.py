@@ -1792,9 +1792,10 @@ def _step_install_dashboard(plan: "SetupPlan") -> bool:
             break
     if have:
         print("  Web dashboard deps already present — `m3 dashboard` is ready.")
-        return True
-
-    if have:
+        # Register the boot task here too: the second `if have:` block below was
+        # unreachable dead code, so on a fresh install where fastapi/uvicorn are
+        # already present the dashboard auto-start task was never registered.
+        # _register_dashboard_task is best-effort and never aborts setup.
         _register_dashboard_task(plan.dashboard_port)
         return True
 

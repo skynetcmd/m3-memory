@@ -1133,7 +1133,7 @@
           "type": "number"
         }
       ],
-      "destructive": false,
+      "destructive": true,
       "domain": "files",
       "name": "files_corpus_delete",
       "summary": "Delete a corpus's settings row."

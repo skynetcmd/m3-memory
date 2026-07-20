@@ -173,6 +173,18 @@ def main() -> int:
 
     variant = "session_end"
 
+    # chatlog_ingest.py requires --transcript-path (argparse required=True). A
+    # transcript-less SessionEnd would otherwise shell into an argparse exit-2
+    # (empty stdout), which run_ingest misreads as "m3 unreachable" — a FALSE
+    # alarm + bogus fallback on every such event even when m3 is healthy. A
+    # SessionEnd with no transcript is a clean no-op, not an m3 failure: return 0
+    # without screaming or writing a fallback. (Mirrors the Claude/Gemini hooks'
+    # missing-transcript guard.)
+    if not transcript:
+        print(f"{AGENT} hook: SessionEnd envelope has no transcript_path — "
+              f"nothing to ingest (no-op).", file=sys.stderr)
+        return 0
+
     repo = find_repo_root()
     ingest = repo / "bin" / "chatlog_ingest.py"
     if not ingest.exists():

@@ -704,12 +704,24 @@ async def _run_entity_extractor(
                         continue
                 canonical_to_id[cname] = entity_id
                 mention_text = ent.get("mention_text") or cname
-                confidence = float(ent.get("confidence", 0.85))
+                # Coerce raw extractor scalars defensively: a pluggable extractor
+                # may emit confidence as null/'high' or a non-numeric offset. An
+                # unguarded float()/int() here would abort the whole memory's
+                # entity+relationship write and eventually poison the row after
+                # retries. Default rather than drop — the entity is already
+                # validated/resolved above (§3 fail-safe; mirrors m3_entities.py).
+                try:
+                    confidence = float(ent.get("confidence", 0.85))
+                except (TypeError, ValueError):
+                    confidence = 0.85
                 # Read mention_offset from the extractor output; default 0
                 # (preserves backward compatibility with extractors that don't
                 # report span positions). Coerced via int() because some JSON
                 # extractors emit it as a float. GLiNER reports as `start`.
-                mention_offset = int(ent.get("mention_offset") or 0)
+                try:
+                    mention_offset = int(ent.get("mention_offset") or 0)
+                except (TypeError, ValueError):
+                    mention_offset = 0
                 try:
                     # _link_memory_to_entity uses INSERT OR IGNORE — idempotent.
                     _link_memory_to_entity(memory_id, entity_id, mention_text, mention_offset, confidence, db)
@@ -721,7 +733,10 @@ async def _run_entity_extractor(
                 from_cname = (rel.get("from_entity") or "").strip()
                 to_cname = (rel.get("to_entity") or "").strip()
                 predicate = (rel.get("predicate") or "").strip()
-                confidence = float(rel.get("confidence", 0.85))
+                try:
+                    confidence = float(rel.get("confidence", 0.85))
+                except (TypeError, ValueError):
+                    confidence = 0.85
                 from_id = canonical_to_id.get(from_cname)
                 to_id = canonical_to_id.get(to_cname)
                 # Centralized vocabulary validation — reject unknown predicates.

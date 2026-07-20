@@ -565,7 +565,12 @@ def _prompt_and_install_dashboard(interactive: bool) -> None:
         # Already installed, or headless: don't prompt. (A headless upgrade keeps
         # whatever the user already has; they can add it with `m3 setup` later.)
         if _dashboard_deps_present():
-            _register_dashboard_task()  # keep the boot task fresh on upgrade
+            # Only (re)register when the boot task is MISSING. Re-registering
+            # unconditionally would rebind the hardcoded default port (8088),
+            # clobbering a port the user previously chose (the chosen port isn't
+            # persisted to config, so we can't re-supply it). Preserving the
+            # existing task keeps their port on upgrade.
+            _register_dashboard_task(skip_if_exists=True)
         return
 
     print()
@@ -600,9 +605,23 @@ def _prompt_and_install_dashboard(interactive: bool) -> None:
         print(f'    [!] dashboard install skipped ({e}); add later:  pip install "m3-memory[dashboard]"')
 
 
-def _register_dashboard_task() -> None:
-    """Register the boot-start dashboard task (windowless). Best-effort."""
+def _register_dashboard_task(skip_if_exists: bool = False) -> None:
+    """Register the boot-start dashboard task (windowless). Best-effort.
+
+    ``skip_if_exists``: on an upgrade, don't re-register when an AgentOS_Dashboard
+    task already exists — re-registering would rebind the hardcoded default port
+    and clobber a user-chosen one (the port isn't persisted, so we can't re-pass
+    it). Only used on the deps-already-present path.
+    """
     try:
+        if skip_if_exists and sys.platform == "win32":
+            # A 0 exit from schtasks /Query means the task exists → leave it.
+            q = subprocess.run(
+                ["schtasks", "/Query", "/TN", "AgentOS_Dashboard"],
+                check=False, capture_output=True, text=True,
+            )
+            if q.returncode == 0:
+                return
         script = str(Path(__file__).resolve().parent.parent / "bin" / "install_schedules.py")
         if not os.path.exists(script):
             return

@@ -315,7 +315,6 @@ async def _ingest_one_group(
     update state-machine row. Returns a per-group summary dict.
     """
     observations: list[dict] = []
-    n_chunks = len(chunk_results)
     n_chunk_failed = 0
     last_err = ""
     tokens_in = tokens_out = 0
@@ -345,11 +344,15 @@ async def _ingest_one_group(
     cost_usd = (base_in_cost + cache_read_cost + out_cost) * 0.5  # batch = 50%
 
     if not observations:
-        # Pure failure or empty
-        if n_chunk_failed > 0 and n_chunk_failed == n_chunks:
+        # ANY chunk failure with zero surviving observations must be FAILED (not
+        # empty): 'empty' is terminal and never retried, so a partial failure
+        # (one chunk errored, a sibling succeeded-but-empty) would permanently
+        # drop the errored chunk's content. Only a clean all-succeeded-empty group
+        # is genuinely 'empty'. Mirrors run_observer.process_conversation. (§3/§5)
+        if n_chunk_failed > 0:
             estate.mark_failed(
                 state_conn, group_id,
-                error_class="batch_error",
+                error_class="batch_error",  # non-deterministic → retryable w/ backoff
                 last_error=last_err[:200],
                 tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost_usd,
             )
@@ -417,6 +420,20 @@ async def _ingest_one_group(
                 return False
     results = await asyncio.gather(*(_write_one(o) for o in observations))
     written = sum(1 for r in results if r)
+
+    if observations and written == 0:
+        # We parsed real observations but EVERY write failed (e.g. embedder down).
+        # Marking this 'success' with obs_emitted=0 would make it terminal and
+        # never-retried, silently discarding already-paid LLM output. Keep it
+        # retryable instead (§3 never-silent, §5). write_error is non-deterministic
+        # → mark_failed leaves it at 'failed' with backoff, not dead_letter.
+        estate.mark_failed(
+            state_conn, group_id,
+            error_class="write_error",
+            last_error=(last_err or "all observation writes failed")[:200],
+            tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost_usd,
+        )
+        return {"status": "failed", "obs": 0, "cost": cost_usd}
 
     estate.mark_success(
         state_conn, group_id,
@@ -876,6 +893,29 @@ async def _run_async(args) -> int:
     ingest_queue: asyncio.Queue = asyncio.Queue(maxsize=4)
     producer_failure: dict = {"err": None, "slice_idx": -1}
     consumer_failure: dict = {"err": None}
+    # Set by the consumer on exit (clean OR error) so the producer, if it's
+    # blocked inside a full-queue put(), can wake and abort instead of hanging
+    # forever on a queue nothing will drain again (§3 deadlock).
+    consumer_done = asyncio.Event()
+
+    async def _put_or_abort(item) -> None:
+        """Put onto ingest_queue, but never block indefinitely: if the consumer
+        exits while we're waiting on a full queue, wake and raise so the producer
+        stops spending and unwinds cleanly."""
+        put_task = asyncio.ensure_future(ingest_queue.put(item))
+        done_task = asyncio.ensure_future(consumer_done.wait())
+        try:
+            await asyncio.wait({put_task, done_task},
+                               return_when=asyncio.FIRST_COMPLETED)
+            if put_task.done() and not put_task.cancelled():
+                return  # our item landed on the queue
+            # Consumer exited first (queue still full) — abandon the put.
+            put_task.cancel()
+            raise RuntimeError(
+                f"consumer exited while producer was queueing; aborting: "
+                f"{consumer_failure['err']!r}")
+        finally:
+            done_task.cancel()
 
     async def _produce_slices(client: httpx.AsyncClient) -> None:
         nonlocal enrich_run_id  # set on first successful submit
@@ -893,6 +933,14 @@ async def _run_async(args) -> int:
                         where=f"producer pre-submit slice {slice_idx+1}/{n_slices}",
                     )
                     raise StopIteration(stop_reason)
+
+                # If the consumer has already died, STOP before spending on the
+                # next paid batch — otherwise we submit slices nothing will ever
+                # ingest and then block forever on a full queue (§3 deadlock).
+                if consumer_failure["err"] is not None:
+                    raise RuntimeError(
+                        f"consumer died before slice {slice_idx+1} submit; "
+                        f"aborting producer: {consumer_failure['err']!r}")
 
                 slice_requests = batch_requests[slice_idx*max_slice:(slice_idx+1)*max_slice]
                 print(f"[batch] slice {slice_idx+1}/{n_slices}: submitting "
@@ -972,14 +1020,21 @@ async def _run_async(args) -> int:
 
                 # Hand off to the consumer; if the queue is full (consumer
                 # falling behind), this awaits naturally — preventing the
-                # producer from running >4 slices ahead of ingest.
-                await ingest_queue.put((slice_idx, batch_id, results_by_gid))
+                # producer from running >4 slices ahead of ingest. Interruptible:
+                # if the consumer dies mid-wait, _put_or_abort raises rather than
+                # blocking forever.
+                await _put_or_abort((slice_idx, batch_id, results_by_gid))
         except (RuntimeError, TimeoutError, Exception) as e:  # noqa: BLE001
             producer_failure["err"] = e
             producer_failure["slice_idx"] = slice_idx if 'slice_idx' in locals() else -1
         finally:
-            # Sentinel — tells the consumer there are no more slices coming.
-            await ingest_queue.put(None)
+            # Sentinel — tells the consumer there are no more slices coming. The
+            # consumer may already be gone (full queue); put_nowait + swallow
+            # QueueFull so the producer can never block here on shutdown.
+            try:
+                ingest_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
 
     async def _consume_slices() -> None:
         nonlocal n_success, n_empty, n_failed, total_cost
@@ -1024,6 +1079,10 @@ async def _run_async(args) -> int:
                 _record_batch_ingested(state_conn, enrich_run_id, batch_id=batch_id)
         except Exception as e:  # noqa: BLE001
             consumer_failure["err"] = e
+        finally:
+            # Wake a producer that may be blocked on a full queue so it can abort
+            # instead of hanging forever now that nothing will drain the queue.
+            consumer_done.set()
 
     async with httpx.AsyncClient() as client:
         producer = asyncio.create_task(_produce_slices(client))

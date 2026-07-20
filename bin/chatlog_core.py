@@ -315,7 +315,25 @@ async def _flush_once() -> int:
         return written
     except Exception as e:
         logger.error(f"Flush failed, spilling {len(batch)} rows: {e}")
-        _spill_batch(batch)
+        # The batch was already dequeued via get_nowait(); if the spill ALSO fails
+        # (disk full / permission), those rows would vanish with only a log line.
+        # Never let a dequeued batch exit without being written, spilled, OR
+        # re-enqueued — fail loud, not silent (§3).
+        try:
+            _spill_batch(batch)
+        except Exception as spill_err:  # noqa: BLE001 — last-resort recovery
+            ids = [it.get("_id") for it in batch]
+            logger.error(
+                f"CATASTROPHIC: DB write AND spill both failed for "
+                f"{len(batch)} dequeued chatlog rows (ids={ids}): {spill_err}. "
+                f"Re-enqueuing to avoid capture loss.")
+            for it in batch:
+                try:
+                    q.put_nowait(it)
+                except asyncio.QueueFull:
+                    logger.error(
+                        f"Re-enqueue dropped chatlog row id={it.get('_id')}: "
+                        f"queue full — this row is LOST.")
         return 0
 
 
@@ -1025,7 +1043,7 @@ async def chatlog_cost_report_impl(
     _je_to = _d.json_extract_int("metadata_json", "tokens_out")
     _je_cost_txt = _d.json_extract_text("metadata_json", "cost_usd")
     if group_by == "day":
-        gcol = "substr(created_at,1,10)"
+        gcol = _d.day_bucket("created_at")  # substr/to_char per backend (§1 portable)
     elif group_by == "conversation_id":
         gcol = "conversation_id"
     elif group_by == "model_id":

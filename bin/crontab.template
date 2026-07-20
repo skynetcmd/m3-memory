@@ -8,7 +8,12 @@
 # The cognitive loop is NOT a cron entry — it is a long-running daemon
 # installed as a launchd agent (macOS) / systemd --user unit (Linux) by
 # bin/install_schedules.py.
+#
+# The >>> m3-managed >>> / <<< m3-managed <<< sentinels below delimit the block
+# the installer manages. On reinstall it removes ONLY the lines between them,
+# never lines merely mentioning the install path — do not edit this block by hand.
 
+# >>> m3-managed (do not edit this block) >>>
 # Weekly auditor (Fridays 4pm)
 0 16 * * 5 [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/weekly_auditor.py --log-file [M3_MEMORY_ROOT]/logs/auditor.log
 
@@ -27,6 +32,7 @@
 
 # Every 15 minutes: Drain observation_queue (extract user-facts from chatlog conversations)
 */15 * * * * [M3_MEMORY_ROOT]/.venv/bin/python3 [M3_MEMORY_ROOT]/bin/m3_enrich.py --drain-queue --drain-batch 200 --profile enrich_local_qwen --log-file [M3_MEMORY_ROOT]/logs/observation_drain.log
+# <<< m3-managed <<<
 
 # NOTE: belief consolidation (knowledge-maintenance Phase 4) is NOT a cron entry.
 # It runs as a governor-gated, event-driven pass inside the cognitive-loop daemon

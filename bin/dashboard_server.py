@@ -46,11 +46,19 @@ you intend to launch the server with (typically ``.venv``).
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Any
+
+
+def _h(s: object) -> str:
+    """HTML-escape any DB-derived / user-supplied value before it lands in an
+    f-string HTML template. quote=True so it is safe in an attribute context too
+    (the local panel esc() omitted quotes). None -> '' so 'None' never renders."""
+    return html.escape("" if s is None else str(s), quote=True)
 
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -1334,7 +1342,7 @@ async def search_memories(request: Request, q: str = "", ignore_case: int = 1):
             hits = [h for h in hits
                     if matches_query_grammar(f"{getattr(h,'text','')} {getattr(h,'filename','')}", grammar, ic)][:15]
             if not hits:
-                return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed file chunks found for "{q}".</p>'
+                return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed file chunks found for "{_h(q)}".</p>'
 
             cards = []
             for hit in hits:
@@ -1343,21 +1351,21 @@ async def search_memories(request: Request, q: str = "", ignore_case: int = 1):
                     <div class="memory-header">
                         <div>
                             <span class="m3-badge badge-fact" style="background: hsla(120, 100%, 45%, 0.1); color: var(--m3-neon-emerald); border: 1px solid rgba(16, 185, 129, 0.25);">FILE CHUNK</span>
-                            <span style="font-family: 'Outfit', sans-serif; font-weight: 500; font-size: 0.95rem; margin-left: 0.5rem; color:#fff;">{hit.filename}</span>
+                            <span style="font-family: 'Outfit', sans-serif; font-weight: 500; font-size: 0.95rem; margin-left: 0.5rem; color:#fff;">{_h(hit.filename)}</span>
                         </div>
-                        <span class="memory-id">{hit.leaf_uuid[:8]}</span>
+                        <span class="memory-id">{_h(hit.leaf_uuid[:8])}</span>
                     </div>
-                    <div class="memory-content" style="margin-bottom: 0.75rem;">{hit.text}</div>
+                    <div class="memory-content" style="margin-bottom: 0.75rem;">{_h(hit.text)}</div>
                     <div style="font-size: 0.75rem; color: hsl(210, 10%, 65%); display: flex; gap: 1rem; border-top: 1px solid var(--m3-border-glass); padding-top: 0.5rem;">
-                        <span>Path: <code style="font-family: 'Fira Code', monospace; color: var(--m3-neon-cyan);">{hit.path}</code></span>
-                        <span>Corpus: <code style="font-family: 'Fira Code', monospace; color: var(--m3-neon-purple);">{hit.corpus_id or 'default'}</code></span>
+                        <span>Path: <code style="font-family: 'Fira Code', monospace; color: var(--m3-neon-cyan);">{_h(hit.path)}</code></span>
+                        <span>Corpus: <code style="font-family: 'Fira Code', monospace; color: var(--m3-neon-purple);">{_h(hit.corpus_id or 'default')}</code></span>
                         <span>Score: <strong style="color: var(--m3-neon-amber);">{hit.score:.4f}</strong></span>
                     </div>
                 </div>
                 """)
             return "\n".join(cards)
         except Exception as e:
-            return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning files index: {str(e)}</p>'
+            return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning files index: {_h(str(e))}</p>'
 
     if not q.strip():
         return '<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">Type in search bar to explore FTS5 & Vector similarity explain graphs.</p>'
@@ -1376,7 +1384,7 @@ async def search_memories(request: Request, q: str = "", ignore_case: int = 1):
                        if matches_query_grammar(f"{it.get('title','')} {it.get('content','')}", grammar, ic)][:15]
 
             if not results:
-                return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed memories found for "{q}".</p>'
+                return f'<p style="color: hsl(210, 15%, 65%); text-align: center; padding: 2rem 0;">No matching indexed memories found for "{_h(q)}".</p>'
 
             cards = []
             for score, item in results:
@@ -1409,19 +1417,19 @@ async def search_memories(request: Request, q: str = "", ignore_case: int = 1):
                 <div class="memory-card">
                     <div class="memory-header">
                         <div>
-                            <span class="m3-badge {badge_class}">{item.get('type', 'note')}</span>
-                            <span style="font-family: 'Outfit', sans-serif; font-weight: 500; font-size: 0.95rem; margin-left: 0.5rem; color:#fff;">{item.get('title') or 'Untitled Memory'}</span>
+                            <span class="m3-badge {badge_class}">{_h(item.get('type', 'note'))}</span>
+                            <span style="font-family: 'Outfit', sans-serif; font-weight: 500; font-size: 0.95rem; margin-left: 0.5rem; color:#fff;">{_h(item.get('title') or 'Untitled Memory')}</span>
                         </div>
-                        <span class="memory-id">{item.get('id')[:8]}</span>
+                        <span class="memory-id">{_h(item.get('id')[:8])}</span>
                     </div>
-                    <div class="memory-content">{item.get('content') or ''}</div>
+                    <div class="memory-content">{_h(item.get('content') or '')}</div>
                     {explain_html}
                 </div>
                 """)
             return "\n".join(cards)
 
     except Exception as e:
-        return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning indices: {str(e)}</p>'
+        return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning indices: {_h(str(e))}</p>'
 
 
 @app.get("/api/kb", response_class=HTMLResponse)
@@ -1460,20 +1468,20 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                     <div class="memory-header">
                         <div>
                             <span style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.85rem; color: var(--m3-neon-emerald);">#{idx:03d}/{total}</span>
-                            <span class="m3-badge badge-sys" style="margin-left: 0.5rem;">{row[3] or 'file'}</span>
-                            <span style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 15%, 50%); margin-left: 0.75rem;">size: {size_kb} KB &middot; corpus: {row[5] or 'default'}</span>
+                            <span class="m3-badge badge-sys" style="margin-left: 0.5rem;">{_h(row[3] or 'file')}</span>
+                            <span style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 15%, 50%); margin-left: 0.75rem;">size: {size_kb} KB &middot; corpus: {_h(row[5] or 'default')}</span>
                         </div>
                     </div>
-                    <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.5rem;">{row[1]}</h3>
+                    <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.5rem;">{_h(row[1])}</h3>
                     <div style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: hsl(210, 15%, 55%); margin-bottom: 0.75rem;">
-                        uuid: {row[0]} &middot; created: {row[6]}
+                        uuid: {_h(row[0])} &middot; created: {_h(row[6])}
                     </div>
-                    <div class="memory-content" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--m3-neon-cyan);">path: {row[2]}</div>
+                    <div class="memory-content" style="white-space: pre-wrap; font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--m3-neon-cyan);">path: {_h(row[2])}</div>
                 </div>
                 """)
             return "\n".join(cards)
         except Exception as e:
-            return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning files DB: {str(e)}</p>'
+            return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning files DB: {_h(str(e))}</p>'
 
     try:
         query = """
@@ -1526,11 +1534,11 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
             tag_html = ""
             if tags:
                 tag_html = '<div style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.75rem;">' + \
-                           "".join([f'<span class="m3-tag">{t}</span>' for t in tags]) + '</div>'
+                           "".join([f'<span class="m3-tag">{_h(t)}</span>' for t in tags]) + '</div>'
 
             extras_html = ""
             if extras:
-                extras_list = [f'<span style="margin-right: 0.75rem; color: hsl(210, 10%, 65%);"><strong style="color: hsl(210, 10%, 80%);">{k}:</strong> {v}</span>' for k, v in extras.items()]
+                extras_list = [f'<span style="margin-right: 0.75rem; color: hsl(210, 10%, 65%);"><strong style="color: hsl(210, 10%, 80%);">{_h(k)}:</strong> {_h(v)}</span>' for k, v in extras.items()]
                 extras_html = '<div style="font-family: \'Fira Code\', monospace; font-size: 0.75rem; margin-top: 0.5rem; display: flex; flex-wrap: wrap;">' + \
                               "".join(extras_list) + '</div>'
 
@@ -1539,8 +1547,8 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                 <div class="memory-header">
                     <div>
                         <span style="font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 0.85rem; color: var(--m3-neon-cyan);">#{idx:03d}/{total}</span>
-                        <span class="m3-badge {badge_class}" style="margin-left: 0.5rem;">{row['type']}</span>
-                        <span style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 15%, 50%); margin-left: 0.75rem;">{row['origin_device'] or '?'} &middot; {row['change_agent'] or '?'}</span>
+                        <span class="m3-badge {badge_class}" style="margin-left: 0.5rem;">{_h(row['type'])}</span>
+                        <span style="font-family: 'Fira Code', monospace; font-size: 0.75rem; color: hsl(210, 15%, 50%); margin-left: 0.75rem;">{_h(row['origin_device'] or '?')} &middot; {_h(row['change_agent'] or '?')}</span>
                     </div>
                     <div class="m3-progress-container" title="Importance score: {importance:.2f}">
                         <div class="m3-progress-bar">
@@ -1549,11 +1557,11 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
                         <span>{importance:.2f}</span>
                     </div>
                 </div>
-                <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.5rem;">{row['title'] or 'Untitled Entry'}</h3>
+                <h3 style="font-family: 'Outfit', sans-serif; font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.5rem;">{_h(row['title'] or 'Untitled Entry')}</h3>
                 <div style="font-family: 'Fira Code', monospace; font-size: 0.7rem; color: hsl(210, 15%, 55%); margin-bottom: 0.75rem;">
-                    id: {row['id']} &middot; created: {(row['created_at'] or '')[:19]} &middot; updated: {(row['updated_at'] or '')[:19]}
+                    id: {_h(row['id'])} &middot; created: {_h((row['created_at'] or '')[:19])} &middot; updated: {_h((row['updated_at'] or '')[:19])}
                 </div>
-                <div class="memory-content" style="white-space: pre-wrap;">{row['content'] or ''}</div>
+                <div class="memory-content" style="white-space: pre-wrap;">{_h(row['content'] or '')}</div>
                 {tag_html}
                 {extras_html}
             </div>
@@ -1561,7 +1569,7 @@ async def get_kb_cards(request: Request, q: str = "", type: str = "", limit: int
         return "\n".join(cards)
 
     except Exception as e:
-        return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning DB: {str(e)}</p>'
+        return f'<p style="color: var(--m3-neon-amber); text-align: center; padding: 2rem 0;">Error scanning DB: {_h(str(e))}</p>'
 
 
 @app.get("/api/history", response_class=HTMLResponse)
@@ -1596,12 +1604,12 @@ async def get_history_feed(request: Request):
                         logs.append(f"""
                         <div class="conflict-item" style="border-left-color: {color}; border-color: {border}; background: hsla(222, 22%, 5%, 0.45);">
                             <div style="display: flex; justify-content: space-between; font-weight: 600; font-family: 'Outfit', sans-serif; font-size: 0.8rem; color: {color}; margin-bottom: 0.25rem;">
-                                <span>ACTION: {action}</span>
-                                <span style="font-family: 'Fira Code', monospace; color: hsl(210, 15%, 50%); font-weight: 400;">{ts}</span>
+                                <span>ACTION: {_h(action)}</span>
+                                <span style="font-family: 'Fira Code', monospace; color: hsl(210, 15%, 50%); font-weight: 400;">{_h(ts)}</span>
                             </div>
                             <div style="color: hsl(210, 15%, 85%); font-size: 0.82rem; margin-top: 0.4rem;">
-                                <strong>ID:</strong> {r['memory_id'][:8]}<br>
-                                <strong>Details:</strong> {r['new_value'] or r['prev_value'] or 'System record updated.'}
+                                <strong>ID:</strong> {_h(r['memory_id'][:8])}<br>
+                                <strong>Details:</strong> {_h(r['new_value'] or r['prev_value'] or 'System record updated.')}
                             </div>
                         </div>
                         """)
@@ -1625,25 +1633,25 @@ def make_html_diff(prev_val: str, new_val: str) -> str:
     if not prev_val and not new_val:
         return '<span style="color: hsl(210, 10%, 50%); font-style: italic;">(Empty)</span>'
     if not prev_val:
-        return f'<span style="background: rgba(16, 185, 129, 0.2); color: var(--m3-neon-emerald); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500;">{new_val}</span>'
+        return f'<span style="background: rgba(16, 185, 129, 0.2); color: var(--m3-neon-emerald); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 500;">{_h(new_val)}</span>'
     if not new_val:
-        return f'<span style="background: rgba(239, 68, 68, 0.2); color: #ff6b6b; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.3); text-decoration: line-through;">{prev_val}</span>'
+        return f'<span style="background: rgba(239, 68, 68, 0.2); color: #ff6b6b; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.3); text-decoration: line-through;">{_h(prev_val)}</span>'
 
     import difflib
     matcher = difflib.SequenceMatcher(None, prev_val.split(), new_val.split())
     result = []
     for opcode, a_start, a_end, b_start, b_end in matcher.get_opcodes():
         if opcode == 'equal':
-            result.append(" ".join(prev_val.split()[a_start:a_end]))
+            result.append(_h(" ".join(prev_val.split()[a_start:a_end])))
         elif opcode == 'insert':
-            inserted = " ".join(new_val.split()[b_start:b_end])
+            inserted = _h(" ".join(new_val.split()[b_start:b_end]))
             result.append(f'<span style="background: rgba(16, 185, 129, 0.25); color: #88ff88; border-bottom: 2px solid var(--m3-neon-emerald); padding: 0 4px; border-radius: 2px; font-weight: 600;">{inserted}</span>')
         elif opcode == 'delete':
-            deleted = " ".join(prev_val.split()[a_start:a_end])
+            deleted = _h(" ".join(prev_val.split()[a_start:a_end]))
             result.append(f'<span style="background: rgba(239, 68, 68, 0.25); color: #ff6b6b; text-decoration: line-through; border-bottom: 2px solid #ef4444; padding: 0 4px; border-radius: 2px;">{deleted}</span>')
         elif opcode == 'replace':
-            deleted = " ".join(prev_val.split()[a_start:a_end])
-            inserted = " ".join(new_val.split()[b_start:b_end])
+            deleted = _h(" ".join(prev_val.split()[a_start:a_end]))
+            inserted = _h(" ".join(new_val.split()[b_start:b_end]))
             result.append(f'<span style="background: rgba(239, 68, 68, 0.25); color: #ff6b6b; text-decoration: line-through; padding: 0 4px; border-radius: 2px;">{deleted}</span>'
                           f' <span style="background: rgba(16, 185, 129, 0.25); color: #88ff88; padding: 0 4px; border-radius: 2px; font-weight: 600;">{inserted}</span>')
     return " ".join(result)
@@ -1722,21 +1730,21 @@ def render_audit_card(memory_id: str, db: Any) -> str:
             diff_html = f"""
             <div style="margin-top: 0.5rem;">
                 <span style="font-size: 0.75rem; font-weight: 600; color: hsl(210, 10%, 60%);">Initial Content:</span>
-                <div class="diff-text" style="color: var(--m3-neon-emerald);">{new_v or prev_v}</div>
+                <div class="diff-text" style="color: var(--m3-neon-emerald);">{_h(new_v or prev_v)}</div>
             </div>
             """
         elif event == "DELETE":
             diff_html = f"""
             <div style="margin-top: 0.5rem;">
                 <span style="font-size: 0.75rem; font-weight: 600; color: hsl(210, 10%, 60%);">Deleted Value:</span>
-                <div class="diff-text" style="color: #ff6b6b; text-decoration: line-through;">{prev_v}</div>
+                <div class="diff-text" style="color: #ff6b6b; text-decoration: line-through;">{_h(prev_v)}</div>
             </div>
             """
         elif event == "RESOLVE":
             diff_html = f"""
             <div style="margin-top: 0.5rem;">
                 <span style="font-size: 0.75rem; font-weight: 600; color: hsl(210, 10%, 60%);">Resolution:</span>
-                <div class="diff-text" style="color: var(--m3-neon-purple);">{new_v or 'Conflict resolved, marked active.'}</div>
+                <div class="diff-text" style="color: var(--m3-neon-purple);">{_h(new_v or 'Conflict resolved, marked active.')}</div>
             </div>
             """
 
@@ -1745,11 +1753,11 @@ def render_audit_card(memory_id: str, db: Any) -> str:
             <div class="timeline-badge {badge_cls}">{icon}</div>
             <div class="timeline-content-box">
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
-                    <strong style="color: var(--m3-neon-cyan);">{event}</strong>
-                    <span style="color: hsl(210, 10%, 55%); font-family: 'Fira Code', monospace;">{ts}</span>
+                    <strong style="color: var(--m3-neon-cyan);">{_h(event)}</strong>
+                    <span style="color: hsl(210, 10%, 55%); font-family: 'Fira Code', monospace;">{_h(ts)}</span>
                 </div>
                 <div style="font-size: 0.78rem; color: hsl(210, 10%, 75%); margin-top: 0.25rem;">
-                    by <strong style="color: #fff;">{actor}</strong> | field: <code>{field}</code>
+                    by <strong style="color: #fff;">{_h(actor)}</strong> | field: <code>{_h(field)}</code>
                 </div>
                 {diff_html}
             </div>

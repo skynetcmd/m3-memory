@@ -233,7 +233,12 @@ def recover_if_fallback_healthy(timeout: float = 1.5) -> bool:
             body = _json.loads(resp.read().decode("utf-8", "replace"))
     except Exception:
         return False
-    if not (isinstance(body, dict) and body.get("status") in ("ok", "loading")):
+    # READINESS, not mere presence: this function STEERS traffic (the next embed
+    # call routes here), so only recover on "ok". "loading" means the server is up
+    # but the embedder isn't loaded yet — forcing breakers closed then would steer
+    # embeds straight into 500s during the GGUF load window. (Other call sites that
+    # accept "loading" are presence/reachability checks, correctly.)
+    if not (isinstance(body, dict) and body.get("status") == "ok"):
         return False
     # Server is back — close breakers and clear the discovery neg-cache so the
     # very next embed call routes to it without a wasted cascade tick.
@@ -1632,7 +1637,20 @@ async def embedder_status_impl() -> dict:
         body = resp.read().decode(errors="replace").strip()
         conn.close()
         res["health"] = body
-        if resp.status != 200 or body != "OK":
+        # Accept BOTH the legacy plaintext "OK" and the JSON health contract every
+        # current embed server actually returns ({"status":"ok"|"loading",...}).
+        # The old `body != "OK"` check flagged a healthy JSON-returning server as
+        # unhealthy 100% of the time. Mirrors bin/memory/doctor.py:_probe_tier2.
+        healthy = resp.status == 200
+        if healthy and body != "OK":
+            try:
+                hj = json.loads(body)
+                healthy = hj.get("status") in ("ok", "loading")
+                if hj.get("model"):
+                    res["model"] = hj.get("model")
+            except (json.JSONDecodeError, AttributeError):
+                healthy = False
+        if not healthy:
             res["status"] = f"unhealthy-{resp.status}"
             return res
 
@@ -1644,7 +1662,9 @@ async def embedder_status_impl() -> dict:
             try:
                 metrics = json.loads(mresp.read().decode())
                 res["metrics"] = metrics
-                res["model"] = metrics.get("model")
+                # Only override the health-JSON model when /metrics actually
+                # reports one (the shared server has no /metrics → keep health).
+                res["model"] = metrics.get("model") or res["model"]
             except json.JSONDecodeError:
                 pass
         conn.close()

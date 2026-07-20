@@ -85,7 +85,7 @@ _Index, search, and recall project files as memory._
 | Tool | Description | Mutates? |
 |---|---|---|
 | `files_corpus_create` | Register a new corpus with optional default overrides. | read-only |
-| `files_corpus_delete` | Delete a corpus's settings row. | read-only |
+| `files_corpus_delete` | Delete a corpus's settings row. | ⚠️ yes |
 | `files_corpus_get` | Fetch a single corpus's settings + counts. | read-only |
 | `files_corpus_list` | Enumerate corpora with row counts. | read-only |
 | `files_corpus_set` | Update settings for an existing corpus. | read-only |

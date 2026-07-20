@@ -1221,7 +1221,7 @@ async def memory_search_scored_impl(
         if recency_bias > 0 and scored:
             scored = _apply_recency_bonus(scored, recency_bias, explain=explain)
         if INTENT_ROUTING and intent_hint == "user-fact" and _depth == 0 and scored:
-            _pull_predecessor_turns(scored)
+            _pull_predecessor_turns(scored, user_id=user_id, scope=scope)
 
         pre_ranked_all = sorted(scored, key=lambda x: x[0], reverse=True)
 
@@ -1325,7 +1325,7 @@ async def memory_search_scored_impl(
         ranked = _apply_observation_preference(ranked, k)
 
     if ranked and _two_stage_observations_gate():
-        ranked = await _apply_two_stage_expansion(ranked, k)
+        ranked = await _apply_two_stage_expansion(ranked, k, user_id=user_id, scope=scope)
 
     return ranked
 
@@ -1362,13 +1362,18 @@ def _apply_observation_preference(ranked, k):
     return ranked
 
 
-async def _apply_two_stage_expansion(ranked, k):
+async def _apply_two_stage_expansion(ranked, k, user_id: str = "", scope: str = ""):
     """Phase B3 two-stage retrieval: expand top-k observations to include their
     source turns. When M3_TWO_STAGE_OBSERVATIONS=1, look up the source_turn_ids
     the Observer stored in each observation's metadata and append those turns at
     a score discount (M3_TWO_STAGE_TURN_PENALTY, default 0.7) so the observation
     still ranks highest but the answerer sees the underlying turns for verbatim
     quotes. (Restored verbatim from the pre-d78fc1d inline logic.)
+
+    TENANCY (§7): source_turn_ids come from an observation's metadata — externally
+    authored ids. Re-apply the caller's user_id/scope when hydrating them so a
+    shared/forged/mis-authored source_turn_id can't pull another tenant's turn
+    into the results, matching how the sibling expansion paths were hardened.
     """
     try:
         turn_penalty = float(os.environ.get("M3_TWO_STAGE_TURN_PENALTY", "0.7"))
@@ -1399,13 +1404,21 @@ async def _apply_two_stage_expansion(ranked, k):
                     existing_ids.add(tid)
     if source_turn_ids:
         try:
+            _tenancy_sql = ""
+            _tenancy_params: list = []
+            if user_id:
+                _tenancy_sql += " AND user_id = ?"
+                _tenancy_params.append(user_id)
+            if scope:
+                _tenancy_sql += " AND scope = ?"
+                _tenancy_params.append(scope)
             with _db() as db:
                 placeholders = ",".join("?" * len(source_turn_ids))
                 turn_rows = db.execute(
                     f"SELECT id, content, title, type, importance "
                     f"FROM memory_items "
-                    f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted,0)=0",
-                    source_turn_ids,
+                    f"WHERE id IN ({placeholders}) AND COALESCE(is_deleted,0)=0{_tenancy_sql}",
+                    source_turn_ids + _tenancy_params,
                 ).fetchall()
             base_score = min((s for s, _ in topk), default=0.5)
             floor = max(0.01, base_score * turn_penalty)

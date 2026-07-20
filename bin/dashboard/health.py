@@ -543,9 +543,18 @@ _SMOKE_PROMPT = "m3-dashboard-healthcheck: reply with the single word ok"
 
 
 def _smoke_enabled() -> bool:
-    """The real-completion fallback can be turned off entirely for users who never
-    want the dashboard to send inference traffic. Cache-safe checks still run."""
-    return os.environ.get("M3_DASHBOARD_LLM_SMOKE", "1").strip().lower() not in ("0", "false", "no")
+    """The real-completion smoke is OPT-IN (default OFF): a health poll must never
+    send a billable /chat/completions to an endpoint it can't prove is local. The
+    local-vs-cloud classifier can't catch an unlisted paid endpoint reached over a
+    local proxy, so defaulting the smoke on risked billing it every poll. Set
+    M3_DASHBOARD_LLM_SMOKE=1 to enable it. Cache-safe readiness checks still run
+    regardless — the smoke is only the last-resort fallback. (§5/§6)
+
+    BEHAVIOR CHANGE: previously defaulted ON. On endpoints that only confirm
+    readiness via a real completion, the panel now shows 'unknown' until the smoke
+    is explicitly enabled.
+    """
+    return os.environ.get("M3_DASHBOARD_LLM_SMOKE", "0").strip().lower() in ("1", "true", "yes")
 
 
 def _smoke_llm_completion(base_url: str, model: str, token: str, timeout_s: float = 6.0) -> dict:

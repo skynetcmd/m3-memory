@@ -274,8 +274,8 @@ def test_llm_token_reuses_m3_key_resolution(monkeypatch):
     """The probe must authenticate with m3's OWN token (auth_utils.get_api_key on
     the LM_API_TOKEN service, LM Studio's 'lm-studio' fallback) — NOT an invented
     env var — so it sees exactly what m3's real LLM calls see."""
-    import dashboard.health as H
     import auth_utils
+    import dashboard.health as H
 
     # When the secret resolves, that value is used verbatim.
     monkeypatch.setattr(auth_utils, "get_api_key",
@@ -419,11 +419,14 @@ def test_llamacpp_health_loading_not_ready(monkeypatch):
 def test_smoke_used_only_when_no_cache_safe_signal(monkeypatch):
     """A bare OpenAI-compat server (no /api/v0/models, no /api/ps, no /health) that
     LISTS a model → the block falls back to ONE real completion to verify it can
-    serve. Confirms the smoke is the LAST resort, not the default."""
+    serve. Confirms the smoke is the LAST resort (only when no cache-safe signal).
+    The real-completion smoke is OPT-IN (default off, to never bill an unproven
+    endpoint), so this test enables it explicitly."""
     import dashboard.health as H
     import httpx
     import llm_failover as lf
 
+    monkeypatch.setenv("M3_DASHBOARD_LLM_SMOKE", "1")
     monkeypatch.setattr(H, "_llm_token", lambda: "x")
     monkeypatch.setattr(lf, "LLM_ENDPOINTS", ["http://localhost:9999/v1"])
     # Only /v1/models answers; native readiness endpoints 404.
@@ -478,8 +481,8 @@ def test_cloud_url_detection():
 def test_cloud_ping_ok_never_completes(monkeypatch):
     """A cloud endpoint with a resolvable key + reachable /models → ok via PING
     ONLY. No /chat/completions or /messages POST may ever be sent (no token cost)."""
-    import dashboard.health as H
     import auth_utils
+    import dashboard.health as H
     import httpx
 
     monkeypatch.setattr(auth_utils, "get_api_key",
@@ -505,8 +508,8 @@ def test_cloud_ping_ok_never_completes(monkeypatch):
 def test_cloud_missing_key_is_auth_failed(monkeypatch):
     """No API key resolves for the profile's service → auth_missing, surfaced as a
     clear 'set <service>' remedy — never a false 'model not loaded'."""
-    import dashboard.health as H
     import auth_utils
+    import dashboard.health as H
     import httpx
 
     monkeypatch.setattr(auth_utils, "get_api_key", lambda svc: None)
@@ -521,8 +524,8 @@ def test_cloud_missing_key_is_auth_failed(monkeypatch):
 
 def test_cloud_rejected_key_is_auth_failed(monkeypatch):
     """A resolvable key that the API rejects (401) → auth_rejected."""
-    import dashboard.health as H
     import auth_utils
+    import dashboard.health as H
     import httpx
 
     monkeypatch.setattr(auth_utils, "get_api_key", lambda svc: "sk-bad")
@@ -535,8 +538,8 @@ def test_cloud_rejected_key_is_auth_failed(monkeypatch):
 def test_inference_block_cloud_endpoint_never_smokes(monkeypatch):
     """End-to-end: LLM_ENDPOINTS pointing at a cloud host → block reports ok via
     ping, and the completion smoke is never invoked."""
-    import dashboard.health as H
     import auth_utils
+    import dashboard.health as H
     import httpx
     import llm_failover as lf
 

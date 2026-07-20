@@ -511,9 +511,13 @@ type, content, title="", metadata="{}", agent_id="", model_id="", change_agent="
     # M3_AUTO_RELATED_LINK_SCOPE_BY_VARIANT scope rule (default ON: same-variant
     # only when variant is set on the inserted item).
     superseded_ids: list[str] = []
-    if vec and type not in ("conversation", "message"):
+    # Honor the operator-configurable exclusion set (the bulk path already does,
+    # at the p["type"] gate below) instead of a hardcoded tuple, so a configured
+    # exclusion isn't silently ignored on the singleton hot path (§5).
+    if vec and type not in CONTRADICTION_TYPE_EXCLUSIONS:
         superseded_ids, related_candidates = await _check_contradictions(
             item_id, content, title, vec, type, agent_id, variant=variant,
+            user_id=user_id,
         )
         # Auto-link top related (non-contradictory) memory. Gated by
         # M3_AUTO_RELATED_LINK (default ON for back-compat). Disable in any
@@ -1206,6 +1210,7 @@ async def memory_write_bulk_impl(
                     p["id"], p["content"], p["title"], vec, p["type"], p["agent_id"],
                     new_valid_from=p.get("valid_from"),
                     variant=p.get("variant"),
+                    user_id=p.get("user_id", ""),
                 )
                 return p["id"], superseded_ids
 
@@ -1276,6 +1281,7 @@ async def _check_contradictions(
     agent_id: str,
     new_valid_from: str | None = None,
     variant: str | None = None,
+    user_id: str = "",
 ) -> tuple[list[str], list[tuple[str, float]]]:
     _resolve_mc_callbacks()
     """
@@ -1298,11 +1304,25 @@ async def _check_contradictions(
             # sources agreeing), so when it's enabled we drop the agent filter
             # from the scan and re-apply same-agent scoping only to the
             # CONTRADICTION branch below — one scan serves both (§4).
-            where = "mi.is_deleted = 0 AND mi.type = ? AND mi.id != ?"
+            #
+            # PORTABILITY (§1/§6): route the placeholder through the dialect seam
+            # so this shared SQLite+PG path uses ?/%s correctly — a hardcoded '?'
+            # raised on PG and the outer except silently disabled contradiction
+            # detection there. TENANCY (§7): re-apply the caller's user_id in the
+            # WHERE so one tenant's write can never scan (and thus supersede) a
+            # different tenant's memory — the read path filters user_id, the
+            # supersede path must too. Empty user_id passes through unchanged
+            # (single-tenant / legacy shared-agent rows).
+            from memory.backends import dialect
+            p = dialect().param()
+            where = f"mi.is_deleted = 0 AND mi.type = {p} AND mi.id != {p}"
             params = [type_, item_id]
+            if user_id:
+                where += f" AND mi.user_id = {p}"
+                params.append(user_id)
             _agent_scoped = bool(agent_id) and not _wcfg.CORROBORATION
             if _agent_scoped:
-                where += " AND mi.agent_id = ?"
+                where += f" AND mi.agent_id = {p}"
                 params.append(agent_id)
             # Resolve scope gate at call time so tests that monkeypatch
             # memory_core.AUTO_RELATED_LINK_SCOPE_BY_VARIANT take effect.
@@ -1314,7 +1334,7 @@ async def _check_contradictions(
             except ImportError:
                 pass
             if variant is not None and _scope_on:
-                where += " AND mi.variant = ?"
+                where += f" AND mi.variant = {p}"
                 params.append(variant)
             rows = db.execute(
                 f"SELECT mi.id, mi.title, mi.content, mi.agent_id, me.embedding FROM memory_items mi "
