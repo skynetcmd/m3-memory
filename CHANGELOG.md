@@ -21,6 +21,29 @@ the policy is forward-going only.
 
 _Nothing pending — all changes below have shipped in a tagged release._
 
+## [2026.7.19.5] — 2026-07-19 — Inference-backend health & Windows task flash fix
+
+### Added
+- **Dashboard reports LLM/SLM inference-backend health.** The System Health panel
+  now shows whether the local (or cloud) inference backend m3 uses is actually up
+  and able to serve — failover-aware (walks the endpoint chain and names which hop
+  failed and why), cache-safe (prefers non-inference readiness signals over a smoke
+  completion so it doesn't evict the model's prompt-cache slot), and cloud-aware
+  (frontier endpoints are ping-checked, never billed a completion). Reuses m3's own
+  token resolution and per-request Profile selection. Knobs:
+  `M3_DASHBOARD_LLM_SMOKE` (opt-out), `M3_DASHBOARD_LLM_SMOKE_TTL_S` (900),
+  `M3_DASHBOARD_LLM_BLOCK_TTL_S` (45).
+
+### Fixed
+- **Windows scheduled tasks no longer flash a console window.** The `AgentOS_*`
+  tasks are now registered with `Hidden=true` — `pythonw.exe` alone does not
+  suppress the flash under an interactive-token task. `install_schedules --verify`
+  now asserts the bit, and the `EmbedServer` self-heal interval was widened
+  (`PT1M` → `PT5M`) to cut churn.
+- **Registry manifests no longer drift from the package version.** `server.json` /
+  `mcp-server.json` had lagged behind `pyproject.toml`; the version is now bumped in
+  lockstep, restoring the manifest-version drift test.
+
 ## [2026.7.19.4] — 2026-07-19 — Background loop reliability & dashboard fixes
 
 ### Fixed
