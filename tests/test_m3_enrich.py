@@ -248,9 +248,15 @@ def test_load_profile_with_path_aborts_on_missing(tmp_path):
 def test_load_profile_falls_back_to_named_profile(monkeypatch):
     """When --profile-path is None, _load_profile_with_path uses --profile."""
     import m3_enrich
+    import slm_intent
     out = m3_enrich._load_profile_with_path(name="enrich_local_qwen", path=None)
     assert out.name == "enrich_local_qwen"
-    assert out.model == "qwen/qwen3.5-9b"
+    # The enrich_local_qwen profile is intentionally MODEL-AGNOSTIC (model: "" →
+    # "use whatever the local server has loaded"; see commit d6b4200 "model-agnostic
+    # profiles"). This test verifies the name-based fallback LOADS the profile, so
+    # assert it resolved to that profile's actual configured model rather than a
+    # hardcoded id the profile no longer pins.
+    assert out.model == slm_intent.load_profile("enrich_local_qwen").model
 
 
 def test_load_profile_aborts_on_unknown_name():
