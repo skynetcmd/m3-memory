@@ -253,6 +253,29 @@ def test_memory_only_when_no_files():
     assert any(p.startswith("topics/") for p in vault)
 
 
+def test_html_viewer_self_contained():
+    """--html emits a single self-contained document embedding every page, with no
+    unescaped </script> breakout and no unfilled template placeholders."""
+    import json
+    import re as _re
+    _bin = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "bin"))
+    if _bin not in sys.path:
+        sys.path.insert(0, _bin)
+    from wiki.html_view import build_html
+
+    vault = _build(use_networkx=False, entity_comention=True)
+    html = build_html(vault)
+    assert "__PAGES_JSON__" not in html and "__TITLE__" not in html
+    m = _re.search(r'<script id="data" type="application/json">(.*?)</script>',
+                   html, _re.S)
+    assert m, "embedded data blob missing"
+    blob = m.group(1)
+    assert "</script>" not in blob, "unescaped </script> would break out of the tag"
+    data = json.loads(blob.replace("<\\/", "</"))
+    assert set(data.keys()) == set(vault.keys())
+    assert html.count("<html") == 1 and html.count("</html>") == 1
+
+
 class _StubSynth:
     """A Synthesizer stand-in — no network, deterministic prose per cluster."""
 

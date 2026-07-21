@@ -145,7 +145,23 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     vault = _build_vault(args, out_dir)
     if args.check:
         return _check_vault(vault, out_dir)
-    return _write_vault(vault, out_dir)
+    rc = _write_vault(vault, out_dir)
+    if getattr(args, "html", False):
+        _write_html(vault, out_dir)
+    return rc
+
+
+def _write_html(vault: dict[str, str], out_dir: str) -> None:
+    from wiki.html_view import build_html
+    html = build_html(vault)
+    dest = os.path.join(out_dir, "wiki.html")
+    with open(dest, "w", encoding="utf-8", newline="\n") as f:
+        f.write(html)
+    try:
+        shown = os.path.relpath(dest)
+    except ValueError:
+        shown = dest
+    print(f"wrote self-contained viewer to {shown} (open it in a browser)")
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -188,6 +204,10 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                    help="Drop any memory whose title/content matches this regex "
                         "(case-insensitive) — e.g. to keep private/bench notes out "
                         "of a shareable vault.")
+    p.add_argument("--html", action="store_true",
+                   help="Also write a single self-contained wiki.html viewer — open "
+                        "it in any browser to click through the vault offline "
+                        "(no server, no dependencies).")
 
 
 def main(argv: list[str] | None = None) -> int:
