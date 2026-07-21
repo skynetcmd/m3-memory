@@ -30,3 +30,17 @@ Step 3 — append exactly ONE short line of interpretation. Examples:
 - `Antigravity SessionEnd hook off — run mcp-memory chatlog init --apply-gemini.`
 
 Do not write a paragraph. One line. The user can read the doctor output themselves.
+
+Step 4 — if (and only if) doctor reported a repairable problem (a stale/dead agent
+config path, a duplicate bridge, a disabled plugin, or a "run doctor --fix" hint),
+OFFER to auto-repair. `doctor --fix` repoints dead config paths, de-duplicates MCP
+registrations, and re-syncs agent hooks — it is non-destructive to data. Run the
+same resolver that worked above, with `--fix`:
+
+```bash
+mcp-memory doctor --fix
+# or: python -m m3_memory.cli doctor --fix
+```
+
+Then re-run plain `doctor` to confirm the fix took. If doctor was already all
+healthy, do NOT run `--fix`.
