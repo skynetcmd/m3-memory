@@ -499,7 +499,6 @@ import subprocess as _subprocess  # noqa: E402
 import textwrap as _textwrap  # noqa: E402
 import time as _time  # noqa: E402
 
-
 # A tiny holder program: acquire the lock for `role` under `engine_root`, print a
 # ready line, then hold for `hold_s` seconds. Run as a real separate process so
 # the OS advisory lock is genuinely tested across process boundaries (an
@@ -560,10 +559,19 @@ def test_cross_process_mutual_exclusion(tmp_path):
         assert res.owner is not None and res.owner.pid == holder_pid
     finally:
         _cleanup_holder(holder)
-    # Holder gone → we must now WIN.
-    res2 = m3_halt.acquire_single_instance("embed-server", engine_root=root)
-    assert res2.status is m3_halt.LockStatus.ACQUIRED, res2.status
-    res2.lock.release()
+    # Holder gone → we must now WIN. On Windows the OS releases a killed process's
+    # file lock ASYNCHRONOUSLY — there is a few-ms window after wait() returns
+    # where the lock is still held even though the pid is dead. Retry-settle for
+    # it (the same pattern test_cross_process_lock_released_on_holder_death uses),
+    # rather than assuming the POSIX-style synchronous release (§1: 3 OSes).
+    for _ in range(20):
+        res2 = m3_halt.acquire_single_instance("embed-server", engine_root=root)
+        if res2.status is m3_halt.LockStatus.ACQUIRED:
+            res2.lock.release()
+            break
+        _time.sleep(0.1)
+    else:
+        raise AssertionError(f"did not ACQUIRE after holder death: {res2.status}")
 
 
 def test_cross_process_lock_released_on_holder_death(tmp_path):
