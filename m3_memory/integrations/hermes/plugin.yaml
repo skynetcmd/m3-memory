@@ -1,7 +1,20 @@
 name: m3
 version: 0.1.0
 description: "m3-memory — hybrid FTS5+vector recall with MMR, bitemporal model, KG supersession, async Observer/Reflector extraction. In-process via the m3-memory catalog (no server/proxy)."
-# Hermes' plugin loader reads `pip_dependencies` (matches the bundled mem0 /
-# supermemory manifests); m3 is imported via PYTHONPATH (see docs/HERMES.md),
-# so it declares none.
+# kind=exclusive: m3 is a MEMORY PROVIDER (register_memory_provider) — Hermes runs
+# at most one external memory provider at a time (docs "single-select" / Option A).
+# Omitting kind would default to 'standalone' and mis-classify us as a plain
+# extension. (Verified against hermes_cli/plugins.py PluginManifest: kind defaults
+# to 'standalone'; memory/context engines are 'exclusive'.)
+kind: exclusive
+# provides_tools: the memory-scoped tools this provider registers (returned by
+# M3MemoryProvider.get_tool_schemas). Declaring them lets `hermes plugins` / the
+# registry list them from the manifest, not just at runtime. m3 registers no
+# lifecycle hooks, so provides_hooks is omitted (empty).
+provides_tools:
+  - m3_profile
+  - m3_search
+  - m3_conclude
+# pip_dependencies: read by hermes_cli/memory_setup.py to install a plugin's PyPI
+# deps. m3 is imported via PYTHONPATH (see docs/HERMES.md), so it declares none.
 pip_dependencies: []
