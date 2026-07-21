@@ -383,24 +383,83 @@ def _heal_agent_settings(settings_file: Path, *, force: bool = False) -> Optiona
 
     servers = data.setdefault("mcpServers", {})
     existing = servers.get("memory")
-    if existing is not None and not force and not _memory_entry_needs_repoint(existing):
-        return None  # healthy — stay quiet
-
     canonical = _canonical_memory_server()
-    if existing == canonical:
-        return None
+    mcp_stale = existing is None or _memory_entry_needs_repoint(existing) or force
+    mcp_stale = mcp_stale and existing != canonical
+
+    # ALSO repoint stale chatlog hooks (AfterModel/PreCompress/SessionEnd, etc.).
+    # These reference bin/hooks/chatlog/<agent>_onexit.py by absolute path, which
+    # goes DEAD when the install moves (payload relocation / dev-tree rename) — and
+    # the old heal only touched the ``memory`` MCP entry, so capture stayed broken
+    # after ``doctor --fix``/upgrade. Now both are healed in one pass.
+    hooks_fixed = _repoint_stale_chatlog_hooks(data)
+
+    if not mcp_stale and not hooks_fixed:
+        return None  # everything healthy — stay quiet
 
     # Back up before any rewrite so the prior config is always restorable.
-    if existing is not None:
-        bak = settings_file.with_suffix(settings_file.suffix + ".m3bak")
-        try:
-            bak.write_text(settings_file.read_text(encoding="utf-8"), encoding="utf-8")
-        except OSError:
-            pass
-    servers["memory"] = canonical
+    bak = settings_file.with_suffix(settings_file.suffix + ".m3bak")
+    try:
+        bak.write_text(settings_file.read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError:
+        pass
+
+    parts = []
+    if mcp_stale:
+        verb = "repointed" if existing is not None else "registered"
+        servers["memory"] = canonical
+        parts.append(f"{verb} 'memory' MCP")
+    if hooks_fixed:
+        parts.append(f"repointed {hooks_fixed} stale chatlog hook(s)")
     settings_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    verb = "repointed" if existing is not None else "registered"
-    return f"[+] {verb} 'memory' MCP in {settings_file}"
+    return f"[+] {' + '.join(parts)} in {settings_file}"
+
+
+def _repoint_stale_chatlog_hooks(data: dict) -> int:
+    """Repoint any chatlog hook command in ``data['hooks']`` whose script path is
+    stale (moved/dead) to the canonical bin/hooks/chatlog/ dir. Mutates ``data``
+    in place; returns the number of hook commands fixed.
+
+    A hook command looks like ``python <dir>/bin/hooks/chatlog/<name>_onexit.py``.
+    We find the token that is the chatlog script path and swap ONLY its directory
+    prefix for the live bridge dir's ``hooks/chatlog``, preserving the interpreter
+    token and the script basename. Idempotent — a command already pointing at the
+    live path is left untouched; a script that still exists is not touched either."""
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return 0
+    bridge = _canonical_bridge_path()
+    if bridge is None:
+        return 0
+    chatlog_dir = str(bridge.parent / "hooks" / "chatlog").replace("\\", "/")
+    fixed = 0
+    for blocks in hooks.values():
+        if not isinstance(blocks, list):
+            continue
+        for blk in blocks:
+            if not isinstance(blk, dict):
+                continue
+            for h in blk.get("hooks", []):
+                cmd = h.get("command") if isinstance(h, dict) else None
+                if not isinstance(cmd, str):
+                    continue
+                # Split into whitespace tokens; find the one that is a chatlog script.
+                tokens = cmd.split()
+                changed = False
+                for i, tok in enumerate(tokens):
+                    norm = tok.replace("\\", "/")
+                    if "hooks/chatlog/" not in norm or not norm.endswith(".py"):
+                        continue
+                    script_name = norm.rsplit("hooks/chatlog/", 1)[1]
+                    new_tok = f"{chatlog_dir}/{script_name}"
+                    # Only rewrite when the current target is stale (dead path).
+                    if norm != new_tok and not Path(tok).expanduser().exists():
+                        tokens[i] = new_tok
+                        changed = True
+                if changed:
+                    h["command"] = " ".join(tokens)
+                    fixed += 1
+    return fixed
 
 
 def _register_gemini_mcp() -> Optional[str]:
