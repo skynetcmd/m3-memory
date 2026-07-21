@@ -21,12 +21,33 @@ BANNER = (
     "do not edit by hand; re-run `m3 wiki generate` to refresh."
 )
 
-# The m3 logo, matching the header used across the user-facing repo docs. Emitted
-# on the vault's landing pages so a shared/rendered vault carries m3 branding.
+def _logo_src() -> str:
+    """The m3 logo as an inline base64 data-URI so a rendered vault carries its
+    branding with NO network — it works offline, over file://, and when embedded.
+    Falls back to the raw.githubusercontent.com URL if the packaged PNG isn't found.
+    """
+    import base64
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, "..", "..", "docs", "m3_logo_icon.png"),  # dev tree (bin/wiki -> ../../docs)
+        os.path.join(here, "..", "docs", "m3_logo_icon.png"),        # installed (m3_memory/docs vs bin/wiki)
+    ]
+    for path in candidates:
+        try:
+            with open(os.path.abspath(path), "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            return f"data:image/png;base64,{b64}"
+        except OSError:
+            continue
+    return ("https://raw.githubusercontent.com/skynetcmd/m3-memory/main/"
+            "docs/m3_logo_icon.png")
+
+
+# The m3 logo <img>, emitted on the vault's landing pages. Resolved once at import.
 _LOGO = (
-    '<img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/'
-    'm3_logo_icon.png" height="60" style="vertical-align: baseline; '
-    'margin-bottom: -15px;"> '
+    f'<img src="{_logo_src()}" height="60" '
+    'style="vertical-align: baseline; margin-bottom: -15px;"> '
 )
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
