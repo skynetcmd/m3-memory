@@ -526,19 +526,20 @@ def _register_cursor_mcp() -> Optional[str]:
     return _heal_agent_settings(cfg)
 
 
-def _cline_config_path() -> Optional[Path]:
+def _cline_config_path() -> Path:
     """Cline's MCP settings file, under the VS Code user-data dir:
     <user-data>/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
-    Returns None when the VS Code Code/User dir can't be located."""
+    Always returns a path (the standard per-OS location) so Cline can be a plain,
+    unconditional host entry like the others; whether Cline is actually installed
+    is decided by _register_cline_mcp / the file-exists check at scan time."""
     if sys.platform == "win32":
-        base = os.environ.get("APPDATA")
-        code_user = Path(base) / "Code" / "User" if base else None
+        # %APPDATA% is the norm; fall back to its default if the env var is unset.
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        code_user = Path(base) / "Code" / "User"
     elif sys.platform == "darwin":
         code_user = Path.home() / "Library" / "Application Support" / "Code" / "User"
     else:
         code_user = Path.home() / ".config" / "Code" / "User"
-    if code_user is None:
-        return None
     return (code_user / "globalStorage" / "saoudrizwan.claude-dev"
             / "settings" / "cline_mcp_settings.json")
 
@@ -550,8 +551,6 @@ def _register_cline_mcp() -> Optional[str]:
     self-healing path applies. Only acts when the Cline extension's settings dir
     exists, so a box without Cline (or without VS Code) stays quiet."""
     cfg = _cline_config_path()
-    if cfg is None:
-        return None
     # Only wire Cline if the extension's globalStorage dir already exists — its
     # parent (…/saoudrizwan.claude-dev) is created by Cline on first run. Creating
     # it ourselves would leave a stray dir on boxes that don't have Cline.
@@ -1695,7 +1694,7 @@ def _known_agent_settings() -> "list[tuple[str, Path]]":
         ("OpenCode",    home / ".config" / "opencode" / "opencode.json"),
         ("Aider",       home / ".aider" / "settings.json"),
         ("Cursor",      _cursor_config_path()),
-        *( [("Cline", _cline_config_path())] if _cline_config_path() else [] ),
+        ("Cline",       _cline_config_path()),
     ]
 
 
@@ -1744,7 +1743,7 @@ def _client_config_sources() -> "dict[str, list[Path]]":
         "OpenCode":    _opencode_source_paths(),
         "Aider":       [home / ".aider" / "settings.json"],
         "Cursor":      [_cursor_config_path()],
-        **({"Cline": [_cline_config_path()]} if _cline_config_path() else {}),
+        "Cline":       [_cline_config_path()],
     }
 
 
