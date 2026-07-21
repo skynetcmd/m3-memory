@@ -2,7 +2,7 @@
 
 Welcome! This guide walks you through integrating **M3 Memory** (State-of-the-Art, vector-accelerated rich memory) with **Hermes Agent**.
 
-By combining Hermes' powerful autonomous execution with M3's advanced 103-tool multi-corpus memory system, you unlock SOTA long-term recall, semantic association, and tamper-proof cryptographic audit trails.
+By combining Hermes' powerful autonomous execution with M3's advanced 100+ tool multi-corpus memory system, you unlock SOTA long-term recall, semantic association, and tamper-proof cryptographic audit trails.
 
 ---
 
@@ -13,7 +13,7 @@ M3 is designed to be highly flexible. When hooking it up to Hermes Agent, you ca
 ### Option A: Optimal Replacement (Recommended for Unified SOTA Memory)
 In this mode, you configure Hermes Agent to use **M3 as its primary memory provider**. 
 * **Why do this?** Hermes' default file-based memory can grow slow and lacks semantic understanding. By replacing it with M3, Hermes gains instant access to **BGE-M3 vector embeddings**, **FTS5 hybrid search**, and automated **fact decay/curation**.
-* **How it works:** Hermes loads the M3 memory provider plugin, redirecting all default read/write operations to the M3 SQLite memory catalog (`~/.m3-memory/memory/agent_memory.db`).
+* **How it works:** Hermes loads the M3 memory provider plugin, redirecting all default read/write operations to the M3 SQLite memory catalog (`~/.m3/engine/agent_memory.db`).
 
 ### Option B: Parallel Co-existence (SOTA Rich Memory Toolbelt)
 In this mode, you keep Hermes' default memory provider active, but load M3's **100+ MCP tools** directly into Hermes' runtime toolbelt.

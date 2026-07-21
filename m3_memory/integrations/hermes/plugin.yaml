@@ -1,4 +1,7 @@
 name: m3
 version: 0.1.0
 description: "m3-memory — hybrid FTS5+vector recall with MMR, bitemporal model, KG supersession, async Observer/Reflector extraction. In-process via the m3-memory catalog (no server/proxy)."
-dependencies: []
+# Hermes' plugin loader reads `pip_dependencies` (matches the bundled mem0 /
+# supermemory manifests); m3 is imported via PYTHONPATH (see docs/HERMES.md),
+# so it declares none.
+pip_dependencies: []
