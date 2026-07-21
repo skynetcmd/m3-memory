@@ -1628,7 +1628,11 @@ def _known_agent_settings() -> "list[tuple[str, Path]]":
         ("Claude Code", home / ".claude" / "settings.json"),
         ("Gemini CLI",  home / ".gemini" / "settings.json"),
         ("Antigravity", home / ".gemini" / "antigravity-cli" / "settings.json"),
-        ("OpenCode",    home / ".opencode" / "settings.json"),
+        # OpenCode uses opencode.json under XDG ~/.config (or %APPDATA% on
+        # Windows), NOT ~/.opencode/settings.json — the old path matched nothing,
+        # so the duplicate-registration detector skipped OpenCode entirely. Use
+        # the canonical resolver's primary path (doctor/wizard already use it).
+        ("OpenCode",    home / ".config" / "opencode" / "opencode.json"),
         ("Aider",       home / ".aider" / "settings.json"),
     ]
 
@@ -1673,9 +1677,23 @@ def _client_config_sources() -> "dict[str, list[Path]]":
         "Claude Code": claude_sources,
         "Gemini CLI":  [home / ".gemini" / "settings.json"],
         "Antigravity": [home / ".gemini" / "antigravity-cli" / "settings.json"],
-        "OpenCode":    [home / ".opencode" / "settings.json"],
+        # OpenCode config is opencode.json under XDG ~/.config (or %APPDATA% on
+        # Windows), not ~/.opencode/settings.json — the old path matched nothing.
+        "OpenCode":    _opencode_source_paths(),
         "Aider":       [home / ".aider" / "settings.json"],
     }
+
+
+def _opencode_source_paths() -> "list[Path]":
+    """Candidate opencode.json locations (XDG ~/.config primary; %APPDATA% on
+    Windows). Mirrors setup_wizard._opencode_config_paths / doctor's probe so the
+    three agree on where OpenCode's config actually lives."""
+    paths = [Path.home() / ".config" / "opencode" / "opencode.json"]
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            paths.append(Path(appdata) / "opencode" / "opencode.json")
+    return paths
 
 
 def _duplicate_mcp_registration() -> "dict[str, dict[str, list[Path]]]":
