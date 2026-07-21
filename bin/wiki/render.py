@@ -125,6 +125,7 @@ def render_pages(
     pages["index.md"] = _render_index(topic_clusters, topic_slugs, files, source_slugs, bool(orphan_members))
     pages["overview.md"] = _render_overview(clusters, files)
     pages["lint.md"] = _render_lint(clusters, edges, mem_to_topic)
+    pages["about.md"] = _render_about()
 
     return pages
 
@@ -383,6 +384,7 @@ def _render_index(topic_clusters, topic_slugs, files, source_slugs, has_orphans:
 
     lines.append("## Housekeeping")
     lines.append("")
+    lines.append("- [[about]] — what this vault is and how it's built")
     if has_orphans:
         lines.append("- [[orphans]] — core memories with no links yet")
     lines.append("- [[lint]] — orphans, dangling links, contradictions")
@@ -413,6 +415,58 @@ def _render_overview(clusters: list[Cluster], files: FilesLayer) -> str:
     for c in sorted(topics, key=lambda c: c.rank_key())[:10]:
         lines.append(f"- {c.members[0].display_title} ({len(c.members)} memories)")
     lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_about() -> str:
+    """A self-documenting page: explains the vault to whoever opens it.
+
+    This is the `docs/WIKI.md` guide, rendered as a vault-native page with
+    [[wikilinks]] into the vault's own structure — so the wiki explains itself in
+    Obsidian without leaving the graph.
+    """
+    body = """This vault was compiled by **m3** from your memory store — it is a
+*projection*, not something you edit by hand. Re-run `m3 wiki generate` to refresh
+it; your edits here would be overwritten.
+
+## How to read it
+
+- **[[index]]** — the table of contents: a ⭐ *Start here* shortlist, then topics
+  grouped by kind (Knowledge, Runbooks, Decisions, References).
+- **[[overview]]** — counts and your largest topics at a glance.
+- **Topics** (`topics/`) — one page per cluster of related memories. Each carries
+  its source `memory_ids`, confidence, an *Evidence* section linking to the files a
+  fact came from, and *Backlinks*.
+- **Sources** (`sources/`) — one page per indexed document, with its summary and
+  notable extracted facts.
+- **[[lint]]** — housekeeping: orphaned memories and contradictions (memories that
+  disagree are kept together and reported, never silently dropped).
+
+## What's included
+
+A memory appears here when it is **canonical** — pinned, high-importance, or a
+consolidated `belief` / `procedure` / `reference`. Related memories are grouped
+into topics using m3's relationship graph *and* shared entities, so notes about the
+same thing land together even without an explicit link.
+
+## Regenerating
+
+```
+m3 wiki generate                 # refresh this vault
+m3 wiki generate --synthesize    # add an LLM prose lede to each topic
+m3 wiki status                   # location, page count, last build
+```
+
+Full guide: the `docs/WIKI.md` file in the m3-memory repository."""
+    lines = [
+        _fm(["title: About this wiki", "type: index"]),
+        "# About this wiki",
+        "",
+        BANNER,
+        "",
+        body,
+        "",
+    ]
     return "\n".join(lines).rstrip() + "\n"
 
 

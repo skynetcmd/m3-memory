@@ -154,6 +154,10 @@ def test_core_pages_emitted():
     assert "index.md" in vault
     assert "overview.md" in vault
     assert "lint.md" in vault
+    # The vault documents itself, and the guide is linked from the index.
+    assert "about.md" in vault
+    assert "[[about]]" in vault["index.md"]
+    assert "m3 wiki generate" in vault["about.md"]
     # The excluded low-importance note must not appear anywhere.
     blob = "\n".join(vault.values())
     assert "Ignored" not in blob
