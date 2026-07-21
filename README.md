@@ -10,15 +10,16 @@ M3 treats agent memory as a **distributed-systems infrastructure problem**, not 
 
 Instead of every tool keeping its own throwaway context, M3 is a **shared, evolving, bitemporal knowledge base** that multiple heterogeneous agents and machines read and write. It is designed to solve a fundamental challenge: *How do agents maintain a consistent, evolving, and temporal knowledge base over months and years?*
 
-> **Plugs into your stack — framework and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
+> **Plugs into your stack — coding agents, framework, and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
 >
+> - 🤖 **Coding agents** — `m3 setup` auto-detects and wires m3 into **Claude Code, Cursor, Cline, Gemini CLI, Aider, Antigravity, OpenCode**, and any MCP client — one shared memory across every agent, re-wired on update. (See [MCP Client Install](docs/MCP_CLIENT_INSTALL.md))
 > - 🖥️ **Web dashboard** — a built-in, backend-agnostic control panel (default `http://127.0.0.1:8088`): browse memory, explore the interactive knowledge graph, and watch system health / load. `pip install m3-memory[dashboard]` then `m3 dashboard`. (See [Dashboard Guide](docs/DASHBOARD.md))
 > - 🐘 **PostgreSQL** — run M3 on a first-class PostgreSQL primary backend (`M3_DB_BACKEND=postgres`) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See [Architecture](docs/ARCHITECTURE.md) · [Sync](docs/SYNC.md))
 > - 🦜 **LangChain & LangGraph** — drop-in **Mem0 replacement** (one-line import swap) and fully **LangMem-compatible** (`store=M3Store()`): `pip install m3-memory[langchain]`. (See [LangChain Guide](docs/integrations/LANGCHAIN.md))
 > - 👥 **CrewAI** — a drop-in `StorageBackend` for CrewAI's unified memory: `pip install m3-memory[crewai]`. (See [CrewAI Guide](m3_memory/integrations/crewai/README.md))
 > - 🧩 **PydanticAI** — wire M3 in as the agent's memory layer: `pip install m3-memory[pydantic-ai]`. (See [PydanticAI Guide](m3_memory/integrations/pydantic_ai/README.md))
 >
-> All four gain automatic contradiction supersession, bitemporal historical queries, local sovereign embedding, and the full 100+ MCP tool set.
+> Every path gains automatic contradiction supersession, bitemporal historical queries, local sovereign embedding, and the full 100+ MCP tool set.
 
 ---
 
