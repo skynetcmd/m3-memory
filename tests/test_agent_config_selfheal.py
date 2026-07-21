@@ -110,6 +110,37 @@ def test_missing_memory_entry_is_added(canonical, tmp_path):
     assert d["mcpServers"]["other"] == {"command": "keep"}
 
 
+def test_absent_file_left_alone_by_default(canonical, tmp_path):
+    """Default (create_if_absent=False): a missing settings file is a no-op — the
+    ``doctor --fix`` sweep must never conjure configs for hosts that have none."""
+    cfg = tmp_path / "host" / "settings.json"  # does not exist
+    assert I._heal_agent_settings(cfg) is None
+    assert not cfg.exists()
+
+
+def test_absent_file_created_when_requested(canonical, tmp_path):
+    """create_if_absent=True: the per-host registrars (Cursor/Cline/Gemini/
+    Antigravity) create the settings file with the canonical ``memory`` entry.
+
+    Regression for the gap where a host was installed but had never written its
+    MCP-settings file yet (Cline/Cursor create it lazily on first settings-UI
+    open), so ``m3 setup`` silently registered nothing on exactly the machines it
+    was meant to wire."""
+    cfg = tmp_path / "host" / "globalStorage" / "settings.json"  # absent, no parent
+    msg = I._heal_agent_settings(cfg, create_if_absent=True)
+    assert msg and "registered" in msg
+    assert cfg.is_file()
+    m = json.loads(cfg.read_text())["mcpServers"]["memory"]
+    assert m["args"] == [str(canonical["bridge"]).replace("\\", "/")]
+
+
+def test_create_if_absent_still_no_op_when_healthy(canonical, tmp_path):
+    """create_if_absent must not force a rewrite of an already-healthy file."""
+    cfg = tmp_path / "host" / "settings.json"
+    I._heal_agent_settings(cfg, create_if_absent=True)   # creates it
+    assert I._heal_agent_settings(cfg, create_if_absent=True) is None  # 2nd = no-op
+
+
 def test_unreadable_config_is_not_clobbered(canonical, tmp_path):
     cfg = tmp_path / "host" / "settings.json"
     cfg.parent.mkdir(parents=True)

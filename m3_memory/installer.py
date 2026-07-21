@@ -362,24 +362,37 @@ def _memory_entry_needs_repoint(entry: object) -> bool:
     return False
 
 
-def _heal_agent_settings(settings_file: Path, *, force: bool = False) -> Optional[str]:
+def _heal_agent_settings(settings_file: Path, *, force: bool = False,
+                         create_if_absent: bool = False) -> Optional[str]:
     """Repoint a single agent's ``memory`` MCP entry to the canonical config.
 
     This FIXES the historical bug where registration skipped an already-present
     ``memory`` entry even when its paths were dead (the split-brain that survived
     upgrades). Behavior:
-      - no file / unparseable      -> leave alone, report
+      - no file, create_if_absent=False -> leave alone, report (default)
+      - no file, create_if_absent=True  -> create it with the canonical entry
       - no ``memory`` entry        -> add the canonical one
       - entry present but stale    -> repoint (back up first)
       - entry present and healthy  -> no-op (unless force=True)
     Returns a short status string, or None when nothing was actionable.
+
+    ``create_if_absent`` is set by the per-host registrars (Cursor/Cline/Gemini/
+    Antigravity) once they've confirmed the host is present and mkdir'd the parent:
+    those clients create their MCP-settings file lazily (only after the user first
+    opens the settings UI), so a freshly-installed-but-never-configured host has no
+    file yet — without this we'd silently register nothing on exactly the machines
+    a fresh ``m3 setup`` is meant to wire. The ``doctor --fix`` sweep leaves it
+    False so it only ever repoints configs that already exist.
     """
     if not settings_file.is_file():
-        return None
-    try:
-        data = json.loads(settings_file.read_text(encoding="utf-8")) or {}
-    except (OSError, json.JSONDecodeError):
-        return f"[!] {settings_file} is unreadable; skipping (hand-edited?)"
+        if not create_if_absent:
+            return None
+        data: dict = {}
+    else:
+        try:
+            data = json.loads(settings_file.read_text(encoding="utf-8")) or {}
+        except (OSError, json.JSONDecodeError):
+            return f"[!] {settings_file} is unreadable; skipping (hand-edited?)"
 
     servers = data.setdefault("mcpServers", {})
     existing = servers.get("memory")
@@ -398,11 +411,13 @@ def _heal_agent_settings(settings_file: Path, *, force: bool = False) -> Optiona
         return None  # everything healthy — stay quiet
 
     # Back up before any rewrite so the prior config is always restorable.
-    bak = settings_file.with_suffix(settings_file.suffix + ".m3bak")
-    try:
-        bak.write_text(settings_file.read_text(encoding="utf-8"), encoding="utf-8")
-    except OSError:
-        pass
+    # Skip when the file didn't exist (create_if_absent path) — nothing to save.
+    if settings_file.is_file():
+        bak = settings_file.with_suffix(settings_file.suffix + ".m3bak")
+        try:
+            bak.write_text(settings_file.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            pass
 
     parts = []
     if mcp_stale:
@@ -411,6 +426,7 @@ def _heal_agent_settings(settings_file: Path, *, force: bool = False) -> Optiona
         parts.append(f"{verb} 'memory' MCP")
     if hooks_fixed:
         parts.append(f"repointed {hooks_fixed} stale chatlog hook(s)")
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
     settings_file.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return f"[+] {' + '.join(parts)} in {settings_file}"
 
@@ -479,7 +495,7 @@ def _register_gemini_mcp() -> Optional[str]:
     settings_dir = Path.home() / ".gemini"
     settings_file = settings_dir / "settings.json"
     settings_dir.mkdir(parents=True, exist_ok=True)
-    return _heal_agent_settings(settings_file)
+    return _heal_agent_settings(settings_file, create_if_absent=True)
 
 
 def _register_antigravity_mcp() -> Optional[str]:
@@ -500,7 +516,7 @@ def _register_antigravity_mcp() -> Optional[str]:
 
     settings_dir.mkdir(parents=True, exist_ok=True)
     settings_file = settings_dir / "settings.json"
-    return _heal_agent_settings(settings_file)
+    return _heal_agent_settings(settings_file, create_if_absent=True)
 
 
 def _cursor_config_path() -> Path:
@@ -523,7 +539,7 @@ def _register_cursor_mcp() -> Optional[str]:
         return None
     cfg = _cursor_config_path()
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    return _heal_agent_settings(cfg)
+    return _heal_agent_settings(cfg, create_if_absent=True)
 
 
 def _cline_config_path() -> Path:
@@ -557,7 +573,7 @@ def _register_cline_mcp() -> Optional[str]:
     if not cfg.parent.parent.is_dir():
         return None
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    return _heal_agent_settings(cfg)
+    return _heal_agent_settings(cfg, create_if_absent=True)
 
 
 def _fix_npm_global_path() -> Optional[str]:
