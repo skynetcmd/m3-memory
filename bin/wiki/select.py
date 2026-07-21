@@ -32,9 +32,21 @@ EDGE_WEIGHTS: dict[str, float] = {
     "supports": 1.5,
     "related": 1.0,
     "references": 1.0,
+    "co_mentions": 1.0,   # synthetic entity-co-mention edge (see below)
     "precedes": 0.5,
     "follows": 0.5,
 }
+
+# Weight of a synthetic edge created because two core memories mention the same
+# entity. Below `related` (1.0) so an explicit hand-authored link always dominates,
+# but at/above the clustering bind threshold so co-mention alone can still group
+# otherwise-orphan memories into a topic.
+ENTITY_COMENTION_WEIGHT = 1.0
+
+# An entity mentioned by more than this many core memories is too generic to be a
+# useful topic signal (e.g. "m3", "user") — it would over-merge the whole graph.
+# Skip it when building co-mention edges.
+ENTITY_MAX_DEGREE = 8
 
 
 @dataclass
@@ -180,6 +192,53 @@ def load_memory_edges(conn: sqlite3.Connection, ids: set[str]) -> list[Edge]:
         fid, tid = r["from_id"], r["to_id"]
         if fid in ids and tid in ids and fid != tid:
             edges.append(Edge(from_id=fid, to_id=tid, rel=r["relationship_type"] or "related"))
+    edges.sort(key=lambda e: (e.from_id, e.to_id, e.rel))
+    return edges
+
+
+def load_entity_comention_edges(conn: sqlite3.Connection, ids: set[str]) -> list[Edge]:
+    """Synthesize weak binding edges between core memories that share an entity.
+
+    m3 already extracts entities per memory (memory_item_entities). Two memories
+    that mention the same specific entity ("M3_ENGINE_ROOT", "LongMemEval") almost
+    always belong on/near the same page even without a hand-authored edge — this is
+    what rescues the otherwise-large orphan set into real topics.
+
+    Generic entities (mentioned by > ENTITY_MAX_DEGREE core memories) are skipped so
+    a ubiquitous term doesn't collapse the whole graph into one blob. Edges are
+    deterministic (sorted) and carry rel='co_mentions' at a sub-`related` weight.
+    """
+    if not ids:
+        return []
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT entity_id, memory_id FROM memory_item_entities"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []  # entity graph not present on this DB
+
+    # entity_id -> sorted list of core memory ids that mention it
+    by_entity: dict[str, list[str]] = {}
+    for r in rows:
+        mid = r["memory_id"]
+        if mid in ids:
+            by_entity.setdefault(r["entity_id"], []).append(mid)
+
+    pair_seen: set[tuple[str, str]] = set()
+    edges: list[Edge] = []
+    for _eid, members in by_entity.items():
+        members = sorted(set(members))
+        if len(members) < 2 or len(members) > ENTITY_MAX_DEGREE:
+            continue
+        # Connect the members into a chain (not a full clique) — a chain is enough
+        # to place them in one connected component and keeps edge count linear.
+        for a, b in zip(members, members[1:]):
+            key = (a, b)
+            if key in pair_seen:
+                continue
+            pair_seen.add(key)
+            edges.append(Edge(from_id=a, to_id=b, rel="co_mentions"))
     edges.sort(key=lambda e: (e.from_id, e.to_id, e.rel))
     return edges
 

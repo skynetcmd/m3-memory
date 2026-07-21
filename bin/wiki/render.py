@@ -287,34 +287,93 @@ def _render_source(
     return "\n".join(lines).rstrip() + "\n"
 
 
+# Human-facing section headings for the dominant memory type of a topic. A topic's
+# "kind" is the most common type among its members; this groups the index the way a
+# reader thinks ("runbooks", "decisions") rather than by cluster id.
+_TYPE_SECTIONS = [
+    ("belief", "🧠 Knowledge & beliefs"),
+    ("procedure", "📘 Runbooks & procedures"),
+    ("decision", "⚖️ Decisions"),
+    ("reference", "📎 References"),
+    ("security", "🔒 Security"),
+    ("infrastructure", "🖥️ Infrastructure"),
+]
+_TYPE_ORDER = {t: i for i, (t, _) in enumerate(_TYPE_SECTIONS)}
+_TYPE_LABEL = dict(_TYPE_SECTIONS)
+
+
+def _dominant_type(c: Cluster) -> str:
+    counts: dict[str, int] = {}
+    for m in c.members:
+        counts[m.type] = counts.get(m.type, 0) + 1
+    # Deterministic: highest count, then _TYPE_ORDER, then name.
+    return sorted(counts, key=lambda t: (-counts[t], _TYPE_ORDER.get(t, 99), t))[0]
+
+
+def _pin_count(c: Cluster) -> int:
+    return sum(1 for m in c.members if m.pinned)
+
+
 def _render_index(topic_clusters, topic_slugs, files, source_slugs, has_orphans: bool) -> str:
+    total_mem = sum(len(c.members) for c in topic_clusters)
     lines = [
         _fm(["title: Index", "type: index"]),
-        "# m3 Wiki — Index",
+        "# m3 Wiki",
         "",
         BANNER,
         "",
-        f"**{len(topic_clusters)} topics · {len(files.files)} sources.**",
-        "",
-        "## Topics",
+        f"Your knowledge, compiled: **{len(topic_clusters)} topics** covering "
+        f"**{total_mem} memories**, plus **{len(files.files)} source documents**. "
+        "Start with the [[overview]], or jump to a topic below.",
         "",
     ]
+
+    # Surface the highest-signal topics first: pinned content, then largest.
+    def prominence(c: Cluster) -> tuple:
+        top_imp = max((m.importance or 0.0) for m in c.members) if c.members else 0.0
+        return (-_pin_count(c), -len(c.members), -top_imp, c.key)
+
+    starred = sorted(topic_clusters, key=prominence)[:8]
+    if starred:
+        lines.append("## ⭐ Start here")
+        lines.append("")
+        for c in starred:
+            slug = topic_slugs.get(c.key)
+            pin = " 📌" if _pin_count(c) else ""
+            lines.append(f"- [[{slug}]] — {c.members[0].display_title}{pin} "
+                         f"({len(c.members)} memories)")
+        lines.append("")
+
+    # Group the full list by dominant type, in reader order.
+    by_kind: dict[str, list[Cluster]] = {}
     for c in topic_clusters:
-        slug = topic_slugs.get(c.key)
-        top = c.members[0]
-        lines.append(f"- [[{slug}]] — {top.display_title} ({len(c.members)} memories)")
-    if has_orphans:
-        lines.append("- [[orphans]] — unlinked core memories")
-    lines.append("")
+        by_kind.setdefault(_dominant_type(c), []).append(c)
+
+    kinds = sorted(by_kind, key=lambda k: (_TYPE_ORDER.get(k, 99), k))
+    for kind in kinds:
+        heading = _TYPE_LABEL.get(kind, f"📄 {kind.title()}")
+        clusters_here = sorted(by_kind[kind], key=prominence)
+        lines.append(f"## {heading}")
+        lines.append("")
+        for c in clusters_here:
+            slug = topic_slugs.get(c.key)
+            pin = " 📌" if _pin_count(c) else ""
+            lines.append(f"- [[{slug}]] — {c.members[0].display_title}{pin} "
+                         f"({len(c.members)} memories)")
+        lines.append("")
+
     if files.files:
-        lines.append("## Sources")
+        lines.append(f"## 📁 Source documents ({len(files.files)})")
         lines.append("")
         for fn in files.files:
             slug = source_slugs.get(fn.uuid)
             lines.append(f"- [[{slug}]] — {fn.filename}")
         lines.append("")
-    lines.append("## Lint")
+
+    lines.append("## Housekeeping")
     lines.append("")
+    if has_orphans:
+        lines.append("- [[orphans]] — core memories with no links yet")
     lines.append("- [[lint]] — orphans, dangling links, contradictions")
     lines.append("")
     return "\n".join(lines).rstrip() + "\n"

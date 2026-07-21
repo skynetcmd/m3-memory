@@ -22,8 +22,11 @@ from .select import Edge, Mem
 # non-binding so a long chain doesn't collapse into one mega-page.
 _BIND_THRESHOLD = 1.0
 
-# A cluster larger than this is split (by the pure path) to avoid one giant page.
-_MAX_CLUSTER = 25
+# A cluster larger than this is split into chunks to avoid one unreadable page.
+# Set high: a genuine topic of 40-60 related memories reads far better as ONE
+# coherent page than as arbitrarily-sliced sub-pages (Obsidian handles long pages
+# fine). Splitting only kicks in for pathologically large components.
+_MAX_CLUSTER = 60
 
 
 @dataclass

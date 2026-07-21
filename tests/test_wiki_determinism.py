@@ -33,6 +33,10 @@ def _mem_db() -> sqlite3.Connection:
         CREATE TABLE memory_relationships (
             from_id TEXT, to_id TEXT, relationship_type TEXT, created_at TEXT
         );
+        CREATE TABLE memory_item_entities (
+            memory_id TEXT, entity_id TEXT, mention_text TEXT,
+            mention_offset INTEGER DEFAULT 0, confidence REAL DEFAULT 0.85
+        );
         """
     )
     rows = [
@@ -62,6 +66,16 @@ def _mem_db() -> sqlite3.Connection:
     conn.executemany(
         "INSERT INTO memory_relationships (from_id,to_id,relationship_type) VALUES (?,?,?)",
         edges,
+    )
+    # Entity co-mention: m-ddd (an edge-orphan, standalone reference) and m-fff
+    # both mention the same specific entity → they should cluster via co-mention
+    # alone, with no hand-authored edge between them.
+    mie = [
+        ("m-ddd", "ent-specific"),
+        ("m-fff", "ent-specific"),
+    ]
+    conn.executemany(
+        "INSERT INTO memory_item_entities (memory_id, entity_id) VALUES (?,?)", mie
     )
     conn.commit()
     return conn
@@ -114,11 +128,12 @@ def _files_db() -> sqlite3.Connection:
     return conn
 
 
-def _build(use_networkx: bool) -> dict:
+def _build(use_networkx: bool, entity_comention: bool = False) -> dict:
     mem, files = _mem_db(), _files_db()
     try:
         return build_wiki(mem, files, WikiOptions(importance_threshold=0.6,
-                                                  use_networkx=use_networkx))
+                                                  use_networkx=use_networkx,
+                                                  entity_comention=entity_comention))
     finally:
         mem.close()
         files.close()
@@ -182,6 +197,30 @@ def test_evidence_links_to_source():
     src = [t for p, t in vault.items() if p.startswith("sources/")]
     assert len(src) == 1
     assert "The design doc summary." in src[0]
+
+
+def test_entity_comention_binds_orphans():
+    """With entity co-mention on, two memories sharing a specific entity cluster
+    together even with no hand-authored edge — and are NOT left as orphans."""
+    without = _build(use_networkx=False, entity_comention=False)
+    with_ = _build(use_networkx=False, entity_comention=True)
+
+    # Without co-mention, m-ddd (Beta Standalone) is an orphan.
+    assert "Beta Standalone" in without["topics/orphans.md"]
+
+    # With co-mention, m-ddd + m-fff (share ent-specific) land on one topic page,
+    # and m-ddd is no longer an orphan.
+    orphans = with_.get("topics/orphans.md", "")
+    assert "Beta Standalone" not in orphans
+    shared = [t for p, t in with_.items()
+              if p.startswith("topics/")
+              and "m-ddd" in t and "m-fff" in t]
+    assert len(shared) == 1, "m-ddd and m-fff should share one topic via co-mention"
+
+    # Determinism must hold with co-mention on, too.
+    again = _build(use_networkx=False, entity_comention=True)
+    for k in with_:
+        assert with_[k] == again[k]
 
 
 def test_memory_only_when_no_files():

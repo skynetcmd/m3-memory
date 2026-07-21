@@ -26,6 +26,11 @@ class WikiOptions:
     corpora: Optional[list[str]] = None
     exclude_corpora: Optional[list[str]] = None
     limit: int = 5000
+    # When True, memories that share an extracted entity are bound into the same
+    # topic even without a hand-authored edge. This is what collapses the large
+    # "orphan" set into real topics. Synthetic co-mention edges affect CLUSTERING
+    # only — they never appear as rendered "Related"/"Backlinks" (those stay real).
+    entity_comention: bool = True
 
 
 def build_wiki(
@@ -55,6 +60,13 @@ def build_wiki(
         )
         promotions = _select.load_promotions(files_conn, ids)
 
-    clusters = _cluster.cluster(memories, edges, use_networkx=opts.use_networkx)
+    # Cluster over explicit edges PLUS synthetic entity-co-mention edges, so
+    # memories sharing an entity land in one topic. Render, however, only sees the
+    # real edges — synthetic links never surface as "Related"/"Backlinks".
+    cluster_edges = list(edges)
+    if opts.entity_comention:
+        cluster_edges += _select.load_entity_comention_edges(mem_conn, ids)
+
+    clusters = _cluster.cluster(memories, cluster_edges, use_networkx=opts.use_networkx)
 
     return _render.render_pages(clusters, edges, files, promotions)
