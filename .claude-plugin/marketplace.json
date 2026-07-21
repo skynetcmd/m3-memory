@@ -1,6 +1,6 @@
 {
   "name": "skynetcmd",
-  "description": "Plugins by skynetcmd \u2014 local-first AI agent infrastructure.",
+  "description": "Plugins by skynetcmd — local-first AI agent infrastructure.",
   "owner": {
     "name": "skynetcmd",
     "url": "https://github.com/skynetcmd"
@@ -10,7 +10,7 @@
       "name": "m3",
       "displayName": "m3 Memory",
       "source": "./",
-      "description": "Local-first persistent memory for Claude Code \u2014 100+ MCP tools, hybrid search, bitemporal contradictions, GDPR primitives, chatlog auto-capture.",
+      "description": "Local-first persistent memory for Claude Code — 100+ MCP tools, hybrid search, bitemporal contradictions, GDPR primitives, chatlog auto-capture.",
       "homepage": "https://github.com/skynetcmd/m3-memory",
       "keywords": [
         "memory",
