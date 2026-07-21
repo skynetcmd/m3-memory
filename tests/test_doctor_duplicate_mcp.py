@@ -75,3 +75,65 @@ def test_section_renders_without_error(monkeypatch):
     monkeypatch.setattr(I, "_duplicate_mcp_registration", lambda: {})
     monkeypatch.setattr(I, "_live_bridge_counts", lambda: {})
     I._duplicate_registration_section()  # no exception = pass
+
+
+# ── _live_bridge_counts: shim-aware, cross-OS (Windows shim / POSIX direct) ──────
+class _FakeProc:
+    def __init__(self, pid, ppid, cmdline):
+        self.info = {"pid": pid, "ppid": ppid, "cmdline": cmdline}
+
+
+def _fake_psutil(procs):
+    class _P:
+        @staticmethod
+        def process_iter(_attrs):
+            return list(procs)
+    return _P
+
+
+def test_bridge_count_windows_shim_worker_counts_as_one(monkeypatch):
+    """Windows: a bridge is a venv SHIM (parent) + its re-exec'd WORKER (child),
+    both carrying <bridge>.py. The pair is ONE logical bridge — must NOT flag."""
+    procs = [
+        _FakeProc(100, 5, ["python.exe", "grok_bridge.py"]),   # shim, parent=client
+        _FakeProc(101, 100, ["python.exe", "grok_bridge.py"]),  # worker, parent=shim
+    ]
+    monkeypatch.setitem(sys.modules, "psutil", _fake_psutil(procs))
+    assert I._live_bridge_counts() == {}
+
+
+def test_bridge_count_posix_single_process_counts_as_one(monkeypatch):
+    """macOS/Linux: no venv shim — a bridge is ONE process whose parent is the
+    MCP client (not a bridge). Must NOT flag."""
+    procs = [_FakeProc(200, 5, ["python", "grok_bridge.py"])]  # parent=client
+    monkeypatch.setitem(sys.modules, "psutil", _fake_psutil(procs))
+    assert I._live_bridge_counts() == {}
+
+
+def test_bridge_count_genuine_double_launch_is_flagged(monkeypatch):
+    """A REAL double-launch = two independent trees (neither parent a bridge).
+    Must flag 2x — the fix must not blind the check to real duplicates."""
+    procs = [
+        _FakeProc(100, 5, ["python", "grok_bridge.py"]),    # tree 1 root
+        _FakeProc(101, 100, ["python", "grok_bridge.py"]),  # tree 1 worker (shim child)
+        _FakeProc(200, 6, ["python", "grok_bridge.py"]),    # tree 2 root — 2nd launch
+        _FakeProc(201, 200, ["python", "grok_bridge.py"]),  # tree 2 worker
+    ]
+    monkeypatch.setitem(sys.modules, "psutil", _fake_psutil(procs))
+    assert I._live_bridge_counts() == {"grok_bridge.py": 2}
+
+
+def test_bridge_count_no_psutil_returns_empty(monkeypatch):
+    """psutil absent → best-effort empty (the config check is the primary signal),
+    never a crash."""
+    import builtins
+    real_import = builtins.__import__
+
+    def _no_psutil(name, *a, **k):
+        if name == "psutil":
+            raise ImportError("no psutil")
+        return real_import(name, *a, **k)
+
+    monkeypatch.delitem(sys.modules, "psutil", raising=False)
+    monkeypatch.setattr(builtins, "__import__", _no_psutil)
+    assert I._live_bridge_counts() == {}
