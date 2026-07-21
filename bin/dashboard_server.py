@@ -843,18 +843,22 @@ async def get_health(request: Request):
     set_active_db_env(selected_db)
     db_selector_html = build_db_selector_html(selected_db)
     header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="", health_active="active", wiki_active="", db_selector_html=db_selector_html)
-    panel = _render_health_panel()
+    # Render the page shell INSTANTLY with a skeleton, then fetch the real panel
+    # from /api/health on load. collect_health() pings the inference endpoint
+    # (~2-3s) + pipeline stats (~0.7s), so building the panel inline blocked the
+    # whole page for ~4s. The skeleton makes the page appear immediately and each
+    # section shows "gathering data…" until the fetch fills it in.
+    skeleton = _health_skeleton_html()
     content = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<title>M3 System Health</title>"
         f"<style>{STYLE_CSS}</style></head><body>"
         f"{header}"
         "<div style='max-width: 1100px; margin: 0 auto; padding: 1.5rem;'>"
-        f"<div id='healthPanel'>{panel}</div>"
+        f"<div id='healthPanel'>{skeleton}</div>"
         "</div>"
-        # Live auto-refresh: governor load (CPU/RAM/GPU) is volatile, so re-fetch
-        # the panel every 5s (vanilla JS — the health page loads no HTMX). Pauses
-        # while the tab is hidden so a backgrounded tab doesn't poll.
+        # Fetch the real panel immediately, then re-fetch every 5s (governor
+        # load — CPU/RAM/GPU — is volatile). Pauses while the tab is hidden.
         "<script>"
         "(function(){"
         " async function refresh(){"
@@ -862,12 +866,62 @@ async def get_health(request: Request):
         "  try{var r=await fetch('/api/health',{cache:'no-store'});"
         "   if(r.ok)document.getElementById('healthPanel').innerHTML=await r.text();}catch(e){}"
         " }"
+        " refresh();"                      # fill the skeleton as soon as data is ready
         " setInterval(refresh,5000);"
         "})();"
         "</script>"
         "</body></html>"
     )
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+def _health_skeleton_html() -> str:
+    """The instant placeholder shown while collect_health() gathers (~3s).
+
+    Mirrors the real panel's card structure so the page doesn't reflow much, and
+    labels each slow section 'gathering data…' with a shimmer, so the user sees a
+    live, loading page instead of a blank ~4s wait.
+    """
+    def card(title: str, note: str) -> str:
+        return (
+            '<div class="m3-card" style="margin-bottom:1.5rem;">'
+            f'<div class="m3-card-title">{title}'
+            '<span class="gathering">gathering data'
+            '<span class="gathering-dots"></span></span></div>'
+            '<div class="skeleton-lines">'
+            '<div class="skel-line"></div>'
+            '<div class="skel-line" style="width:82%;"></div>'
+            '<div class="skel-line" style="width:64%;"></div>'
+            '</div>'
+            f'<div style="color:hsl(210,12%,52%);font-size:.8rem;margin-top:.4rem;">{note}</div>'
+            '</div>'
+        )
+    return (
+        '<style>'
+        '.gathering{float:right;font-size:.8rem;font-weight:500;color:var(--m3-neon-cyan);'
+        'font-family:"Fira Code",monospace;opacity:.9;}'
+        '.gathering-dots::after{content:"";animation:gather-dots 1.4s steps(4,end) infinite;}'
+        '@keyframes gather-dots{0%{content:"";}25%{content:".";}50%{content:"..";}75%{content:"...";}}'
+        '.skeleton-lines{display:flex;flex-direction:column;gap:.6rem;margin:.4rem 0;}'
+        '.skel-line{height:12px;border-radius:6px;'
+        'background:linear-gradient(90deg,hsla(210,20%,30%,.25) 25%,hsla(180,100%,50%,.15) 50%,hsla(210,20%,30%,.25) 75%);'
+        'background-size:200% 100%;animation:skel-shimmer 1.6s ease-in-out infinite;}'
+        '@keyframes skel-shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}'
+        '@media (prefers-reduced-motion: reduce){'
+        '.skel-line{animation:none;}.gathering-dots::after{animation:none;content:"…";}}'
+        '</style>'
+        '<div class="m3-card" style="margin-bottom:1.5rem;border-left:3px solid var(--m3-neon-cyan);">'
+        '<div style="font-size:1.1rem;font-weight:600;color:var(--m3-neon-cyan);">'
+        '● Gathering system health'
+        '<span class="gathering-dots"></span></div>'
+        '<div style="color:hsl(210,15%,70%);margin-top:.35rem;">'
+        'Probing the inference endpoint, stores, and pipeline — this takes a few '
+        'seconds. Sections fill in below as data arrives.</div></div>'
+        + card("System load (Governor)", "CPU / RAM / GPU pacing")
+        + card("Storage backend", "core · chatlog · files stores")
+        + card("Inference backend (LLM/SLM)", "endpoint + model probe (slowest)")
+        + card("Cognitive pipeline", "queue depths + drain telemetry")
+    )
 
 
 @app.get("/api/health", response_class=HTMLResponse)

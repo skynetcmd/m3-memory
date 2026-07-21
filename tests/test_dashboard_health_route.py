@@ -70,19 +70,25 @@ def test_health_routes_render():
 
     client = TestClient(D.app)
 
+    # The /health PAGE now renders an instant skeleton and fetches the real panel
+    # from /api/health on load (collect_health() pings the inference endpoint and
+    # is slow, so it no longer blocks the page). The page shell shows the loading
+    # placeholder; the data lives in the partial.
     page = client.get("/health")
     assert page.status_code == 200
     body = page.text
-    # Nav tab + verdict pill + the panel title are all present.
-    assert "System Health" in body
-    assert any(v in body for v in
-               ("HEALTHY", "THROTTLED", "REDUCED PERFORMANCE", "NEEDS SETUP", "UNKNOWN"))
-    # Report time is noted; backend name uses tall-man casing (SQLite/PostgreSQL).
-    assert "report time:" in body
+    assert "System Health" in body                 # nav tab
+    assert "Gathering system health" in body       # instant loading skeleton
+    assert "/api/health" in body                   # async fetch is wired
 
+    # The actual health data — verdict pill, report time, stores — is the partial.
     partial = client.get("/api/health")
     assert partial.status_code == 200
-    assert "Database backend" in partial.text
+    pbody = partial.text
+    assert any(v in pbody for v in
+               ("HEALTHY", "THROTTLED", "REDUCED PERFORMANCE", "NEEDS SETUP", "UNKNOWN"))
+    assert "report time:" in pbody
+    assert "Database backend" in pbody
 
 
 def test_existing_tabs_still_render_with_health_nav():
