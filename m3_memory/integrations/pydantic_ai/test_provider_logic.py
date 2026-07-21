@@ -23,7 +23,6 @@ from m3_memory.integrations.pydantic_ai.deps import (  # noqa: E402
     _parse_written_id,
 )
 
-
 # ── mapping ──────────────────────────────────────────────────────────────────
 
 def test_recall_hit_to_dict_surfaces_only_safe_fields():
