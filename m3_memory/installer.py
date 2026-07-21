@@ -2190,24 +2190,53 @@ def _deprecated_env_config_section() -> None:
     print("        until you do).")
 
 
+_BRIDGE_SCRIPTS = ("memory_bridge.py", "grok_bridge.py", "web_research_bridge.py",
+                   "debug_agent_bridge.py", "custom_tool_bridge.py", "mcp_proxy.py")
+
+
 def _live_bridge_counts() -> "dict[str, int]":
-    """Count live m3 bridge processes by script name (memory_bridge, etc.). >1 of
-    any is the process-level signature of double-launch. Returns {} if psutil is
-    unavailable (best-effort — the config check above is the primary signal)."""
+    """Count LOGICAL live m3 bridge processes by script name. >1 of any is the
+    process-level signature of a real double-launch. Returns {} if psutil is
+    unavailable (best-effort — the config check above is the primary signal).
+
+    SHIM-AWARE (Windows): a bridge launched via a pipx/venv ``Scripts\\python.exe``
+    appears as TWO OS processes — the venv launcher SHIM plus the base-interpreter
+    WORKER it re-execs as its child — both carrying the same ``<bridge>.py`` in
+    their cmdline. Counting raw processes therefore reported ``2x`` for every
+    healthy single bridge on Windows (a false "double-launch" that neither
+    ``m3 doctor --fix`` nor a config edit could clear, because nothing was
+    actually doubled). We dedupe by counting only ROOT bridge processes — those
+    whose parent is NOT itself a same-script bridge — so a shim+worker pair counts
+    as ONE logical bridge. A genuine double-launch (two independent trees / two
+    clients) still shows >1 and is flagged."""
     try:
         import psutil
     except Exception:  # noqa: BLE001
         return {}
-    counts: "dict[str, int]" = {}
-    for proc in psutil.process_iter(["name", "cmdline"]):
+
+    # First pass: map every bridge PID -> its matched script.
+    pid_script: "dict[int, str]" = {}
+    ppids: "dict[int, int]" = {}
+    for proc in psutil.process_iter(["pid", "ppid", "cmdline"]):
         try:
             cmd = " ".join(proc.info.get("cmdline") or [])
         except Exception:  # noqa: BLE001
             continue
-        for script in ("memory_bridge.py", "grok_bridge.py", "web_research_bridge.py",
-                       "debug_agent_bridge.py", "custom_tool_bridge.py", "mcp_proxy.py"):
+        for script in _BRIDGE_SCRIPTS:
             if script in cmd:
-                counts[script] = counts.get(script, 0) + 1
+                pid_script[proc.info["pid"]] = script
+                ppids[proc.info["pid"]] = proc.info.get("ppid") or 0
+                break
+
+    # Count only ROOTS: a bridge PID whose parent is NOT itself a same-script
+    # bridge. The venv shim (parent) and its re-exec'd worker (child) share the
+    # script, so the worker is skipped and the pair counts once.
+    counts: "dict[str, int]" = {}
+    for pid, script in pid_script.items():
+        parent = ppids.get(pid, 0)
+        if pid_script.get(parent) == script:
+            continue  # this is the worker child of a same-script shim — not a root
+        counts[script] = counts.get(script, 0) + 1
     return {s: n for s, n in counts.items() if n > 1}
 
 
