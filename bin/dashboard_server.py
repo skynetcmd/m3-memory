@@ -858,16 +858,17 @@ async def get_health(request: Request):
         f"<div id='healthPanel'>{skeleton}</div>"
         "</div>"
         # Fetch the real panel immediately, then re-fetch every 5s (governor
-        # load — CPU/RAM/GPU — is volatile). Pauses while the tab is hidden.
+        # load — CPU/RAM/GPU — is volatile). The INITIAL fetch always runs so the
+        # skeleton fills in even on a background tab; only the recurring poll skips
+        # while hidden (don't waste cycles polling an unfocused tab).
         "<script>"
         "(function(){"
-        " async function refresh(){"
-        "  if(document.hidden)return;"
+        " async function fetchPanel(){"
         "  try{var r=await fetch('/api/health',{cache:'no-store'});"
         "   if(r.ok)document.getElementById('healthPanel').innerHTML=await r.text();}catch(e){}"
         " }"
-        " refresh();"                      # fill the skeleton as soon as data is ready
-        " setInterval(refresh,5000);"
+        " fetchPanel();"                   # initial fill — regardless of visibility
+        " setInterval(function(){ if(!document.hidden) fetchPanel(); },5000);"
         "})();"
         "</script>"
         "</body></html>"
