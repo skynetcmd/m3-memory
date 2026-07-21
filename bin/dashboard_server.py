@@ -855,6 +855,12 @@ async def get_health(request: Request):
         f"<style>{STYLE_CSS}</style></head><body>"
         f"{header}"
         "<div style='max-width: 1100px; margin: 0 auto; padding: 1.5rem;'>"
+        "<div class='page-hero'>"
+        "<div class='hero-icon'>🩺</div>"
+        "<div class='hero-text'>"
+        "<div class='hero-title'>System Health</div>"
+        "<div class='hero-sub'>Backend identity, store integrity, inference status, and governor load — the same signals as <code>m3 doctor</code>.</div>"
+        "</div></div>"
         f"<div id='healthPanel'>{skeleton}</div>"
         "</div>"
         # Fetch the real panel immediately, then re-fetch every 5s (governor
@@ -984,7 +990,6 @@ def _render_health_panel() -> str:
                         'font-size:0.85rem;">All subsystems nominal.</div>')
 
     parts = [
-        '<div class="m3-card-title" style="font-size:1.4rem;margin-bottom:0.35rem;">System Health</div>',
         f'<div style="color:hsl(210,15%,55%);font-size:0.75rem;margin-bottom:0.9rem;">'
         f'report time: {generated}</div>',
         f'<div class="memory-card" style="border-left:4px solid {color};">'

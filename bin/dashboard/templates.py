@@ -214,7 +214,7 @@ STYLE_CSS = """
             font-weight: 600;
             margin-bottom: 1.25rem;
             display: flex;
-            justify-content: space-between;
+            justify-content: flex-start;
             align-items: center;
         }
 
@@ -984,6 +984,102 @@ STYLE_CSS = """
         /* Live status dot text pairs with a subtle glow pulse on its label. */
         .status-dot-container span { text-shadow: 0 0 12px hsla(145, 100%, 45%, 0.3); }
 
+        /* ---- Page hero band: a compact identity header for each page, so a
+           content page opens with a clear title + purpose instead of a big
+           half-empty filter box with a marooned title. ---- */
+        .page-hero {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.1rem 1.4rem;
+            margin-bottom: 1.5rem;
+            border-radius: 14px;
+            background:
+                linear-gradient(120deg, hsla(180,100%,50%,0.10), transparent 60%),
+                linear-gradient(300deg, hsla(270,100%,65%,0.10), transparent 55%),
+                var(--m3-bg-card-glass);
+            border: 1px solid var(--m3-border-glass);
+            border-top: 1px solid hsla(180, 100%, 50%, 0.25);
+            box-shadow: var(--m3-shadow-card);
+            position: relative;
+            overflow: hidden;
+            animation: rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .page-hero::after {
+            content: "";
+            position: absolute;
+            top: -40%; right: -5%;
+            width: 220px; height: 220px;
+            background: radial-gradient(circle, hsla(180,100%,50%,0.12), transparent 70%);
+            pointer-events: none;
+            animation: hero-orb 8s ease-in-out infinite alternate;
+        }
+        @keyframes hero-orb {
+            from { transform: translate(0,0) scale(1); }
+            to   { transform: translate(-24px, 14px) scale(1.15); }
+        }
+        .page-hero .hero-icon {
+            flex: none;
+            width: 46px; height: 46px;
+            display: grid; place-items: center;
+            font-size: 1.5rem;
+            border-radius: 12px;
+            background: linear-gradient(135deg, hsla(180,100%,50%,0.18), hsla(270,100%,65%,0.18));
+            border: 1px solid hsla(180, 100%, 50%, 0.25);
+            box-shadow: 0 0 18px hsla(180, 100%, 50%, 0.15);
+        }
+        .page-hero .hero-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+        .page-hero .hero-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.55rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            background: linear-gradient(135deg, #fff 0%, hsl(180, 80%, 82%) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-hero .hero-sub {
+            font-size: 0.9rem;
+            color: hsl(210, 15%, 68%);
+            font-weight: 400;
+        }
+        .page-hero .hero-stat {
+            margin-left: auto;
+            text-align: right;
+            font-family: 'Fira Code', monospace;
+            flex: none;
+        }
+        .page-hero .hero-stat b {
+            display: block;
+            font-size: 1.4rem;
+            color: var(--m3-neon-cyan);
+            font-variant-numeric: tabular-nums;
+        }
+        .page-hero .hero-stat span {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: hsl(210, 15%, 55%);
+        }
+        @media (max-width: 640px) {
+            .page-hero .hero-stat { display: none; }
+            .page-hero .hero-title { font-size: 1.3rem; }
+        }
+
+        /* Compact filter/toolbar cards: tighter padding + a slim caption instead
+           of a big title marooned in empty space. */
+        .toolbar-card { padding: 1rem 1.25rem !important; }
+        .toolbar-card .m3-card-title {
+            font-size: 0.8rem !important;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: hsl(210, 15%, 60%) !important;
+            margin-bottom: 0.7rem !important;
+            font-weight: 600;
+        }
+        .toolbar-card .m3-card-title::before { height: 13px; width: 4px; }
+
         /* Honor reduced-motion: kill ambient drift, floats, sheens, and
            entrance animation — keep only instant hover feedback. */
         @media (prefers-reduced-motion: reduce) {
@@ -992,6 +1088,8 @@ STYLE_CSS = """
             .m3-card, .metric-card { animation: none; }
             .m3-card::before { display: none; }
             .m3-card-title::before { animation: none; }
+            .page-hero { animation: none; }
+            .page-hero::after { animation: none; }
             .m3-card:hover, .metric-card:hover, .m3-btn:hover { transform: none; }
         }
 """
@@ -1020,7 +1118,17 @@ INDEX_HTML = """
 
     {{ HEADER }}
 
-    <div class="container">
+    <div style="max-width: 1400px; margin: 2rem auto 0; padding: 0 1.5rem;">
+        <div class="page-hero">
+            <div class="hero-icon">🧠</div>
+            <div class="hero-text">
+                <div class="hero-title">Cognitive Graph Explorer</div>
+                <div class="hero-sub">Live view of your memory core — entities, relationships, and the knowledge graph as it evolves.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" style="margin-top: 1rem;">
         <!-- Main Panel (Left Column) -->
         <main>
             <!-- System Stats Grid -->
@@ -1753,9 +1861,16 @@ BROWSE_HTML = """
     {{ HEADER }}
 
     <div class="browse-container">
+        <div class="page-hero">
+            <div class="hero-icon">📚</div>
+            <div class="hero-text">
+                <div class="hero-title">Knowledge Base Browser</div>
+                <div class="hero-sub">Browse and curate your semantic memory — rank-ordered entities with tags, types, and relevance.</div>
+            </div>
+        </div>
         <!-- Filter Bar Panel -->
-        <div class="m3-card" style="margin-bottom: 2rem;">
-            <div class="m3-card-title">Filter & Search Knowledge base</div>
+        <div class="m3-card toolbar-card" style="margin-bottom: 1.5rem;">
+            <div class="m3-card-title">Filter &amp; search</div>
             <div class="filter-panel">
                 <input type="text" name="q" class="m3-input" placeholder="Search keywords in title or content..."
                        hx-get="/api/kb" hx-target="#kbEntries" hx-trigger="keyup changed delay:300ms, filter" hx-include="[name='type'], [name='limit']">
@@ -1973,17 +2088,17 @@ AUDIT_HTML = """
     {{ HEADER }}
 
     <div class="audit-container">
-        <!-- Title & Desc -->
-        <div class="m3-card" style="margin-bottom: 2rem;">
-            <div class="m3-card-title" style="font-size: 1.4rem; color: var(--m3-neon-cyan);">Conflict & Audit Log</div>
-            <p style="font-size: 0.88rem; color: hsl(210, 15%, 75%); line-height: 1.5; margin-top: 0.5rem;">
-                Explore raw bitemporal change timelines. This panel detects, groups, and lets you resolve contradictions, supersession history, and change logs. It shows interactive word-level <strong>Diff Blocks</strong> comparing previous vs. new values.
-            </p>
+        <div class="page-hero">
+            <div class="hero-icon">⚖️</div>
+            <div class="hero-text">
+                <div class="hero-title">Conflict &amp; Audit Log</div>
+                <div class="hero-sub">Bitemporal change timelines — resolve contradictions and supersession history with word-level diff blocks.</div>
+            </div>
         </div>
 
         <!-- Filter Panel -->
-        <div class="m3-card" style="margin-bottom: 2rem;">
-            <div class="m3-card-title">Filter Conflict Timelines</div>
+        <div class="m3-card toolbar-card" style="margin-bottom: 1.5rem;">
+            <div class="m3-card-title">Filter timelines</div>
             <div class="filter-panel">
                 <input type="text" name="q" class="m3-input" placeholder="Search memory ID, title or content keywords..."
                        hx-get="/api/audit/timeline" hx-target="#auditTimeline" hx-trigger="keyup changed delay:300ms, filter" hx-include="[name='limit']">
