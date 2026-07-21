@@ -736,6 +736,264 @@ STYLE_CSS = """
         .m3-alert-banner.banner-files svg {
             color: var(--m3-neon-emerald);
         }
+
+        /* ==================================================================
+           SNAZZ LAYER — additive polish on top of the base system above.
+           Pushes the existing dark-neon identity: ambient background, richer
+           metric cards, entrance choreography, tactile controls. Everything
+           degrades under prefers-reduced-motion.
+           ================================================================== */
+
+        /* Ambient living backdrop (on EVERY page): a drifting neon aurora +
+           a second slow-rotating color wash + a faint dot-grid, fixed behind
+           everything. This is what makes text-heavy pages feel alive, not flat. */
+        body::before {
+            content: "";
+            position: fixed;
+            inset: -25%;
+            z-index: -2;
+            background:
+                radial-gradient(40% 44% at 16% 10%, hsla(180, 100%, 50%, 0.16), transparent 68%),
+                radial-gradient(38% 42% at 84% 6%, hsla(270, 100%, 65%, 0.16), transparent 68%),
+                radial-gradient(48% 52% at 62% 96%, hsla(145, 100%, 45%, 0.11), transparent 70%),
+                radial-gradient(30% 34% at 92% 60%, hsla(38, 100%, 50%, 0.07), transparent 72%);
+            filter: blur(22px);
+            animation: mesh-drift 24s ease-in-out infinite alternate;
+        }
+        /* A very slow rotating conic wash adds depth + perpetual gentle motion. */
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background:
+                conic-gradient(from 0deg at 30% 20%,
+                    hsla(180,100%,50%,0.05), hsla(270,100%,65%,0.05),
+                    hsla(145,100%,45%,0.04), hsla(180,100%,50%,0.05)),
+                radial-gradient(hsla(210, 40%, 98%, 0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 36px 36px;
+            mask-image: radial-gradient(circle at 50% 35%, #000 25%, transparent 88%);
+            -webkit-mask-image: radial-gradient(circle at 50% 35%, #000 25%, transparent 88%);
+            pointer-events: none;
+            animation: wash-spin 60s linear infinite;
+        }
+        @keyframes mesh-drift {
+            0%   { transform: translate3d(0,0,0) scale(1); }
+            50%  { transform: translate3d(2.5%, 2%, 0) scale(1.06); }
+            100% { transform: translate3d(-2%, 2.5%, 0) scale(1.03); }
+        }
+        @keyframes wash-spin {
+            from { background-position: 0% 0%, 0 0; }
+            to   { background-position: 100% 100%, 0 0; }
+        }
+
+        /* Logo gets a soft cyan halo + a gentle idle float. */
+        .logo-img {
+            filter: drop-shadow(0 0 10px hsla(180, 100%, 50%, 0.35));
+            animation: logo-float 5s ease-in-out infinite;
+        }
+        @keyframes logo-float {
+            0%, 100% { transform: translateY(0); }
+            50%      { transform: translateY(-3px); }
+        }
+
+        /* Keep nav labels on one line; tighten padding so all tabs fit the bar. */
+        .nav-link { white-space: nowrap; padding: 0.5rem 0.8rem; }
+
+        /* Nav: sliding neon underline on hover/active instead of a flat box. */
+        .nav-link { position: relative; }
+        .nav-link::after {
+            content: "";
+            position: absolute;
+            left: 12px; right: 12px; bottom: 4px;
+            height: 2px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, var(--m3-neon-cyan), var(--m3-neon-purple));
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: transform 0.28s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+        .nav-link:hover::after,
+        .nav-link.active::after { transform: scaleX(1); }
+
+        /* Cards float up on entry and lift on hover with a brighter glow. */
+        .m3-card {
+            animation: rise-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+            position: relative;
+            overflow: hidden;
+        }
+        /* A faint sheen sweeps across a card on hover. */
+        .m3-card::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, transparent 30%, hsla(180,100%,50%,0.06) 50%, transparent 70%);
+            transform: translateX(-120%);
+            transition: transform 0.7s ease;
+            pointer-events: none;
+        }
+        .m3-card:hover { transform: translateY(-3px); }
+        .m3-card:hover::before { transform: translateX(120%); }
+
+        @keyframes rise-in {
+            from { opacity: 0; transform: translateY(14px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Metric cards: real cards — left accent stripe, gradient floor, lift,
+           and a staggered entrance so the row cascades in. */
+        .metric-card {
+            position: relative;
+            overflow: hidden;
+            text-align: left;
+            background:
+                linear-gradient(160deg, hsla(222, 22%, 13%, 0.65), hsla(222, 22%, 8%, 0.65));
+            transition: var(--m3-transition-smooth);
+            animation: rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        /* ONE consistent card shape: every metric card gets an accent stripe on
+           its left edge and nothing else. The stripe carries meaning — bright +
+           glowing when this metric's DB is the active core, dim when it isn't —
+           so we don't also need the old full-border highlight box (softened
+           below) fighting it. */
+        .metric-card::before {
+            content: "";
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            background: var(--stripe, var(--m3-neon-cyan));
+            opacity: 0.55;
+            transition: opacity 0.3s ease, box-shadow 0.3s ease;
+        }
+        /* Per-metric stripe hue (matches each value's color). */
+        .metrics-grid > .metric-card:nth-child(1) { --stripe: var(--m3-neon-cyan); }
+        .metrics-grid > .metric-card:nth-child(2) { --stripe: var(--m3-neon-purple); }
+        .metrics-grid > .metric-card:nth-child(3) { --stripe: var(--m3-neon-cyan); }
+        .metrics-grid > .metric-card:nth-child(4) { --stripe: var(--m3-neon-amber); }
+        .metrics-grid > .metric-card:nth-child(5) { --stripe: hsl(300, 100%, 65%); }
+        .metrics-grid > .metric-card:nth-child(6) { --stripe: var(--m3-neon-emerald); }
+        /* Active-core cards: light the stripe up (the meaningful state signal). */
+        .metric-card.highlight-main::before,
+        .metric-card.highlight-chatlog::before,
+        .metric-card.highlight-files::before {
+            opacity: 1;
+            box-shadow: 0 0 12px var(--stripe);
+        }
+        /* Soften the old full-border highlight so it no longer competes with the
+           stripe — keep only a faint tint + gentle border glow, one card shape. */
+        .metric-card.highlight-main,
+        .metric-card.highlight-chatlog,
+        .metric-card.highlight-files {
+            border-color: var(--m3-border-glow);
+            box-shadow: none;
+        }
+        .metrics-grid > .metric-card:nth-child(1) { animation-delay: 0.02s; }
+        .metrics-grid > .metric-card:nth-child(2) { animation-delay: 0.08s; }
+        .metrics-grid > .metric-card:nth-child(3) { animation-delay: 0.14s; }
+        .metrics-grid > .metric-card:nth-child(4) { animation-delay: 0.20s; }
+        .metrics-grid > .metric-card:nth-child(5) { animation-delay: 0.26s; }
+        .metrics-grid > .metric-card:nth-child(6) { animation-delay: 0.32s; }
+        .metric-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--m3-border-glow);
+            box-shadow: var(--m3-shadow-glow), var(--m3-shadow-card);
+        }
+        .metric-value {
+            padding-left: 0.5rem;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.01em;
+            text-shadow: 0 0 18px hsla(180, 100%, 50%, 0.18);
+        }
+        .metric-label { padding-left: 0.5rem; }
+
+        /* Every card gets a faint glowing top edge that brightens on hover —
+           gives text-heavy pages (Wiki, Browser, Audit, Health) the same energy
+           as the metric grid, not just a flat rectangle. */
+        .m3-card {
+            border-top: 1px solid hsla(180, 100%, 50%, 0.12);
+        }
+        .m3-card::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 10%; right: 10%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--m3-neon-cyan), transparent);
+            opacity: 0.35;
+            transition: opacity 0.3s ease;
+        }
+        .m3-card:hover::after { opacity: 0.9; }
+
+        /* Section titles get a small neon tick + a wider tracking for a
+           "control-panel" read. The tick breathes so even a static text page
+           has a pulse of life. */
+        .m3-card-title::before {
+            content: "";
+            display: inline-block;
+            width: 6px; height: 18px;
+            margin-right: 0.6rem;
+            border-radius: 2px;
+            background: linear-gradient(180deg, var(--m3-neon-cyan), var(--m3-neon-purple));
+            vertical-align: -3px;
+            box-shadow: 0 0 8px hsla(180, 100%, 50%, 0.4);
+            animation: tick-breathe 3.5s ease-in-out infinite;
+        }
+        @keyframes tick-breathe {
+            0%, 100% { box-shadow: 0 0 6px hsla(180, 100%, 50%, 0.3); opacity: 0.85; }
+            50%      { box-shadow: 0 0 14px hsla(180, 100%, 50%, 0.7); opacity: 1; }
+        }
+
+        /* Buttons: springier, with a glow on hover. */
+        .m3-btn {
+            transition: var(--m3-transition-smooth);
+        }
+        .m3-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px hsla(180, 100%, 50%, 0.25);
+        }
+        .m3-btn:active { transform: translateY(0); }
+
+        /* Diagnostics / task links read as tappable chips, not bare text. */
+        .diag-link, .task-link, a.m3-task {
+            border: 1px solid var(--m3-border-glass);
+            border-radius: 8px;
+            padding: 0.5rem 0.75rem;
+            transition: var(--m3-transition-smooth);
+        }
+        .diag-link:hover, .task-link:hover, a.m3-task:hover {
+            border-color: var(--m3-border-glow);
+            background: hsla(180, 100%, 50%, 0.06);
+            transform: translateY(-1px);
+        }
+
+        /* Tame destructive actions: the "Purge" button no longer dominates —
+           outlined danger by default, filling red only on hover/intent. */
+        button[onclick*="forget"], .btn-danger, .m3-btn-danger,
+        button[hx-post*="forget"] {
+            background: transparent !important;
+            color: hsl(4, 90%, 68%) !important;
+            border: 1px solid hsla(4, 90%, 60%, 0.5) !important;
+            box-shadow: none !important;
+        }
+        button[onclick*="forget"]:hover, .btn-danger:hover, .m3-btn-danger:hover,
+        button[hx-post*="forget"]:hover {
+            background: linear-gradient(135deg, hsl(4, 85%, 55%), hsl(18, 90%, 52%)) !important;
+            color: #fff !important;
+            box-shadow: 0 4px 18px hsla(4, 85%, 55%, 0.45) !important;
+        }
+
+        /* Live status dot text pairs with a subtle glow pulse on its label. */
+        .status-dot-container span { text-shadow: 0 0 12px hsla(145, 100%, 45%, 0.3); }
+
+        /* Honor reduced-motion: kill ambient drift, floats, sheens, and
+           entrance animation — keep only instant hover feedback. */
+        @media (prefers-reduced-motion: reduce) {
+            body::before, body::after { animation: none; }
+            .logo-img { animation: none; }
+            .m3-card, .metric-card { animation: none; }
+            .m3-card::before { display: none; }
+            .m3-card-title::before { animation: none; }
+            .m3-card:hover, .metric-card:hover, .m3-btn:hover { transform: none; }
+        }
 """
 
 # --- Explorer (View 1) Layout Template ---
@@ -945,6 +1203,41 @@ INDEX_HTML = """
 
     <!-- Canvas Simulation JS -->
     <script>
+        // --- Metric count-up: animate .metric-value numbers when the stats
+        // grid swaps in (HTMX). Respects prefers-reduced-motion. Purely visual;
+        // the final rendered number is always the exact server value. ---
+        (function () {
+            const reduce = window.matchMedia &&
+                window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            function countUp(el) {
+                const raw = (el.textContent || "").trim();
+                // Only animate pure integers (optionally comma-grouped); leave
+                // things like "0 → HEALTH" or "419 lines" untouched.
+                if (!/^[0-9][0-9,]*$/.test(raw)) return;
+                const target = parseInt(raw.replace(/,/g, ""), 10);
+                if (!isFinite(target) || target <= 0) return;
+                if (reduce || target < 2) { el.textContent = target.toLocaleString(); return; }
+                const dur = 750, t0 = performance.now();
+                function frame(now) {
+                    const p = Math.min(1, (now - t0) / dur);
+                    const eased = 1 - Math.pow(1 - p, 3); // ease-out cubic
+                    el.textContent = Math.round(target * eased).toLocaleString();
+                    if (p < 1) requestAnimationFrame(frame);
+                    else el.textContent = target.toLocaleString();
+                }
+                requestAnimationFrame(frame);
+            }
+            function animateGrid(root) {
+                (root || document).querySelectorAll(".metrics-grid .metric-value")
+                    .forEach(countUp);
+            }
+            document.body.addEventListener("htmx:afterSwap", function (e) {
+                if (e.target && e.target.classList &&
+                    e.target.classList.contains("metrics-grid")) animateGrid(e.target);
+            });
+            document.addEventListener("DOMContentLoaded", function () { animateGrid(); });
+        })();
+
         const canvas = document.getElementById("graphCanvas");
         const ctx = canvas.getContext("2d");
 
