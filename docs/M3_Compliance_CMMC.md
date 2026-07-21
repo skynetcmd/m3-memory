@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> CMMC 2.0 Alignment
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> CMMC 2.0 Alignment
 
 > Last updated: May 2026. How M3 Memory supports defense-contractor security controls.
 

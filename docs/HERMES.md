@@ -1,4 +1,4 @@
-# ⚡ M3 Memory Integration for Hermes Agent
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> ⚡ M3 Memory Integration for Hermes Agent
 
 Welcome! This guide walks you through integrating **M3 Memory** (State-of-the-Art, vector-accelerated rich memory) with **Hermes Agent**.
 

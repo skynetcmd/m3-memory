@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Sovereign Memory Systems Comparison
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Sovereign Memory Systems Comparison
 
 > Last updated: 2026-07-17 (m3 row refreshed to 2026.7.17.0). Honest dimensional comparison of local-first / sovereign memory substrates. Competitor benchmark figures are vendor/author self-reported and verified against primary sources through 2026-06-23 (see the sourcing note under Retrieval & Extraction); they are not independently audited and may be stale — corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).
 

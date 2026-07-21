@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Welcome to M3 Memory!
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Welcome to M3 Memory!
 
 If you've ever felt like your AI agent is a "stranger" every time you start a new session—forgetting your architectural preferences, your naming conventions, or that specific bug you fixed yesterday—**you're in the right place.**
 

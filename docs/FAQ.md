@@ -1,4 +1,4 @@
-# M3 Memory FAQ
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory FAQ
 
 ## What is M3?
 

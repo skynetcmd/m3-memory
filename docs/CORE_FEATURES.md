@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
 > 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 2,179 tests across 180 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
 

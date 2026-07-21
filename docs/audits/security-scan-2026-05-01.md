@@ -1,4 +1,4 @@
-# <a href="../../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Security Scan — 2026-05-01
+# <a href="../../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Security Scan — 2026-05-01
 
 > Snapshot of M3 Memory's security posture run by the maintainers. Reproducible — run the same tools yourself and compare. See [`docs/SECURITY.md`](../SECURITY.md) for the disclosure policy and [`docs/audits/`](.) for the full audit history.
 

@@ -1,4 +1,4 @@
-# M3 Web Dashboard
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Web Dashboard
 
 A built-in, local web control panel for M3 — browse memory, explore the
 interactive knowledge graph, audit conflicts, and watch system health and load.

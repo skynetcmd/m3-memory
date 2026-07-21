@@ -1,4 +1,4 @@
-# M3 Capability Matrix
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Capability Matrix
 
 > **Generated** by `bin/gen_capability_matrix.py` from `docs/tools/MCP_CATALOG.json` — do not edit by hand; re-run after any tool-catalog change. This is the single scannable index of *what M3 can do* and *which tool does it*, for humans, search engines, and AI agents.
 

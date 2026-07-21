@@ -1,4 +1,4 @@
-# The m3 Memory Model
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> The m3 Memory Model
 
 > **One-page answer to: "Is this a durable, governed knowledge base — or a vector
 > store with RAG sugar?"** It's the former. This doc is the synthesizing index;

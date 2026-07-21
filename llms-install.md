@@ -1,4 +1,4 @@
-# m3-memory — install guide for LLM agents (Cline)
+# <a href="README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3-memory — install guide for LLM agents (Cline)
 
 This file tells an AI agent (e.g. Cline) exactly how to install and register
 **m3-memory** as an MCP server, with no human in the loop. Follow the steps for

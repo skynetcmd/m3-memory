@@ -1,4 +1,4 @@
-# Chat Log Subsystem: Architecture & Operations Guide
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Chat Log Subsystem: Architecture & Operations Guide
 
 ## 1. Overview
 

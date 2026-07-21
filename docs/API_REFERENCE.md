@@ -1,4 +1,4 @@
-# M3 Memory: API Reference
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory: API Reference
 
 All 100+ MCP tools exposed by the memory bridge (`bin/memory_bridge.py`) and the MCP proxy (`bin/mcp_proxy.py`), including the `files_*` tools that ship the files-memory layer (directory ingestion, hierarchical chunking, ascension, staleness review, multi-corpus management). For behavioral rules and usage guidance, see [AGENT_INSTRUCTIONS.md](AGENT_INSTRUCTIONS.md). For the full inventory see [MCP_TOOLS.md](MCP_TOOLS.md).
 

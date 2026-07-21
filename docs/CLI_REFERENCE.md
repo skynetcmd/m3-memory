@@ -1,4 +1,4 @@
-# CLI Reference
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> CLI Reference
 
 This document lists every command-line entry point that touches a SQLite database and how each one selects its target DB.
 

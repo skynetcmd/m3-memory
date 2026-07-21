@@ -1,4 +1,4 @@
-# m3-memory as a Google Antigravity plugin
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> m3-memory as a Google Antigravity plugin
 
 `m3-memory` ships as a Google Antigravity plugin in the same repo as the Python package. The plugin auto-registers the memory MCP, wires up chatlog hooks, and adds 15 `/m3:*` slash commands as native Skills plus two curator subagents (`m3:curate-memory` for the memory store and `m3:curate-chatlog` for captured agentic-coding conversations).
 

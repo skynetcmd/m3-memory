@@ -1,4 +1,4 @@
-# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/icon.svg" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Multi-Agent Orchestration
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Multi-Agent Orchestration
 
 M3 Memory provides the persistent memory and coordination substrate for multi-agent workflows. Agents share knowledge through scoped memory, pass context through handoffs and inboxes, and coordinate work through tasks, notifications, and a recursive task tree.
 

@@ -1,4 +1,4 @@
-# How to Upgrade m3-memory
+# <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> How to Upgrade m3-memory
 
 This guide covers upgrading an existing checkout in place — pulling new code, updating dependencies, running schema migrations, and keeping the host OS current. For a fresh install see [`docs/install_linux.md`](install_linux.md), [`docs/install_macos.md`](install_macos.md), or [`docs/install_windows.md`](install_windows.md).
 
