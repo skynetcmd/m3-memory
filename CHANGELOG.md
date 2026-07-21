@@ -21,6 +21,34 @@ the policy is forward-going only.
 
 _Nothing pending — all changes below have shipped in a tagged release._
 
+## [2026.7.21.1] — 2026-07-21 — Memory Wiki
+
+### Added
+- **`m3 wiki` — an auto-generated wiki from your memories.** `m3 wiki generate`
+  compiles your canonical memories (pinned, high-confidence, beliefs, procedures)
+  and indexed files into a browsable, interlinked Markdown vault under
+  `<engine_root>/wiki`. Related memories cluster into topic pages via the memory
+  graph and shared entities; every page carries real frontmatter, an evidence
+  section linking down to the source file a fact came from, and backlinks.
+  Deterministic output; re-run to refresh. `m3 wiki status` reports the vault.
+- **Standard Markdown links + Obsidian-ready.** The vault uses portable
+  `[text](page.md#section)` hyperlinks (not Obsidian-only `[[wikilinks]]`), so it
+  reads in any Markdown viewer — GitHub, a browser — while still opening cleanly
+  as an Obsidian vault (graph view and backlinks work out of the box).
+- **Offline HTML viewer.** `m3 wiki generate --html` writes a self-contained
+  `wiki.html` you can open from a `file://` URL and click through with no server,
+  no network, no dependencies.
+- **Optional prose summaries.** `m3 wiki generate --synthesize` adds an LLM-written
+  lede to each topic via a local chat endpoint; cached, and it degrades to the
+  member list when no model is reachable. `--exclude REGEX` drops matching
+  memories; `pip install "m3-memory[wiki]"` adds networkx for tighter clustering.
+- **Memory Wiki in the dashboard.** A new dashboard tab shows the generated wiki
+  inline, or — when none exists — OS-specific instructions for generating it.
+- **Dashboard visual refresh.** The header now uses the m3 logo (inlined so it
+  renders offline), each tab opens with an identity hero, System Health loads
+  instantly with a "gathering data…" skeleton while probes run, and the
+  content tabs adopt a restrained, high-contrast theme.
+
 ## [2026.7.21.0] — 2026-07-21 — Cursor & Cline first-class support
 
 ### Added

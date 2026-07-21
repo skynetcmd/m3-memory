@@ -25,7 +25,7 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 
 ## ▸ Sovereignty & Integrity (M3 strengths)
 
-| Dimension | m3-memory<br>(2026.7.21.0) | agentmemory<br>(V4) | Chronos<br>(High/Res) | Hindsight | Mastra OM | Mem0 | Memento | MemPalace ⚠️ |
+| Dimension | m3-memory<br>(2026.7.21.1) | agentmemory<br>(V4) | Chronos<br>(High/Res) | Hindsight | Mastra OM | Mem0 | Memento | MemPalace ⚠️ |
 |---|---|---|---|---|---|---|---|---|
 | **[Sovereignty (Main)](#sovereignty-main)** | 🛡️ **Full Sovereign** | 🛡️ **Full Sovereign** | ⚖️ **On-Prem** | ⚖️ **High Local** | ⚖️ **Hybrid** | 🔻 **Cloud-Tied** | ⚖️ **Config-Local** | 🛡️ **Full Verbatim** |
 | ↳ *Data Residency* | 🏆 Local SQLite (or PostgreSQL primary) | ✅ Local SQLite | ✅ Local Files | ✅ Local Files | ⚖️ Postgres / Container | 🔻 Cloud DB | ✅ Local SQLite | ✅ Local SQLite |
