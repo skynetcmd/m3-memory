@@ -52,7 +52,16 @@ def main() -> int:
     domains = ORDER + [d for d in sorted(by_domain) if d not in ORDER]
 
     lines: list[str] = []
-    lines.append("# M3 Capability Matrix")
+    # Logo header (top-left, linked to README) matching the house style used
+    # across the user-facing docs. Emitted by the generator so the file stays
+    # both freshly-generated AND consistently branded (a hand-added header would
+    # be stripped on the next regen and fail the freshness test).
+    lines.append(
+        '# <a href="../README.md"><img '
+        'src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" '
+        'height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> '
+        "M3 Capability Matrix"
+    )
     lines.append("")
     lines.append(
         "> **Generated** by `bin/gen_capability_matrix.py` from "

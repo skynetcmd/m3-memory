@@ -86,7 +86,7 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
 | **Retrieval Accuracy** | State-of-the-art for a local-first substrate — **99.2% session-hit-rate @ k=10, 100% @ k=20** on LongMemEval-S (no oracle routing), with the correct session as the **#1 result for ~92% of questions**. See [Benchmarks](#-benchmarks). |
 | **Context Efficiency** | Exposes 100+ tools but occupies just **~1.8% of a 200K context window** at startup — lazy domain-gating loads the rest on demand. |
-| **Maturity** | Stable, battle-tested core engine (2,179 tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
+| **Maturity** | Stable, battle-tested core engine (2,501 tests) that's safe to build on today; new features and integrations are added actively. **SQLite by default; PostgreSQL as a first-class primary backend** (`M3_DB_BACKEND=postgres`) via a pluggable SQL storage seam. (See [features.json](docs/features.json)) |
 
 ---
 
@@ -292,7 +292,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ## 🛡️ Why Trust This
 
 *   **Benchmarked Retrieval:** State-of-the-art for a local-first substrate — 99.2% session-hit-rate @ k=10, 100% @ k=20 on LongMemEval-S — with a published, reproducible methodology and no oracle routing. See [Benchmarks](#-benchmarks).
-*   **Robust Coverage:** Verified with **2,179 tests across 180 test files** spanning search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite.
+*   **Robust Coverage:** Verified with **2,501 tests across 192 test files** spanning search, sync, GDPR lifecycle, and files ingestion — run with warnings-as-errors, so a new warning fails the suite.
 *   **Audit Reports:** Regular vulnerability reports (Bandit, secrets scans, pip-audit) published directly under [`docs/audits/`](docs/audits/).
 *   **Explainable Retrieval:** No black-box queries; retrieval math is open, readable, and scoring parameters are outputted directly.
 *   **Open Source:** Apache 2.0 licensed, free, with no SaaS walls or usage limits.

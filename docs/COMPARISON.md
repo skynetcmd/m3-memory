@@ -39,12 +39,12 @@ If "the LLM should decide what's worth remembering" matches your worldview, Mem0
 
 ## ⚔️ M3-Memory vs Mem0
 
-Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memory offers a **superset of Mem0's capabilities** and ships a drop-in Mem0-compatible surface (`from m3_memory.langchain import Memory` — a one-line import swap), so LangChain/LangGraph users get everything Mem0 does plus contradiction supersession, bitemporal history, commanded forgetting, and hybrid+graph retrieval — locally, with no server or API key. M3 also backs **CrewAI** (native `StorageBackend`) and **PydanticAI** (drop-in tools + a formal `M3MemoryToolset`) from the same store — so one local memory serves LangChain, CrewAI, and PydanticAI agents at once. And it serves developers using **desktop coding agents** (Claude Code, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
+Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memory offers a **superset of Mem0's capabilities** and ships a drop-in Mem0-compatible surface (`from m3_memory.langchain import Memory` — a one-line import swap), so LangChain/LangGraph users get everything Mem0 does plus contradiction supersession, bitemporal history, commanded forgetting, and hybrid+graph retrieval — locally, with no server or API key. M3 also backs **CrewAI** (native `StorageBackend`) and **PydanticAI** (drop-in tools + a formal `M3MemoryToolset`) from the same store — so one local memory serves LangChain, CrewAI, and PydanticAI agents at once. And it serves developers using **desktop coding agents** (Claude Code, Cursor, Cline, Gemini CLI, Aider) who need memory that is private, offline-capable, and speaks MCP natively.
 
 | Feature | M3-Memory | Mem0 |
 |---------|-----------|------|
 | **Primary deployment** | 👑 Local SQLite — works fully offline, zero data egress | Cloud API (self-host is possible but not the happy path) |
-| **MCP support** | 👑 Native — 100+ tools, zero config in Claude Code / Gemini CLI | No native MCP; requires a custom wrapper |
+| **MCP support** | 👑 Native — 100+ tools, zero config in Claude Code / Cursor / Cline / Gemini CLI | No native MCP; requires a custom wrapper |
 | **Search algorithm** | FTS5 (BM25) + vector cosine + MMR diversity re-ranking | Vector search + knowledge graph traversal |
 | **Contradiction handling** | 👑 Automatic heuristic detection on write (cosine + title) **plus** a deterministic explicit `memory_supersede` — old memory soft-deleted, `supersedes` edge recorded, history preserved | Basic deduplication; no strong conflict resolution |
 | **Bitemporal history** | 👑 `valid_from` / `valid_to` on every memory — query state as of any past date | No |
@@ -66,11 +66,11 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **PydanticAI integration** | 👑 Native — two tiers: drop-in tools + auto-recall (`register_m3_tools`, `m3_recall_processor`) **and** a formal `M3MemoryToolset` (a real PydanticAI `AbstractToolset`); `pip install m3-memory[pydantic-ai]`, runs on Python 3.14 | ❌ None |
 | **Feature coverage** | **Superset of Mem0** — everything Mem0 does (`.add()`/`.search()`) plus contradiction supersession, bitemporal `as_of`, commanded forgetting, hybrid+graph retrieval | Baseline |
 | **Cost** | Free, Apache 2.0 licensed | Free tier + $249/mo Pro |
-| **Stars** | Newer project (fewer stars); 2,179-test codebase with SOTA local-first retrieval (99.2% SHR@10) | 20k+ (mindshare leader) |
+| **Stars** | Newer project (fewer stars); 2,501-test codebase with SOTA local-first retrieval (99.2% SHR@10) | 20k+ (mindshare leader) |
 
 ### When to choose M3-Memory over Mem0
 
-- You use Claude Code, Gemini CLI, Aider, or any MCP-compatible agent
+- You use Claude Code, Cursor, Cline, Gemini CLI, Aider, or any MCP-compatible agent
 - Your data cannot leave your machine (enterprise, regulated industries, personal privacy)
 - You need agents that stay factually consistent (contradiction detection matters)
 - You want compliance tooling (GDPR forget/export) without building it yourself
@@ -111,7 +111,7 @@ M3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for
 
 ### When to choose M3-Memory over Letta
 
-- You use Claude Code, Gemini CLI, Aider, or any existing MCP agent and want to add memory **without rewriting your stack**
+- You use Claude Code, Cursor, Cline, Gemini CLI, Aider, or any existing MCP agent and want to add memory **without rewriting your stack**
 - You need **automatic** contradiction resolution, not agent-driven memory management
 - You need GDPR forget/export as compliance tooling
 - You want 100% local, offline-capable memory with no cloud dependency
@@ -232,7 +232,7 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 
 ### When to choose M3-Memory over LangChain Memory
 
-- You use Claude Code, Gemini CLI, Aider, or any non-LangChain MCP agent
+- You use Claude Code, Cursor, Cline, Gemini CLI, Aider, or any non-LangChain MCP agent
 - You need a single memory backend that works across multiple agent frameworks
 - You want automatic contradiction detection without writing custom procedural memory logic
 - GDPR compliance tooling is a requirement
@@ -289,7 +289,7 @@ for how we hold every entry (including M3's own) to source-of-truth.
 
 M3 Memory targets a specific intersection that other tools don't fully cover:
 
-- **MCP-native** — works with Claude Code, Gemini CLI, Aider, and any MCP agent without integration code
+- **MCP-native** — works with Claude Code, Cursor, Cline, Gemini CLI, Aider, and any MCP agent without integration code
 - **Local-first** — all data stays on your machine; fully offline-capable
 - **Automatic consistency** — contradiction detection handles conflicting facts without agent-side logic
 - **Compliant** — GDPR forget and export are built-in MCP tools

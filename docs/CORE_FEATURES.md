@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Memory — Core Features
 
-> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 2,179 tests across 180 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
+> 100+ MCP tools, lazy-loaded to just ~1.8% of a 200K context window at startup. SOTA local-first retrieval (99.2% SHR@10, 100% @ k=20 on LongMemEval-S). 2,501 tests across 192 files. Pluggable storage backend (SQLite default / PostgreSQL primary). Framework adapters for LangChain, CrewAI, and PydanticAI. Hybrid search with diversity ranking. Directory ingestion & file-memory. GDPR compliance. Multi-agent orchestration. Zero cloud dependency.
 
 For agent behavioral rules and the full tool reference, see [AGENT_INSTRUCTIONS.md](./AGENT_INSTRUCTIONS.md).
 
@@ -145,7 +145,7 @@ Hourly automated sync.
 
 ## 🔌 Portable & Interoperable
 
-- **MCP-native** — works with Claude Code, Gemini CLI, Aider, or any MCP client out of the box
+- **MCP-native** — works with Claude Code, Cursor, Cline, Gemini CLI, Aider, Antigravity, OpenCode, or any MCP client out of the box
 - **LangChain / LangGraph** — five drop-in surfaces: a **Mem0 replacement** (one-line import swap), LangMem-compatible `M3Store`, the `M3Saver` LangGraph checkpointer (pause/resume/time-travel), chat-message history, and a RAG retriever — plus LCEL-native `MemoryWrite`/`MemoryRetrieve`. `pip install m3-memory[langchain]`; see [docs/integrations/LANGCHAIN.md](integrations/LANGCHAIN.md)
 - **CrewAI (v1.x)** — a native `StorageBackend`: `Memory(storage=M3StorageBackend(user_id=…))`. `pip install m3-memory[crewai]`; a CrewAI-written memory stays searchable by your other m3 agents. See [the CrewAI guide](../m3_memory/integrations/crewai/README.md)
 - **PydanticAI** — two tiers: `register_m3_tools` + `m3_recall_processor()` for drop-in tools and auto-recall, and a formal `M3MemoryToolset` (a real PydanticAI `AbstractToolset`). `pip install m3-memory[pydantic-ai]`; runs on Python 3.14. See [the PydanticAI guide](../m3_memory/integrations/pydantic_ai/README.md)
@@ -157,7 +157,7 @@ Hourly automated sync.
 
 ## 🧪 Tested and Measured
 
-### 2,179 Tests (warnings-as-errors)
+### 2,501 Tests (warnings-as-errors)
 
 Every feature is tested — not just the happy path (the suite runs with
 `filterwarnings=error`, so a new warning fails the build):
