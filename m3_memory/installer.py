@@ -503,6 +503,64 @@ def _register_antigravity_mcp() -> Optional[str]:
     return _heal_agent_settings(settings_file)
 
 
+def _cursor_config_path() -> Path:
+    """Cursor's global MCP config — ~/.cursor/mcp.json (standard mcpServers
+    schema; project-level .cursor/mcp.json overrides but we manage the global)."""
+    return Path.home() / ".cursor" / "mcp.json"
+
+
+def _register_cursor_mcp() -> Optional[str]:
+    """Register/repoint the ``memory`` MCP entry in Cursor's ~/.cursor/mcp.json.
+
+    Cursor uses the standard ``mcpServers`` schema (command/args/env), so the same
+    self-healing path as Claude/Gemini applies. Only acts when Cursor is present
+    (a ``~/.cursor`` dir), so a box without Cursor stays quiet.
+
+    NOTE: Cursor caps ~40 active tools across all MCP servers; m3 exposes 100+ but
+    lazy-loads (a small essential set + on-demand domains via tools_load_domain),
+    so the default surface stays under the ceiling."""
+    if not (Path.home() / ".cursor").is_dir():
+        return None
+    cfg = _cursor_config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    return _heal_agent_settings(cfg)
+
+
+def _cline_config_path() -> Optional[Path]:
+    """Cline's MCP settings file, under the VS Code user-data dir:
+    <user-data>/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
+    Returns None when the VS Code Code/User dir can't be located."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA")
+        code_user = Path(base) / "Code" / "User" if base else None
+    elif sys.platform == "darwin":
+        code_user = Path.home() / "Library" / "Application Support" / "Code" / "User"
+    else:
+        code_user = Path.home() / ".config" / "Code" / "User"
+    if code_user is None:
+        return None
+    return (code_user / "globalStorage" / "saoudrizwan.claude-dev"
+            / "settings" / "cline_mcp_settings.json")
+
+
+def _register_cline_mcp() -> Optional[str]:
+    """Register/repoint the ``memory`` MCP entry in Cline's cline_mcp_settings.json.
+
+    Cline (VS Code extension) uses the standard ``mcpServers`` schema, so the same
+    self-healing path applies. Only acts when the Cline extension's settings dir
+    exists, so a box without Cline (or without VS Code) stays quiet."""
+    cfg = _cline_config_path()
+    if cfg is None:
+        return None
+    # Only wire Cline if the extension's globalStorage dir already exists — its
+    # parent (…/saoudrizwan.claude-dev) is created by Cline on first run. Creating
+    # it ourselves would leave a stray dir on boxes that don't have Cline.
+    if not cfg.parent.parent.is_dir():
+        return None
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    return _heal_agent_settings(cfg)
+
+
 def _fix_npm_global_path() -> Optional[str]:
     """Append ~/.npm-global/bin to ~/.profile for non-interactive shells.
 
@@ -1166,6 +1224,8 @@ def _post_install(
             _run_main_migrations(bridge),
             _register_gemini_mcp(),
             _register_antigravity_mcp(),
+            _register_cursor_mcp(),
+            _register_cline_mcp(),
             _sqlite3_cli_hint(),
             _fix_npm_global_path(),
         ) if m
@@ -1634,6 +1694,8 @@ def _known_agent_settings() -> "list[tuple[str, Path]]":
         # the canonical resolver's primary path (doctor/wizard already use it).
         ("OpenCode",    home / ".config" / "opencode" / "opencode.json"),
         ("Aider",       home / ".aider" / "settings.json"),
+        ("Cursor",      _cursor_config_path()),
+        *( [("Cline", _cline_config_path())] if _cline_config_path() else [] ),
     ]
 
 
@@ -1681,6 +1743,8 @@ def _client_config_sources() -> "dict[str, list[Path]]":
         # Windows), not ~/.opencode/settings.json — the old path matched nothing.
         "OpenCode":    _opencode_source_paths(),
         "Aider":       [home / ".aider" / "settings.json"],
+        "Cursor":      [_cursor_config_path()],
+        **({"Cline": [_cline_config_path()]} if _cline_config_path() else {}),
     }
 
 
