@@ -80,7 +80,7 @@ Instead of every tool keeping its own throwaway context, M3 is a **shared, evolv
 
 | Feature | Details |
 | :--- | :--- |
-| **Works With** | Claude Code · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · LangChain/LangGraph · CrewAI · PydanticAI · Any MCP Agent |
+| **Works With** | Claude Code · Cursor · Cline · Gemini CLI · Aider · Google Antigravity · OpenCode · Hermes · LangChain/LangGraph · CrewAI · PydanticAI · Any MCP Agent |
 | **M3 Is** | A persistent memory layer · An MCP server · A hybrid retrieval engine · A bitemporal knowledge base |
 | **M3 Is Not** | An LLM · A chatbot · A plain vector database · A RAG framework · An IDE |
 | **Core Promise** | Private, offline-capable, locally owned memory shared securely across all your developer tools — with FIPS 140-3-ready crypto and atomic multi-agent writes for regulated and multi-agent environments. |
@@ -121,7 +121,7 @@ If you are developing inside python environments:
 pip install m3-memory
 m3 setup
 ```
-The `m3 setup` wizard automatically scans your `PATH` for active agents (Claude Code, Gemini CLI, OpenCode, OpenClaw), installs settings files/hooks, provisions the sovereign CPU embedder, and performs a system diagnostic.
+The `m3 setup` wizard automatically **detects your installed agents** — Claude Code, Cursor, Cline, Gemini CLI, OpenCode, Antigravity, OpenClaw, Hermes — and wires the m3 `memory` MCP server into each, installs settings files/hooks, provisions the sovereign CPU embedder, and performs a system diagnostic. Detection and wiring re-run on every `m3 update`/`m3 setup`, and `m3 doctor --fix` repoints any config whose paths have moved — so an agent you install *later* gets picked up automatically the next time you run setup or update.
 
 ### Integrating with AI Coding Tools
 
@@ -132,6 +132,20 @@ Install as a plugin to unlock `/m3:*` slash commands, curation subagents, and au
 /plugin install m3@skynetcmd
 ```
 *See [Claude Code Plugin Reference](docs/claude_code_plugin.md) and [Claude.ai Connector Guide](docs/claude_ai_connector.md).*
+
+#### ▷ Cursor
+Auto-detected and wired by the setup wizard — it writes the m3 `memory` MCP server into `~/.cursor/mcp.json`:
+```bash
+m3 setup
+```
+Re-run after installing Cursor and it's picked up automatically; `m3 doctor --fix` repoints the entry if paths move. *See [MCP Client Install Guide](docs/MCP_CLIENT_INSTALL.md).*
+
+#### ◧ Cline (VS Code)
+Auto-detected and wired by the setup wizard — it writes the m3 `memory` MCP server into Cline's `cline_mcp_settings.json`:
+```bash
+m3 setup
+```
+Also available from [Cline's MCP marketplace](https://github.com/cline/mcp-marketplace) (see [`llms-install.md`](llms-install.md)). *See [MCP Client Install Guide](docs/MCP_CLIENT_INSTALL.md).*
 
 #### 🪐 Google Antigravity
 Install the plugin directly:

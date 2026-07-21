@@ -1254,3 +1254,37 @@ class TestGuiChildElevationMacOS:
         ok = setup_wizard._kill_stuck_writers(stuck, allow_sudo=False)
         assert ok is False               # kill refused, not escalated
         assert sudo_called["n"] == 0     # sudo NEVER attempted (no console hang)
+
+
+class TestCursorClineVisibility:
+    """Cursor and Cline must be first-class in the wizard's detection/targets,
+    not just silently wired by the install-m3 registrars. Regression guard for
+    the gap where they were wired but invisible in every user-facing surface."""
+
+    def test_agent_targets_has_cursor_and_cline(self):
+        t = setup_wizard.AgentTargets()
+        assert hasattr(t, "cursor") and hasattr(t, "cline")
+
+    def test_any_counts_cursor_and_cline(self):
+        assert setup_wizard.AgentTargets(cursor=True).any() is True
+        assert setup_wizard.AgentTargets(cline=True).any() is True
+
+    def test_detect_agents_sets_cursor_when_dot_cursor_exists(self, monkeypatch, tmp_path):
+        home = tmp_path
+        (home / ".cursor").mkdir()
+        monkeypatch.setattr(setup_wizard.Path, "home", staticmethod(lambda: home))
+        monkeypatch.setattr(setup_wizard.shutil, "which", lambda _n: None)
+        t = setup_wizard._detect_agents()
+        assert t.cursor is True
+
+    def test_detect_agents_cursor_false_without_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup_wizard.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(setup_wizard.shutil, "which", lambda _n: None)
+        assert setup_wizard._detect_agents().cursor is False
+
+    def test_agents_flag_maps_cursor_cline(self):
+        # --agents cursor,cline must flip the target fields (generic setattr path).
+        t = setup_wizard.AgentTargets()
+        for a in "cursor,cline".split(","):
+            setattr(t, a.strip().lower(), True)
+        assert t.cursor and t.cline

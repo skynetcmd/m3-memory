@@ -74,10 +74,12 @@ class AgentTargets:
     opencode: bool = False
     openclaw: bool = False
     hermes: bool = False
+    cursor: bool = False
+    cline: bool = False
 
     def any(self) -> bool:
         return any((self.claude, self.gemini, self.antigravity, self.opencode,
-                    self.openclaw, self.hermes))
+                    self.openclaw, self.hermes, self.cursor, self.cline))
 
 
 def _detect_agents() -> AgentTargets:
@@ -108,9 +110,21 @@ def _detect_agents() -> AgentTargets:
     # Hermes Agent uses a file-based plugin (not MCP wiring): detection drives
     # an offer to COPY the m3 provider into the user's hermes-agent checkout.
     hermes = bool(_find_hermes_plugins_dir())
+    # Cursor / Cline are VS Code-family MCP clients wired by the install-m3
+    # registrars (installer._register_cursor_mcp / _register_cline_mcp). Detect
+    # them by the SAME presence signal those registrars gate on, so the wizard's
+    # displayed detection matches what actually gets wired: Cursor -> ~/.cursor
+    # exists; Cline -> its VS Code extension globalStorage dir exists.
+    cursor = (Path.home() / ".cursor").is_dir()
+    try:
+        from m3_memory.installer import _cline_config_path
+        cline = _cline_config_path().parent.parent.is_dir()
+    except Exception:
+        cline = False
     return AgentTargets(
         claude=claude, gemini=gemini, antigravity=antigravity,
-        opencode=opencode, openclaw=openclaw, hermes=hermes
+        opencode=opencode, openclaw=openclaw, hermes=hermes,
+        cursor=cursor, cline=cline,
     )
 
 
@@ -314,6 +328,8 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
     print(f"    {'[x]' if detected.opencode    else '[ ]'} OpenCode             (opencode)")
     print(f"    {'[x]' if detected.openclaw    else '[ ]'} OpenClaw             (no native MCP; wired via local proxy)")
     print(f"    {'[x]' if detected.hermes      else '[ ]'} Hermes Agent         (file-based memory-provider plugin)")
+    print(f"    {'[x]' if detected.cursor      else '[ ]'} Cursor               (~/.cursor/mcp.json)")
+    print(f"    {'[x]' if detected.cline       else '[ ]'} Cline                (VS Code extension MCP settings)")
     print()
 
     if detected.claude:
@@ -324,6 +340,10 @@ def _gather_plan(detected: AgentTargets, args: argparse.Namespace) -> SetupPlan:
         plan.targets.antigravity = _ask_yes_no("  Wire m3 into Antigravity CLI/Desktop?", default=True)
     if detected.opencode:
         plan.targets.opencode = _ask_yes_no("  Wire m3 into OpenCode?", default=True)
+    if detected.cursor:
+        plan.targets.cursor = _ask_yes_no("  Wire m3 into Cursor?", default=True)
+    if detected.cline:
+        plan.targets.cline = _ask_yes_no("  Wire m3 into Cline?", default=True)
     plan.targets.openclaw = _ask_yes_no(
         "  Set up OpenClaw proxy (localhost:9000)?", default=detected.openclaw
     )
@@ -1671,6 +1691,24 @@ def _wire_antigravity() -> bool:
     return True
 
 
+def _wire_cursor() -> bool:
+    """Write the m3 MCP entry into Cursor's ~/.cursor/mcp.json."""
+    from m3_memory.installer import _register_cursor_mcp
+    msg = _register_cursor_mcp()
+    if msg:
+        _say(f"  · {msg.lstrip('[+=!]').strip()}")
+    return True
+
+
+def _wire_cline() -> bool:
+    """Write the m3 MCP entry into Cline's cline_mcp_settings.json (VS Code)."""
+    from m3_memory.installer import _register_cline_mcp
+    msg = _register_cline_mcp()
+    if msg:
+        _say(f"  · {msg.lstrip('[+=!]').strip()}")
+    return True
+
+
 def _wire_openclaw_note() -> bool:
     """OpenClaw can't speak MCP natively — print proxy instructions."""
     _say("  · OpenClaw needs the local proxy on http://localhost:9000/v1")
@@ -1871,6 +1909,10 @@ def _step_wire_agents(plan: SetupPlan, *, non_interactive: bool = False) -> bool
         _wire_antigravity()
     if plan.targets.opencode:
         _wire_opencode()
+    if plan.targets.cursor:
+        _wire_cursor()
+    if plan.targets.cline:
+        _wire_cline()
     if plan.targets.openclaw:
         _wire_openclaw_note()
     if plan.targets.hermes:
@@ -1990,6 +2032,8 @@ def run_setup(args: argparse.Namespace) -> int:
         "Gemini CLI": plan.targets.gemini,
         "Antigravity CLI/Desktop": plan.targets.antigravity,
         "OpenCode": plan.targets.opencode,
+        "Cursor": plan.targets.cursor,
+        "Cline": plan.targets.cline,
         "OpenClaw": plan.targets.openclaw,
         "Hermes Agent": plan.targets.hermes,
     }.items() if v]

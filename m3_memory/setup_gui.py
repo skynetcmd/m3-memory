@@ -87,7 +87,8 @@ def _build_flags(values: dict) -> list[str]:
     flags: list[str] = ["--non-interactive", "--gui-child"]
 
     # Agents: comma-separated; omit to let the child wire all detected agents.
-    agents = [a for a in ("claude", "gemini", "antigravity", "opencode", "openclaw")
+    agents = [a for a in ("claude", "gemini", "antigravity", "opencode",
+                          "cursor", "cline", "openclaw")
               if values.get(f"agent_{a}")]
     if agents:
         flags += ["--agents", ",".join(agents)]
@@ -379,6 +380,7 @@ def run_gui() -> int:
     agents_box.pack(fill="x", pady=4)
     for name, label in (("claude", "Claude Code"), ("gemini", "Gemini CLI"),
                         ("antigravity", "Antigravity"), ("opencode", "OpenCode"),
+                        ("cursor", "Cursor"), ("cline", "Cline"),
                         ("openclaw", "OpenClaw (local proxy)")):
         var = tk.BooleanVar(value=_det(name))
         state[f"agent_{name}"] = var
@@ -603,6 +605,7 @@ def run_gui() -> int:
         agents = [lbl for key, lbl in (
             ("agent_claude", "Claude Code"), ("agent_gemini", "Gemini CLI"),
             ("agent_antigravity", "Antigravity"), ("agent_opencode", "OpenCode"),
+            ("agent_cursor", "Cursor"), ("agent_cline", "Cline"),
             ("agent_openclaw", "OpenClaw")) if values.get(key)]
         lines = ["", "──────── Setup summary ────────"]
         # Agents can be a long list; print one per continuation line with a
