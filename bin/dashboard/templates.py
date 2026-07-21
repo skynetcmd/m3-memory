@@ -10,7 +10,10 @@ HEADER_HTML = """
     <header>
         <div class="logo-group">
             <div class="m3-status-dot"></div>
-            <div class="logo-text">M3 COGNITIVE</div>
+            <a href="/" title="M3 Cognitive" style="display:flex; align-items:center;">
+                <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png"
+                     alt="M3" width="60" height="60" class="logo-img">
+            </a>
         </div>
         <div style="display: flex; gap: 0.5rem; align-items: center;">
             <a href="/" class="nav-link {explorer_active}">Graph Explorer</a>
@@ -95,6 +98,13 @@ STYLE_CSS = """
             background: linear-gradient(135deg, var(--m3-neon-cyan) 0%, var(--m3-neon-purple) 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+        }
+
+        .logo-img {
+            display: block;
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
         }
 
         .nav-link {
