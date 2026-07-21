@@ -37,8 +37,15 @@ def build_wiki(
     mem_conn: sqlite3.Connection,
     files_conn: Optional[sqlite3.Connection],
     opts: Optional[WikiOptions] = None,
+    synthesizer=None,
 ) -> dict[str, str]:
-    """Compile the vault. `files_conn` may be None (memory-only vault)."""
+    """Compile the vault. `files_conn` may be None (memory-only vault).
+
+    `synthesizer` is an optional wiki.synth.Synthesizer. When None (the default),
+    the build is PURE and deterministic (topic bodies are member lists). When
+    provided, each topic gets an LLM-written prose lede — this makes the build
+    non-pure, so it's only used behind `--synthesize`, never in the drift test.
+    """
     opts = opts or WikiOptions()
 
     memories = _select.select_core_memories(
@@ -69,4 +76,14 @@ def build_wiki(
 
     clusters = _cluster.cluster(memories, cluster_edges, use_networkx=opts.use_networkx)
 
-    return _render.render_pages(clusters, edges, files, promotions)
+    # Optional prose ledes per topic (opt-in; needs a local model).
+    ledes: dict[str, str] = {}
+    if synthesizer is not None:
+        for c in clusters:
+            if c.is_orphan:
+                continue
+            prose = synthesizer.lede_for(c)
+            if prose:
+                ledes[c.key] = prose
+
+    return _render.render_pages(clusters, edges, files, promotions, ledes=ledes)

@@ -300,6 +300,8 @@ def _cmd_wiki(args: argparse.Namespace) -> int:
             argv.append("--no-files")
         if getattr(args, "no_networkx", False):
             argv.append("--no-networkx")
+        if getattr(args, "synthesize", False):
+            argv.append("--synthesize")
         if getattr(args, "importance_threshold", None) is not None:
             argv += ["--importance-threshold", str(args.importance_threshold)]
     return _run_bin_script("gen_wiki.py", argv)
@@ -1064,6 +1066,9 @@ Examples:
                             help="Memory-only vault (skip the files corpus).")
     p_wiki_gen.add_argument("--no-networkx", action="store_true",
                             help="Force the pure-Python clustering fallback.")
+    p_wiki_gen.add_argument("--synthesize", action="store_true",
+                            help="Add an LLM prose lede per topic via a local chat "
+                                 "endpoint (opt-in, cached). Not compatible with --check.")
     p_wiki_gen.add_argument("--importance-threshold", type=float, default=None,
                             help="Min importance to count as 'core' (default 0.6).")
     p_wiki_status = wiki_sub.add_parser("status", help="Report vault location, page count, last build.")

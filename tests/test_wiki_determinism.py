@@ -233,3 +233,82 @@ def test_memory_only_when_no_files():
     assert not any(p.startswith("sources/") for p in vault)
     # Topic pages still render; just no Evidence section.
     assert any(p.startswith("topics/") for p in vault)
+
+
+class _StubSynth:
+    """A Synthesizer stand-in — no network, deterministic prose per cluster."""
+
+    def __init__(self):
+        self.seen = []
+
+    def lede_for(self, cluster):
+        self.seen.append(cluster.key)
+        return f"LEDE for {cluster.members[0].display_title}."
+
+
+def test_synthesis_injects_lede():
+    """When a synthesizer is passed, topic pages carry its prose lede; orphans
+    do not get synthesized (no wasted calls)."""
+    mem, files = _mem_db(), _files_db()
+    stub = _StubSynth()
+    try:
+        vault = build_wiki(
+            mem, files,
+            WikiOptions(importance_threshold=0.6, use_networkx=False, entity_comention=True),
+            synthesizer=stub,
+        )
+    finally:
+        mem.close()
+        files.close()
+    topic_pages = [t for p, t in vault.items() if p.startswith("topics/") and p != "topics/orphans.md"]
+    assert topic_pages, "expected at least one topic page"
+    assert any("LEDE for" in t for t in topic_pages)
+    # The pure (no-synth) build must NOT contain a lede — confirms opt-in only.
+    mem2, files2 = _mem_db(), _files_db()
+    try:
+        plain = build_wiki(mem2, files2, WikiOptions(importance_threshold=0.6,
+                                                     use_networkx=False))
+    finally:
+        mem2.close()
+        files2.close()
+    assert not any("LEDE for" in t for t in plain.values())
+
+
+def test_synth_cache_roundtrip(tmp_path):
+    """The synth cache stores + returns a lede keyed by cluster content-hash, so
+    an unchanged cluster is not re-generated."""
+    import sys as _sys
+    _bin = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "bin"))
+    if _bin not in _sys.path:
+        _sys.path.insert(0, _bin)
+    from wiki.synth import SynthConfig, Synthesizer
+    from wiki.cluster import Cluster
+    from wiki.select import Mem
+
+    m = Mem(id="m-1", type="belief", title="T", content="body", importance=0.9,
+            confidence=0.8, valid_from=None, valid_to=None, pinned=0,
+            created_at=None, updated_at=None)
+    c = Cluster(key="m-1", members=[m])
+
+    calls = {"n": 0}
+
+    class OneShot(Synthesizer):
+        def __init__(self, cfg):
+            super().__init__(cfg)
+
+        def lede_for(self, cluster):
+            # Force the model call to a stub the first time; cache on second.
+            import wiki.synth as s
+            orig = s._call_model
+            s._call_model = lambda cfg, prompt: (calls.__setitem__("n", calls["n"] + 1) or "cached prose")
+            try:
+                return super().lede_for(cluster)
+            finally:
+                s._call_model = orig
+
+    cfg = SynthConfig(cache_dir=str(tmp_path))
+    syn = OneShot(cfg)
+    first = syn.lede_for(c)
+    second = syn.lede_for(c)
+    assert first == "cached prose" and second == "cached prose"
+    assert calls["n"] == 1, "second call should hit the on-disk cache, not the model"

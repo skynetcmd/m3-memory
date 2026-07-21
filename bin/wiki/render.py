@@ -67,8 +67,14 @@ def render_pages(
     edges: list[Edge],
     files: FilesLayer,
     promotions: list[Promo],
+    ledes: Optional[dict[str, str]] = None,
 ) -> dict[str, str]:
-    """Build the full vault as {relpath: markdown}."""
+    """Build the full vault as {relpath: markdown}.
+
+    `ledes` maps cluster.key -> a prose summary (from optional synthesis). When a
+    cluster has no lede, its page falls back to the deterministic member list.
+    """
+    ledes = ledes or {}
     topic_slugs = SlugBook()
     source_slugs = SlugBook()
 
@@ -106,7 +112,7 @@ def render_pages(
     for c in topic_clusters:
         slug = topic_slugs.get(c.key)
         pages[f"topics/{slug}.md"] = _render_topic(
-            c, edges, mem_to_topic, promo_by_mem, backlinks, files
+            c, edges, mem_to_topic, promo_by_mem, backlinks, files, ledes.get(c.key)
         )
 
     if orphan_members:
@@ -130,6 +136,7 @@ def _render_topic(
     promo_by_mem: dict[str, list[Promo]],
     backlinks: dict[str, set[str]],
     files: FilesLayer,
+    lede: Optional[str] = None,
 ) -> str:
     top = c.members[0]
     slug = mem_to_topic.get(top.id, c.key)
@@ -160,6 +167,10 @@ def _render_topic(
         fm.append(f"related: [{rel_links}]")
 
     lines = [_fm(fm), f"# {top.display_title}", "", BANNER, ""]
+
+    if lede:
+        lines.append(lede.strip())
+        lines.append("")
 
     if contradictions:
         lines.append("> ⚠️ **Contradiction on this page** — members below disagree; "

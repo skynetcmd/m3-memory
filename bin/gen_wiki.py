@@ -62,7 +62,7 @@ def _open_ro(path: str) -> sqlite3.Connection:
     return conn
 
 
-def _build_vault(args: argparse.Namespace) -> dict[str, str]:
+def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
     mem_path = _memory_db_path()
     if not os.path.isfile(mem_path):
         print(f"memory DB not found at {mem_path} — run `m3 setup` first.", file=sys.stderr)
@@ -81,12 +81,22 @@ def _build_vault(args: argparse.Namespace) -> dict[str, str]:
         include_files=not args.no_files,
         use_networkx=not args.no_networkx,
     )
+
+    synthesizer = None
+    if getattr(args, "synthesize", False):
+        from wiki.synth import SynthConfig, Synthesizer
+        cache_dir = os.path.join(out_dir, ".synth-cache")
+        synthesizer = Synthesizer(SynthConfig.from_env(cache_dir))
+
     try:
-        return build_wiki(mem_conn, files_conn, opts)
+        vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer)
     finally:
         mem_conn.close()
         if files_conn is not None:
             files_conn.close()
+    if synthesizer is not None:
+        print(synthesizer.summary(), file=sys.stderr)
+    return vault
 
 
 def _write_vault(vault: dict[str, str], out_dir: str) -> int:
@@ -126,7 +136,12 @@ def _check_vault(vault: dict[str, str], out_dir: str) -> int:
 
 def _cmd_generate(args: argparse.Namespace) -> int:
     out_dir = args.out or _default_out()
-    vault = _build_vault(args)
+    if args.check and getattr(args, "synthesize", False):
+        print("--check and --synthesize are mutually exclusive: LLM ledes are not "
+              "bit-reproducible, so the drift check runs on the deterministic vault "
+              "only (drop --synthesize).", file=sys.stderr)
+        return 2
+    vault = _build_vault(args, out_dir)
     if args.check:
         return _check_vault(vault, out_dir)
     return _write_vault(vault, out_dir)
@@ -162,6 +177,10 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                    help="Skip the files corpus (memory-only vault).")
     p.add_argument("--no-networkx", action="store_true",
                    help="Force the pure-Python clustering fallback even if networkx is present.")
+    p.add_argument("--synthesize", action="store_true",
+                   help="Write an LLM prose lede per topic via a local chat endpoint "
+                        "(opt-in; cached; degrades to member-lists if no model). "
+                        "Mutually exclusive with --check.")
     p.add_argument("--importance-threshold", type=float, default=None,
                    help="Min importance for a memory to count as 'core' (default 0.6).")
 
