@@ -245,7 +245,17 @@ def _server_health(url: str, timeout: float = 3.0) -> tuple[str, dict]:
         return "bad-scheme", {}
     try:
         with urllib.request.urlopen(f"{url}/health", timeout=timeout) as r:  # nosec B310 — scheme checked
-            body = json.loads(r.read())
+            raw = r.read().decode("utf-8", "replace").strip()
+        # Accept BOTH health contracts: the Rust m3-embed-server returns plaintext
+        # "OK", the Python embed_server_inproc.py returns JSON {"status":...}. The
+        # old code json.loads'd unconditionally, so the Rust server's "OK" raised
+        # JSONDecodeError and doctor false-reported a healthy :8082 as down.
+        if raw == "OK":
+            return "ok", {"status": "ok"}
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError:
+            return "down", {}
         status = body.get("status")
         if status in ("ok", "loading"):
             return status, body
