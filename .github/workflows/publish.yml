@@ -6,9 +6,10 @@ name: Publish to PyPI
 # checkov:skip=CKV2_GHA_1: publish.yml is triggered by a version-tag push
 # (`push: tags: v*`) or a manual `workflow_dispatch`. The tag-push trigger is
 # scoped to `v*` tags only (not arbitrary branch pushes).
-# The two publish jobs each declare `permissions: id-token: write` and nothing
-# else (trusted publishing to PyPI/TestPyPI); the build job runs with the
-# default `contents: read` set at the workflow level.
+# The PyPI/TestPyPI publish jobs each declare `permissions: id-token: write` and
+# nothing else (trusted publishing); the MCP-registry job adds `contents: read`
+# so it can check out server.json, and uses id-token: write for OIDC auth to the
+# registry. The build job runs with the default `contents: read`.
 
 on:
   # A version-tag push is the SINGLE publish trigger. Cutting a release pushes
@@ -116,3 +117,46 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  publish-mcp-registry:
+    name: Publish to MCP Registry
+    # Runs AFTER PyPI: server.json's package entry points at the PyPI release, so
+    # the package must exist first. Real tag pushes only (never the TestPyPI dry
+    # run). If the PyPI job is skipped (dry_run), this is skipped too.
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      id-token: write   # OIDC auth to the registry (namespace io.github.skynetcmd/*)
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate
+
+      - name: Authenticate to MCP Registry (OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json to the registry
+        run: ./mcp-publisher publish
+
+      # NOTE — 'isLatest' pitfall: the registry ranks "latest" by SemVer, and m3's
+      # 4-part CalVer (e.g. 2026.7.21.0) is NON-semver, so a NEW publish does not
+      # reliably become 'latest' if any VALID 3-part semver version still exists
+      # in the server's history (it did once: 2026.4.7 held 'latest' until deleted).
+      # This publish keeps the registry entry current; if 'latest' ever sticks on an
+      # old version, the fix is a manual `mcp-publisher status --status deleted
+      # <name> <old-semver-version>` (deprecate does NOT move isLatest). Full
+      # runbook is in m3 memory: "RUNBOOK: fix MCP registry 'isLatest' stuck on an
+      # old version" (memory_search it).
+      - name: Report published version
+        run: echo "Published ${GITHUB_REF#refs/tags/v} to the MCP registry. Verify 'latest' at https://registry.modelcontextprotocol.io/v0/servers?search=io.github.skynetcmd/m3-memory"
