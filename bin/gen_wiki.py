@@ -101,7 +101,70 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
     return vault
 
 
+# Manifest of the files m3 generated, so a later regen can prune ONLY its own
+# stale pages and never touch user-authored notes / .obsidian config / caches.
+_MANIFEST = ".m3-wiki-manifest.json"
+
+
+def _read_manifest(out_dir: str) -> list[str]:
+    path = os.path.join(out_dir, _MANIFEST)
+    try:
+        import json
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        files = data.get("generated", [])
+        return [p for p in files if isinstance(p, str)]
+    except (OSError, ValueError):
+        return []
+
+
+def _write_manifest(out_dir: str, relpaths: list[str]) -> None:
+    import json
+    path = os.path.join(out_dir, _MANIFEST)
+    payload = {"generated": sorted(relpaths)}
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def _prune_stale(vault: dict[str, str], out_dir: str) -> list[str]:
+    """Delete files m3 generated on a PRIOR run that it no longer generates.
+
+    Compliance-relevant: a GDPR/soft-deleted memory drops out of the vault, so its
+    page must be removed from disk — a lingering page would retain 'forgotten'
+    content. We only ever delete paths recorded in our own manifest and absent from
+    the new vault, so user notes / .obsidian/ / .synth-cache are never touched.
+    """
+    prev = set(_read_manifest(out_dir))
+    now = set(vault.keys())
+    stale = sorted(prev - now)
+    removed: list[str] = []
+    for relpath in stale:
+        # Defense in depth: never delete outside out_dir, never touch dotfiles/dirs
+        # we don't own (a manifest entry is always a relative page path we wrote).
+        dest = os.path.normpath(os.path.join(out_dir, relpath))
+        if not dest.startswith(os.path.normpath(out_dir) + os.sep):
+            continue
+        try:
+            if os.path.isfile(dest):
+                os.remove(dest)
+                removed.append(relpath)
+        except OSError:
+            pass
+    # Best-effort: clean up now-empty generated subdirs (topics/, sources/).
+    for sub in ("topics", "sources"):
+        d = os.path.join(out_dir, sub)
+        try:
+            if os.path.isdir(d) and not os.listdir(d):
+                os.rmdir(d)
+        except OSError:
+            pass
+    return removed
+
+
 def _write_vault(vault: dict[str, str], out_dir: str) -> int:
+    os.makedirs(out_dir, exist_ok=True)
+    removed = _prune_stale(vault, out_dir)
     written = 0
     for relpath, text in sorted(vault.items()):
         dest = os.path.join(out_dir, relpath)
@@ -109,11 +172,15 @@ def _write_vault(vault: dict[str, str], out_dir: str) -> int:
         with open(dest, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         written += 1
+    _write_manifest(out_dir, list(vault.keys()))
     try:
         shown = os.path.relpath(out_dir)
     except ValueError:
         shown = out_dir
-    print(f"wrote {written} pages to {shown}")
+    msg = f"wrote {written} pages to {shown}"
+    if removed:
+        msg += f" · pruned {len(removed)} stale page(s)"
+    print(msg)
     return 0
 
 

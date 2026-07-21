@@ -170,10 +170,18 @@ def test_core_pages_emitted():
 
 def test_uses_real_markdown_links_not_wikilinks():
     """Default vault must be browsable in any Markdown renderer: standard
-    [text](path.md) links only, no Obsidian-only [[wikilinks]]."""
+    [text](path.md) links only, no Obsidian-only [[wikilink]] *links*.
+
+    (about.md may *mention* the word `[[wikilinks]]` in backticked prose — that's
+    documentation, not a link — so we forbid only BARE, un-code-fenced wikilinks.)
+    """
+    import re as _re
     vault = _build(use_networkx=False, entity_comention=True)
     for path, text in vault.items():
-        assert "[[" not in text, f"{path} contains an Obsidian-only [[wikilink]]"
+        # Strip inline code spans and fenced code blocks, then any [[ is a real link.
+        stripped = _re.sub(r"`[^`]*`", "", text)
+        stripped = _re.sub(r"```.*?```", "", stripped, flags=_re.S)
+        assert "[[" not in stripped, f"{path} contains a bare Obsidian [[wikilink]]"
     # A topic page links back up to the index with a correct relative path.
     topic = [t for p, t in vault.items()
              if p.startswith("topics/") and p != "topics/orphans.md"][0]
@@ -372,3 +380,61 @@ def test_synth_cache_roundtrip(tmp_path):
     second = syn.lede_for(c)
     assert first == "cached prose" and second == "cached prose"
     assert calls["n"] == 1, "second call should hit the on-disk cache, not the model"
+
+
+def test_regen_prunes_stale_pages_but_keeps_user_files(tmp_path):
+    """Regeneration deletes m3-generated pages that no longer exist (GDPR/soft-
+    delete → the memory is gone → its page must not linger), but NEVER touches
+    files m3 didn't create (user notes, .obsidian/ config)."""
+    import gen_wiki
+
+    out = str(tmp_path)
+    # Gen 1: a vault with several pages.
+    v1 = {
+        "index.md": "# Index\n",
+        "topics/alpha.md": "# Alpha\nsecret content\n",
+        "topics/beta.md": "# Beta\n",
+        "sources/doc.md": "# Doc\n",
+    }
+    gen_wiki._write_vault(v1, out)
+    assert os.path.isfile(os.path.join(out, "topics", "alpha.md"))
+    assert os.path.isfile(os.path.join(out, gen_wiki._MANIFEST))
+
+    # User adds their own note + an Obsidian config dir.
+    os.makedirs(os.path.join(out, ".obsidian"), exist_ok=True)
+    with open(os.path.join(out, ".obsidian", "app.json"), "w") as f:
+        f.write("{}")
+    with open(os.path.join(out, "my-notes.md"), "w") as f:
+        f.write("# mine\n")
+
+    # Gen 2: 'alpha' is gone (imagine its memory was GDPR-deleted).
+    v2 = {
+        "index.md": "# Index\n",
+        "topics/beta.md": "# Beta\n",
+        "sources/doc.md": "# Doc\n",
+    }
+    gen_wiki._write_vault(v2, out)
+
+    # The stale page — and its 'secret content' — is pruned from disk.
+    assert not os.path.exists(os.path.join(out, "topics", "alpha.md"))
+    # Surviving generated pages remain.
+    assert os.path.isfile(os.path.join(out, "topics", "beta.md"))
+    # User-authored content is untouched.
+    assert os.path.isfile(os.path.join(out, "my-notes.md"))
+    assert os.path.isfile(os.path.join(out, ".obsidian", "app.json"))
+
+
+def test_prune_never_escapes_out_dir(tmp_path):
+    """A malicious/garbage manifest path can't cause deletion outside the vault."""
+    import gen_wiki
+
+    out = str(tmp_path / "vault")
+    os.makedirs(out)
+    # Plant a sensitive file OUTSIDE the vault.
+    outside = tmp_path / "important.txt"
+    outside.write_text("do not delete")
+    # Forge a manifest with a traversal path.
+    gen_wiki._write_manifest(out, ["../important.txt", "topics/x.md"])
+    # Regen with a vault that doesn't include those → prune runs.
+    gen_wiki._write_vault({"index.md": "# i\n"}, out)
+    assert outside.exists(), "prune must never delete outside the vault dir"

@@ -611,9 +611,35 @@ def _render_about(links: "LinkResolver") -> str:
     idx = links.link("index", SELF, "Index")
     ovr = links.link("overview", SELF, "Overview")
     lnt = links.link("lint", SELF, "Lint")
-    body = f"""This vault was compiled by **m3** from your memory store — it is a
-*projection*, not something you edit by hand. Re-run `m3 wiki generate` to refresh
-it; your edits here would be overwritten.
+
+    # Obsidian guidance depends on which link format this vault was built with.
+    if links.obsidian:
+        obsidian_note = """This vault was generated with `--obsidian`, so cross-page
+links are `[[wikilinks]]` — Obsidian's **graph view** and **backlinks** pane work.
+Open the folder with **Open folder as vault**.
+
+Treat the vault as **read-only and disposable**: don't edit these pages and don't
+link to them from notes you want to keep — a page can change, move, or disappear on
+the next generation (see below). Keep your own notes in a *separate* folder or vault.
+"""
+    else:
+        obsidian_note = """Open this folder in Obsidian with **Open folder as vault**
+— pages are clickable immediately. Note that links here are standard Markdown, which
+Obsidian follows but does **not** use to build its graph view or backlinks pane. For
+those, regenerate with `m3 wiki generate --obsidian` (emits `[[wikilinks]]`).
+
+Treat the vault as **read-only and disposable**: don't edit these pages and don't
+link to them from notes you want to keep — a page can change, move, or disappear on
+the next generation (see below). Keep your own notes in a *separate* folder or vault.
+"""
+
+    body = f"""This vault is a **regenerated snapshot** of what m3 currently
+remembers — a *projection* of the memory store, not a document you build on. Pages
+can change, move, or **disappear** between generations: a memory may be superseded,
+soft-deleted, or permanently erased (GDPR right-to-be-forgotten), and re-running
+`m3 wiki generate` prunes any page whose memory no longer exists. So don't edit
+these pages or link to them from notes you care about — regenerate for the current
+state, and keep durable personal notes elsewhere.
 
 ## How to read it
 
@@ -635,10 +661,13 @@ consolidated `belief` / `procedure` / `reference`. Related memories are grouped
 into topics using m3's relationship graph *and* shared entities, so notes about the
 same thing land together even without an explicit link.
 
+## For Obsidian users
+{obsidian_note}
 ## Regenerating
 
 ```
 m3 wiki generate                 # refresh this vault
+m3 wiki generate --obsidian      # [[wikilinks]] for Obsidian graph view + backlinks
 m3 wiki generate --synthesize    # add an LLM prose lede to each topic
 m3 wiki status                   # location, page count, last build
 ```
