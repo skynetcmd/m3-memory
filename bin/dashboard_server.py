@@ -852,7 +852,7 @@ async def get_health(request: Request):
     content = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<title>M3 System Health</title>"
-        f"<style>{STYLE_CSS}</style></head><body>"
+        f"<style>{STYLE_CSS}</style></head><body class='restrained'>"
         f"{header}"
         "<div style='max-width: 1100px; margin: 0 auto; padding: 1.5rem;'>"
         "<div class='page-hero'>"

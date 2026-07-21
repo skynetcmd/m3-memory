@@ -1092,6 +1092,152 @@ STYLE_CSS = """
             .page-hero::after { animation: none; }
             .m3-card:hover, .metric-card:hover, .m3-btn:hover { transform: none; }
         }
+
+        /* ==================================================================
+           RESTRAINED THEME  (body.restrained)
+           Applied to KB Browser / Audit / Wiki / Health — NOT Graph Explorer.
+           The Linear/Vercel/Stripe playbook: ONE accent used semantically,
+           neutrals carry the page, depth via hairlines not glow, motion only
+           where it's purposeful. This block NEUTRALIZES the decorative snazz
+           above and re-establishes a quiet, high-craft surface.
+           ================================================================== */
+        body.restrained {
+            /* Neutrals with a faint cool bias — chosen, not pure grey. One accent. */
+            --r-bg:      hsl(222, 18%, 8%);
+            --r-surface: hsl(222, 16%, 11%);
+            --r-raised:  hsl(222, 15%, 13%);
+            --r-line:    hsla(220, 14%, 70%, 0.10);
+            --r-line-2:  hsla(220, 14%, 70%, 0.16);
+            --r-ink:     hsl(210, 20%, 92%);
+            --r-muted:   hsl(214, 12%, 62%);
+            --r-faint:   hsl(214, 10%, 46%);
+            --r-accent:  hsl(190, 95%, 55%);        /* the single accent (cyan) */
+            --r-accent-dim: hsla(190, 95%, 55%, 0.14);
+            background: var(--r-bg);
+            color: var(--r-ink);
+        }
+        /* Kill the ambient backdrop — restraint means the surface is calm. */
+        body.restrained::before,
+        body.restrained::after { display: none; }
+
+        /* Cards: flat surface, hairline border, no glow / glass / sheen. Depth
+           comes from a 1px border + a whisper of shadow, nothing more. */
+        body.restrained .m3-card {
+            background: var(--r-surface);
+            border: 1px solid var(--r-line);
+            border-top: 1px solid var(--r-line);
+            border-radius: 10px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+            backdrop-filter: none;
+            animation: none;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        body.restrained .m3-card::before,
+        body.restrained .m3-card::after { display: none; }  /* no sheen, no glow edge */
+        body.restrained .m3-card:hover {
+            transform: none;
+            border-color: var(--r-line-2);
+            background: var(--r-raised);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+        }
+
+        /* Section titles: quiet. A thin accent rule, no gradient, no breathing. */
+        body.restrained .m3-card-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--r-ink);
+            letter-spacing: -0.005em;
+        }
+        body.restrained .m3-card-title::before {
+            width: 3px; height: 14px;
+            margin-right: 0.6rem;
+            background: var(--r-accent);
+            box-shadow: none;
+            animation: none;
+            border-radius: 1px;
+        }
+
+        /* Hero: neutral surface, one accent hairline on top, no orb / gradient
+           wash / gradient text. Title is just clean white with tight tracking. */
+        body.restrained .page-hero {
+            background: var(--r-surface);
+            border: 1px solid var(--r-line);
+            border-top: 1px solid var(--r-accent-dim);
+            border-radius: 12px;
+            box-shadow: none;
+            animation: none;
+            padding: 1.15rem 1.35rem;
+        }
+        body.restrained .page-hero::after { display: none; }
+        body.restrained .page-hero .hero-icon {
+            background: var(--r-raised);
+            border: 1px solid var(--r-line-2);
+            box-shadow: none;
+            border-radius: 10px;
+            filter: grayscale(0.15);
+        }
+        body.restrained .page-hero .hero-title {
+            background: none;
+            -webkit-text-fill-color: currentColor;
+            color: var(--r-ink);
+            font-size: 1.4rem;
+            letter-spacing: -0.02em;
+        }
+        body.restrained .page-hero .hero-sub { color: var(--r-muted); }
+        body.restrained .page-hero .hero-stat b { color: var(--r-accent); }
+
+        /* Toolbar caption: quiet uppercase micro-label. */
+        body.restrained .toolbar-card .m3-card-title { color: var(--r-faint) !important; }
+
+        /* Inputs & selects: flat, hairline, accent only on focus (a real state). */
+        body.restrained .m3-input,
+        body.restrained .m3-select,
+        body.restrained input[type="text"],
+        body.restrained select {
+            background: var(--r-bg);
+            border: 1px solid var(--r-line-2);
+            border-radius: 8px;
+            color: var(--r-ink);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        body.restrained .m3-input:focus,
+        body.restrained .m3-select:focus,
+        body.restrained input[type="text"]:focus,
+        body.restrained select:focus {
+            outline: none;
+            border-color: var(--r-accent);
+            box-shadow: 0 0 0 3px var(--r-accent-dim);
+        }
+
+        /* Links / accent text default to the single accent; the old purple/amber
+           decorative titles fall back to accent or ink. */
+        body.restrained a { color: var(--r-accent); }
+        body.restrained [style*="--m3-neon-purple"],
+        body.restrained [style*="neon-purple"] { color: var(--r-accent) !important; }
+
+        /* Buttons: neutral by default, accent on the PRIMARY action only.
+           Semantic colors (danger red) are preserved via the rules already above. */
+        body.restrained .m3-btn {
+            background: var(--r-raised);
+            border: 1px solid var(--r-line-2);
+            color: var(--r-ink);
+            border-radius: 8px;
+            box-shadow: none;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        body.restrained .m3-btn:hover {
+            transform: none;
+            border-color: var(--r-accent);
+            background: var(--r-raised);
+            box-shadow: none;
+        }
+
+        /* Scrollbar: thin, neutral. */
+        body.restrained ::-webkit-scrollbar { width: 10px; height: 10px; }
+        body.restrained ::-webkit-scrollbar-thumb {
+            background: var(--r-line-2); border-radius: 6px;
+        }
+        body.restrained ::-webkit-scrollbar-track { background: transparent; }
 """
 
 # --- Explorer (View 1) Layout Template ---
@@ -1856,7 +2002,7 @@ BROWSE_HTML = """
         }
     </style>
 </head>
-<body>
+<body class="restrained">
 
     {{ HEADER }}
 
@@ -2083,7 +2229,7 @@ AUDIT_HTML = """
         }
     </style>
 </head>
-<body>
+<body class="restrained">
 
     {{ HEADER }}
 
@@ -2164,7 +2310,7 @@ _WIKI_PAGE_HTML = """
         pre code { font-family: 'Fira Code', monospace; }
     </style>
 </head>
-<body>
+<body class="restrained">
     {{ HEADER }}
     <div class="wiki-shell">
         {{ BODY }}
