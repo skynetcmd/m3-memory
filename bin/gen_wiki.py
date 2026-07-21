@@ -81,6 +81,7 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
         include_files=not args.no_files,
         use_networkx=not args.no_networkx,
         exclude_regex=getattr(args, "exclude", None),
+        obsidian=getattr(args, "obsidian", False),
     )
 
     synthesizer = None
@@ -208,6 +209,10 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                    help="Also write a single self-contained wiki.html viewer — open "
                         "it in any browser to click through the vault offline "
                         "(no server, no dependencies).")
+    p.add_argument("--obsidian", action="store_true",
+                   help="Emit [[wikilinks]] instead of standard Markdown links so "
+                        "Obsidian's graph view and backlinks work. (Wikilinks show "
+                        "as literal text outside Obsidian, so this is opt-in.)")
 
 
 def main(argv: list[str] | None = None) -> int:

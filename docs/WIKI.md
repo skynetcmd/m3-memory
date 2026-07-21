@@ -5,9 +5,12 @@ into a browsable, interlinked Markdown vault. It is a *projection*, not a new
 store: it reads `agent_memory.db` and `files_database.db` and renders pages — your
 memory model is untouched, and re-running only refreshes the output.
 
-The result is an [Obsidian](https://obsidian.md)-ready folder: open it as a vault
-and the graph view, backlinks pane, and local-graph all work with zero extra
-setup, because every relationship M3 already tracks is rendered as a `[[wikilink]]`.
+The result is a folder of Markdown files that opens as an
+[Obsidian](https://obsidian.md) vault, renders on GitHub, or browses offline via a
+self-contained HTML viewer. By default it uses **standard Markdown links**
+(`[text](page.md)`) so it's clickable in every renderer; add `--obsidian` to emit
+`[[wikilinks]]` when you want Obsidian's **graph view and backlinks** to populate
+(see [Using it in Obsidian](#using-it-in-obsidian)).
 
 ---
 
@@ -129,6 +132,26 @@ Force the pure-Python path (e.g. to compare) with `--no-networkx`.
 
 ---
 
+## Using it in Obsidian
+
+The vault opens directly in Obsidian: **Open folder as vault**, point it at the
+output dir. Every page is clickable straight away.
+
+For Obsidian's **graph view** and **backlinks pane** to populate, generate with
+`--obsidian`:
+
+```bash
+m3 wiki generate --obsidian
+```
+
+This emits `[[wikilinks]]` instead of standard Markdown links — Obsidian builds its
+graph and backlinks from wikilinks, not from `[text](page.md)` links. The tradeoff:
+wikilinks render as literal text outside Obsidian (GitHub, the HTML viewer), so
+`--obsidian` is opt-in. Use the default (standard links) for a portable vault; use
+`--obsidian` when Obsidian is your primary reader.
+
+---
+
 ## Command reference
 
 ```
@@ -137,6 +160,10 @@ m3 wiki generate [options]
   --importance-threshold F   Min importance to count as "core" (default 0.6)
   --no-files                 Memory-only vault (skip the files corpus)
   --synthesize               Add an LLM prose lede per topic (opt-in, cached)
+  --obsidian                 Emit [[wikilinks]] so Obsidian's graph view + backlinks
+                             work (opt-in; literal text elsewhere)
+  --exclude REGEX            Drop memories whose title/content matches REGEX
+  --html                     Also write a self-contained wiki.html viewer
   --no-networkx              Force the pure-Python clustering fallback
   --check                    Exit non-zero if the on-disk vault is stale
 

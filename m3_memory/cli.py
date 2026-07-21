@@ -308,6 +308,8 @@ def _cmd_wiki(args: argparse.Namespace) -> int:
             argv += ["--exclude", args.exclude]
         if getattr(args, "html", False):
             argv.append("--html")
+        if getattr(args, "obsidian", False):
+            argv.append("--obsidian")
     return _run_bin_script("gen_wiki.py", argv)
 
 
@@ -1081,6 +1083,9 @@ Examples:
     p_wiki_gen.add_argument("--html", action="store_true",
                             help="Also write a self-contained wiki.html viewer to "
                                  "click through the vault in a browser (offline).")
+    p_wiki_gen.add_argument("--obsidian", action="store_true",
+                            help="Emit [[wikilinks]] so Obsidian's graph view and "
+                                 "backlinks work (opt-in; literal text elsewhere).")
     p_wiki_status = wiki_sub.add_parser("status", help="Report vault location, page count, last build.")
     p_wiki_status.add_argument("--out", default=None, help="Vault dir to inspect.")
     p_wiki.set_defaults(func=_cmd_wiki)

@@ -100,47 +100,71 @@ class SlugBook:
 
 
 class LinkResolver:
-    """Resolves a page reference to a relative Markdown hyperlink.
+    """Resolves a page reference to a link, in one of two link formats.
 
-    Standard `[title](relpath.md)` links render as real hyperlinks in every
-    Markdown viewer (GitHub, browsers, static-site generators) AND are followed by
-    Obsidian — unlike `[[wikilinks]]`, which only work inside Obsidian. Paths are
-    computed relative to the SOURCE page's directory so they resolve on disk.
+    Default (`obsidian=False`): standard `[title](relpath.md)` Markdown links —
+    they render as real hyperlinks in EVERY viewer (GitHub, browsers, the HTML
+    viewer) and are clickable in Obsidian. Portable, but do NOT populate
+    Obsidian's graph view / backlinks pane.
+
+    Obsidian mode (`obsidian=True`, via `m3 wiki generate --obsidian`): emits
+    `[[note-name|title]]` wikilinks so Obsidian's graph view and backlinks fully
+    work. Obsidian resolves wikilinks by note *name* (the filename without its
+    path/extension), which is our unique slug — so links resolve across the
+    topics/ and sources/ folders without needing relative paths. These render as
+    literal text outside Obsidian, so the mode is opt-in.
     """
 
-    def __init__(self) -> None:
-        # ref -> (path_from_vault_root, display_title)
-        self._reg: dict[str, tuple[str, str]] = {}
+    def __init__(self, obsidian: bool = False) -> None:
+        self.obsidian = obsidian
+        # ref -> (path_from_vault_root, display_title, note_name)
+        self._reg: dict[str, tuple[str, str, str]] = {}
 
     def register(self, ref: str, path_from_root: str, title: str) -> None:
-        self._reg[ref] = (path_from_root, title)
+        # note_name = filename without dir/extension (Obsidian's link target).
+        note_name = posixpath.splitext(posixpath.basename(path_from_root))[0]
+        self._reg[ref] = (path_from_root, title, note_name)
 
     def has(self, ref: str) -> bool:
         return ref in self._reg
 
     def link(self, ref: str, src_path_from_root: str,
              text: Optional[str] = None, anchor: Optional[str] = None) -> str:
-        """Markdown link to `ref` from the page at `src_path_from_root`.
+        """Link to `ref` from the page at `src_path_from_root`.
 
-        `anchor` (a heading text or pre-slugged id) appends a `#fragment` so the
-        link jumps to a section within the target page — GitHub/most renderers
-        auto-assign these ids to headings. Falls back to plain text if the target
-        is unknown, so a dangling reference never emits a broken link.
+        `anchor` (a heading text or pre-slugged id) jumps to a section within the
+        target page. Falls back to plain text if the target is unknown, so a
+        dangling reference never emits a broken link.
         """
         entry = self._reg.get(ref)
         if not entry:
             return text or ref
-        target, title = entry
+        target, title, note_name = entry
+        label = text or title
+        if self.obsidian:
+            # [[note-name#Section|label]] — Obsidian keeps section headings as
+            # given (not slugged), so pass the raw anchor text through. Drop the
+            # alias when it equals the note-name (Obsidian shows [[x]] cleaner).
+            frag = f"#{anchor}" if anchor else ""
+            body = f"{note_name}{frag}"
+            if label == note_name and not frag:
+                return f"[[{body}]]"
+            return f"[[{body}|{_esc_wikilabel(label)}]]"
         src_dir = posixpath.dirname(src_path_from_root)
         rel = posixpath.relpath(target, src_dir or ".")
         frag = f"#{heading_anchor(anchor)}" if anchor else ""
-        label = text or title
         return f"[{_esc_label(label)}]({_url_quote(rel)}{frag})"
 
 
 def _esc_label(s: str) -> str:
     # Markdown link text: escape brackets that would break the [ ]( ) syntax.
     return (s or "").replace("[", "\\[").replace("]", "\\]")
+
+
+def _esc_wikilabel(s: str) -> str:
+    # Obsidian wikilink alias: '|' separates target from alias and ']]' closes
+    # the link, so neither may appear in the label. Replace with safe lookalikes.
+    return (s or "").replace("|", "∣").replace("]]", "] ]")
 
 
 def _url_quote(path: str) -> str:
@@ -163,11 +187,13 @@ def render_pages(
     files: FilesLayer,
     promotions: list[Promo],
     ledes: Optional[dict[str, str]] = None,
+    obsidian: bool = False,
 ) -> dict[str, str]:
     """Build the full vault as {relpath: markdown}.
 
     `ledes` maps cluster.key -> a prose summary (from optional synthesis). When a
     cluster has no lede, its page falls back to the deterministic member list.
+    `obsidian` switches cross-page links to `[[wikilinks]]` (see LinkResolver).
     """
     ledes = ledes or {}
     topic_slugs = SlugBook()
@@ -191,7 +217,7 @@ def render_pages(
             mem_to_topic[m.id] = slug  # type: ignore[assignment]
 
     # Build the link registry: every page a ref can point at.
-    links = LinkResolver()
+    links = LinkResolver(obsidian=obsidian)
     for name in ("index", "overview", "lint", "about"):
         links.register(name, f"{name}.md", name.title())
     if orphan_members:

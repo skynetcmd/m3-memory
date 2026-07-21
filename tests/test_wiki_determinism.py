@@ -128,12 +128,14 @@ def _files_db() -> sqlite3.Connection:
     return conn
 
 
-def _build(use_networkx: bool, entity_comention: bool = False) -> dict:
+def _build(use_networkx: bool, entity_comention: bool = False,
+           obsidian: bool = False) -> dict:
     mem, files = _mem_db(), _files_db()
     try:
         return build_wiki(mem, files, WikiOptions(importance_threshold=0.6,
                                                   use_networkx=use_networkx,
-                                                  entity_comention=entity_comention))
+                                                  entity_comention=entity_comention,
+                                                  obsidian=obsidian))
     finally:
         mem.close()
         files.close()
@@ -167,7 +169,7 @@ def test_core_pages_emitted():
 
 
 def test_uses_real_markdown_links_not_wikilinks():
-    """The whole vault must be browsable in any Markdown renderer: standard
+    """Default vault must be browsable in any Markdown renderer: standard
     [text](path.md) links only, no Obsidian-only [[wikilinks]]."""
     vault = _build(use_networkx=False, entity_comention=True)
     for path, text in vault.items():
@@ -176,6 +178,23 @@ def test_uses_real_markdown_links_not_wikilinks():
     topic = [t for p, t in vault.items()
              if p.startswith("topics/") and p != "topics/orphans.md"][0]
     assert "(../index.md)" in topic, "topic nav should link up to ../index.md"
+
+
+def test_obsidian_mode_emits_wikilinks():
+    """--obsidian emits [[note-name|label]] wikilinks (so Obsidian's graph view
+    and backlinks work) and NO standard markdown page links."""
+    vault = _build(use_networkx=False, entity_comention=True, obsidian=True)
+    idx = vault["index.md"]
+    assert "[[" in idx, "obsidian mode should emit wikilinks"
+    # No standard markdown links to .md pages (the logo data-URI img is not a link).
+    import re as _re
+    assert not _re.search(r"\]\([^)]+\.md", idx), "obsidian mode must not emit [text](x.md)"
+    # A wikilink targets the note-name (slug), aliased to the display title.
+    assert _re.search(r"\[\[[a-z0-9-]+(\|[^\]]+)?\]\]", idx)
+    # Deterministic in obsidian mode too.
+    again = _build(use_networkx=False, entity_comention=True, obsidian=True)
+    for k in vault:
+        assert vault[k] == again[k]
 
 
 def test_cluster_and_wikilinks():

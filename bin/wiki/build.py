@@ -34,6 +34,9 @@ class WikiOptions:
     # A regex; any memory whose title/content matches is excluded from the vault.
     # Used to keep private/bench memories out of a shareable export.
     exclude_regex: Optional[str] = None
+    # Emit [[wikilinks]] instead of portable [text](path.md) links, so Obsidian's
+    # graph view + backlinks work. Opt-in (renders as literal text elsewhere).
+    obsidian: bool = False
 
 
 def build_wiki(
@@ -90,4 +93,5 @@ def build_wiki(
             if prose:
                 ledes[c.key] = prose
 
-    return _render.render_pages(clusters, edges, files, promotions, ledes=ledes)
+    return _render.render_pages(clusters, edges, files, promotions, ledes=ledes,
+                                obsidian=opts.obsidian)

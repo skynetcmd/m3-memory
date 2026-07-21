@@ -31,10 +31,11 @@ _Nothing pending — all changes below have shipped in a tagged release._
   graph and shared entities; every page carries real frontmatter, an evidence
   section linking down to the source file a fact came from, and backlinks.
   Deterministic output; re-run to refresh. `m3 wiki status` reports the vault.
-- **Standard Markdown links + Obsidian-ready.** The vault uses portable
-  `[text](page.md#section)` hyperlinks (not Obsidian-only `[[wikilinks]]`), so it
-  reads in any Markdown viewer — GitHub, a browser — while still opening cleanly
-  as an Obsidian vault (graph view and backlinks work out of the box).
+- **Portable links by default, `--obsidian` for the full Obsidian experience.**
+  The vault uses standard `[text](page.md#section)` hyperlinks so it reads in any
+  Markdown viewer (GitHub, a browser) and is clickable in Obsidian.
+  `m3 wiki generate --obsidian` instead emits `[[wikilinks]]`, which Obsidian needs
+  to populate its graph view and backlinks pane.
 - **Offline HTML viewer.** `m3 wiki generate --html` writes a self-contained
   `wiki.html` you can open from a `file://` URL and click through with no server,
   no network, no dependencies.
