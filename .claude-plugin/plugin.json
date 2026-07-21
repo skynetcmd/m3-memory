@@ -1,7 +1,7 @@
 {
   "name": "m3",
-  "version": "2026.7.13.0",
-  "description": "Local-first persistent memory for Claude Code — 101 MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
+  "version": "2026.7.19.5",
+  "description": "Local-first persistent memory for Claude Code \u2014 100+ MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
   "keywords": [
     "memory",
     "mcp",
@@ -21,7 +21,6 @@
   "homepage": "https://github.com/skynetcmd/m3-memory",
   "repository": "https://github.com/skynetcmd/m3-memory",
   "license": "Apache-2.0",
-
   "userConfig": {
     "endpoint": {
       "type": "string",
@@ -38,17 +37,16 @@
     "embed_fallback_url": {
       "type": "string",
       "title": "Embedder fallback URL (tier-2)",
-      "description": "Always-on HTTP embedder URL — the m3-embed-server CPU service (install via `m3-embed-server.exe install` on Windows, systemd unit on Linux). Default :8082. Leave empty to fall back to llm_failover probes (much slower; not BGE-M3).",
+      "description": "Always-on HTTP embedder URL \u2014 the m3-embed-server CPU service (install via `m3-embed-server.exe install` on Windows, systemd unit on Linux). Default :8082. Leave empty to fall back to llm_failover probes (much slower; not BGE-M3).",
       "default": "http://127.0.0.1:8082"
     },
     "embed_gguf": {
       "type": "string",
       "title": "In-proc embedder GGUF path (tier-1)",
-      "description": "Absolute path to a BGE-M3 GGUF file. When set, the MCP server loads it in-process via m3_core_rs for 10-100x faster embeds. Optional — if empty, all embeds go through tier-2 HTTP. Common path: %USERPROFILE%/.lmstudio/models/deepsweet/bge-m3-GGUF-Q4_K_M/bge-m3-GGUF-Q4_K_M.gguf",
+      "description": "Absolute path to a BGE-M3 GGUF file. When set, the MCP server loads it in-process via m3_core_rs for 10-100x faster embeds. Optional \u2014 if empty, all embeds go through tier-2 HTTP. Common path: %USERPROFILE%/.lmstudio/models/deepsweet/bge-m3-GGUF-Q4_K_M/bge-m3-GGUF-Q4_K_M.gguf",
       "default": ""
     }
   },
-
   "mcpServers": {
     "m3": {
       "command": "m3",

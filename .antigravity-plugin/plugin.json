@@ -1,7 +1,7 @@
 {
   "name": "m3",
-  "version": "2026.7.13.0",
-  "description": "Local-first persistent memory for Antigravity — 101 MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
+  "version": "2026.7.19.5",
+  "description": "Local-first persistent memory for Antigravity \u2014 100+ MCP tools, hybrid search (FTS5 + vector + MMR), bitemporal contradictions, GDPR primitives, chatlog auto-capture, multi-agent handoffs.",
   "keywords": [
     "memory",
     "mcp",
@@ -37,13 +37,13 @@
     "embed_fallback_url": {
       "type": "string",
       "title": "Embedder fallback URL (tier-2)",
-      "description": "Always-on HTTP embedder URL — the m3-embed-server CPU service. Default :8082.",
+      "description": "Always-on HTTP embedder URL \u2014 the m3-embed-server CPU service. Default :8082.",
       "default": "http://127.0.0.1:8082"
     },
     "embed_gguf": {
       "type": "string",
       "title": "In-proc embedder GGUF path (tier-1)",
-      "description": "Absolute path to a BGE-M3 GGUF file. Optional — if empty, all embeds go through tier-2 HTTP.",
+      "description": "Absolute path to a BGE-M3 GGUF file. Optional \u2014 if empty, all embeds go through tier-2 HTTP.",
       "default": ""
     }
   }

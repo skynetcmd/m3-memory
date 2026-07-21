@@ -52,10 +52,26 @@ _DOC_FILES = [
 
 # Files whose version string must equal the pyproject [project] version, so a
 # release bump can't leave a manifest advertising a stale version (server.json
-# said 2026.4.24.5 and mcp-server.json said 2026.04 while pyproject was newer).
+# said 2026.4.24.5 and mcp-server.json said 2026.04 while pyproject was newer;
+# the plugin.json manifests drifted 6 releases behind — 2026.7.13.0 vs 2026.7.19.5
+# — because release bumps updated pyproject but forgot these, and NOTHING caught
+# it. The marketplace serves these directly from main, so a stale version.json
+# ships to every user's `/plugin install`).
 _VERSIONED_MANIFESTS = [
     os.path.join(_ROOT, "server.json"),
     os.path.join(_ROOT, "mcp-server.json"),
+    os.path.join(_ROOT, ".claude-plugin", "plugin.json"),
+    os.path.join(_ROOT, ".antigravity-plugin", "plugin.json"),
+]
+
+# The plugin marketplace manifests (published to every user). Their descriptions
+# must NOT quote an exact "N MCP tools" — policy is "100+ MCP tools" (an exact
+# count drifts on every catalog change and there is no generator syncing them).
+_PLUGIN_MANIFESTS = [
+    os.path.join(_ROOT, ".claude-plugin", "plugin.json"),
+    os.path.join(_ROOT, ".claude-plugin", "marketplace.json"),
+    os.path.join(_ROOT, ".antigravity-plugin", "plugin.json"),
+    os.path.join(_ROOT, ".antigravity-plugin", "marketplace.json"),
 ]
 
 # Domain-/phase-subcount claims that are intentionally NOT the catalog total
@@ -183,4 +199,40 @@ def test_registry_manifests_match_pyproject_version():
     assert not mismatches, (
         "MCP registry manifest version drift (bump these on release): "
         + "; ".join(mismatches)
+    )
+
+
+def test_all_manifests_synced_to_pyproject_version():
+    """The authoritative single-source check: bin/sync_manifest_versions.py --check
+    must pass, i.e. EVERY version-bearing manifest equals pyproject's version. A
+    release bump that edits pyproject but forgets to run the sync fails HERE,
+    loudly, instead of shipping a stale manifest to the marketplace.
+
+    This subsumes test_registry_manifests_match_pyproject_version (kept for its
+    targeted message) — both must stay green."""
+    import subprocess
+    script = os.path.join(_ROOT, "bin", "sync_manifest_versions.py")
+    r = subprocess.run([sys.executable, script, "--check"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, (
+        "manifest version drift — run `python bin/sync_manifest_versions.py`:\n"
+        + r.stdout + r.stderr
+    )
+
+
+def test_plugin_manifests_use_no_exact_tool_count():
+    """Plugin marketplace manifests (published to every user) must say
+    "100+ MCP tools", never an exact "N MCP tools" — an exact count silently
+    drifts on every catalog change (there is no generator syncing them) and is
+    what shipped a stale "101 MCP tools" while the catalog had 108."""
+    offenders: list[str] = []
+    exact_re = re.compile(r"\b\d+ MCP tools\b")
+    for path in _PLUGIN_MANIFESTS:
+        with open(path, encoding="utf-8") as _f:
+            text = _f.read()
+        for m in exact_re.finditer(text):
+            offenders.append(f"{os.path.relpath(path, _ROOT)}: {m.group(0)!r}")
+    assert not offenders, (
+        "plugin manifests must say '100+ MCP tools', not an exact count: "
+        + "; ".join(offenders)
     )

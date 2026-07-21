@@ -3,6 +3,7 @@ docs/AGENT_INSTRUCTIONS.md
 ## Git Standards
 - **Commit Messages:** Do NOT include "Co-Authored-By" lines in commit messages. Focus on clear, concise descriptions of "why" and "what".
 - **Pre-push process (MANDATORY, all agents):** After cloning, run `python bin/setup_hooks.py` once to enable the shared pre-push gate. Before any push, the tool-catalog drift check (`python bin/check_tool_catalog_drift.py`) and bench-data leakage scan must pass. If you change `bin/mcp_tool_catalog.py`, regenerate the catalog/inventory and update the "N tools" counts in the same change. Full rationale: the "Pre-push process — ALL agents" section in `docs/AGENT_INSTRUCTIONS.md`. This is enforced by the local hook AND CI, not just convention.
+- **Cutting a release (version bump):** The version has ONE source of truth — `pyproject.toml` `[project].version`. Do NOT hand-edit version strings in the derived manifests. Instead: (1) bump `pyproject.toml`, (2) run `python bin/sync_manifest_versions.py` — it writes the new version into every derived manifest (`server.json`, `mcp-server.json`, `.claude-plugin/plugin.json`, `.antigravity-plugin/plugin.json`; the plugin manifests are served straight from `main` to every user's `/plugin install`), (3) commit all together. `tests/test_tool_count_drift.py::test_all_manifests_synced_to_pyproject_version` (runs `--check`) fails the build if you skip step 2, so a stale manifest can't ship. Plugin manifest descriptions say "100+ MCP tools", never an exact count (also test-guarded).
 
 ## Homecoming Architecture (decoupled roots)
 
