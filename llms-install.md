@@ -131,8 +131,8 @@ values the commands above print):
       "command": "/absolute/path/to/python",
       "args": ["/absolute/path/to/bin/memory_bridge.py"],
       "env": {
-        "M3_ENGINE_ROOT": "/home/you/.m3/engine",
-        "M3_CONFIG_ROOT": "/home/you/.m3/config"
+        "M3_ENGINE_ROOT": "<HOME>/.m3/engine",
+        "M3_CONFIG_ROOT": "<HOME>/.m3/config"
       },
       "disabled": false,
       "autoApprove": []

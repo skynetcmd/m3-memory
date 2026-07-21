@@ -21,6 +21,27 @@ the policy is forward-going only.
 
 _Nothing pending — all changes below have shipped in a tagged release._
 
+## [2026.7.21.0] — 2026-07-21 — Cursor & Cline first-class support
+
+### Added
+- **Cursor and Cline are now first-class MCP hosts.** `m3 setup` (terminal and
+  GUI wizards) detects both — Cursor via `~/.cursor`, Cline via its VS Code
+  extension storage dir — and wires the `memory` MCP server into each client's
+  own config, alongside the existing agents. They appear in the wizard's
+  detection display, selection prompts, plan summary, and the GUI agent
+  checklist; `--agents cursor,cline` targets them explicitly. `doctor`/`doctor
+  --fix` already scan and heal both.
+
+### Fixed
+- **`m3 setup` now wires hosts that have no config file yet.** The registrar only
+  repointed an existing settings file, so a client that was installed but had
+  never written its MCP-settings file (Cline/Cursor create it lazily; also
+  Gemini/Antigravity) was silently skipped. It now creates the file with the
+  canonical `memory` entry when the host is present.
+- **Comparison/feature docs refreshed for accuracy** — test count (2,179→2,501
+  tests / 192 files), stale version strings, and Cursor/Cline added to the agent
+  enumerations and per-client install guides.
+
 ## [2026.7.19.5] — 2026-07-19 — Inference-backend health & Windows task flash fix
 
 ### Added
