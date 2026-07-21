@@ -5,9 +5,9 @@
 > **how-to-register** differs by client.
 
 For most users: run `m3 setup` once and the wizard auto-detects + wires
-every supported client on your machine (Claude Code, Gemini CLI,
-OpenCode, OpenClaw, Aider). This doc is for users who want to wire
-clients manually or understand what the wizard does.
+every supported client on your machine (Claude Code, Cursor, Cline,
+Gemini CLI, OpenCode, Antigravity, OpenClaw, Aider). This doc is for users
+who want to wire clients manually or understand what the wizard does.
 
 ---
 
@@ -250,6 +250,65 @@ agent = Agent(
 
 **TypeScript** equivalent uses the same spec shape via the SDK's
 `mcpServers` config option.
+
+---
+
+## Client 7 — Cursor & Cline (VS Code-family)
+
+Both are auto-detected and auto-wired by `m3 setup` — it writes the `memory`
+MCP entry (with the correct interpreter, bridge path, and root env) to each
+client's own config. Re-run `m3 setup` after installing either, and
+`m3 doctor --fix` repoints the entry if paths later move.
+
+### Cursor
+
+Auto-wired to `~/.cursor/mcp.json` (only when `~/.cursor` exists). Manual config:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "m3",
+      "env": {
+        "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082"
+      }
+    }
+  }
+}
+```
+
+> **Cursor's ~40-tool cap.** Cursor limits the active tool surface across all
+> MCP servers. m3 exposes 100+ tools but lazy-loads only the ~18 essentials at
+> startup (the rest via `tools_load_domain`), so it stays well under the ceiling.
+
+### Cline (VS Code extension)
+
+Auto-wired (only when the Cline extension's storage dir exists) to
+`cline_mcp_settings.json`:
+
+- **Windows**: `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json`
+- **macOS**: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+- **Linux**: `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+
+Manual config merges into the `mcpServers` object (see the root
+[`llms-install.md`](../llms-install.md) for the full agent-followed guide, and
+Cline's [MCP marketplace](https://github.com/cline/mcp-marketplace) for one-click
+install):
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "m3",
+      "env": { "M3_EMBED_FALLBACK_URL": "http://127.0.0.1:8082" },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+Restart Cursor / reload Cline's MCP servers. Verify via the client's MCP tool list.
 
 ---
 

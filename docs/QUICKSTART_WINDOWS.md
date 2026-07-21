@@ -1,6 +1,6 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Windows Quick Start
 
-Get persistent memory + directory ingestion running on Windows in under five minutes. Works with Claude Code, Gemini CLI, OpenCode, and OpenClaw.
+Get persistent memory + directory ingestion running on Windows in under five minutes. Works with Claude Code, Cursor, Cline, Gemini CLI, OpenCode, Antigravity, and OpenClaw.
 
 > No bash needed. Everything here is PowerShell.
 
@@ -116,6 +116,18 @@ Add to `opencode.json` (project root) or `%APPDATA%\opencode\opencode.json`:
   }
 }
 ```
+
+### Cursor
+
+`m3 setup` already wrote the entry into `%USERPROFILE%\.cursor\mcp.json` (when Cursor is installed). Restart Cursor. Manual:
+
+```json
+{ "mcpServers": { "memory": { "command": "m3" } } }
+```
+
+### Cline (VS Code)
+
+`m3 setup` already wrote the entry into `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json` (when the Cline extension is installed). Reload Cline's MCP servers. See the root [`llms-install.md`](../llms-install.md) for the full manual recipe.
 
 ### OpenClaw
 

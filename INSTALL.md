@@ -75,7 +75,8 @@ m3 setup
 ```
 
 `m3 setup` is the recommended path. It detects your agents (Claude Code,
-Gemini CLI, OpenCode, OpenClaw), asks a few questions, then drives every
+Cursor, Cline, Gemini CLI, OpenCode, Antigravity, OpenClaw, Hermes), asks a
+few questions, then drives every
 install step end-to-end: install-m3, sovereign CPU embedder, per-agent MCP
 wiring, chatlog hooks, and a final `doctor` verification. Power users can
 still run each step manually with `m3 install-m3`, `m3 embedder install`,
@@ -158,7 +159,8 @@ again:
    if you want CUDA / Vulkan / Metal acceleration on top of the CPU
    baseline. Auto-detects toolchain.
 4. **Per-agent MCP wiring** — writes `memory` MCP entries for any of
-   Claude Code / Gemini CLI / OpenCode / OpenClaw it detects on PATH.
+   Claude Code / Cursor / Cline / Gemini CLI / OpenCode / Antigravity /
+   OpenClaw it detects on your system.
 5. **Chatlog hooks** — installs the `PreCompact` (and optionally `Stop`)
    hooks in Claude Code, and the `SessionEnd` hook in Gemini CLI.
 6. **sqlite3 CLI check** — prints a per-OS install hint if `sqlite3` isn't

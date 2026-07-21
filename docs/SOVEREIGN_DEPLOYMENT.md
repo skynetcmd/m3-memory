@@ -94,8 +94,8 @@ LFS-tracked model file and any extra wheels you'll need offline.
    - `m3 embedder install` locates the bundled GGUF at
      `_assets/models/bge-m3-Q4_K_M.gguf`, registers `m3-embed-server` as an
      OS service with `concurrency=2`, and starts it on port 8082.
-   - Per-agent MCP wiring runs for any of Claude Code / Gemini CLI /
-     OpenCode detected on PATH.
+   - Per-agent MCP wiring runs for any of Claude Code / Cursor / Cline /
+     Gemini CLI / OpenCode / Antigravity / OpenClaw detected on your system.
    - Chatlog hooks are installed.
    - `m3 doctor` verifies everything.
 

@@ -233,6 +233,24 @@ Edit `~/.gemini/antigravity-cli/settings.json`:
 }
 ```
 
+**Cursor** (`~/.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "m3" }
+  }
+}
+```
+
+**Cline** (VS Code — `…/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`):
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "m3" }
+  }
+}
+```
+
 Restart your agent after saving the config.
 
 ---
