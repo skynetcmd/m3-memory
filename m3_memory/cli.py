@@ -284,6 +284,27 @@ def _cmd_governor(args: argparse.Namespace) -> int:
     return _run_bin_script("governor_cli.py", argv)
 
 
+def _cmd_wiki(args: argparse.Namespace) -> int:
+    """Dispatch `m3 wiki <generate|status>` to bin/gen_wiki.py."""
+    if not _resolve_bin_script("gen_wiki.py"):
+        print("wiki command requires the project payload (run `m3 install`).")
+        return 1
+    sub = getattr(args, "wiki_cmd", None) or "generate"
+    argv = [sub]
+    if getattr(args, "out", None):
+        argv += ["--out", args.out]
+    if sub == "generate":
+        if getattr(args, "check", False):
+            argv.append("--check")
+        if getattr(args, "no_files", False):
+            argv.append("--no-files")
+        if getattr(args, "no_networkx", False):
+            argv.append("--no-networkx")
+        if getattr(args, "importance_threshold", None) is not None:
+            argv += ["--importance-threshold", str(args.importance_threshold)]
+    return _run_bin_script("gen_wiki.py", argv)
+
+
 def _cmd_fips(args: argparse.Namespace) -> int:
     """Dispatch `m3 fips <install-wolfssl|status>`."""
     sub = getattr(args, "fips_cmd", None)
@@ -1029,6 +1050,25 @@ Examples:
     p_gov_mig.add_argument("--yes", "-y", action="store_true",
                            help="Skip the confirmation prompt (headless use).")
     p_governor.set_defaults(func=_cmd_governor)
+
+    p_wiki = subparsers.add_parser(
+        "wiki",
+        help="Generate a browsable, interlinked wiki from your core memories + files corpus.",
+    )
+    wiki_sub = p_wiki.add_subparsers(dest="wiki_cmd", metavar="<generate|status>")
+    p_wiki_gen = wiki_sub.add_parser("generate", help="Compile the wiki vault (default <engine_root>/wiki).")
+    p_wiki_gen.add_argument("--out", default=None, help="Output vault dir.")
+    p_wiki_gen.add_argument("--check", action="store_true",
+                            help="Exit non-zero if the on-disk vault is stale.")
+    p_wiki_gen.add_argument("--no-files", action="store_true",
+                            help="Memory-only vault (skip the files corpus).")
+    p_wiki_gen.add_argument("--no-networkx", action="store_true",
+                            help="Force the pure-Python clustering fallback.")
+    p_wiki_gen.add_argument("--importance-threshold", type=float, default=None,
+                            help="Min importance to count as 'core' (default 0.6).")
+    p_wiki_status = wiki_sub.add_parser("status", help="Report vault location, page count, last build.")
+    p_wiki_status.add_argument("--out", default=None, help="Vault dir to inspect.")
+    p_wiki.set_defaults(func=_cmd_wiki)
 
     p_fips = subparsers.add_parser(
         "fips",

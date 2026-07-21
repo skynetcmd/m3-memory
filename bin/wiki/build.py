@@ -1,0 +1,60 @@
+"""Pure wiki builder.
+
+`build_wiki(mem_conn, files_conn, opts)` takes two open sqlite3 connections and
+returns {relpath: markdown_text}. No path resolution, no file I/O, no embedder, no
+timestamps — so the determinism test can drive it from fixture DBs and assert
+byte-identical output across runs. The I/O shell lives in bin/gen_wiki.py.
+"""
+from __future__ import annotations
+
+import sqlite3
+from dataclasses import dataclass
+from typing import Optional
+
+from . import cluster as _cluster
+from . import files_layer as _files
+from . import render as _render
+from . import select as _select
+
+
+@dataclass
+class WikiOptions:
+    importance_threshold: float = 0.6
+    include_files: bool = True
+    use_networkx: bool = True
+    include_all_corpora: bool = True
+    corpora: Optional[list[str]] = None
+    exclude_corpora: Optional[list[str]] = None
+    limit: int = 5000
+
+
+def build_wiki(
+    mem_conn: sqlite3.Connection,
+    files_conn: Optional[sqlite3.Connection],
+    opts: Optional[WikiOptions] = None,
+) -> dict[str, str]:
+    """Compile the vault. `files_conn` may be None (memory-only vault)."""
+    opts = opts or WikiOptions()
+
+    memories = _select.select_core_memories(
+        mem_conn,
+        importance_threshold=opts.importance_threshold,
+        limit=opts.limit,
+    )
+    ids = {m.id for m in memories}
+    edges = _select.load_memory_edges(mem_conn, ids)
+
+    files = _files.FilesLayer()
+    promotions: list[_select.Promo] = []
+    if opts.include_files and files_conn is not None:
+        files = _files.load_files_layer(
+            files_conn,
+            include_all=opts.include_all_corpora,
+            corpora=opts.corpora,
+            exclude_corpora=opts.exclude_corpora,
+        )
+        promotions = _select.load_promotions(files_conn, ids)
+
+    clusters = _cluster.cluster(memories, edges, use_networkx=opts.use_networkx)
+
+    return _render.render_pages(clusters, edges, files, promotions)

@@ -151,6 +151,13 @@ entity-ner = ["gliner>=0.2.26"]
 # cosine path is the fallback). The PyPI wheel ships the platform-native
 # extension binary, so no separate compilation/bundling step is needed.
 vector = ["sqlite-vec>=0.1.6"]
+# Higher-quality topic clustering for the wiki generator (bin/wiki/cluster.py),
+# used by `m3 wiki generate`. Optional by design: the generator runs fully without
+# it via a pure-Python weighted connected-components fallback — networkx only
+# upgrades cluster quality (greedy-modularity communities). Imported lazily and
+# guarded inside cluster.py, so `pip install m3-memory` gains NO hard dependency;
+# opt in with `pip install "m3-memory[wiki]"`.
+wiki = ["networkx>=3.0,<4"]
 # LangChain / LangGraph integration (m3_memory/integrations/langchain/). Optional
 # by design: core m3 gains NO hard LangChain dependency — the adapter imports
 # langchain-core / langgraph lazily, so `pip install m3-memory` stays light and
