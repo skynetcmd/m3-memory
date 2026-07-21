@@ -10,12 +10,12 @@
 # what the generator writes on any runner, regardless of core.autocrlf.
 *.svg      text eol=lf
 
-# The homelab-dashboard icon cache holds RUNTIME-FETCHED icon blobs, some of
-# which are PNGs saved with a .svg extension (magic bytes 89 50 4E 47). The
-# `*.svg text eol=lf` rule above would try to LF-normalize those binaries,
-# mangling a byte on every checkout — leaving them permanently "modified" and
-# breaking stash pop / merge / checkout. Force the whole cache dir to binary so
-# git never applies eol conversion to it (it's a cache, not source).
+# The homelab-dashboard icon cache holds RUNTIME-FETCHED icon blobs (SVG and
+# PNG). Files are now named by their true content type (see get_icon in
+# backend/main.py), so `*.png binary` / `*.svg text` handle them correctly. This
+# blanket rule is belt-and-suspenders: force the whole cache dir to binary so a
+# future mis-extensioned blob can never be eol-mangled (which previously left
+# PNG-as-svg files permanently "modified" and broke stash pop / merge).
 examples/homelab-dashboard/backend/cache/** binary
 
 # Git hooks are extensionless shell scripts — must stay LF so they execute

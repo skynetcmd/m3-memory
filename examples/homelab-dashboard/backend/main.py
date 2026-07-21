@@ -42,31 +42,44 @@ ICON_CACHE_DIR = Path(__file__).parent / "cache" / "icons"
 ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 ICON_CACHE_DIR = ICON_CACHE_DIR.resolve()
 
-_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.svg$")
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+\.(svg|png)$")
 
-def get_safe_filename(name):
-    return base64.urlsafe_b64encode(name.encode()).decode().rstrip("=") + ".svg"
+# Cached icons can be SVG (SimpleIcons/MDI) or PNG (some homepage icons). Name
+# the cache file by its ACTUAL content type and serve it with the matching media
+# type — writing PNG bytes into a `.svg` file mislabels a binary as text and
+# makes git eol-normalization corrupt it on every checkout.
+_MEDIA_BY_EXT = {".svg": "image/svg+xml", ".png": "image/png"}
+
+
+def _ext_for(content: bytes, content_type: str) -> str:
+    """Pick .png or .svg from the response's magic bytes / content-type."""
+    if content[:8] == b"\x89PNG\r\n\x1a\n" or "png" in (content_type or "").lower():
+        return ".png"
+    return ".svg"
+
+
+def get_safe_stem(name: str) -> str:
+    return base64.urlsafe_b64encode(name.encode()).decode().rstrip("=")
 
 @app.get("/api/icon")
 async def get_icon(name: str):
-    safe_name = get_safe_filename(name)
-    if not _SAFE_NAME_RE.match(safe_name):
-        raise HTTPException(status_code=400, detail="Invalid icon name")
-    cache_path = ICON_CACHE_DIR / safe_name
-
-    if cache_path.exists():
-        return FileResponse(str(cache_path), media_type="image/svg+xml")
+    stem = get_safe_stem(name)
+    # Serve whichever extension was already cached for this name.
+    for ext, media in _MEDIA_BY_EXT.items():
+        cached = ICON_CACHE_DIR / f"{stem}{ext}"
+        if _SAFE_NAME_RE.match(cached.name) and cached.exists():
+            return FileResponse(str(cached), media_type=media)
 
     async with httpx.AsyncClient() as client:
         try:
             content = None
-            media_type = "image/svg+xml"
+            content_type = ""
             if name.startswith("/"):
                 url = f"{HOMEPAGE_URL.rstrip('/')}{name}"
                 res = await client.get(url, timeout=5.0)
                 if res.status_code == 200:
                     content = res.content
-                    media_type = res.headers.get("content-type", "image/svg+xml")
+                    content_type = res.headers.get("content-type", "")
 
             elif name.startswith("si-"):
                 # SimpleIcons
@@ -83,9 +96,11 @@ async def get_icon(name: str):
                     content = res.content
 
             if content:
+                ext = _ext_for(content, content_type)
+                cache_path = ICON_CACHE_DIR / f"{stem}{ext}"
                 with open(cache_path, "wb") as f:
                     f.write(content)
-                return Response(content=content, media_type=media_type)
+                return Response(content=content, media_type=_MEDIA_BY_EXT[ext])
 
             raise HTTPException(status_code=404, detail="Icon not found")
         except Exception:
