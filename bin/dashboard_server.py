@@ -194,6 +194,33 @@ from dashboard.templates import (  # noqa: E402
     _WIKI_PAGE_HTML,
 )
 
+
+def _logo_data_uri() -> str:
+    """The m3 logo as an inline base64 data-URI so the dashboard renders it with
+    no network (fully offline). Falls back to the raw.githubusercontent.com URL if
+    the packaged PNG can't be found — the header still works, just needs the net.
+    """
+    import base64
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(here, "..", "docs", "m3_logo_icon.png"),   # dev tree (bin/ -> ../docs)
+        os.path.join(here, "docs", "m3_logo_icon.png"),          # installed (m3_memory/docs)
+    ]
+    for path in candidates:
+        try:
+            with open(os.path.abspath(path), "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            return f"data:image/png;base64,{b64}"
+        except OSError:
+            continue
+    return ("https://raw.githubusercontent.com/skynetcmd/m3-memory/main/"
+            "docs/m3_logo_icon.png")
+
+
+# Bake the logo src into the header once at import (base64 has no {}/braces, so it
+# survives the later str.format() calls that fill the nav-active + db-selector slots).
+HEADER_HTML = HEADER_HTML.replace("{{ LOGO_SRC }}", _logo_data_uri())
+
 # Standalone full-window Interactive Knowledge Graph (served at /graph, opened in
 # its own browser window). Self-contained: a compact copy of the force-graph
 # renderer (fetch /api/graph → physics → draw → drag/zoom), full-viewport, dark.

@@ -10,7 +10,7 @@ HEADER_HTML = """
     <header>
         <div class="logo-group">
             <a href="/" title="M3 Cognitive" style="display:flex; align-items:center;">
-                <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png"
+                <img src="{{ LOGO_SRC }}"
                      alt="M3" width="72" height="72" class="logo-img">
             </a>
         </div>
