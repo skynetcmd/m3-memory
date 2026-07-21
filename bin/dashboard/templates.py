@@ -16,6 +16,7 @@ HEADER_HTML = """
             <a href="/" class="nav-link {explorer_active}">Graph Explorer</a>
             <a href="/browse" class="nav-link {browse_active}">KB Browser</a>
             <a href="/audit" class="nav-link {audit_active}">Conflict & Audit Log</a>
+            <a href="/wiki" class="nav-link {wiki_active}">Wiki</a>
             <a href="/health" class="nav-link {health_active}">System Health</a>
         </div>
 
@@ -1720,6 +1721,37 @@ AUDIT_HTML = """
             }
         });
     </script>
+</body>
+</html>
+"""
+
+
+# Wiki page shell. {{ BODY }} is either an iframe embedding the generated
+# self-contained wiki.html, or OS-specific "how to generate it" instructions.
+# Uses a column flex so the iframe fills the space below the header.
+_WIKI_PAGE_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>M3 Wiki</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+        {{ STYLE_CSS }}
+        html, body { height: 100%; }
+        body { display: flex; flex-direction: column; margin: 0; }
+        .wiki-shell { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        pre code { font-family: 'Fira Code', monospace; }
+    </style>
+</head>
+<body>
+    {{ HEADER }}
+    <div class="wiki-shell">
+        {{ BODY }}
+    </div>
 </body>
 </html>
 """

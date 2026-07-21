@@ -62,7 +62,12 @@ def _h(s: object) -> str:
 
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 
 # Ensure bin/ is on path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -186,6 +191,7 @@ from dashboard.templates import (  # noqa: E402
     HEADER_HTML,
     INDEX_HTML,
     STYLE_CSS,
+    _WIKI_PAGE_HTML,
 )
 
 # Standalone full-window Interactive Knowledge Graph (served at /graph, opened in
@@ -588,7 +594,7 @@ async def get_index(request: Request):
     set_active_db_env(selected_db)
 
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="active", browse_active="", audit_active="", health_active="", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="active", browse_active="", audit_active="", health_active="", wiki_active="", db_selector_html=db_selector_html)
     content = INDEX_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
@@ -600,7 +606,7 @@ async def get_browse(request: Request):
     set_active_db_env(selected_db)
 
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="", browse_active="active", audit_active="", health_active="", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="", browse_active="active", audit_active="", health_active="", wiki_active="", db_selector_html=db_selector_html)
     content = BROWSE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
@@ -612,9 +618,117 @@ async def get_audit(request: Request):
     set_active_db_env(selected_db)
 
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="active", health_active="", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="active", health_active="", wiki_active="", db_selector_html=db_selector_html)
     content = AUDIT_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS).replace("{{ HEADER }}", header).replace("{{ db_path }}", selected_db_path)
     return HTMLResponse(content=content, status_code=200, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+def _wiki_html_path() -> str:
+    """Absolute path to the generated self-contained wiki viewer, if any.
+
+    Default vault location is <engine_root>/wiki/wiki.html (see bin/gen_wiki.py).
+    """
+    try:
+        from m3_core.paths import get_m3_engine_root
+        engine_root = get_m3_engine_root()
+    except Exception:
+        engine_root = os.path.join(os.path.expanduser("~"), ".m3", "engine")
+    return os.path.join(engine_root, "wiki", "wiki.html")
+
+
+@app.get("/wiki", response_class=HTMLResponse)
+async def get_wiki(request: Request):
+    """Show the generated wiki if present, else how to generate it.
+
+    The wiki is a self-contained HTML vault produced by `m3 wiki generate --html`.
+    When it exists we embed it in an iframe (served from /wiki/raw) inside the
+    dashboard chrome; when it doesn't, we render OS-specific instructions.
+    """
+    selected_db = request.cookies.get("selected_db", "main")
+    selected_db_path = get_active_db_path(request)
+    set_active_db_env(selected_db)
+    db_selector_html = build_db_selector_html(selected_db)
+    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="",
+                                health_active="", wiki_active="active",
+                                db_selector_html=db_selector_html)
+
+    if os.path.isfile(_wiki_html_path()):
+        body = (
+            '<div style="flex:1; display:flex; flex-direction:column; min-height:0;">'
+            '<div style="padding:0.4rem 1rem; display:flex; gap:1rem; align-items:center;">'
+            '<span style="color:hsl(210,15%,60%); font-size:0.85rem;">'
+            'Generated from your core memories · refresh with '
+            '<code>m3 wiki generate --html</code></span>'
+            '<a href="/wiki/raw" target="_blank" class="nav-link" '
+            'style="margin-left:auto;">Open full screen ↗</a></div>'
+            '<iframe src="/wiki/raw" title="m3 wiki" '
+            'style="flex:1; width:100%; border:0; background:transparent;"></iframe>'
+            '</div>'
+        )
+    else:
+        body = _wiki_install_html()
+
+    content = _WIKI_PAGE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS) \
+                             .replace("{{ HEADER }}", header) \
+                             .replace("{{ BODY }}", body)
+    return HTMLResponse(content=content, status_code=200,
+                        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+@app.get("/wiki/raw", response_class=HTMLResponse)
+async def get_wiki_raw(request: Request):
+    """Serve the raw self-contained wiki.html (for the iframe / full-screen)."""
+    path = _wiki_html_path()
+    if not os.path.isfile(path):
+        return HTMLResponse(content="wiki not generated — run `m3 wiki generate --html`",
+                            status_code=404)
+    return FileResponse(path, media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+
+
+def _wiki_install_html() -> str:
+    """Instructions shown when no wiki has been generated yet (OS variants)."""
+    return """
+    <div style="max-width:760px; margin:2rem auto; padding:0 1.5rem;
+                font-family:'Outfit',sans-serif; color:hsl(210,15%,80%);">
+      <h1 style="color:hsl(210,20%,92%);">No wiki generated yet</h1>
+      <p>The <strong>m3 wiki</strong> compiles your canonical memories (pinned,
+         high-confidence, beliefs, procedures) and indexed files into a browsable,
+         interlinked knowledge base. Generate it once and it appears here.</p>
+
+      <h3 style="color:hsl(180,100%,70%); margin-top:1.6rem;">Generate it</h3>
+      <p>Run this in a terminal on the machine hosting m3 — the same command on
+         every OS:</p>
+      <pre style="background:hsla(222,22%,12%,0.9); border:1px solid hsla(210,15%,30%,0.4);
+                  border-radius:8px; padding:0.9rem 1rem; overflow-x:auto;"><code>m3 wiki generate --html</code></pre>
+      <p style="color:hsl(210,15%,60%); font-size:0.9rem;">
+         Then reload this page. Re-run any time to refresh.</p>
+
+      <h3 style="color:hsl(180,100%,70%); margin-top:1.6rem;">Opening a terminal</h3>
+      <ul style="line-height:1.9;">
+        <li><strong>Windows</strong> — press <code>Win</code>, type
+            <em>PowerShell</em>, Enter. If <code>m3</code> isn't found, run
+            <code>py -m m3_memory.cli wiki generate --html</code>.</li>
+        <li><strong>macOS</strong> — open <em>Terminal</em>
+            (<code>Cmd+Space</code> → "Terminal"). If <code>m3</code> isn't found,
+            run <code>pipx ensurepath</code> and reopen the terminal.</li>
+        <li><strong>Linux</strong> — open your terminal emulator. If <code>m3</code>
+            isn't on <code>PATH</code>, run <code>pipx ensurepath</code> (or use
+            <code>python3 -m m3_memory.cli wiki generate --html</code>).</li>
+      </ul>
+
+      <h3 style="color:hsl(180,100%,70%); margin-top:1.6rem;">Options</h3>
+      <ul style="line-height:1.9;">
+        <li><code>--importance-threshold 0.8</code> — a tighter, higher-signal vault.</li>
+        <li><code>--synthesize</code> — add an LLM prose summary to each topic
+            (needs a local chat model).</li>
+        <li><code>--exclude "REGEX"</code> — drop private/sensitive memories.</li>
+      </ul>
+      <p style="margin-top:1.4rem;">Full guide:
+         <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/WIKI.md"
+            target="_blank" style="color:hsl(180,100%,65%);">docs/WIKI.md</a>.</p>
+    </div>
+    """
 
 
 @app.get("/graph", response_class=HTMLResponse)
@@ -701,7 +815,7 @@ async def get_health(request: Request):
     selected_db = request.cookies.get("selected_db", "main")
     set_active_db_env(selected_db)
     db_selector_html = build_db_selector_html(selected_db)
-    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="", health_active="active", db_selector_html=db_selector_html)
+    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="", health_active="active", wiki_active="", db_selector_html=db_selector_html)
     panel = _render_health_panel()
     content = (
         "<!doctype html><html><head><meta charset='utf-8'>"
