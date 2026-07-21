@@ -122,13 +122,20 @@ def select_core_memories(
     *,
     importance_threshold: float = 0.6,
     limit: int = 5000,
+    exclude_regex: Optional[str] = None,
 ) -> list[Mem]:
     """Load the canonical memory set, sorted deterministically.
 
     Resilient to older schemas: `pinned`/`confidence`/`valid_*` are accreted
     columns, so fall back to safe defaults if a column is absent (keeps the
     generator usable against a minimal fixture DB).
+
+    `exclude_regex`, when set, drops any memory whose title OR content matches it
+    (case-insensitive) — used to keep private/bench memories out of a shareable
+    vault. Applied in Python (not SQL) so the pattern is a full regex.
     """
+    import re as _re
+    _excl = _re.compile(exclude_regex, _re.IGNORECASE) if exclude_regex else None
     has_pinned = _has_column(conn, "memory_items", "pinned")
     has_conf = _has_column(conn, "memory_items", "confidence")
     has_valid = _has_column(conn, "memory_items", "valid_from")
@@ -158,6 +165,10 @@ def select_core_memories(
     rows = conn.execute(sql, params).fetchall()
     out: list[Mem] = []
     for r in rows:
+        if _excl is not None:
+            hay = f"{r['title'] or ''}\n{r['content'] or ''}"
+            if _excl.search(hay):
+                continue
         out.append(
             Mem(
                 id=r["id"],

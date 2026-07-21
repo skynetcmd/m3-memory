@@ -31,6 +31,9 @@ class WikiOptions:
     # "orphan" set into real topics. Synthetic co-mention edges affect CLUSTERING
     # only — they never appear as rendered "Related"/"Backlinks" (those stay real).
     entity_comention: bool = True
+    # A regex; any memory whose title/content matches is excluded from the vault.
+    # Used to keep private/bench memories out of a shareable export.
+    exclude_regex: Optional[str] = None
 
 
 def build_wiki(
@@ -52,6 +55,7 @@ def build_wiki(
         mem_conn,
         importance_threshold=opts.importance_threshold,
         limit=opts.limit,
+        exclude_regex=opts.exclude_regex,
     )
     ids = {m.id for m in memories}
     edges = _select.load_memory_edges(mem_conn, ids)

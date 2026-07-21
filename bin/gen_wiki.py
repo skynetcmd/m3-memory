@@ -80,6 +80,7 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
                               if args.importance_threshold is not None else 0.6),
         include_files=not args.no_files,
         use_networkx=not args.no_networkx,
+        exclude_regex=getattr(args, "exclude", None),
     )
 
     synthesizer = None
@@ -183,6 +184,10 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                         "Mutually exclusive with --check.")
     p.add_argument("--importance-threshold", type=float, default=None,
                    help="Min importance for a memory to count as 'core' (default 0.6).")
+    p.add_argument("--exclude", default=None, metavar="REGEX",
+                   help="Drop any memory whose title/content matches this regex "
+                        "(case-insensitive) — e.g. to keep private/bench notes out "
+                        "of a shareable vault.")
 
 
 def main(argv: list[str] | None = None) -> int:

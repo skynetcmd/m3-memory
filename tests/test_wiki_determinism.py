@@ -154,14 +154,28 @@ def test_core_pages_emitted():
     assert "index.md" in vault
     assert "overview.md" in vault
     assert "lint.md" in vault
-    # The vault documents itself, and the guide is linked from the index.
+    # The vault documents itself, and the guide is linked from the index with a
+    # REAL Markdown hyperlink (not an Obsidian-only [[wikilink]]).
     assert "about.md" in vault
-    assert "[[about]]" in vault["index.md"]
+    assert "(about.md)" in vault["index.md"]
+    assert "[[" not in vault["index.md"], "index must use standard Markdown links"
     assert "m3 wiki generate" in vault["about.md"]
     # The excluded low-importance note must not appear anywhere.
     blob = "\n".join(vault.values())
     assert "Ignored" not in blob
     assert "m-zzz" not in blob
+
+
+def test_uses_real_markdown_links_not_wikilinks():
+    """The whole vault must be browsable in any Markdown renderer: standard
+    [text](path.md) links only, no Obsidian-only [[wikilinks]]."""
+    vault = _build(use_networkx=False, entity_comention=True)
+    for path, text in vault.items():
+        assert "[[" not in text, f"{path} contains an Obsidian-only [[wikilink]]"
+    # A topic page links back up to the index with a correct relative path.
+    topic = [t for p, t in vault.items()
+             if p.startswith("topics/") and p != "topics/orphans.md"][0]
+    assert "(../index.md)" in topic, "topic nav should link up to ../index.md"
 
 
 def test_cluster_and_wikilinks():

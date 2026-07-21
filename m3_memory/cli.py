@@ -304,6 +304,8 @@ def _cmd_wiki(args: argparse.Namespace) -> int:
             argv.append("--synthesize")
         if getattr(args, "importance_threshold", None) is not None:
             argv += ["--importance-threshold", str(args.importance_threshold)]
+        if getattr(args, "exclude", None):
+            argv += ["--exclude", args.exclude]
     return _run_bin_script("gen_wiki.py", argv)
 
 
@@ -1071,6 +1073,9 @@ Examples:
                                  "endpoint (opt-in, cached). Not compatible with --check.")
     p_wiki_gen.add_argument("--importance-threshold", type=float, default=None,
                             help="Min importance to count as 'core' (default 0.6).")
+    p_wiki_gen.add_argument("--exclude", default=None, metavar="REGEX",
+                            help="Drop memories whose title/content matches this "
+                                 "regex (e.g. to exclude private/bench notes).")
     p_wiki_status = wiki_sub.add_parser("status", help="Report vault location, page count, last build.")
     p_wiki_status.add_argument("--out", default=None, help="Vault dir to inspect.")
     p_wiki.set_defaults(func=_cmd_wiki)
