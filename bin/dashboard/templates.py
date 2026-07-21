@@ -9,10 +9,9 @@ the route handlers. Do not add logic here.
 HEADER_HTML = """
     <header>
         <div class="logo-group">
-            <div class="m3-status-dot"></div>
             <a href="/" title="M3 Cognitive" style="display:flex; align-items:center;">
                 <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png"
-                     alt="M3" width="60" height="60" class="logo-img">
+                     alt="M3" width="72" height="72" class="logo-img">
             </a>
         </div>
         <div style="display: flex; gap: 0.5rem; align-items: center;">
@@ -102,8 +101,8 @@ STYLE_CSS = """
 
         .logo-img {
             display: block;
-            width: 60px;
-            height: 60px;
+            width: 72px;
+            height: 72px;
             object-fit: contain;
         }
 
