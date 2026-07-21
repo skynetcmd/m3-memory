@@ -18,7 +18,7 @@ HEADER_HTML = """
             <a href="/" class="nav-link {explorer_active}">Graph Explorer</a>
             <a href="/browse" class="nav-link {browse_active}">KB Browser</a>
             <a href="/audit" class="nav-link {audit_active}">Conflict & Audit Log</a>
-            <a href="/wiki" class="nav-link {wiki_active}">Wiki</a>
+            <a href="/wiki" class="nav-link {wiki_active}">Memory Wiki</a>
             <a href="/health" class="nav-link {health_active}">System Health</a>
         </div>
 

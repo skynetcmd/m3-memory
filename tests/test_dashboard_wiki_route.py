@@ -74,4 +74,4 @@ def test_wiki_nav_link_on_every_page(client):
     for path in ("/", "/browse", "/audit", "/wiki"):
         r = c.get(path)
         assert r.status_code == 200, path
-        assert ">Wiki</a>" in r.text, f"Wiki nav link missing on {path}"
+        assert ">Memory Wiki</a>" in r.text, f"Memory Wiki nav link missing on {path}"
