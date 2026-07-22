@@ -134,16 +134,28 @@ def _set_dict_rows(conn) -> None:
 
 
 def _has_column(conn, table: str, column: str) -> bool:
-    """Backend-portable column existence check.
+    """Backend-portable column existence check via the dialect's metadata query.
 
-    `PRAGMA table_info` is SQLite-only, so probe by selecting the column with a
-    zero-row predicate; a missing column raises, which we treat as absent. Works on
-    both supported backends (SQLite and PostgreSQL)."""
+    Uses `dialect.columns_of()` — `pragma_table_info()` on SQLite,
+    `information_schema.columns` on PostgreSQL — which lists column names WITHOUT
+    erroring on a missing column. This matters on PostgreSQL: a failed probe query
+    (e.g. `SELECT missing_col …`) aborts the whole transaction, poisoning every
+    later query on the connection. A metadata query never does that. Falls back to
+    `PRAGMA table_info` for a raw sqlite3 fixture with no backend seam (tests)."""
     try:
-        conn.execute(f"SELECT {column} FROM {table} WHERE 1=0").fetchall()
-        return True
+        from memory.backends import dialect
+        sql, params = dialect().columns_of(table)
+        return any(r[0] == column for r in conn.execute(sql, params).fetchall())
     except Exception:
-        return False
+        # No backend seam (standalone sqlite fixture): PRAGMA is safe on sqlite.
+        try:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            return any(
+                (r["name"] if isinstance(r, sqlite3.Row) else r[1]) == column
+                for r in rows
+            )
+        except Exception:
+            return False
 
 
 def select_core_memories(
@@ -257,12 +269,14 @@ def load_entity_comention_edges(conn: sqlite3.Connection, ids: set[str]) -> list
     if not ids:
         return []
     _set_dict_rows(conn)
-    try:
-        rows = conn.execute(
-            "SELECT entity_id, memory_id FROM memory_item_entities"
-        ).fetchall()
-    except Exception:
-        return []  # entity graph not present on this DB (any backend)
+    # Guard BEFORE running the query, not with try/except around it: on PostgreSQL
+    # a query against a missing table aborts the whole transaction, poisoning the
+    # connection for any later query. `_has_column` uses a safe metadata query.
+    if not _has_column(conn, "memory_item_entities", "entity_id"):
+        return []  # entity graph not present on this DB
+    rows = conn.execute(
+        "SELECT entity_id, memory_id FROM memory_item_entities"
+    ).fetchall()
 
     # entity_id -> sorted list of core memory ids that mention it
     by_entity: dict[str, list[str]] = {}

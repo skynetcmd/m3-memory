@@ -207,7 +207,7 @@ just developers. Documentation refreshed.
 ### Added
 - **PostgreSQL→PostgreSQL warehouse fast-path** (`postgres_fdw`): set-based, server-side
   delta upserts with last-writer-wins, used automatically when both the primary store and the
-  warehouse are PostgreSQL; falls back to the generic bridge otherwise (SQLite/MariaDB). See
+  warehouse are PostgreSQL; falls back to the generic bridge otherwise (e.g. a SQLite primary). See
   `docs/SYNC_PG_TO_PG.md`.
 - **Warehouse consolidation tool** (`bin/migrate_warehouse_to_schema.py`) to move an existing
   `public`-layout warehouse into the canonical `m3_warehouse` schema — dry-run by default,
