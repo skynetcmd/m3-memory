@@ -10,20 +10,18 @@ M3 treats agent memory as a **distributed-systems infrastructure problem**, not 
 
 Instead of every tool keeping its own throwaway context, M3 is a **shared, evolving, bitemporal knowledge base** that multiple heterogeneous agents and machines read and write. It is designed to solve a fundamental challenge: *How do agents maintain a consistent, evolving, and temporal knowledge base over months and years?*
 
-> **Plugs into your stack — coding agents, framework, and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
->
-> - 🤖 **Coding agents** — `m3 setup` auto-detects and wires m3 into **Claude Code, Cursor, Cline, Gemini CLI, Aider, Antigravity, OpenCode**, and any MCP client — one shared memory across every agent, re-wired on update. (See [MCP Client Install](docs/MCP_CLIENT_INSTALL.md))
-> <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/hr.svg" alt="" width="100%" height="1">
-> - 🖥️ **Web dashboard, open to all users — not just developers** — a built-in, backend-agnostic control panel (default `http://127.0.0.1:8088`): browse memory, read your auto-generated Memory Wiki, explore the interactive knowledge graph, and watch system health / load. `pip install m3-memory[dashboard]` then `m3 dashboard`. (See [Dashboard Guide](docs/DASHBOARD.md))
-> <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/hr.svg" alt="" width="100%" height="1">
-> - 📖 **Auto-generated wiki + Obsidian export** — `m3 wiki generate` compiles your canonical memories (pinned, high-confidence, beliefs, procedures) and indexed files into a browsable, interlinked Markdown vault — one page per topic, real hyperlinks for every relationship, and provenance links down to the source document each fact came from. Renders on GitHub, in a self-contained offline HTML viewer, or as an **Obsidian vault** (`--obsidian` for graph view + backlinks). (See [Wiki Guide](docs/WIKI.md))
-> <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/hr.svg" alt="" width="100%" height="1">
-> - 🐘 **PostgreSQL** — run M3 on a first-class PostgreSQL primary backend (`M3_DB_BACKEND=postgres`) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See [Architecture](docs/ARCHITECTURE.md) · [Sync](docs/SYNC.md))
-> <img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/badges/hr.svg" alt="" width="100%" height="1">
-> - 🦜 **LangChain & LangGraph** — drop-in **Mem0 replacement** (one-line import swap) and fully **LangMem-compatible** (`store=M3Store()`): `pip install m3-memory[langchain]`. (See [LangChain Guide](docs/integrations/LANGCHAIN.md))
-> - 👥 **CrewAI** — a drop-in `StorageBackend` for CrewAI's unified memory: `pip install m3-memory[crewai]`. (See [CrewAI Guide](m3_memory/integrations/crewai/README.md))
-> - 🧩 **PydanticAI** — wire M3 in as the agent's memory layer: `pip install m3-memory[pydantic-ai]`. (See [PydanticAI Guide](m3_memory/integrations/pydantic_ai/README.md))
->
+**Plugs into your stack — coding agents, framework, and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
+
+<table border="0">
+<tr><td valign="top">🤖</td><td><b>Coding agents</b> — <code>m3 setup</code> auto-detects and wires m3 into <b>Claude Code, Cursor, Cline, Gemini CLI, Aider, Antigravity, OpenCode</b>, and any MCP client — one shared memory across every agent, re-wired on update. (See <a href="docs/MCP_CLIENT_INSTALL.md">MCP Client Install</a>)</td></tr>
+<tr><td valign="top">🖥️</td><td><b>Web dashboard, open to all users — not just developers</b> — a built-in, backend-agnostic control panel (default <code>http://127.0.0.1:8088</code>): browse memory, read your auto-generated Memory Wiki, explore the interactive knowledge graph, and watch system health / load. <code>pip install m3-memory[dashboard]</code> then <code>m3 dashboard</code>. (See <a href="docs/DASHBOARD.md">Dashboard Guide</a>)</td></tr>
+<tr><td valign="top">📖</td><td><b>Auto-generated wiki + Obsidian export</b> — <code>m3 wiki generate</code> compiles your canonical memories (pinned, high-confidence, beliefs, procedures) and indexed files into a browsable, interlinked Markdown vault — one page per topic, real hyperlinks for every relationship, and provenance links down to the source document each fact came from. Renders on GitHub, in a self-contained offline HTML viewer, or as an <b>Obsidian vault</b> (<code>--obsidian</code> for graph view + backlinks). (See <a href="docs/WIKI.md">Wiki Guide</a>)</td></tr>
+<tr><td valign="top">🐘</td><td><b>PostgreSQL</b> — run M3 on a first-class PostgreSQL primary backend (<code>M3_DB_BACKEND=postgres</code>) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/SYNC.md">Sync</a>)</td></tr>
+<tr><td valign="top">🦜</td><td><b>LangChain &amp; LangGraph</b> — drop-in <b>Mem0 replacement</b> (one-line import swap) and fully <b>LangMem-compatible</b> (<code>store=M3Store()</code>): <code>pip install m3-memory[langchain]</code>. (See <a href="docs/integrations/LANGCHAIN.md">LangChain Guide</a>)</td></tr>
+<tr><td valign="top">👥</td><td><b>CrewAI</b> — a drop-in <code>StorageBackend</code> for CrewAI's unified memory: <code>pip install m3-memory[crewai]</code>. (See <a href="m3_memory/integrations/crewai/README.md">CrewAI Guide</a>)</td></tr>
+<tr><td valign="top">🧩</td><td><b>PydanticAI</b> — wire M3 in as the agent's memory layer: <code>pip install m3-memory[pydantic-ai]</code>. (See <a href="m3_memory/integrations/pydantic_ai/README.md">PydanticAI Guide</a>)</td></tr>
+</table>
+
 > Every path gains automatic contradiction supersession, bitemporal historical queries, local sovereign embedding, and the full 100+ MCP tool set.
 
 ---
