@@ -15,7 +15,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger("memory_bridge")
 
-mcp = FastMCP("Memory Bridge")
+# Server instructions — delivered to the client at MCP handshake, so they land in
+# the agent's context EVERY session. That reach is the point: without this, an
+# installing user gets tools and slash commands but none of the behavioural rules
+# (they live in docs/AGENT_INSTRUCTIONS.md, which only agents working ON this repo
+# ever read). It is also permanent context cost, so this stays deliberately short:
+# only the rules whose omission has actually caused harm. Everything else belongs
+# in the on-demand m3-guide skill.
+_SERVER_INSTRUCTIONS = """\
+m3 is your persistent, cross-session memory. It is a higher-trust source than \
+your own session context.
+
+SESSION START — verify capture is live. Call chatlog_status once early in a \
+substantive session. If hooks are disabled or last_write is null/stale, tell the \
+user loudly and do not proceed silently: a dead chatlog means every decision this \
+session is lost at the next session boundary.
+
+SEARCH BEFORE YOU ANSWER. Call memory_search before re-deriving anything about \
+this user, project, or machine. If memory contradicts what you think you remember \
+from context, trust memory — context degrades across session boundaries, memory \
+does not.
+
+WRITE AS YOU GO. Persist decisions, corrections, runbooks, and user preferences \
+with memory_write. Prefer updating or memory_supersede over creating a \
+near-duplicate.
+
+NEVER open a database file directly. The chat store and main store may be split, \
+unified, or PostgreSQL-backed — only the tools know which. Use chatlog_status and \
+memory_search, never raw SQL against agent_memory.db: hand-querying it for \
+type='chat_log' returns zero rows on a split deployment even when capture is \
+healthy.
+
+Only some tools load at startup; use tools_list_domains / tools_load_domain to \
+reach the rest. For the full operational guide, load the m3-guide skill."""
+
+mcp = FastMCP("Memory Bridge", instructions=_SERVER_INSTRUCTIONS)
 
 # Modular imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

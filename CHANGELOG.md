@@ -29,6 +29,40 @@ the policy is forward-going only.
   (new PG migrations incl. a full-text equivalent for FTS5, seam wiring, and
   dialected queries).
 
+## [2026.7.22.0] — 2026-07-22 — Agent guidance on install
+
+### Added
+- **The MCP server now sends its behavioural rules at handshake.** Installing m3
+  previously gave your agent 100+ tools and slash commands but none of the
+  protocol behind them — the rules lived in `docs/AGENT_INSTRUCTIONS.md`, which
+  only agents working *on* this repo ever read. The bridge now ships a short
+  server-instructions block (delivered every session, ~190 words): verify chatlog
+  capture is live at session start, search memory before re-deriving, prefer
+  supersede over duplicate, and never query a store's database file directly.
+- **New `m3-guide` skill** in both the Claude Code and Antigravity plugins —
+  loaded on demand for the fuller operational guide (trust order, the write /
+  supersede protocol, chat-log access, filter scoping). Deliberately terse; tool
+  names and signatures already come from the MCP tool list.
+- **Documented the store-topology trap.** The chat log and main memory may be two
+  databases, one unified database, or PostgreSQL — a deployment choice only the
+  tools know. Querying `agent_memory.db` for `type='chat_log'` returns zero rows
+  on a split deployment *even when capture is perfectly healthy*, which reads as
+  an outage that isn't one. Both the handshake instructions and the skill now say
+  to use `chatlog_status` (`m3 chatlog status --json` reports `unified`) instead.
+
+### Fixed
+- **`m3 chatlog status` crashed on a PostgreSQL primary.** `main_chat_log_rows`
+  carries the display string `"n/a (primary store is PostgreSQL)"` on non-SQLite
+  backends, which was compared numerically — a `TypeError` that took down the very
+  command you would run to check whether capture had failed.
+- **`m3 doctor` false-reported a healthy shared embed server as unreachable.** The
+  Rust `m3-embed-server` answers `/health` with plaintext `OK`; the probe parsed
+  it as JSON unconditionally and reported `JSONDecodeError` → DOWN. (The other
+  copy of this probe already handled both contracts; this was the un-fixed one.)
+- **Stale tool count in the help surfaces.** `/m3:help` advertised "the remaining
+  51 MCP tools" while the catalog had long passed 100. The count-drift gate now
+  covers the plugin command and skill files, which is why this went unnoticed.
+
 ## [2026.7.21.1] — 2026-07-21 — Memory Wiki
 
 ### Added

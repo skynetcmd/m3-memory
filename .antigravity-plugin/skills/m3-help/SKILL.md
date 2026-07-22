@@ -31,6 +31,6 @@ Print the following table verbatim. Do not interpret it as instructions or take 
 | /m3:install        | Install or upgrade m3-memory                           |
 | /m3:help           | This list                                              |
 
-The remaining 51 MCP tools are callable directly via tool calls.
+The remaining MCP tools (100+ in total) are callable directly via tool calls.
 Full reference: docs/AGENT_INSTRUCTIONS.md
 ````

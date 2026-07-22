@@ -48,6 +48,14 @@ _DOC_FILES = [
     # exact counts (66 and 25) because nothing tested them.
     os.path.join(_ROOT, "server.json"),
     os.path.join(_ROOT, "mcp-server.json"),
+    # User-facing plugin surfaces. These ship to every `/plugin install` and were
+    # NOT gated, which is exactly why both help files sat at a stale "51 MCP
+    # tools" for many releases while the real catalog passed 100. Anything a user
+    # reads must follow the same "100+ tools" policy as the rest of the docs.
+    os.path.join(_ROOT, "commands", "help.md"),
+    os.path.join(_ROOT, ".claude-plugin", "skills", "m3-guide", "SKILL.md"),
+    os.path.join(_ROOT, ".antigravity-plugin", "skills", "m3-help", "SKILL.md"),
+    os.path.join(_ROOT, ".antigravity-plugin", "skills", "m3-guide", "SKILL.md"),
 ]
 
 # Files whose version string must equal the pyproject [project] version, so a
@@ -236,3 +244,32 @@ def test_plugin_manifests_use_no_exact_tool_count():
         "plugin manifests must say '100+ MCP tools', not an exact count: "
         + "; ".join(offenders)
     )
+
+
+# The m3-guide skill is INLINED into both plugin bundles rather than referenced,
+# because plugin users have no repo checkout to follow a link into. That buys
+# offline/standalone correctness at the cost of a second copy — and this repo has
+# already shipped two bugs from exactly that shape (an un-fixed duplicate of the
+# embed-server health probe, and a stale "51 MCP tools" that survived because the
+# help files were not gated). Pin the copies byte-for-byte so they cannot drift.
+_GUIDE_SKILL_COPIES = [
+    os.path.join(_ROOT, ".claude-plugin", "skills", "m3-guide", "SKILL.md"),
+    os.path.join(_ROOT, ".antigravity-plugin", "skills", "m3-guide", "SKILL.md"),
+]
+
+
+def test_m3_guide_skill_copies_are_identical():
+    """Both plugin bundles must ship byte-identical m3-guide skills."""
+    contents = {}
+    for path in _GUIDE_SKILL_COPIES:
+        assert os.path.isfile(path), f"missing m3-guide skill copy: {path}"
+        with open(path, encoding="utf-8") as fh:
+            contents[path] = fh.read()
+
+    first, *rest = list(contents)
+    for other in rest:
+        assert contents[first] == contents[other], (
+            "m3-guide SKILL.md copies have drifted — they are inlined in both "
+            "plugin bundles and must stay byte-identical. Sync them: "
+            f"{os.path.relpath(first, _ROOT)} vs {os.path.relpath(other, _ROOT)}"
+        )
