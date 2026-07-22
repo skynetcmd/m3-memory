@@ -42,6 +42,10 @@ Write a fact that conflicts with an existing one? M3 detects it automatically. T
 
 Memories aren't isolated — they form a web. M3 automatically links related memories on write (cosine >0.7) and supports 9 relationship types: `related`, `supports`, `contradicts`, `extends`, `supersedes`, `references`, `consolidates`, `precedes`, `follows`. Traverse the graph up to 3 hops with a single tool call.
 
+### 📖 Auto-Generated Wiki
+
+`m3 wiki generate` compiles your **canonical memories** (pinned, high-confidence, beliefs, procedures) and indexed files into a browsable, interlinked **Markdown vault** — one page per topic, clustered by the relationship graph *and* shared entities, with real hyperlinks and provenance links down to the exact source document each fact came from. It's a deterministic *projection* of the store (re-run to refresh; stale pages are pruned, so GDPR-deleted content never lingers). The vault renders on GitHub, as a **self-contained offline HTML viewer** (`--html`), or as an **Obsidian vault** — add `--obsidian` for `[[wikilinks]]` so Obsidian's graph view and backlinks populate. Also viewable in the web dashboard's **Memory Wiki** tab. (See the [Wiki Guide](WIKI.md).)
+
 ### 🧹 Self-Maintaining
 
 Left alone, memory systems accumulate noise. M3 fights entropy:

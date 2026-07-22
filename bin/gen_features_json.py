@@ -183,6 +183,21 @@ def main() -> int:
                 ),
             },
         },
+        "outputs": {
+            # `m3 wiki generate` — a deterministic projection of canonical memories
+            # (+ indexed files) into an interlinked Markdown vault. Not an MCP tool
+            # (a CLI verb), so it isn't in the tool catalog.
+            "auto_generated_wiki": True,
+            "wiki_command": "m3 wiki generate",
+            "wiki_formats": [
+                "Markdown vault (portable; renders on GitHub)",
+                "self-contained offline HTML viewer (--html)",
+                "Obsidian vault (--obsidian → [[wikilinks]] for graph view + backlinks)",
+            ],
+            "wiki_prunes_stale_pages": True,   # GDPR/soft-deleted content does not linger
+            "wiki_in_dashboard": True,         # web dashboard "Memory Wiki" tab
+            "wiki_docs": "docs/WIKI.md",
+        },
         "tools": {
             "total": len(tools),
             "by_domain": dict(sorted(by_domain.items())),

@@ -35,6 +35,17 @@ If "the LLM should decide what's worth remembering" matches your worldview, Mem0
 
 > **Legend:** 🏆 = the system has this capability and does it well · 👑 = best-in-class here — either a rare stand-out few offer (e.g. FIPS-ready crypto, bundled in-process embedder) or a shared capability M3 does better (e.g. deterministic contradiction supersession, native MCP, drop-in LangChain). Where a competitor also has a feature it earns 🏆; M3's 👑 marks where it leads. (Temporal/bitemporal is a genuine tie with graph-native systems like Zep/Graphiti — both earn 🏆; M3's edge there is doing it local-first with no graph DB to run.) Applies to every table below.
 
+> **A note that applies across the whole field.** M3 turns your memory store into a
+> browsable, human-readable **knowledge base** — `m3 wiki generate` compiles canonical
+> memories + indexed files into an interlinked Markdown vault (GitHub-renderable, a
+> self-contained offline HTML viewer, or an **Obsidian vault** with `--obsidian` for
+> graph view + backlinks; also in the web dashboard). Most agentic-memory tools —
+> whether cloud (Mem0) or local-first (agentmemory, Letta, and the systems in the
+> [Sovereign Memory Systems table](M3_Comparison_Table.md)) — expose memory through an
+> API or a dashboard, not as a portable, tool-agnostic document you can read, diff, and
+> open in your own PKM app. That export/interop layer is an M3 differentiator regardless
+> of which competitor you're weighing.
+
 ---
 
 ## ⚔️ M3-Memory vs Mem0
@@ -48,6 +59,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **Search algorithm** | FTS5 (BM25) + vector cosine + MMR diversity re-ranking | Vector search + knowledge graph traversal |
 | **Contradiction handling** | 👑 Automatic heuristic detection on write (cosine + title) **plus** a deterministic explicit `memory_supersede` — old memory soft-deleted, `supersedes` edge recorded, history preserved | Basic deduplication; no strong conflict resolution |
 | **Bitemporal history** | 👑 `valid_from` / `valid_to` on every memory — query state as of any past date | No |
+| **Auto-generated wiki** | 👑 `m3 wiki generate` compiles your memories into a browsable, interlinked Markdown vault (renders on GitHub, an offline HTML viewer, or as an **Obsidian vault** with `--obsidian` for graph view + backlinks) — a *projection* of the store, pruned on regen | No |
 | **GDPR tooling** | 👑 `gdpr_forget` (Art. 17 hard delete) + `gdpr_export` (Art. 20 portable JSON) as MCP tools | Manual; no dedicated GDPR tooling |
 | **Embeddings** | 👑 **Bundled in-process embedder** — BGE-M3 ships with M3 (GGUF, installed by `m3 setup`); no separate model server, no Ollama/LM Studio/vLLM required. Optional GPU or external endpoint if you want them | Cloud embedding APIs by default |
 | **Setup** | 👑 One-command auto-configuring wizard (`m3 setup`) — detects agents, wires config + hooks, installs the embedder, runs a `doctor` verify | Manual SDK wiring / cloud dashboard config |

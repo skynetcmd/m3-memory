@@ -686,14 +686,18 @@ async def get_wiki(request: Request):
             '<span style="color:hsl(210,15%,60%); font-size:0.85rem;">'
             'Generated from your core memories · refresh with '
             '<code>m3 wiki generate --html</code></span>'
-            '<a href="/wiki/raw" target="_blank" class="nav-link" '
-            'style="margin-left:auto;">Open full screen ↗</a></div>'
+            '<a href="/wiki/obsidian" class="nav-link" style="margin-left:auto;">'
+            '📖 Using in Obsidian</a>'
+            '<a href="/wiki/raw" target="_blank" class="nav-link">'
+            'Open full screen ↗</a></div>'
             '<iframe src="/wiki/raw" title="m3 wiki" '
             'style="flex:1; width:100%; border:0; background:transparent;"></iframe>'
             '</div>'
         )
     else:
-        body = _wiki_install_html()
+        body = ('<div style="padding:0.4rem 1rem; text-align:right;">'
+                '<a href="/wiki/obsidian" class="nav-link">📖 Using in Obsidian</a></div>'
+                + _wiki_install_html())
 
     content = _WIKI_PAGE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS) \
                              .replace("{{ HEADER }}", header) \
@@ -711,6 +715,81 @@ async def get_wiki_raw(request: Request):
                             status_code=404)
     return FileResponse(path, media_type="text/html",
                         headers={"Cache-Control": "no-store"})
+
+
+@app.get("/wiki/obsidian", response_class=HTMLResponse)
+async def get_wiki_obsidian(request: Request):
+    """A self-contained, offline help page: how to use the Memory Wiki as an
+    Obsidian vault, and the caveats. Reachable from the Memory Wiki tab."""
+    selected_db = request.cookies.get("selected_db", "main")
+    set_active_db_env(selected_db)
+    db_selector_html = build_db_selector_html(selected_db)
+    header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="",
+                                health_active="", wiki_active="active",
+                                db_selector_html=db_selector_html)
+    content = _WIKI_PAGE_HTML.replace("{{ STYLE_CSS }}", STYLE_CSS) \
+                             .replace("{{ HEADER }}", header) \
+                             .replace("{{ BODY }}", _wiki_obsidian_help_html())
+    return HTMLResponse(content=content, status_code=200,
+                        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+def _wiki_obsidian_help_html() -> str:
+    """How-to + caveats for using the Memory Wiki in Obsidian (offline, no GitHub)."""
+    return """
+    <div style="max-width:820px; margin:1.5rem auto 3rem; padding:0 1.5rem;
+                font-family:'Outfit',sans-serif; color:hsl(210,15%,82%); line-height:1.6;">
+      <a href="/wiki" style="color:var(--m3-neon-cyan); font-size:0.85rem;">← Back to Memory Wiki</a>
+      <h1 style="color:hsl(210,20%,92%); margin-top:0.6rem;">📖 Using the Memory Wiki in Obsidian</h1>
+      <p>The Memory Wiki is a folder of Markdown files compiled from your memories.
+         <a href="https://obsidian.md" target="_blank" style="color:var(--m3-neon-cyan);">Obsidian</a>
+         reads that folder directly — no import, no conversion.</p>
+
+      <h3 style="color:hsl(180,100%,70%); margin-top:1.6rem;">1. Generate an Obsidian-ready vault</h3>
+      <p>Run this on the machine hosting m3 (same command on every OS):</p>
+      <pre style="background:hsla(222,22%,12%,0.9); border:1px solid hsla(210,15%,30%,0.4);
+                  border-radius:8px; padding:0.9rem 1rem; overflow-x:auto;"><code>m3 wiki generate --obsidian</code></pre>
+      <p style="font-size:0.9rem; color:hsl(210,15%,62%);">
+         The <code>--obsidian</code> flag emits <code>[[wikilinks]]</code>, which Obsidian needs to
+         build its <strong>graph view</strong> and <strong>backlinks</strong> pane. Without it the
+         vault still opens and is clickable, but the graph stays empty.</p>
+
+      <h3 style="color:hsl(180,100%,70%); margin-top:1.6rem;">2. Open it in Obsidian</h3>
+      <ul style="line-height:1.9;">
+        <li>In Obsidian: <strong>Open folder as vault</strong> → point it at the vault directory
+            (default <code>&lt;engine root&gt;/wiki</code>, or wherever you passed <code>--out</code>).</li>
+        <li>The <strong>graph view</strong> (Ctrl/Cmd&nbsp;+&nbsp;G) shows your topics as connected nodes;
+            the <strong>backlinks</strong> pane shows what links to the current page.</li>
+        <li>Start from <code>index.md</code> — a table of contents grouped by topic kind.</li>
+      </ul>
+
+      <h3 style="color:hsl(210,20%,88%); margin-top:1.6rem;">⚠️ Caveats — read before you rely on it</h3>
+      <ul style="line-height:1.9;">
+        <li><strong>It's a disposable snapshot, not a document you build on.</strong> The vault is a
+            <em>projection</em> of your current memories. Regenerating rewrites it, and pages can
+            change, move, or <strong>disappear</strong> — a memory may be superseded, soft-deleted,
+            or permanently erased (GDPR). Regeneration <em>prunes</em> pages whose memory no longer exists.</li>
+        <li><strong>Don't edit the generated pages</strong> — your edits are overwritten on the next
+            <code>m3 wiki generate</code>. Keep your own notes in a <em>separate</em> folder or vault;
+            m3 never touches files it didn't create (your notes, your <code>.obsidian/</code> config).</li>
+        <li><strong>Don't link into the vault from notes you care about</strong> — the target page may
+            vanish on regen, breaking your link. Treat it read-only.</li>
+        <li><strong><code>--obsidian</code> is opt-in.</strong> Wikilinks render as literal text outside
+            Obsidian (GitHub, the built-in HTML viewer). Use the default (standard Markdown links) for a
+            portable vault; use <code>--obsidian</code> when Obsidian is your primary reader.</li>
+      </ul>
+
+      <h3 style="color:hsl(180,100%,70%); margin-top:1.6rem;">Adding your own material</h3>
+      <p>New documents (tool docs, manuals) → <strong>ingest them into m3</strong>; the next
+         <code>m3 wiki generate</code> adds them as source pages automatically. Environment-specific
+         notes → keep them in <strong>your own linked notes</strong>, outside the generated folder.</p>
+
+      <p style="margin-top:1.6rem; font-size:0.9rem; color:hsl(210,15%,60%);">
+         Full reference:
+         <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/WIKI.md"
+            target="_blank" style="color:var(--m3-neon-cyan);">docs/WIKI.md</a>.</p>
+    </div>
+    """
 
 
 def _wiki_install_html() -> str:

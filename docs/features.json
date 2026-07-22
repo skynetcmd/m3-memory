@@ -147,6 +147,18 @@
       "note": "PydanticAI ships no built-in persistent memory; this adapter adds it as deps-injected tools + a recall history-processor (Tier 1) and a formal M3MemoryToolset (Tier 2). Runs on Python 3.14 with a plain pip install."
     }
   },
+  "outputs": {
+    "auto_generated_wiki": true,
+    "wiki_command": "m3 wiki generate",
+    "wiki_formats": [
+      "Markdown vault (portable; renders on GitHub)",
+      "self-contained offline HTML viewer (--html)",
+      "Obsidian vault (--obsidian \u2192 [[wikilinks]] for graph view + backlinks)"
+    ],
+    "wiki_prunes_stale_pages": true,
+    "wiki_in_dashboard": true,
+    "wiki_docs": "docs/WIKI.md"
+  },
   "tools": {
     "total": 110,
     "by_domain": {
