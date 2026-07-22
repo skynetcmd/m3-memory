@@ -261,7 +261,16 @@ def _compute_warnings(
     # _recent_write_count for why the wiring flag is not a capture signal. Only
     # warn when total chatlog rows exist (a fresh/empty install legitimately has
     # 0 recent writes and should not scream).
-    total_rows = row_counts.get("main_chat_log_rows", 0) or row_counts.get("chatlog_rows", 0)
+    # main_chat_log_rows is int|str by contract — it carries the display string
+    # "n/a (primary store is PostgreSQL)" when the primary store isn't SQLite
+    # (see _get_row_counts). Comparing that string to 0 raises TypeError and takes
+    # the whole status call down on a PG-primary deployment, so coerce non-ints
+    # away before the numeric test rather than trusting the `or` chain.
+    def _as_count(value: Any) -> int:
+        return value if isinstance(value, int) else 0
+
+    total_rows = (_as_count(row_counts.get("main_chat_log_rows"))
+                  or _as_count(row_counts.get("chatlog_rows")))
     if recent_writes == 0 and total_rows > 0:
         # Disambiguate session-start/between-turns lull from a real outage using
         # the age of the LAST write (see _LULL_GRACE_MIN). A recent last-write

@@ -105,6 +105,11 @@ def test_complex_arg_tool_set_is_pinned():
     expected = {
         "notify", "agent_register", "curate_chatlog_apply", "memory_update_bulk",
         "curate_memory_apply", "memory_link_bulk", "task_create", "task_update",
+        # gdpr_forget takes an optional `compliance` object (Art. 17 erasure
+        # context for the audit trail). Codegen already handles it: `m3 admin
+        # gdpr_forget --help` renders the `--json OBJ` structured-argument
+        # fallback, so it is pinned here rather than taught.
+        "gdpr_forget",
     }
     assert found == expected, (
         f"complex-arg tool set drifted — extra (teach the CLI codegen, then add "
