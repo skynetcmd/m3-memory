@@ -307,7 +307,16 @@ def _shared_embedder_status() -> None:
         import urllib.request
         # scheme validated to http(s) above, so B310's file:// concern can't apply
         with urllib.request.urlopen(f"{url}/health", timeout=3) as r:  # nosec B310
-            body = json.loads(r.read())
+            raw = r.read().decode("utf-8", "replace").strip()
+        # Accept BOTH health contracts: the Rust m3-embed-server returns plaintext
+        # "OK", the Python embed_server_inproc.py returns JSON {"status":...}.
+        # json.loads'ing unconditionally made the Rust server's "OK" raise
+        # JSONDecodeError, so doctor false-reported a healthy :8082 as DOWN.
+        # Mirrors bin/doctor/shared_embedder_probe.py::_server_health.
+        if raw == "OK":
+            body = {"status": "ok"}
+        else:
+            body = json.loads(raw)
         if body.get("status") == "ok":
             print(f"  shared server:           OK (model={body.get('model')}, "
                   f"dim={body.get('dim')})")
