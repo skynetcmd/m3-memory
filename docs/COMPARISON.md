@@ -1,12 +1,44 @@
+<a id="top"></a>
+
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> M3 Memory — Comparison Guide
 
 > Last updated: July 2026. Corrections welcome via [issue](https://github.com/skynetcmd/m3-memory/issues).
 
 Several tools address agentic memory. This document explains where M3 Memory fits relative to each, and when a different tool is the better choice.
 
-> 💡 This page has per-competitor head-to-heads for **Mem0, Letta, Zep, Graphiti, A-MEM, LangMem** and the **sovereign / local-first substrates** (agentmemory, Chronos, Hindsight, Mastra OM, Memento, MemPalace) — jump to any section below. For benchmark sourcing and judge-provenance behind the LongMemEval figures, see the [Sovereign Memory Systems benchmark reference](M3_Comparison_Table.md).
-
 > 📊 **Retrieval accuracy (the metric that isolates the memory layer).** M3's **v3 core engine** reaches **99.2% retrieval session-hit-rate @ k=10 (496/500) and 100% @ k=20** on [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) — raw turns, hybrid FTS5 + BGE-M3 vector + MMR, no knowledge graph, no oracle metadata. SHR (session hit-rate) **is** retrieval accuracy: it measures whether the correct evidence session is surfaced, with no answer model involved — the like-for-like, retrieval-only metric memory systems publish as their headline. Separately, the same v3 config scores **92.0% end-to-end QA accuracy** (460/500, no oracle metadata) — a different, answer-model-dependent metric. Receipts, per-category breakdown, and full methodology: the [LME-S Benchmarking Report](../benchmarks/longmemeval/LME-S_Benchmarking_Report.md).
+
+### M3 vs Other Memory Systems
+
+<table border="0">
+<tr>
+<td width="40"></td>
+<td><table border="1">
+<tr>
+<td><a href="#vs-a-mem">A-MEM</a></td>
+<td><a href="#vs-agentmemory">agentmemory</a></td>
+<td><a href="#vs-chronos">Chronos</a></td>
+</tr>
+<tr>
+<td><a href="#vs-graphiti">Graphiti</a></td>
+<td><a href="#vs-hindsight">Hindsight</a></td>
+<td><a href="#vs-langmem">LangChain Memory / LangMem</a></td>
+</tr>
+<tr>
+<td><a href="#vs-letta">Letta</a></td>
+<td><a href="#vs-mastra-om">Mastra OM</a></td>
+<td><a href="#vs-mem0">Mem0</a></td>
+</tr>
+<tr>
+<td><a href="#vs-memento">Memento</a></td>
+<td><a href="#vs-mempalace">MemPalace</a></td>
+<td><a href="#vs-zep">Zep</a></td>
+</tr>
+</table></td>
+</tr>
+</table>
+
+> 💡 For benchmark sourcing and judge-provenance behind the LongMemEval figures, see the [Sovereign Memory Systems benchmark reference](M3_Comparison_Table.md).
 
 ---
 
@@ -19,23 +51,28 @@ The cleanest way to compare agentic memory tools is to ask **where in your stack
 
 M3 is unusual in that **it ships both modes**. Out of the box, M3 includes a local-SLM extraction pipeline (`m3_enrich`), a reflector for conflict resolution (`run_reflector`), bitemporal valid-time / transaction-time, supersedes relationships, and 3-hop graph traversal. You can run M3 with all of that on, or run M3 as raw substrate and bring your own extraction stack. **The choice is yours, not the tool's.**
 
-This composability is the actual differentiator — not "M3 has no cognition" (it does) and not "Mem0 is opinionated" (that's a feature for some teams). The split that matters: do you want cognition welded to the memory layer, or factored as an exchangeable component?
+This composability is the actual differentiator — not "M3 has no cognition" (it does) and not that welded-in designs are wrong (that's a feature for some teams). The split that matters: do you want cognition welded to the memory layer, or factored as an exchangeable component?
 
-| Concern | M3 (composable) | Mem0 (welded-in) |
+Roughly where each system in this guide sits:
+
+| Cognition placement | Systems | What it means for you |
 |---|---|---|
-| Run as deterministic substrate, no LLM in retrieval path | ✅ Disable enrichment, use deterministic CRUD + graph walks | ❌ LLM is in the loop by design |
-| Use M3's built-in local SLM extraction | ✅ `m3_enrich --profile enrich_local_qwen` (or Anthropic/Gemini) | n/a — Mem0 ships its own |
-| Bring your own extraction pipeline | ✅ Ignore `m3_enrich`, write entities directly via MCP | ⚖️ Possible but cuts against the grain |
-| Multiple agents writing simultaneously | ✅ SQLite WAL, atomic | ⚖️ Cloud version handles via API queueing; local less emphasized |
-| Memory works fully offline / air-gapped | ✅ No external dependency in any mode | 🔻 Cloud version requires internet; self-host possible but not the happy path |
+| **Welded into the memory layer** | [Mem0](#vs-mem0), [Mastra OM](#vs-mastra-om), [A-MEM](#vs-a-mem) | The tool decides what's worth remembering. Less to build; an LLM is implicitly in the loop, and extraction policy isn't separately swappable. |
+| **Owned by the agent runtime** | [Letta](#vs-letta) | The agent edits its own memory blocks via tool calls. Powerful for self-improving agents; requires adopting the runtime. |
+| **Composable — cognition is a separable layer** | **M3**, [agentmemory](#vs-agentmemory), [Memento](#vs-memento) | Storage and retrieval are deterministic; extraction is a component you enable, replace, or skip. |
+| **Substrate only — bring your own cognition** | [Graphiti](#vs-graphiti), [Zep](#vs-zep), [LangMem](#vs-langmem) | You get graph/store primitives and supply the cognitive layer yourself. |
 
-If "the LLM should decide what's worth remembering" matches your worldview, Mem0's tighter integration is a genuine win. If "extraction policy should be inspectable, swappable, and testable independent of storage" matches yours, M3's split is the right shape.
+If "the LLM should decide what's worth remembering" matches your worldview, a tighter-integrated tool is a genuine win. If "extraction policy should be inspectable, swappable, and testable independent of storage" matches yours, M3's split is the right shape.
+
+> The head-to-head detail behind this axis — deterministic mode, bring-your-own extraction, built-in SLM — lives in the [M3 vs Mem0](#vs-mem0) table below, alongside every other Mem0 comparison.
 
 ---
 
 > **Legend:** 🏆 = the system has this capability and does it well · 👑 = best-in-class here — either a rare stand-out few offer (e.g. FIPS-ready crypto, bundled in-process embedder) or a shared capability M3 does better (e.g. deterministic contradiction supersession, native MCP, drop-in LangChain). Where a competitor also has a feature it earns 🏆; M3's 👑 marks where it leads. (Temporal/bitemporal is a genuine tie with graph-native systems like Zep/Graphiti — both earn 🏆; M3's edge there is doing it local-first with no graph DB to run.) Applies to every table below.
 
 ---
+
+<a id="vs-mem0"></a>
 
 ## ⚔️ M3-Memory vs Mem0
 
@@ -45,22 +82,25 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 |---------|-----------|------|
 | **Primary deployment** | 👑 Local SQLite — works fully offline, zero data egress | Cloud API (self-host is possible but not the happy path) |
 | **MCP support** | 👑 Native — 100+ tools, zero config in Claude Code / Cursor / Cline / Gemini CLI | No native MCP; requires a custom wrapper |
-| **Search algorithm** | FTS5 (BM25) + vector cosine + MMR diversity re-ranking | Vector search + knowledge graph traversal |
+| **Search** | FTS5 (BM25) + vector cosine + MMR diversity re-ranking | Vector search + knowledge graph traversal |
 | **Contradiction handling** | 👑 Automatic heuristic detection on write (cosine + title) **plus** a deterministic explicit `memory_supersede` — old memory soft-deleted, `supersedes` edge recorded, history preserved | Basic deduplication; no strong conflict resolution |
-| **Bitemporal history** | 👑 `valid_from` / `valid_to` on every memory — query state as of any past date | No |
+| **Bitemporal / undo** | 👑 `valid_from` / `valid_to` on every memory — query state as of any past date | No |
 | **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects your memories + files into an interlinked Markdown vault (GitHub, offline HTML viewer, or **Obsidian** with `--obsidian` for graph view + backlinks) | Export is [structured JSON](https://docs.mem0.ai/cookbooks/essentials/exporting-memories) for migration/compliance — not a human-readable wiki |
 | **GDPR tooling** | 👑 `gdpr_forget` (Art. 17 hard delete) + `gdpr_export` (Art. 20 portable JSON) as MCP tools | Manual; no dedicated GDPR tooling |
 | **Embeddings** | 👑 **Bundled in-process embedder** — BGE-M3 ships with M3 (GGUF, installed by `m3 setup`); no separate model server, no Ollama/LM Studio/vLLM required. Optional GPU or external endpoint if you want them | Cloud embedding APIs by default |
 | **Setup / installation** | 👑 `pip install m3-memory` + a one-command **smart wizard** (`m3 setup`, terminal **or optional GUI**) — auto-detects agents, wires config + hooks, installs the bundled embedder, runs a `doctor` verify | Manual SDK wiring / cloud dashboard config |
 | **API keys required** | None | Yes (cloud version) |
-| **Offline operation** | Full — SQLite + bundled embedder, no external services | No (cloud version) |
+| **Offline operation** | 👑 Full — SQLite + bundled embedder, no external dependency in any mode | 🔻 Cloud version requires internet; self-host is possible but not the happy path |
 | **FIPS 140-3** | 👑 **Deployment-ready** crypto boundary (AES-256-GCM vault, PBKDF2-HMAC-SHA256, TLS 1.3 FIPS ciphersuites); point it at the CMVP-validated wolfSSL FIPS module for a validated deployment. Note: the validation belongs to that module — M3 is not itself a CMVP-validated cryptographic module (no application is) | No |
 | **Storage backend** | 👑 SQLite (default, zero-infra) **or PostgreSQL as a first-class primary store** (`M3_DB_BACKEND=postgres`) for shared/high-concurrency deployments — same semantics on either | Single managed cloud store |
 | **Cross-device sync** | Optionally sync/federate a SQLite deployment to a PostgreSQL warehouse tier, bi-directional delta sync | Managed by Mem0 cloud |
 | **Storage topology** | 🏆 Chat-log and curated memory run as **one unified store, two independent stores, or two stores searched together** (`memory_search_multi_db`) — your choice by config, no rework | Single managed store |
 | **Knowledge graph** | Yes — 9 relationship types, 3-hop traversal | Yes — strong point |
 | **Multi-agent concurrent writes** | WAL mode + 30s busy_timeout + retry — concurrent writers serialize and wait, they don't fail; SQL-layer scope isolation keeps agents' private notes private; optional shared **PostgreSQL** pool for high-concurrency fleets (no single-writer limit) | Cloud version handles via API queueing; multi-writer correctness in self-host is not emphasized |
-| **Cognition placement** | Composable — disable, replace, or use built-in SLM extraction | LLM-driven extraction is welded into the memory layer |
+| **Cognition placement** | 👑 Composable — disable, replace, or use built-in SLM extraction | LLM-driven extraction is welded into the memory layer |
+| **Deterministic mode (no LLM in the retrieval path)** | 👑 Yes — disable enrichment, use deterministic CRUD + graph walks | ❌ An LLM is in the loop by design |
+| **Bring your own extraction pipeline** | 👑 Ignore `m3_enrich`, write entities directly via MCP | ⚖️ Possible, but cuts against the grain |
+| **Built-in local SLM extraction** | 🏆 `m3_enrich --profile enrich_local_qwen` (or Anthropic/Gemini) | 🏆 Ships its own (cloud LLM) |
 | **Multi-tenant** | Per-agent scoping (`agent_id`, `user_id`, `scope`) | Yes — production-grade |
 | **LangChain integration** | 👑 **Drop-in replacement** — shadows Mem0's `Memory`/`MemoryClient` API; migrate with a one-line import swap. Plus native `M3Store` (LangGraph `BaseStore`), `M3Saver` (LangGraph checkpointer — pause/resume/time-travel), and full 100+ MCP tool access from any LangChain agent | 🏆 Native library |
 | **CrewAI integration** | 👑 Native `StorageBackend` (CrewAI v1.10+): `Memory(storage=M3StorageBackend(...))`. A CrewAI memory can **also be searchable by every other m3 agent** (Claude Code, Gemini, LangChain) if you want — a shared cross-framework memory a single-vector store can't provide | 🏆 Native provider (CrewAI-only silo) |
@@ -85,7 +125,11 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 
 > **Building on LangChain / LangGraph?** You no longer have to choose Mem0 for that reason. M3 is a **drop-in Mem0 replacement** (one-line import swap), is **compatible with LangMem** (pass `store=M3Store()`), and exposes M3's full **100+ MCP tool** surface to LangChain agents — while adding contradiction handling, temporal queries, and forgetting that Mem0 doesn't offer. See [`docs/integrations/LANGCHAIN.md`](integrations/LANGCHAIN.md).
 
+<sub>[↑ Back to top](#top)</sub>
+
 ---
+
+<a id="vs-letta"></a>
 
 ## ⚔️ M3-Memory vs Letta
 
@@ -102,7 +146,7 @@ M3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for
 | **Search** | FTS5 + vector + MMR | Tiered recall with embeddings |
 | **Contradiction handling** | 👑 Automatic heuristic detection + deterministic explicit supersede (bitemporal, auditable) | 🏆 Agent-driven — the agent must decide to update its own memory |
 | **GDPR tooling** | 👑 Built-in `gdpr_forget` + `gdpr_export` | Not built-in |
-| **Bitemporal history** | 👑 Yes — query state as of any past date | No |
+| **Bitemporal / undo** | 👑 Yes — query state as of any past date | No |
 | **Auto-generated wiki / Obsidian export** | 👑 Generates an Obsidian-ready Markdown vault *from* memory (`m3 wiki generate --obsidian`) | Reverse direction — the [Letta Obsidian plugin](https://github.com/letta-ai/letta-obsidian) reads an *existing* vault into the agent; memory lives in Letta's DB, not portable markdown |
 | **Deployment** | 👑 100% local (SQLite) by default, bundled embedder — no external services | 🏆 Self-hosted or Letta Cloud |
 | **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
@@ -130,7 +174,11 @@ M3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for
 
 Yes. Letta agents can call external MCP tools. You could run M3-Memory as the persistent memory backend for a Letta agent, using M3's hybrid search and GDPR tools while keeping Letta's runtime for agent orchestration.
 
+<sub>[↑ Back to top](#top)</sub>
+
 ---
+
+<a id="vs-zep"></a>
 
 ## ⚔️ M3-Memory vs Zep
 
@@ -147,7 +195,20 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 | **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Cost** | Free, OSS | OSS + SaaS |
 
+### When to choose M3-Memory over Zep
+- You want bitemporal memory without running a graph database — one SQLite file, no Neo4j/FalkorDB to operate.
+- You need MCP-native tools and offline operation out of the box.
+- GDPR forget/export as first-class tooling matters.
+
+### When to choose Zep over M3-Memory
+- You're running enterprise multi-agent systems at a scale where a dedicated graph DB is warranted.
+- You want temporal reasoning at fact/edge grain in a knowledge graph, and already have (or want) the infrastructure for it.
+
+<sub>[↑ Back to top](#top)</sub>
+
 ---
+
+<a id="vs-graphiti"></a>
 
 ## ⚔️ M3-Memory vs Graphiti
 
@@ -180,7 +241,11 @@ M3 is memory-first rather than graph-first: the primary store is a bitemporal SQ
 ### Can you use both?
 Yes — they operate at different altitudes. You can let M3 own memory/retrieval and offload deep relationship reasoning to a Graphiti graph if a workload needs it.
 
+<sub>[↑ Back to top](#top)</sub>
+
 ---
+
+<a id="vs-a-mem"></a>
 
 ## ⚔️ M3-Memory vs A-MEM
 
@@ -207,7 +272,11 @@ M3 is production-and-operations oriented: typed memories, bitemporal supersessio
 - You're researching self-organizing / emergent memory structures and want the note-network model as the object of study.
 - Deterministic operations and compliance posture are not your priority.
 
+<sub>[↑ Back to top](#top)</sub>
+
 ---
+
+<a id="vs-agentmemory"></a>
 
 ## ⚔️ M3-Memory vs agentmemory
 
@@ -222,7 +291,7 @@ M3's differences are breadth over a single-benchmark peak: native MCP + framewor
 | **Bitemporal / as-of queries** | 👑 Full bitemporal (valid + transaction time) — query state as of any past date | ⚖️ Temporal signature (integrity-oriented, not an as-of query model) |
 | **Retrieval SHR@10** | 👑 **99.2%** (#1), 100% @ k=20 | Not reported on this metric |
 | **Published LME-S (QA)** | 92.0% (no oracle; same strict upstream judge)ᵃ | 🏆 **96.2%**ᵇ — #1 published, same strict judge |
-| **Search strategy** | ✅ 3-pillar hybrid (FTS5 + vector + MMR) | 🏆 6-signal hybrid |
+| **Search** | ✅ 3-pillar hybrid (FTS5 + vector + MMR) | 🏆 6-signal hybrid |
 | **GDPR tooling** | 👑 Native `gdpr_forget` + `gdpr_export` | ✅ Local-only (no dedicated tooling) |
 | **MCP + framework integrations** | 👑 Native MCP (100+ tools) + LangChain/CrewAI/PydanticAI adapters | Native Python library — no MCP / framework-adapter surface documented |
 | **Storage backend** | 👑 SQLite **or PostgreSQL** primary | SQLite |
@@ -232,9 +301,20 @@ M3's differences are breadth over a single-benchmark peak: native MCP + framewor
 
 > ᵃ M3 — 92.0% QA (no oracle; SHR=100% @ k=20), unmodified upstream LongMemEval judge. ᵇ agentmemory — 96.2% QA (481/500), Claude Opus 4.6 answerer, GPT-4o judge; judge is upstream Wu exact (5/6 templates byte-identical, temporal template only *adds* a stricter `Reference Date:` line). The 96.2% is driven by answerer-side prompt tuning, not a loosened judge. Both numbers are answer-model-dependent. Source: [github.com/JordanMcCann/agentmemory](https://github.com/JordanMcCann/agentmemory). *Verified 2026-06-22.*
 
-**Choose agentmemory if:** the single published LongMemEval-S QA peak is your deciding factor and you don't need MCP, framework adapters, as-of temporal queries, GDPR tooling, or PostgreSQL. **Choose M3 if:** you want a sovereign peer that also plugs into MCP agents and LangChain/CrewAI/PydanticAI, offers bitemporal as-of queries and GDPR primitives, scales to PostgreSQL, and projects to a portable wiki.
+### When to choose M3-Memory over agentmemory
+- You want a sovereign peer that also plugs into MCP agents and LangChain/CrewAI/PydanticAI.
+- You need bitemporal as-of queries and GDPR primitives.
+- You want to scale to PostgreSQL, or project memory to a portable wiki.
+
+### When to choose agentmemory over M3-Memory
+- The single published LongMemEval-S QA peak is your deciding factor.
+- You don't need MCP, framework adapters, as-of temporal queries, GDPR tooling, or PostgreSQL.
+
+<sub>[↑ Back to top](#top)</sub>
 
 ---
+
+<a id="vs-chronos"></a>
 
 ## ⚔️ M3-Memory vs Chronos
 
@@ -247,17 +327,30 @@ M3 differs on deployment simplicity and openness: zero-infrastructure local SQLi
 | **Sovereignty** | 🛡️ Full local (SQLite / PostgreSQL) | ⚖️ On-prem (Linux/Python + services) |
 | **Deployment** | 👑 Zero-infra — SQLite + bundled embedder | ⚖️ Service stack |
 | **Bitemporal / undo** | 👑 Full bitemporal + undo | ✅ Event-log / ISO-temporal audit |
-| **Published LME-S (QA)** | 92.0% (no oracle; verifiable, upstream judge) | 95.6%ᵇ — **judge unpublished/unverifiable** |
-| **Search strategy** | ✅ 3-pillar hybrid | ⚖️ Dual-index |
+| **Published LME-S (QA)** | 92.0% (no oracle; verifiable, upstream judge) | 95.6%ᶜ — **judge unpublished/unverifiable** |
+| **Search** | ✅ 3-pillar hybrid | ⚖️ Dual-index |
 | **Local fact extraction** | 🏆 Local SLM | ✅ ISO-temporal |
 | **MCP + framework integrations** | 👑 Native MCP + LangChain/CrewAI/PydanticAI | Not documented |
 | **GDPR tooling** | 👑 Native tools | ✅ On-prem (no dedicated tooling) |
 | **Auto-generated wiki / Obsidian export** | 👑 Markdown/Obsidian vault | Not a documented feature |
 | **Setup / installation** | 👑 Smart wizard (`m3 setup`, terminal or GUI) — auto-detect, wire, verify | Service-stack deployment; no guided wizard documented |
 
-> ᵇ Chronos — 95.6% QA (self-reported, arXiv preprint [2603.16862](https://arxiv.org/abs/2603.16862), not peer-reviewed). The paper says it implements "LongMemEval's LLM judge" but shows no prompt text, names no judge model, and releases no code (it even flags "LLM-as-judge variability"). *Figure verified; judge unconfirmed 2026-06-23.*
+### When to choose M3-Memory over Chronos
+- You want zero-infrastructure local memory rather than an on-prem service stack.
+- A reproducible, independently verifiable benchmark posture matters to your evaluation.
+- You need MCP, GDPR tooling, and framework adapters.
+
+### When to choose Chronos over M3-Memory
+- Calendar-grained / ISO-temporal event reasoning is central to your problem.
+- You're comfortable deploying and operating a service stack on-prem.
+
+> ᶜ Chronos — 95.6% QA (self-reported, arXiv preprint [2603.16862](https://arxiv.org/abs/2603.16862), not peer-reviewed). The paper says it implements "LongMemEval's LLM judge" but shows no prompt text, names no judge model, and releases no code (it even flags "LLM-as-judge variability"). *Figure verified; judge unconfirmed 2026-06-23.*
+
+<sub>[↑ Back to top](#top)</sub>
 
 ---
+
+<a id="vs-hindsight"></a>
 
 ## ⚔️ M3-Memory vs Hindsight
 
@@ -268,18 +361,31 @@ M3's edges: native MCP with a 100+-tool surface (Hindsight integrates via per-fr
 | Feature | M3-Memory | Hindsight |
 |---|---|---|
 | **Sovereignty** | 🛡️ Full local | ⚖️ High local (Py + services) |
-| **Framework integrations** | 👑 Native MCP + LangChain/CrewAI/PydanticAI adapters | 🏆 Broad — LangGraph/CrewAI/AutoGen + 40+ connectors (adapter-based, no native MCP) |
-| **Bitemporal / as-of** | 👑 Full bitemporal | ✅ Traceable (not an as-of model) |
-| **Published LME-S (QA)** | 92.0% (verifiable, upstream judge) | 91.4%ᶜ — **judge unpublished** |
-| **Search strategy** | ✅ 3-pillar hybrid | 🏆 4-stream neural |
+| **MCP + framework integrations** | 👑 Native MCP + LangChain/CrewAI/PydanticAI adapters | 🏆 Broad — LangGraph/CrewAI/AutoGen + 40+ connectors (adapter-based, no native MCP) |
+| **Bitemporal / undo** | 👑 Full bitemporal | ✅ Traceable (not an as-of model) |
+| **Published LME-S (QA)** | 92.0% (verifiable, upstream judge) | 91.4%ᵈ — **judge unpublished** |
+| **Search** | ✅ 3-pillar hybrid | 🏆 4-stream neural |
 | **Token efficiency** | 🏆 Lazy tools + low-K (1.8% window at startup) | 🔻 Heavy rerank |
 | **GDPR tooling** | 👑 Native tools | ✅ Local-only |
 | **Auto-generated wiki / Obsidian export** | 👑 Markdown/Obsidian vault | Not a documented feature |
 | **Setup / installation** | 👑 Smart wizard (`m3 setup`, terminal or GUI) — auto-detect, wire, verify | Per-framework adapter install; no guided wizard documented |
 
-> ᶜ Hindsight — 91.4% QA, Gemini 3 Pro backbone. The public [hindsight-benchmarks](https://github.com/vectorize-io/hindsight-benchmarks) repo ships LongMemEval *results* but no LongMemEval judge code (the only judge it ships is a lenient LoCoMo one). *Figure verified; judge unconfirmed 2026-06-23.*
+### When to choose M3-Memory over Hindsight
+- You want native MCP with a 100+-tool surface rather than per-framework adapters.
+- You need bitemporal as-of queries, GDPR primitives, or PostgreSQL as a primary store.
+- Retrieval overhead matters — Hindsight's 4-stream rerank is heavier.
+
+### When to choose Hindsight over M3-Memory
+- You need its breadth of ready-made connectors (LangGraph/CrewAI/AutoGen + 40 more) and MCP isn't part of your stack.
+- Multi-stream neural reranking is worth the extra retrieval cost for your workload.
+
+> ᵈ Hindsight — 91.4% QA, Gemini 3 Pro backbone. The public [hindsight-benchmarks](https://github.com/vectorize-io/hindsight-benchmarks) repo ships LongMemEval *results* but no LongMemEval judge code (the only judge it ships is a lenient LoCoMo one). *Figure verified; judge unconfirmed 2026-06-23.*
+
+<sub>[↑ Back to top](#top)</sub>
 
 ---
+
+<a id="vs-mastra-om"></a>
 
 ## ⚔️ M3-Memory vs Mastra OM
 
@@ -292,17 +398,30 @@ M3 differs on sovereignty and infrastructure: Mastra OM runs on a Docker stack w
 | **Sovereignty** | 🛡️ Full local | ⚖️ Hybrid — cloud reflector |
 | **Infrastructure** | 👑 None to start (SQLite + bundled embedder) | 🔻 Docker stack |
 | **Native OS** | 🍎 🐧 🪟 | 🔻 Docker only |
-| **Bitemporal / as-of** | 👑 Full bitemporal | ✅ 3-date anchor |
-| **Published LME-S (QA)** | 92.0% (no oracle, upstream judge) | 94.9%ᵈ — exact upstream judge |
+| **Bitemporal / undo** | 👑 Full bitemporal | ✅ 3-date anchor |
+| **Published LME-S (QA)** | 92.0% (no oracle, upstream judge) | 94.9%ᵉ — exact upstream judge |
 | **Local fact extraction** | 🏆 Local SLM | 🏆 Reflector (cloud) |
 | **MCP + framework integrations** | 👑 Native MCP + LangChain/CrewAI/PydanticAI | Mastra-framework-native |
 | **GDPR tooling** | 👑 Native tools | ⚖️ Hybrid |
 | **Auto-generated wiki / Obsidian export** | 👑 Markdown/Obsidian vault from memory | Internal working-memory markdown/JSON — not an exported vault |
 | **Setup / installation** | 👑 Smart wizard (`m3 setup`, terminal or GUI) — auto-detect, wire, verify | Docker stack; framework-native setup |
 
-> ᵈ Mastra OM — 94.9% QA (94.87%), gpt-5-mini answerer, GPT-4o judge; eval code carries "copied EXACTLY from the official LongMemEval benchmark … Do not modify these prompts" — the six templates match verbatim. Source: [mastra.ai/research/observational-memory](https://mastra.ai/research/observational-memory). *Verified 2026-06-22.*
+### When to choose M3-Memory over Mastra OM
+- Your data can't leave the machine — M3 is fully local; Mastra's reflector is cloud-side.
+- You don't want a Docker stack as a prerequisite.
+- You need native MCP, bitemporal as-of queries, or GDPR tooling.
+
+### When to choose Mastra OM over M3-Memory
+- You're already building on the Mastra framework and want its native memory layer.
+- Background observer/reflector compression of message history is the model you want.
+
+> ᵉ Mastra OM — 94.9% QA (94.87%), gpt-5-mini answerer, GPT-4o judge; eval code carries "copied EXACTLY from the official LongMemEval benchmark … Do not modify these prompts" — the six templates match verbatim. Source: [mastra.ai/research/observational-memory](https://mastra.ai/research/observational-memory). *Verified 2026-06-22.*
+
+<sub>[↑ Back to top](#top)</sub>
 
 ---
+
+<a id="vs-memento"></a>
 
 ## ⚔️ M3-Memory vs Memento
 
@@ -316,15 +435,28 @@ M3's differences: a verifiable standard-setting benchmark (Memento's number is t
 | **Data integrity** | 🏆 Bitemporal logic + undo | 🏆 Merkle-audit |
 | **Bitemporal / undo** | 👑 Full bitemporal + undo | 🏆 Merkle-audit (bitemporal KG) |
 | **Published LME-S (QA)** | 92.0% (standard S-setting, upstream judge) | 90.8%ᶠ — **oracle setting, loosened judge** |
-| **Search strategy** | ✅ 3-pillar hybrid | ✅ Compositional |
+| **Search** | ✅ 3-pillar hybrid | ✅ Compositional |
 | **MCP + framework integrations** | 👑 Native MCP + LangChain/CrewAI/PydanticAI | 🏆 Native MCP (no framework adapters documented) |
 | **GDPR tooling** | 👑 Native tools | ✅ Local-only |
 | **Auto-generated wiki / Obsidian export** | 👑 Markdown/Obsidian vault | Not a documented feature |
 | **Setup / installation** | 👑 Smart wizard (`m3 setup`, terminal or GUI) — auto-detect, wire, verify | Native Python install; no guided wizard documented |
 
+### When to choose M3-Memory over Memento
+- You want a benchmark number from the standard LongMemEval-S setting, graded by the unmodified upstream judge.
+- You need framework adapters (LangChain/CrewAI/PydanticAI) alongside MCP.
+- GDPR tooling, PostgreSQL as primary, or the generated wiki matter.
+
+### When to choose Memento over M3-Memory
+- Merkle-audited integrity over a bitemporal knowledge graph is the architecture you want.
+- Native MCP is sufficient and you don't need framework adapters.
+
 > ᶠ Memento — 90.8% QA in the **oracle / evidence-only (no-distractor)** setting, *not* standard LongMemEval-S; the harder S-setting is unpublished. Judge is modified/more-lenient (rewritten prompts adding "minor phrasing differences are acceptable", "off-by-one errors are acceptable"). Not apples-to-apples with strict-judge S-setting numbers. Source: [github.com/shane-farkas/memento-memory](https://github.com/shane-farkas/memento-memory). *Partially verified — setting differs, judge loosened, 2026-06-23.*
 
+<sub>[↑ Back to top](#top)</sub>
+
 ---
+
+<a id="vs-mempalace"></a>
 
 ## ⚔️ M3-Memory vs MemPalace ⚠️
 
@@ -346,7 +478,11 @@ MemPalace advertises a spatial "memory-palace" (loci-hierarchy) architecture wit
 
 > ᵍ MemPalace — 96.6% is **R@5 recall, not QA accuracy** (different metric). An [independent analysis](https://arxiv.org/abs/2604.21284) attributes it to ChromaDB, not the spatial architecture, and shows the AAAK compression mode is lossy (96.6%→84.2%). Scam allegations ([repo issue #618](https://github.com/MemPalace/mempalace/issues/618)) and malware-impostor domains documented. *Listed to flag only.*
 
+<sub>[↑ Back to top](#top)</sub>
+
 ---
+
+<a id="vs-langmem"></a>
 
 ## ⚔️ M3-Memory vs LangChain Memory / LangMem
 
@@ -389,6 +525,8 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 
 > **Note:** choosing LangMem and choosing M3 are not mutually exclusive — M3 implements the `BaseStore` LangMem runs on. See [`docs/integrations/LANGCHAIN.md`](integrations/LANGCHAIN.md).
 
+<sub>[↑ Back to top](#top)</sub>
+
 ---
 
 ## 🔭 Not yet independently evaluated
@@ -413,20 +551,26 @@ for how we hold every entry (including M3's own) to source-of-truth.
 | Drop-in memory for an existing MCP agent | **M3-Memory** |
 | LangChain / LangGraph memory (drop-in Mem0 replacement, or back LangMem) | **M3-Memory** |
 | Full 100+ MCP tool set available inside a LangChain agent | **M3-Memory** |
-| Managed cloud, multi-tenant, hosted dashboard (SaaS) | **Mem0** |
+| Managed cloud, multi-tenant, hosted dashboard (SaaS) | [**Mem0**](#vs-mem0) |
 | CrewAI memory backend (v1.10+ `StorageBackend`), local-first | **M3-Memory** |
 | CrewAI memory that's *also* searchable by your other agents (Claude Code, LangChain) | **M3-Memory** |
 | PydanticAI agent memory (drop-in tools + auto-recall, or a formal `AbstractToolset`) | **M3-Memory** |
 | One memory store backing LangChain, CrewAI, *and* PydanticAI at once | **M3-Memory** |
 | PostgreSQL as a first-class primary backend, local-first (not a managed cloud DB) | **M3-Memory** |
-| Long-lived autonomous agents that self-edit memory | **Letta** |
-| Full stateful agent runtime (not just memory) | **Letta** |
-| Git-backed agent state | **Letta** |
-| Dedicated graph-database backend (Neo4j / FalkorDB) at massive scale | **Zep** |
-| Graph-first entity/relationship reasoning on a graph DB | **Graphiti** |
+| Long-lived autonomous agents that self-edit memory | [**Letta**](#vs-letta) |
+| Full stateful agent runtime (not just memory) | [**Letta**](#vs-letta) |
+| Git-backed agent state | [**Letta**](#vs-letta) |
+| Dedicated graph-database backend (Neo4j / FalkorDB) at massive scale | [**Zep**](#vs-zep) |
+| Graph-first entity/relationship reasoning on a graph DB | [**Graphiti**](#vs-graphiti) |
 | Bitemporal memory + temporal queries, local-first, no graph DB to run | **M3-Memory** |
 | Short-term + long-term memory unified, separate, or searched together by config | **M3-Memory** |
-| Researching self-organizing / emergent memory structures | **A-MEM** |
+| Researching self-organizing / emergent memory structures | [**A-MEM**](#vs-a-mem) |
+| The single highest published LongMemEval-S QA score, sovereign, MCP not required | [**agentmemory**](#vs-agentmemory) |
+| Calendar-grained / ISO-temporal event reasoning, on-prem service stack acceptable | [**Chronos**](#vs-chronos) |
+| Breadth of per-framework connectors (LangGraph / CrewAI / AutoGen + 40 more) | [**Hindsight**](#vs-hindsight) |
+| Memory for agents already built on the Mastra framework | [**Mastra OM**](#vs-mastra-om) |
+| Merkle-audited bitemporal knowledge graph, native MCP, no framework adapters needed | [**Memento**](#vs-memento) |
+| Retrieval accuracy on the like-for-like metric (99.2% SHR@10, 100% @ k=20) | **M3-Memory** |
 
 ---
 
