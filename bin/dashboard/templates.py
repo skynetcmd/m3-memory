@@ -1370,12 +1370,52 @@ INDEX_HTML = """
             <!-- GDPR Center -->
             <div class="m3-card">
                 <div class="m3-card-title">GDPR Compliance center</div>
+                <details style="font-size: 0.78rem; color: hsl(210, 15%, 65%); margin-bottom: 0.75rem; line-height: 1.5;">
+                    <summary style="cursor: pointer;">What this does &amp; doesn't do</summary>
+                    <div style="margin-top: 0.4rem;">
+                        <strong style="color: hsl(210, 20%, 85%);">m3 does:</strong> hard-delete
+                        a user's data (Art. 17) or export it (Art. 20), and log the erasure to a
+                        tamper-evident audit trail (subject, time, count, and any compliance
+                        details you enter below).<br>
+                        <strong style="color: hsl(210, 20%, 85%);">You must do:</strong> verify the
+                        requester's identity, determine the legal basis / exemptions, notify any
+                        third parties, and respond to the subject within one month. m3 is not a
+                        DSAR platform and this is not legal advice.
+                        <a href="https://github.com/skynetcmd/m3-memory/blob/main/docs/GDPR_COMPLIANCE.md"
+                           target="_blank" style="color: var(--m3-neon-cyan);">Full guide →</a>
+                    </div>
+                </details>
                 <div class="gdpr-btn-group">
                     <div class="gdpr-user-group">
                         <label style="font-size: 0.8rem; color: hsl(210, 15%, 65%); display: block; margin-bottom: 0.25rem;">User ID</label>
                         <input type="text" id="gdprUserId" class="m3-input" style="width: 100%; padding: 0.5rem 0.75rem;" value="default">
                     </div>
                     <button class="m3-btn" style="width: 100%; font-size: 0.85rem;" onclick="exportGDPR()">Export User Data (Art. 20)</button>
+
+                    <!-- Optional program-layer record for the erasure. Collapsed by
+                         default so a casual single-user purge isn't burdened; a
+                         multi-tenant operator can fill it for a defensible audit
+                         record (written to the tamper-evident audit trail). -->
+                    <details style="font-size: 0.8rem; margin: 0.25rem 0;">
+                        <summary style="cursor: pointer; color: hsl(210, 15%, 65%);">Compliance details (optional)</summary>
+                        <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                            <select id="gdprLegalBasis" class="m3-select" style="width: 100%; padding: 0.4rem 0.6rem; font-size: 0.8rem;">
+                                <option value="">Legal basis (Art. 17(1)) — optional</option>
+                                <option value="a) no longer necessary">a) No longer necessary</option>
+                                <option value="b) consent withdrawn">b) Consent withdrawn</option>
+                                <option value="c) objection (Art. 21)">c) Objection (Art. 21)</option>
+                                <option value="d) unlawfully processed">d) Unlawfully processed</option>
+                                <option value="e) legal obligation">e) Legal obligation</option>
+                                <option value="f) child's data">f) Child's data</option>
+                            </select>
+                            <input type="text" id="gdprReason" class="m3-input" style="width: 100%; padding: 0.4rem 0.6rem; font-size: 0.8rem;" placeholder="Reason / notes">
+                            <input type="text" id="gdprVerifiedBy" class="m3-input" style="width: 100%; padding: 0.4rem 0.6rem; font-size: 0.8rem;" placeholder="Identity verified by (who / how)">
+                            <input type="text" id="gdprAuthorizedBy" class="m3-input" style="width: 100%; padding: 0.4rem 0.6rem; font-size: 0.8rem;" placeholder="Authorized by (operator / DPO)">
+                            <input type="text" id="gdprExternalRef" class="m3-input" style="width: 100%; padding: 0.4rem 0.6rem; font-size: 0.8rem;" placeholder="External ref (case / ticket #)">
+                            <input type="text" id="gdprRetainedNote" class="m3-input" style="width: 100%; padding: 0.4rem 0.6rem; font-size: 0.8rem;" placeholder="Retained under exemption (Art. 17(3)) — note">
+                        </div>
+                    </details>
+
                     <button class="m3-btn m3-btn-danger" style="width: 100%; font-size: 0.85rem;" onclick="forgetGDPR()">Purge User Records (Art. 17)</button>
                 </div>
                 <div id="gdprFeedback" style="margin-top: 0.75rem; font-size: 0.8rem; text-align: center;"></div>
@@ -1842,6 +1882,16 @@ INDEX_HTML = """
             try {
                 const formData = new FormData();
                 formData.append("user_id", uid);
+                // Optional program-layer compliance fields (sent only if filled).
+                const cmap = {
+                    legal_basis: "gdprLegalBasis", reason: "gdprReason",
+                    verified_by: "gdprVerifiedBy", authorized_by: "gdprAuthorizedBy",
+                    external_ref: "gdprExternalRef", retained_note: "gdprRetainedNote"
+                };
+                for (const [field, id] of Object.entries(cmap)) {
+                    const el = document.getElementById(id);
+                    if (el && el.value.trim()) formData.append(field, el.value.trim());
+                }
 
                 const res = await fetch("/api/gdpr/forget", {
                     method: "POST",

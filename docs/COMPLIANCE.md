@@ -12,7 +12,7 @@ M3 ships compliance-relevant primitives natively — built-in GDPR erasure/expor
 
 What M3 ships natively that's relevant here:
 
-- **GDPR primitives.** `gdpr_forget` (Article 17 — right to erasure) and `gdpr_export` (Article 20 — data portability) are built-in MCP tools. No custom code, no third-party services.
+- **GDPR primitives.** `gdpr_forget` (Article 17 — right to erasure) and `gdpr_export` (Article 20 — data portability) are built-in MCP tools. No custom code, no third-party services. What m3 does vs. what remains the operator's responsibility is spelled out in **[GDPR_COMPLIANCE.md](GDPR_COMPLIANCE.md)**.
 - **Bitemporal audit log.** Every write captures valid-time and transaction-time. Native undo via supersedes relationships preserves the full history of what was known, when.
 - **Atomic concurrent writes.** SQLite WAL — multiple agents writing simultaneously without race conditions or silent failures.
 - **Air-gap operability.** No network listeners, no telemetry, no implicit egress. Same code path runs on a developer laptop and inside an air-gapped enclave.

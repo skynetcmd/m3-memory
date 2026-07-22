@@ -166,6 +166,20 @@ TOOLS: list[ToolSpec] = [
             "type": "object",
             "properties": {
                 "user_id": {"type": "string", "description": "Data subject id to forget."},
+                "compliance": {
+                    "type": "object",
+                    "description": (
+                        "Optional operator-supplied record of the erasure's "
+                        "program-layer context, logged to the tamper-evident audit "
+                        "trail (not required; only the operator knows these). "
+                        "Recognized keys: legal_basis (Art. 17(1) ground), reason, "
+                        "verified_by, verification_method, authorized_by, "
+                        "external_ref (case/ticket #), retained_note (Art. 17(3) "
+                        "exemption). Program-level record-keeping remains the "
+                        "operator's responsibility — see docs/COMPLIANCE.md."
+                    ),
+                    "additionalProperties": True,
+                },
             },
             "required": ["user_id"],
         },

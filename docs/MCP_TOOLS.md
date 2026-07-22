@@ -1432,6 +1432,7 @@ Right to be forgotten — hard-deletes ALL data for a user_id including memories
 | Parameter | Type | Required | Description | Default |
 | --- | --- | --- | --- | --- |
 | `user_id` | `string` | Yes | Data subject id to forget. | `-` |
+| `compliance` | `object` | No | Optional operator-supplied record of the erasure's program-layer context, logged to the tamper-evident audit trail (not required; only the operator knows these). Recognized keys: legal_basis (Art. 17(1) ground), reason, verified_by, verification_method, authorized_by, external_ref (case/ticket #), retained_note (Art. 17(3) exemption). Program-level record-keeping remains the operator's responsibility — see docs/COMPLIANCE.md. | `-` |
 | `database` | `string` | No | Optional SQLite database path. Overrides M3_DATABASE env and the default memory/agent_memory.db for this call only. Empty = use default. | `` |
 | `timeout` | `number` | No | Optional per-call timeout in seconds. Overrides the M3_TOOL_TIMEOUT env and the 30s default for this call only. Use a larger value for long-running ops; <= 0 disables the timeout entirely. | `30` |
 

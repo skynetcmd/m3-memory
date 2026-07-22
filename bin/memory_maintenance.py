@@ -670,16 +670,39 @@ def gdpr_export_impl(user_id: str) -> str:
 
     return json.dumps({"user_id": user_id, "request_id": req_id, "items_count": len(items), "items": items}, indent=2, default=str)
 
-def gdpr_forget_impl(user_id: str) -> str:
+def gdpr_forget_impl(user_id: str, compliance: "dict | str | None" = None) -> str:
     """Right to be forgotten (GDPR Article 17). Hard-deletes all data for a user_id.
 
     Backend-aware: seam (_db()) + dialected placeholders / now() so the cascade
     delete runs on PostgreSQL as well as SQLite. The bypass_surface guard catches
     the backend-specific "table absent" error (sqlite3.OperationalError /
-    psycopg2 UndefinedTable) rather than only the SQLite one."""
+    psycopg2 UndefinedTable) rather than only the SQLite one.
+
+    `compliance` is an OPTIONAL operator-supplied record of the erasure's
+    program-layer context — the fields a DPO/auditor expects to see under the
+    accountability principle (Art. 5(2)) but that only the operator knows:
+    `legal_basis` (Art. 17(1) ground), `reason`, `verified_by` /
+    `verification_method` (who confirmed the requester's identity + how),
+    `authorized_by`, `external_ref` (case/ticket #), `retained_note` (what was
+    kept under an Art. 17(3) exemption). Stored verbatim in the tamper-evident
+    audit trail entry for this erasure. It does NOT make m3 a DSAR platform or a
+    compliance program — it just captures more when the operator provides it. See
+    docs/COMPLIANCE.md: program-level record-keeping is the operator's
+    responsibility. Accepts a dict or a JSON string; unknown keys are kept as-is.
+    NOTE: these fields are logged ONLY to the audit trail (the compliance record);
+    they are never surfaced elsewhere (wiki, export)."""
+    import json as _json
     import uuid
     if not user_id or not user_id.strip():
         return "Error: user_id is required"
+    # Normalize compliance to a dict; tolerate a JSON string (CLI/HTTP callers).
+    if isinstance(compliance, str):
+        try:
+            compliance = _json.loads(compliance) if compliance.strip() else None
+        except ValueError:
+            compliance = {"note": compliance}   # keep raw text rather than lose it
+    if compliance is not None and not isinstance(compliance, dict):
+        compliance = None
     from memory.backends import dialect
     _d = dialect()
     _p = _d.param()
@@ -733,10 +756,15 @@ def gdpr_forget_impl(user_id: str) -> str:
 
     try:
         from audit_trail import write_audit_entry
+        audit_meta = {"request_id": req_id, "items_affected": total_deleted}
+        if compliance:
+            # Operator-supplied program-layer record (legal_basis, reason,
+            # verified_by, authorized_by, external_ref, …) — captured verbatim.
+            audit_meta["compliance"] = compliance
         write_audit_entry(
             action="gdpr_forget",
             target_id=user_id,
-            metadata={"request_id": req_id, "items_affected": total_deleted}
+            metadata=audit_meta,
         )
     except Exception as e:
         logger.warning(f"Failed to write audit trail entry for gdpr_forget: {e}")

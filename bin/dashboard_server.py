@@ -2223,10 +2223,30 @@ async def export_gdpr_data(user_id: str = "default"):
 
 
 @app.post("/api/gdpr/forget")
-async def forget_gdpr_data(user_id: str = Form(...)):
-    """Invokes core gdpr_forget_impl under Article 17."""
+async def forget_gdpr_data(
+    user_id: str = Form(...),
+    legal_basis: str = Form(""),
+    reason: str = Form(""),
+    verified_by: str = Form(""),
+    authorized_by: str = Form(""),
+    external_ref: str = Form(""),
+    retained_note: str = Form(""),
+):
+    """Invokes core gdpr_forget_impl under Article 17.
+
+    The optional program-layer fields (legal basis, reason, who verified/authorized
+    the request, an external case ref, and any retained-under-exemption note) are
+    passed through to the tamper-evident audit trail. They're optional so casual
+    single-user purges aren't burdened; a multi-tenant operator can build a
+    defensible record. m3 does not verify or enforce these — see docs/COMPLIANCE.md.
+    """
     try:
-        msg = gdpr_forget_impl(user_id)
+        compliance = {k: v.strip() for k, v in {
+            "legal_basis": legal_basis, "reason": reason,
+            "verified_by": verified_by, "authorized_by": authorized_by,
+            "external_ref": external_ref, "retained_note": retained_note,
+        }.items() if v and v.strip()} or None
+        msg = gdpr_forget_impl(user_id, compliance=compliance)
         return HTMLResponse(content=f"GDPR Purge Successful: {msg}", status_code=200)
     except Exception as e:
         return HTMLResponse(content=f"Purge Failed: {str(e)}", status_code=500)

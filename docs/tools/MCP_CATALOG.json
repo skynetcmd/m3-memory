@@ -102,6 +102,11 @@
           "type": "string"
         },
         {
+          "name": "compliance",
+          "required": false,
+          "type": "object"
+        },
+        {
           "name": "timeout",
           "required": false,
           "type": "number"

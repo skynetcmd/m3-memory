@@ -291,8 +291,20 @@ Export all memories for a user as portable JSON (Article 20).
 - **Args**: `user_id` (str, required)
 
 ### `gdpr_forget`
-Hard-delete all data for a user (Article 17).
-- **Args**: `user_id` (str, required)
+Hard-delete all data for a user (Article 17) and log the erasure to the
+tamper-evident audit trail (subject, timestamps, item count).
+- **Args**: `user_id` (str, required); `compliance` (object, optional) — an
+  operator-supplied record of the erasure's program-layer context, logged verbatim
+  to the audit trail. Recognized keys: `legal_basis` (Art. 17(1) ground), `reason`,
+  `verified_by`, `verification_method`, `authorized_by`, `external_ref`
+  (case/ticket #), `retained_note` (Art. 17(3) exemption).
+- **Scope**: this tool performs and records the *technical* erasure. The
+  *program-level* record-keeping GDPR expects — identity verification, legal-basis
+  determination, exemption analysis, third-party notification (Art. 19), and
+  responding to the data subject — is the **deploying organization's**
+  responsibility. See [COMPLIANCE.md](COMPLIANCE.md). The `compliance` field lets an
+  operator capture that context in the audit trail but does not make m3 a
+  DSAR/compliance platform or constitute legal advice.
 
 ### `memory_export`
 Export memories as portable JSON for backup or migration.
