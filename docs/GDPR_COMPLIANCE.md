@@ -5,7 +5,8 @@
 > obligations (identity verification, legal-basis determination, exemption
 > analysis, third-party notification, responding to the data subject, and keeping
 > the case file) remain with the **deploying organization**. If you process other
-> people's personal data, consult your DPO / legal counsel.
+> people's personal data, consult your Data Protection Officer (DPO) / legal
+> counsel.
 
 For most m3 users this page is academic: m3 is **local-first and single-user by
 default**, and purely personal use generally falls under the GDPR "household
