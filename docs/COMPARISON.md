@@ -10,10 +10,8 @@ Several tools address agentic memory. This document explains where M3 Memory fit
 
 ### M3 vs Other Memory Systems
 
-<table border="0">
-<tr>
-<td width="40"></td>
-<td><table border="1">
+<blockquote>
+<table>
 <tr>
 <td><a href="#vs-a-mem">A-MEM</a></td>
 <td><a href="#vs-agentmemory">agentmemory</a></td>
@@ -34,9 +32,8 @@ Several tools address agentic memory. This document explains where M3 Memory fit
 <td><a href="#vs-mempalace">MemPalace</a></td>
 <td><a href="#vs-zep">Zep</a></td>
 </tr>
-</table></td>
-</tr>
 </table>
+</blockquote>
 
 > 💡 For benchmark sourcing and judge-provenance behind the LongMemEval figures, see the [Sovereign Memory Systems benchmark reference](M3_Comparison_Table.md).
 
