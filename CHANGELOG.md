@@ -69,10 +69,6 @@ the policy is forward-going only.
   m3's backend seam, so it runs on the active backend (SQLite or PostgreSQL), not
   just a local SQLite file. (The files corpus is still SQLite; use `--no-files`
   for a memory-only vault on PostgreSQL.)
-- **Regeneration prunes stale pages.** Re-running `m3 wiki generate` deletes pages
-  for memories that no longer exist, so superseded or GDPR-erased content does not
-  linger in a previously generated vault. Only m3's own generated files are
-  touched — your notes and `.obsidian/` config are left alone.
 
 ## [2026.7.21.0] — 2026-07-21 — Cursor & Cline first-class support
 
