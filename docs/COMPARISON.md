@@ -35,16 +35,19 @@ If "the LLM should decide what's worth remembering" matches your worldview, Mem0
 
 > **Legend:** 🏆 = the system has this capability and does it well · 👑 = best-in-class here — either a rare stand-out few offer (e.g. FIPS-ready crypto, bundled in-process embedder) or a shared capability M3 does better (e.g. deterministic contradiction supersession, native MCP, drop-in LangChain). Where a competitor also has a feature it earns 🏆; M3's 👑 marks where it leads. (Temporal/bitemporal is a genuine tie with graph-native systems like Zep/Graphiti — both earn 🏆; M3's edge there is doing it local-first with no graph DB to run.) Applies to every table below.
 
-> **A note that applies across the whole field.** M3 turns your memory store into a
-> browsable, human-readable **knowledge base** — `m3 wiki generate` compiles canonical
-> memories + indexed files into an interlinked Markdown vault (GitHub-renderable, a
-> self-contained offline HTML viewer, or an **Obsidian vault** with `--obsidian` for
-> graph view + backlinks; also in the web dashboard). Most agentic-memory tools —
-> whether cloud (Mem0) or local-first (agentmemory, Letta, and the systems in the
-> [Sovereign Memory Systems table](M3_Comparison_Table.md)) — expose memory through an
-> API or a dashboard, not as a portable, tool-agnostic document you can read, diff, and
-> open in your own PKM app. That export/interop layer is an M3 differentiator regardless
-> of which competitor you're weighing.
+> **Auto-generated wiki — a note that applies across the field.** M3 *projects* its
+> memory store into a browsable, human-readable **knowledge base**: `m3 wiki generate`
+> compiles canonical memories + indexed files into an interlinked Markdown vault
+> (GitHub-renderable, a self-contained offline HTML viewer, or an **Obsidian vault**
+> with `--obsidian` for graph view + backlinks; also in the web dashboard). This is a
+> different direction of data flow than the ecosystem norm (verified 2026-07-21):
+> Mem0's export is [structured JSON](https://docs.mem0.ai/cookbooks/essentials/exporting-memories)
+> for migration/compliance, not a readable wiki; [Letta's Obsidian plugin](https://github.com/letta-ai/letta-obsidian)
+> reads an *existing* vault *into* the agent (Obsidian → Letta), the reverse of
+> generating one *from* memory. Tools that treat markdown files *as* the store (e.g.
+> Basic Memory) are the closest analog, but that's a different model — m3 keeps its
+> hybrid-search engine and generates the vault as a downstream, disposable projection.
+> Weigh this as an interop/ownership feature, not a retrieval-quality one.
 
 ---
 
