@@ -35,20 +35,6 @@ If "the LLM should decide what's worth remembering" matches your worldview, Mem0
 
 > **Legend:** 🏆 = the system has this capability and does it well · 👑 = best-in-class here — either a rare stand-out few offer (e.g. FIPS-ready crypto, bundled in-process embedder) or a shared capability M3 does better (e.g. deterministic contradiction supersession, native MCP, drop-in LangChain). Where a competitor also has a feature it earns 🏆; M3's 👑 marks where it leads. (Temporal/bitemporal is a genuine tie with graph-native systems like Zep/Graphiti — both earn 🏆; M3's edge there is doing it local-first with no graph DB to run.) Applies to every table below.
 
-> **Auto-generated wiki — a note that applies across the field.** M3 *projects* its
-> memory store into a browsable, human-readable **knowledge base**: `m3 wiki generate`
-> compiles canonical memories + indexed files into an interlinked Markdown vault
-> (GitHub-renderable, a self-contained offline HTML viewer, or an **Obsidian vault**
-> with `--obsidian` for graph view + backlinks; also in the web dashboard). This is a
-> different direction of data flow than the ecosystem norm (verified 2026-07-21):
-> Mem0's export is [structured JSON](https://docs.mem0.ai/cookbooks/essentials/exporting-memories)
-> for migration/compliance, not a readable wiki; [Letta's Obsidian plugin](https://github.com/letta-ai/letta-obsidian)
-> reads an *existing* vault *into* the agent (Obsidian → Letta), the reverse of
-> generating one *from* memory. Tools that treat markdown files *as* the store (e.g.
-> Basic Memory) are the closest analog, but that's a different model — m3 keeps its
-> hybrid-search engine and generates the vault as a downstream, disposable projection.
-> Weigh this as an interop/ownership feature, not a retrieval-quality one.
-
 ---
 
 ## ⚔️ M3-Memory vs Mem0
@@ -62,7 +48,7 @@ Mem0 is a popular agentic memory library with broad ecosystem adoption. M3-Memor
 | **Search algorithm** | FTS5 (BM25) + vector cosine + MMR diversity re-ranking | Vector search + knowledge graph traversal |
 | **Contradiction handling** | 👑 Automatic heuristic detection on write (cosine + title) **plus** a deterministic explicit `memory_supersede` — old memory soft-deleted, `supersedes` edge recorded, history preserved | Basic deduplication; no strong conflict resolution |
 | **Bitemporal history** | 👑 `valid_from` / `valid_to` on every memory — query state as of any past date | No |
-| **Auto-generated wiki** | 👑 `m3 wiki generate` compiles your memories into a browsable, interlinked Markdown vault (renders on GitHub, an offline HTML viewer, or as an **Obsidian vault** with `--obsidian` for graph view + backlinks) — a *projection* of the store, pruned on regen | No |
+| **Auto-generated wiki / Obsidian export** | 👑 `m3 wiki generate` projects your memories + files into an interlinked Markdown vault (GitHub, offline HTML viewer, or **Obsidian** with `--obsidian` for graph view + backlinks) | Export is [structured JSON](https://docs.mem0.ai/cookbooks/essentials/exporting-memories) for migration/compliance — not a human-readable wiki |
 | **GDPR tooling** | 👑 `gdpr_forget` (Art. 17 hard delete) + `gdpr_export` (Art. 20 portable JSON) as MCP tools | Manual; no dedicated GDPR tooling |
 | **Embeddings** | 👑 **Bundled in-process embedder** — BGE-M3 ships with M3 (GGUF, installed by `m3 setup`); no separate model server, no Ollama/LM Studio/vLLM required. Optional GPU or external endpoint if you want them | Cloud embedding APIs by default |
 | **Setup** | 👑 One-command auto-configuring wizard (`m3 setup`) — detects agents, wires config + hooks, installs the embedder, runs a `doctor` verify | Manual SDK wiring / cloud dashboard config |
@@ -117,6 +103,7 @@ M3-Memory is a **dedicated, lightweight memory layer** — a drop-in backend for
 | **Contradiction handling** | 👑 Automatic heuristic detection + deterministic explicit supersede (bitemporal, auditable) | 🏆 Agent-driven — the agent must decide to update its own memory |
 | **GDPR tooling** | 👑 Built-in `gdpr_forget` + `gdpr_export` | Not built-in |
 | **Bitemporal history** | 👑 Yes — query state as of any past date | No |
+| **Auto-generated wiki / Obsidian export** | 👑 Generates an Obsidian-ready Markdown vault *from* memory (`m3 wiki generate --obsidian`) | Reverse direction — the [Letta Obsidian plugin](https://github.com/letta-ai/letta-obsidian) reads an *existing* vault into the agent; memory lives in Letta's DB, not portable markdown |
 | **Deployment** | 👑 100% local (SQLite) by default, bundled embedder — no external services | 🏆 Self-hosted or Letta Cloud |
 | **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Works with existing agents** | Yes — any MCP agent unchanged | No — must rebuild on Letta runtime |
@@ -156,6 +143,7 @@ Zep focuses on temporal knowledge graphs for enterprise multi-agent systems. It 
 | **GDPR tooling** | 👑 Built-in MCP tools | 🏆 Partial |
 | **MCP support** | 👑 Native — 100+ tools | No |
 | **Deployment** | 👑 Local SQLite + bundled embedder — no external services | 🏆 Self-hosted or Zep Cloud |
+| **Auto-generated wiki / Obsidian export** | 👑 Generates an interlinked Markdown/Obsidian vault from memory | Export API / DB dump, no native wiki; markdown↔graph is a 3rd-party plugin (MegaMem) that *ingests* Obsidian into the graph |
 | **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Cost** | Free, OSS | OSS + SaaS |
 
@@ -175,6 +163,7 @@ M3 is memory-first rather than graph-first: the primary store is a bitemporal SQ
 | **Temporal model** | 🏆 Bitemporal (valid + transaction time), item-grain | 🏆 Bi-temporal edge validity (fact/edge grain) |
 | **MCP support** | 👑 Native — 100+ tools | 🏆 Via a separate MCP server |
 | **Infrastructure** | 👑 None to start (SQLite + bundled embedder) | Requires a graph database |
+| **Auto-generated wiki / Obsidian export** | 👑 Generates an interlinked Markdown/Obsidian vault from memory | No — API / MCP over a graph DB; not a human-readable file export |
 | **Local-first / offline** | 👑 100% — SQLite, fully offline, no external services | Depends on graph-DB deployment |
 | **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Cost** | Free, Apache 2.0 | Free, OSS |
@@ -208,6 +197,7 @@ M3 is production-and-operations oriented: typed memories, bitemporal supersessio
 | **MCP / agent integration** | 👑 Native — 100+ tools, plugin, hooks | Library / research code |
 | **Compliance tooling** | 👑 GDPR primitives + FIPS 140-3 deployment-ready posture (validation belongs to the wolfSSL CMVP module, not M3 itself) | Not a focus |
 | **Local-first / offline** | 👑 100% — SQLite + bundled embedder, fully offline | Depends on the LLM/embeddings used |
+| **Auto-generated wiki / Obsidian export** | 👑 Generates an interlinked Markdown/Obsidian vault from memory | Zettelkasten-style linked "memory notes" in ChromaDB — a note network, but not exported as a portable Markdown vault |
 
 ### When to choose M3-Memory over A-MEM
 - You need something to deploy and operate today — with MCP integration, compliance tooling, and predictable behavior.
@@ -240,6 +230,7 @@ M3-Memory is framework-agnostic and MCP-native — it works with any agent via a
 | **Search** | FTS5 + vector + MMR | Depends on configured backend store |
 | **Local-first** | 👑 100% — SQLite + bundled embedder, fully offline | 🏆 Good — depends on backend store choice |
 | **Embeddings** | 👑 Bundled in-process (BGE-M3) — no separate model server | Configured externally (needs an embedder) |
+| **Auto-generated wiki / Obsidian export** | 👑 Generates an interlinked Markdown/Obsidian vault from memory | No — a store abstraction, not a knowledge-base generator |
 | **FIPS 140-3** | 👑 Deployment-ready crypto boundary (validation belongs to the wolfSSL CMVP module, not M3 itself) | No |
 | **Installation** | 👑 `pip install m3-memory` + one-command auto-configuring wizard (`m3 setup`) | Part of LangChain / LangGraph install |
 | **Overhead** | Very light | Medium (tied to LangGraph runtime) |
