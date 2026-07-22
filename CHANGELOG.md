@@ -52,11 +52,27 @@ the policy is forward-going only.
   member list when no model is reachable. `--exclude REGEX` drops matching
   memories; `pip install "m3-memory[wiki]"` adds networkx for tighter clustering.
 - **Memory Wiki in the dashboard.** A new dashboard tab shows the generated wiki
-  inline, or — when none exists — OS-specific instructions for generating it.
+  inline (with an Obsidian how-to page), or — when none exists — OS-specific
+  instructions for generating it.
+- **GDPR erasure now records the request context.** `gdpr_forget` accepts an
+  optional compliance record (legal basis, reason, who verified/authorized it, an
+  external ticket ref), logged to the tamper-evident audit trail; the dashboard's
+  GDPR panel exposes the same fields and summarizes what m3 does vs. what the
+  operator must do. See [GDPR_COMPLIANCE.md](docs/GDPR_COMPLIANCE.md).
 - **Dashboard visual refresh.** The header now uses the m3 logo (inlined so it
   renders offline), each tab opens with an identity hero, System Health loads
   instantly with a "gathering data…" skeleton while probes run, and the
   content tabs adopt a restrained, high-contrast theme.
+
+### Changed
+- **Wiki works on PostgreSQL.** `m3 wiki generate` reads the memory store through
+  m3's backend seam, so it runs on the active backend (SQLite or PostgreSQL), not
+  just a local SQLite file. (The files corpus is still SQLite; use `--no-files`
+  for a memory-only vault on PostgreSQL.)
+- **Regeneration prunes stale pages.** Re-running `m3 wiki generate` deletes pages
+  for memories that no longer exist, so superseded or GDPR-erased content does not
+  linger in a previously generated vault. Only m3's own generated files are
+  touched — your notes and `.obsidian/` config are left alone.
 
 ## [2026.7.21.0] — 2026-07-21 — Cursor & Cline first-class support
 
