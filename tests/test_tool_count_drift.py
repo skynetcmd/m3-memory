@@ -53,7 +53,7 @@ _DOC_FILES = [
     # tools" for many releases while the real catalog passed 100. Anything a user
     # reads must follow the same "100+ tools" policy as the rest of the docs.
     os.path.join(_ROOT, "commands", "help.md"),
-    os.path.join(_ROOT, ".claude-plugin", "skills", "m3-guide", "SKILL.md"),
+    os.path.join(_ROOT, "skills", "m3-guide", "SKILL.md"),
     os.path.join(_ROOT, ".antigravity-plugin", "skills", "m3-help", "SKILL.md"),
     os.path.join(_ROOT, ".antigravity-plugin", "skills", "m3-guide", "SKILL.md"),
 ]
@@ -253,7 +253,7 @@ def test_plugin_manifests_use_no_exact_tool_count():
 # embed-server health probe, and a stale "51 MCP tools" that survived because the
 # help files were not gated). Pin the copies byte-for-byte so they cannot drift.
 _GUIDE_SKILL_COPIES = [
-    os.path.join(_ROOT, ".claude-plugin", "skills", "m3-guide", "SKILL.md"),
+    os.path.join(_ROOT, "skills", "m3-guide", "SKILL.md"),
     os.path.join(_ROOT, ".antigravity-plugin", "skills", "m3-guide", "SKILL.md"),
 ]
 
@@ -273,3 +273,33 @@ def test_m3_guide_skill_copies_are_identical():
             "plugin bundles and must stay byte-identical. Sync them: "
             f"{os.path.relpath(first, _ROOT)} vs {os.path.relpath(other, _ROOT)}"
         )
+
+
+def test_claude_skills_live_at_plugin_root():
+    """Claude Code loads plugin skills from `<plugin-root>/skills/`, NOT from
+    inside `.claude-plugin/` (which holds manifests only).
+
+    Shipped 2026-07-22 at `.claude-plugin/skills/m3-guide/` — the file reached
+    every user's plugin cache and silently never loaded, because the client does
+    not look there. Verified against the layout of plugins that DO work
+    (claude-plugins-official/discord, frontend-design): both put skills at
+    `skills/` beside `.claude-plugin/plugin.json`.
+    """
+    root_skills = os.path.join(_ROOT, "skills")
+    assert os.path.isdir(root_skills), (
+        "Claude Code plugin skills must live at <root>/skills/ — directory missing"
+    )
+
+    stray = os.path.join(_ROOT, ".claude-plugin", "skills")
+    assert not os.path.exists(stray), (
+        "skills found under .claude-plugin/skills — Claude Code will NOT load "
+        "them. Move to <root>/skills/ (see this test's docstring)."
+    )
+
+    # Every skill dir must carry a SKILL.md, or the client silently skips it.
+    for name in os.listdir(root_skills):
+        d = os.path.join(root_skills, name)
+        if os.path.isdir(d):
+            assert os.path.isfile(os.path.join(d, "SKILL.md")), (
+                f"skills/{name}/ has no SKILL.md — it will not load"
+            )
