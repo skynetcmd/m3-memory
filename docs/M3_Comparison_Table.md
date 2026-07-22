@@ -1,6 +1,16 @@
 # <a href="../README.md"><img src="https://raw.githubusercontent.com/skynetcmd/m3-memory/main/docs/m3_logo_icon.png" height="60" style="vertical-align: baseline; margin-bottom: -15px;"></a> Sovereign Memory Systems Comparison
 
-> Last updated: 2026-07-21 (m3 row refreshed to 2026.7.21.0). Honest dimensional comparison of local-first / sovereign memory substrates. Competitor benchmark figures are vendor/author self-reported and verified against primary sources through 2026-06-23 (see the sourcing note under Retrieval & Extraction); they are not independently audited and may be stale — corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).
+> ⚠️ **Superseded — use the per-competitor comparisons.** The head-to-heads for
+> agentmemory, Chronos, Hindsight, Mastra OM, Memento, and MemPalace now live as
+> dedicated per-competitor tables in **[COMPARISON.md](COMPARISON.md)** (alongside
+> Mem0, Letta, Zep, Graphiti, A-MEM, and LangMem), which state a specific,
+> researched fact per feature rather than a single-icon grid cell. This page is kept
+> for its **benchmark sourcing and judge-provenance analysis** (the cited LongMemEval
+> figures + how each vendor grades), which the per-competitor footnotes draw on and
+> [MYTHS_AND_FACTS.md](MYTHS_AND_FACTS.md) references. The multi-column grids below are
+> retained as historical/at-a-glance context; the per-competitor tables are canonical.
+
+> Last updated: 2026-07-21 (m3 row refreshed to 2026.7.21.1). Honest dimensional comparison of local-first / sovereign memory substrates. Competitor benchmark figures are vendor/author self-reported and verified against primary sources through 2026-06-23 (see the sourcing note under Retrieval & Extraction); they are not independently audited and may be stale — corrections welcome via [GitHub issue](https://github.com/skynetcmd/m3-memory/issues).
 
 > 🔗 **Interactive version:** [M3_Comparison_Table.html](https://html-preview.github.io/?url=https://github.com/skynetcmd/m3-memory/blob/main/docs/M3_Comparison_Table.html) — same data, but with sticky columns, sticky section labels, hover tooltips on acronyms, and clickable jump-links into the dimension glossary. Recommended if you want to scroll across the cohort comparison.
 
@@ -46,6 +56,7 @@ This is a head-to-head against other **sovereign / local-first memory substrates
 | **[Multi-agent Orchestration](#multi-agent-orchestration)** | 🏆 **Native MCP handoffs** | 🏆 **Orchestrated** | ✅ **Sequential** | 🏆 **Bank-Scoped** | 🏆 **Supervisor** | ✅ **ID-Scoped** | 🏆 **Native (MCP)** | ✅ **Agent Diaries** |
 | **[Native OS Support](#native-os-support)** | 🍎 🐧 🪟 | 🍎 🐧 | 🐧 🍎 | 🐧 🍎 | 🔻 (Docker only) | 🍎 🐧 🪟 | 🍎 🐧 🪟 | 🍎 🐧 🪟 |
 | **[Multi-Computer Sync](#multi-computer-sync)** | 🏆 **Bi-dir Delta Sync** | ✅ **Managed API** | ✅ **Web Server** | 🏆 **Local Server** | 🏆 **Cloud / EKS** | 🏆 **Cloud Native** | ⚖️ **Local Sync** | 🔻 **Manual Sync** |
+| **[Auto-generated wiki / Obsidian export](#auto-generated-wiki--obsidian-export)** | 👑 **MD / Obsidian vault** | — | — | — | — | 🔻 **JSON export only** | — | — |
 
 ---
 
@@ -213,6 +224,18 @@ For the developer-tool decision (Mem0, Letta, Zep, LangChain Memory), see the [d
 **M3 standing:** Bi-directional delta sync via PostgreSQL — set one env var, your memories follow you across devices.
 
 **Cohort context:** Cloud-native systems (Mem0) deliver sync trivially but at the cost of sovereignty. MemPalace requires manual sync.
+
+---
+
+### Auto-generated wiki / Obsidian export
+
+**What it means:** Projecting the memory store into a browsable, human-readable knowledge base — a folder of interlinked Markdown pages you can read, diff, and open in your own tools, rather than accessing memory only through an API or dashboard.
+
+**Why it matters:** Ownership and interop. A portable Markdown vault renders on GitHub, opens as an [Obsidian](https://obsidian.md) vault (graph view + backlinks), and survives whatever happens to the memory tool — the opposite of a database you can only reach through a vendor SDK.
+
+**M3 standing:** `m3 wiki generate` compiles canonical memories + indexed files into an interlinked Markdown vault (GitHub-renderable, a self-contained offline HTML viewer, or Obsidian with `--obsidian`), also viewable in the web dashboard. It's a deterministic *projection* of the store, pruned on regen so deleted content never lingers.
+
+**Cohort context (verified 2026-07-21):** This memory→wiki direction is rare in the cohort. Mem0's [export](https://docs.mem0.ai/cookbooks/essentials/exporting-memories) is structured JSON for migration/compliance, not a readable wiki (🔻). For the others, a human-readable Markdown/Obsidian export is not a documented feature (—); several are benchmark/research systems. Where competitors touch Obsidian at all it's the reverse direction (a plugin that reads a vault *into* the agent) or a third-party bridge, not native generation from the store.
 
 ---
 
