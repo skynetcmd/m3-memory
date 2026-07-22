@@ -54,8 +54,11 @@ def _files_db_path() -> str:
         return os.path.join(_engine_root(), "files_database.db")
 
 
-def _open_ro(path: str) -> sqlite3.Connection:
-    """Open a sqlite DB read-only (URI mode) so the generator never mutates it."""
+def _open_ro_sqlite(path: str) -> sqlite3.Connection:
+    """Open a local sqlite DB read-only (URI mode) so the generator never mutates
+    it. Used for the FILES corpus, which is a local SQLite sidecar on every backend
+    (files_database.db) — the memory store, by contrast, goes through the backend
+    seam (see _build_vault) so the wiki works on PostgreSQL too."""
     uri = f"file:{path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=10.0)
     conn.row_factory = sqlite3.Row
@@ -63,18 +66,6 @@ def _open_ro(path: str) -> sqlite3.Connection:
 
 
 def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
-    mem_path = _memory_db_path()
-    if not os.path.isfile(mem_path):
-        print(f"memory DB not found at {mem_path} — run `m3 setup` first.", file=sys.stderr)
-        raise SystemExit(2)
-    mem_conn = _open_ro(mem_path)
-
-    files_conn = None
-    if not args.no_files:
-        fpath = _files_db_path()
-        if os.path.isfile(fpath):
-            files_conn = _open_ro(fpath)
-
     opts = WikiOptions(
         importance_threshold=(args.importance_threshold
                               if args.importance_threshold is not None else 0.6),
@@ -90,12 +81,42 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
         cache_dir = os.path.join(out_dir, ".synth-cache")
         synthesizer = Synthesizer(SynthConfig.from_env(cache_dir))
 
+    # Files corpus: always a local SQLite sidecar (files_database.db), on every
+    # backend — open it read-only directly. Absent → memory-only vault.
+    files_conn = None
+    if not args.no_files:
+        fpath = _files_db_path()
+        if os.path.isfile(fpath):
+            files_conn = _open_ro_sqlite(fpath)
+
+    # Memory store: route through m3's backend seam so the wiki reads the ACTIVE
+    # backend (SQLite default, or PostgreSQL) rather than assuming a local .db
+    # file. The seam yields a live connection; build inside the `with`.
     try:
-        vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer)
+        from memory.db import _db as _memory_seam
+    except Exception:
+        _memory_seam = None
+
+    try:
+        if _memory_seam is not None:
+            with _memory_seam() as mem_conn:
+                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer)
+        else:
+            # Fallback (payload not importable): the legacy local-SQLite path.
+            mem_path = _memory_db_path()
+            if not os.path.isfile(mem_path):
+                print(f"memory DB not found at {mem_path} — run `m3 setup` first.",
+                      file=sys.stderr)
+                raise SystemExit(2)
+            mem_conn = _open_ro_sqlite(mem_path)
+            try:
+                vault = build_wiki(mem_conn, files_conn, opts, synthesizer=synthesizer)
+            finally:
+                mem_conn.close()
     finally:
-        mem_conn.close()
         if files_conn is not None:
             files_conn.close()
+
     if synthesizer is not None:
         print(synthesizer.summary(), file=sys.stderr)
     return vault

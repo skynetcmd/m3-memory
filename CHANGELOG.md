@@ -19,7 +19,15 @@ the policy is forward-going only.
 
 ## [Unreleased]
 
-_Nothing pending — all changes below have shipped in a tagged release._
+### Planned
+- **PostgreSQL support for the files corpus (`files_database.db`).** The files
+  store is currently a local SQLite sidecar on every backend, so the wiki's
+  *source* pages (from indexed files) are SQLite-scoped even on a PostgreSQL
+  deployment. The wiki's *memory* layer already works on both backends (SQLite and
+  PostgreSQL) via the core seam. Making `files_memory` backend-agnostic — like core
+  memory and chatlog already are — will bring the files layer to PostgreSQL too
+  (new PG migrations incl. a full-text equivalent for FTS5, seam wiring, and
+  dialected queries).
 
 ## [2026.7.21.1] — 2026-07-21 — Memory Wiki
 

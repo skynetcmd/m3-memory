@@ -112,9 +112,38 @@ class CoreSet:
         return {m.id for m in self.memories}
 
 
-def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    return any((r[1] if not isinstance(r, sqlite3.Row) else r["name"]) == column for r in rows)
+def _param() -> str:
+    """The active backend's SQL placeholder ('?' on SQLite, '%s' on PostgreSQL).
+    Falls back to '?' when the backend seam isn't importable (e.g. a standalone
+    sqlite fixture in tests)."""
+    try:
+        from memory.backends import dialect
+        return dialect().param()
+    except Exception:
+        return "?"
+
+
+def _set_dict_rows(conn) -> None:
+    """Ensure column access by name works. On a raw sqlite3 connection we set the
+    Row factory; on a backend-seam connection (PostgreSQL) rows already support
+    name access, so this is a best-effort no-op there."""
+    try:
+        conn.row_factory = sqlite3.Row
+    except (AttributeError, TypeError):
+        pass  # non-sqlite connection from the backend seam — already name-addressable
+
+
+def _has_column(conn, table: str, column: str) -> bool:
+    """Backend-portable column existence check.
+
+    `PRAGMA table_info` is SQLite-only, so probe by selecting the column with a
+    zero-row predicate; a missing column raises, which we treat as absent. Works on
+    both supported backends (SQLite and PostgreSQL)."""
+    try:
+        conn.execute(f"SELECT {column} FROM {table} WHERE 1=0").fetchall()
+        return True
+    except Exception:
+        return False
 
 
 def select_core_memories(
@@ -145,11 +174,14 @@ def select_core_memories(
     vfrom_sel = "valid_from" if has_valid else "NULL AS valid_from"
     vto_sel = "valid_to" if has_valid else "NULL AS valid_to"
 
-    type_placeholders = ",".join("?" * len(CORE_TYPES))
-    # The pinned predicate only references a real column when it exists.
-    pinned_pred = "pinned = 1 OR " if has_pinned else ""
+    p = _param()  # backend placeholder: '?' (SQLite) or '%s' (PostgreSQL)
+    type_placeholders = ",".join([p] * len(CORE_TYPES))
+    # The pinned predicate only references a real column when it exists. Compare
+    # to a bound value (not literal 1) so it's valid whether `pinned` is INTEGER
+    # (SQLite) or BOOLEAN (PostgreSQL).
+    pinned_pred = f"pinned = {p} OR " if has_pinned else ""
     where_sql = (
-        f"is_deleted = 0 AND ({pinned_pred}importance >= ? "
+        f"is_deleted = 0 AND ({pinned_pred}importance >= {p} "
         f"OR type IN ({type_placeholders}))"
     )
 
@@ -157,11 +189,14 @@ def select_core_memories(
         f"SELECT id, type, title, content, importance, {conf_sel}, "
         f"       {vfrom_sel}, {vto_sel}, {pinned_sel}, created_at, updated_at "
         f"FROM memory_items WHERE {where_sql} "
-        f"ORDER BY id LIMIT ?"
+        f"ORDER BY id LIMIT {p}"
     )
-    params: list = [importance_threshold, *CORE_TYPES, limit]
+    params: list = []
+    if has_pinned:
+        params.append(1)              # pinned = 1 (truthy on both int and bool cols)
+    params += [importance_threshold, *CORE_TYPES, limit]
 
-    conn.row_factory = sqlite3.Row
+    _set_dict_rows(conn)
     rows = conn.execute(sql, params).fetchall()
     out: list[Mem] = []
     for r in rows:
@@ -194,7 +229,7 @@ def load_memory_edges(conn: sqlite3.Connection, ids: set[str]) -> list[Edge]:
     Deterministically sorted. Edges to memories outside the core set are dropped
     (they'd render as dangling links); the lint pass reports those separately.
     """
-    conn.row_factory = sqlite3.Row
+    _set_dict_rows(conn)
     rows = conn.execute(
         "SELECT from_id, to_id, relationship_type FROM memory_relationships"
     ).fetchall()
@@ -221,13 +256,13 @@ def load_entity_comention_edges(conn: sqlite3.Connection, ids: set[str]) -> list
     """
     if not ids:
         return []
-    conn.row_factory = sqlite3.Row
+    _set_dict_rows(conn)
     try:
         rows = conn.execute(
             "SELECT entity_id, memory_id FROM memory_item_entities"
         ).fetchall()
-    except sqlite3.OperationalError:
-        return []  # entity graph not present on this DB
+    except Exception:
+        return []  # entity graph not present on this DB (any backend)
 
     # entity_id -> sorted list of core memory ids that mention it
     by_entity: dict[str, list[str]] = {}

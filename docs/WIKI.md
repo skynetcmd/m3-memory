@@ -54,6 +54,13 @@ Your **files corpus** contributes a second layer: each indexed document becomes 
 link *down* to the exact file a fact came from, while a source page links *up* to
 every memory it fed. Skip the files layer with `--no-files`.
 
+> **Backend note.** The wiki's *memory* layer works on both M3 backends (SQLite and
+> PostgreSQL) — it reads through M3's core database seam. The files corpus
+> is currently a local **SQLite** sidecar (`files_database.db`) on every backend, so
+> the `sources/` pages are read from SQLite even on a PostgreSQL deployment.
+> PostgreSQL support for the files corpus is planned (see the CHANGELOG). If you run
+> PostgreSQL without a local files DB, use `--no-files` for a memory-only vault.
+
 ---
 
 ## How pages are organized
