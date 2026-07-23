@@ -49,6 +49,7 @@ the policy is forward-going only.
   on a split deployment *even when capture is perfectly healthy*, which reads as
   an outage that isn't one. Both the handshake instructions and the skill now say
   to use `chatlog_status` (`m3 chatlog status --json` reports `unified`) instead.
+- README updated.
 
 ### Fixed
 - **`m3 chatlog status` crashed on a PostgreSQL primary.** `main_chat_log_rows`
