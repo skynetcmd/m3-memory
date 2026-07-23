@@ -29,7 +29,56 @@ the policy is forward-going only.
   (new PG migrations incl. a full-text equivalent for FTS5, seam wiring, and
   dialected queries).
 
+## [2026.7.23.0] — 2026-07-23 — Embedding-space integrity
+
+> `2026.7.22.0` was prepared but never tagged, so it never reached PyPI. Its
+> changes ship here.
+
+### Added
+- **`m3 doctor` detects a store mixing incompatible embedding spaces.** Cosine is
+  only meaningful within one embedding model, so a mixed store still "works" —
+  the minority rows just rank wrongly, silently. Reports the model families and
+  their shares. Tags are folded into families first, so the several spellings of
+  one model are never flagged as a mix. Report-only; `--skip-embed-space`.
+- **`m3 embedder reembed`** retires wrong-model vectors so `embed_backfill`
+  regenerates them against the current model. Dry-run by default; `--apply` takes
+  a database backup first. Only the vector is dropped — content, metadata and
+  relationships are untouched. `--keep` picks the surviving family.
+
+### Fixed
+- **The agent install prompts recommended an embedder that corrupts your store.**
+  Both README prompts told new users to run Ollama with `qwen3-embedding:0.6b` and
+  claimed m3 falls back to keyword search without it. The default is in-process
+  BGE-M3; no external service is needed. Qwen3 is bench-only and occupies a
+  different vector space, so following the prompt produced exactly the mixed store
+  the new doctor check finds. Both prompts now run `m3 setup`.
+- **Wrong storage location documented.** The README said all state lives under
+  `~/.m3-memory`, naming only `M3_MEMORY_ROOT`. Databases default to
+  `~/.m3/engine` and config to `~/.m3/config`; setting `M3_MEMORY_ROOT` alone
+  would not have moved them. Now documents the three roots and their precedence.
+  Same correction in `AGENTS.md`.
+- **Contradiction-detection docs were wrong** on the threshold (0.92, not 0.85),
+  the title gate (`loose` by default, so no title match is required), and the
+  mechanism (supersession closes the validity interval rather than soft-deleting,
+  which is why superseded facts stay queryable).
+- **Benchmark tables now name their aggregation.** The per-question-type table
+  reads marginally higher at shallow depth than the headline binary figures
+  (98.8% vs 98.2% at k=5); only k=10 was previously noted.
+
+### Changed
+- **README quickstart moved above the fold**, followed by a worked write/search
+  example whose query shares no keywords with the stored text. The feature table
+  is now "Beyond the core", each row stating what it costs to enable.
+- **New pre-commit hook blocks PowerShell-mangled control characters.** PowerShell
+  escapes with a backtick, so markdown code-spans written through a double-quoted
+  string lose their first letter to a control byte. Enable with
+  `python bin/setup_hooks.py`.
+
+---
+
 ## [2026.7.22.0] — 2026-07-22 — Agent guidance on install
+
+> Never tagged; ships as part of `2026.7.23.0`.
 
 ### Added
 - **The MCP server now sends its behavioural rules at handshake.** Installing m3
