@@ -32,6 +32,7 @@ import os
 import shutil
 import sys
 import time
+from typing import Any
 
 _BIN = os.path.dirname(os.path.abspath(__file__))
 if _BIN not in sys.path:
@@ -147,6 +148,11 @@ def _delete_doomed(db_path: str, doomed) -> int:
     # decision drives both the connection and the commit below, so they cannot
     # disagree.
     is_file = _is_file_backend()
+    # Either a closing(sqlite3.Connection) or the backend's connection() CM —
+    # both are context managers yielding a DB-API connection. Annotated Any so
+    # the second branch isn't narrowed to the first's type (same treatment as
+    # chatlog_decay.py's _conn_cm).
+    cm: "Any"
     if is_file:
         import sqlite3
         _conn = sqlite3.connect(db_path, timeout=30.0)
