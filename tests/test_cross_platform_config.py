@@ -15,6 +15,7 @@ via tests/conftest.py.
 """
 
 import os
+import pathlib
 
 import generate_configs as g
 import pytest
@@ -44,8 +45,6 @@ def _build_settings(monkeypatch, os_name):
         venv_py = os.path.join(repo_root, ".venv", "bin", "python")
     venv_py_fwd = venv_py.replace("\\", "/")
 
-    monkeypatch.setattr(g.os, "name", os_name)
-
     real_exists = os.path.exists
 
     def fake_exists(p):
@@ -64,7 +63,22 @@ def _build_settings(monkeypatch, os_name):
     # Don't write template files during the test.
     monkeypatch.setattr(g, "_write_json", lambda path, data: None)
 
-    g.generate_configs()
+    # `g.os` IS the global `os` module, so forcing `os.name` is process-wide —
+    # and `pathlib.Path()` picks PosixPath vs WindowsPath from `os.name` at
+    # construction time. Left to monkeypatch's teardown, the override stays live
+    # through the rest of the test AND through pytest's own reporting, where
+    # `Path(os.getcwd())` in `repr_failure` then builds a WindowsPath. On
+    # Python 3.11 that raises NotImplementedError inside the reporter, turning
+    # any unrelated failure into an INTERNALERROR that aborts the whole session
+    # (green on 3.12, where the guard sits elsewhere; green on Windows, where
+    # WindowsPath is native — so it only ever bit POSIX + 3.11 in CI).
+    # Scope the override to the generator call and restore it immediately.
+    saved_name = g.os.name
+    try:
+        g.os.name = os_name
+        g.generate_configs()
+    finally:
+        g.os.name = saved_name
     return g.generate_configs._last_claude, venv_py_fwd
 
 
@@ -187,3 +201,30 @@ def test_setup_migrations_skip_down_and_order_numerically():
     prefixes = [int(n.split("_", 1)[0]) for n in ordered]
     assert prefixes == sorted(prefixes)
     assert prefixes == [1, 2, 10, 13]
+
+
+# ── os.name must not leak out of the helper ──────────────────────────────────
+
+def test_build_settings_restores_os_name(monkeypatch):
+    """Regression: `_build_settings` forces `os.name` process-wide, and
+    `pathlib.Path()` selects PosixPath vs WindowsPath from `os.name` at
+    construction time. If the override outlives the helper, every later
+    `Path(...)` on a POSIX host becomes a WindowsPath — which raises
+    NotImplementedError on Python 3.11. pytest builds one in `repr_failure`,
+    so a leak turns any unrelated test failure into a session-aborting
+    INTERNALERROR (CI 2026-07-22/23: ubuntu+macos py3.11 red, py3.12 and
+    Windows green, for ~30 consecutive runs)."""
+    before = os.name
+    _build_settings(monkeypatch, "nt")
+    assert os.name == before, "os.name leaked out of _build_settings"
+    # The observable consequence, asserted directly.
+    assert type(pathlib.Path(".")) is type(pathlib.Path(os.getcwd()))
+
+
+def test_path_flavour_unchanged_after_both_variants(monkeypatch):
+    """Both parametrised variants must leave path flavour untouched."""
+    native = type(pathlib.Path("."))
+    for os_name in ("nt", "posix"):
+        _build_settings(monkeypatch, os_name)
+        assert type(pathlib.Path(".")) is native, (
+            f"path flavour changed after _build_settings({os_name!r})")
