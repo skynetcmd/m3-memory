@@ -163,7 +163,7 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ### Embedding System
 
-- **Model:** Configurable via `EMBED_MODEL` env var (default: `qwen3-embedding`)
+- **Model:** BGE-M3 by default (`text-embedding-bge-m3`), served in-process from the bundled GGUF — no external embedding service required. Configurable via `EMBED_MODEL`. **Never mix vectors from different models or quants in one database:** Qwen3-Embedding in particular occupies a different vector space and is bench-only. See [Embed Input Recipe](EMBED_INPUT_RECIPE.md) for the model/tag matrix.
 - **Dimension:** All models across all devices must produce the same dimension (default 1024, configurable via `EMBED_DIM`). Mismatched dimensions break cosine similarity.
 - **Auto-detection:** `embedding_utils.py` + `llm_failover.get_best_embed()` probe the local LLM server's `/v1/models` endpoint for loaded models, preferring names containing `embed`, `nomic`, or `jina`
 - **Dimension validation:** First embedding call validates actual vs expected dimensions; logs warning on mismatch
@@ -336,7 +336,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 | `DEDUP_THRESHOLD` | 0.92 | Cosine threshold for duplicate detection |
 | `CONTRADICTION_THRESHOLD` | 0.85 | Cosine threshold for contradiction detection |
 | `SEARCH_ROW_CAP` | 500 | Max rows for cosine computation per search |
-| `EMBED_MODEL` | qwen3-embedding | Embedding model name (must be loaded in your local LLM server) |
+| `EMBED_MODEL` | text-embedding-bge-m3 | Embedding model name. Default is served in-process from the bundled GGUF; only needs to be loaded in a local LLM server when routing out via `EMBED_BASE_URL` |
 | `EMBED_DIM` | 1024 | Expected embedding dimensions |
 | `DB_POOL_SIZE` | 5 | SQLite connection pool size |
 | `DB_POOL_TIMEOUT` | 30 | Pool acquisition timeout (seconds) |

@@ -371,19 +371,22 @@ Copy and paste these prompts into your terminal client to let your agent set up 
 #### Claude Code Prompt
 ```text
 Install m3-memory for persistent memory. Run: pip install m3-memory
-Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
-~/.claude/settings.json under "mcpServers". For best retrieval, ensure
-Ollama is running with qwen3-embedding:0.6b (optional, falls back
-to keyword search without it). Then use /mcp to verify the memory server loaded.
+Then run: m3 setup
+That wires the m3 "memory" MCP server into my agents and provisions the
+local BGE-M3 embedder — no external embedding service is needed. If it
+doesn't detect Claude Code, add {"mcpServers":{"memory":{"command":"m3"}}}
+to my ~/.claude/settings.json under "mcpServers". Then use /mcp to verify
+the memory server loaded.
 ```
 
 #### Gemini CLI Prompt
 ```text
 Install m3-memory for persistent memory. Run: pip install m3-memory
-Then add {"mcpServers":{"memory":{"command":"m3"}}} to my
-~/.gemini/settings.json under "mcpServers". For best retrieval, ensure
-Ollama is running with qwen3-embedding:0.6b (optional, falls back
-to keyword search without it).
+Then run: m3 setup
+That wires the m3 "memory" MCP server into my agents and provisions the
+local BGE-M3 embedder — no external embedding service is needed. If it
+doesn't detect Gemini CLI, add {"mcpServers":{"memory":{"command":"m3"}}}
+to my ~/.gemini/settings.json under "mcpServers".
 ```
 
 #### Active Chatlog Capture Plugin
