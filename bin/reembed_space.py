@@ -149,7 +149,17 @@ def _delete_doomed(db_path: str, doomed) -> int:
     is_file = _is_file_backend()
     if is_file:
         import sqlite3
-        cm = closing(sqlite3.connect(db_path, timeout=30.0))
+        _conn = sqlite3.connect(db_path, timeout=30.0)
+        # §10 DB hygiene: every new SQLite connection applies the pragma stack
+        # (WAL autocheckpoint, journal_size_limit, mmap/cache) via the shared
+        # helper — never inline PRAGMAs. Best-effort: a missing helper must not
+        # abort the delete. SQLite-only; pooled backends tune their own pool.
+        try:
+            from sqlite_pragmas import apply_pragmas, profile_for_db
+            apply_pragmas(_conn, profile_for_db(db_path))
+        except Exception:  # noqa: BLE001 — hygiene is best-effort, not a gate
+            pass
+        cm = closing(_conn)
     else:
         cm = backend.connection()
 
@@ -170,6 +180,13 @@ def _delete_doomed(db_path: str, doomed) -> int:
         # The pooled seam commits on clean exit; a raw sqlite3 handle does not.
         if is_file:
             conn.commit()
+            # §10: truncate the WAL at clean exit so a bulk delete doesn't leave
+            # it bloated. Best-effort — never fail a completed delete on hygiene.
+            try:
+                from sqlite_pragmas import checkpoint_truncate
+                checkpoint_truncate(conn)
+            except Exception:  # noqa: BLE001
+                pass
     return deleted
 
 
