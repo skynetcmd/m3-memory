@@ -52,13 +52,15 @@ The query shares no keywords with the stored text — no "RS256", no "JWT" — a
 
 ---
 
-**Plugs into your stack — coding agents, dashboard, and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
+## 🧩 Beyond the core
+
+The Quickstart above is the whole product for most people: shared memory, wired into your agents, working offline. Everything below is **optional surface** you can ignore until you want it — each row says what it costs to turn on.
 
 <table border="0">
-<tr><td valign="top">🤖</td><td><b>Coding agents</b> — <code>m3 setup</code> auto-detects and wires m3 into <b>Claude Code, Cursor, Cline, Gemini CLI, Google Antigravity, Aider, OpenCode, OpenClaw, Hermes</b> — one shared memory across every agent, and any agent you add later is picked up automatically. (See <a href="docs/MCP_CLIENT_INSTALL.md">MCP Client Install</a>)</td></tr>
-<tr><td valign="top">🖥️</td><td><b>Web dashboard, open to all users — not just developers</b> — a built-in, backend-agnostic control panel (default <code>http://127.0.0.1:8088</code>): browse memory, read your auto-generated Memory Wiki, explore the interactive knowledge graph, and watch system health / load. <code>pip install m3-memory[dashboard]</code> then <code>m3 dashboard</code>. (See <a href="docs/DASHBOARD.md">Dashboard Guide</a>)</td></tr>
-<tr><td valign="top">📖</td><td><b>Auto-generated wiki + Obsidian export</b> — <code>m3 wiki generate</code> compiles your canonical memories (pinned, high-confidence, beliefs, procedures) and indexed files into a browsable, interlinked Markdown vault — one page per topic, real hyperlinks for every relationship, and provenance links down to the source document each fact came from. Renders on GitHub, in a self-contained offline HTML viewer, or as an <b>Obsidian vault</b> (<code>--obsidian</code> for graph view + backlinks). (See <a href="docs/WIKI.md">Wiki Guide</a>)</td></tr>
-<tr><td valign="top">🐘</td><td><b>PostgreSQL</b> — run M3 on a first-class PostgreSQL primary backend (<code>M3_DB_BACKEND=postgres</code>) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/SYNC.md">Sync</a>)</td></tr>
+<tr><td valign="top">🤖</td><td><b>Coding agents</b> · <sub><b>included in the base install</b></sub><br><code>m3 setup</code> auto-detects and wires m3 into <b>Claude Code, Cursor, Cline, Gemini CLI, Google Antigravity, Aider, OpenCode, OpenClaw, Hermes</b> — one shared memory across every agent, and any agent you add later is picked up automatically. (See <a href="docs/MCP_CLIENT_INSTALL.md">MCP Client Install</a>)</td></tr>
+<tr><td valign="top">🖥️</td><td><b>Web dashboard, open to all users — not just developers</b> · <sub>needs <code>m3-memory[dashboard]</code></sub><br>a built-in, backend-agnostic control panel (default <code>http://127.0.0.1:8088</code>): browse memory, read your auto-generated Memory Wiki, explore the interactive knowledge graph, and watch system health / load. <code>pip install m3-memory[dashboard]</code> then <code>m3 dashboard</code>. (See <a href="docs/DASHBOARD.md">Dashboard Guide</a>)</td></tr>
+<tr><td valign="top">📖</td><td><b>Auto-generated wiki + Obsidian export</b> · <sub>works in the base install; <code>m3-memory[wiki]</code> improves topic clustering</sub><br><code>m3 wiki generate</code> compiles your canonical memories (pinned, high-confidence, beliefs, procedures) and indexed files into a browsable, interlinked Markdown vault — one page per topic, real hyperlinks for every relationship, and provenance links down to the source document each fact came from. Renders on GitHub, in a self-contained offline HTML viewer, or as an <b>Obsidian vault</b> (<code>--obsidian</code> for graph view + backlinks). (See <a href="docs/WIKI.md">Wiki Guide</a>)</td></tr>
+<tr><td valign="top">🐘</td><td><b>PostgreSQL</b> · <sub>needs <code>m3-memory[postgres]</code>; SQLite is the default and needs nothing</sub><br>run M3 on a first-class PostgreSQL primary backend (<code>M3_DB_BACKEND=postgres</code>) for a shared, server-hosted store, with cross-device sync to a PostgreSQL warehouse. SQLite stays the zero-infrastructure default. (See <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/SYNC.md">Sync</a>)</td></tr>
 </table>
 
 <sub>Also a drop-in memory backend for <b><a href="docs/integrations/LANGCHAIN.md">LangChain / LangGraph</a></b>, <b><a href="m3_memory/integrations/crewai/README.md">CrewAI</a></b>, and <b><a href="m3_memory/integrations/pydantic_ai/README.md">PydanticAI</a></b> — see the framework guides.</sub>
@@ -114,6 +116,7 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 ## 📑 Table of Contents
 
 - [Quickstart](#-quickstart)
+- [Beyond the Core (optional surface)](#-beyond-the-core)
 - [Overview & At a Glance](#-m3-at-a-glance)
 - [Memory Model](#-memory-model-at-a-glance)
 - [Installation & Onboarding](#-installation)
@@ -312,6 +315,8 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ---
 
 ## 📚 Documentation Index
+
+**Start here, in this order:** [Getting Started](docs/GETTING_STARTED.md) → [Memory Model](docs/MEMORY_MODEL.md) (what a memory *is*, and how supersession works) → [Agent Instructions](docs/AGENT_INSTRUCTIONS.md) (how to make your agent use it well). Everything else below is reference — reach for it when you hit the specific thing it covers.
 
 | Quick & Core | Advanced & Architecture | Integrations & Compliance |
 | :--- | :--- | :--- |
