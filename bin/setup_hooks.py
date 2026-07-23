@@ -29,13 +29,18 @@ def main() -> int:
                         cwd=_ROOT).returncode
     if rc != 0:
         return rc
-    # Best-effort chmod on POSIX (no-op semantics on Windows).
-    try:
-        (hooks_dir / "pre-push").chmod(0o755)
-    except OSError:
-        pass
+    # Best-effort chmod on POSIX (no-op semantics on Windows). pre-commit is
+    # optional-by-presence so an older checkout without it still sets up fine.
+    for name in ("pre-push", "pre-commit"):
+        try:
+            (hooks_dir / name).chmod(0o755)
+        except OSError:
+            pass
+    enabled = ["pre-push drift + leakage gate"]
+    if (hooks_dir / "pre-commit").exists():
+        enabled.append("pre-commit control-char scan")
     print("Enabled shared git hooks (core.hooksPath -> .githooks). "
-          "Pre-push drift + leakage gate is now active for this clone.")
+          "Active for this clone: " + "; ".join(enabled) + ".")
     return 0
 
 

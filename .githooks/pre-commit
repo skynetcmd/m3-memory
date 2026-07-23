@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Shared pre-commit hook — runs for EVERY agent and human. Enable once per
+# clone:  git config core.hooksPath .githooks   (or: python bin/setup_hooks.py)
+#
+# Guards against stray control characters in staged text files. The realistic
+# source on this project is PowerShell: its escape character is the BACKTICK,
+# not the backslash, so markdown inline-code written through a double-quoted
+# PowerShell string is silently mangled --
+#
+#     `bytemuck`  ->  \x08ytemuck    (`b = backspace)
+#     `ring`      ->  \r + "ing"     (`r = carriage return)
+#     `ndarray`   ->  \n + "darray"  (`n = newline)
+#
+# Only words starting with b/n/r/t/a/f/v/0 are hit, so most of a document looks
+# perfect and the damage survives review. A design plan was committed twice with
+# exactly this corruption (2026-07-15, repaired 2026-07-23) before it was caught.
+#
+# This is cheap -- a byte scan over staged text files only -- so it always runs.
+# A non-zero exit blocks the commit. Override in a real emergency with
+# `git commit --no-verify`, then fix forward immediately.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+PY="python"
+command -v python >/dev/null 2>&1 || PY="python3"
+
+if [ ! -f bin/check_control_chars.py ]; then
+  # Checker absent (partial checkout / old branch) -- don't block the commit.
+  exit 0
+fi
+
+if ! "$PY" bin/check_control_chars.py --staged; then
+  echo
+  echo "[pre-commit] BLOCKED: stray control characters in staged files."
+  echo "  When writing files from PowerShell use a SINGLE-quoted here-string"
+  echo "  @'...'@ (no escape processing) -- never @\"...\"@ -- or write the file"
+  echo "  with Python/an editor instead of shell string interpolation."
+  exit 1
+fi
+
+exit 0
