@@ -507,6 +507,33 @@ def cmd_unshared(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reembed(args: argparse.Namespace) -> int:
+    """Retire vectors from a non-current embedding model (delegates to bin/).
+
+    Fixes the mixed embed space that `m3 doctor` reports: cosine across two
+    embedding models is meaningless, so minority-model rows rank wrongly with
+    no error. The bin/ script deletes those vectors and hands off to the
+    existing embed_backfill.py sweeper to regenerate them. Dry-run by default —
+    it prints what it would delete and exits until --apply is passed.
+    """
+    from m3_memory.cli import _resolve_bin_script, _run_bin_script
+
+    if _resolve_bin_script("reembed_space.py") is None:
+        print("error: bin/reembed_space.py not found — is the payload installed? "
+              "Try `m3 update`.")
+        return 1
+
+    argv: "list[str]" = []
+    if getattr(args, "db", None):
+        argv += ["--db", args.db]
+    if getattr(args, "keep", None):
+        argv += ["--keep", args.keep]
+    for flag in ("apply", "no_backup", "no_backfill"):
+        if getattr(args, flag, False):
+            argv.append("--" + flag.replace("_", "-"))
+    return _run_bin_script("reembed_space.py", argv)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add `m3 embedder <sub>` subcommands to an argparse subparser."""
     sub = parser.add_subparsers(dest="embedder_cmd", metavar="<subcommand>")
@@ -572,3 +599,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Revert to per-process in-process embedders (remove .embed_config.json).",
     )
     p_unshared.set_defaults(func=cmd_unshared)
+
+    p_reembed = sub.add_parser(
+        "reembed",
+        help="Retire vectors from a non-current embedding model so they can be "
+             "regenerated (fixes a mixed embed space reported by `m3 doctor`). "
+             "Dry-run unless --apply is given.",
+    )
+    p_reembed.add_argument("--db", default=None,
+                           help="Target DB (default: the resolved engine agent_memory.db).")
+    p_reembed.add_argument("--keep", default=None,
+                           help="Model family to KEEP (e.g. 'bge-m3'). "
+                                "Default: the family holding the most vectors.")
+    p_reembed.add_argument("--apply", action="store_true",
+                           help="Actually delete. Without this it only reports.")
+    p_reembed.add_argument("--no-backup", action="store_true",
+                           help="Skip the pre-delete DB copy (not recommended).")
+    p_reembed.add_argument("--no-backfill", action="store_true",
+                           help="Do not chain embed_backfill.py after deleting.")
+    p_reembed.set_defaults(func=cmd_reembed)
