@@ -12,7 +12,6 @@ improves cluster *quality*.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from .select import Edge, Mem
 

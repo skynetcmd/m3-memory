@@ -13,7 +13,7 @@ import re
 from typing import Optional
 
 from .cluster import Cluster
-from .files_layer import FilesLayer, FileNode
+from .files_layer import FileNode, FilesLayer
 from .select import Edge, Mem, Promo
 
 BANNER = (

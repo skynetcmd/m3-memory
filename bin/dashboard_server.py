@@ -186,12 +186,12 @@ def matches_query_grammar(text: str, g: dict, ignore_case: bool = True) -> bool:
 # --- Common HTML Parts (Styling, Header, Nav) ---
 # HTML/CSS templates extracted to bin/dashboard/templates.py (behavior-preserving).
 from dashboard.templates import (  # noqa: E402
+    _WIKI_PAGE_HTML,
     AUDIT_HTML,
     BROWSE_HTML,
     HEADER_HTML,
     INDEX_HTML,
     STYLE_CSS,
-    _WIKI_PAGE_HTML,
 )
 
 
@@ -672,7 +672,6 @@ async def get_wiki(request: Request):
     dashboard chrome; when it doesn't, we render OS-specific instructions.
     """
     selected_db = request.cookies.get("selected_db", "main")
-    selected_db_path = get_active_db_path(request)
     set_active_db_env(selected_db)
     db_selector_html = build_db_selector_html(selected_db)
     header = HEADER_HTML.format(explorer_active="", browse_active="", audit_active="",
