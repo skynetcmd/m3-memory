@@ -244,7 +244,15 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ### Enterprise Security & Compliance
 *   **FIPS 140-3 Ready:** Standardized encryption pathways allow routing through validated cryptographic modules (e.g., wolfSSL via `M3_FIPS_MODE=1`).
 *   **Air-Gapped Install:** Supports installation without internet access via pre-compiled python wheels. (See [Sovereign Deployment Guide](docs/SOVEREIGN_DEPLOYMENT.md) & [FIPS Boundary Reference](docs/FIPS_MODULE_BOUNDARY.md)).
-*   **Storage Location:** All config and data files reside under `~/.m3-memory` (configurable via `M3_MEMORY_ROOT`).
+*   **Storage Location:** State lives under three roots, so databases and configuration can be relocated and secured independently:
+
+    | Root | Default | Holds |
+    | :--- | :--- | :--- |
+    | `M3_ENGINE_ROOT` | `~/.m3/engine` | Databases + runtime state (`agent_memory.db`, `agent_chatlog.db`, `files_database.db`) |
+    | `M3_CONFIG_ROOT` | `~/.m3/config` | Configuration (chatlog config, salt) |
+    | `M3_MEMORY_ROOT` | `~/.m3-memory` | Payload / repo clone |
+
+    **All three are overridable.** Set any of them to relocate that root. `M3_MEMORY_ROOT` also acts as a master override — if set and the other two are unset, engine and config derive from it as `<root>/engine` and `<root>/config`. Precedence is `M3_ENGINE_ROOT` / `M3_CONFIG_ROOT` → `M3_MEMORY_ROOT/…` → the `~/.m3/…` default, so a specific root always wins over the master. (See [Architecture](docs/ARCHITECTURE.md).)
 
 ---
 
