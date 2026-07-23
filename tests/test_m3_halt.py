@@ -283,9 +283,15 @@ def test_kill_stale_daemons_kills_live_writer_windows(root, monkeypatch):
     is confirmed by the pid going dead."""
     victim = 4242
     calls = {}
+    # Build the Path BEFORE os.name is forced to "nt": the lambda is evaluated
+    # lazily by the code under test, i.e. while the patch is live, and
+    # pathlib.Path() picks its flavour from os.name at construction time — so a
+    # lazily-built Path() would be a WindowsPath, which cannot be instantiated
+    # on a POSIX host.
+    _native_path = Path()
     monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
         m3_halt.ProcInfo(pid=victim, role="cognitive-loop", started_at="",
-                         engine_root=root, path=Path())])
+                         engine_root=root, path=_native_path)])
     monkeypatch.setattr(m3_halt.os, "name", "nt")
     # alive on the first probe, dead after the kill runs
     state = {"alive": True}
@@ -313,9 +319,12 @@ def test_kill_stale_daemons_reports_stuck_writer(root, monkeypatch):
     """A writer that survives the kill (e.g. elevated, unprivileged installer) is
     reported killed=False with an error — never a false success."""
     victim = 4243
+    # Native-flavour Path built before the os.name patch — see the note in
+    # test_kill_stale_daemons_kills_live_writer_windows.
+    _native_path = Path()
     monkeypatch.setattr(m3_halt, "list_all_db_writers", lambda engine_root=None: [
         m3_halt.ProcInfo(pid=victim, role="dashboard", started_at="",
-                         engine_root=root, path=Path())])
+                         engine_root=root, path=_native_path)])
     monkeypatch.setattr(m3_halt.os, "name", "nt")
     monkeypatch.setattr(m3_halt, "_pid_is_alive", lambda pid: True)  # never dies
 
