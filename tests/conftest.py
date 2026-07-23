@@ -175,6 +175,31 @@ def pg_url() -> str:
     return dsn
 
 
+_REAL_OS_NAME = _os.name
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    """Restore `os.name` BEFORE pytest renders a test report.
+
+    A fixture cannot do this: pytest builds the report inside
+    ``pytest_runtest_makereport``, which runs while the test's fixtures are
+    still active, so monkeypatch teardown (and any autouse fixture) happens too
+    late. ``repr_failure`` constructs ``Path(os.getcwd())``; with ``os.name``
+    still forced to ``"nt"`` that is a ``WindowsPath``, which raises
+    ``NotImplementedError`` on a POSIX host and aborts the whole session with an
+    INTERNALERROR that never names the failing test.
+
+    Restoring here — first, and around the report call — means a leaked
+    ``os.name`` can no longer poison the reporter. See ``_restore_os_name``
+    below for the fixture-level half (which keeps the leak from reaching the
+    *next* test).
+    """
+    if _os.name != _REAL_OS_NAME:
+        _os.name = _REAL_OS_NAME
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _restore_os_name():
     """Guarantee `os.name` is restored after every test.
