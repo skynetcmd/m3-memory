@@ -12,6 +12,46 @@
 
 Under the hood, M3 treats agent memory as a **distributed-systems infrastructure problem**, not a simple retrieval feature — a **shared, evolving, bitemporal, contradiction-aware knowledge base** that multiple heterogeneous agents and machines read and write, built to stay consistent over months and years.
 
+---
+
+## ⚡ Quickstart
+
+```bash
+pip install m3-memory
+m3 setup            # detects your agents, wires the MCP server, provisions the local embedder
+m3 doctor           # verify: health, memory count, embedder, and which agents got wired
+```
+
+That's the whole install. No cloud account, no API key, no external embedding service.
+
+### What it does, in four lines
+
+Save a decision — from any agent, or straight from the shell:
+
+```console
+$ m3 memory memory_write --type decision --title "auth-jwt-algorithm" \
+    --content "The auth service uses RS256 JWTs. HS256 was rejected because we need asymmetric verification at the edge."
+"Created: 84a944fb-ef3e-403b-9240-f53ab3c015f7"
+```
+
+Next week, in a different agent, on a different model — ask in your own words:
+
+```console
+$ m3 memory memory_search --query "which signing algorithm did we pick for tokens?" --k 3
+Top 1 results:
+----------------------------------------
+1. [84a944fb-ef3e-403b-9240-f53ab3c015f7] score=0.7501  type: decision  title: auth-jwt-algorithm
+Content:
+The auth service uses RS256 JWTs. HS256 was rejected because we need asymmetric verification at the edge.
+----------------------------------------
+```
+
+The query shares no keywords with the stored text — no "RS256", no "JWT" — and still finds it. That's the hybrid engine: BM25 for exact terms, local BGE-M3 vectors for meaning, MMR for diversity. Your agent calls the same tools over MCP, so it recalls this automatically instead of asking you again.
+
+> New here? The **[5-Minute Getting Started Guide](docs/GETTING_STARTED.md)** walks the same path with more context, and [Core Tools](#-core-tools) lists the five you'll use most.
+
+---
+
 **Plugs into your stack — coding agents, dashboard, and database.** M3 brings contradiction-aware, bitemporal, locally-embedded memory to the tools you already use, and scales from a zero-setup file to a shared server:
 
 <table border="0">
@@ -73,11 +113,12 @@ Short version: M3 is the **local-first, MCP-native** option that stays *yours* a
 
 ## 📑 Table of Contents
 
+- [Quickstart](#-quickstart)
 - [Overview & At a Glance](#-m3-at-a-glance)
 - [Memory Model](#-memory-model-at-a-glance)
 - [Installation & Onboarding](#-installation)
 - [Domain Gating (Token Optimization)](#-domain-gating-the-full-catalog-without-the-context-cost)
-- [Sovereign & Air-Gapped Deployments](#-sovereign--air-gapped-deployments)
+- [Sovereign & Air-Gapped Deployments](#-sovereign-air-gapped-deployments)
 - [Interactive Features & Capabilities](#-what-m3-does)
 - [Documentation Index](#-documentation-index)
 - [Target Audience & Fit](#-who-this-is-for)
@@ -120,6 +161,8 @@ M3 is a **typed, bitemporal, confidence-scored, self-maintaining knowledge base*
 ---
 
 ## 📦 Installation
+
+*The [Quickstart](#-quickstart) above covers the common path (`pip install m3-memory` → `m3 setup`). This section adds the alternatives: the shell installer, per-agent wiring, and manual MCP configuration.*
 
 ### The One-Liner (macOS & Linux)
 ```bash
