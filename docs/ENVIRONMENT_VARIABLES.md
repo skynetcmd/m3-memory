@@ -171,7 +171,9 @@ These knobs change how results are ranked. Defaults are safe — override only i
 | `M3_INTENT_PROCEDURAL_BOOST` | `0.20` | Additive ranking boost applied to a `procedure`-type memory when the query intent is `procedural` ("how do I X"). Gated by `M3_INTENT_ROUTING`; a non-procedural intent (or routing off) leaves ranking byte-identical. Set `0` to disable. |
 | `M3_ROUTER_TEMPORAL_K_BUMP` | `5` | Extra `k` added when a query is routed as temporal (e.g. contains "when", "before", "days ago"), widening verbatim retrieval for date-sensitive questions. |
 | `SUPERSEDES_PENALTY` | `0.5` | At retrieval time, an older fact that has been superseded by a newer one is demoted by this multiplier (0.5 = ranked at half score). Set to `1.0` to disable demotion. |
+| `CONTRADICTION_THRESHOLD` | `0.92` | Cosine floor above which a differing same-type memory is superseded on write. Deliberately conservative: it fires on near-restatements of the same claim, so two facts that are topically related but genuinely different (~0.74, say) are **both kept**. Use `memory_supersede` to close a fact explicitly; lower this only after measuring your own corpus. |
 | `CONTRADICTION_TITLE_GATE` | `loose` | How contradiction detection decides two memories are about the same thing: `strict` (legacy — require a title substring match), `loose` (cosine + type + content-diff, default), or `off` (no title check). |
+| `CONTRADICTION_TYPE_EXCLUSIONS` | `conversation` | Comma-separated memory types skipped entirely during contradiction detection. |
 | `CONTRADICTION_TYPE_EXCLUSIONS` | `conversation` | Comma-separated memory `type`s skipped during contradiction checks. |
 
 #### Adaptive-k elbow trim

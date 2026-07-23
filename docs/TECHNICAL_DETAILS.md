@@ -176,12 +176,20 @@ Migrations v013+ ship both `.up.sql` and `.down.sql` files.
 
 ### Contradiction Detection
 
-On every `memory_write` (except `conversation`/`message` types):
-1. Query existing same-type items by cosine similarity against the new content's embedding
-2. If a near-duplicate is found (cosine > `CONTRADICTION_THRESHOLD`, default 0.85) with matching title but different content:
-   - Old memory is soft-deleted (`is_deleted = 1`)
-   - A `supersedes` relationship is created from new → old
-   - History event recorded with `supersede` type
+Runs inline on every `memory_write` — synchronously, not deferred to the background loop — for all types except those in `CONTRADICTION_TYPE_EXCLUSIONS` (default: `conversation`):
+
+1. Query existing same-type items by cosine similarity against the new content's embedding, scoped to the same `agent_id`.
+2. If a candidate scores above `CONTRADICTION_THRESHOLD` (default **0.92**) and its content differs, it is superseded:
+   - The old memory's validity interval is **closed** — `is_deleted = 1` *and* `valid_to` set — rather than erased. The original text stays retrievable byte-for-byte and remains queryable via bitemporal `as_of` lookups.
+   - A `supersedes` relationship is created from new → old.
+   - History event recorded with `supersede` type.
+   - At retrieval, the closed fact is demoted by `SUPERSEDES_PENALTY` (default `0.5`) rather than hidden.
+
+Whether a title match is also required depends on `CONTRADICTION_TITLE_GATE` — `loose` (the default) needs only cosine + same type + differing content; `strict` additionally requires a title substring match.
+
+> **The 0.92 bar is deliberately conservative, and it is higher than most people expect.** It fires on near-restatements of the same claim, where auto-closing is safe. Two facts that are *topically related but genuinely different* will both be kept. For example, "The auth service uses RS256 JWTs" versus "The auth service now uses EdDSA, replacing RS256" score ~0.74 cosine — well under the bar — so both are retained and neither is closed. That is intentional: silently closing a fact on a weak signal destroys correct history, which is the failure mode this threshold exists to prevent.
+>
+> To close a fact explicitly when you know it is stale, use [`memory_supersede`](MCP_TOOLS.md) — it takes the old and new IDs directly and does not consult the cosine threshold. Lower `CONTRADICTION_THRESHOLD` only if you have measured your own corpus and accept the false-positive risk.
 
 ### Auto-Linking
 
@@ -334,7 +342,7 @@ Watermark updates are NOT atomic with data writes. A crash between data write an
 |----------|---------|----------|
 | `DEDUP_LIMIT` | 1000 | Max items scanned during deduplication |
 | `DEDUP_THRESHOLD` | 0.92 | Cosine threshold for duplicate detection |
-| `CONTRADICTION_THRESHOLD` | 0.85 | Cosine threshold for contradiction detection |
+| `CONTRADICTION_THRESHOLD` | 0.92 | Cosine floor for contradiction detection. Deliberately high — only near-restatements supersede; related-but-different facts are both kept |
 | `SEARCH_ROW_CAP` | 500 | Max rows for cosine computation per search |
 | `EMBED_MODEL` | text-embedding-bge-m3 | Embedding model name. Default is served in-process from the bundled GGUF; only needs to be loaded in a local LLM server when routing out via `EMBED_BASE_URL` |
 | `EMBED_DIM` | 1024 | Expected embedding dimensions |
