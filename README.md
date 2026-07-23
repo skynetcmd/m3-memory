@@ -315,7 +315,7 @@ M3 includes an optional Rust performance module (`m3_core_rs`) that speeds up MM
 ### Retrieval Recall (Session Hit-Rate @ k)
 Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/LongMemEval) dataset under default server configurations:
 
-| Retrieve Depth (k) | Session Hit-Rate (SHR) | Success Count | vs. Prior Version |
+| Retrieve Depth (k) | Session Hit-Rate (SHR) ⁂ | Success Count | vs. Prior Version |
 | :---: | :---: | :---: | :---: |
 | 1 | **91.8%** | 459 / 500 | First Report † |
 | 5 | **98.2%** | 491 / 500 | +2.0pp |
@@ -323,6 +323,8 @@ Evaluated on the 500-question [LongMemEval-S](https://github.com/xiaowu0162/Long
 | 20 | **100.0%** | 500 / 500 | First Report ‡ |
 
 > † **SHR@1** is the strictest cut — a gold session as the single top-ranked result. M3 operates at **k=10** (its default), where a gold session is present for 99.2% of questions; k=1 is reported here for completeness, not as the headline. Cross-system SHR/recall figures are usually quoted at k=5, k=10, k=20, or k=50, so comparing another system's k=10+ number against this k=1 figure is not a like-for-like comparison.
+
+> ⁂ **Which aggregation.** These are binary per-question `recall_any@k` values — the convention adjacent LongMemEval submissions report. The benchmarking report's per-question-type table aggregates slightly differently and reads marginally higher at shallow depth (98.8% at k=5, 99.4% at k=10); k=20 is 100.0% either way. The table above quotes the more conservative figures.
 
 > ‡ **v3 improvement** — the v3 engine reaches **100% SHR at k=20**, exceeding the prior version's **97.8% measured at the deeper k=30** ([LongMemEval issue #43](https://github.com/xiaowu0162/LongMemEval/issues/43)) — higher recall at shallower depth. Both figures are retrieval-only SHR (no answerer). The "vs. Prior Version" deltas at k=5/k=10 compare v3 against the prior version's 96.2% / 96.8% at the same k.
 
