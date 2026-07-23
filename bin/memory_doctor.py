@@ -7,6 +7,7 @@ Phases (each in its own module under bin/doctor/):
   - cascade_probe      embedding-cascade health (delegates to memory.doctor)
   - embed_server_probe Rust-side `m3-embed-server doctor` subprocess
   - oxidation_probe    m3_core_rs native-extension presence/staleness report
+  - embed_space_probe  mixed embed-space check (vectors from >1 model in one index)
 
 Each phase can be skipped via --skip-*. Exit code is the maximum across
 the non-skipped phases (most-severe wins). The embed-server and oxidation
@@ -69,6 +70,10 @@ def main() -> int:
     parser.add_argument(
         "--skip-locks", action="store_true",
         help="Skip the single-instance lock health check.",
+    )
+    parser.add_argument(
+        "--skip-embed-space", action="store_true",
+        help="Skip the mixed embed-space check (vectors from >1 model in one index).",
     )
     parser.add_argument(
         "--skip-schedule", action="store_true",
@@ -184,6 +189,14 @@ def main() -> int:
         # hard failure — the services still run (fail-safe). Surfaces the state
         # from the lock event log that is otherwise invisible.
         lock_probe.run(brief=brief)
+
+    if not getattr(args, "skip_embed_space", False):
+        from doctor import embed_space_probe
+        # Report-only: a store mixing two embedding models still "works" — cosine
+        # just returns nonsense for the minority rows, silently. Re-embedding is a
+        # deliberate one-time cost the operator chooses, so this warns and never
+        # bumps the exit code.
+        embed_space_probe.run(brief=brief)
 
     if not args.skip_schedule:
         from doctor import schedule_probe
