@@ -71,6 +71,13 @@ def _keep_family(rows, keep: "str | None") -> str:
     return max(totals.items(), key=lambda kv: kv[1])[0] if totals else ""
 
 
+def _resolve_default_db() -> str:
+    """The engine-root agent_memory.db. Separate seam so tests can point the
+    default-path branch at a temp store."""
+    from m3_core.paths import resolve_engine_file
+    return resolve_engine_file("agent_memory.db")
+
+
 def _scan(db_path: str):
     """Return [(vector_kind, embed_model, family, dim, count)] for the store."""
     from doctor.embed_space_probe import _family
@@ -81,11 +88,89 @@ def _scan(db_path: str):
         cur = conn.execute(
             "SELECT COALESCE(vector_kind, 'default'), COALESCE(embed_model, ''), "
             "       COALESCE(dim, 0), COUNT(*) "
-            "FROM memory_embeddings GROUP BY 1, 2, 3"
+            f"FROM {_embeddings_table()} GROUP BY 1, 2, 3"
         )
         for kind, tag, dim, n in cur.fetchall():
             out.append((str(kind), str(tag), _family(str(tag)), int(dim), int(n)))
     return out
+
+
+def _is_file_backend() -> bool:
+    """True when the active backend stores one DB per file (SQLite today).
+
+    Keyed on ``!= "sqlite"`` like memory/db.py::_db, NOT on ``== "postgres"``,
+    so a future SQL backend (MariaDB) routes through the pooled seam rather than
+    silently falling into the file path and touching the wrong store.
+    """
+    try:
+        from memory.backends import active_backend
+        return active_backend().name == "sqlite"
+    except Exception:  # noqa: BLE001 — no backend layer means the legacy file path
+        return True
+
+
+def _embeddings_table() -> str:
+    """The CORE store's embeddings table — ``memory_embeddings`` on every backend.
+
+    Note this is deliberately NOT ``chatlog_table("embeddings")``. That helper
+    maps the CHATLOG store's tables, which on non-SQLite backends are namespaced
+    ``chat_log_*`` so both logical stores can share one database. This tool
+    operates on the core memory store, whose table keeps the same name
+    everywhere (see postgres_backend's own JOIN on ``memory_embeddings``).
+    Kept as a seam so a future backend that namespaces differently has one place
+    to change rather than a literal scattered through the SQL.
+    """
+    return "memory_embeddings"
+
+
+def _delete_doomed(db_path: str, doomed) -> int:
+    """Delete the stale embedding rows, backend-blind.
+
+    On a file backend (SQLite) the write must honor ``db_path`` — ``--db`` names
+    a specific file and the seam's ``connection()`` takes no path, so it would
+    open the DEFAULT store and delete from the wrong database. On a pooled
+    backend (PostgreSQL, future MariaDB) there is exactly ONE store, ``db_path``
+    is meaningless, and the seam's connection is the only correct route.
+
+    Binds go through ``placeholder()`` so the same SQL works on ``?`` (SQLite)
+    and ``%s`` (psycopg).
+    """
+    from contextlib import closing
+
+    from memory.backends import active_backend
+
+    backend = active_backend()
+    ph = backend.dialect().param()
+    # Branch on name == "sqlite" like chatlog_decay/chatlog_prune/curator_apply:
+    # only a file backend has a per-file store to honor, and every other backend
+    # (PG today, MariaDB later) routes through the pooled seam. One local
+    # decision drives both the connection and the commit below, so they cannot
+    # disagree.
+    is_file = _is_file_backend()
+    if is_file:
+        import sqlite3
+        cm = closing(sqlite3.connect(db_path, timeout=30.0))
+    else:
+        cm = backend.connection()
+
+    sql = (
+        f"DELETE FROM {_embeddings_table()} "
+        f"WHERE COALESCE(vector_kind,'default')={ph} "
+        f"AND COALESCE(embed_model,'')={ph} AND COALESCE(dim,0)={ph}"
+    )
+    deleted = 0
+    with cm as conn:
+        cur = conn.cursor() if hasattr(conn, "cursor") else conn
+        for kind, tag, _fam, dim, _n in doomed:
+            res = cur.execute(sql, (kind, tag, dim))
+            rc = getattr(res, "rowcount", None)
+            if rc is None:
+                rc = getattr(cur, "rowcount", 0)
+            deleted += rc if rc and rc > 0 else 0
+        # The pooled seam commits on clean exit; a raw sqlite3 handle does not.
+        if is_file:
+            conn.commit()
+    return deleted
 
 
 def _backup(db_path: str) -> str:
@@ -115,13 +200,14 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     try:
-        from m3_core.paths import resolve_engine_file
+        db_path = args.db or _resolve_default_db()
     except Exception as e:  # noqa: BLE001
         print(f"error: could not load path seam: {type(e).__name__}: {e}")
         return 1
 
-    db_path = args.db or resolve_engine_file("agent_memory.db")
-    if not os.path.exists(db_path):
+    # Only a file backend has a path to check; on a pooled store db_path is a
+    # label, not a file, and this guard would abort every run.
+    if _is_file_backend() and not os.path.exists(db_path):
         print(f"error: no such DB: {db_path}")
         return 1
 
@@ -175,33 +261,25 @@ def main(argv=None) -> int:
         print("DRY RUN — nothing deleted. Re-run with --apply to proceed.")
         return 0
 
+    backup_path = ""
     if not args.no_backup:
+        if not _is_file_backend():
+            # A file copy is meaningless for a server-hosted store; taking one
+            # silently would imply a rollback that does not exist. Say so and
+            # make the operator opt in explicitly.
+            print("error: --no-backup is required on a non-file backend. This tool "
+                  "cannot snapshot a server-hosted store — take a dump first "
+                  "(e.g. pg_dump) and re-run with --no-backup.")
+            return 1
         try:
-            dest = _backup(db_path)
-            print(f"backup  : {dest}")
+            backup_path = _backup(db_path)
+            print(f"backup  : {backup_path}")
         except Exception as e:  # noqa: BLE001
             print(f"error: backup failed ({type(e).__name__}: {e}); aborting. "
                   f"Pass --no-backup to override.")
             return 1
 
-    # Path-scoped write. active_backend().connection() takes NO path — it opens
-    # the DEFAULT store — so using it here would silently ignore --db and delete
-    # from the wrong database. bin/embed_backfill.py, the sibling tool this one
-    # hands off to, connects directly for the same reason; match it.
-    import sqlite3
-    deleted = 0
-    conn = sqlite3.connect(db_path, timeout=30.0)
-    try:
-        for kind, tag, _fam, dim, _n in doomed:
-            cur = conn.execute(
-                "DELETE FROM memory_embeddings WHERE COALESCE(vector_kind,'default')=? "
-                "AND COALESCE(embed_model,'')=? AND COALESCE(dim,0)=?",
-                (kind, tag, dim),
-            )
-            deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-        conn.commit()
-    finally:
-        conn.close()
+    deleted = _delete_doomed(db_path, doomed)
     print(f"deleted : {deleted:,} embedding rows")
 
     if args.no_backfill:
@@ -212,10 +290,21 @@ def main(argv=None) -> int:
     print()
     print("Regenerating via embed_backfill.py ...")
     import subprocess
-    cmd = [sys.executable, os.path.join(_BIN, "embed_backfill.py")]
-    if args.db:
-        cmd += ["--db", args.db]
-    return subprocess.call(cmd)
+    # ALWAYS pass the resolved db_path, never only when --db was given.
+    # embed_backfill's own default is the pre-Homecoming repo-relative
+    # `<repo>/memory/agent_memory.db`, which does not exist on a decoupled-roots
+    # install — so omitting --db made it abort with "DB not found" AFTER this
+    # tool had already committed the deletes, leaving the store with vectors
+    # removed and nothing regenerating them. (Hit live 2026-07-23.)
+    cmd = [sys.executable, os.path.join(_BIN, "embed_backfill.py"), "--db", db_path]
+    rc = subprocess.call(cmd)
+    if rc != 0:
+        print()
+        print(f"WARNING: embed_backfill.py exited {rc} — the stale vectors are "
+              f"deleted but NOT yet regenerated.")
+        print(f"         Re-run manually:  python bin/embed_backfill.py --db {db_path}")
+        print(f"         Or restore:       {backup_path or '(no backup taken)'}")
+    return rc
 
 
 if __name__ == "__main__":

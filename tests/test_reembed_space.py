@@ -144,6 +144,114 @@ def test_empty_store_is_a_no_op(tmp_path, capsys):
     assert "nothing to do" in capsys.readouterr().out.lower()
 
 
+def test_backfill_handoff_always_passes_the_resolved_db(tmp_path, monkeypatch):
+    """Regression (2026-07-23): the handoff omitted --db unless the user passed
+    one, so embed_backfill fell back to its pre-Homecoming repo-relative default
+    and aborted with "DB not found" — AFTER the deletes had committed, leaving
+    the store with vectors removed and nothing regenerating them."""
+    db = _store(tmp_path, MIXED)
+    seen = {}
+
+    def _fake_call(cmd):
+        seen["cmd"] = cmd
+        return 0
+
+    monkeypatch.setattr("subprocess.call", _fake_call)
+    # NOTE: invoked WITHOUT --db. That is the path that broke: the old code
+    # only forwarded --db when the user supplied one, so the default-resolved
+    # engine DB was never passed on. Passing --db here would test the case
+    # that always worked.
+    monkeypatch.setattr(reembed_space, "_resolve_default_db", lambda: db)
+    reembed_space.main(["--apply"])
+    assert "--db" in seen["cmd"], "handoff must always scope the sweeper to the target DB"
+    assert seen["cmd"][seen["cmd"].index("--db") + 1] == db
+
+
+def test_backfill_failure_is_reported_not_swallowed(tmp_path, capsys, monkeypatch):
+    """If regeneration fails the operator must be told the store is mid-way."""
+    db = _store(tmp_path, MIXED)
+    monkeypatch.setattr("subprocess.call", lambda cmd: 2)
+    rc = reembed_space.main(["--db", db, "--apply"])
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "NOT yet regenerated" in out
+    assert "Re-run manually" in out
+
+
+# ── backend portability (SQLite / PostgreSQL / future MariaDB) ───────────────
+
+def test_pooled_backend_uses_the_seam_not_a_file_handle(tmp_path, monkeypatch):
+    """On a pooled backend there is ONE store: the delete must go through
+    active_backend().connection(), never sqlite3.connect(db_path)."""
+    used = {}
+
+    class _Cur:
+        rowcount = 3
+        def execute(self, sql, params):
+            used.setdefault("sql", sql)
+            used.setdefault("params", []).append(params)
+            return self
+
+    class _Conn:
+        def cursor(self):
+            return _Cur()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def commit(self):
+            used["committed"] = True
+
+    class _Dialect:
+        def param(self):
+            return "%s"
+
+    class _Backend:
+        name = "postgres"
+
+        def connection(self):
+            return _Conn()
+
+        def dialect(self):
+            return _Dialect()
+
+    monkeypatch.setattr(reembed_space, "_is_file_backend", lambda: False)
+    monkeypatch.setattr("memory.backends.active_backend", lambda: _Backend())
+    import sqlite3 as _s
+    monkeypatch.setattr(_s, "connect", lambda *a, **k: pytest.fail(
+        "pooled backend must not open a sqlite file"))
+
+    n = reembed_space._delete_doomed("ignored", [("default", "qwen3-embedding:0.6b",
+                                                  "qwen3-embedding", 1024, 3)])
+    assert n == 3
+    assert "%s" in used["sql"], "binds must use the backend's placeholder"
+    assert "?" not in used["sql"]
+
+
+def test_file_backend_honours_the_db_path(tmp_path, monkeypatch):
+    """On SQLite --db names a specific file; the seam's connection() takes no
+    path, so using it would delete from the DEFAULT store instead."""
+    db = _store(tmp_path, MIXED)
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    other = _store(other_dir, MIXED)
+    monkeypatch.setattr(reembed_space, "_is_file_backend", lambda: True)
+    reembed_space._delete_doomed(db, [("default", "qwen3-embedding:0.6b",
+                                       "qwen3-embedding", 1024, 7)])
+    assert _count(db) == 100, "target file must lose exactly its stale rows"
+    assert _count(other) == 107, "a different store must be untouched"
+
+
+def test_pooled_backend_refuses_silent_backup(tmp_path, capsys, monkeypatch):
+    """A file copy cannot snapshot a server-hosted store — implying otherwise
+    would promise a rollback that does not exist."""
+    db = _store(tmp_path, MIXED)
+    monkeypatch.setattr(reembed_space, "_is_file_backend", lambda: False)
+    rc = reembed_space.main(["--db", db, "--apply"])
+    assert rc == 1
+    assert "--no-backup is required" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("rows,expected_kept", [
     # vector_kind partitions spaces by design, so one model per kind is fine.
     ([("default", "bge-m3-GGUF-Q4_K_M.gguf", 1024, 10),
