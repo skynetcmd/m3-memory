@@ -1,0 +1,1592 @@
+{
+  "module": "memory_core",
+  "module_doc_present": true,
+  "n_symbols": 319,
+  "symbols": {
+    "ARCHIVE_DB_PATH": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'<M3_ENGINE_ROOT>\\\\agent_memory_archive.db'"
+    },
+    "AUTO_RELATED_LINK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "AUTO_RELATED_LINK_SCOPE_BY_VARIANT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "Any": {
+      "kind": "class",
+      "signature": "(*args, **kwargs)",
+      "value_repr": null
+    },
+    "Awaitable": {
+      "kind": "constant",
+      "signature": "(*args, **kwargs)",
+      "value_repr": null
+    },
+    "BASE_DIR": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'<REPO_ROOT>'"
+    },
+    "CONTRADICTION_THRESHOLD": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.92"
+    },
+    "CONTRADICTION_TITLE_GATE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'loose'"
+    },
+    "CONTRADICTION_TYPE_EXCLUSIONS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'conversation'})"
+    },
+    "Callable": {
+      "kind": "constant",
+      "signature": "(*args, **kwargs)",
+      "value_repr": null
+    },
+    "DB_PATH": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'<M3_MEMORY_ROOT>\\\\test_agent_memory.db'"
+    },
+    "DEDUP_LIMIT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "1000"
+    },
+    "DEDUP_THRESHOLD": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.92"
+    },
+    "DEFAULT_CHANGE_AGENT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'unknown'"
+    },
+    "DEFAULT_ENTITY_VOCAB_YAML": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "WindowsPath('<REPO_ROOT>/config/lists/entity_graph_default.yaml')"
+    },
+    "DEFAULT_RERANK_MODEL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'cross-encoder/ms-marco-MiniLM-L-6-v2'"
+    },
+    "DENSE_MIN_SUB_CHARS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "2000"
+    },
+    "DENSE_TARGET_TOKENS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "7000"
+    },
+    "DENSE_TOKEN_OVERLAP": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "500"
+    },
+    "ELBOW_ABS_THRESHOLD": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.05"
+    },
+    "ELBOW_MIN_INPUT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "20"
+    },
+    "ELBOW_MIN_RETURN": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "8"
+    },
+    "EMBED_BREAKER_CLOUD_RESET_SECS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "60.0"
+    },
+    "EMBED_BREAKER_CLOUD_THRESHOLD": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "3"
+    },
+    "EMBED_BULK_CHUNK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "1024"
+    },
+    "EMBED_BULK_CONCURRENCY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "4"
+    },
+    "EMBED_DIM": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "1024"
+    },
+    "EMBED_MODEL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'text-embedding-bge-m3'"
+    },
+    "EMBED_TIMEOUT_READ": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "30.0"
+    },
+    "ENABLE_ENTITY_GRAPH": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "ENABLE_FACT_ENRICHED": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "ENTITY_EXTRACT_CONCURRENCY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "2"
+    },
+    "ENTITY_EXTRACT_MAX_ATTEMPTS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "3"
+    },
+    "ENTITY_NAME_EMBED_CACHE_MAX": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "50000"
+    },
+    "ENTITY_RESOLVE_COSINE_MIN": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.92"
+    },
+    "ENTITY_RESOLVE_FUZZY_MIN": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.85"
+    },
+    "ENTITY_SEED_STOPLIST": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'there', 'thank', 'they', 'no', 'its', 'it', 'hello', 'their', 'them', 'the', 'that', 'yes', 'this', 'thanks', 'hi', 'ok', 'okay'})"
+    },
+    "EXPANSION_DISPLACEMENT_MARGIN": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "2.0"
+    },
+    "EXPANSION_PROTECTED_RANKS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "3"
+    },
+    "EmbedError": {
+      "kind": "class",
+      "signature": null,
+      "value_repr": null
+    },
+    "EmbedFallbackError": {
+      "kind": "class",
+      "signature": null,
+      "value_repr": null
+    },
+    "EmbedPrimaryError": {
+      "kind": "class",
+      "signature": null,
+      "value_repr": null
+    },
+    "EmbedSemaphoreTimeout": {
+      "kind": "class",
+      "signature": null,
+      "value_repr": null
+    },
+    "EmbeddedBackendError": {
+      "kind": "class",
+      "signature": null,
+      "value_repr": null
+    },
+    "FACT_ENRICH_CONCURRENCY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "2"
+    },
+    "FACT_ENRICH_MAX_ATTEMPTS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "3"
+    },
+    "IMPORTANCE_WEIGHT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.15"
+    },
+    "INGEST_EVENT_ROWS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "INGEST_GIST_MIN_TURNS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "10"
+    },
+    "INGEST_GIST_ROWS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "INGEST_GIST_STRIDE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "5"
+    },
+    "INGEST_WINDOW_CHUNKS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "INGEST_WINDOW_SIZE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "3"
+    },
+    "INTENT_ROUTING": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "INTENT_USER_FACT_BOOST": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.2"
+    },
+    "LLM_TIMEOUT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "45.0"
+    },
+    "M3Context": {
+      "kind": "class",
+      "signature": "(db_path: str | None = None)",
+      "value_repr": null
+    },
+    "M3_ALLOW_CLOUD_FALLBACK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "False"
+    },
+    "M3_CLOUD_AUTH_TOKEN_KEYRING": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "M3_CLOUD_ENCLAVE_URL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "M3_CLOUD_MINIMIZATION_LEVEL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'standard'"
+    },
+    "MAX_CHARS_PER_CHUNK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "28000"
+    },
+    "MIN_OVERLAP_CHARS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "8000"
+    },
+    "ORIGIN_DEVICE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'SKYPC'"
+    },
+    "QUERY_TYPE_ROUTING": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "SEARCH_ROW_CAP": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "5000"
+    },
+    "SHORT_TURN_THRESHOLD": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "20"
+    },
+    "SPEAKER_IN_TITLE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "STRIDE_CHARS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "20000"
+    },
+    "SUPERSEDES_PENALTY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.5"
+    },
+    "TASK_STATE_TRANSITIONS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{'pending': {'cancelled', 'in_progress', 'blocked'}, 'in_progress': {'cancelled', 'completed', 'failed', 'blocked'}, 'blocked': {'in_progress', 'cancelled'}, 'completed': set(), 'failed': set(), 'cancelled': set()}"
+    },
+    "TERMINAL_TASK_STATES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'cancelled', 'completed', 'failed'})"
+    },
+    "TITLE_MATCH_BOOST": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.15"
+    },
+    "VALID_AGENT_STATUSES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'active', 'idle', 'offline'})"
+    },
+    "VALID_CHANGE_AGENTS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{'legacy', 'gemini', 'grok', 'unknown', 'aider', 'deepseek', 'manual', 'system', 'openclaw', 'claude'}"
+    },
+    "VALID_ENTITY_PREDICATES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'references', 'prefers', 'works_at', 'listens_on', 'family_of', 'on_vlan', 'same_as', 'has_time', 'authorizes_budget', 'judged_by', 'fails_over_to', 'affects_category', 'assigned_ip', 'measured_on', 'introduced_in', 'before', 'produced_artifact', 'imports', 'has_location', 'uses_model', 'defined_in', 'mentions', 'has_quantity', 'calls', 'after', 'has_participant', 'owns', 'located_in', 'runs_on', 'deprecates', 'supersedes', 'hosts', 'source_of', 'knows'})"
+    },
+    "VALID_ENTITY_TYPES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'container', 'file_path', 'organization', 'model', 'device', 'host', 'product', 'function', 'dataset_field', 'benchmark', 'commit_or_branch', 'task_id', 'preference', 'mac_address', 'service', 'port', 'person', 'legacy_object', 'firewall_rule', 'task_category', 'quantity', 'legacy_concept', 'class_or_table', 'protocol', 'endpoint_url', 'module', 'migration', 'date', 'ip_address', 'place', 'datetime', 'memory_id', 'bench_run_id', 'env_var', 'bench_artifact', 'cli_flag', 'memory_type', 'variant', 'event', 'vlan', 'topic', 'metric'})"
+    },
+    "VALID_RELATIONSHIP_TYPES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{'related', 'references', 'contradicts', 'supports', 'extends', 'consolidates', 'precedes', 'follows', 'supersedes', 'message', 'handoff'}"
+    },
+    "VALID_SCOPES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{'agent', 'user', 'session', 'org'}"
+    },
+    "VALID_TASK_STATES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'in_progress', 'blocked', 'failed', 'pending', 'completed', 'cancelled'})"
+    },
+    "_ACCESS_FLUSH_INTERVAL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "0.25"
+    },
+    "_AUTO_ENTITIES_CACHE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{}"
+    },
+    "_COST_COUNTERS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{'embed_calls': 0, 'embed_tokens_est': 0, 'search_calls': 0, 'write_calls': 0}"
+    },
+    "_CPU_FALLBACK_BREAKER": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_DATE_MONTHS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "('january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december')"
+    },
+    "_DATE_RE_ISO": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\\\\b(\\\\d{4})-(\\\\d{2})-(\\\\d{2})\\\\b')"
+    },
+    "_DATE_RE_LONG": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\\\\b(\\\\d{1,2})(?:st|nd|rd|th)?\\\\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\\\\s+,?\\\\s*(\\\\d{4}))?\\, re.IGNORECASE)"
+    },
+    "_DEFAULT_VALID_ENTITY_PREDICATES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'references', 'prefers', 'works_at', 'listens_on', 'family_of', 'on_vlan', 'same_as', 'has_time', 'authorizes_budget', 'judged_by', 'fails_over_to', 'affects_category', 'assigned_ip', 'measured_on', 'introduced_in', 'before', 'produced_artifact', 'imports', 'has_location', 'uses_model', 'defined_in', 'mentions', 'has_quantity', 'calls', 'after', 'has_participant', 'owns', 'located_in', 'runs_on', 'deprecates', 'supersedes', 'hosts', 'source_of', 'knows'})"
+    },
+    "_DEFAULT_VALID_ENTITY_TYPES": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "frozenset({'container', 'file_path', 'organization', 'model', 'device', 'host', 'product', 'function', 'dataset_field', 'benchmark', 'commit_or_branch', 'task_id', 'preference', 'mac_address', 'service', 'port', 'person', 'legacy_object', 'firewall_rule', 'task_category', 'quantity', 'legacy_concept', 'class_or_table', 'protocol', 'endpoint_url', 'module', 'migration', 'date', 'ip_address', 'place', 'datetime', 'memory_id', 'bench_run_id', 'env_var', 'bench_artifact', 'cli_flag', 'memory_type', 'variant', 'event', 'vlan', 'topic', 'metric'})"
+    },
+    "_DENSE_ERR_RE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('(\\\\d+)\\\\s*tokens\\\\s*>\\\\s*n_ctx')"
+    },
+    "_EMBEDDED_BREAKER": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_EMBED_BACKEND_STATS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{}"
+    },
+    "_EMBED_BACKEND_STATS_LOCK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<unlocked _thread.lock object at 0x000001F1C2B97E10>"
+    },
+    "_EMBED_BULK_SEM": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<asyncio.locks.Semaphore object at 0x000001F1C2AF5590 [unlocked, value:4]>"
+    },
+    "_EMBED_CLIENT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_EMBED_CLIENT_LOCK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<unlocked _thread.lock object at 0x000001F1C29FE0D0>"
+    },
+    "_EMBED_CLIENT_LOOP_ID": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_EMBED_DIM_VALIDATED": {
+      "kind": "unresolved",
+      "signature": null,
+      "value_repr": null
+    },
+    "_EMBED_FALLBACK_URL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'http://127.0.0.1:8082'"
+    },
+    "_EMBED_GGUF_MODEL_TAG": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'bge-m3-GGUF-Q4_K_M.gguf'"
+    },
+    "_EMBED_GGUF_PATH": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_EMBED_HTTP_KEEPALIVE_EXPIRY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "5.0"
+    },
+    "_EMBED_HTTP_MAX_CONNS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "32"
+    },
+    "_EMBED_HTTP_MAX_KEEPALIVE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "16"
+    },
+    "_EMBED_MODEL_OVERRIDE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_EMBED_SEM": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<asyncio.locks.Semaphore object at 0x000001F1C2B78980 [unlocked, value:4]>"
+    },
+    "_EMBED_URL_OVERRIDE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_ENTITY_COUNT_QUERY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "'SELECT COUNT(*) FROM entities'"
+    },
+    "_ENTITY_EXTRACT_SEM": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<memory.entity.LoopScopedSemaphoreProxy object at 0x000001F1C2B7ACF0>"
+    },
+    "_ENTITY_MENTION_PATTERNS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "('\"[^\"]+\"', \"'[^']+'\", '\\\\b(?:19|20)\\\\d{2}\\\\b', '\\\\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\\\\s+\\\\d{1,2}\\\\b', '[A-Z][a-z]+(?:\\\\s+[A-Z][a-z]+)*')"
+    },
+    "_ENTITY_MENTION_RE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\"[^\"]+\"|\\'[^\\']+\\'|\\\\b(?:19|20)\\\\d{2}\\\\b|\\\\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\\\\s+\\\\d{1,2}\\\\b|[A-Z][a-z]+(?:\\\\s+[A-Z][a-z]+)*')"
+    },
+    "_ENTITY_NAME_EMBED_CACHE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{}"
+    },
+    "_ENV_ENTITY_VOCAB_YAML": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_EVENT_DATE_HINT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\\\\b(?:today|yesterday|tomorrow|last|next|this|on|at|in|ago|from|to)\\\\b|\\\\d{4}-\\\\d{2}-\\\\d{2}', re.IGNORECASE)"
+    },
+    "_EVENT_PROPER_NOUN": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\\\\b([A-Z][a-z]{2,})\\\\b')"
+    },
+    "_EVENT_SENT_SPLIT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('(?<=[.!?])\\\\s+')"
+    },
+    "_EVENT_VERB_LIST": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "('decided', 'started', 'finished', 'completed', 'installed', 'configured', 'updated', 'removed', 'fixed', 'bought', 'purchased', 'booked', 'traveled', 'met', 'attended', 'presented', 'wrote', 'released', 'launched', 'deployed')"
+    },
+    "_EVENT_VERB_RE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\\\\b(decided|started|finished|completed|installed|configured|updated|removed|fixed|bought|purchased|booked|traveled|met|attended|presented|wrote|released|launched|deployed)\\\\b', re.IGNORECASE)"
+    },
+    "_FACT_ENRICH_SEM": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<asyncio.locks.Semaphore object at 0x000001F1C2BC3490 [unlocked, value:2]>"
+    },
+    "_FTS_OPERATORS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\\\\b(OR|AND|NOT|NEAR)\\\\b')"
+    },
+    "_GATE_CACHE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{}"
+    },
+    "_GATE_CACHE_TTL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "300"
+    },
+    "_HAS_NUMPY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "_LAZY_IMPORTS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{'_DEFAULT_VALID_ENTITY_PREDICATES': 'memory.config', '_DEFAULT_VALID_ENTITY_TYPES': 'memory.config', '_EMBED_MODEL_OVERRIDE': 'memory.config', '_EMBED_URL_OVERRIDE': 'memory.config', '_ENV_ENTITY_VOCAB_YAML': 'memory.config', '_OXIDATION_DISABLED': 'memory.config', 'ARCHIVE_DB_PATH': 'memory.config', 'AUTO_RELATED_LINK': 'memory.config', 'AUTO_RELATED_LINK_SCOPE_BY_VARIANT': 'memory.config', 'BASE_DIR': 'memory.config', 'CONTRADICTION_THRESHOLD': 'memory.config', 'CONTRADICTION_TITLE_GATE': 'memory.config', 'CONTRADICTION_TYPE_EXCLUSIONS': 'memory.config', 'DB_PATH': 'memory.config', 'DEDUP_LIMIT': 'memory.config', 'DEDUP_THRESHOLD': 'memory.config', 'DEFAULT_CHANGE_AGENT': 'memory.config', 'DEFAULT_ENTITY_VOCAB_YAML': 'memory.config', 'DEFAULT_RERANK_MODEL': 'memory.config', 'ELBOW_ABS_THRESHOLD': 'memory.config', 'ELBOW_MIN_INPUT': 'memory.config', 'ELBOW_MIN_RETURN': 'memory.config', 'EMBED_BREAKER_CLOUD_RESET_SECS': 'memory.config', 'EMBED_BREAKER_CLOUD_THRESHOLD': 'memory.config', 'EMBED_DIM': 'memory.config', 'EMBED_MODEL': 'memory.config', 'EMBED_TIMEOUT_READ': 'memory.config', 'ENABLE_ENTITY_GRAPH': 'memory.config', 'ENABLE_FACT_ENRICHED': 'memory.config', 'ENTITY_EXTRACT_CONCURRENCY': 'memory.config', 'ENTITY_EXTRACT_MAX_ATTEMPTS': 'memory.config', 'ENTITY_RESOLVE_COSINE_MIN': 'memory.config', 'ENTITY_RESOLVE_FUZZY_MIN': 'memory.config', 'ENTITY_SEED_STOPLIST': 'memory.config', 'EXPANSION_DISPLACEMENT_MARGIN': 'memory.config', 'EXPANSION_PROTECTED_RANKS': 'memory.config', 'FACT_ENRICH_CONCURRENCY': 'memory.config', 'FACT_ENRICH_MAX_ATTEMPTS': 'memory.config', 'IMPORTANCE_WEIGHT': 'memory.config', 'INGEST_EVENT_ROWS': 'memory.config', 'INGEST_GIST_MIN_TURNS': 'memory.config', 'INGEST_GIST_ROWS': 'memory.config', 'INGEST_GIST_STRIDE': 'memory.config', 'INGEST_WINDOW_CHUNKS': 'memory.config', 'INGEST_WINDOW_SIZE': 'memory.config', 'INTENT_ROUTING': 'memory.config', 'INTENT_USER_FACT_BOOST': 'memory.config', 'LLM_TIMEOUT': 'memory.config', 'M3_ALLOW_CLOUD_FALLBACK': 'memory.config', 'M3_CLOUD_AUTH_TOKEN_KEYRING': 'memory.config', 'M3_CLOUD_ENCLAVE_URL': 'memory.config', 'M3_CLOUD_MINIMIZATION_LEVEL': 'memory.config', 'ORIGIN_DEVICE': 'memory.config', 'QUERY_TYPE_ROUTING': 'memory.config', 'SEARCH_ROW_CAP': 'memory.config', 'SHORT_TURN_THRESHOLD': 'memory.config', 'SPEAKER_IN_TITLE': 'memory.config', 'SUPERSEDES_PENALTY': 'memory.config', 'TITLE_MATCH_BOOST': 'memory.config', 'm3_core_rs': 'memory.config', '_mc_config': 'memory', '_ACCESS_FLUSH_INTERVAL': 'memory.db', '_ENTITY_COUNT_QUERY': 'memory.db', '_GATE_CACHE': 'memory.db', '_GATE_CACHE_TTL': 'memory.db', '_OBS_COUNT_QUERY': 'memory.db', '_access_flusher_task': 'memory.db', '_access_lock': 'memory.db', '_access_pending': 'memory.db', '_access_stamp_flusher': 'memory.db', '_backfill_change_agent': 'memory.db', '_conn': 'memory.db', '_db': 'memory.db', '_enqueue_access_stamps': 'memory.db', '_ensure_sync_tables': 'memory.db', '_gate_active': 'memory.db', '_gate_count_query': 'memory.db', '_init_lock': 'memory.db', '_initialized': 'memory.db', '_initialized_dbs': 'memory.db', '_lazy_init': 'memory.db', '_local': 'memory.db', '_record_history': 'memory.db', 'memory_history_impl': 'memory.db', '_mc_db': 'memory', 'memory_doctor_impl': 'memory.doctor', 'memory_doctor_fix_impl': 'memory.doctor', '_CPU_FALLBACK_BREAKER': 'memory.embed', '_DENSE_ERR_RE': 'memory.embed', '_EMBED_BACKEND_STATS': 'memory.embed', '_EMBED_BACKEND_STATS_LOCK': 'memory.embed', '_EMBED_BULK_SEM': 'memory.embed', '_EMBED_CLIENT': 'memory.embed', '_EMBED_CLIENT_LOCK': 'memory.embed', '_EMBED_CLIENT_LOOP_ID': 'memory.embed', '_EMBED_DIM_VALIDATED': 'memory.embed', '_EMBED_FALLBACK_URL': 'memory.embed', '_EMBED_GGUF_MODEL_TAG': 'memory.embed', '_EMBED_GGUF_PATH': 'memory.embed', '_EMBED_HTTP_KEEPALIVE_EXPIRY': 'memory.embed', '_EMBED_HTTP_MAX_CONNS': 'memory.embed', '_EMBED_HTTP_MAX_KEEPALIVE': 'memory.embed', '_EMBED_SEM': 'memory.embed', '_EMBEDDED_BREAKER': 'memory.embed', '_ENTITY_NAME_EMBED_CACHE': 'memory.embed', '_PRIMARY_BREAKER': 'memory.embed', 'DENSE_MIN_SUB_CHARS': 'memory.embed', 'DENSE_TARGET_TOKENS': 'memory.embed', 'DENSE_TOKEN_OVERLAP': 'memory.embed', 'EMBED_BULK_CHUNK': 'memory.embed', 'EMBED_BULK_CONCURRENCY': 'memory.embed', 'ENTITY_NAME_EMBED_CACHE_MAX': 'memory.embed', 'MAX_CHARS_PER_CHUNK': 'memory.embed', 'MIN_OVERLAP_CHARS': 'memory.embed', 'STRIDE_CHARS': 'memory.embed', 'EmbeddedBackendError': 'memory.embed', 'EmbedError': 'memory.embed', 'EmbedFallbackError': 'memory.embed', 'EmbedPrimaryError': 'memory.embed', 'EmbedSemaphoreTimeout': 'memory.embed', '_augment_embed_text_with_anchors': 'memory.embed', '_chunk_for_sliding_window': 'memory.embed', '_content_hash': 'memory.embed', '_embed': 'memory.embed', '_embed_canonical_cached': 'memory.embed', '_embed_many': 'memory.embed', '_embedded_embed_checked': 'memory.embed', '_embedded_embedder': 'memory.embed', '_embedded_label': 'memory.embed', '_get_embed_client': 'memory.embed', '_get_embedded_embedder': 'memory.embed', '_record_embed_backend': 'memory.embed', '_shared_embed_client': 'memory.embed', '_subdivide_dense_chunk': 'memory.embed', 'embedder_status_impl': 'memory.embed', 'get_embed_backend_stats': 'memory.embed', 'get_embed_breaker_state': 'memory.embed', 'reset_embed_backend_stats': 'memory.embed', 'reset_embed_breakers': 'memory.embed', 'set_embed_override': 'memory.embed', '_mc_embed': 'memory', '_select_pending_fact_enrichment': 'memory.enrich', '_try_enrich_or_enqueue': 'memory.enrich', 'enrich_pending_impl': 'memory.enrich', '_ENTITY_EXTRACT_SEM': 'memory.entity', '_PENDING_ENTITY_TASKS': 'memory.entity', '_TOKEN_PUNCT_RE': 'memory.entity', 'VALID_ENTITY_PREDICATES': 'memory.entity', 'VALID_ENTITY_TYPES': 'memory.entity', '_create_entity': 'memory.entity', '_enqueue_entity_extraction': 'memory.entity', '_link_entity_relationship': 'memory.entity', '_link_memory_to_entity': 'memory.entity', '_resolve_entity': 'memory.entity', '_resolve_entity_async': 'memory.entity', '_run_entity_extractor': 'memory.entity', '_select_pending_entity_extraction': 'memory.entity', '_token_jaccard': 'memory.entity', '_try_extract_or_enqueue': 'memory.entity', 'entity_extractor_health': 'memory.entity', 'entity_get_impl': 'memory.entity', 'entity_search_impl': 'memory.entity', 'extract_pending_impl': 'memory.entity', 'load_entity_vocab': 'memory.entity', '_mc_entity': 'memory', 'count_entities_impl': 'memory.entity_count', 'count_mentions_impl': 'memory.entity_count', 'list_mentions_impl': 'memory.entity_count', '_EVENT_DATE_HINT': 'memory.fts', '_EVENT_PROPER_NOUN': 'memory.fts', '_EVENT_SENT_SPLIT': 'memory.fts', '_EVENT_VERB_LIST': 'memory.fts', '_EVENT_VERB_RE': 'memory.fts', '_FTS_OPERATORS': 'memory.fts', '_SEARCHABLE_PUNCT': 'memory.fts', '_TOKEN_SPLIT': 'memory.fts', '_augment_title_with_role': 'memory.fts', '_compile_fts_query': 'memory.fts', '_query_title_overlap': 'memory.fts', '_query_title_token_set': 'memory.fts', '_sanitize_for_searchable': 'memory.fts', '_sanitize_fts': 'memory.fts', '_title_overlap_from_qset': 'memory.fts', '_entity_graph_neighbor_ids': 'memory.graph', '_graph_neighbor_ids': 'memory.graph', '_score_extra_rows': 'memory.graph', '_session_neighbor_ids': 'memory.graph', 'memory_graph_impl': 'memory.graph', 'compute_bitemporal_diffs_impl': 'memory.history', 'get_bitemporal_timeline_impl': 'memory.history', '_DATE_MONTHS': 'memory.search', '_DATE_RE_ISO': 'memory.search', '_DATE_RE_LONG': 'memory.search', '_ENTITY_MENTION_PATTERNS': 'memory.search', '_ENTITY_MENTION_RE': 'memory.search', '_RERANKER_MODEL': 'memory.search', '_RERANKER_MODEL_NAME': 'memory.search', '_TEMPORAL_QUERY_RE': 'memory.search', '_TEMPORAL_ROUTER_PATTERNS': 'memory.search', '_TEMPORAL_ROUTER_RE': 'memory.search', '_UNSET': 'memory.search', '_apply_auto_layer': 'memory.search', '_apply_recency_bonus': 'memory.search', '_apply_rerank': 'memory.search', '_apply_sharp_trim': 'memory.search', '_apply_temporal_boost': 'memory.search', '_cosine_batch_packed': 'memory.search', '_enforce_expansion_displacement_guard': 'memory.search', '_extract_caller_overrides': 'memory.search', '_get_reranker': 'memory.search', '_hybrid_score_batch': 'memory.search', '_maybe_expand_routed': 'memory.search', '_maybe_route_query': 'memory.search', '_pull_predecessor_turns': 'memory.search', '_recency_bonus_ranks': 'memory.search', '_trim_by_elbow': 'memory.search', 'is_temporal_query': 'memory.search', 'memory_search_impl': 'memory.search', 'memory_search_multi_db_impl': 'memory.search', 'memory_search_routed_impl': 'memory.search', 'memory_search_scored_impl': 'memory.search', '_mc_search': 'memory', '_batch_cosine': 'memory.util', '_cosine': 'memory.util', '_sha256_hex': 'memory.util', '_check_contradictions': 'memory.write', 'memory_link_impl': 'memory.write', 'memory_supersede_impl': 'memory.write', 'memory_write_batch_impl': 'memory.write', 'memory_write_bulk_impl': 'memory.write', 'memory_write_from_file_impl': 'memory.write', 'memory_write_impl': 'memory.write', '_FACT_ENRICH_SEM': 'lazy_sem'}"
+    },
+    "_MEMORY_DELETE_BULK_CHUNK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "500"
+    },
+    "_MEMORY_LINK_BULK_CHUNK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "500"
+    },
+    "_MEMORY_UPDATE_BULK_CHUNK": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "500"
+    },
+    "_OBS_COUNT_QUERY": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "\"SELECT COUNT(*) FROM memory_items WHERE type='observation' AND COALESCE(is_deleted,0)=0\""
+    },
+    "_OXIDATION_DISABLED": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "True"
+    },
+    "_PENDING_ENTITY_TASKS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "set()"
+    },
+    "_PENDING_FACT_TASKS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "set()"
+    },
+    "_POISON_PATTERNS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "[re.compile('<script\\\\b', re.IGNORECASE), re.compile('javascript:', re.IGNORECASE), re.compile('__import__|\\\\bexec\\\\s*\\\\(|\\\\beval\\\\s*\\\\(', re.IGNORECASE), re.compile('(?:ignore|disregard)\\\\s+(?:all\\\\s+)?(?:previous|prior)\\\\s+instructions', re.IGNORECASE)]"
+    },
+    "_PRIMARY_BREAKER": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_RERANKER_MODEL": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_RERANKER_MODEL_NAME": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "''"
+    },
+    "_SEARCHABLE_PUNCT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "{63: ' ', 33: ' ', 58: ' ', 46: ' ', 44: ' ', 59: ' ', 47: ' ', 34: ' ', 39: ' '}"
+    },
+    "_TEMPORAL_QUERY_RE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('\\\\b(?:last|next|past|this|current|previous)\\\\b|\\\\b(?:today|yesterday|tomorrow)\\\\b|\\\\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\\\b|\\\\b(?:january|february|march|april|may|june|july|a, re.IGNORECASE)"
+    },
+    "_TEMPORAL_ROUTER_PATTERNS": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "('\\\\bwhen\\\\b', '\\\\bhow long\\\\b', '\\\\bwhat\\\\s+(?:date|day|month|year|time)\\\\b', '\\\\bbefore\\\\b', '\\\\bafter\\\\b', '\\\\bsince\\\\b', '\\\\buntil\\\\b', '\\\\b(?:days?|weeks?|months?|years?)\\\\s+ago\\\\b', '\\\\bfirst\\\\b', '\\\\blast\\\\b', '\\\\brecent(?:ly)?\\\\b', '\\\\bearliest\\\\b', '\\\\blatest\\\\b', '\\\\bwhich\\\\s+\\\\w+\\\\s+first\\\\b', '\\\\bin\\\\s+what\\\\s+order\\\\b', '\\\\b(?:mon|tue|wed|thu|fri|sat|sun)(?:day)?\\\\b', \"\\\\bvalentine'?s?\\\\s+day\\\\b\", '\\\\bchristmas\\\\b', '\\\\bthanksgiving\\\\b', \"\\\\bnew\\\\s+year'?s?\\\\b\")"
+    },
+    "_TEMPORAL_ROUTER_RE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile(\"\\\\bwhen\\\\b|\\\\bhow long\\\\b|\\\\bwhat\\\\s+(?:date|day|month|year|time)\\\\b|\\\\bbefore\\\\b|\\\\bafter\\\\b|\\\\bsince\\\\b|\\\\buntil\\\\b|\\\\b(?:days?|weeks?|months?|years?)\\\\s+ago\\\\b|\\\\bfirst\\\\b|\\\\blast\\\\b|\\\\brecent(?:l, re.IGNORECASE)"
+    },
+    "_TOKEN_PUNCT_RE": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('[^\\\\w\\\\s]')"
+    },
+    "_TOKEN_SPLIT": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "re.compile('[^\\\\w]+')"
+    },
+    "_UNSET": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<object object at 0x000001F1B4839140>"
+    },
+    "_access_flusher_task": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_access_lock": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<asyncio.locks.Lock object at 0x000001F1C2B781A0 [unlocked]>"
+    },
+    "_access_pending": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "set()"
+    },
+    "_access_stamp_flusher": {
+      "kind": "async_function",
+      "signature": "() -> 'None'",
+      "value_repr": null
+    },
+    "_agent_exists": {
+      "kind": "function",
+      "signature": "(agent_id: 'str') -> 'bool'",
+      "value_repr": null
+    },
+    "_apply_auto_layer": {
+      "kind": "function",
+      "signature": "(query: 'str', primary_candidates: 'list', current_params: 'dict', sig_defaults: 'dict') -> 'tuple'",
+      "value_repr": null
+    },
+    "_apply_recency_bonus": {
+      "kind": "function",
+      "signature": "(scored, recency_bias, explain=False)",
+      "value_repr": null
+    },
+    "_apply_rerank": {
+      "kind": "function",
+      "signature": "(hits: 'list', query: 'str', *, pool_k: 'int', final_k: 'int', model_name: 'str', blend: 'float') -> 'list'",
+      "value_repr": null
+    },
+    "_apply_sharp_trim": {
+      "kind": "function",
+      "signature": "(hits, *, threshold_ratio, k_min, k_max)",
+      "value_repr": null
+    },
+    "_apply_temporal_boost": {
+      "kind": "function",
+      "signature": "(scored, query, explain=False)",
+      "value_repr": null
+    },
+    "_augment_embed_text_with_anchors": {
+      "kind": "function",
+      "signature": "(embed_text: 'str', metadata: 'str | dict | None') -> 'str'",
+      "value_repr": null
+    },
+    "_augment_title_with_role": {
+      "kind": "function",
+      "signature": "(title: 'str', metadata: 'str | dict | None') -> 'str'",
+      "value_repr": null
+    },
+    "_backfill_change_agent": {
+      "kind": "function",
+      "signature": "() -> 'None'",
+      "value_repr": null
+    },
+    "_batch_cosine": {
+      "kind": "function",
+      "signature": "(query, matrix) -> 'list[float]'",
+      "value_repr": null
+    },
+    "_check_content_safety": {
+      "kind": "function",
+      "signature": "(content: 'str') -> 'str | None'",
+      "value_repr": null
+    },
+    "_check_contradictions": {
+      "kind": "async_function",
+      "signature": "(item_id: 'str', content: 'str', title: 'str', vec: 'list[float]', type_: 'str', agent_id: 'str', new_valid_from: 'str | None' = None, variant: 'str | None' = None, user_id: 'str' = '') -> 'tuple[list[str], list[tuple[str, float]]]'",
+      "value_repr": null
+    },
+    "_chunk_for_sliding_window": {
+      "kind": "function",
+      "signature": "(text: 'str') -> 'list[tuple[str, int]]'",
+      "value_repr": null
+    },
+    "_compile_fts_query": {
+      "kind": "function",
+      "signature": "(query: 'str', mode: 'str') -> 'tuple[str, bool]'",
+      "value_repr": null
+    },
+    "_conn": {
+      "kind": "function",
+      "signature": "()",
+      "value_repr": null
+    },
+    "_content_hash": {
+      "kind": "function",
+      "signature": "(content: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "_cosine": {
+      "kind": "function",
+      "signature": "(v1: 'list[float]', v2: 'list[float]') -> 'float'",
+      "value_repr": null
+    },
+    "_cosine_batch_packed": {
+      "kind": "function",
+      "signature": "(query, blobs, dim: 'int') -> 'list[float]'",
+      "value_repr": null
+    },
+    "_count_refresh_backlog": {
+      "kind": "function",
+      "signature": "(agent_id: 'str' = '') -> 'int'",
+      "value_repr": null
+    },
+    "_create_entity": {
+      "kind": "function",
+      "signature": "(canonical_name: 'str', entity_type: 'str', attributes: 'dict', db) -> 'str'",
+      "value_repr": null
+    },
+    "_current_ctx": {
+      "kind": "function",
+      "signature": "() -> 'M3Context'",
+      "value_repr": null
+    },
+    "_db": {
+      "kind": "function",
+      "signature": "()",
+      "value_repr": null
+    },
+    "_embed": {
+      "kind": "async_function",
+      "signature": "(text: 'str') -> 'tuple[list[float] | None, str]'",
+      "value_repr": null
+    },
+    "_embed_canonical_cached": {
+      "kind": "async_function",
+      "signature": "(canonical_name: 'str') -> 'list[float] | None'",
+      "value_repr": null
+    },
+    "_embed_many": {
+      "kind": "async_function",
+      "signature": "(texts: 'list[str]') -> 'list[tuple[list[float] | None, str]]'",
+      "value_repr": null
+    },
+    "_embedded_embed_checked": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "False"
+    },
+    "_embedded_embedder": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_embedded_label": {
+      "kind": "function",
+      "signature": "() -> 'str'",
+      "value_repr": null
+    },
+    "_enable_entity_graph_gate": {
+      "kind": "function",
+      "signature": "() -> 'bool'",
+      "value_repr": null
+    },
+    "_enforce_expansion_displacement_guard": {
+      "kind": "function",
+      "signature": "(hits: 'list', *, protected_ranks: 'int' = 3, margin: 'float' = 2.0) -> 'list'",
+      "value_repr": null
+    },
+    "_enqueue_access_stamps": {
+      "kind": "function",
+      "signature": "(ids) -> 'None'",
+      "value_repr": null
+    },
+    "_enqueue_entity_extraction": {
+      "kind": "function",
+      "signature": "(memory_id: 'str', db) -> 'None'",
+      "value_repr": null
+    },
+    "_ensure_sync_tables": {
+      "kind": "function",
+      "signature": "(db_path: 'str | None' = None) -> 'None'",
+      "value_repr": null
+    },
+    "_entity_graph_neighbor_ids": {
+      "kind": "async_function",
+      "signature": "(query: 'str', depth: 'int', max_neighbors: 'int', db, valid_types: 'list' = None, valid_predicates: 'list' = None, entity_stoplist: 'list' = None, _capture_dict: 'dict' = None) -> 'set'",
+      "value_repr": null
+    },
+    "_extract_caller_overrides": {
+      "kind": "function",
+      "signature": "(local_args: 'dict', sig_defaults: 'dict') -> 'dict'",
+      "value_repr": null
+    },
+    "_gate_active": {
+      "kind": "function",
+      "signature": "(env_var: 'str', count_query: 'str', threshold: 'int' = 1) -> 'bool'",
+      "value_repr": null
+    },
+    "_gate_count_query": {
+      "kind": "function",
+      "signature": "(query: 'str') -> 'int'",
+      "value_repr": null
+    },
+    "_get_embed_client": {
+      "kind": "function",
+      "signature": "() -> '_httpx.AsyncClient'",
+      "value_repr": null
+    },
+    "_get_embedded_embedder": {
+      "kind": "function",
+      "signature": "()",
+      "value_repr": null
+    },
+    "_get_reranker": {
+      "kind": "function",
+      "signature": "(model_name: 'str')",
+      "value_repr": null
+    },
+    "_graph_neighbor_ids": {
+      "kind": "function",
+      "signature": "(seed_ids: 'list', depth: 'int') -> 'set'",
+      "value_repr": null
+    },
+    "_hybrid_score_batch": {
+      "kind": "function",
+      "signature": "(vector_scores, bm25_scores, content_lens, importances, title_overlaps, vector_weight: 'float', importance_weight: 'float', title_match_boost: 'float', short_turn_threshold: 'int') -> 'list[float]'",
+      "value_repr": null
+    },
+    "_infer_change_agent_util": {
+      "kind": "function",
+      "signature": "(agent_id: str = '', model_id: str = '', default: str = 'unknown') -> str",
+      "value_repr": null
+    },
+    "_init_lock": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<unlocked _thread.RLock object owner=0 count=0 at 0x000001F1C2B5EBC0>"
+    },
+    "_initialized": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "False"
+    },
+    "_initialized_dbs": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "set()"
+    },
+    "_lazy_init": {
+      "kind": "function",
+      "signature": "(db_path: 'str | None' = None) -> 'None'",
+      "value_repr": null
+    },
+    "_link_entity_relationship": {
+      "kind": "function",
+      "signature": "(from_entity_id: 'str', to_entity_id: 'str', predicate: 'str', confidence: 'float', source_memory_id: 'str', db) -> 'None'",
+      "value_repr": null
+    },
+    "_link_memory_to_entity": {
+      "kind": "function",
+      "signature": "(memory_id: 'str', entity_id: 'str', mention_text: 'str', mention_offset: 'int', confidence: 'float', db) -> 'None'",
+      "value_repr": null
+    },
+    "_local": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<_thread._local object at 0x000001F1C2B5E8E0>"
+    },
+    "_lru_cache": {
+      "kind": "function",
+      "signature": "(maxsize=128, typed=False)",
+      "value_repr": null
+    },
+    "_maybe_expand_routed": {
+      "kind": "async_function",
+      "signature": "(query: 'str', primary: 'list', k: 'int', graph_depth: 'int' = 0, expand_sessions: 'bool' = False, session_cap: 'int' = 12, entity_graph: 'bool' = False, entity_graph_depth: 'int' = 1, entity_graph_max_neighbors: 'int' = 20, entity_graph_valid_types: 'list' = None, entity_graph_valid_predicates: 'list' = None, entity_stoplist: 'list' = None, user_id: 'str' = '', scope: 'str' = '', _capture_dict: 'dict' = None) -> 'list'",
+      "value_repr": null
+    },
+    "_maybe_route_query": {
+      "kind": "function",
+      "signature": "(query: 'str', vector_weight: 'float', intent_hint: 'str' = '') -> 'float'",
+      "value_repr": null
+    },
+    "_mc_config": {
+      "kind": "module",
+      "module_name": "memory.config"
+    },
+    "_mc_db": {
+      "kind": "module",
+      "module_name": "memory.db"
+    },
+    "_mc_embed": {
+      "kind": "module",
+      "module_name": "memory.embed"
+    },
+    "_mc_entity": {
+      "kind": "module",
+      "module_name": "memory.entity"
+    },
+    "_mc_search": {
+      "kind": "module",
+      "module_name": "memory.search"
+    },
+    "_memory_link_inner": {
+      "kind": "function",
+      "signature": "(from_id: 'str', to_id: 'str', relationship_type: 'str', db) -> 'str'",
+      "value_repr": null
+    },
+    "_pack": {
+      "kind": "function",
+      "signature": "(floats: list[float]) -> bytes",
+      "value_repr": null
+    },
+    "_prefer_observations_gate": {
+      "kind": "function",
+      "signature": "() -> 'bool'",
+      "value_repr": null
+    },
+    "_pull_predecessor_turns": {
+      "kind": "function",
+      "signature": "(scored: 'list', user_id: 'str' = '', scope: 'str' = '') -> 'None'",
+      "value_repr": null
+    },
+    "_query_title_overlap": {
+      "kind": "function",
+      "signature": "(query: 'str', title: 'str') -> 'float'",
+      "value_repr": null
+    },
+    "_query_title_token_set": {
+      "kind": "function",
+      "signature": "(query: 'str') -> 'frozenset[str]'",
+      "value_repr": null
+    },
+    "_recency_bonus_ranks": {
+      "kind": "function",
+      "signature": "(valid_froms, bias: 'float') -> 'list[float]'",
+      "value_repr": null
+    },
+    "_record_embed_backend": {
+      "kind": "function",
+      "signature": "(label: 'str', call_count: 'int' = 1) -> 'None'",
+      "value_repr": null
+    },
+    "_record_history": {
+      "kind": "function",
+      "signature": "(memory_id: 'str', event: 'str', prev_value: 'str | None' = None, new_value: 'str | None' = None, field: 'str' = 'content', actor_id: 'str' = '', db: 'Any' = None) -> 'None'",
+      "value_repr": null
+    },
+    "_refresh_hint": {
+      "kind": "function",
+      "signature": "(agent_id: 'str' = '') -> 'str'",
+      "value_repr": null
+    },
+    "_resolve_entity": {
+      "kind": "function",
+      "signature": "(canonical_name: 'str', entity_type: 'str', db) -> 'str | None'",
+      "value_repr": null
+    },
+    "_resolve_entity_async": {
+      "kind": "async_function",
+      "signature": "(canonical_name: 'str', entity_type: 'str', db) -> 'str | None'",
+      "value_repr": null
+    },
+    "_resolve_pin_id": {
+      "kind": "function",
+      "signature": "(db, ident: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "_run_entity_extractor": {
+      "kind": "async_function",
+      "signature": "(memory_id: 'str', content: 'str', entity_extractor, *, valid_types: 'frozenset | None' = None, valid_predicates: 'frozenset | None' = None) -> 'None'",
+      "value_repr": null
+    },
+    "_sanitize_for_searchable": {
+      "kind": "function",
+      "signature": "(text: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "_sanitize_fts": {
+      "kind": "function",
+      "signature": "(query: 'str', max_len: 'int' = 500) -> 'str'",
+      "value_repr": null
+    },
+    "_score_extra_rows": {
+      "kind": "async_function",
+      "signature": "(query: 'str', rows_by_id: 'dict', base_score: 'float' = 0.0) -> 'list'",
+      "value_repr": null
+    },
+    "_select_pending_entity_extraction": {
+      "kind": "function",
+      "signature": "(db, limit: 'int | None' = None, allowed_variants: 'list[str] | None' = None) -> 'list[tuple[str, str, str | None]]'",
+      "value_repr": null
+    },
+    "_select_pending_fact_enrichment": {
+      "kind": "function",
+      "signature": "(db, limit: 'int | None' = None, allowed_variants: 'list[str] | None' = None) -> 'list[tuple[str, str]]'",
+      "value_repr": null
+    },
+    "_session_neighbor_ids": {
+      "kind": "function",
+      "signature": "(seed_ids: 'list', session_cap: 'int' = 12, user_id: 'str' = '', scope: 'str' = '') -> 'dict'",
+      "value_repr": null
+    },
+    "_set_pinned": {
+      "kind": "function",
+      "signature": "(id, val) -> 'str'",
+      "value_repr": null
+    },
+    "_sha256_hex": {
+      "kind": "function",
+      "signature": "(data: 'bytes') -> 'str'",
+      "value_repr": null
+    },
+    "_shared_embed_client": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "None"
+    },
+    "_subdivide_dense_chunk": {
+      "kind": "function",
+      "signature": "(text: 'str', observed_tokens: 'int') -> 'list[str]'",
+      "value_repr": null
+    },
+    "_title_overlap_from_qset": {
+      "kind": "function",
+      "signature": "(q_tokens: 'frozenset[str]', title: 'str') -> 'float'",
+      "value_repr": null
+    },
+    "_token_jaccard": {
+      "kind": "function",
+      "signature": "(a: 'str', b: 'str') -> 'float'",
+      "value_repr": null
+    },
+    "_track_cost": {
+      "kind": "function",
+      "signature": "(operation: 'str', tokens_est: 'int' = 0)",
+      "value_repr": null
+    },
+    "_trim_by_elbow": {
+      "kind": "function",
+      "signature": "(ranked: 'list[tuple[float, dict]]', sensitivity: 'float' = 1.5) -> 'list[tuple[float, dict]]'",
+      "value_repr": null
+    },
+    "_try_enrich_or_enqueue": {
+      "kind": "async_function",
+      "signature": "(memory_id: 'str', content: 'str', fact_enricher, db, variant: 'str | None' = None, allowlist: 'set[str] | None' = None) -> 'None'",
+      "value_repr": null
+    },
+    "_try_extract_or_enqueue": {
+      "kind": "async_function",
+      "signature": "(memory_id: 'str', content: 'str', entity_extractor, db, variant: 'str | None' = None, allowlist: 'set[str] | None' = None, *, valid_types: 'frozenset | None' = None, valid_predicates: 'frozenset | None' = None) -> 'None'",
+      "value_repr": null
+    },
+    "_two_stage_observations_gate": {
+      "kind": "function",
+      "signature": "() -> 'bool'",
+      "value_repr": null
+    },
+    "_unpack": {
+      "kind": "function",
+      "signature": "(blob: bytes) -> list[float]",
+      "value_repr": null
+    },
+    "_validate_task_transition": {
+      "kind": "function",
+      "signature": "(prev: 'str', new: 'str')",
+      "value_repr": null
+    },
+    "agent_get_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "agent_heartbeat_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "agent_list_impl": {
+      "kind": "function",
+      "signature": "(status: 'str' = '', role: 'str' = '') -> 'str'",
+      "value_repr": null
+    },
+    "agent_offline_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "agent_register_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str', role: 'str', capabilities: 'list', metadata: 'dict') -> 'str'",
+      "value_repr": null
+    },
+    "agent_set_trust_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str', trust_score: 'float') -> 'str'",
+      "value_repr": null
+    },
+    "annotations": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "_Feature((3, 7, 0, 'beta', 1), None, 16777216)"
+    },
+    "asyncio": {
+      "kind": "module",
+      "module_name": "asyncio"
+    },
+    "compute_bitemporal_diffs_impl": {
+      "kind": "function",
+      "signature": "(history_rows: 'list[tuple[int, str, str, str, str]]') -> 'str'",
+      "value_repr": null
+    },
+    "conversation_append_impl": {
+      "kind": "async_function",
+      "signature": "(conversation_id, role, content, agent_id='', model_id='', embed=True)",
+      "value_repr": null
+    },
+    "conversation_start_impl": {
+      "kind": "async_function",
+      "signature": "(title, agent_id='', model_id='', tags='')",
+      "value_repr": null
+    },
+    "conversation_summarize_impl": {
+      "kind": "async_function",
+      "signature": "(conversation_id: 'str', threshold: 'int' = 20) -> 'str'",
+      "value_repr": null
+    },
+    "count_entities_impl": {
+      "kind": "function",
+      "signature": "(conversation_id: 'str', entity_type: 'str' = '', pattern: 'str' = '') -> 'dict[str, Any]'",
+      "value_repr": null
+    },
+    "count_mentions_impl": {
+      "kind": "function",
+      "signature": "(conversation_id: 'str', entity_type: 'str' = '', pattern: 'str' = '', limit: 'int' = 0) -> 'dict[str, Any]'",
+      "value_repr": null
+    },
+    "ctx": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<m3_core.context.M3Context object at 0x000001F1C2A56BA0>"
+    },
+    "datetime": {
+      "kind": "class",
+      "signature": null,
+      "value_repr": null
+    },
+    "embedder_status_impl": {
+      "kind": "async_function",
+      "signature": "() -> 'dict'",
+      "value_repr": null
+    },
+    "enrich_pending_impl": {
+      "kind": "async_function",
+      "signature": "(dry_run: 'bool' = True, limit: 'int' = 0, allowed_variants: 'list[str] | None' = None) -> 'dict'",
+      "value_repr": null
+    },
+    "entity_extractor_health": {
+      "kind": "function",
+      "signature": "() -> 'dict'",
+      "value_repr": null
+    },
+    "entity_get_impl": {
+      "kind": "function",
+      "signature": "(entity_id: 'str', depth: 'int' = 1) -> 'dict'",
+      "value_repr": null
+    },
+    "entity_search_impl": {
+      "kind": "function",
+      "signature": "(query: 'str' = '', entity_type: 'str' = '', limit: 'int' = 10, with_neighbors: 'bool' = False) -> 'list[dict]'",
+      "value_repr": null
+    },
+    "extract_pending_impl": {
+      "kind": "async_function",
+      "signature": "(dry_run: 'bool' = True, limit: 'int' = 0, allowed_variants: 'list[str] | None' = None, *, valid_types: 'frozenset | None' = None, valid_predicates: 'frozenset | None' = None) -> 'dict'",
+      "value_repr": null
+    },
+    "get_best_llm": {
+      "kind": "async_function",
+      "signature": "(client: httpx.AsyncClient, token: str) -> tuple[str, str] | None",
+      "value_repr": null
+    },
+    "get_bitemporal_timeline_impl": {
+      "kind": "function",
+      "signature": "(memory_id: 'str', limit: 'int' = 100) -> 'str'",
+      "value_repr": null
+    },
+    "get_embed_backend_stats": {
+      "kind": "function",
+      "signature": "() -> 'dict[str, int]'",
+      "value_repr": null
+    },
+    "get_embed_breaker_state": {
+      "kind": "function",
+      "signature": "() -> 'dict'",
+      "value_repr": null
+    },
+    "is_temporal_query": {
+      "kind": "function",
+      "signature": "(query: 'str') -> 'bool'",
+      "value_repr": null
+    },
+    "json": {
+      "kind": "module",
+      "module_name": "json"
+    },
+    "list_mentions_impl": {
+      "kind": "function",
+      "signature": "(conversation_id: 'str', entity_id: 'str' = '', canonical_name: 'str' = '', entity_type: 'str' = '', limit: 'int' = 0) -> 'dict[str, Any]'",
+      "value_repr": null
+    },
+    "load_entity_vocab": {
+      "kind": "function",
+      "signature": "(yaml_path: 'str | Path | None' = None) -> 'tuple[frozenset[str], frozenset[str]]'",
+      "value_repr": null
+    },
+    "logger": {
+      "kind": "constant",
+      "signature": null,
+      "value_repr": "<Logger memory_core (WARNING)>"
+    },
+    "logging": {
+      "kind": "module",
+      "module_name": "logging"
+    },
+    "memory_cost_report_impl": {
+      "kind": "function",
+      "signature": "() -> 'str'",
+      "value_repr": null
+    },
+    "memory_delete_bulk_impl": {
+      "kind": "function",
+      "signature": "(ids, hard=False)",
+      "value_repr": null
+    },
+    "memory_delete_impl": {
+      "kind": "function",
+      "signature": "(id, hard=False)",
+      "value_repr": null
+    },
+    "memory_doctor_fix_impl": {
+      "kind": "async_function",
+      "signature": "(dry_run: 'bool' = False) -> 'dict[str, Any]'",
+      "value_repr": null
+    },
+    "memory_doctor_impl": {
+      "kind": "async_function",
+      "signature": "() -> 'dict[str, Any]'",
+      "value_repr": null
+    },
+    "memory_get_impl": {
+      "kind": "function",
+      "signature": "(id)",
+      "value_repr": null
+    },
+    "memory_graph_impl": {
+      "kind": "function",
+      "signature": "(memory_id: 'str', depth: 'int' = 1) -> 'str'",
+      "value_repr": null
+    },
+    "memory_handoff_impl": {
+      "kind": "function",
+      "signature": "(from_agent: 'str', to_agent: 'str', task: 'str', context_ids: 'list', note: 'str' = '', task_id: 'str' = '') -> 'str'",
+      "value_repr": null
+    },
+    "memory_history_impl": {
+      "kind": "function",
+      "signature": "(memory_id: 'str', limit: 'int' = 20) -> 'str'",
+      "value_repr": null
+    },
+    "memory_inbox_ack_impl": {
+      "kind": "function",
+      "signature": "(memory_id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "memory_inbox_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str', unread_only: 'bool' = True, limit: 'int' = 20) -> 'str'",
+      "value_repr": null
+    },
+    "memory_link_bulk_impl": {
+      "kind": "function",
+      "signature": "(links, relationship_type: 'str' = 'related')",
+      "value_repr": null
+    },
+    "memory_link_impl": {
+      "kind": "function",
+      "signature": "(from_id: 'str', to_id: 'str', relationship_type: 'str' = 'related', db=None) -> 'str'",
+      "value_repr": null
+    },
+    "memory_pin_impl": {
+      "kind": "function",
+      "signature": "(id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "memory_refresh_queue_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str' = '', limit: 'int' = 50, include_future: 'bool' = False) -> 'str'",
+      "value_repr": null
+    },
+    "memory_search_impl": {
+      "kind": "async_function",
+      "signature": "(query, k=8, type_filter='', agent_filter='', search_mode='hybrid', include_scratchpad=False, user_id='', scope='', as_of='', explain=False, conversation_id='', recency_bias=0.0, adaptive_k=False, variant='', intent_hint='', mmr=True, requesting_agent='', _depth=0)",
+      "value_repr": null
+    },
+    "memory_search_multi_db_impl": {
+      "kind": "async_function",
+      "signature": "(query: 'str', databases: \"'list[str] | str'\", k: 'int' = 8, mmr: 'bool' = True, type_filter: 'str' = '', agent_filter: 'str' = '', search_mode: 'str' = 'hybrid', user_id: 'str' = '', scope: 'str' = '', as_of: 'str' = '', conversation_id: 'str' = '', extra_columns: \"'list[str] | None'\" = None, recency_bias: 'float' = 0.0, adaptive_k: 'bool' = False, variant: \"'str | list'\" = '', fan_out_limit: \"'int | None'\" = None, requesting_agent: 'str' = '')",
+      "value_repr": null
+    },
+    "memory_search_routed_impl": {
+      "kind": "async_function",
+      "signature": "(query: 'str', mmr: 'bool' = True, k: 'int' = 10, fact_variant: 'str' = '', temporal_k_bump: 'int' = 5, graph_depth: 'int' = 0, expand_sessions: 'bool' = False, session_cap: 'int' = 12, entity_graph: 'bool' = False, entity_graph_depth: 'int' = 1, entity_graph_max_neighbors: 'int' = 20, entity_graph_valid_types: 'list' = None, entity_graph_valid_predicates: 'list' = None, entity_stoplist: 'list' = None, rerank: 'bool' = False, rerank_model: 'str' = '', rerank_pool_k: 'int' = 0, rerank_blend: 'float' = 1.0, user_id: 'str' = '', scope: 'str' = '', type_filter: 'str' = '', agent_filter: 'str' = '', search_mode: 'str' = 'hybrid', variant: 'str' = '', as_of: 'str' = '', conversation_id: 'str' = '', bypass_surface: 'bool' = False, bypass_surface_cap: 'int' = 0, explain: 'bool' = False, extra_columns=None, recency_bias: 'float' = 0.0, vector_weight: 'float' = 0.7, adaptive_k: 'bool' = False, elbow_sensitivity: 'float' = 1.5, adaptive_k_min: 'int' = 0, adaptive_k_max: 'int' = 0, smart_time_boost: 'float' = 0.0, smart_neighbor_sessions: 'int' = 0, intent_hint: 'str' = '', vector_kind_strategy: 'str' = 'default', auto_route: 'bool' = False, auto_top1_sharp_min: 'float' = 0.89, auto_slope_at_3_sharp_min: 'float' = 0.08, auto_conv_id_diversity_threshold: 'int' = 5, auto_top1_low_threshold: 'float' = 0.5, auto_temporal_k: 'int' = 15, auto_temporal_recency_bias: 'float' = 0.05, auto_temporal_expand_sessions: 'bool' = True, auto_temporal_graph_depth: 'int' = 1, auto_multi_k: 'int' = 20, auto_multi_expand_sessions: 'bool' = True, auto_sharp_threshold_ratio: 'float' = 0.85, auto_sharp_k_min: 'int' = 3, auto_sharp_k_max: 'int' = 10, auto_entity_graph_enabled: 'bool' = True, auto_entity_graph_depth: 'int' = 1, auto_entity_graph_max_neighbors: 'int' = 20, auto_entity_graph_named_entity_threshold: 'int' = 1, requesting_agent: 'str' = '', _capture_dict: 'dict' = None) -> 'list'",
+      "value_repr": null
+    },
+    "memory_search_scored_impl": {
+      "kind": "async_function",
+      "signature": "(query, mmr=True, k=8, type_filter='', agent_filter='', search_mode='hybrid', user_id='', scope='', as_of='', conversation_id='', explain=False, extra_columns=None, recency_bias=0.0, vector_weight=0.7, adaptive_k=False, elbow_sensitivity=1.5, adaptive_k_min=0, adaptive_k_max=0, smart_time_boost=0.0, smart_neighbor_sessions=0, variant='', intent_hint='', vector_kind_strategy='default', requesting_agent='', _depth=0, _capture_dict: 'dict' = None)",
+      "value_repr": null
+    },
+    "memory_suggest_impl": {
+      "kind": "async_function",
+      "signature": "(query: 'str', k: 'int' = 5, variant: 'str' = '__none__') -> 'str'",
+      "value_repr": null
+    },
+    "memory_supersede_impl": {
+      "kind": "async_function",
+      "signature": "(old_id: 'str', content: 'str', type: 'str' = '', title: 'str' = '', metadata: 'str' = '{}', agent_id: 'str' = '', model_id: 'str' = '', change_agent: 'str' = '', importance: 'float' = -1.0, source: 'str' = 'agent', embed: 'bool' = True, user_id: 'str' = '', scope: 'str' = '', valid_from: 'str' = '', variant: 'str | None' = None, embed_text: 'str | None' = None) -> 'str'",
+      "value_repr": null
+    },
+    "memory_unpin_impl": {
+      "kind": "function",
+      "signature": "(id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "memory_update_bulk_impl": {
+      "kind": "function",
+      "signature": "(updates)",
+      "value_repr": null
+    },
+    "memory_update_impl": {
+      "kind": "async_function",
+      "signature": "(id, content='', title='', metadata='', importance=-1.0, reembed=False, refresh_on='', refresh_reason='', conversation_id='')",
+      "value_repr": null
+    },
+    "memory_verify_impl": {
+      "kind": "function",
+      "signature": "(memory_id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "memory_write_batch_impl": {
+      "kind": "async_function",
+      "signature": "(items: 'list[dict]')",
+      "value_repr": null
+    },
+    "memory_write_bulk_impl": {
+      "kind": "async_function",
+      "signature": "(items: 'list[dict]', *, enrich: 'bool | None' = None, check_contradictions: 'bool | None' = None, emit_conversation: 'bool | None' = None, variant: 'str | None' = None, embed_key_enricher: \"'Callable[[str, dict], Awaitable[str]] | None'\" = None, embed_key_enricher_concurrency: 'int' = 4, dual_embed: 'bool' = False, fact_enricher: \"'Callable[[str], Awaitable[list[dict]]] | None'\" = None, fact_enricher_concurrency: 'int' = 2, fact_enricher_variant_allowlist: 'set[str] | None' = None, entity_extractor: \"'Callable[[str], Awaitable[dict]] | None'\" = None, entity_extractor_concurrency: 'int' = 2, entity_extractor_variant_allowlist: \"'set[str] | None'\" = None) -> 'list[str]'",
+      "value_repr": null
+    },
+    "memory_write_from_file_impl": {
+      "kind": "async_function",
+      "signature": "(path: 'str', type: 'str', title: 'str' = '', metadata: 'str' = '{}', agent_id: 'str' = '', model_id: 'str' = '', change_agent: 'str' = '', importance: 'float' = 0.5, source: 'str' = 'agent', embed: 'bool' = True, user_id: 'str' = '', scope: 'str' = 'agent', valid_from: 'str' = '', valid_to: 'str' = '', auto_classify: 'bool' = False, conversation_id: 'str' = '', refresh_on: 'str' = '', refresh_reason: 'str' = '', variant: 'str | None' = None, delete_after_read: 'bool' = True)",
+      "value_repr": null
+    },
+    "memory_write_impl": {
+      "kind": "async_function",
+      "signature": "(type, content, title='', metadata='{}', agent_id='', model_id='', change_agent='', importance=0.5, source='agent', embed=True, user_id='', scope='agent', valid_from='', valid_to='', auto_classify=False, conversation_id='', refresh_on='', refresh_reason='', variant=None, embed_text=None, confidence: 'float' = -1.0, fact_enricher: \"'Callable[[str], Awaitable[list[dict]]] | None'\" = None, fact_enricher_variant_allowlist: \"'set[str] | None'\" = None, entity_extractor: \"'Callable[[str], Awaitable[dict]] | None'\" = None, entity_extractor_variant_allowlist: \"'set[str] | None'\" = None)",
+      "value_repr": null
+    },
+    "notifications_ack_all_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "notifications_ack_impl": {
+      "kind": "function",
+      "signature": "(notification_id: 'int') -> 'str'",
+      "value_repr": null
+    },
+    "notifications_poll_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str', unread_only: 'bool' = True, limit: 'int' = 20) -> 'str'",
+      "value_repr": null
+    },
+    "notify_impl": {
+      "kind": "function",
+      "signature": "(agent_id: 'str', kind: 'str', payload: 'dict' = None) -> 'str'",
+      "value_repr": null
+    },
+    "observation_enqueue_impl": {
+      "kind": "function",
+      "signature": "(conversation_id: 'str', user_id: 'str' = '') -> 'str'",
+      "value_repr": null
+    },
+    "os": {
+      "kind": "module",
+      "module_name": "os"
+    },
+    "reflector_enqueue_impl": {
+      "kind": "function",
+      "signature": "(conversation_id: 'str', user_id: 'str' = '', obs_count: 'int | None' = None) -> 'str'",
+      "value_repr": null
+    },
+    "reset_embed_backend_stats": {
+      "kind": "function",
+      "signature": "() -> 'None'",
+      "value_repr": null
+    },
+    "reset_embed_breakers": {
+      "kind": "function",
+      "signature": "() -> 'dict'",
+      "value_repr": null
+    },
+    "resolve_db_path": {
+      "kind": "function",
+      "signature": "(explicit: str | None = None) -> str",
+      "value_repr": null
+    },
+    "set_embed_override": {
+      "kind": "function",
+      "signature": "(url: 'str | None', model: 'str | None' = None) -> 'None'",
+      "value_repr": null
+    },
+    "task_assign_impl": {
+      "kind": "function",
+      "signature": "(task_id: 'str', owner_agent: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "task_create_impl": {
+      "kind": "function",
+      "signature": "(title: 'str', created_by: 'str', description: 'str' = '', owner_agent: 'str' = '', parent_task_id: 'str' = '', metadata: 'dict' = None) -> 'str'",
+      "value_repr": null
+    },
+    "task_delete_impl": {
+      "kind": "function",
+      "signature": "(task_id: 'str', hard: 'bool' = False, actor: 'str' = '') -> 'str'",
+      "value_repr": null
+    },
+    "task_get_impl": {
+      "kind": "function",
+      "signature": "(task_id: 'str', include_deleted: 'bool' = False) -> 'str'",
+      "value_repr": null
+    },
+    "task_list_impl": {
+      "kind": "function",
+      "signature": "(owner_agent: 'str' = '', state: 'str' = '', parent_task_id: 'str' = '', limit: 'int' = 20, include_deleted: 'bool' = False) -> 'str'",
+      "value_repr": null
+    },
+    "task_set_result_impl": {
+      "kind": "function",
+      "signature": "(task_id: 'str', result_memory_id: 'str') -> 'str'",
+      "value_repr": null
+    },
+    "task_tree_impl": {
+      "kind": "function",
+      "signature": "(root_task_id: 'str', max_depth: 'int' = 10) -> 'str'",
+      "value_repr": null
+    },
+    "task_update_impl": {
+      "kind": "function",
+      "signature": "(task_id: 'str', state: 'str' = '', description: 'str' = '', metadata: 'dict' = None, actor: 'str' = '') -> 'str'",
+      "value_repr": null
+    },
+    "timezone": {
+      "kind": "class",
+      "signature": null,
+      "value_repr": null
+    },
+    "uuid": {
+      "kind": "module",
+      "module_name": "uuid"
+    }
+  }
+}
