@@ -176,6 +176,35 @@ def pg_url() -> str:
 
 
 @pytest.fixture(autouse=True)
+def _restore_os_name():
+    """Guarantee `os.name` is restored after every test.
+
+    Several tests simulate a different OS with
+    ``monkeypatch.setattr(<mod>.os, "name", "nt")``. Because ``<mod>.os`` IS the
+    global ``os`` module, that override is process-wide, and ``pathlib.Path()``
+    chooses PosixPath vs WindowsPath from ``os.name`` *at construction time*.
+    While it is live, every ``Path(...)`` on a POSIX host becomes a
+    ``WindowsPath`` — which raises ``NotImplementedError``.
+
+    pytest constructs one in ``repr_failure`` (``Path(os.getcwd())``), so a leak
+    does not fail the leaking test: it turns the next *unrelated* failure into a
+    session-aborting INTERNALERROR that never names the culprit. CI was red on
+    ubuntu+macos py3.11 for ~30 straight runs this way, green on Windows (where
+    WindowsPath is native) and on py3.12 (where the guard sits elsewhere).
+
+    monkeypatch's own teardown restores it, but only *after* the test's report is
+    built — too late. This fixture closes that window for every test at once, so
+    no future ``os.name`` patch can reopen it.
+    """
+    saved = _os.name
+    try:
+        yield
+    finally:
+        if _os.name != saved:
+            _os.name = saved
+
+
+@pytest.fixture(autouse=True)
 def _restore_memory_modules():
     """Heal `sys.modules` pollution of the memory.* namespace after each test.
 
