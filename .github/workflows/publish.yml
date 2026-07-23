@@ -13,7 +13,10 @@ name: Publish to PyPI
 
 on:
   # A version-tag push is the SINGLE publish trigger. Cutting a release pushes
-  # `vX.Y.Z` and (usually) also creates a GitHub Release — if BOTH `push: tags`
+  # `vX.Y.Z`; the `github-release` job below then creates the GitHub Release from
+  # the matching CHANGELOG section (previously a manual step that was missed for
+  # 2026.7.21.1 and 2026.7.23.0, leaving the repo's Releases page stale). We do
+  # NOT also trigger on `release: published` — if BOTH `push: tags`
   # and `release: published` triggered this workflow, each release fired it twice,
   # both runs uploaded the same files, and the loser failed with PyPI's
   # `400 File already exists`, leaving a spurious red run on every release (and
@@ -160,3 +163,61 @@ jobs:
       # old version" (memory_search it).
       - name: Report published version
         run: echo "Published ${GITHUB_REF#refs/tags/v} to the MCP registry. Verify 'latest' at https://registry.modelcontextprotocol.io/v0/servers?search=io.github.skynetcmd/m3-memory"
+
+  github-release:
+    name: Create the GitHub Release
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    # Real tag pushes only — never a dry-run workflow_dispatch (there is no tag
+    # to attach a Release to, and TestPyPI runs must not mint public Releases).
+    if: github.event_name == 'push'
+    permissions:
+      contents: write  # create a Release + upload the built artifacts to it
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract this version's CHANGELOG section
+        id: notes
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          # Pull the body between this version's '## [x]' header and the next
+          # '## [' header. If the section is missing, fall back to a stub rather
+          # than failing the release.
+          python - "$VERSION" > release_notes.md <<'PY'
+          import re, sys, pathlib
+          v = sys.argv[1]
+          cl = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          m = re.search(rf"^## \[{re.escape(v)}\][^\n]*\n(.*?)(?=^## \[)", cl, re.S | re.M)
+          print(m.group(1).strip() if m else f"Release {v}. See CHANGELOG.md.")
+          PY
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="v${{ steps.notes.outputs.version }}"
+          TITLE=$(grep -m1 "^## \[${{ steps.notes.outputs.version }}\]" CHANGELOG.md \
+                  | sed -E 's/^## \[[^]]*\] — [0-9-]+ — //' || true)
+          [ -n "$TITLE" ] && TITLE="$TAG — $TITLE" || TITLE="$TAG"
+          # Idempotent: if the Release already exists (manual pre-creation, re-run),
+          # update its notes instead of failing.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --notes-file release_notes.md --latest
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --notes-file release_notes.md --verify-tag --latest \
+              dist/*
+          fi
