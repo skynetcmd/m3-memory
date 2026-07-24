@@ -14,6 +14,7 @@ from typing import Optional
 
 from . import authority as _authority
 from . import blast_radius as _blast
+from . import citation_drift as _citation_drift
 from .cluster import Cluster
 from .files_layer import FileNode, FilesLayer
 from .select import Edge, Mem, Promo
@@ -190,12 +191,17 @@ def render_pages(
     promotions: list[Promo],
     ledes: Optional[dict[str, str]] = None,
     obsidian: bool = False,
+    drift_judge=None,
 ) -> dict[str, str]:
     """Build the full vault as {relpath: markdown}.
 
     `ledes` maps cluster.key -> a prose summary (from optional synthesis). When a
     cluster has no lede, its page falls back to the deterministic member list.
     `obsidian` switches cross-page links to `[[wikilinks]]` (see LinkResolver).
+    `drift_judge` (optional) enables the citation-drift lint section (4b). When
+    None (the default) the section is omitted entirely and the vault is
+    byte-identical — the judge is model-backed and non-deterministic, so it is
+    kept OUT of the drift-tested surface, exactly like `synthesizer`.
     """
     ledes = ledes or {}
     topic_slugs = SlugBook()
@@ -260,7 +266,8 @@ def render_pages(
 
     pages["index.md"] = _render_index(topic_clusters, topic_slugs, files, source_slugs, links, bool(orphan_members))
     pages["overview.md"] = _render_overview(clusters, files, links)
-    pages["lint.md"] = _render_lint(clusters, edges, mem_to_topic, topic_slugs, links)
+    pages["lint.md"] = _render_lint(clusters, edges, mem_to_topic, topic_slugs,
+                                    links, drift_judge=drift_judge)
     pages["about.md"] = _render_about(links)
 
     return pages
@@ -712,7 +719,8 @@ Full guide: the `docs/WIKI.md` file in the m3-memory repository."""
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolver") -> str:
+def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolver",
+                 drift_judge=None) -> str:
     SELF = "lint.md"
     orphans = [m for c in clusters if c.is_orphan for m in c.members]
     # Dangling: edges pointing at a memory not in the core set were already
@@ -767,4 +775,12 @@ def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolve
     else:
         lines.append("_No synthesis is marked wrong; nothing downstream to flag._")
     lines.append("")
+
+    # Citation drift (4b, opt-in). Omitted entirely when no judge is injected, so
+    # the default vault is byte-identical (the judge is model-backed and
+    # non-deterministic — kept out of the drift-tested surface).
+    report = _citation_drift.check_drift(clusters, edges, drift_judge)
+    drift_lines = _citation_drift.render_section(report, links, SELF)
+    if drift_lines:
+        lines.extend(drift_lines)
     return "\n".join(lines).rstrip() + "\n"

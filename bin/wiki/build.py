@@ -44,6 +44,7 @@ def build_wiki(
     files_conn: Optional[sqlite3.Connection],
     opts: Optional[WikiOptions] = None,
     synthesizer=None,
+    drift_judge=None,
 ) -> dict[str, str]:
     """Compile the vault. `files_conn` may be None (memory-only vault).
 
@@ -94,4 +95,5 @@ def build_wiki(
                 ledes[c.key] = prose
 
     return _render.render_pages(clusters, edges, files, promotions, ledes=ledes,
+                                drift_judge=drift_judge,
                                 obsidian=opts.obsidian)
