@@ -96,9 +96,17 @@ def _seed(pg):
         )
 
 
-def _build_via_seam():
+def _build_via_seam(admission_gate: bool = False):
     """Build the vault through m3's backend seam, exactly as `m3 wiki generate`
-    does on a PG deployment (memory read via _db(); no files corpus)."""
+    does on a PG deployment (memory read via _db(); no files corpus).
+
+    admission_gate defaults OFF: these tests validate the PG-specific read paths
+    (dialect placeholders, _has_column, co-mention) on a tiny 4-memory fixture.
+    The gate demotes weakly-anchored clusters, and a 4-node fixture cluster is
+    exactly that — with the gate ON it lands every member in orphans, masking the
+    clustering/co-mention behaviour under test. The gate has its own suite
+    (test_wiki_admission.py); mirror the SQLite determinism tests, which also
+    build with admission_gate=False for the same reason."""
     from memory.db import _db
     from wiki.build import WikiOptions, build_wiki
 
@@ -106,7 +114,7 @@ def _build_via_seam():
         return build_wiki(
             mem_conn, None,
             WikiOptions(importance_threshold=0.6, include_files=False,
-                        entity_comention=True),
+                        entity_comention=True, admission_gate=admission_gate),
         )
 
 

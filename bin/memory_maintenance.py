@@ -750,6 +750,30 @@ def gdpr_forget_impl(user_id: str, compliance: "dict | str | None" = None) -> st
                     "may still render; review manually", user_id, _e)
                 wiki_erasure_summary = {"error": repr(_e)}
 
+        # WIKI LEDGER erasure scan (Art. 17, plan G2): the compile ledger's
+        # `cluster_members` cache may hold an erased UUID. Scan it, record the
+        # erasure on the affected `cluster_run` rows (accumulating id + count +
+        # timestamps), and FLUSH those runs' cached membership. The run row
+        # survives — so WHY the data is gone outlasts the data. `cluster_members`
+        # stores UUIDs only (never content), so the table itself holds no personal
+        # data; this closes the cache. A failure is surfaced, never swallowed: an
+        # un-flushed cache holding an erased id is a compliance gap. Guarded so an
+        # un-migrated DB (tables absent) degrades gracefully.
+        wiki_ledger_summary = None
+        if item_ids:
+            try:
+                from wiki.ledger import scan_and_flush_on_erasure
+                _led_at = datetime.now(timezone.utc).isoformat()
+                wiki_ledger_summary = scan_and_flush_on_erasure(
+                    db, _d, item_ids, timestamp=_led_at)
+            except Exception as _e:  # pragma: no cover - defensive
+                import logging
+                logging.getLogger("m3.gdpr").warning(
+                    "wiki ledger erasure scan failed for user %s: %r — a cluster "
+                    "membership cache may still hold the erased id; review manually",
+                    user_id, _e)
+                wiki_ledger_summary = {"error": repr(_e)}
+
         if item_ids:
             placeholders = _d.placeholder(len(item_ids))
             # Delete embeddings
@@ -793,6 +817,10 @@ def gdpr_forget_impl(user_id: str, compliance: "dict | str | None" = None) -> st
             # Derived-content record: how many wiki syntheses were restricted
             # because they quoted an erased member (Art. 17 derived-content trail).
             audit_meta["wiki_restricted"] = wiki_erasure_summary
+        if wiki_ledger_summary:
+            # Cache-invalidation record: which cluster_run rows were flagged and had
+            # their membership cache flushed because they cached the erased id (G2).
+            audit_meta["wiki_ledger_flush"] = wiki_ledger_summary
         write_audit_entry(
             action="gdpr_forget",
             target_id=user_id,

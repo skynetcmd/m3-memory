@@ -488,10 +488,14 @@ async def compile_clusters(
     checkpoint_every: int = 500,
     edges: "Optional[list]" = None,
     gate=None,
+    importance_threshold: "Optional[float]" = None,
+    entity_comention: bool = False,
+    record_run: bool = True,
     _write=None,
     _supersede=None,
     _link=None,
     _ensure_prompt=None,
+    _ledger_db=None,
 ) -> CompileStats:
     """Orchestrate a full compile pass over many clusters. The I/O-bearing entry
     point the CLI calls; compile_cluster is the per-cluster decision.
@@ -510,12 +514,29 @@ async def compile_clusters(
     Demoting before the model call also saves its compile cost. Pass `gate` to
     override the config-resolved default; pass no `edges` to disable gating
     entirely (the pre-gate behaviour, e.g. for an audit pass).
+
+    LEDGER (plan G1): when `record_run` is True, the pass opens a `cluster_run`
+    provenance row, FREEZES each admitted cluster's membership into
+    `cluster_members` (UUIDs only), and stamps the run complete at the end. Frozen
+    membership is what lets a later pass recognize an unchanged topic WITHOUT
+    recomputing its clustering — recompute is what perturbs it (the residual 2/13
+    idempotence churn). The ledger is best-effort: any failure logs and the compile
+    proceeds — it is an audit/optimization surface, never on the critical path of a
+    correct single pass. Pass `_ledger_db` (a live seam connection) in tests;
+    otherwise the pass opens one via the memory seam.
     """
     stats = CompileStats()
     ensure_prompt = _ensure_prompt or _ensure_prompt_row
     prompt_id = await ensure_prompt(compiler, stats, scope=scope, user_id=user_id)
 
     clusters = _admit(clusters, edges, gate, stats)
+
+    # Ledger: open a provenance run (invisible until completed) and collect the
+    # membership rows as we go. All best-effort — a ledger failure must not abort.
+    run_ctx = _LedgerRun(record_run, _ledger_db, scope=scope, user_id=user_id,
+                         importance_threshold=importance_threshold,
+                         entity_comention=entity_comention)
+    run_ctx.open()
 
     writes_since_ckpt = 0
     for cluster in clusters:
@@ -525,6 +546,7 @@ async def compile_clusters(
             cluster, compiler, head, prompt_id, stats,
             scope=scope, user_id=user_id, _write=_write, _supersede=_supersede,
             _link=_link)
+        run_ctx.add(cluster, compiler, r)
         if r.action in ("created", "superseded"):
             writes_since_ckpt += 1
             if backend is not None and writes_since_ckpt >= checkpoint_every:
@@ -532,7 +554,99 @@ async def compile_clusters(
                 writes_since_ckpt = 0
     if backend is not None:
         _try_checkpoint(backend, final=True)
+
+    run_ctx.complete(len(clusters))
     return stats
+
+
+class _LedgerRun:
+    """Best-effort accumulator that records a compile pass into the G1 ledger.
+
+    Isolates every ledger touch behind try/except so the compile pass is never
+    aborted by a ledger problem (a missing table on an un-migrated DB, a seam
+    hiccup). Collects `(cluster_key, memory_id, cluster_hash, head_synthesis_id)`
+    per admitted cluster, then writes them all + completes the run at the end.
+    """
+
+    def __init__(self, enabled, db, *, scope, user_id, importance_threshold,
+                 entity_comention):
+        self.enabled = bool(enabled)
+        self._db_arg = db
+        self._scope = scope
+        self._user_id = user_id
+        self._tau = importance_threshold
+        self._comention = entity_comention
+        self._db = None
+        self._dialect = None
+        self._own_db = False
+        self.run_id = None
+        self._rows: list = []
+
+    def _resolve(self):
+        if self._db_arg is not None:
+            self._db = self._db_arg
+            from memory.backends import dialect
+            self._dialect = dialect()
+            return True
+        from memory.backends import dialect
+        from memory.db import _db
+        self._own_cm = _db()
+        self._db = self._own_cm.__enter__()
+        self._own_db = True
+        self._dialect = dialect()
+        return True
+
+    def open(self):
+        if not self.enabled:
+            return
+        try:
+            from . import ledger
+            self._resolve()
+            self.run_id = ledger.open_run(
+                self._db, self._dialect, scope=self._scope, user_id=self._user_id,
+                importance_threshold=self._tau, entity_comention=self._comention)
+        except Exception as e:  # pragma: no cover - defensive
+            _log_ledger("open", e)
+            self.enabled = False
+
+    def add(self, cluster, compiler, result: CompileResult):
+        if not self.enabled or self.run_id is None:
+            return
+        try:
+            from .synth import _cluster_hash
+            chash = _cluster_hash(cluster, compiler.model)
+            head_id = result.synthesis_id
+            for m in cluster.members:  # freeze ALL members (source + synthesis)
+                self._rows.append((cluster.key, m.id, chash, head_id))
+        except Exception as e:  # pragma: no cover - defensive
+            _log_ledger("add", e)
+
+    def complete(self, cluster_count: int):
+        if not self.enabled or self.run_id is None:
+            return
+        try:
+            from . import ledger
+            ledger.record_members(self._db, self._dialect, self.run_id, self._rows)
+            ledger.complete_run(self._db, self._dialect, self.run_id,
+                                cluster_count=cluster_count)
+            # Generational cleanup: keep only this run's cached membership warm.
+            ledger.prune_superseded_members(self._db, self._dialect, self.run_id)
+            if hasattr(self._db, "commit"):
+                self._db.commit()
+        except Exception as e:  # pragma: no cover - defensive
+            _log_ledger("complete", e)
+        finally:
+            if self._own_db and getattr(self, "_own_cm", None) is not None:
+                try:
+                    self._own_cm.__exit__(None, None, None)
+                except Exception:
+                    pass
+
+
+def _log_ledger(phase: str, e: Exception) -> None:
+    import logging
+    logging.getLogger("m3.wiki.ledger").warning(
+        "compile ledger %s failed (non-fatal): %r", phase, e)
 
 
 def _try_checkpoint(backend, *, final: bool) -> None:

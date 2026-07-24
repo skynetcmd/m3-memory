@@ -306,7 +306,13 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                 clusters, compiler, heads,
                 scope=getattr(args, "scope", "agent") or "agent",
                 user_id=getattr(args, "user_id", "") or "",
-                backend=backend, edges=edges, gate=gate)
+                backend=backend, edges=edges, gate=gate,
+                # Ledger (G1): record this pass's provenance + frozen membership on
+                # the SAME seam connection — opening a second connection to the
+                # SQLite file mid-pass would contend on the write lock.
+                importance_threshold=tau,
+                entity_comention=True,  # gen_wiki always loads co-mention edges above
+                _ledger_db=conn)
 
     if args.dry_run:
         # Load + cluster only; report what WOULD be compiled without calling the

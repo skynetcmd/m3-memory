@@ -273,6 +273,17 @@ def _restore_memory_modules():
     # memory.* namespace instead and let the next test reimport a clean,
     # consistently cross-bound set. When nothing was replaced (the common case),
     # keep the cheap restore.
+    #
+    # This heals CROSS-test leakage on teardown, but it is a safety net, not a
+    # license: DO NOT monkeypatch.setitem(sys.modules, "memory.backends", <fake>)
+    # in a test. memory.backends re-exports a `dialect` CALLABLE and also has a
+    # `dialect` SUBMODULE (same name) -- replacing the package object breaks that
+    # resolution so `from memory.backends import dialect; dialect()` binds the
+    # MODULE and raises "module object is not callable" in tests that run before
+    # this teardown fires (bit test_wiki_determinism, 2026-07-24). Use the REAL
+    # dialect() factory (defaults to SqliteDialect with no active backend) against
+    # an in-memory DB instead. See m3 memory
+    # "test-hazard-monkeypatch-memory.backends-dialect-poisons-suite".
     replaced = any(
         name in before and before[name] is not mod
         for name, mod in after.items()

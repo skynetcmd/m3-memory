@@ -345,3 +345,86 @@ async def test_two_consecutive_compiles_of_an_unchanged_store_write_zero_rows():
         assert r.action == "skipped-hash"
     assert total_writes_run2 == 0, "idempotence violated — second pass wrote rows"
     assert comp.calls == 0, "second pass called the model despite unchanged inputs"
+
+
+# ── ledger integration (G1): compile_clusters records a run + frozen membership ─
+
+def _ledger_db():
+    import sqlite3
+    _root = os.path.normpath(os.path.join(_HERE, ".."))
+    mig = os.path.join(_root, "memory", "migrations",
+                       "041_wiki_cluster_run.up.sql")
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    with open(mig, encoding="utf-8") as f:
+        conn.executescript(f.read())
+    return conn
+
+
+class _LedgerDialect:
+    """SQLite-flavoured dialect stub for direct ledger reads in assertions."""
+    def param(self): return "?"
+    def placeholder(self, n): return ",".join(["?"] * n)
+    def insert_or_ignore(self): return "INSERT OR IGNORE INTO"
+    def on_conflict_ignore(self, *, conflict_target="", index_predicate=""): return ""
+    def now(self): return "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+
+
+@pytest.mark.asyncio
+async def test_compile_clusters_records_ledger_run_and_membership():
+    """A full compile pass opens a cluster_run, freezes membership, completes it.
+
+    Uses the REAL dialect factory (which defaults to SqliteDialect with no active
+    backend) against an in-memory SQLite DB — no monkeypatching of memory.backends,
+    which is fragile (the package re-exports `dialect` as both a submodule and a
+    factory attribute, so replacing it poisons every other test in the process)."""
+    import wiki.compile as _wc
+    import wiki.ledger as _led
+    db = _ledger_db()
+
+    clusters = [_cluster(_mem("a", 0.9), _mem("b", 0.5)),
+                _cluster(_mem("c", 0.7))]
+    comp = _StubCompiler(prose="P")
+
+    writes = []
+    async def _write(**a):
+        writes.append(a); return "Created: syn-new"
+    async def _ensure_prompt(compiler, stats, **kw):
+        return "prompt-1"  # skip the memory-seam prompt write
+
+    stats = await _wc.compile_clusters(
+        clusters, comp, heads={},
+        edges=None, gate=None,  # gating off (no edges) so both clusters compile
+        importance_threshold=0.55, entity_comention=True,
+        _write=_write, _ensure_prompt=_ensure_prompt, _ledger_db=db)
+
+    assert stats.created == 2
+    # A completed run exists with the right params.
+    run = db.execute("SELECT * FROM cluster_run WHERE completed_at IS NOT NULL"
+                     ).fetchone()
+    assert run is not None
+    assert run["importance_threshold"] == 0.55
+    assert run["entity_comention"] == 1
+    assert run["cluster_count"] == 2
+    # Membership frozen for both clusters (UUIDs only).
+    frozen = _led.frozen_membership(db, _LedgerDialect(), run["id"])
+    all_members = {m for c in frozen.values() for m in c["members"]}
+    assert all_members == {"a", "b", "c"}
+
+
+@pytest.mark.asyncio
+async def test_compile_clusters_ledger_off_writes_no_run(monkeypatch):
+    """record_run=False → no ledger row, compile still works."""
+    import wiki.compile as _wc
+    db = _ledger_db()
+    clusters = [_cluster(_mem("a", 0.9))]
+    comp = _StubCompiler(prose="P")
+
+    async def _write(**a): return "Created: syn-new"
+    async def _ensure_prompt(compiler, stats, **kw): return "prompt-1"
+
+    await _wc.compile_clusters(
+        clusters, comp, heads={}, edges=None, record_run=False,
+        _write=_write, _ensure_prompt=_ensure_prompt, _ledger_db=db)
+    n = db.execute("SELECT COUNT(*) AS c FROM cluster_run").fetchone()["c"]
+    assert n == 0
