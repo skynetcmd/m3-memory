@@ -194,6 +194,24 @@ def test_restricted_orphan_shows_marker_not_silent():
     assert "🔒" in orph
 
 
+def test_canonical_synthesis_renders_as_topic_BODY_above_members():
+    """The point of compile-at-ingest: a topic with a canonical synthesis reads
+    as a coherent page — its compiled prose is the BODY, above the member list,
+    not merely one bullet within it. (Found during live review 2026-07-24: the
+    prose was stored but only appeared as a member bullet.)"""
+    conn = _mem_db_with_authority()
+    try:
+        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
+                                                   use_networkx=False))
+    finally:
+        conn.close()
+    canon = [t for p, t in pages.items()
+             if p.startswith("topics/") and "Canon Topic" in t][0]
+    before_members = canon.split("## Members")[0]
+    assert "CANON BODY VISIBLE" in before_members, \
+        "canonical synthesis prose must render as the topic body, above Members"
+
+
 def test_gate_is_deterministic():
     """Two builds are byte-identical with the gate active (no config present)."""
     h = []

@@ -273,6 +273,21 @@ def render_pages(
     return pages
 
 
+def _topic_synthesis(c: Cluster) -> "Optional[Mem]":
+    """The synthesis member whose compiled prose should be the topic body, or
+    None. Deterministic: prefer a body-authority synthesis (canonical), then the
+    one whose id sorts last (the current head, since a supersede mints a new id).
+    A cluster with no synthesis member returns None — non-synthesis topics render
+    exactly as before."""
+    syns = [m for m in c.members if m.type == "synthesis"]
+    if not syns:
+        return None
+    # Body-eligible (authority passes the gate) beats gated; within each group the
+    # highest id wins (stable, and the head of a supersede chain).
+    syns.sort(key=lambda m: (_authority.renders_as_body(m.metadata), m.id))
+    return syns[-1]
+
+
 def _render_topic(
     c: Cluster,
     edges: list[Edge],
@@ -316,6 +331,25 @@ def _render_topic(
     if lede:
         lines.append(lede.strip())
         lines.append("")
+
+    # Compiled synthesis body: if this topic has a synthesis member, surface its
+    # full compiled prose as the PAGE BODY (not merely one bullet in the member
+    # list). This is the point of compile-at-ingest — a topic that was compiled
+    # reads as a coherent page, with the source members kept below as provenance.
+    # Honors the S6 authority gate: a provisional/restricted synthesis shows its
+    # withholding marker instead of the prose, exactly like the member-list gate.
+    syn = _topic_synthesis(c)
+    if syn is not None:
+        if _authority.renders_as_body(syn.metadata):
+            body = (syn.content or "").strip()
+            if body:
+                lines.append(body)
+                lines.append("")
+        else:
+            marker = _authority.render_marker(syn.metadata)
+            if marker:
+                lines.append(f"> {marker}")
+                lines.append("")
 
     if contradictions:
         lines.append("> ⚠️ **Contradiction on this page** — members below disagree; "
