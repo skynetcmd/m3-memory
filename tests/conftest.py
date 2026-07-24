@@ -742,3 +742,54 @@ def main_db_template() -> Path:
     handles the copy and is the public API.
     """
     return _get_template_db()
+
+
+# ── schema-correct row seeding (raw-SQL primitive tests) ─────────────────────
+#
+# WHY: many tests hand-write `INSERT INTO memory_items(id, title, content) ...`
+# with an ad-hoc column list. Against a lenient minimal fixture schema that
+# passes; against the REAL schema (SQLite ensure_schema / live PostgreSQL) it
+# fails a NOT NULL constraint — `type` on memory_items and the `id` PK on
+# memory_embeddings are required. That drift bit test_backend_conformance and
+# test_postgres_backend_live on PG (2026-07-24). These helpers are the ONE place
+# that knows the required columns, so a raw-SQL primitive test (one that must
+# stay below the seam to exercise keyword/vector/CAS native paths) can seed a
+# schema-VALID row on either backend without re-listing columns and drifting.
+#
+# NOTE: this is for tests that legitimately bypass the seam. A test that just
+# needs a row to EXIST (not exercise a primitive) should write through the seam
+# (`memory_write_impl`) instead — that path supplies every column itself and is
+# what production uses.
+
+def seed_memory_row(conn, dialect, *, mid, type="note", title="", content="",
+                    importance=0.5, confidence=None, pinned=0, user_id="",
+                    scope="agent"):
+    """Insert ONE schema-valid memory_items row via raw SQL, supplying every
+    NOT NULL column the real schema requires. `dialect` is the active seam
+    dialect (for the placeholder + now()). Returns `mid`."""
+    p = dialect.param()
+    conn.execute(
+        f"INSERT INTO memory_items "
+        f"(id, type, title, content, importance, confidence, pinned, is_deleted, "
+        f" user_id, scope, valid_from, created_at, updated_at) "
+        f"VALUES ({p},{p},{p},{p},{p},{p},{p},0,{p},{p},{dialect.now()},"
+        f"{dialect.now()},{dialect.now()})",
+        (mid, type, title, content, importance, confidence, pinned,
+         user_id, scope),
+    )
+    return mid
+
+
+def seed_embedding_row(conn, dialect, *, mid, embedding, dim, embed_model,
+                       emb_id=None):
+    """Insert ONE schema-valid memory_embeddings row (supplies the NOT NULL `id`
+    PK, which hand-written fixtures routinely omit). Returns the embedding id."""
+    p = dialect.param()
+    eid = emb_id or f"emb-{mid}"
+    conn.execute(
+        f"INSERT INTO memory_embeddings "
+        f"(id, memory_id, embedding, dim, embed_model) "
+        f"VALUES ({p},{p},{p},{p},{p})",
+        (eid, mid, embedding, dim, embed_model),
+    )
+    return eid
