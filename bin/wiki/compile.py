@@ -115,14 +115,32 @@ class CompileStats:
 
 # ── pure helpers (deterministic, unit-tested without a model) ─────────────────
 
+def source_members(cluster: Cluster) -> list:
+    """Cluster members that are legitimate SOURCES for a synthesis — i.e. NOT
+    other syntheses.
+
+    A synthesis must never be compiled from its own kind: feeding compiled prose
+    back in as a source is how summary-creep compounds (an early omission becomes
+    an input to the next compile), the exact failure glukhov names. This bit the
+    real corpus — a recompile fed a prior synthesis of the SAME topic back in.
+    All source-facing reads (the prompt, member_ids manifest, confidence, edges)
+    go through this so the exclusion is applied in exactly one place.
+
+    Falls back to all members only if the cluster is ENTIRELY syntheses (nothing
+    else to compile from) — better to re-summarize than to produce nothing.
+    """
+    srcs = [m for m in cluster.members if m.type != "synthesis"]
+    return srcs if srcs else list(cluster.members)
+
+
 def min_member_confidence(cluster: Cluster) -> float:
-    """MIN of member confidences, NULLs excluded; all-NULL → documented constant.
+    """MIN of source-member confidences, NULLs excluded; all-NULL → constant.
 
     A synthesis is only as trustworthy as its weakest source. Never returns 1.0
     from members alone here — callers may still cap, but the rule is a floor, not
     a promotion.
     """
-    vals = [m.confidence for m in cluster.members if m.confidence is not None]
+    vals = [m.confidence for m in source_members(cluster) if m.confidence is not None]
     if not vals:
         return _NO_MEMBER_CONFIDENCE
     return min(vals)
@@ -152,7 +170,7 @@ def build_metadata(
     citation-drift check (commit 4b) reads. cluster_hash is synth.py's no-op
     gate, recorded so a later run can tell "inputs unchanged" without recompute.
     """
-    members = cluster.members
+    members = source_members(cluster)  # manifest excludes prior syntheses
     return {
         "synthesis_kind": synthesis_kind,
         "authority": authority,
@@ -269,6 +287,7 @@ async def compile_cluster(
     user_id: str = "",
     _write=None,
     _supersede=None,
+    _link=None,
 ) -> CompileResult:
     """Compile one cluster into a synthesis row, honoring the idempotent write
     rule. `head` is the current synthesis for this topic (or None if first-ever).
@@ -287,6 +306,16 @@ async def compile_cluster(
         return r
 
     prose = compiler.compile(cluster)
+    if prose:
+        # Scrub PII from the COMPILED PROSE before it becomes durable (§6: content
+        # safety at the write boundary). The synthesis is a shareable, redacted
+        # VIEW; the linked source memories keep full fidelity as the system of
+        # record. Redaction is enforced here in code, not trusted to the prompt —
+        # the v1/v2/v3 A/B proved a local model leaks paths/usernames verbatim
+        # regardless of instruction. Also feeds the prose_hash below, so the
+        # idempotence gate keys on the scrubbed text (stable across runs).
+        from .pii_scrub import scrub_prose
+        prose, _n = scrub_prose(prose)
     if not prose:  # fail-open: a compiler failure must not abort the batch.
         r = CompileResult(key, "compile-failed")
         stats.record(r)
@@ -325,8 +354,34 @@ async def compile_cluster(
         )
         r = CompileResult(key, "superseded",
                           synthesis_id=_extract_id(new_raw), superseded_id=head.id)
+
+    # Write the provenance edges the whole design depends on: a `consolidates`
+    # edge from the new synthesis to every source member. Without these the
+    # synthesis is a graph ORPHAN — it clusters apart from its sources, its prose
+    # never reaches the source topic page, and blast-radius / citation-drift (which
+    # walk these edges) see nothing. metadata.member_ids is the manifest; these
+    # edges are the graph. (Bug found in live review 2026-07-24: the writer
+    # recorded member_ids but never wrote the edges.)
+    if r.synthesis_id:
+        await _write_provenance_edges(r.synthesis_id, cluster, _link=_link)
     stats.record(r)
     return r
+
+
+async def _write_provenance_edges(synthesis_id, cluster, *, _link=None):
+    """`consolidates` edge from a synthesis to each of its source members.
+    Best-effort per edge: one failed link must not abort the compile pass."""
+    if _link is None:
+        from memory.write import memory_link_impl as _link
+    for m in source_members(cluster):  # never cite a prior synthesis as a source
+        if m.id == synthesis_id:
+            continue  # never self-link
+        try:
+            res = _link(synthesis_id, m.id, "consolidates")
+            if hasattr(res, "__await__"):
+                await res
+        except Exception:
+            pass
 
 
 def _cluster_importance(cluster: Cluster) -> float:
@@ -395,6 +450,7 @@ async def compile_clusters(
     checkpoint_every: int = 500,
     _write=None,
     _supersede=None,
+    _link=None,
     _ensure_prompt=None,
 ) -> CompileStats:
     """Orchestrate a full compile pass over many clusters. The I/O-bearing entry
@@ -416,7 +472,8 @@ async def compile_clusters(
         head = heads.get(title)
         r = await compile_cluster(
             cluster, compiler, head, prompt_id, stats,
-            scope=scope, user_id=user_id, _write=_write, _supersede=_supersede)
+            scope=scope, user_id=user_id, _write=_write, _supersede=_supersede,
+            _link=_link)
         if r.action in ("created", "superseded"):
             writes_since_ckpt += 1
             if backend is not None and writes_since_ckpt >= checkpoint_every:

@@ -29,16 +29,52 @@ from .cluster import Cluster
 # Bump when SYSTEM or the user-prompt template below changes. Combined with the
 # stored prompt text, this is what makes a prompt change auditable: a superseded
 # synthesis records the exact version AND the exact text it was compiled under.
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "4"
 
+# PROMPT_VERSION is an AUDIT ANCHOR: every synthesis records the version it was
+# compiled under, and a bump is an explicit, traceable recompile event (see the
+# plan's supersede design). It only ever increases; the trail to "4" reflects one
+# tuning pass (2026-07-24), consolidated here into the rationale for the CURRENT
+# prompt rather than a per-version changelog.
+#
+# Design of this prompt, established by an A/B over a real memory corpus once
+# clustering was fixed (so the prompt was the only remaining variable):
+#   - LEDE: open with one sentence naming what the page establishes. A plain
+#     "synthesize" prompt dove into structure and even renamed a page off its own
+#     subject ("MCP lockup" -> "Stability and Architecture").
+#   - TOPIC-FIDELITY: stay strictly on subject; exclude off-cluster notes rather
+#     than stretching to cover them (the corpus still has mild cross-topic bleed).
+#   - NO INVENTED FRAMING: add no causal/narrative connective tissue the notes
+#     don't assert (a plain "don't invent facts" did not stop "culminating in…").
+#   - PARAPHRASE, DON'T COPY: keep the technical substance but in the model's own
+#     words. This is deliberately SOFTER than an earlier "prefer the notes' own
+#     specifics" line, which pushed a local 9B to reproduce absolute paths and
+#     usernames VERBATIM — the leak that taught the boundary lesson below.
+#   - explicit source DELIMITERS live in _user_prompt so the model can't treat its
+#     own knowledge as a source.
+#
+# PII redaction is deliberately NOT in this prompt. The A/B proved a local model
+# leaks paths/usernames regardless of instruction (even an explicit "abstract
+# these" line failed), so redaction is a SAFETY BOUNDARY, not a best-effort prompt
+# (§3 fail-safe, §6 content safety at the boundary). It is enforced in code by
+# wiki.pii_scrub over the compiled prose. ASYMMETRY: the SYNTHESIS is the redacted,
+# shareable view; the linked SOURCE memories keep full fidelity (paths, hosts,
+# usernames) as the system of record, reachable via the consolidates edges.
 _SYSTEM = (
-    "You are compiling a knowledge-base wiki page from a cluster of related "
-    "memory notes. Write a single, self-contained markdown page that SYNTHESIZES "
-    "the notes into coherent prose — not a list of the notes, but what they "
-    "collectively establish. State only what the notes support; do not invent "
-    "facts, and do not overclaim beyond the sources. Where notes disagree, say so "
-    "plainly. Be concrete and specific. No preamble like 'Here is the page'; "
-    "output the page body directly."
+    "You are compiling one wiki page from a cluster of related memory notes. "
+    "Synthesize what the notes COLLECTIVELY establish into coherent prose — the "
+    "connected picture, not a restatement of each note in turn.\n"
+    "Begin with a single sentence naming what this page establishes; then develop "
+    "the detail.\n"
+    "Stay strictly on this page's subject. If a note in the cluster is about "
+    "something else, leave it out (a brief 'unrelated notes were excluded' line is "
+    "fine) — never stretch the page to cover it.\n"
+    "Ground every statement in the notes. Add no causal or narrative connective "
+    "tissue the notes do not themselves assert. Keep the technical substance — "
+    "which files, versions, commands, and symbols matter — without copying the "
+    "notes' text word for word; describe the specifics in your own words.\n"
+    "Where notes genuinely disagree, say so. Output the page body directly, with "
+    "no preamble."
 )
 
 
@@ -69,20 +105,29 @@ def _user_prompt(cluster: Cluster, cfg: ProseCompilerConfig) -> str:
     the same cluster + config, so two runs with an unchanged cluster produce the
     same request (the caller's cluster-hash gate relies on input stability)."""
     topic = cluster.members[0].display_title if cluster.members else "Untitled"
-    lines = [f"Topic: {topic}", "", "Source notes:"]
-    shown = cluster.members[:cfg.max_members]
+    # Exclude prior syntheses from what the model reads — never feed compiled
+    # prose back in as a source (summary-creep compounding). Kept in sync with
+    # compile.source_members via a local filter to avoid an import cycle.
+    srcs = [m for m in cluster.members if m.type != "synthesis"] or list(cluster.members)
+    # Delimit the sources explicitly (v3): a fenced SOURCES block draws a hard line
+    # between "material to compile from" and the model's own knowledge, so it can't
+    # quietly treat training data as a source. Paraphrased from the field's
+    # context-tagging convention, adapted to our per-note format.
+    lines = [f"Topic: {topic}", "", "===== SOURCE NOTES (compile ONLY from these) ====="]
+    shown = srcs[:cfg.max_members]
     for m in shown:
         body = (m.content or "").strip().replace("\r\n", "\n")
         if len(body) > cfg.snippet_chars:
             body = body[:cfg.snippet_chars] + "…"
         title = m.display_title
         lines.append(f"- [{title}] {body}")
-    dropped = len(cluster.members) - len(shown)
+    dropped = len(srcs) - len(shown)
     if dropped > 0:
         # Never silently truncate (§3): tell the model (and, via the prompt text,
         # the audit trail) that the cluster was larger than what it saw.
         lines.append("")
         lines.append(f"(NOTE: {dropped} further note(s) omitted to bound prompt size.)")
+    lines.append("===== END SOURCE NOTES =====")
     lines.append("")
     lines.append("Compile these into one coherent wiki page as instructed.")
     return "\n".join(lines)

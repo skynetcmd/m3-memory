@@ -221,6 +221,52 @@ async def test_changed_prose_supersedes_never_updates_in_place():
 
 
 @pytest.mark.asyncio
+async def test_created_synthesis_writes_consolidates_edges_to_every_member():
+    """Regression (found live 2026-07-24): the writer must create a `consolidates`
+    edge from the synthesis to EACH source member. Without them the synthesis is a
+    graph orphan — it clusters apart from its sources, its prose never reaches the
+    source topic, and blast-radius / citation-drift (which walk these edges) see
+    nothing. metadata.member_ids is the manifest; these edges are the graph."""
+    c = _cluster(_mem("a", 0.8), _mem("b", 0.6), _mem("c", 0.9))
+    comp = _StubCompiler(prose="P")
+    links = []
+
+    async def _write(**a):
+        return "Created: syn-1"
+
+    def _link(frm, to, rel):
+        links.append((frm, to, rel))
+        return "linked"
+
+    stats = WC.CompileStats()
+    r = await WC.compile_cluster(c, comp, head=None, prompt_memory_id="p", stats=stats,
+                                 _write=_write, _link=_link)
+    assert r.action == "created"
+    # One consolidates edge from the new synthesis to each of the 3 members.
+    assert {(t, rel) for _f, t, rel in links} == {
+        ("a", "consolidates"), ("b", "consolidates"), ("c", "consolidates")}
+    assert all(f == "syn-1" for f, _t, _rel in links), "edges must originate at the synthesis"
+
+
+@pytest.mark.asyncio
+async def test_synthesis_never_self_links():
+    """If the synthesis id somehow matches a member, no self-edge is written."""
+    c = _cluster(_mem("syn-1", 0.8))
+    links = []
+
+    async def _write(**a):
+        return "Created: syn-1"
+
+    def _link(frm, to, rel):
+        links.append((frm, to, rel))
+
+    stats = WC.CompileStats()
+    await WC.compile_cluster(c, _StubCompiler(), head=None, prompt_memory_id="p",
+                             stats=stats, _write=_write, _link=_link)
+    assert links == [], "must not self-link the synthesis to itself"
+
+
+@pytest.mark.asyncio
 async def test_compile_failure_is_fail_open():
     """A compiler returning None must not raise or write — the batch continues."""
     class _Broken(_StubCompiler):
