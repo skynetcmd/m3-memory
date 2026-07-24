@@ -12,6 +12,7 @@ import posixpath
 import re
 from typing import Optional
 
+from . import authority as _authority
 from .cluster import Cluster
 from .files_layer import FileNode, FilesLayer
 from .select import Edge, Mem, Promo
@@ -319,10 +320,22 @@ def _render_topic(
     lines.append("")
     for m in c.members:
         pin = " 📌" if m.pinned else ""
-        head = m.content.strip().splitlines()[0].strip() if m.content.strip() else ""
-        snippet = (head[:200] + "…") if len(head) > 200 else head
         lines.append(f"- **{m.display_title}**{pin} · `{m.type}` · conf {_conf(m)} "
                      f"· `id:{m.id[:8]}`")
+        # Authority gate (S6): a synthesis renders its content as body prose ONLY
+        # when its authority is in the configured body set AND it is not GDPR-
+        # restricted. Otherwise show a marker and withhold the content — a
+        # provisional/unknown/restricted page must not read as authoritative.
+        # Non-synthesis members are unaffected (renders_as_body is vacuously the
+        # old behavior for them since they carry no authority — but we only gate
+        # the 'synthesis' type to avoid changing any existing page).
+        if m.type == "synthesis" and not _authority.renders_as_body(m.metadata):
+            marker = _authority.render_marker(m.metadata)
+            if marker:
+                lines.append(f"  {marker}")
+            continue
+        head = m.content.strip().splitlines()[0].strip() if m.content.strip() else ""
+        snippet = (head[:200] + "…") if len(head) > 200 else head
         if snippet:
             lines.append(f"  {snippet}")
     lines.append("")
@@ -414,6 +427,13 @@ def _render_orphans(
     for m in sorted(members, key=lambda m: m.rank_key()):
         pin = " 📌" if m.pinned else ""
         lines.append(f"- **{m.display_title}**{pin} · `{m.type}` · conf {_conf(m)} · `id:{m.id[:8]}`")
+        # Orphans are title-only (no content leaks here regardless), but a
+        # restricted/withheld synthesis must still SHOW its status so a reviewer
+        # scanning orphans sees the legal-hold, not a silent plain row.
+        if m.type == "synthesis" and not _authority.renders_as_body(m.metadata):
+            marker = _authority.render_marker(m.metadata)
+            if marker:
+                lines.append(f"  {marker}")
     lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

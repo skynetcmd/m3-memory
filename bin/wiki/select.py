@@ -63,6 +63,11 @@ class Mem:
     pinned: int
     created_at: Optional[str]
     updated_at: Optional[str]
+    # Parsed metadata_json (already a dict via the seam's json_column_to_dict, so
+    # a Postgres JSONB dict and a SQLite TEXT string both normalize here). Empty
+    # dict when the column is absent or unparseable — never None, so callers need
+    # no nil-check (§3 empty=zero, never None).
+    metadata: dict = field(default_factory=dict)
 
     @property
     def display_title(self) -> str:
@@ -123,6 +128,51 @@ def _param() -> str:
         return "?"
 
 
+def _json_column_to_dict(value) -> dict:
+    """Normalize a fetched JSON column to a dict via the backend seam.
+
+    Routes through dialect.json_column_to_dict so a Postgres JSONB dict and a
+    SQLite TEXT string both work — never a bare json.loads(), which TypeErrors on
+    a pre-parsed JSONB dict. Falls back to a local safe parse only when the seam
+    isn't importable (a standalone sqlite fixture), matching _param()'s pattern.
+    Fails safe: anything unparseable / non-object yields {}.
+    """
+    try:
+        from memory.backends import dialect
+    except ImportError:
+        # Seam not importable — a standalone sqlite fixture, definitionally TEXT.
+        # Degrade with the SAME fail-safe contract the seam guarantees. Not a
+        # backend branch: there is no backend here, only a raw sqlite column.
+        return _local_json_to_dict(value)
+    return dialect().json_column_to_dict(value)
+
+
+def _local_json_to_dict(value) -> dict:
+    """Fallback parse for when the backend seam isn't importable. Mirrors the
+    seam's fail-safe contract: None/empty/malformed/non-object → {}."""
+    if value is None or value == "" or value == b"":
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        import json as _json
+        if isinstance(value, (bytes, bytearray)):
+            value = value.decode("utf-8")
+        parsed = _json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _row_get(row, key):
+    """Column value by name across a sqlite3.Row (dict-like) and a seam row, or
+    None if the column is absent (e.g. the NULL AS ... alias on an older schema)."""
+    try:
+        return row[key]
+    except (KeyError, IndexError):
+        return None
+
+
 def _set_dict_rows(conn) -> None:
     """Ensure column access by name works. On a raw sqlite3 connection we set the
     Row factory; on a backend-seam connection (PostgreSQL) rows already support
@@ -180,11 +230,13 @@ def select_core_memories(
     has_pinned = _has_column(conn, "memory_items", "pinned")
     has_conf = _has_column(conn, "memory_items", "confidence")
     has_valid = _has_column(conn, "memory_items", "valid_from")
+    has_meta = _has_column(conn, "memory_items", "metadata_json")
 
     pinned_sel = "pinned" if has_pinned else "0 AS pinned"
     conf_sel = "confidence" if has_conf else "NULL AS confidence"
     vfrom_sel = "valid_from" if has_valid else "NULL AS valid_from"
     vto_sel = "valid_to" if has_valid else "NULL AS valid_to"
+    meta_sel = "metadata_json" if has_meta else "NULL AS metadata_json"
 
     p = _param()  # backend placeholder: '?' (SQLite) or '%s' (PostgreSQL)
     type_placeholders = ",".join([p] * len(CORE_TYPES))
@@ -199,7 +251,8 @@ def select_core_memories(
 
     sql = (
         f"SELECT id, type, title, content, importance, {conf_sel}, "
-        f"       {vfrom_sel}, {vto_sel}, {pinned_sel}, created_at, updated_at "
+        f"       {vfrom_sel}, {vto_sel}, {pinned_sel}, created_at, updated_at, "
+        f"       {meta_sel} "
         f"FROM memory_items WHERE {where_sql} "
         f"ORDER BY id LIMIT {p}"
     )
@@ -210,6 +263,7 @@ def select_core_memories(
 
     _set_dict_rows(conn)
     rows = conn.execute(sql, params).fetchall()
+    _to_dict = _json_column_to_dict  # bind once (seam lookup is cached inside)
     out: list[Mem] = []
     for r in rows:
         if _excl is not None:
@@ -229,6 +283,7 @@ def select_core_memories(
                 pinned=int(r["pinned"] or 0),
                 created_at=r["created_at"],
                 updated_at=r["updated_at"],
+                metadata=_to_dict(_row_get(r, "metadata_json")),
             )
         )
     out.sort(key=lambda m: m.rank_key())
