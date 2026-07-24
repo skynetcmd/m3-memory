@@ -321,6 +321,29 @@ SLM-extraction pipeline to build a typed knowledge graph of entities and relatio
 
 ---
 
+## Wiki — synthesis & compilation
+
+The [wiki](WIKI.md) can attach an LLM prose lede per topic (`--synthesize`) or
+compile durable synthesis memories (`m3 wiki compile`). Both talk to an
+OpenAI-compatible `/v1/chat/completions` endpoint (your local model). The
+`COMPILE` vars fall back to the `SYNTH` vars when unset, so pointing one endpoint
+via `M3_WIKI_SYNTH_*` configures both; set `M3_WIKI_COMPILE_*` only to route
+compilation to a different/larger model than the lede synthesizer.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_WIKI_SYNTH_URL` | `http://127.0.0.1:1234/v1/chat/completions` | Chat endpoint for `--synthesize` ledes (LM Studio, llama-server, Ollama, vLLM, …). |
+| `M3_WIKI_SYNTH_MODEL` | (empty → server's loaded model) | Model id to request for ledes. |
+| `M3_WIKI_SYNTH_TIMEOUT` | `30` | Per-request timeout (seconds) for ledes. |
+| `M3_WIKI_COMPILE_URL` | (falls back to `M3_WIKI_SYNTH_URL`, then `http://127.0.0.1:1234/v1/chat/completions`) | Chat endpoint for `m3 wiki compile`. Set to route compilation to a different endpoint than lede synthesis. |
+| `M3_WIKI_COMPILE_MODEL` | (falls back to `M3_WIKI_SYNTH_MODEL`, then server's loaded model) | Model id for compilation — e.g. a larger model than the lede synthesizer. |
+| `M3_WIKI_COMPILE_TIMEOUT` | `60` | Per-request timeout (seconds) for compilation. Higher than the lede default: a compiled page is longer than a 2–3 sentence lede. |
+
+The LLM token is read from `LM_API_TOKEN` (see [API Keys](#-api-keys--authentication)).
+Admission-gate tuning is a config file, not an env var — see the [wiki docs](WIKI.md).
+
+---
+
 ## Project Oxidation — Rust Core (`m3_core_rs`)
 
 Optional Rust compute core ([`m3-core-rs`](https://github.com/skynetcmd/m3-core-rs)). Prebuilt wheels are published per platform — `m3 setup` / `m3 embedder install-gpu` install the matching one automatically (CPU/Vulkan/Metal from PyPI under the platform-suffixed names like `m3-core-rs-linux-cpu`; CUDA from the GitHub Release — see [CUDA_INSTALL.md](CUDA_INSTALL.md)). You only build from source when no prebuilt wheel matches your platform + Python version ([BUILD_WHEELS.md](BUILD_WHEELS.md)). When the `m3_core_rs` wheel is importable, hot-path operations — SHA-256 hashing, cosine / batch-cosine, MMR reranking, the expansion-displacement guard, chat-log redaction, and pre-retrieval query routing — route through Rust. 
