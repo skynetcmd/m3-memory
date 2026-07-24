@@ -12,10 +12,11 @@
 # A non-zero exit blocks the push. Override only in a real emergency with
 # `git push --no-verify` — and then fix forward immediately.
 #
-# Local exclusions: set $M3_PREPUSH_EXCLUDES to a file of extra pathspecs (one
-# per line) to exempt from the leakage scan — for machine/user-specific paths
-# (a developer's own username dirs) that must NOT be hardcoded in this tracked
-# hook. The mechanism is public; your exclusion list stays local. See gate 3.
+# Local exclusions: a file of extra pathspecs (one per line) exempts them from
+# the leakage scan — for machine/user-specific paths (a developer's own username
+# dirs) that must NOT be hardcoded in this tracked hook. Source: $M3_PREPUSH_EXCLUDES
+# if set, else ~/.m3-private/m3_PrePush_Excludes.txt. The mechanism is public;
+# your exclusion list stays local. See gate 3.
 #
 # Performance: the expensive half is the drift gate, which spawns Python to
 # regenerate artifacts + run pytest. That work is only meaningful when the
@@ -135,18 +136,21 @@ EXCLUDES=(
   ':(exclude)tests/test_wiki_pii_scrub.py'
 )
 
-# LOCAL exclusions (optional): a path in $M3_PREPUSH_EXCLUDES points at a file of
-# additional pathspecs, one per line, appended as ':(exclude)<path>'. This keeps
-# MACHINE/USER-specific exclusions — a developer's own username paths, a local
-# scratch dir — OUT of the tracked repo: the mechanism is generic and public, the
-# list is private and local. Blank lines and '#' comments are ignored. A missing
-# file or unset var is a no-op (the tracked excludes above always apply).
-if [ -n "${M3_PREPUSH_EXCLUDES:-}" ] && [ -f "$M3_PREPUSH_EXCLUDES" ]; then
+# LOCAL exclusions (optional): a file of additional pathspecs, one per line,
+# appended as ':(exclude)<path>'. This keeps MACHINE/USER-specific exclusions —
+# a developer's own username paths, a local scratch dir — OUT of the tracked
+# repo: the mechanism is generic and public, the list is private and local.
+# Source, in order: $M3_PREPUSH_EXCLUDES if set, else the conventional default
+# ~/.m3-private/m3_PrePush_Excludes.txt (a private tree, never the public repo).
+# Blank lines and '#' comments are ignored. A missing file is a no-op (the
+# tracked excludes above always apply).
+LOCAL_EXCLUDES="${M3_PREPUSH_EXCLUDES:-${HOME}/.m3-private/m3_PrePush_Excludes.txt}"
+if [ -f "$LOCAL_EXCLUDES" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue ;; esac      # skip blanks + comments
     EXCLUDES+=(":(exclude)${line}")
-  done < "$M3_PREPUSH_EXCLUDES"
-  echo "[pre-push]   (applied local exclusions from \$M3_PREPUSH_EXCLUDES)"
+  done < "$LOCAL_EXCLUDES"
+  echo "[pre-push]   (applied local exclusions from $LOCAL_EXCLUDES)"
 fi
 
 LEAK=""
