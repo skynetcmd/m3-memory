@@ -48,6 +48,67 @@ ENTITY_COMENTION_WEIGHT = 1.0
 # Skip it when building co-mention edges.
 ENTITY_MAX_DEGREE = 8
 
+# Entity TYPES that are non-discriminative for topic co-mention: they appear
+# across unrelated topics and bridge them into one blob (a date, a file path, an
+# env var, a port, a branch name, a generic module/table). Two memories sharing
+# only "2026-04-10" or "pyproject.toml" or "M3_ENGINE_ROOT" are NOT about the same
+# thing. Excluding these from co-mention is what keeps clusters coherent — a much
+# sharper lever than lowering ENTITY_MAX_DEGREE (which would also drop the GOOD
+# links from discriminative entities like a person, benchmark, model, or device).
+# (Measured 2026-07-24: file_path/datetime/env_var/port/commit_or_branch were the
+# top mergers that fused 40 unrelated notes into one "debugging" cluster.)
+NON_DISCRIMINATIVE_ENTITY_TYPES = frozenset({
+    # Structural / temporal noise — appear everywhere.
+    "datetime", "file_path", "env_var", "port", "commit_or_branch",
+    "module", "class_or_table", "memory_type", "task_id", "task_category",
+    "bench_run_id", "migration", "mac_address", "memory_id",
+    # Infrastructure addressing — a host/container/IP/VLAN/endpoint is shared by
+    # every note that happens to touch that box, across unrelated topics.
+    "host", "container", "ip_address", "vlan", "endpoint_url", "service",
+    "protocol",
+    # Model/tool names are too generic: "Opus", "gpt-4o-mini", "bge-m3" co-occur
+    # across bench, infra, and feature notes alike. (Discriminative entities that
+    # SURVIVE and rightly co-locate: person, benchmark, organization, metric.)
+    "model", "variant", "device",
+})
+
+# Self-referential entity VALUES: the project's own name / repo / org identifiers.
+# Type alone can't catch these — "skynetcmd/m3-memory" is an `organization`, and
+# real external orgs of that type (Technitium, Mem0, PyPI) ARE discriminative and
+# must survive. But the project's own repo/org means "this is an m3 note", not
+# "this is about X", so it bridges everything. A VALUE-level exclusion, config-
+# overridable per deployment (a different project has a different name).
+# (Measured 2026-07-24: `skynetcmd/m3-memory` [org] + `m3-memory` [org] were the
+# last bridges fusing a release note into the debugging cluster.)
+_SELF_REF_CONFIG_BASENAME = ".wiki_self_entities.json"
+_DEFAULT_SELF_REF_NAMES = frozenset({
+    "m3-memory", "skynetcmd/m3-memory", "skynetcmd", "skynetCMD", "m3", "M3",
+})
+
+
+def _self_ref_names() -> "frozenset[str]":
+    """Project self-reference entity names to exclude from co-mention. Default set
+    plus an optional config file at M3_CONFIG_ROOT/.wiki_self_entities.json
+    (`{"self_entities": ["myproj", "org/repo"]}`). Case-insensitive match. Config
+    is a code-resolved FILE, not an env var (§3: headless launchers inherit no
+    shell env). Malformed/absent → the default. Cached per config path."""
+    import json as _json
+    import os as _os
+    root = (_os.environ.get("M3_CONFIG_ROOT")
+            or (_os.path.join(_os.environ["M3_MEMORY_ROOT"], "config")
+                if _os.environ.get("M3_MEMORY_ROOT") else None)
+            or _os.path.join(_os.path.expanduser("~"), ".m3", "config"))
+    path = _os.path.join(root, _SELF_REF_CONFIG_BASENAME)
+    names = set(_DEFAULT_SELF_REF_NAMES)
+    try:
+        if _os.path.isfile(path):
+            extra = _json.load(open(path, encoding="utf-8")).get("self_entities")
+            if isinstance(extra, list):
+                names.update(str(x) for x in extra)
+    except Exception:
+        pass  # config problems never break clustering
+    return frozenset(n.lower() for n in names)
+
 
 @dataclass
 class Mem:
@@ -333,12 +394,31 @@ def load_entity_comention_edges(conn: sqlite3.Connection, ids: set[str]) -> list
         "SELECT entity_id, memory_id FROM memory_item_entities"
     ).fetchall()
 
+    # Non-discriminative entity types (dates, file paths, env vars, …) bridge
+    # unrelated topics, so drop their entities from co-mention. Load the type map
+    # if the entities table is present; if it isn't, degrade to no filtering
+    # (behaviour unchanged on a DB without the entity catalog).
+    excluded_ids: set[str] = set()
+    if _has_column(conn, "entities", "entity_type"):
+        self_names = _self_ref_names()
+        has_name = _has_column(conn, "entities", "canonical_name")
+        cols = "id, entity_type" + (", canonical_name" if has_name else "")
+        for er in conn.execute(f"SELECT {cols} FROM entities").fetchall():
+            # (a) non-discriminative TYPE, or (b) a self-referential project name.
+            if er["entity_type"] in NON_DISCRIMINATIVE_ENTITY_TYPES:
+                excluded_ids.add(er["id"])
+            elif has_name and (er["canonical_name"] or "").lower() in self_names:
+                excluded_ids.add(er["id"])
+
     # entity_id -> sorted list of core memory ids that mention it
     by_entity: dict[str, list[str]] = {}
     for r in rows:
+        eid = r["entity_id"]
+        if eid in excluded_ids:
+            continue  # non-discriminative type — no cross-topic bridge
         mid = r["memory_id"]
         if mid in ids:
-            by_entity.setdefault(r["entity_id"], []).append(mid)
+            by_entity.setdefault(eid, []).append(mid)
 
     pair_seen: set[tuple[str, str]] = set()
     edges: list[Edge] = []

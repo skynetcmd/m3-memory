@@ -479,3 +479,83 @@ def test_prune_never_escapes_out_dir(tmp_path):
     # Regen with a vault that doesn't include those → prune runs.
     gen_wiki._write_vault({"index.md": "# i\n"}, out)
     assert outside.exists(), "prune must never delete outside the vault dir"
+
+
+def test_non_discriminative_entities_excluded_from_comention():
+    """Upstream clustering fix (2026-07-24): entities of non-discriminative types
+    (dates, file paths, hosts, IPs, generic model names) must NOT create
+    co-mention edges — they bridge unrelated topics into one blob. Only
+    discriminative entities (person, benchmark, …) should link."""
+    import sqlite3
+    from wiki import select as S
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        """CREATE TABLE memory_items (id TEXT PRIMARY KEY, type TEXT, title TEXT,
+             content TEXT, importance REAL DEFAULT 0.5, confidence REAL,
+             valid_from TEXT, valid_to TEXT, pinned INTEGER DEFAULT 0,
+             is_deleted INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT,
+             metadata_json TEXT);
+           CREATE TABLE entities (id TEXT PRIMARY KEY, canonical_name TEXT,
+             entity_type TEXT);
+           CREATE TABLE memory_item_entities (memory_id TEXT, entity_id TEXT,
+             mention_text TEXT, mention_offset INTEGER DEFAULT 0,
+             confidence REAL DEFAULT 0.85);"""
+    )
+    conn.executescript(
+        """INSERT INTO memory_items (id,type,title,content,importance) VALUES
+             ('m1','note','A','a',0.9),('m2','note','B','b',0.9),('m3','note','C','c',0.9);
+           INSERT INTO entities (id,canonical_name,entity_type) VALUES
+             ('e_date','2026-07-24','datetime'),
+             ('e_bench','LongMemEval','benchmark');
+           -- m1,m2 share only a DATE (noise) -> must NOT link
+           INSERT INTO memory_item_entities (memory_id,entity_id) VALUES
+             ('m1','e_date'),('m2','e_date'),
+           -- m2,m3 share a BENCHMARK (discriminative) -> SHOULD link
+             ('m2','e_bench'),('m3','e_bench');"""
+    )
+    conn.commit()
+    edges = S.load_entity_comention_edges(conn, {"m1", "m2", "m3"})
+    pairs = {tuple(sorted((e.from_id, e.to_id))) for e in edges}
+    assert ("m2", "m3") in pairs, "discriminative (benchmark) co-mention must link"
+    assert ("m1", "m2") not in pairs, "date-only co-mention must NOT link (noise)"
+    conn.close()
+
+
+def test_self_referential_project_name_excluded_from_comention():
+    """Finer clustering fix (2026-07-24): the project's OWN repo/org name is
+    non-discriminative (every note mentions it) even though `organization` as a
+    TYPE is discriminative for real external orgs. A value-level exclusion must
+    drop the self-name bridge while keeping real-org links."""
+    import sqlite3
+    from wiki import select as S
+    conn = sqlite3.connect(":memory:")
+    conn.executescript(
+        """CREATE TABLE memory_items (id TEXT PRIMARY KEY, type TEXT, title TEXT,
+             content TEXT, importance REAL DEFAULT 0.5, confidence REAL,
+             valid_from TEXT, valid_to TEXT, pinned INTEGER DEFAULT 0,
+             is_deleted INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT,
+             metadata_json TEXT);
+           CREATE TABLE entities (id TEXT PRIMARY KEY, canonical_name TEXT,
+             entity_type TEXT);
+           CREATE TABLE memory_item_entities (memory_id TEXT, entity_id TEXT,
+             mention_text TEXT, mention_offset INTEGER DEFAULT 0,
+             confidence REAL DEFAULT 0.85);"""
+    )
+    conn.executescript(
+        """INSERT INTO memory_items (id,type,title,content,importance) VALUES
+             ('m1','note','A','a',0.9),('m2','note','B','b',0.9),('m3','note','C','c',0.9);
+           INSERT INTO entities (id,canonical_name,entity_type) VALUES
+             ('e_self','skynetcmd/m3-memory','organization'),
+             ('e_real','Technitium','organization');
+           -- m1,m2 share only the PROJECT's own org name -> must NOT link
+           INSERT INTO memory_item_entities (memory_id,entity_id) VALUES
+             ('m1','e_self'),('m2','e_self'),
+           -- m2,m3 share a REAL external org -> SHOULD link
+             ('m2','e_real'),('m3','e_real');"""
+    )
+    conn.commit()
+    pairs = {tuple(sorted((e.from_id, e.to_id)))
+             for e in S.load_entity_comention_edges(conn, {"m1", "m2", "m3"})}
+    assert ("m2", "m3") in pairs, "real external org must still link"
+    assert ("m1", "m2") not in pairs, "project self-name must NOT bridge (noise)"
+    conn.close()
