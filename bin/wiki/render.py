@@ -12,6 +12,7 @@ import posixpath
 import re
 from typing import Optional
 
+from . import anchor as _anchor
 from . import authority as _authority
 from . import blast_radius as _blast
 from . import citation_drift as _citation_drift
@@ -817,4 +818,63 @@ def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolve
     drift_lines = _citation_drift.render_section(report, links, SELF)
     if drift_lines:
         lines.extend(drift_lines)
+
+    # Knowledge Anchor Report: KAS + coverage / staleness / redundancy. Pure,
+    # deterministic (no model, no new query), so it stays in the drift test.
+    lines.extend(_render_anchor_report(clusters, edges))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_anchor_report(clusters, edges) -> list:
+    """The Knowledge Anchor Report lint section: which topics are anchored vs.
+    adrift (KAS), whether the wiki is representative (coverage), current
+    (staleness), and non-redundant. All deterministic graph math."""
+    from .select import EDGE_WEIGHTS
+    h = _anchor.build_health(clusters, edges, EDGE_WEIGHTS)
+    L = ["## Knowledge Anchor Report", ""]
+    L.append(f"_Coverage {h.coverage:.0%}: {h.covered} high-value memories in real "
+             f"topics, {h.orphaned_high_value} stranded as orphans._")
+    L.append("")
+    # Low-anchor / adrift topics (the headline signal).
+    L.append(f"### Low anchor ({len(h.low_anchor)})")
+    L.append("")
+    if h.low_anchor:
+        L.append("_Topics held together weakly or only by co-mention — candidates "
+                 "for a tighter entity filter or a manual split._")
+        L.append("")
+        by_key = {a.key: a for a in h.anchors}
+        for key in h.low_anchor:
+            a = by_key.get(key)
+            if not a:
+                continue
+            drift = (f" · bridged by: {', '.join(a.drift_entities)}"
+                     if a.drift_entities else "")
+            tag = "adrift" if a.adrift else f"KAS {a.kas}"
+            L.append(f"- {a.title} · `{tag}` · {a.members} members "
+                     f"({a.load_bearing_edges} real / {a.comention_edges} co-mention){drift}")
+    else:
+        L.append("_Every topic is anchored by real connections._")
+    L.append("")
+    # Stale topics.
+    if h.stale:
+        L.append(f"### Stale sources ({len(h.stale)})")
+        L.append("")
+        L.append("_Topics whose source memories are mostly superseded/aged — the "
+                 "page may present outdated knowledge._")
+        L.append("")
+        slug = {c.key: c for c in clusters}
+        for key, frac in h.stale:
+            title = slug[key].members[0].display_title if slug.get(key) else key
+            L.append(f"- {title} · {frac:.0%} stale")
+        L.append("")
+    # Redundant pairs.
+    if h.redundant_pairs:
+        L.append(f"### Redundant topics ({len(h.redundant_pairs)})")
+        L.append("")
+        L.append("_Topic pairs with high member overlap — likely one topic split "
+                 "in two._")
+        L.append("")
+        for a_key, b_key, ov in h.redundant_pairs:
+            L.append(f"- `{a_key[:8]}` ⇄ `{b_key[:8]}` · {ov:.0%} overlap")
+        L.append("")
+    return L
