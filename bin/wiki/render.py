@@ -13,6 +13,7 @@ import re
 from typing import Optional
 
 from . import authority as _authority
+from . import blast_radius as _blast
 from .cluster import Cluster
 from .files_layer import FileNode, FilesLayer
 from .select import Edge, Mem, Promo
@@ -745,5 +746,25 @@ def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolve
 
     for a, b in contradictions:
         lines.append(f"- `{a[:8]}` ({topic_ref(a)}) ⚔️ `{b[:8]}` ({topic_ref(b)})")
+    lines.append("")
+
+    # Blast radius (4a): syntheses transitively compiled FROM a synthesis judged
+    # wrong. Deterministic graph walk over the edges already in hand — no model,
+    # no new query. A file-based wiki can't compute this; m3's provenance edges
+    # can. Section is always emitted (count 0 when clean) so its absence never
+    # reads as "not checked".
+    wrong = sorted(_blast.wrong_ids(clusters))
+    tainted = sorted(_blast.contaminated(clusters, edges))
+    lines.append(f"## Blast radius ({len(tainted)})")
+    lines.append("")
+    if wrong:
+        lines.append(f"_{len(wrong)} synthesis(es) judged wrong; "
+                     f"{len(tainted)} downstream synthesis(es) may carry the error._")
+        lines.append("")
+        for mid in tainted:
+            lines.append(f"- `{mid[:8]}` ({topic_ref(mid)}) — compiled from a "
+                         f"wrong source; re-check")
+    else:
+        lines.append("_No synthesis is marked wrong; nothing downstream to flag._")
     lines.append("")
     return "\n".join(lines).rstrip() + "\n"
