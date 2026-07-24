@@ -148,7 +148,10 @@ in shell rc files (see the Zero-Leak principle above).
 | `PERPLEXITY_API_KEY` | Perplexity AI — web search. | Optional |
 | `XAI_API_KEY` | xAI / Grok — web-search fallback. | Optional |
 | `NEWS_API_KEY` | NewsAPI — the news-fetch tool. | Optional |
-| `GITHUB_TOKEN` / `GH_TOKEN` | GitHub API — docs-generation scripts (stargazer / clone-count badges). In CI, `GITHUB_TOKEN` is injected automatically; locally use `$(gh auth token)`. | Optional (dev tooling) |
+
+> GitHub tokens (`GITHUB_TOKEN` / `GH_TOKEN`) are **not** a runtime service key —
+> m3 uses GitHub only for **development & deployment** (docs/badge generation, CI,
+> releases), never at runtime. See [Development & repo tooling](#development--repo-tooling).
 
 ### FIPS / Cryptography (`bin/crypto_provider.py`)
 
@@ -405,12 +408,15 @@ increments by the number of inputs served along that path.
 
 ## Development & repo tooling
 
-These are read by developer tooling (git hooks, build scripts), **not** by the
-m3 runtime. They matter only when working *in* the repo, and are read by a shell
-process (the git hook), so they are set in your shell/Windows-user environment —
-not in the MCP server `env` block that the runtime `M3_*` roots use.
+These are read by **development & deployment** tooling — git hooks, docs/badge
+generators, CI, and release flows — **not** by the m3 runtime. A user running m3
+never needs these; only a developer/maintainer does. They are read by a shell
+process (not the MCP server), so they live in your shell / Windows-user
+environment (or CI secrets), not in the MCP server `env` block that the runtime
+`M3_*` roots use.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `M3_PREPUSH_EXCLUDES` | `~/.m3-private/m3_PrePush_Excludes.txt` | Path to a file of **local** pathspecs the pre-push leakage scan (`.githooks/pre-push`, gate 3) should exempt — one pathspec per line, `#` comments and blanks ignored. For machine-/user-specific paths that legitimately contain scan patterns (a developer's own username directories, a local scratch tree) but are not leaks. Keeps the *mechanism* in the public tracked hook while the *exclusion list* stays in the private `~/.m3-private` tree. Read defensively: a missing / empty / unreadable file is a harmless no-op (the hook's tracked excludes always apply), so the var is entirely optional. Set it only to point the hook at a non-default location. |
-| `M3_STARGAZER` | (unset) | Fallback GitHub token for `bin/gen_download_badges.py` (README clone-count badge) when `GITHUB_TOKEN` is unset. A read-only token is sufficient. Unset → the clone badge is skipped, not an error. Badge/docs generation only; never read at runtime. (The primary token, `GITHUB_TOKEN` / `GH_TOKEN`, is listed under [Third-party service credentials](#third-party-service-credentials--endpoints).) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | (unset) | GitHub API token — m3 uses GitHub **only for development & deployment**, never at runtime: the docs-generation scripts (`bin/gen_star_history.py`, `bin/gen_download_badges.py`) read it to fetch stargazer / clone-count stats, and CI/release flows use it. In CI, `GITHUB_TOKEN` is injected automatically; locally use `GITHUB_TOKEN=$(gh auth token)`. `GH_TOKEN` is an accepted alias. Unset → those generators skip or error clearly; no effect on the m3 runtime. |
+| `M3_STARGAZER` | (unset) | Fallback GitHub token for `bin/gen_download_badges.py` (README clone-count badge) when `GITHUB_TOKEN` is unset. A read-only token is sufficient. Unset → the clone badge is skipped, not an error. Badge/docs generation only; never read at runtime. |
