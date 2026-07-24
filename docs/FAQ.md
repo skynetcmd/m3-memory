@@ -61,6 +61,37 @@ python bin/install_schedules.py --repair
 
 ## General
 
+### Q: Why do my writes take so long? I thought M3 was "zero-lag."
+**A:** They're two different clocks, and the slow one isn't M3.
+
+**Once M3 has the write, it's millisecond-to-sub-second.** Measured end-to-end on
+a real ~305 MB store: the write impl is ~1.7 ms warm, the MCP dispatch adds
+~0.02 ms, and embedding is ~0.8 ms of that (a live call to the shared embedder).
+That's the "zero-lag" promise, and it holds — a warm write lands well inside M3's
+5 ms budget.
+
+**What you're waiting on is the AI writing the memory, not M3 storing it.** When
+an assistant calls `memory_write`, it has to *generate the content as tool-call
+arguments*, one token at a time, before M3 ever receives the request. That
+generation is **size-proportional**: a one-line memory is near-instant, but a
+multi-kilobyte memory can take seconds to tens of seconds to emit. In one
+measurement, a 23-byte write round-tripped in ~3.7 s while a 4 KB write of the
+same shape took ~24 s — the only variable was how much text had to be generated.
+
+This is **the same whether the assistant runs on a local LLM or a cloud AI** —
+token generation is proportional to output length in both cases, so a large
+memory is slow to *produce* regardless of provider. M3's storage cost is
+identical either way.
+
+**Takeaways:**
+- If writes feel slow, the memory is probably large. Prefer several focused
+  memories over one giant blob — each is faster to generate and better for
+  retrieval.
+- For bulk ingestion (many memories at once), the per-write generation cost
+  dominates; that's what bulk-write paths exist to amortize.
+- A slow write is not a sign M3 is unhealthy. To confirm M3 itself is fast, time
+  a tiny write — it should return almost immediately.
+
 ### Q: Where are the logs located?
 **A:** Logs are stored in the `logs/` directory at the project root.
 
