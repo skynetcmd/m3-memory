@@ -29,6 +29,7 @@
   },
   "overrides": {
     "vite": "^8.0.0-beta.13",
-    "brace-expansion": "^2.0.3"
+    "brace-expansion": "^2.0.3",
+    "postcss": ">=8.5.12"
   }
 }
