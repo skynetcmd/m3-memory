@@ -64,8 +64,7 @@ def test_default_build_omits_the_section_entirely():
     """A build with no judge must not contain the drift section at all."""
     conn = _db()
     try:
-        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False))
+        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6))
     finally:
         conn.close()
     assert "Citation drift" not in pages["lint.md"]
@@ -79,12 +78,10 @@ def test_default_build_is_byte_identical_with_and_without_the_param():
         try:
             if pass_param:
                 return build_wiki(conn, None,
-                                  WikiOptions(importance_threshold=0.6,
-                                              use_networkx=False),
+                                  WikiOptions(importance_threshold=0.6),
                                   drift_judge=None)
             return build_wiki(conn, None,
-                              WikiOptions(importance_threshold=0.6,
-                                          use_networkx=False))
+                              WikiOptions(importance_threshold=0.6))
         finally:
             conn.close()
     a, b = build(True), build(False)

@@ -9,9 +9,9 @@ Obsidian-ready vault. Default output is <engine_root>/wiki.
                                     [--importance-threshold F]
     python bin/gen_wiki.py status  [--out DIR]
 
-Invoked by `m3 wiki generate` / `m3 wiki status` (see m3_memory/cli.py). The heavy
-clustering dep (networkx) is optional: `pip install "m3-memory[wiki]"` upgrades
-cluster quality; without it a pure-Python fallback is used.
+Invoked by `m3 wiki generate` / `m3 wiki status` (see m3_memory/cli.py). The wiki
+is a core feature and runs on the base install — clustering uses networkx, which
+is a base dependency of m3-memory (no optional extra required).
 """
 from __future__ import annotations
 
@@ -72,7 +72,6 @@ def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
                               if args.importance_threshold is not None
                               else DEFAULT_IMPORTANCE_THRESHOLD),
         include_files=not args.no_files,
-        use_networkx=not args.no_networkx,
         exclude_regex=getattr(args, "exclude", None),
         obsidian=getattr(args, "obsidian", False),
     )
@@ -279,7 +278,6 @@ def _cmd_compile(args: argparse.Namespace) -> int:
 
     tau = (args.importance_threshold if args.importance_threshold is not None
            else DEFAULT_IMPORTANCE_THRESHOLD)
-    use_nx = not getattr(args, "no_networkx", False)
     compiler = LLMProseCompiler()
 
     async def _run(gate=None):
@@ -289,7 +287,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
             ids = {m.id for m in mems}
             edges = list(_select.load_memory_edges(conn, ids))
             edges += _select.load_entity_comention_edges(conn, ids)
-            clusters = [c for c in _cluster_mod.cluster(mems, edges, use_networkx=use_nx)
+            clusters = [c for c in _cluster_mod.cluster(mems, edges)
                         if not c.is_orphan]
             # Heads: live syntheses already in `mems` (CORE_TYPES includes it),
             # keyed by title. No extra query — reuse the loaded rows.
@@ -321,7 +319,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
             ids = {m.id for m in mems}
             edges = list(_select.load_memory_edges(conn, ids))
             edges += _select.load_entity_comention_edges(conn, ids)
-            clusters = [c for c in _cluster_mod.cluster(mems, edges, use_networkx=use_nx)
+            clusters = [c for c in _cluster_mod.cluster(mems, edges)
                         if not c.is_orphan]
         gate = _admission.load_gate()
         demoted = 0
@@ -375,8 +373,6 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                    help="Exit non-zero if the on-disk vault differs from a fresh build.")
     p.add_argument("--no-files", action="store_true",
                    help="Skip the files corpus (memory-only vault).")
-    p.add_argument("--no-networkx", action="store_true",
-                   help="Force the pure-Python clustering fallback even if networkx is present.")
     p.add_argument("--synthesize", action="store_true",
                    help="Write an LLM prose lede per topic via a local chat endpoint "
                         "(opt-in; cached; degrades to member-lists if no model). "
@@ -411,8 +407,6 @@ def main(argv: list[str] | None = None) -> int:
              "store; idempotent — safe to re-run).")
     p_compile.add_argument("--importance-threshold", type=float, default=None,
                            help="Core-memory importance floor (default 0.55).")
-    p_compile.add_argument("--no-networkx", action="store_true",
-                           help="Force the pure-Python clustering fallback.")
     p_compile.add_argument("--scope", default="agent",
                            help="Tenancy scope for written syntheses (default agent).")
     p_compile.add_argument("--user-id", default="",

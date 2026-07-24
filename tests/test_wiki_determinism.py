@@ -1,7 +1,7 @@
 """Determinism + correctness tests for the wiki generator (bin/wiki/).
 
-Drives the PURE builder (`wiki.build.build_wiki`) from tiny in-memory fixture DBs
-so there's no dependency on the real store, no embedder, and no flake surface. The
+Drives `wiki.build.build_wiki` from tiny in-memory fixture DBs so there's no
+dependency on the real store, no embedder, and no flake surface. The
 core guarantee — same DB in → byte-identical vault out — is asserted by building
 twice and comparing every page.
 """
@@ -144,16 +144,15 @@ def _files_db() -> sqlite3.Connection:
     return conn
 
 
-def _build(use_networkx: bool, entity_comention: bool = False,
+def _build(entity_comention: bool = False,
            obsidian: bool = False) -> dict:
     mem, files = _mem_db(), _files_db()
     try:
-        # admission_gate=False: these tests validate pure clustering + rendering
-        # on tiny fixtures. The gate (which demotes weakly-anchored clusters) has
-        # its own suite in test_wiki_admission.py; leaving it on here would demote
-        # fixture clusters to orphans and mask the rendering behaviour under test.
+        # admission_gate=False: these tests validate clustering + rendering on tiny
+        # fixtures. The gate (which demotes weakly-anchored clusters) has its own
+        # suite in test_wiki_admission.py; leaving it on here would demote fixture
+        # clusters to orphans and mask the rendering behaviour under test.
         return build_wiki(mem, files, WikiOptions(importance_threshold=0.6,
-                                                  use_networkx=use_networkx,
                                                   entity_comention=entity_comention,
                                                   obsidian=obsidian,
                                                   admission_gate=False))
@@ -162,18 +161,17 @@ def _build(use_networkx: bool, entity_comention: bool = False,
         files.close()
 
 
-@pytest.mark.parametrize("use_networkx", [False, True])
-def test_deterministic(use_networkx):
+def test_deterministic():
     """Same DB in → byte-identical vault out, across two independent builds."""
-    a = _build(use_networkx)
-    b = _build(use_networkx)
+    a = _build()
+    b = _build()
     assert a.keys() == b.keys()
     for k in a:
         assert a[k] == b[k], f"page {k} differs between builds"
 
 
 def test_core_pages_emitted():
-    vault = _build(use_networkx=False)
+    vault = _build()
     assert "index.md" in vault
     assert "overview.md" in vault
     assert "lint.md" in vault
@@ -197,7 +195,7 @@ def test_uses_real_markdown_links_not_wikilinks():
     documentation, not a link — so we forbid only BARE, un-code-fenced wikilinks.)
     """
     import re as _re
-    vault = _build(use_networkx=False, entity_comention=True)
+    vault = _build(entity_comention=True)
     for path, text in vault.items():
         # Strip inline code spans and fenced code blocks, then any [[ is a real link.
         stripped = _re.sub(r"`[^`]*`", "", text)
@@ -212,7 +210,7 @@ def test_uses_real_markdown_links_not_wikilinks():
 def test_obsidian_mode_emits_wikilinks():
     """--obsidian emits [[note-name|label]] wikilinks (so Obsidian's graph view
     and backlinks work) and NO standard markdown page links."""
-    vault = _build(use_networkx=False, entity_comention=True, obsidian=True)
+    vault = _build(entity_comention=True, obsidian=True)
     idx = vault["index.md"]
     assert "[[" in idx, "obsidian mode should emit wikilinks"
     # No standard markdown links to .md pages (the logo data-URI img is not a link).
@@ -221,13 +219,13 @@ def test_obsidian_mode_emits_wikilinks():
     # A wikilink targets the note-name (slug), aliased to the display title.
     assert _re.search(r"\[\[[a-z0-9-]+(\|[^\]]+)?\]\]", idx)
     # Deterministic in obsidian mode too.
-    again = _build(use_networkx=False, entity_comention=True, obsidian=True)
+    again = _build(entity_comention=True, obsidian=True)
     for k in vault:
         assert vault[k] == again[k]
 
 
 def test_cluster_and_wikilinks():
-    vault = _build(use_networkx=False)
+    vault = _build()
     # Alpha Root/Detail/Runbook cluster together on one topic page.
     alpha = [t for p, t in vault.items()
              if p.startswith("topics/") and "Alpha Root" in t]
@@ -240,7 +238,7 @@ def test_cluster_and_wikilinks():
 
 
 def test_contradiction_flagged():
-    vault = _build(use_networkx=False)
+    vault = _build()
     # Two contradicting pairs: the belief pair (eee/fff) and the synthesis pair
     # (hhh contradicts ggg) — see test_synthesis_is_core_type_and_sections.
     lint = vault["lint.md"]
@@ -262,7 +260,7 @@ def test_synthesis_is_core_type_and_sections():
     target, so suppressing the wrong page would break the very machinery that
     records it as wrong.
     """
-    vault = _build(use_networkx=False)
+    vault = _build()
     body = "\n".join(vault.values())
     assert "Alpha Compiled" in body, "synthesis excluded despite being a CORE_TYPE"
     assert "Wrong Answer" in body, "a contradicted synthesis must remain visible"
@@ -278,7 +276,7 @@ def test_synthesis_is_core_type_and_sections():
 
 
 def test_evidence_links_to_source():
-    vault = _build(use_networkx=False)
+    vault = _build()
     # m-aaa was promoted from design.md → its topic shows an Evidence link,
     # and a sources/ page exists for the file.
     alpha = [t for p, t in vault.items()
@@ -293,8 +291,8 @@ def test_evidence_links_to_source():
 def test_entity_comention_binds_orphans():
     """With entity co-mention on, two memories sharing a specific entity cluster
     together even with no hand-authored edge — and are NOT left as orphans."""
-    without = _build(use_networkx=False, entity_comention=False)
-    with_ = _build(use_networkx=False, entity_comention=True)
+    without = _build(entity_comention=False)
+    with_ = _build(entity_comention=True)
 
     # Without co-mention, m-ddd (Beta Standalone) is an orphan.
     assert "Beta Standalone" in without["topics/orphans.md"]
@@ -309,7 +307,7 @@ def test_entity_comention_binds_orphans():
     assert len(shared) == 1, "m-ddd and m-fff should share one topic via co-mention"
 
     # Determinism must hold with co-mention on, too.
-    again = _build(use_networkx=False, entity_comention=True)
+    again = _build(entity_comention=True)
     for k in with_:
         assert with_[k] == again[k]
 
@@ -323,8 +321,7 @@ def test_admission_gate_demotes_comention_only_cluster():
     mem, files = _mem_db(), _files_db()
     try:
         gated = build_wiki(mem, files, WikiOptions(
-            importance_threshold=0.6, use_networkx=False,
-            entity_comention=True, admission_gate=True))
+            importance_threshold=0.6, entity_comention=True, admission_gate=True))
     finally:
         mem.close()
         files.close()
@@ -360,7 +357,7 @@ def test_html_viewer_self_contained():
         sys.path.insert(0, _bin)
     from wiki.html_view import build_html
 
-    vault = _build(use_networkx=False, entity_comention=True)
+    vault = _build(entity_comention=True)
     html = build_html(vault)
     assert "__PAGES_JSON__" not in html and "__TITLE__" not in html
     m = _re.search(r'<script id="data" type="application/json">(.*?)</script>',
@@ -392,8 +389,7 @@ def test_synthesis_injects_lede():
     try:
         vault = build_wiki(
             mem, files,
-            WikiOptions(importance_threshold=0.6, use_networkx=False,
-                        entity_comention=True, admission_gate=False),
+            WikiOptions(importance_threshold=0.6, entity_comention=True, admission_gate=False),
             synthesizer=stub,
         )
     finally:
@@ -406,7 +402,6 @@ def test_synthesis_injects_lede():
     mem2, files2 = _mem_db(), _files_db()
     try:
         plain = build_wiki(mem2, files2, WikiOptions(importance_threshold=0.6,
-                                                     use_networkx=False,
                                                      admission_gate=False))
     finally:
         mem2.close()

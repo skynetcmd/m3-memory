@@ -184,17 +184,20 @@ m3 wiki generate --check    # exit 0 if fresh, non-zero (and lists drift) if sta
 
 ---
 
-## Clustering quality (optional dependency)
+## Clustering
 
-Topic clustering works out of the box with a pure-Python algorithm. For tighter
-communities on large memory sets, install the optional extra — it pulls in
-`networkx` and M3 uses it automatically when present:
+The wiki is a **core feature — it ships in the base `pip install m3-memory`** and
+needs no extra to run. `m3 wiki generate` works out of the box.
 
-```bash
-pip install "m3-memory[wiki]"
-```
+Topic clustering uses [`networkx`](https://networkx.org) greedy-modularity
+community detection, which is a **base dependency** of m3-memory — it installs
+with the core package, nothing extra to enable. Clustering is deterministic
+run-to-run, so `m3 wiki generate --check` stays byte-reproducible.
 
-Force the pure-Python path (e.g. to compare) with `--no-networkx`.
+> The old `[wiki]` optional extra (and the `--no-networkx` flag) are gone:
+> networkx is now always present. `pip install "m3-memory[wiki]"` still works as a
+> no-op back-compat alias so existing scripts don't break, but it installs nothing
+> beyond the base package.
 
 ---
 
@@ -230,7 +233,6 @@ m3 wiki generate [options]
                              work (opt-in; literal text elsewhere)
   --exclude REGEX            Drop memories whose title/content matches REGEX
   --html                     Also write a self-contained wiki.html viewer
-  --no-networkx              Force the pure-Python clustering fallback
   --check                    Exit non-zero if the on-disk vault is stale
 
 m3 wiki compile [options]    Compile topics into durable synthesis memories

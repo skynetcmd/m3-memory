@@ -106,7 +106,7 @@ def _build_via_seam():
         return build_wiki(
             mem_conn, None,
             WikiOptions(importance_threshold=0.6, include_files=False,
-                        use_networkx=False, entity_comention=True),
+                        entity_comention=True),
         )
 
 

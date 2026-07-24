@@ -22,7 +22,6 @@ from . import select as _select
 class WikiOptions:
     importance_threshold: float = _select.DEFAULT_IMPORTANCE_THRESHOLD
     include_files: bool = True
-    use_networkx: bool = True
     include_all_corpora: bool = True
     corpora: Optional[list[str]] = None
     exclude_corpora: Optional[list[str]] = None
@@ -87,7 +86,7 @@ def build_wiki(
     if opts.entity_comention:
         cluster_edges += _select.load_entity_comention_edges(mem_conn, ids)
 
-    clusters = _cluster.cluster(memories, cluster_edges, use_networkx=opts.use_networkx)
+    clusters = _cluster.cluster(memories, cluster_edges)
 
     # Admission gate: a weakly-anchored multi-member cluster (co-mention grab-bag
     # or thin-provenance mega-page) is demoted to an orphan rather than rendered as

@@ -101,6 +101,12 @@ dependencies = [
     # transitively present (via fpdf2) — pinned directly so the safe path is
     # guaranteed on a fresh install.
     "defusedxml>=0.7.1,<1",
+    # Topic clustering for the Memory Wiki (bin/wiki/cluster.py, `m3 wiki
+    # generate`). The wiki is a core feature, so networkx is a base dependency —
+    # imported directly, no optional extra, no in-tree fallback (the pure-Python
+    # clustering path was retired 2026-07-24 when the wiki became core). Pure-Python
+    # wheel, no compiled/torch-class weight; deterministic run-to-run.
+    "networkx>=3.0,<4",
     # Windows-only: keyring backend + hook process control. Marker-gated so it
     # installs only where relevant.
     "pywin32>=311; sys_platform == 'win32'",
@@ -151,13 +157,13 @@ entity-ner = ["gliner>=0.2.26"]
 # cosine path is the fallback). The PyPI wheel ships the platform-native
 # extension binary, so no separate compilation/bundling step is needed.
 vector = ["sqlite-vec>=0.1.6"]
-# Higher-quality topic clustering for the wiki generator (bin/wiki/cluster.py),
-# used by `m3 wiki generate`. Optional by design: the generator runs fully without
-# it via a pure-Python weighted connected-components fallback — networkx only
-# upgrades cluster quality (greedy-modularity communities). Imported lazily and
-# guarded inside cluster.py, so `pip install m3-memory` gains NO hard dependency;
-# opt in with `pip install "m3-memory[wiki]"`.
-wiki = ["networkx>=3.0,<4"]
+# The Memory Wiki is a CORE feature and its clustering dep (networkx) is now a
+# BASE dependency (see [project].dependencies above) — `pip install m3-memory`
+# already includes everything the wiki needs. This `[wiki]` extra is kept as an
+# empty BACK-COMPAT alias so existing `pip install "m3-memory[wiki]"` commands and
+# scripts keep working; it installs nothing beyond the base. It can be removed in a
+# future major version.
+wiki = []
 # LangChain / LangGraph integration (m3_memory/integrations/langchain/). Optional
 # by design: core m3 gains NO hard LangChain dependency — the adapter imports
 # langchain-core / langgraph lazily, so `pip install m3-memory` stays light and

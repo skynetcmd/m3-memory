@@ -143,7 +143,6 @@ def test_gate_end_to_end():
     conn = _mem_db_with_authority()
     try:
         pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False,
                                                    admission_gate=False))
     finally:
         conn.close()
@@ -185,7 +184,6 @@ def test_restricted_orphan_shows_marker_not_silent():
     conn.commit()
     try:
         pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False,
                                                    admission_gate=False))
     finally:
         conn.close()
@@ -204,7 +202,6 @@ def test_canonical_synthesis_renders_as_topic_BODY_above_members():
     conn = _mem_db_with_authority()
     try:
         pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False,
                                                    admission_gate=False))
     finally:
         conn.close()
@@ -222,7 +219,6 @@ def test_gate_is_deterministic():
         conn = _mem_db_with_authority()
         try:
             pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                       use_networkx=False,
                                                        admission_gate=False))
         finally:
             conn.close()

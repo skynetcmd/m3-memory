@@ -145,8 +145,7 @@ def _db_with_wrong_chain():
 def test_lint_page_reports_blast_radius():
     conn = _db_with_wrong_chain()
     try:
-        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False))
+        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6))
     finally:
         conn.close()
     lint = pages["lint.md"]
@@ -168,8 +167,7 @@ def test_blast_radius_adds_zero_queries():
         n = [0]
         conn.set_trace_callback(lambda _sql: n.__setitem__(0, n[0] + 1))
         try:
-            build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                               use_networkx=False))
+            build_wiki(conn, None, WikiOptions(importance_threshold=0.6))
         finally:
             conn.set_trace_callback(None)
             conn.close()
@@ -244,8 +242,7 @@ def test_clean_store_says_blast_radius_zero_not_absent():
                  "'2026-01-02','{}')")
     conn.commit()
     try:
-        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False))
+        pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6))
     finally:
         conn.close()
     assert "## Blast radius (0)" in pages["lint.md"]
