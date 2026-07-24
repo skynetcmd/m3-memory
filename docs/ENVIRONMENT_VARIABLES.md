@@ -122,14 +122,33 @@ at install time — nothing else to do once the database is up.
 
 ### API Keys & Authentication
 
+`AGENT_OS_MASTER_KEY` is m3's own vault key; the third-party service keys below
+have their own section.
+
 | Variable | Purpose | Example Keychain Command (macOS) |
 |---|---|---|
 | `AGENT_OS_MASTER_KEY`| **Required.** Master key for the encrypted vault. | `_keychain_set AGENT_OS_MASTER_KEY "your-secure-key"` |
-| `LM_API_TOKEN` | **Required.** Token for your local LLM server (e.g., LM Studio, Ollama, vLLM). | `_keychain_set LM_API_TOKEN "your-token"` |
-| `PERPLEXITY_API_KEY`| API key for Perplexity AI (web search). | `_keychain_set PERPLEXITY_API_KEY "your-ppl-key"` |
-| `XAI_API_KEY`| API key for xAI/Grok (web search fallback). | `_keychain_set XAI_API_KEY "your-grok-key"` |
-| `ANTHROPIC_API_KEY`| API key for Anthropic/Claude models. | `_keychain_set ANTHROPIC_API_KEY "your-claude-key"` |
-| `GEMINI_API_KEY`| API key for Google/Gemini models. | `_keychain_set GEMINI_API_KEY "your-gemini-key"` |
+
+### Third-party service credentials & endpoints
+
+Keys and endpoints for **external services** m3 can talk to. These follow each
+vendor's own naming convention (they are **not** `M3_*`-namespaced by design — a
+tool that already exports `ANTHROPIC_API_KEY` should just work). All are
+**optional except `LM_API_TOKEN`**; a feature that needs an unset key degrades or
+is skipped, never a hard failure of the core. Store them in your OS keychain, not
+in shell rc files (see the Zero-Leak principle above).
+
+| Variable | Service / used by | Required? |
+|---|---|---|
+| `LM_API_TOKEN` | Token for your local LLM server (LM Studio, Ollama, llama-server, vLLM) — the primary inference endpoint. | **Required** |
+| `LM_STUDIO_API_KEY` | Alternate token some LM Studio setups expect; read by `auth_utils` as a fallback for the local LLM token. | Optional |
+| `ANTHROPIC_API_KEY` | Anthropic / Claude models (e.g. via the MCP proxy's model routing). | Optional |
+| `GEMINI_API_KEY` | Google / Gemini models. | Optional |
+| `OPENAI_API_KEY` | OpenAI-compatible cloud models (MCP proxy routing / cloud fallback). | Optional |
+| `PERPLEXITY_API_KEY` | Perplexity AI — web search. | Optional |
+| `XAI_API_KEY` | xAI / Grok — web-search fallback. | Optional |
+| `NEWS_API_KEY` | NewsAPI — the news-fetch tool. | Optional |
+| `GITHUB_TOKEN` / `GH_TOKEN` | GitHub API — docs-generation scripts (stargazer / clone-count badges). In CI, `GITHUB_TOKEN` is injected automatically; locally use `$(gh auth token)`. | Optional (dev tooling) |
 
 ### FIPS / Cryptography (`bin/crypto_provider.py`)
 
@@ -394,5 +413,4 @@ not in the MCP server `env` block that the runtime `M3_*` roots use.
 | Variable | Default | Purpose |
 |---|---|---|
 | `M3_PREPUSH_EXCLUDES` | `~/.m3-private/m3_PrePush_Excludes.txt` | Path to a file of **local** pathspecs the pre-push leakage scan (`.githooks/pre-push`, gate 3) should exempt — one pathspec per line, `#` comments and blanks ignored. For machine-/user-specific paths that legitimately contain scan patterns (a developer's own username directories, a local scratch tree) but are not leaks. Keeps the *mechanism* in the public tracked hook while the *exclusion list* stays in the private `~/.m3-private` tree. Read defensively: a missing / empty / unreadable file is a harmless no-op (the hook's tracked excludes always apply), so the var is entirely optional. Set it only to point the hook at a non-default location. |
-| `M3_STARGAZER` | (unset) | Fallback GitHub token for `bin/gen_download_badges.py` (README clone-count badge) when `GITHUB_TOKEN` is unset. A read-only token is sufficient. Unset → the clone badge is skipped, not an error. Badge/docs generation only; never read at runtime. |
-| `GITHUB_TOKEN` / `GH_TOKEN` | (unset) | Standard GitHub tokens (not m3-specific) read by the docs-generation scripts `bin/gen_star_history.py` and `bin/gen_download_badges.py` to fetch stargazer/clone stats. In CI, `GITHUB_TOKEN` is injected automatically; locally, `GITHUB_TOKEN=$(gh auth token)`. `GH_TOKEN` is accepted as an alias. Unset → those generators skip or error with a clear message; no effect on the m3 runtime. |
+| `M3_STARGAZER` | (unset) | Fallback GitHub token for `bin/gen_download_badges.py` (README clone-count badge) when `GITHUB_TOKEN` is unset. A read-only token is sufficient. Unset → the clone badge is skipped, not an error. Badge/docs generation only; never read at runtime. (The primary token, `GITHUB_TOKEN` / `GH_TOKEN`, is listed under [Third-party service credentials](#third-party-service-credentials--endpoints).) |
