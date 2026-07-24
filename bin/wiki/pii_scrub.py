@@ -33,7 +33,7 @@ import re
 # ── absolute-path abstraction ────────────────────────────────────────────────
 # Windows (C:\Users\name\..., C:/Users/name/...) and POSIX (/home/name/...,
 # /Users/name/...). Replace the whole path with its final component, so
-# "C:/Users/bhaba/.m3/engine/agent_memory.db" -> "agent_memory.db" — the
+# "C:/Users/alice/.m3/engine/agent_memory.db" -> "agent_memory.db" — the
 # technically-useful part survives, the personal prefix does not.
 _WIN_ABS = re.compile(r"[A-Za-z]:[\\/](?:[^\s\\/]+[\\/])*([^\s\\/]+)")
 _POSIX_HOME = re.compile(r"/(?:home|Users)/[^\s/]+/(?:[^\s/]+/)*([^\s/]+)")
@@ -48,10 +48,13 @@ def _basename_posix(m: "re.Match") -> str:
 
 
 # ── username / hostname placeholders ─────────────────────────────────────────
-# These are deployment-specific VALUES (not a pattern), so they come from config
-# with a sensible default. A username appearing as a bare word ("by bhaba", "user
-# bhaba") is the leak the A/B surfaced.
-_DEFAULT_SELF_NAMES = ("bhaba",)  # overridable via config; the local user
+# These are deployment-specific VALUES (not a pattern), so they come ENTIRELY
+# from local config — there is no hardcoded default, because a shipped default
+# would (a) leak the author's own username into a public repo and (b) be wrong
+# for every other deployment. Each install lists its own usernames/hostnames in
+# M3_CONFIG_ROOT/.wiki_pii.json. A bare username appearing as a word ("by <name>",
+# "user <name>") is the leak the prompt A/B surfaced; the config catches it.
+_DEFAULT_SELF_NAMES = ()  # no default — supply names via .wiki_pii.json (see below)
 _CONFIG_BASENAME = ".wiki_pii.json"
 
 
@@ -67,7 +70,7 @@ def _config_root() -> str:
 
 def _self_names() -> "tuple[str, ...]":
     """Personal usernames/hostnames to redact. Default + optional config file
-    M3_CONFIG_ROOT/.wiki_pii.json  {"names": ["bhaba", "skypc"]}. A code-resolved
+    M3_CONFIG_ROOT/.wiki_pii.json  {"names": ["alice", "alice-laptop"]}. A code-resolved
     file, not an env var (§3: headless launchers inherit no shell env)."""
     import json
     names = set(_DEFAULT_SELF_NAMES)
