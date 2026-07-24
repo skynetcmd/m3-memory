@@ -203,6 +203,26 @@ class SqliteBackend:
             raise ValueError(f"placeholder count must be >= 1, got {n}")
         return ", ".join(["?"] * n)
 
+    def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
+        """WAL checkpoint: PASSIVE mid-batch, TRUNCATE at clean exit (§10).
+
+        Delegates to bin/sqlite_pragmas.py so the PRAGMA text lives in exactly
+        one place. Best-effort by contract: a checkpoint is housekeeping, and a
+        failure here (a reader holding a read txn blocks TRUNCATE, a closed
+        conn) must never abort the batch that called it.
+        """
+        try:
+            import sqlite_pragmas
+        except ImportError:  # payload not importable — nothing to do
+            return
+        try:
+            if final:
+                sqlite_pragmas.checkpoint_truncate(conn)  # type: ignore[arg-type]
+            else:
+                sqlite_pragmas.checkpoint_passive(conn)  # type: ignore[arg-type]
+        except Exception:
+            pass
+
     def keyword_search(
         self,
         conn: object,

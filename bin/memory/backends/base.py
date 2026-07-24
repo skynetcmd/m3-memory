@@ -243,3 +243,24 @@ class StorageBackend(Protocol):
         Phase-4 opt-in chosen behind the capability probe, never required here.
         """
         ...
+
+    def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
+        """Bound the write-ahead log during a long-running write. Backend-blind.
+
+        A batch writer (wiki compile, bulk import, backfill) must keep the WAL
+        from growing without bound — but *how* is backend-specific, and feature
+        code must not know which backend it is on. Callers invoke this on a
+        row/time cadence and let the backend decide:
+
+          SQLite   — ``PRAGMA wal_checkpoint(PASSIVE)``, or ``TRUNCATE`` when
+                     ``final=True`` at clean exit.
+          Postgres — a no-op; the server manages its own WAL.
+
+        Exists so a caller never writes ``if backend == "sqlite"`` around a
+        checkpoint. A new backend implements it (often as a no-op) and every
+        existing writer keeps working unchanged.
+
+        MUST be best-effort: a checkpoint failure is a housekeeping problem, not
+        a data problem, and must never abort the batch that called it.
+        """
+        ...

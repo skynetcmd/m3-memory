@@ -18,6 +18,7 @@ names are trusted, caller-supplied identifiers, never end-user input.
 """
 from __future__ import annotations
 
+import json as _json
 from dataclasses import dataclass
 from typing import Literal
 
@@ -200,6 +201,47 @@ class Dialect:
         JSON-typed SQL backend (MariaDB) gets ``'{}'`` too, not the SQLite ``''``.
         """
         raise NotImplementedError("subclass must implement empty_json_default()")
+
+    def json_column_to_dict(self, value: object) -> dict:
+        """Normalize a FETCHED JSON column to a dict. The read-side complement
+        to :meth:`empty_json_default` (which handles the write side).
+
+        The same column comes back as a different Python type per backend:
+        SQLite stores ``metadata_json`` as TEXT so the driver yields ``str``,
+        while Postgres JSONB (and MariaDB JSON) yields an ALREADY-PARSED
+        ``dict``. A bare ``json.loads()`` therefore works on SQLite and raises
+        ``TypeError`` on Postgres — the trap documented on
+        :meth:`json_extract_text`.
+
+        Callers must route every read of a JSON column through this instead of
+        writing their own str-or-dict shim: a call-site helper is the same
+        defect in smaller form, because the next author copy-pastes it.
+
+        Fails SAFE, never loud: ``None`` / empty / malformed all yield ``{}``.
+        A caller gating on a field (e.g. rendering only ``authority ==
+        "canonical"``) then treats unparseable metadata as "not authoritative"
+        rather than crashing a whole batch render on one bad row.
+
+        Concrete on the base class because normalization keys on the VALUE's
+        Python type, not on SQL syntax — so it is already correct for any future
+        backend whose driver returns either shape.
+        """
+        if value is None or value == "" or value == b"":
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, (bytes, bytearray)):
+            try:
+                value = value.decode("utf-8")
+            except Exception:
+                return {}
+        if isinstance(value, str):
+            try:
+                parsed = _json.loads(value)
+            except Exception:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
 
     def json_extract_text(self, column: str, json_path: str) -> str:
         """Extract a top-level JSON field AS TEXT.

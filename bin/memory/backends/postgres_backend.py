@@ -551,6 +551,17 @@ class PostgresBackend:
         """Positional binds for psycopg: ``placeholder(3) -> "%s, %s, %s"``."""
         return POSTGRES.placeholder(n)
 
+    def maintenance_checkpoint(self, conn: object, *, final: bool = False) -> None:
+        """No-op: PostgreSQL manages its own WAL (checkpointer + bgwriter).
+
+        SQLite's ``PRAGMA wal_checkpoint`` has no Postgres analogue a client
+        should invoke — the server's checkpointer handles it, and ``CHECKPOINT``
+        is a superuser-ish server-wide operation that a batch writer has no
+        business issuing. Present so callers can checkpoint on a cadence without
+        knowing the backend (§1 storage seam).
+        """
+        return None
+
     def schema_version(self) -> "int | None":
         """MAX(version) from schema_versions, or None if the table is absent."""
         try:
