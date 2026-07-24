@@ -119,6 +119,48 @@ async def _run(cluster, compiler, head, **kw):
 
 
 @pytest.mark.asyncio
+async def test_prompt_is_deduped_by_exact_title_lookup():
+    """Regression (found live 2026-07-24): a re-run with an unchanged prompt must
+    REUSE the existing row, not write a second. The dedup is an EXACT-title
+    lookup, not a semantic search — semantic search returned the wrong shape and
+    matched everything, so every run wrote a duplicate prompt.
+    """
+    writes = []
+
+    async def _write(**a):
+        writes.append(a)
+        return "Created: prompt-new"
+
+    # First call: lookup finds nothing → writes the prompt.
+    stats1 = WC.CompileStats()
+    store = {}  # title -> id, our stand-in for the DB
+
+    def _lookup(title):
+        return store.get(title)
+
+    async def _write_and_record(**a):
+        writes.append(a)
+        new_id = "prompt-1"
+        store[a["title"]] = new_id  # persist so the next lookup finds it
+        return f"Created: {new_id}"
+
+    pid1 = await WC._ensure_prompt_row(_StubCompiler(), stats1,
+                                       scope="agent", user_id="",
+                                       _write=_write_and_record, _lookup=_lookup)
+    assert stats1.prompts_written == 1 and stats1.prompts_reused == 0
+    assert pid1 == "prompt-1"
+
+    # Second call, same compiler (same prompt text) → lookup HITS, no new write.
+    stats2 = WC.CompileStats()
+    pid2 = await WC._ensure_prompt_row(_StubCompiler(), stats2,
+                                       scope="agent", user_id="",
+                                       _write=_write_and_record, _lookup=_lookup)
+    assert stats2.prompts_written == 0, "wrote a duplicate prompt on re-run"
+    assert stats2.prompts_reused == 1
+    assert pid2 == "prompt-1", "did not reuse the existing prompt id"
+
+
+@pytest.mark.asyncio
 async def test_unchanged_cluster_writes_nothing_and_does_not_call_model():
     """THE idempotence gate: identical inputs → 0 rows, 0 model calls."""
     c = _cluster(_mem("a", 0.8))

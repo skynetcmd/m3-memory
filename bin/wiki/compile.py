@@ -185,7 +185,7 @@ def is_compiler_prompt(metadata: dict) -> bool:
 
 async def _ensure_prompt_row(
     compiler: ProseCompiler, stats: CompileStats, *, scope: str, user_id: str,
-    _write=None, _search=None,
+    _write=None, _lookup=None,
 ) -> str:
     """Persist the compiler's prompt text ONCE (deduped by content hash), return
     its memory id. A re-run with an unchanged prompt must not create a 2nd row —
@@ -200,7 +200,7 @@ async def _ensure_prompt_row(
     title = f"[compiler-prompt] v{compiler.prompt_version} {digest}"
 
     # Look for an existing prompt row with this exact title (⇒ same content).
-    existing = await _find_prompt_by_title(title, _search=_search)
+    existing = _find_prompt_by_title(title, _lookup=_lookup)
     if existing:
         stats.prompts_reused += 1
         return existing
@@ -219,22 +219,43 @@ async def _ensure_prompt_row(
     return _extract_id(new_id)
 
 
-async def _find_prompt_by_title(title: str, *, _search=None) -> Optional[str]:
-    """Return the id of an existing compiler-prompt row with this exact title,
-    or None. Kept narrow: an exact-title equality, not a semantic search."""
-    if _search is None:
-        try:
-            from memory.search import memory_search_impl as _search
-        except Exception:
-            return None
+def _find_prompt_by_title(title: str, *, _lookup=None) -> Optional[str]:
+    """Return the id of an existing compiler-prompt row with this EXACT title, or
+    None. An exact-equality SQL lookup through the seam — NOT a semantic search.
+
+    Semantic search was wrong here: memory_search_impl ranks + returns a large
+    result set (and, on this store, degrades to matching everything for a
+    bracket-heavy FTS query), and its items are not the shape a title-equality
+    check needs. Dedup must be exact and deterministic, so we query
+    memory_items.title = ? directly, live (not is_deleted) so a superseded/erased
+    prompt is re-created rather than reused. Placeholder comes from the dialect —
+    no backend branch.
+    """
+    if _lookup is not None:  # test seam
+        return _lookup(title)
     try:
-        hits = await _search(query=title, k=5, search_mode="keyword")
+        from memory.backends import dialect
+        from memory.db import _db
     except Exception:
         return None
-    for h in (hits or []):
-        if isinstance(h, dict) and h.get("title") == title:
-            return h.get("id") or h.get("memory_id")
-    return None
+    try:
+        p = dialect().param()
+        with _db() as conn:
+            row = conn.execute(
+                f"SELECT id FROM memory_items "
+                f"WHERE title = {p} AND is_deleted = 0 "
+                f"ORDER BY id LIMIT 1",
+                (title,),
+            ).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    # Row may be a tuple or a name-access row depending on backend/factory.
+    try:
+        return row["id"]
+    except (KeyError, IndexError, TypeError):
+        return row[0]
 
 
 async def compile_cluster(
