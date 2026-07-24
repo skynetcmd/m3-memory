@@ -142,15 +142,22 @@ EXCLUDES=(
 # repo: the mechanism is generic and public, the list is private and local.
 # Source, in order: $M3_PREPUSH_EXCLUDES if set, else the conventional default
 # ~/.m3-private/m3_PrePush_Excludes.txt (a private tree, never the public repo).
-# Blank lines and '#' comments are ignored. A missing file is a no-op (the
-# tracked excludes above always apply).
+# Blank lines and '#' comments are ignored. The file is OPTIONAL and read
+# defensively: it is used only if it exists AND is a regular readable file, and
+# a read error never aborts the push — the tracked excludes above always apply,
+# so a missing / empty / unreadable / not-a-file local list degrades to "tracked
+# excludes only", never to a hook failure.
 LOCAL_EXCLUDES="${M3_PREPUSH_EXCLUDES:-${HOME}/.m3-private/m3_PrePush_Excludes.txt}"
-if [ -f "$LOCAL_EXCLUDES" ]; then
+if [ -n "$LOCAL_EXCLUDES" ] && [ -f "$LOCAL_EXCLUDES" ] && [ -r "$LOCAL_EXCLUDES" ]; then
+  _n_local=0
+  # `|| true` on the redirect: a mid-read I/O error must not exit the hook.
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue ;; esac      # skip blanks + comments
     EXCLUDES+=(":(exclude)${line}")
-  done < "$LOCAL_EXCLUDES"
-  echo "[pre-push]   (applied local exclusions from $LOCAL_EXCLUDES)"
+    _n_local=$((_n_local + 1))
+  done < "$LOCAL_EXCLUDES" || true
+  [ "$_n_local" -gt 0 ] && \
+    echo "[pre-push]   (applied $_n_local local exclusion(s) from $LOCAL_EXCLUDES)"
 fi
 
 LEAK=""
