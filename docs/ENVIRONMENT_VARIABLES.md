@@ -360,3 +360,14 @@ increments by the number of inputs served along that path.
 | `M3_TEST_GGUF` | (empty) | Test-only. Points the `m3-embed-llamacpp` crate's opt-in real-inference test at a GGUF model. Unset → that test is skipped. Not read by m3-memory at runtime. |
 
 > **Note — the `M3_MMR_SHADOW` var has been retired.** An earlier build added a shadow-mode flag for the MMR reranker; the Rust MMR (`mmr_rerank_scored`) is now authoritative when `m3_core_rs` is loaded (it replicates the Python loop's selection sequence exactly, verified by `tests/test_oxidation_parity.py`). No env var gates it — `M3_CORE_RS_DISABLE` is the only override.
+
+## Development & repo tooling
+
+These are read by developer tooling (git hooks, build scripts), **not** by the
+m3 runtime. They matter only when working *in* the repo, and are read by a shell
+process (the git hook), so they are set in your shell/Windows-user environment —
+not in the MCP server `env` block that the runtime `M3_*` roots use.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `M3_PREPUSH_EXCLUDES` | `~/.m3-private/m3_PrePush_Excludes.txt` | Path to a file of **local** pathspecs the pre-push leakage scan (`.githooks/pre-push`, gate 3) should exempt — one pathspec per line, `#` comments and blanks ignored. For machine-/user-specific paths that legitimately contain scan patterns (a developer's own username directories, a local scratch tree) but are not leaks. Keeps the *mechanism* in the public tracked hook while the *exclusion list* stays in the private `~/.m3-private` tree. Read defensively: a missing / empty / unreadable file is a harmless no-op (the hook's tracked excludes always apply), so the var is entirely optional. Set it only to point the hook at a non-default location. |
