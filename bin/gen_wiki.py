@@ -253,6 +253,80 @@ def _write_html(vault: dict[str, str], out_dir: str) -> None:
     print(f"wrote self-contained viewer to {shown} (open it in a browser)")
 
 
+def _cmd_compile(args: argparse.Namespace) -> int:
+    """`m3 wiki compile` — WRITE synthesis rows for topic clusters (§6 mutation).
+
+    Distinct from `generate`, which is a read-only render. This loads the same
+    clusters, then for each writes/supersedes a compiled `synthesis` memory. The
+    compile is idempotent (unchanged clusters skip with no model call), so it is
+    safe to re-run; the writer never updates in place.
+    """
+    import asyncio
+
+    try:
+        from memory.backends.selector import active_backend
+        from memory.db import _db as _memory_seam
+    except Exception as e:
+        print(f"compile requires the m3 payload (memory seam): {e!r}", file=sys.stderr)
+        return 2
+
+    from wiki import cluster as _cluster_mod
+    from wiki import select as _select
+    from wiki.compile import compile_clusters, load_heads
+    from wiki.prose_compiler import LLMProseCompiler
+
+    tau = args.importance_threshold if args.importance_threshold is not None else 0.6
+    use_nx = not getattr(args, "no_networkx", False)
+    compiler = LLMProseCompiler()
+
+    async def _run():
+        with _memory_seam() as conn:
+            mems = _select.select_core_memories(conn, importance_threshold=tau,
+                                                limit=5000)
+            ids = {m.id for m in mems}
+            edges = list(_select.load_memory_edges(conn, ids))
+            edges += _select.load_entity_comention_edges(conn, ids)
+            clusters = [c for c in _cluster_mod.cluster(mems, edges, use_networkx=use_nx)
+                        if not c.is_orphan]
+            # Heads: live syntheses already in `mems` (CORE_TYPES includes it),
+            # keyed by title. No extra query — reuse the loaded rows.
+            head_rows = [
+                {"id": m.id, "title": m.title, "content": m.content,
+                 "metadata": m.metadata}
+                for m in mems if m.type == "synthesis"
+            ]
+            heads = load_heads(head_rows)
+            backend = None
+            try:
+                backend = active_backend()
+            except Exception:
+                backend = None  # checkpointing is best-effort; PG is a no-op anyway
+            return await compile_clusters(
+                clusters, compiler, heads,
+                scope=getattr(args, "scope", "agent") or "agent",
+                user_id=getattr(args, "user_id", "") or "",
+                backend=backend)
+
+    if args.dry_run:
+        # Load + cluster only; report what WOULD be compiled without calling the
+        # model or writing. Honest preview (§3): no side effects.
+        with _memory_seam() as conn:
+            mems = _select.select_core_memories(conn, importance_threshold=tau,
+                                                limit=5000)
+            ids = {m.id for m in mems}
+            edges = list(_select.load_memory_edges(conn, ids))
+            edges += _select.load_entity_comention_edges(conn, ids)
+            clusters = [c for c in _cluster_mod.cluster(mems, edges, use_networkx=use_nx)
+                        if not c.is_orphan]
+        print(f"dry-run: {len(clusters)} topic cluster(s) would be compiled "
+              f"(threshold {tau}). No model call, no write.")
+        return 0
+
+    stats = asyncio.run(_run())
+    print(stats.summary())
+    return 0
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     out_dir = args.out or _default_out()
     if not os.path.isdir(out_dir):
@@ -310,6 +384,22 @@ def main(argv: list[str] | None = None) -> int:
     p_gen = sub.add_parser("generate", help="Compile the wiki vault.")
     _add_generate_args(p_gen)
     p_gen.set_defaults(func=_cmd_generate)
+
+    p_compile = sub.add_parser(
+        "compile",
+        help="WRITE compiled synthesis memories for topic clusters (mutates the "
+             "store; idempotent — safe to re-run).")
+    p_compile.add_argument("--importance-threshold", type=float, default=None,
+                           help="Core-memory importance floor (default 0.6).")
+    p_compile.add_argument("--no-networkx", action="store_true",
+                           help="Force the pure-Python clustering fallback.")
+    p_compile.add_argument("--scope", default="agent",
+                           help="Tenancy scope for written syntheses (default agent).")
+    p_compile.add_argument("--user-id", default="",
+                           help="Owner user_id for written syntheses.")
+    p_compile.add_argument("--dry-run", action="store_true",
+                           help="Report what would be compiled; no model call, no write.")
+    p_compile.set_defaults(func=_cmd_compile)
 
     p_status = sub.add_parser("status", help="Report vault location, page count, last build.")
     p_status.add_argument("--out", default=None)

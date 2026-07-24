@@ -36,7 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Iterable, Optional, Protocol
 
 from .cluster import Cluster
 from .synth import _cluster_hash
@@ -330,3 +330,90 @@ class ExistingSynthesis:
     id: str
     cluster_hash: str
     prose_hash: str
+
+
+def load_heads(mem_rows: "Iterable") -> dict[str, "ExistingSynthesis"]:
+    """Index live synthesis rows by TITLE → their head ExistingSynthesis.
+
+    A synthesis's title is stable across supersessions (compile.py sets it from
+    the cluster's top member), so title is the topic key that lets the writer
+    find "the current synthesis for this cluster". `mem_rows` are dict-like rows
+    (id, title, content, metadata dict) already filtered to live syntheses by the
+    caller — this function does no I/O, so it is unit-testable.
+
+    When two live syntheses share a title (should not happen — supersede closes
+    the old one — but be defensive), the one whose id sorts last wins
+    deterministically.
+    """
+    out: dict[str, ExistingSynthesis] = {}
+    prev_id: dict[str, str] = {}
+    for r in mem_rows:
+        title = r.get("title") or ""
+        rid = r.get("id") or ""
+        if title in out and rid <= prev_id.get(title, ""):
+            continue
+        meta = r.get("metadata") or {}
+        compiler = meta.get("compiler") or {}
+        out[title] = ExistingSynthesis(
+            id=rid,
+            cluster_hash=compiler.get("cluster_hash", ""),
+            prose_hash=prose_hash(r.get("content") or ""),
+        )
+        prev_id[title] = rid
+    return out
+
+
+async def compile_clusters(
+    clusters: "Iterable",
+    compiler: ProseCompiler,
+    heads: dict[str, "ExistingSynthesis"],
+    *,
+    scope: str = "agent",
+    user_id: str = "",
+    backend=None,
+    checkpoint_every: int = 500,
+    _write=None,
+    _supersede=None,
+    _ensure_prompt=None,
+) -> CompileStats:
+    """Orchestrate a full compile pass over many clusters. The I/O-bearing entry
+    point the CLI calls; compile_cluster is the per-cluster decision.
+
+    Persists the compiler's prompt ONCE (deduped), then walks the clusters in a
+    single deterministic pass (no recursion, fixed list — cannot loop). Heads are
+    keyed by title. WAL is bounded via the seam's maintenance_checkpoint every
+    `checkpoint_every` writes (§10), never a direct PRAGMA. Best-effort
+    checkpoint — a housekeeping failure never aborts the pass.
+    """
+    stats = CompileStats()
+    ensure_prompt = _ensure_prompt or _ensure_prompt_row
+    prompt_id = await ensure_prompt(compiler, stats, scope=scope, user_id=user_id)
+
+    writes_since_ckpt = 0
+    for cluster in clusters:
+        title = cluster.members[0].display_title if cluster.members else ""
+        head = heads.get(title)
+        r = await compile_cluster(
+            cluster, compiler, head, prompt_id, stats,
+            scope=scope, user_id=user_id, _write=_write, _supersede=_supersede)
+        if r.action in ("created", "superseded"):
+            writes_since_ckpt += 1
+            if backend is not None and writes_since_ckpt >= checkpoint_every:
+                _try_checkpoint(backend, final=False)
+                writes_since_ckpt = 0
+    if backend is not None:
+        _try_checkpoint(backend, final=True)
+    return stats
+
+
+def _try_checkpoint(backend, *, final: bool) -> None:
+    """Bound the WAL via the seam. Best-effort (§10): never aborts the batch."""
+    try:
+        conn_cm = backend.connection()
+    except Exception:
+        return
+    try:
+        with conn_cm as conn:
+            backend.maintenance_checkpoint(conn, final=final)
+    except Exception:
+        pass
