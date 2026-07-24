@@ -143,7 +143,8 @@ def test_gate_end_to_end():
     conn = _mem_db_with_authority()
     try:
         pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False))
+                                                   use_networkx=False,
+                                                   admission_gate=False))
     finally:
         conn.close()
     body = "\n".join(pages.values())
@@ -184,7 +185,8 @@ def test_restricted_orphan_shows_marker_not_silent():
     conn.commit()
     try:
         pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False))
+                                                   use_networkx=False,
+                                                   admission_gate=False))
     finally:
         conn.close()
     orph = pages["topics/orphans.md"]
@@ -202,7 +204,8 @@ def test_canonical_synthesis_renders_as_topic_BODY_above_members():
     conn = _mem_db_with_authority()
     try:
         pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                   use_networkx=False))
+                                                   use_networkx=False,
+                                                   admission_gate=False))
     finally:
         conn.close()
     canon = [t for p, t in pages.items()
@@ -219,7 +222,8 @@ def test_gate_is_deterministic():
         conn = _mem_db_with_authority()
         try:
             pages = build_wiki(conn, None, WikiOptions(importance_threshold=0.6,
-                                                       use_networkx=False))
+                                                       use_networkx=False,
+                                                       admission_gate=False))
         finally:
             conn.close()
         h.append("".join(f"{k}\x00{pages[k]}" for k in sorted(pages)))

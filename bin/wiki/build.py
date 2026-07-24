@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional
 
+from . import admission as _admission
 from . import cluster as _cluster
 from . import files_layer as _files
 from . import render as _render
@@ -19,7 +20,7 @@ from . import select as _select
 
 @dataclass
 class WikiOptions:
-    importance_threshold: float = 0.6
+    importance_threshold: float = _select.DEFAULT_IMPORTANCE_THRESHOLD
     include_files: bool = True
     use_networkx: bool = True
     include_all_corpora: bool = True
@@ -37,6 +38,10 @@ class WikiOptions:
     # Emit [[wikilinks]] instead of portable [text](path.md) links, so Obsidian's
     # graph view + backlinks work. Opt-in (renders as literal text elsewhere).
     obsidian: bool = False
+    # Run the admission gate (wiki.admission): demote weakly-anchored multi-member
+    # clusters to the orphan list rather than rendering them as syntheses. On by
+    # default; set False for an audit build that shows every cluster ungated.
+    admission_gate: bool = True
 
 
 def build_wiki(
@@ -84,6 +89,14 @@ def build_wiki(
 
     clusters = _cluster.cluster(memories, cluster_edges, use_networkx=opts.use_networkx)
 
+    # Admission gate: a weakly-anchored multi-member cluster (co-mention grab-bag
+    # or thin-provenance mega-page) is demoted to an orphan rather than rendered as
+    # an authoritative synthesis. Marking it is_orphan routes its members to the
+    # orphan list — the members are never dropped, only un-synthesized — and keeps
+    # the anchor report honest (it scores only what actually renders as a topic).
+    if opts.admission_gate:
+        _apply_admission_gate(clusters, cluster_edges)
+
     # Optional prose ledes per topic (opt-in; needs a local model).
     ledes: dict[str, str] = {}
     if synthesizer is not None:
@@ -97,3 +110,27 @@ def build_wiki(
     return _render.render_pages(clusters, edges, files, promotions, ledes=ledes,
                                 drift_judge=drift_judge,
                                 obsidian=opts.obsidian)
+
+
+def _apply_admission_gate(clusters: list, cluster_edges: list) -> None:
+    """Demote weakly-anchored multi-member clusters in place (set is_orphan=True).
+
+    Scores each multi-member cluster with KAS and consults the config-resolved
+    admission gate. A demoted cluster is marked is_orphan so render routes its
+    members to the orphan list instead of a synthesis page. Singletons and clusters
+    the gate admits are untouched. Never raises — a scoring hiccup on one cluster
+    leaves it admitted (fail-open: we'd rather render a page than silently drop a
+    topic), matching the wiki's other never-break-generation guards.
+    """
+    gate = _admission.load_gate()
+    if not gate.enabled:
+        return
+    for c in clusters:
+        if c.is_orphan or len(c.members) < 2:
+            continue
+        try:
+            demote = not gate.admits(c, cluster_edges)
+        except Exception:
+            continue  # fail-open: keep the cluster rather than break the build
+        if demote:
+            c.is_orphan = True

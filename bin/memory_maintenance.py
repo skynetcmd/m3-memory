@@ -722,6 +722,34 @@ def gdpr_forget_impl(user_id: str, compliance: "dict | str | None" = None) -> st
             f"SELECT id FROM memory_items WHERE user_id = {_p}", (user_id,)
         ).fetchall()]
 
+        # WIKI erasure hook (Art. 17 derived-content): before the cascade removes
+        # the `consolidates` edges, mark every synthesis derived from an erased
+        # member `restricted` so it stops rendering immediately. The prose is NOT
+        # deleted — the erased member may have been redundant; a later review
+        # (follow-on d4ab42c9) decides. Must run BEFORE the relationship delete
+        # below, which would otherwise sever the synthesis→member link the scan
+        # reads. Best-effort import (wiki is an optional extra), but a scan failure
+        # is logged, never silently swallowed — a synthesis left rendering after
+        # its source is erased is a compliance breach.
+        wiki_erasure_summary = None
+        if item_ids:
+            try:
+                import os as _os
+                import sys as _sys
+                _bin = _os.path.dirname(_os.path.abspath(__file__))
+                if _bin not in _sys.path:
+                    _sys.path.insert(0, _bin)
+                from wiki.erasure import restrict_derived_on_erasure
+                _erased_at = datetime.now(timezone.utc).isoformat()
+                wiki_erasure_summary = restrict_derived_on_erasure(
+                    db, _d, item_ids, timestamp=_erased_at)
+            except Exception as _e:  # pragma: no cover - defensive
+                import logging
+                logging.getLogger("m3.gdpr").warning(
+                    "wiki erasure hook failed for user %s: %r — derived syntheses "
+                    "may still render; review manually", user_id, _e)
+                wiki_erasure_summary = {"error": repr(_e)}
+
         if item_ids:
             placeholders = _d.placeholder(len(item_ids))
             # Delete embeddings
@@ -761,6 +789,10 @@ def gdpr_forget_impl(user_id: str, compliance: "dict | str | None" = None) -> st
             # Operator-supplied program-layer record (legal_basis, reason,
             # verified_by, authorized_by, external_ref, …) — captured verbatim.
             audit_meta["compliance"] = compliance
+        if wiki_erasure_summary:
+            # Derived-content record: how many wiki syntheses were restricted
+            # because they quoted an erased member (Art. 17 derived-content trail).
+            audit_meta["wiki_restricted"] = wiki_erasure_summary
         write_audit_entry(
             action="gdpr_forget",
             target_id=user_id,

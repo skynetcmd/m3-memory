@@ -269,10 +269,19 @@ def _has_column(conn, table: str, column: str) -> bool:
             return False
 
 
+# Default core-memory importance floor. 0.55 splits the difference between 0.6
+# (maximally clean but leaves ~300 high-value memories orphaned) and 0.5 (broad
+# coverage but admits weak clusters). At 0.55 the admission gate (wiki.admission)
+# demotes the two thin-provenance pages that would otherwise appear, bringing it
+# to 0-low-anchor parity with 0.6 while keeping the extra coverage. Swept on the
+# live 3,337-memory corpus 2026-07-24; see wiki.admission for the gate calibration.
+DEFAULT_IMPORTANCE_THRESHOLD = 0.55
+
+
 def select_core_memories(
     conn: sqlite3.Connection,
     *,
-    importance_threshold: float = 0.6,
+    importance_threshold: float = DEFAULT_IMPORTANCE_THRESHOLD,
     limit: int = 5000,
     exclude_regex: Optional[str] = None,
 ) -> list[Mem]:

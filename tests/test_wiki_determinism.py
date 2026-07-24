@@ -148,10 +148,15 @@ def _build(use_networkx: bool, entity_comention: bool = False,
            obsidian: bool = False) -> dict:
     mem, files = _mem_db(), _files_db()
     try:
+        # admission_gate=False: these tests validate pure clustering + rendering
+        # on tiny fixtures. The gate (which demotes weakly-anchored clusters) has
+        # its own suite in test_wiki_admission.py; leaving it on here would demote
+        # fixture clusters to orphans and mask the rendering behaviour under test.
         return build_wiki(mem, files, WikiOptions(importance_threshold=0.6,
                                                   use_networkx=use_networkx,
                                                   entity_comention=entity_comention,
-                                                  obsidian=obsidian))
+                                                  obsidian=obsidian,
+                                                  admission_gate=False))
     finally:
         mem.close()
         files.close()
@@ -309,11 +314,35 @@ def test_entity_comention_binds_orphans():
         assert with_[k] == again[k]
 
 
+def test_admission_gate_demotes_comention_only_cluster():
+    """Default-on gate in build_wiki: a cluster fused ONLY by entity co-mention
+    (m-ddd + m-fff share `ent-specific`, no authored edge → provenance 0,
+    backbone_ratio 0) is a grab-bag and must be demoted back to orphans, NOT
+    rendered as a synthesis topic. Mirror of test_entity_comention_binds_orphans,
+    which turns the gate OFF to show the raw co-mention binding."""
+    mem, files = _mem_db(), _files_db()
+    try:
+        gated = build_wiki(mem, files, WikiOptions(
+            importance_threshold=0.6, use_networkx=False,
+            entity_comention=True, admission_gate=True))
+    finally:
+        mem.close()
+        files.close()
+    # The co-mention pair is demoted: both fall to orphans, no shared topic page.
+    orphans = gated.get("topics/orphans.md", "")
+    assert "Beta Standalone" in orphans, "grab-bag member should land in orphans"
+    shared = [t for p, t in gated.items()
+              if p.startswith("topics/") and p != "topics/orphans.md"
+              and "Beta Standalone" in t]
+    assert not shared, "co-mention-only cluster must not render as a synthesis topic"
+
+
 def test_memory_only_when_no_files():
     mem = _mem_db()
     try:
         vault = build_wiki(mem, None, WikiOptions(importance_threshold=0.6,
-                                                  include_files=False))
+                                                  include_files=False,
+                                                  admission_gate=False))
     finally:
         mem.close()
     assert not any(p.startswith("sources/") for p in vault)
@@ -363,7 +392,8 @@ def test_synthesis_injects_lede():
     try:
         vault = build_wiki(
             mem, files,
-            WikiOptions(importance_threshold=0.6, use_networkx=False, entity_comention=True),
+            WikiOptions(importance_threshold=0.6, use_networkx=False,
+                        entity_comention=True, admission_gate=False),
             synthesizer=stub,
         )
     finally:
@@ -376,7 +406,8 @@ def test_synthesis_injects_lede():
     mem2, files2 = _mem_db(), _files_db()
     try:
         plain = build_wiki(mem2, files2, WikiOptions(importance_threshold=0.6,
-                                                     use_networkx=False))
+                                                     use_networkx=False,
+                                                     admission_gate=False))
     finally:
         mem2.close()
         files2.close()

@@ -89,6 +89,39 @@ def test_metadata_carries_provenance_and_manifest():
     assert meta["verdict"] is None
 
 
+# ── cluster hash idempotence across cold/warm re-clustering ──────────────────
+
+def _src(id, title="M"):
+    return Mem(id=id, type="belief", title=title, content=f"body {id}",
+               importance=0.5, confidence=0.7, valid_from=None, valid_to=None,
+               pinned=0, created_at=None, updated_at=None)
+
+
+def _syn(id, title="M"):
+    return Mem(id=id, type="synthesis", title=title, content=f"prose {id}",
+               importance=0.8, confidence=0.6, valid_from=None, valid_to=None,
+               pinned=0, created_at=None, updated_at=None)
+
+
+def test_cluster_hash_ignores_synthesis_members():
+    """Idempotence guard: once compiled, a synthesis re-clusters WITH its sources
+    (via consolidates edges) on the next run. The hash must exclude it, or it
+    changes every run and the no-op gate never fires (duplicate syntheses pile up).
+    Cold cluster (sources only) and warm cluster (sources + synthesis) must hash
+    identically."""
+    cold = _cluster(_src("a"), _src("b"), _src("c"))
+    warm = _cluster(_src("a"), _src("b"), _src("c"), _syn("syn-1"))
+    assert _cluster_hash(cold, "m") == _cluster_hash(warm, "m")
+
+
+def test_cluster_hash_still_tracks_source_changes():
+    """The exclusion must not make the hash blind to REAL changes: a different
+    source member set still yields a different hash."""
+    a = _cluster(_src("a"), _src("b"))
+    b = _cluster(_src("a"), _src("c"))
+    assert _cluster_hash(a, "m") != _cluster_hash(b, "m")
+
+
 # ── the idempotent write rule (the merge gate) ───────────────────────────────
 
 def _head_for(cluster, compiler, prose):

@@ -92,6 +92,7 @@ class CompileStats:
     failed: int = 0
     prompts_written: int = 0
     prompts_reused: int = 0
+    demoted: int = 0  # multi-member clusters the admission gate sent to orphans
     results: list[CompileResult] = field(default_factory=list)
 
     def record(self, r: CompileResult) -> None:
@@ -105,11 +106,21 @@ class CompileStats:
             "compile-failed": lambda: setattr(self, "failed", self.failed + 1),
         }[r.action]()
 
+    @property
+    def admitted(self) -> int:
+        """Clusters that cleared the admission gate and reached the compiler —
+        whatever the per-cluster outcome (created / superseded / skipped / failed).
+        The retry wrapper uses (admitted == 0 and demoted > 0) as its cold-corpus
+        signal: every cluster existed but the gate sent them all to orphans."""
+        return (self.created + self.superseded + self.skipped_hash
+                + self.skipped_identical + self.failed)
+
     def summary(self) -> str:
+        demoted = f", {self.demoted} demoted (weak-anchor)" if self.demoted else ""
         return (f"compile: {self.created} created, {self.superseded} superseded, "
                 f"{self.skipped_hash + self.skipped_identical} skipped "
                 f"({self.skipped_hash} unchanged, {self.skipped_identical} identical), "
-                f"{self.failed} failed; prompts {self.prompts_written} written / "
+                f"{self.failed} failed{demoted}; prompts {self.prompts_written} written / "
                 f"{self.prompts_reused} reused")
 
 
@@ -439,6 +450,33 @@ def load_heads(mem_rows: "Iterable") -> dict[str, "ExistingSynthesis"]:
     return out
 
 
+def _admit(clusters, edges, gate, stats: CompileStats) -> list:
+    """Filter clusters through the admission gate, recording demotions on `stats`.
+
+    No `edges` → gating disabled (returns the clusters unchanged): the anchor
+    needs the edge graph to score, and callers that don't supply it opt out. A
+    demoted cluster is simply dropped from the compile set; it falls to the orphan
+    list at render time (its members are never lost, only un-synthesized).
+    """
+    clusters = list(clusters)
+    if edges is None:
+        return clusters
+    from . import admission
+    gate = gate or admission.load_gate()
+    if not gate.enabled:
+        return clusters
+    admitted = []
+    for c in clusters:
+        if len(c.members) < 2:
+            admitted.append(c)
+            continue
+        if gate.admits(c, edges):
+            admitted.append(c)
+        else:
+            stats.demoted += 1
+    return admitted
+
+
 async def compile_clusters(
     clusters: "Iterable",
     compiler: ProseCompiler,
@@ -448,6 +486,8 @@ async def compile_clusters(
     user_id: str = "",
     backend=None,
     checkpoint_every: int = 500,
+    edges: "Optional[list]" = None,
+    gate=None,
     _write=None,
     _supersede=None,
     _link=None,
@@ -461,10 +501,21 @@ async def compile_clusters(
     keyed by title. WAL is bounded via the seam's maintenance_checkpoint every
     `checkpoint_every` writes (§10), never a direct PRAGMA. Best-effort
     checkpoint — a housekeeping failure never aborts the pass.
+
+    ADMISSION GATE (§ cluster admission): when `edges` is supplied, each
+    multi-member cluster is scored with KAS and run through the admission gate
+    BEFORE the model call. A weakly-anchored cluster (co-mention grab-bag or
+    thin-provenance mega-page) is demoted — skipped here, so it falls to the
+    orphan list at render time instead of shipping as a low-quality synthesis.
+    Demoting before the model call also saves its compile cost. Pass `gate` to
+    override the config-resolved default; pass no `edges` to disable gating
+    entirely (the pre-gate behaviour, e.g. for an audit pass).
     """
     stats = CompileStats()
     ensure_prompt = _ensure_prompt or _ensure_prompt_row
     prompt_id = await ensure_prompt(compiler, stats, scope=scope, user_id=user_id)
+
+    clusters = _admit(clusters, edges, gate, stats)
 
     writes_since_ckpt = 0
     for cluster in clusters:

@@ -88,11 +88,18 @@ fields, and the tamper-evident chain. **Not** retained: the memories, their
 content, embeddings, relationships, or history. Keeping proof-of-deletion is
 permitted; it is not "still holding their data."
 
+> **Derived content is a separate case.** A [wiki](WIKI.md) synthesis compiled
+> from an erased memory is its own row and is *not* removed by the cascade — it is
+> marked `restricted` (withheld from rendering) and held for review instead. See
+> [The Wiki & the Right to Erasure](WIKI_GDPR.md) for how erasure affects derived
+> prose, the cluster cache, and `--as-of` reproducibility.
+
 ---
 
 ## References
 
 - ICO — [Right to erasure](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/individual-rights/individual-rights/right-to-erasure/)
 - Regulation text — Art. 17 (erasure), Art. 19 (notification), Art. 5(2) (accountability), Art. 17(3) (exemptions)
-- See also [COMPLIANCE.md](COMPLIANCE.md) (m3's overall compliance posture) and
-  [API_REFERENCE.md](API_REFERENCE.md#gdpr_forget) (the tool contract).
+- See also [COMPLIANCE.md](COMPLIANCE.md) (m3's overall compliance posture),
+  [API_REFERENCE.md](API_REFERENCE.md#gdpr_forget) (the tool contract), and
+  [WIKI_GDPR.md](WIKI_GDPR.md) (erasure of wiki-derived content).

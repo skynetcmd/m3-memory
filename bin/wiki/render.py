@@ -796,6 +796,32 @@ def _render_lint(clusters, edges, mem_to_topic, topic_slugs, links: "LinkResolve
     # no new query. A file-based wiki can't compute this; m3's provenance edges
     # can. Section is always emitted (count 0 when clean) so its absence never
     # reads as "not checked".
+    # Restricted (GDPR Art. 17): syntheses whose source was erased. `restricted`
+    # already halts rendering per topic; this section surfaces the full review
+    # queue in one place (plan G3.5 — "never only a column") so a reviewer can
+    # find every page awaiting a derivability decision. Deterministic metadata
+    # scan, no model, no query.
+    restricted = []
+    for c in clusters:
+        for m in c.members:
+            if m.type == "synthesis" and _authority.is_restricted(m.metadata):
+                recs = (m.metadata.get("review") or {}).get("erasure_records") or []
+                restricted.append((m, len(recs)))
+    lines.append(f"## Restricted — GDPR review ({len(restricted)})")
+    lines.append("")
+    if restricted:
+        lines.append("_Source memories were erased (Art. 17). These pages are "
+                     "withheld from rendering pending a derivability review — the "
+                     "prose may be unaffected if the erased member was redundant._")
+        lines.append("")
+        for m, nrec in sorted(restricted, key=lambda t: t[0].rank_key()):
+            plural = "erasure" if nrec == 1 else "erasures"
+            lines.append(f"- {m.display_title} · `id:{m.id[:8]}` · "
+                         f"{nrec} {plural}")
+    else:
+        lines.append("_No synthesis is restricted; no erased sources to review._")
+    lines.append("")
+
     wrong = sorted(_blast.wrong_ids(clusters))
     tainted = sorted(_blast.contaminated(clusters, edges))
     lines.append(f"## Blast radius ({len(tainted)})")

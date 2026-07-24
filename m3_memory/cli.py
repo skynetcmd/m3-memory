@@ -1087,7 +1087,7 @@ Examples:
                             help="Add an LLM prose lede per topic via a local chat "
                                  "endpoint (opt-in, cached). Not compatible with --check.")
     p_wiki_gen.add_argument("--importance-threshold", type=float, default=None,
-                            help="Min importance to count as 'core' (default 0.6).")
+                            help="Min importance to count as 'core' (default 0.55).")
     p_wiki_gen.add_argument("--exclude", default=None, metavar="REGEX",
                             help="Drop memories whose title/content matches this "
                                  "regex (e.g. to exclude private/bench notes).")
@@ -1102,7 +1102,7 @@ Examples:
         help="WRITE compiled synthesis memories for topic clusters (mutates the "
              "store; idempotent — safe to re-run). Use --dry-run to preview.")
     p_wiki_compile.add_argument("--importance-threshold", type=float, default=None,
-                                help="Min importance to count as 'core' (default 0.6).")
+                                help="Min importance to count as 'core' (default 0.55).")
     p_wiki_compile.add_argument("--no-networkx", action="store_true",
                                 help="Force the pure-Python clustering fallback.")
     p_wiki_compile.add_argument("--scope", default="agent",

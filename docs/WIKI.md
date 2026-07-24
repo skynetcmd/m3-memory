@@ -110,6 +110,65 @@ never fails.
 
 ---
 
+## Compiled syntheses (`m3 wiki compile`)
+
+`--synthesize` writes a prose lede into the *rendered vault*. `m3 wiki compile`
+goes further: it writes each topic's synthesis back into your store as a durable
+`synthesis` memory — a first-class, searchable, supersede-tracked row with
+provenance edges to its sources. This is the "compile-at-ingest" model: knowledge
+is distilled once and stored, not re-derived on every read.
+
+```bash
+m3 wiki compile               # compile the whole corpus
+m3 wiki compile --dry-run     # show what would compile — no model call, no write
+```
+
+Compilation is **idempotent**: an unchanged topic is recognized by a content hash
+and skipped (no model call), so re-running only recompiles topics that actually
+changed. Each synthesis records its source `member_ids` and writes `consolidates`
+provenance edges, so blast-radius, citation-drift, and the Knowledge Anchor Report
+can all reason about how a page was derived.
+
+### The admission gate — which topics earn a synthesis
+
+Not every cluster deserves a compiled page. A cluster fused only by incidental
+co-mention (two memories that happen to name the same file or host) is a grab-bag,
+not a topic. The **admission gate** demotes such clusters back to the orphan list
+*before* the model is called — so compilation spends effort only on genuinely
+anchored topics, and the vault isn't padded with incoherent pages.
+
+The gate scores each cluster on its **member-to-member link structure** and admits
+it if any of these clears its floor:
+
+| Signal | Meaning | Default floor |
+|---|---|---|
+| `backbone_ratio` | share of real (non-co-mention) edges — the primary discriminator | 0.6 |
+| `provenance` | share of edges that are authored lineage (supersedes / extends / …) | 0.5 |
+| `kas` | overall structural [Knowledge Anchor Score](#) | 0.5 |
+
+Two properties are guaranteed by design:
+
+- **Deterministic** — the same store produces a byte-identical result.
+- **State-independent** — the decision reads only *authored* structure, never the
+  `consolidates` edges that a prior compile wrote. A topic is admitted or demoted
+  identically on the first compile and the thousandth; compiling never changes what
+  the gate will do next time.
+
+Tune the floors (or turn the gate off for an audit build) with an optional config
+file at `$M3_CONFIG_ROOT/.wiki_admission.json`:
+
+```json
+{ "min_backbone_ratio": 0.6, "min_provenance": 0.5, "min_kas": 0.5, "enabled": true }
+```
+
+Any field may be omitted (it keeps the default). A `--dry-run` reports how many
+clusters the gate would demote, so you can calibrate before a real run.
+
+> Compiled syntheses derived from a memory that is later erased are handled under
+> GDPR Art. 17 — see [The Wiki & the Right to Erasure](WIKI_GDPR.md).
+
+---
+
 ## Keeping it fresh
 
 The generator is **deterministic**: the same memories produce a byte-identical
@@ -164,7 +223,7 @@ wikilinks render as literal text outside Obsidian (GitHub, the HTML viewer), so
 ```
 m3 wiki generate [options]
   --out DIR                  Output vault dir (default <engine_root>/wiki)
-  --importance-threshold F   Min importance to count as "core" (default 0.6)
+  --importance-threshold F   Min importance to count as "core" (default 0.55)
   --no-files                 Memory-only vault (skip the files corpus)
   --synthesize               Add an LLM prose lede per topic (opt-in, cached)
   --obsidian                 Emit [[wikilinks]] so Obsidian's graph view + backlinks
@@ -173,6 +232,11 @@ m3 wiki generate [options]
   --html                     Also write a self-contained wiki.html viewer
   --no-networkx              Force the pure-Python clustering fallback
   --check                    Exit non-zero if the on-disk vault is stale
+
+m3 wiki compile [options]    Compile topics into durable synthesis memories
+  --importance-threshold F   Min importance to count as "core" (default 0.55)
+  --dry-run                  Report what would compile — no model call, no write
+                             (also shows how many clusters the admission gate demotes)
 
 m3 wiki status [--out DIR]   Vault location, page count, last build time
 ```

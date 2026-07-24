@@ -24,6 +24,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from wiki.build import WikiOptions, build_wiki  # noqa: E402
+from wiki.select import DEFAULT_IMPORTANCE_THRESHOLD  # noqa: E402
 
 
 def _engine_root() -> str:
@@ -68,7 +69,8 @@ def _open_ro_sqlite(path: str) -> sqlite3.Connection:
 def _build_vault(args: argparse.Namespace, out_dir: str) -> dict[str, str]:
     opts = WikiOptions(
         importance_threshold=(args.importance_threshold
-                              if args.importance_threshold is not None else 0.6),
+                              if args.importance_threshold is not None
+                              else DEFAULT_IMPORTANCE_THRESHOLD),
         include_files=not args.no_files,
         use_networkx=not args.no_networkx,
         exclude_regex=getattr(args, "exclude", None),
@@ -275,11 +277,12 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     from wiki.compile import compile_clusters, load_heads
     from wiki.prose_compiler import LLMProseCompiler
 
-    tau = args.importance_threshold if args.importance_threshold is not None else 0.6
+    tau = (args.importance_threshold if args.importance_threshold is not None
+           else DEFAULT_IMPORTANCE_THRESHOLD)
     use_nx = not getattr(args, "no_networkx", False)
     compiler = LLMProseCompiler()
 
-    async def _run():
+    async def _run(gate=None):
         with _memory_seam() as conn:
             mems = _select.select_core_memories(conn, importance_threshold=tau,
                                                 limit=5000)
@@ -305,11 +308,13 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                 clusters, compiler, heads,
                 scope=getattr(args, "scope", "agent") or "agent",
                 user_id=getattr(args, "user_id", "") or "",
-                backend=backend)
+                backend=backend, edges=edges, gate=gate)
 
     if args.dry_run:
         # Load + cluster only; report what WOULD be compiled without calling the
-        # model or writing. Honest preview (§3): no side effects.
+        # model or writing. Honest preview (§3): no side effects — including the
+        # admission gate, so the count matches a real run.
+        from wiki import admission as _admission
         with _memory_seam() as conn:
             mems = _select.select_core_memories(conn, importance_threshold=tau,
                                                 limit=5000)
@@ -318,10 +323,25 @@ def _cmd_compile(args: argparse.Namespace) -> int:
             edges += _select.load_entity_comention_edges(conn, ids)
             clusters = [c for c in _cluster_mod.cluster(mems, edges, use_networkx=use_nx)
                         if not c.is_orphan]
+        gate = _admission.load_gate()
+        demoted = 0
+        if gate.enabled:
+            kept = []
+            for c in clusters:
+                if len(c.members) >= 2 and not gate.admits(c, edges):
+                    demoted += 1
+                else:
+                    kept.append(c)
+            clusters = kept
+        tail = f" ({demoted} demoted by admission gate)" if demoted else ""
         print(f"dry-run: {len(clusters)} topic cluster(s) would be compiled "
-              f"(threshold {tau}). No model call, no write.")
+              f"(threshold {tau}){tail}. No model call, no write.")
         return 0
 
+    # Single pass — no cold/warm distinction. The admission gate reads only
+    # state-independent structure (authored member↔member edges), never the
+    # compile-produced `consolidates` edges, so a first-ever build and a
+    # steady-state regen gate identically. No seeding pass, no retry.
     stats = asyncio.run(_run())
     print(stats.summary())
     return 0
@@ -362,7 +382,7 @@ def _add_generate_args(p: argparse.ArgumentParser) -> None:
                         "(opt-in; cached; degrades to member-lists if no model). "
                         "Mutually exclusive with --check.")
     p.add_argument("--importance-threshold", type=float, default=None,
-                   help="Min importance for a memory to count as 'core' (default 0.6).")
+                   help="Min importance for a memory to count as 'core' (default 0.55).")
     p.add_argument("--exclude", default=None, metavar="REGEX",
                    help="Drop any memory whose title/content matches this regex "
                         "(case-insensitive) — e.g. to keep private/bench notes out "
@@ -390,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
         help="WRITE compiled synthesis memories for topic clusters (mutates the "
              "store; idempotent — safe to re-run).")
     p_compile.add_argument("--importance-threshold", type=float, default=None,
-                           help="Core-memory importance floor (default 0.6).")
+                           help="Core-memory importance floor (default 0.55).")
     p_compile.add_argument("--no-networkx", action="store_true",
                            help="Force the pure-Python clustering fallback.")
     p_compile.add_argument("--scope", default="agent",
