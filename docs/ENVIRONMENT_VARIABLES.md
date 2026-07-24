@@ -322,7 +322,7 @@ Autonomous pipeline that rolls up successful (completed) task runs — a task pl
 | Variable | Default | Purpose |
 |---|---|---|
 | `M3_DISTILL_AUTO` | `0` | Hard gate for autonomous procedure **writes**. Distillation runs **dry-run** unless `--apply` AND `M3_DISTILL_AUTO=1` — so a scheduled/loop invocation is a safe no-op until you opt in. |
-| `M3_DISTILL_MODEL` | `slm` | Distillation model selector: unset/`slm` → the local `procedure_local` SLM profile (sovereign default); `llm` → the largest local model via `get_best_llm` failover; any other value → a profile name (another local model, or a cloud endpoint via a `backend: anthropic\|openai` profile — cloud is config, not new code). |
+| `M3_DISTILL_MODEL` | `slm` | Distillation model selector: unset/`slm` → the local `procedure_local` SLM profile (sovereign default); `llm` → the largest local model via `get_best_llm` failover; any other value → a profile name (another local model, or a cloud endpoint via a `backend: anthropic`/`openai` profile — cloud is config, not new code). |
 
 ---
 
