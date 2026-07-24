@@ -48,6 +48,18 @@ VALID_MEMORY_TYPES = frozenset({
     # array. Auto-distilled from successful task runs (memory_distill_procedures)
     # and linked back to sources via 'distills_from' edges.
     "procedure",
+    # Compiled prose over N source memories — the wiki's "compile at ingest"
+    # output. Distinct from 'belief' (autonomous episodic->semantic rollup of
+    # observations) and 'summary' (hand-written): a synthesis is LLM-compiled
+    # from an explicit cluster and carries compiler provenance (prompt version,
+    # model, cluster hash, member manifest) in metadata_json so a recompile is
+    # auditable and a prompt bump is an explained event, not silent churn.
+    # Sub-kind rides metadata_json.synthesis_kind in {compiled, answer,
+    # comparison, draft}; metadata_json.authority in {canonical, provisional,
+    # pending, draft} defaults to provisional and gates how it renders. Linked
+    # to sources via 'consolidates' (a compiled page) or 'distills_from' (a
+    # query answer filed back into the wiki).
+    "synthesis",
 })
 
 # Entity-graph enums — defined in memory_core to avoid circular import

@@ -47,6 +47,18 @@ def _mem_db() -> sqlite3.Connection:
         ("m-ddd", "reference", "Beta Standalone","Delta body",  0.65, 0.5, 0),
         ("m-eee", "belief",    "Contra One",     "Claim X",     0.85, 0.7, 0),
         ("m-fff", "belief",    "Contra Two",     "Not X",       0.85, 0.6, 0),
+        # Compiled prose. Importance 0.5 is BELOW the 0.6 threshold on purpose:
+        # it must land in the vault via CORE_TYPES, not via importance.
+        ("m-ggg", "synthesis", "Alpha Compiled", "Compiled body", 0.5, 0.75, 0),
+        # A synthesis judged wrong. Must stay VISIBLE and flagged, never hidden —
+        # a contradicts edge needs a live target.
+        ("m-hhh", "synthesis", "Wrong Answer",   "Bad claim",     0.5, 0.40, 0),
+        # A synthesis-DOMINATED topic (2 synthesis + 1 procedure), so the index
+        # renders the "Compiled syntheses" section and _TYPE_ORDER's tiebreak is
+        # actually exercised. Also below threshold → included on type alone.
+        ("m-iii", "synthesis", "Gamma Compiled", "Gamma prose",  0.5, 0.70, 0),
+        ("m-jjj", "synthesis", "Gamma Revised",  "Gamma redux",  0.5, 0.70, 0),
+        ("m-kkk", "procedure", "Gamma Steps",    "steps here",   0.5, None, 0),
         # Below the importance threshold and not a core type → excluded.
         ("m-zzz", "note",      "Ignored",        "noise",       0.1, None, 0),
     ]
@@ -61,6 +73,10 @@ def _mem_db() -> sqlite3.Connection:
         ("m-aaa", "m-bbb", "consolidates"),   # binds alpha cluster
         ("m-aaa", "m-ccc", "related"),        # binds runbook into alpha
         ("m-eee", "m-fff", "contradicts"),    # co-locate + flag
+        ("m-ggg", "m-aaa", "consolidates"),   # synthesis -> its source member
+        ("m-hhh", "m-ggg", "contradicts"),    # wrong synthesis vs the compiled one
+        ("m-iii", "m-kkk", "consolidates"),   # synthesis-dominated gamma cluster
+        ("m-jjj", "m-iii", "supersedes"),     # recompile chain within it
         # m-ddd has no edges → orphan.
     ]
     conn.executemany(
@@ -220,15 +236,40 @@ def test_cluster_and_wikilinks():
 
 def test_contradiction_flagged():
     vault = _build(use_networkx=False)
-    # The contradicting pair lands together AND is reported in lint.
+    # Two contradicting pairs: the belief pair (eee/fff) and the synthesis pair
+    # (hhh contradicts ggg) — see test_synthesis_is_core_type_and_sections.
     lint = vault["lint.md"]
-    assert "Contradictions (1)" in lint
+    assert "Contradictions (2)" in lint
     # Both members appear on one topic page with the warning.
     contra = [t for p, t in vault.items()
               if p.startswith("topics/") and "Contra One" in t]
     assert len(contra) == 1
     assert "Contra Two" in contra[0]
     assert "Contradiction on this page" in contra[0]
+
+
+def test_synthesis_is_core_type_and_sections():
+    """A synthesis reaches the vault on TYPE, not importance, and a synthesis
+    judged wrong stays visible (flagged) rather than being hidden.
+
+    m-ggg sits at importance 0.5, below the 0.6 threshold — it can only appear
+    via CORE_TYPES. m-hhh contradicts it: a `contradicts` edge needs a live
+    target, so suppressing the wrong page would break the very machinery that
+    records it as wrong.
+    """
+    vault = _build(use_networkx=False)
+    body = "\n".join(vault.values())
+    assert "Alpha Compiled" in body, "synthesis excluded despite being a CORE_TYPE"
+    assert "Wrong Answer" in body, "a contradicted synthesis must remain visible"
+    # The gamma cluster is synthesis-dominated, so the index gets its section.
+    assert "📝 Compiled syntheses" in vault["index.md"]
+    # _TYPE_ORDER tiebreak: gamma is 2 synthesis + 1 procedure. Were 'synthesis'
+    # appended LAST in _TYPE_SECTIONS it would lose the ordering tiebreak and the
+    # topic would file under runbooks instead.
+    gamma = [t for p, t in vault.items()
+             if p.startswith("topics/") and "Gamma Compiled" in t]
+    assert len(gamma) == 1, "gamma cluster should be exactly one topic page"
+    assert "Gamma Steps" in gamma[0], "procedure member belongs on the same page"
 
 
 def test_evidence_links_to_source():

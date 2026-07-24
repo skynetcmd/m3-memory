@@ -7,7 +7,7 @@ determinism test can drive it from a fixture DB.
 The "core set" is m3's three overlapping notions of a canonical memory:
     pinned = 1          — explicit "this is canon, never age it out"
     importance >= tau   — high-ranked
-    type in (belief, procedure, reference)
+    type in (belief, procedure, reference, synthesis)
                         — already-consolidated distillations / curated refs
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import Optional
 
 # Memory types that are themselves distillations / curated references, so they
 # belong in the wiki regardless of importance.
-CORE_TYPES = ("belief", "procedure", "reference")
+CORE_TYPES = ("belief", "procedure", "reference", "synthesis")
 
 # memory_relationships types, weighted for clustering. Higher = pulls harder
 # toward "same topic page". `contradicts` is special: keep the two memories on

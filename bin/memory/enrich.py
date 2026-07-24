@@ -90,6 +90,7 @@ async def _auto_classify(content: str, title: str) -> str:
         "local_device", "network_config", "infrastructure", "home_automation",
         "migration-log", "security",
         "windows_only", "macos_only", "linux_only", "to_do", "procedure",
+        "synthesis",
     }
 
     token = _ctx().get_secret("LM_API_TOKEN") or "lm-studio"

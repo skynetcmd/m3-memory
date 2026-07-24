@@ -472,6 +472,12 @@ def _render_source(
 # reader thinks ("runbooks", "decisions") rather than by cluster id.
 _TYPE_SECTIONS = [
     ("belief", "🧠 Knowledge & beliefs"),
+    # Placed second deliberately: _TYPE_ORDER (derived from this list) is the
+    # deterministic tiebreaker in _dominant_type(). A cluster tied between
+    # 'synthesis' and a later type classifies as a synthesis — correct, since a
+    # synthesis is compiled ABOUT its co-members. Appended last it would lose
+    # every tie and never title a topic.
+    ("synthesis", "📝 Compiled syntheses"),
     ("procedure", "📘 Runbooks & procedures"),
     ("decision", "⚖️ Decisions"),
     ("reference", "📎 References"),
