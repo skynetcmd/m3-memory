@@ -213,6 +213,56 @@ The `test_slm_intent.py` module demonstrates this end-to-end.
 
 ---
 
+## PostgreSQL-backed tests (`requires_pg`)
+
+m3 runs on both SQLite (default) and PostgreSQL through one storage seam. A set of
+`*_pg_live.py` suites verify the PG path against a **real** cluster — schema parity,
+the maintenance pass, the files store, chatlog, etc. They are marked
+`@pytest.mark.requires_pg`.
+
+**Running them.** Point the suite at any throwaway PostgreSQL via the DSN env vars
+and run as normal:
+
+```bash
+export M3_PRIMARY_PG_URL="postgresql://<user>:<pass>@<host>:5432/<throwaway_db>"
+export M3_PG_URL="$M3_PRIMARY_PG_URL"          # fallback the tests also read
+python -m pytest -m requires_pg -q             # every PG-live test
+python -m pytest tests/test_schema_parity_pg_live.py -q   # the migration-parity gate
+```
+
+Use a **disposable** database — the fixtures create/drop schemas freely. The DSN is
+resolved `M3_PRIMARY_PG_URL` > `M3_PG_URL`; the suite deliberately **never** reads
+`PG_URL` (that names the production/warehouse store). Applying the schema to a fresh
+DB is `psql -f memory/migrations/postgres/pg_primary_v1.sql` then
+`migrate_pg.run_pending_pg_migrations(conn)` (pass a live connection, not a DSN
+string); the files-store schema builds itself via its own migrations on first
+`files_memory.db.init_db()`.
+
+**Auto-skip is by design.** With no DSN set (or no reachable cluster), every
+`requires_pg` test **skips cleanly** — that is expected on a SQLite-only checkout and
+in the default CI lane, not a failure. A conftest collection hook probes reachability
+once per session and skips the marked tests when the probe fails.
+
+> ⚠️ **Silent-skip footgun.** Because that reachability result is cached for the whole
+> session, a *single* failed probe skips **all** PG-live tests for the run — a false
+> green that hides real PG regressions. The probe therefore retries a few times before
+> giving up (`tests/conftest.py::_pg_reachable`), so a momentary blip (the cluster
+> still starting, a service restart mid-run) doesn't poison coverage. If your PG tests
+> **skip while a cluster is up**, the probe isn't reaching it: verify the DSN host is
+> actually accepting TCP connections from where pytest runs (a common cause is a DB
+> bound to loopback-only behind a flaky port forward — bind it so your test host can
+> reach it directly). A quick check: `python -c "import psycopg2,os;
+> psycopg2.connect(os.environ['M3_PRIMARY_PG_URL']).close(); print('reachable')"`.
+
+Native Windows PostgreSQL is not a supported test target on some setups (its
+per-connection fork model can crash under a locked-down DLL environment); a Linux
+cluster — including one inside WSL — is the reliable path. Maintainers keep the
+machine-specific stand-up recipe (creating the throwaway role/db, binding the
+cluster so the test host can reach it) in the internal runbooks, since it carries
+local credentials and paths that don't belong in the public tree.
+
+---
+
 ## 6. Related docs
 
 - [`docs/CLI_REFERENCE.md`](CLI_REFERENCE.md) — every DB-aware CLI, including
