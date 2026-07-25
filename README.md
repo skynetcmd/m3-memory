@@ -487,6 +487,13 @@ The agent executes `bin/chatlog_init.py` and configures execution triggers (see 
 
 This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
+### Built with
+
+M3 Memory is authored and maintained by **skynetCMD**. It was built with the help of
+AI coding assistants — **Gemini CLI**, **Claude Code**, and **Google Antigravity** —
+which contributed code under the author's direction. (They are tools that assisted;
+they are not maintainers, sponsors, or co-owners of the project.)
+
 ### Asset & Icon Credits
 The provider badges under [`docs/badges/`](docs/badges/) embed small logo glyphs:
 * **OpenClaw & OpenCode icons** are from the MIT-licensed [LobeHub icon set](https://github.com/lobehub/lobe-icons) (`lobe-icons`).

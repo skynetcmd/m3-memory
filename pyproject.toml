@@ -16,14 +16,12 @@ license = "Apache-2.0"
 # sdist/wheel — setuptools>=77 packages these globs into the distribution.
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
-# skynetcmd is the package owner + maintainer. The AI coding assistants below are
-# credited as co-authors because m3 was built with their help — they are tools that
-# contributed code, not maintainers or sponsors of the package.
+# skynetcmd is THE author, maintainer, and copyright holder (see NOTICE). The AI
+# coding assistants that helped build m3 (Gemini CLI, Claude Code, Google
+# Antigravity) are credited in the README's "Built with" acknowledgment — NOT
+# listed here, so they aren't given equal-footing authorship with skynetcmd.
 authors = [
     { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" },
-    { name = "Gemini CLI", email = "gemini-cli@users.noreply.github.com" },
-    { name = "Claude Code", email = "claude-code@users.noreply.github.com" },
-    { name = "Google Antigravity", email = "antigravity@users.noreply.github.com" },
 ]
 maintainers = [
     { name = "skynetcmd", email = "skynetcmd@users.noreply.github.com" },
